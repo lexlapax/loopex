@@ -1,0 +1,21 @@
+# Destination: .codex/config.toml
+#
+# AGENTS.md is the normative project contract. This compatibility index only
+# registers Codex-native agent profiles; it grants no project or product
+# authority and defines no acceptance rule.
+
+[agents.mechanical_worker]
+description = "Luna worker for narrow repeatable scans, inventories, extraction, mechanical transformations, fixture work, and test-log triage."
+config_file = "agents/mechanical-worker.toml"
+
+[agents.milestone_worker]
+description = "Terra implementation worker for one bounded milestone workstream with explicit ownership, contracts, and focused verification."
+config_file = "agents/milestone-worker.toml"
+
+[agents.release_architect]
+description = "Sol read-only architect for ambiguity involving ownership, durability, authority, security, public contracts, compatibility, and release boundaries."
+config_file = "agents/release-architect.toml"
+
+[agents.release_reviewer]
+description = "Sol read-only independent milestone reviewer for correctness, security, plan adherence, test honesty, rollback, and exact-SHA evidence."
+config_file = "agents/release-reviewer.toml"

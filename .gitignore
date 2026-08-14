@@ -1,0 +1,147 @@
+# Elixir, Erlang, and Mix -------------------------------------------------------
+# Keep known generated roots explicit. Broad package and report rules can
+# silently hide conformance repositories, fixtures, and retained evidence.
+/_build/
+/deps/
+/cover/
+/doc/
+/.fetch
+/apps/*/_build/
+/apps/*/deps/
+/apps/*/cover/
+/apps/*/doc/
+/apps/*/.fetch
+/examples/*/_build/
+/examples/*/deps/
+/examples/*/cover/
+/examples/*/doc/
+/examples/*/.fetch
+
+# VM, archive, package, and analysis output.
+/*_crash.dump
+/erl_crash.dump
+/rebar3.crashdump
+/crash.dump
+/apps/*/erl_crash.dump
+/apps/*/rebar3.crashdump
+/apps/*/crash.dump
+/examples/*/erl_crash.dump
+/examples/*/rebar3.crashdump
+/examples/*/crash.dump
+/loopex-*.ez
+/loopex-*.tar
+/loopex-*.tar.gz
+/loopex-*.zip
+/dist/
+/priv/plts/
+/apps/*/priv/plts/
+/*.plt
+/*.plt.hash
+
+# Language servers and local analysis caches.
+/.elixir_ls/
+/.lexical/
+/.next_ls/
+/.lsp/
+
+# Optional adapter/tool ecosystems --------------------------------------------
+/node_modules/
+/assets/node_modules/
+/apps/*/assets/node_modules/
+/clients/*/node_modules/
+/examples/*/node_modules/
+/tools/*/node_modules/
+/target/
+/apps/*/native/*/target/
+/clients/*/target/
+/native/*/target/
+/tools/*/target/
+/__pycache__/
+/clients/**/__pycache__/
+/examples/**/__pycache__/
+/tools/**/__pycache__/
+/.venv/
+/venv/
+/clients/*/.venv/
+/examples/*/.venv/
+/tools/*/.venv/
+
+# Loopex runtime and local test state -----------------------------------------
+# Tests must still fail closed unless LOOPEX_HOME and workspaces are explicit
+# temporary roots. Ignore rules are cleanup hygiene, not that safety boundary.
+/.loopex/
+/.loopex-home/
+/var/loopex/
+/tmp/
+/.tmp/
+/log/
+/.test_metrics/
+/test-results/
+/coverage/
+/artifacts/local/
+/artifacts/tmp/
+
+# Secrets and machine-local configuration -------------------------------------
+# .gitignore is not secret protection; repository checks must reject known
+# credentials and generated secrets before commit and in CI.
+.env
+.env.*
+!.env.example
+!.env.*.example
+.envrc.local
+/.direnv/
+/.mise.local.toml
+/config/*.local.exs
+/config/*.secret.exs
+/apps/*/config/*.local.exs
+/apps/*/config/*.secret.exs
+
+# Agent-client local state -----------------------------------------------------
+# Track shared adapters and workflows. Never ignore .claude/, .codex/, or
+# .agents/ wholesale.
+
+# Claude Code: keep settings.json, hooks, agents, and any transitional shared
+# files; exclude only per-machine state.
+/.claude/settings.local.json
+/.claude/.credentials.json
+/.claude/projects/
+/.claude/worktrees/
+/.claude/debug/
+/.claude/todos/
+/.claude/shell-snapshots/
+/.claude/logs/
+/.claude/transcripts/
+/.claude/.cache/
+
+# Codex: keep config.toml, agents/, future reviewed hooks/rules, and other
+# project adapter files. Exclude logs, sessions, auth, and caches if CODEX_HOME
+# or log_dir is ever pointed inside the checkout.
+/.codex-log/
+/.codex/auth.json
+/.codex/history.jsonl
+/.codex/sessions/
+/.codex/shell_snapshots/
+/.codex/logs/
+/.codex/tmp/
+/.codex/.cache/
+/.codex/hook_outputs/
+/.codex/rollout*.jsonl
+/.codex/session-*.jsonl
+/.codex/*.db
+/.codex/*.db-shm
+/.codex/*.db-wal
+
+# Shared Agent Skills: keep .agents/skills/; exclude only client-local caches.
+/.agents/.cache/
+/.agents/local/
+/.agents/tmp/
+
+# Editors and operating systems -----------------------------------------------
+.DS_Store
+Thumbs.db
+/.idea/
+/.vscode/*
+!/.vscode/extensions.json
+!/.vscode/settings.json
+!/.vscode/tasks.json
+!/.vscode/launch.json
