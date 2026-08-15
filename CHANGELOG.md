@@ -133,6 +133,19 @@ the exact document set its milestone must update.
   reordered, or changed commitments and history rewrites while leaving
   conforming workstream, progress, outcome-state, and evidence-link updates
   outside the locks.
+- `docs/adr/0004-plan-amendment-supersession.md` (Proposed) and its technical
+  companion — an append-only `## Amendments` table lets a defect found in an
+  accepted plan or gate be corrected without editing or erasing the acceptance
+  record. Each amendment records its class (`Correction`, `Strengthening`, or
+  `Weakening`), authority, disposition pointer, superseded candidate, new bound
+  bytes, and reason; the effective binding is the last complete amendment.
+  Weakening is never delegated, every amendment re-opens independent review, and
+  the superseded-candidate chain is verifiable end to end. Written because `M0`
+  was accepted with an outcome its gate could not prove, and the anchor that
+  makes acceptance tamper-evident also makes a revert impossible.
+- The ADR index recorded 0001 through 0003 as Proposed after they were accepted.
+  The acceptance transition may change only governance rows and marked status
+  blocks, so the index correction lands separately here.
 - ADR 0001, ADR 0002, and ADR 0003 are **Accepted**, bound to candidate
   `c703a65` with concept and technical digests recorded in each governance row.
   The maintainer's disposition is retained in the context map under
