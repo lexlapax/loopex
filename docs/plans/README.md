@@ -17,8 +17,10 @@ being otherwise empty is the honest record of that, not an oversight.
 | `v0.5` | Remote ecosystem | Yes | Not started |
 | `v1.0` | Compatibility baseline | Yes | Not started |
 
-The ladder itself — what each stage proves and which orderings can never be
-changed — is in [docs/roadmap.md](../roadmap.md).
+The ladder — what each stage proves — is in
+[docs/roadmap.md](../roadmap.md). Which orderings can never be changed is fixed
+by the vision's serial barriers (§22), not by the roadmap, which only quotes
+them.
 
 **M0's prerequisites.** Architecture decisions belong to the milestone whose
 work they unblock. M0 cannot open until both of these are accepted or rejected,

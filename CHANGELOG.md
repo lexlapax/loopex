@@ -76,8 +76,18 @@ the exact document set its milestone must update.
   runs five, and the context map advertised `mix test` with no Mix project in
   existence.
 
+- `AGENTS.md` now names where sequence authority lives — vision §22 for which
+  capability may precede which, § Milestones and Gates for a milestone's own
+  lifecycle — instead of leaving it to be inferred.
+- `scripts/check-status.sh` also verifies that the rejoin order quoted in
+  `docs/roadmap.md` still matches `docs/vision.md` §22 verbatim.
+
 ### Removed
 
+- The paraphrase of the vision's serial barriers in `docs/roadmap.md`. Restating
+  a normative constraint inside a document that declares itself non-normative
+  makes the restatement read as authority while answering to nothing. The
+  verbatim quotation stays and is now checked against its source.
 - The duplicated milestone ladder in `README.md`. It restated `docs/roadmap.md`
   and had already drifted from it; the README now points at the roadmap, and the
   roadmap links each rung to its plan file as milestones open.

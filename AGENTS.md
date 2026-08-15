@@ -41,6 +41,14 @@ When normative sources conflict:
 4. [docs/vision.md](docs/vision.md).
 5. Historical material.
 
+Sequence has two normative sources and neither is the roadmap. Which capability
+may be proved before which is fixed by the vision's serial barriers and rejoin
+order (§22). The order a milestone itself runs — green base, red gate before
+implementation, acceptance, work, independent review, closure — is fixed by
+§ Milestones and Gates below. An accepted plan adds its own prerequisites and
+rejoin barriers within those. [docs/roadmap.md](docs/roadmap.md) is a readable
+projection of the first and authorizes nothing.
+
 Code, tests, gates, CI, traces, and demonstrations are evidence, not independent
 normative authority. Evidence retained with a plan establishes what was proved
 and accepted under it; it cannot create scope, reverse a higher source, or make

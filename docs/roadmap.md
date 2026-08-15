@@ -98,8 +98,12 @@ rest.
 
 ## The Only Hard Ordering
 
-Everything above can be resequenced by an accepted plan except the rejoin order
-in [vision §22](vision.md):
+Everything above can be resequenced by an accepted plan. The rejoin order cannot.
+
+That ordering is **normative and it is not defined here** — it is defined in
+[vision §22](vision.md), which governs. The block below is a verbatim quotation
+kept for readability, and `scripts/check-status.sh` fails if it ever stops
+matching its source:
 
 ```text
 durable local session and operation truth
@@ -110,11 +114,10 @@ durable local session and operation truth
 -> remote-worker and multi-host compatibility evidence
 ```
 
-Restated as the four barriers a plan may not cross: durable local truth before
-multi-client protocol; extension namespaces and activation evidence before
-public-protocol freeze; isolated-hand conformance before remote workers;
-materially different consumer evidence before 1.0. Restart plus replay is the
-continuity mechanism until release hot upgrades get separate proof.
+Read vision §22 for what the barriers require; this file deliberately does not
+paraphrase them. A paraphrase of a normative constraint, living in a
+non-normative document, is the most dangerous kind of drift — it reads as
+authority and answers to nothing.
 
 ## ADR Agenda by Milestone
 
