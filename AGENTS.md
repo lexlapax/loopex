@@ -149,6 +149,13 @@ Portable enforcement lives in product/test code, repository-owned Mix tasks,
 and CI. Client hooks call the same entrypoints but never waive them. Enforcement
 fails closed when a required check is missing or silently ineffective.
 
+Every required check runs locally from a clean checkout with stock tools.
+Hosted CI is a replaceable runner of the same repository-owned commands, never
+the only home of a check, a policy, or acceptance evidence; development
+depends on no host-specific service, workflow feature, or repository setting.
+Releases may use a hosted provider only where retained release evidence
+requires it, and those workflows stay thin wrappers over repository commands.
+
 - Core uses stdlib and OTP only; CI checks the dependency budget and direction.
 - Checkpoints are warning-free under formatting, compilation, static analysis,
   and relevant documentation/protocol checks.
