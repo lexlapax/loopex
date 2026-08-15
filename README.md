@@ -140,6 +140,7 @@ in `docs/plans/`.
   — routing map by area.
 - `docs/adr/` — architectural decisions, as they land.
 - `docs/plans/` — the active milestone plan.
+- [CHANGELOG.md](CHANGELOG.md) — what changed, per milestone.
 
 ## License
 

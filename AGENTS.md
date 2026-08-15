@@ -127,6 +127,11 @@ evidence-backed decision packet.
   every Purpose outcome maps to evidence, demonstration, or an explicitly
   approved limitation/deferral. Do not mutate tracked bytes merely to paste a
   final run link.
+- A closure candidate also updates the documentation its milestone changed:
+  `CHANGELOG.md`, `README.md`, affected `docs/` indexes, and the current-stage
+  pointer in the context map. Each gate locks that milestone's exact document
+  set, since the set differs by milestone; documentation drift blocks closure
+  like any other unmet outcome.
 
 A retry is diagnostic, not a pass. A same-SHA/seed/environment failure that
 disappears is a blocking flake until fixed or explicitly dispositioned.
