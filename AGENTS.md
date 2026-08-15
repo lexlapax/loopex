@@ -26,7 +26,9 @@ Start with the current task, this file, any accepted active plan and gate
 contract, and relevant code and tests. Use
 [docs/developer/agent-context-map.md](docs/developer/agent-context-map.md) to
 load constraining vision sections, accepted ADRs, and the current stage's
-version-specific guidance. Read the full vision for
+version-specific guidance. Use [DEVELOPMENT.md](DEVELOPMENT.md) for current
+local prerequisites and repository entrypoints; it is setup guidance, not
+acceptance authority. Read the full vision for
 architecture, trust, public contracts, cross-domain work, or a new plan. Do not
 bulk-read historical plans.
 
@@ -150,7 +152,10 @@ Portable enforcement lives in product/test code, repository-owned Mix tasks,
 and CI. Client hooks call the same entrypoints but never waive them. Enforcement
 fails closed when a required check is missing or silently ineffective.
 
-Every required check runs locally from a clean checkout with stock tools.
+Every required check runs locally from a clean checkout with the documented
+portable toolchain in [DEVELOPMENT.md](DEVELOPMENT.md). Bootstrap currently
+requires Bash, Git, the documented POSIX userland, Python 3.11+ and `jq`;
+product checks move to the declared Elixir/OTP toolchain when it exists.
 Hosted CI is a replaceable runner of the same repository-owned commands, never
 the only home of a check, a policy, or acceptance evidence; development
 depends on no host-specific service, workflow feature, or repository setting.
@@ -166,8 +171,9 @@ requires it, and those workflows stay thin wrappers over repository commands.
   CI covers the floor and current supported versions.
 - Replaceable store, model, executor, broker, extension, and transport boundaries
   run reusable conformance suites.
-- CI checks gate locks, client/workflow drift, and the ban on AI-attribution or
-  generated-by claims in commits, PRs, release notes, and project docs.
+- Repository checks, mirrored by CI, check gate locks, client/workflow drift,
+  and the ban on AI-attribution or generated-by claims in commits, PRs, release
+  notes, and project docs.
 
 ## Product Non-Negotiables
 
@@ -242,6 +248,26 @@ artifacts, and short decision/evidence pointers. Client memory, transcripts,
 task queues, worker summaries, and schedules are caches—not project state,
 authority, or acceptance evidence. Scheduled remediation inherits ordinary
 authority and otherwise produces a proposal.
+
+Coding-agent ecosystem behavior is an input to this contract, not authority
+over it. When a coding agent or adjacent client changes features that may affect
+independent, fast, logical development—such as instruction discovery,
+context/memory, autonomy, permissions, sandboxing, delegation, skills, tools,
+approvals, or evidence—check current primary vendor documentation or release
+notes and observed behavior in the installed client; do not rely on model
+memory. Derive any coding-agent-agnostic behavior first, record durable shared
+behavior here and version-specific routing in the context map, then implement
+only necessary client mechanics and parity checks in vendor adapters. Untested
+candidates such as OpenCode, Pi, or a future Loopex coding surface have no
+support status, and development-agent policy never enters the product core.
+
+A material change to autonomy, authority, trust, permissions, acceptance,
+evidence, parallelism, project-state semantics, or required operator attention
+is Propose and pause: present options, implications, compatibility or migration
+impact, and a recommendation, then obtain maintainer approval before changing
+development behavior. A reversible client compatibility fix that preserves the
+coding-agent-agnostic contract and does not materially change effective
+development behavior is Act.
 
 Claude Code uses a root `CLAUDE.md` importing `@AGENTS.md`; Codex reads this file
 directly. Canonical repository skills live in `.agents/skills`; clients discover

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # PreToolUse[Bash]: stdin is the tool-call JSON.
-# Early feedback only (AGENTS.md); CI owns enforcement, so fail open without jq.
+# Early feedback only (AGENTS.md); repository checks own enforcement, so fail
+# open without jq.
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
 input="$(cat)"

@@ -124,6 +124,8 @@ real only as per-milestone plan documents in `docs/plans/`:
 
 ## Start Here
 
+- [DEVELOPMENT.md](DEVELOPMENT.md) — current bootstrap prerequisites and the
+  provider-neutral local validation command.
 - [docs/vision.md](docs/vision.md) — the founding vision and architecture;
   everything else derives from it.
 - [AGENTS.md](AGENTS.md) — repository rules for coding agents and

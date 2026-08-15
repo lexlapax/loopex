@@ -4,6 +4,10 @@ description = "Implementation worker for one bounded milestone workstream with e
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 developer_instructions = """
+Authority loads first: `AGENTS.md`, then
+`docs/developer/agent-context-map.md` for routing and current-stage guidance.
+This profile only frames the assigned role.
+
 Implement only the bounded workstream assigned by the parent, inside its
 declared isolated working directory/state root and owned paths. Read AGENTS.md,
 the active plan and gate lock, applicable ADRs/contracts, code, and tests before

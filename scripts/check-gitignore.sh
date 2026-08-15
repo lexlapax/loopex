@@ -33,6 +33,7 @@ done
 for candidate_path in \
   AGENTS.md \
   CLAUDE.md \
+  DEVELOPMENT.md \
   .codex/config.toml \
   .codex/agents/release-reviewer.toml \
   .claude/settings.json \
@@ -41,6 +42,7 @@ for candidate_path in \
   .env.example \
   .env.test.example \
   .vscode/settings.json \
+  scripts/check-bootstrap.sh \
   scripts/check-agent-bootstrap.sh \
   test/fixtures/protocol/session.jsonl \
   test/fixtures/extensions/compat.ez \

@@ -8,8 +8,8 @@ with ADR and code pointers as they land.
 
 ## How To Use
 
-1. Read `AGENTS.md`, the active plan in `docs/plans/`, and constraining ADRs
-   first.
+1. Read `AGENTS.md`, any accepted active plan and gate contract when one exists,
+   and constraining accepted ADRs first.
 2. Use the table below to find an area's anchor sections and docs.
 3. Prefer code and tests over stale prose. Flag conflicts.
 
@@ -39,7 +39,7 @@ with ADR and code pointers as they land.
 | Verification, invariants, budgets | Vision §23 | Test layers; the named invariant suite; minimalism budgets; performance evidence rules. |
 | Compatibility and release governance | Vision §24 | Six separately versioned surfaces; 0.x labeling; migration/rollback duties. |
 | Prior-system evidence (Allbert Assist) | Vision §19.3, §29.6 | All consulted documents are directly linked there with full URLs. Lessons flow in; code does not. |
-| Client adapters, skills, portable enforcement | AGENTS.md § Project State and Client Adapters and § Parallel Work and Portable Enforcement; [agent-adapter-smoke.md](agent-adapter-smoke.md); `scripts/` | Canonical skills live in `.agents/skills`; `.claude/` and `.codex/` are thin adapters over the same bytes; smoke evidence is appended whenever adapter bytes change; every check runs locally, hosted CI is a replaceable runner. |
+| Coding-agent ecosystem, adapters, skills, portable enforcement | AGENTS.md § Project State and Client Adapters and § Parallel Work and Portable Enforcement; [DEVELOPMENT.md](../../DEVELOPMENT.md); [agent-adapter-smoke.md](agent-adapter-smoke.md); `scripts/` | Check current primary vendor docs and installed behavior, derive coding-agent-agnostic consequences first, then keep `.claude/`, `.codex/`, and future tested adapters thin. OpenCode, Pi, and a future Loopex coding surface are candidates, not supported clients. Every check runs locally; hosted CI is replaceable. |
 
 ## Test Quick Reference
 
@@ -49,35 +49,56 @@ adapter or behaviour change; property tests own reducer/replay claims;
 fault-injection owns durable-transition claims. Real-provider runs are a
 tagged, explicitly invoked lane — never part of the default suite.
 
+## Coding-Agent Ecosystem Guidance
+
+- `scripts/check-agent-bootstrap.sh` and `scripts/check-gitignore.sh` define
+  "bootstrap green" behind the provider-neutral aggregate
+  `scripts/check-bootstrap.sh`. They run from a clean checkout with the
+  toolchain in [DEVELOPMENT.md](../../DEVELOPMENT.md); hosted CI may invoke only
+  the aggregate as a replaceable thin wrapper.
+- Client-adapter loading is proven, not assumed. Retain versions, source SHA,
+  adapter digests, prompts, observed instruction/role/skill loading, and
+  permission results in [agent-adapter-smoke.md](agent-adapter-smoke.md). Rerun
+  relevant smokes whenever `.codex/`, `.claude/`, or `.agents/skills` bytes
+  change.
+- Independent review requires an effectively read-only environment. A client
+  role default is not proof: if the live parent or client overrides it with a
+  writable profile, the reviewer reports unavailable and stops. Retain both a
+  positive read-only smoke and a negative fail-closed smoke where supported.
+- For coding-agent ecosystem changes, check current primary vendor docs or
+  release notes plus installed behavior, derive any coding-agent-agnostic
+  consequence first, and retain version-specific facts here. Material changes
+  to development behavior require an option-and-implication packet and
+  maintainer approval before adapter edits.
+- Current Codex compatibility: `[features] multi_agent_v2` stays in
+  `.codex/config.toml` because project roles are proven with codex-cli 0.147.0;
+  removal requires a separately reviewed compatibility smoke. The `gate` and
+  `close-milestone` skills require explicit invocation: Claude consumes
+  `disable-model-invocation: true`, while Codex consumes
+  `agents/openai.yaml` policy `allow_implicit_invocation: false`. Enforcement
+  scripts use stock `grep -E`, never ripgrep.
+- Mix-scaffold rider: `.claude/hooks/deps-budget.sh` hardcodes
+  `apps/loopex/mix.exs` and is silently inert under any other layout. Vision
+  §20.1 leaves the tree unfrozen; the layout decision must update that hook in
+  the same change.
+
 ## Version-Specific Guidance
 
 This section holds temporary in-flight guidance while a specific version is
 being planned and implemented. It is cleared at release closeout; add the
 next version's working notes here when that work begins.
 
-### Seed bootstrap (updated 2026-08-15)
+### Seed bootstrap closure candidate (updated 2026-08-15)
 
-The seed bootstrap is complete and green. Any client should reach the same
-state from these facts alone:
+The maintainer authorized this final cross-client hardening pass. Do not call
+the seed bootstrap closed until its candidate SHA, adapter smokes, repository
+checks, and independent review agree. Push and any hosted-wrapper result are
+supplementary publication evidence, not closure authority or a development
+dependency. Any client should derive the candidate state from these facts alone:
 
-- `scripts/check-agent-bootstrap.sh` and `scripts/check-gitignore.sh` are the
-  executable definition of "bootstrap green"; both pass from a clean checkout
-  with stock tools. Hosted CI runs the same scripts as a thin wrapper.
-- Client-adapter loading is proven, not assumed:
-  [agent-adapter-smoke.md](agent-adapter-smoke.md) retains the evidence.
-  Rerun and append whenever `.codex/`, `.claude/`, or `.agents/skills` bytes
-  change. The Codex read-only role-delegation check is still deferred to an
-  interactive session.
-- Settled seed decisions — do not relitigate without new evidence:
-  `[features] multi_agent_v2` stays in `.codex/config.toml` (project roles
-  load on codex-cli 0.147.0); the AGENTS.md durability paragraph stays
-  complete per vision §20.3; the `gate` and `close-milestone` skills carry
-  `disable-model-invocation: true` (Codex parses it); enforcement scripts use
-  stock `grep -E`, never ripgrep.
-- Known pre-commitment to revisit at the Mix scaffold:
-  `.claude/hooks/deps-budget.sh` hardcodes `apps/loopex/mix.exs` and is
-  silently inert under any other layout. The layout decision (vision §20.1
-  leaves the tree unfrozen) must update that hook in the same change.
+- The permanent Coding-Agent Ecosystem Guidance above, retained smoke evidence,
+  and the AGENTS.md durability paragraph (complete per vision §20.3) are the
+  candidate's shared memory; do not move these facts into client-only state.
 - Nothing beyond seed-scope work is authorized until the maintainer
   explicitly opens the next stage gate-first (AGENTS.md § Milestones and
   Gates, seed-bootstrap clause; `gate` skill).

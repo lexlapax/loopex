@@ -1,7 +1,7 @@
 name: agent-bootstrap
-# Seed enforcement only: proves the committed base keeps the agent bootstrap
-# green. Product gates (mix loopex.gate) get their own workflow once the Mix
-# scaffold exists; this workflow must not be weakened to admit a red seed.
+# Optional hosted mirror only: the repository-owned aggregate command defines
+# bootstrap green. Future product gates remain repository commands that any
+# hosted provider may invoke; this wrapper must not admit a red seed.
 on:
   push:
     branches: [main]
@@ -12,5 +12,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: bash scripts/check-agent-bootstrap.sh
-      - run: bash scripts/check-gitignore.sh
+      - run: bash scripts/check-bootstrap.sh

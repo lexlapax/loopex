@@ -2,3 +2,5 @@ interface:
   display_name: "Milestone Gate"
   short_description: "Open a milestone with locked red acceptance"
   default_prompt: "Use $gate to scaffold a milestone plan candidate and red acceptance gate."
+policy:
+  allow_implicit_invocation: false

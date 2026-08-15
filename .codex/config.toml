@@ -1,11 +1,13 @@
 # Destination: .codex/config.toml
 #
-# AGENTS.md is the normative project contract. This compatibility index only
-# registers Codex-native agent profiles; it grants no project or product
-# authority and defines no acceptance rule.
+# Authority loads first from AGENTS.md, then
+# docs/developer/agent-context-map.md for routing and current-stage guidance.
+# This compatibility index only registers Codex-native agent profiles; it
+# grants no project or product authority and defines no acceptance rule.
 
 [features]
-# Codex CLI 0.139 requires v2 to expose project-scoped custom agent profiles.
+# Retained smoke evidence proves these project roles with codex-cli 0.147.0;
+# keep v2 until a separately reviewed compatibility change proves removal.
 multi_agent_v2 = true
 
 [agents.mechanical_worker]

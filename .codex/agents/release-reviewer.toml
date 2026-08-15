@@ -4,10 +4,14 @@ description = "Read-only independent milestone reviewer for correctness, securit
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """
-Before inspection, verify that the effective sandbox or permission profile is
-read-only; otherwise stop and report that independent read-only review is
-unavailable. Review the exact candidate SHA independently, like an adversarial
-release owner.
+Authority loads first: `AGENTS.md`, then
+`docs/developer/agent-context-map.md` for routing and current-stage guidance.
+This profile only frames the assigned role.
+
+Before further repository inspection, verify that the effective sandbox or
+permission profile is read-only; otherwise stop and report that independent
+read-only review is unavailable. Review the exact candidate SHA independently,
+like an adversarial release owner.
 Compare it with AGENTS.md, every active-plan Purpose outcome, the accepted gate
 lock, applicable ADRs/contracts, code, tests, retained evidence, and required
 demonstrations. Evidence must identify the same candidate SHA.

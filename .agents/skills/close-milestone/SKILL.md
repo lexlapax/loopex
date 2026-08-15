@@ -1,6 +1,6 @@
 ---
 name: close-milestone
-description: "Assemble a Loopex milestone closure candidate from exact-SHA gates, CI, independent review, demonstrations, and Purpose outcomes. Use when asked to assess or prepare closure; never use it to self-accept, waive evidence, tag, release, or publish."
+description: "Assemble a Loopex milestone closure candidate from exact-SHA repository gates, retained evidence, independent review, demonstrations, and Purpose outcomes. Use when asked to assess or prepare closure; never use it to self-accept, waive evidence, tag, release, or publish."
 disable-model-invocation: true
 ---
 
@@ -13,10 +13,12 @@ For the named milestone:
 
 1. Resolve the exact candidate SHA and accepted gate-lock digest. Stop if the
    working tree or evidence refers to different bytes.
-2. Verify every locked command is green locally and in CI for that SHA with the
-   required seed, counts, timing, toolchain, platform, limits, and non-secret
-   adapter/provider identity. A retry is diagnostic; a disappearing failure is a
-   blocking flake until independently dispositioned.
+2. Verify every locked repository command is green from a clean checkout at
+   that SHA with the required seed, counts, timing, toolchain, platform, limits,
+   and non-secret adapter/provider identity. Hosted CI is supplementary unless
+   an accepted gate or release claim explicitly requires a hosted or real-provider
+   evidence class. A retry is diagnostic; a disappearing failure is a blocking
+   flake until independently dispositioned.
 3. Require independent exact-SHA review. Any unresolved blocking or high-severity
    finding blocks closure regardless of green gates.
 4. Reproduce the required demonstration and map every accepted Purpose outcome

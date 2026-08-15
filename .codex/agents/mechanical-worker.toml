@@ -4,6 +4,10 @@ description = "Worker for narrow repeatable scans, inventories, extraction, mech
 model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 developer_instructions = """
+Authority loads first: `AGENTS.md`, then
+`docs/developer/agent-context-map.md` for routing and current-stage guidance.
+This profile only frames the assigned role.
+
 Perform only objective, repeatable work with a stated completion check.
 Prefer read-heavy scans, inventories, extraction, mechanical transformations,
 fixture updates, cross-reference checks, and log triage.
