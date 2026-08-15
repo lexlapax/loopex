@@ -57,6 +57,7 @@
 /native/*/target/
 /tools/*/target/
 /__pycache__/
+/scripts/__pycache__/
 /clients/**/__pycache__/
 /examples/**/__pycache__/
 /tools/**/__pycache__/
