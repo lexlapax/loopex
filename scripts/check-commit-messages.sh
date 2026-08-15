@@ -53,4 +53,7 @@ if [ "$status" -ne 0 ]; then
   exit 1
 fi
 
-echo "commit message check passed"
+# Always report the baseline. The override exists so the check can be tested
+# against known-bad history; printing it keeps a raised baseline visible in
+# retained evidence instead of silently shrinking the checked range.
+echo "commit message check passed (baseline ${baseline})"
