@@ -40,7 +40,8 @@ The accepted shape is:
 
 ```text
 mix.exs                    umbrella root; one version train
-apps/loopex/               Loopex.Protocol + Loopex.Core + Loopex.Runtime
+apps/loopex_protocol/      Loopex.Protocol + the extension contract
+apps/loopex/               Loopex.Core + Loopex.Runtime
 apps/<adapter apps>/       model, store, executor, transport adapters
 apps/<client apps>/        reference daemon and CLI
 conformance/               language-neutral fixtures and golden vectors
@@ -48,14 +49,27 @@ examples/
 docs/
 ```
 
+`apps/loopex_protocol` holds what a contributor outside this repository must
+compile against: versioned protocol envelopes and content types, canonical
+boundary data types, extension behaviours and callbacks, and manifest and
+contribution schemas. It holds no supervision, process, dispatch, or storage
+code. The test for membership is whether an extension or an independent client
+would need the module to build against a released contract; convenience for the
+runtime is not a reason to place a module there.
+
 Implementation constraints:
 
-1. `apps/loopex/mix.exs` returns an empty `deps` list. No runtime, development,
-   test, formatter, analysis, or documentation dependency is declared there.
+1. `apps/loopex_protocol/mix.exs` and `apps/loopex/mix.exs` each return an empty
+   `deps` list apart from the one in-umbrella edge in constraint 3. No runtime,
+   development, test, formatter, analysis, or documentation dependency is
+   declared in either.
 2. An accepted project-wide external tool, if later authorized, is declared at
    the umbrella root. This ADR does not authorize one.
-3. `apps/loopex` never declares an in-umbrella dependency. Adapter and client
-   applications declare an inward dependency on `:loopex` as required.
+3. `apps/loopex` declares exactly one in-umbrella dependency,
+   `:loopex_protocol`. `apps/loopex_protocol` declares none, and no reverse edge
+   from contract to runtime may exist. Adapter and client applications declare
+   an inward dependency on `:loopex`, and on `:loopex_protocol` when they only
+   need the contract.
 4. Every adapter or client application is created under an accepted plan that
    names its owner and the concrete boundary it implements.
 5. `conformance/` is not an OTP application. Its fixtures remain plain,
@@ -111,7 +125,14 @@ Concept: [Consequences](0001-repository-and-application-layout.md#concept-adr-00
   Any use of application environment for per-runtime ownership violates the
   runtime-reference invariant.
 - Publishing from an umbrella is per application. A repository check must prove
-  the one-version train; Mix does not supply that property automatically.
+  the one-version train; Mix does not supply that property automatically. Each
+  umbrella child declares its own `:version`, written as `vsn` into its `.app`
+  file, and the umbrella root declares none — so a shared version is a
+  convention this repository enforces, not a property Mix provides. The check
+  covers `apps/loopex_protocol` and `apps/loopex` from the first scaffold.
+- Splitting the contract does not authorize publishing it. Publication remains
+  deferred until an external consumer justifies it, and the split exists so that
+  decision stays available rather than to make it.
 - Application boundaries do not detect every static or dynamic reference. The
   dependency command needs an adversarial corpus rather than one happy-path
   source scan.
@@ -128,7 +149,13 @@ configuration and module/application references. Once published, the name is a
 public compatibility surface governed by the
 [technical compatibility rules](../vision-technical.md#technical-vision-compatibility).
 
-A Hex-package or repository split, independent version train, external core
-dependency, or relocation of protocol/core/runtime into separate applications
+A Hex-package or repository split, independent version train, external
+dependency in either dependency-free application, a reverse edge from contract
+to runtime, or further relocation of core and runtime into separate applications
 changes this decision and requires an amendment with migration and rollback
 evidence.
+
+Moving a module between `apps/loopex_protocol` and `apps/loopex` is an ordinary
+in-repository change while nothing is published. After publication it becomes a
+compatibility event on surface 7 and on the extension API, because a consumer
+pins the package rather than the module.

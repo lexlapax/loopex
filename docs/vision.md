@@ -293,6 +293,13 @@ their VM. Resource packs are data-only in the code-loading sense, not
 automatically safe. Generated code remains isolated unless a separate reviewed
 promotion creates a trusted artifact.
 
+Installation admits a reviewed package from a named source; activation consumes
+only the resulting sealed artifact. A source is a place a candidate is fetched
+from and validated, never a path a running brain loads from. The configuration
+that names admissible sources belongs to the host, not to Loopex. Because a
+retained artifact is prebuilt, it declares the toolchain it was compiled with,
+and a brain verifies that declaration against its own runtime before activation.
+
 Technical depth: [Packages, manifests, contributions, activation, rollback, state, and generation](vision-technical.md#technical-vision-extensions)
 
 Extension activation is VM-global, versioned, quiescent, and durable. It drains
@@ -415,7 +422,8 @@ or orchestration. Performance budgets follow measurement.
 ### 24. Compatibility and release governance
 
 Journal schema, public protocol, executor protocol, extension API, embedded API,
-and artifact formats are separate compatibility surfaces. They freeze only when
+artifact formats, and — once anything is published — released package names and
+their version constraints are separate compatibility surfaces. They freeze only when
 their own consumers, schemas, vectors, migration, rollback, and operational
 evidence justify the claim.
 

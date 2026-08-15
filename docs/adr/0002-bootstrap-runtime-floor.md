@@ -84,6 +84,14 @@ Technical depth: [Evidence, cost, and failure cases](0002-bootstrap-runtime-floo
 None is claimed. The first release that states a supported version span must
 amend this pair with evidence and record the span in release notes.
 
+Two events trigger that amendment. Publishing any package declares a language
+requirement to consumers, so a first publication is a compatibility claim
+regardless of how the release is labelled. Retaining a prebuilt extension
+artifact makes the same claim in the other direction: the artifact records the
+toolchain its bytes were compiled with, and a brain must verify that record
+against its own runtime before activation. The validated pairs therefore govern
+what may be built and loaded, not only what this repository tests.
+
 Before M0 closes, rollback restores bootstrap checks, hook wiring, and the
 Python/`jq` prerequisites together. After closure, changing the matrix,
 reintroducing a development dependency, or changing the floor requires an

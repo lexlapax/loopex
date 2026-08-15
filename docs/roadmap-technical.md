@@ -72,6 +72,7 @@ can be accepted or product implementation can begin.
 | Store selection and migrations | Durable service | A service makes operational and compatibility claims that the bootstrap adapters do not. |
 | Public schemas and attachment delivery | Durable service | Snapshot-first attach and schemas precede a protocol release candidate. |
 | Extension activation and rollback | Governed extension runtime | Quiescence, atomic module-set loading, and exact A→B→A rollback define the capability. |
+| Extension packaging, acquisition, and installation | Whichever comes first: the first out-of-repository extension, or the first published package | Distinct from activation. [ADR 0003](adr/0003-extension-contract-boundary.md#concept) fixes the contributor-facing boundary and defers the installation pipeline, closure conflict resolution, signing and provenance formats, host configuration schema, and registry acquisition until a runtime and manifest implementation supply the evidence. |
 | Isolated-hand threat model and sandbox backend | Isolated hands | Nothing may claim OS isolation before the backend is chosen and reviewed. |
 | Remote-hand threat model and transport | Remote ecosystem | Distribution connects trusted gateways only; the transport gates remote claims. |
 | ACP mapping and protocol-v1 criteria | Before compatibility baseline | ACP mapping precedes the protocol-v1 freeze decision. |

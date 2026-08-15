@@ -12,9 +12,12 @@ a decision adds a new record rather than rewriting the old one.
 | --- | --- | --- | --- | --- |
 | 0001 | Repository and application layout | Proposed | [Decision](0001-repository-and-application-layout.md#concept) | [Technical depth](0001-repository-and-application-layout-technical.md#technical-depth) |
 | 0002 | Bootstrap runtime floor and version matrix | Proposed | [Decision](0002-bootstrap-runtime-floor.md#concept) | [Technical depth](0002-bootstrap-runtime-floor-technical.md#technical-depth) |
+| 0003 | Extension contract boundary and distribution constraints | Proposed | [Decision](0003-extension-contract-boundary.md#concept) | [Technical depth](0003-extension-contract-boundary-technical.md#technical-depth) |
 
-Both are prerequisites of the next milestone candidate; the
+0001 and 0002 are prerequisites of the next milestone candidate; the
 [plans register](../plans/README.md) records what their disposition unblocks.
+0003 blocks nothing today — it settles the questions a first publication would
+foreclose, so that they stay open until there is evidence to decide them.
 
 ## How a Decision Is Recorded
 

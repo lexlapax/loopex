@@ -111,6 +111,20 @@ This ADR makes no support claim. A compatibility-bearing release must amend the
 pair with the vision's required evidence and state the supported span in release
 notes.
 
+Either of these makes a claim and requires that amendment first:
+
+- **Publishing any package.** A published package declares a language version
+  requirement that consumers resolve against. The requirement is a supported
+  span whatever the release label says, and Hex name clearance remains a
+  separate prerequisite recorded in the vision's open questions.
+- **Retaining a prebuilt extension artifact.** The
+  [manifest](../vision-technical.md#technical-vision-extensions) records the
+  exact Erlang/OTP and Elixir versions the bytes were compiled with and the
+  runtime range they may be activated into. Activation verifies that record
+  against the running versions and rejects a mismatch, so the validated pairs
+  bound what may be built and loaded, not only what is tested here. Which pairs
+  an artifact may declare is locked by the plan that first retains one.
+
 Before M0 closes, rollback restores the prior bootstrap checks, hook wiring, and
 Python/`jq` prerequisites atomically. A partial rollback that leaves a tested
 path silently disabled is invalid. After closure, changing the matrix,

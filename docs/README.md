@@ -41,6 +41,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | --- | --- | --- |
 | 0001 — repository and application layout | [Decision](adr/0001-repository-and-application-layout.md#concept) | [Technical depth](adr/0001-repository-and-application-layout-technical.md#technical-depth) |
 | 0002 — bootstrap runtime floor | [Decision](adr/0002-bootstrap-runtime-floor.md#concept) | [Technical depth](adr/0002-bootstrap-runtime-floor-technical.md#technical-depth) |
+| 0003 — extension contract boundary | [Decision](adr/0003-extension-contract-boundary.md#concept) | [Technical depth](adr/0003-extension-contract-boundary-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.

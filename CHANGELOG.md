@@ -41,7 +41,30 @@ the exact document set its milestone must update.
   capability each decision blocks.
 - `docs/adr/0001-repository-and-application-layout.md` (Proposed) — Elixir
   umbrella; application boundaries carry dependency direction, and are not
-  package boundaries.
+  package boundaries. Revised to split `apps/loopex_protocol` — the versioned
+  protocol types and extension contract, with no dependencies — out of
+  `apps/loopex`, because an out-of-repository extension author can only compile
+  against something published, and shipping the extension API inside the runtime
+  package would weld two separately versioned compatibility surfaces to one
+  version. The deviation from the vision's singular protocol/core/runtime
+  application is stated in the ADR rather than left to be discovered.
+- Vision: an extension manifest now records the exact Erlang/OTP and Elixir
+  versions its retained bytes were compiled with, and activation verifies that
+  record against the running runtime; installation sources (in-repository,
+  host-admitted filesystem location, package registry) are named as acquisition
+  inputs to the builder or validation distribution rather than load paths, with
+  the configuration naming them owned by the host; and released package names
+  and version constraints are recorded as a seventh compatibility surface,
+  inert until first publication.
+- `docs/adr/0003-extension-contract-boundary.md` (Proposed) and its technical
+  companion — a contributor compiles against the extension contract, never the
+  runtime; only contract and runtime are candidate published units; publication
+  waits for a consumer; first-party extensions get no shortcut past the
+  manifest, sealing, and activation path; a filesystem location is an
+  acquisition source rather than a load path; and the host owns the
+  configuration naming sources. It blocks nothing and defers the installation
+  pipeline, closure conflict resolution, signing formats, host config schema,
+  and registry acquisition to the milestone that builds extensions.
 - `docs/adr/0002-bootstrap-runtime-floor.md` (Proposed) — OTP 26 / Elixir 1.17
   as the development and locally runnable validation floor, carrying no
   compatibility claim; matrix as two validated (Elixir, OTP) pairs.
@@ -110,6 +133,11 @@ the exact document set its milestone must update.
   reordered, or changed commitments and history rewrites while leaving
   conforming workstream, progress, outcome-state, and evidence-link updates
   outside the locks.
+- Proposed ADR 0002 now names two events that trigger its amendment: publishing
+  any package, which declares a language requirement to consumers, and retaining
+  a prebuilt extension artifact, whose declared build toolchain is verified
+  against the running runtime before activation. Validated pairs therefore bound
+  what may be built and loaded, not only what this repository tests.
 - Proposed ADR 0001 and ADR 0002 now carry empty governance records. The seed
   checker requires both exact records to be accepted before `M0` can leave
   Blocked and keeps the seed guard fail-closed until the opening branch installs

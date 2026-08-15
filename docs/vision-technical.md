@@ -1872,6 +1872,8 @@ A trusted extension manifest declares:
 
 - globally unique extension ID and semantic version;
 - manifest schema version and supported Loopex extension-API range;
+- the exact Erlang/OTP and Elixir versions the retained bytes were compiled
+  with, and the runtime range they may be activated into;
 - immutable content digest, provenance, and host-supplied trust/signing
   evidence;
 - OTP application and entry module from already validated trusted bytes;
@@ -1888,6 +1890,23 @@ A trusted extension manifest declares:
 Untrusted strings never become atoms or module names. Installation resolves a
 reviewed package into trusted retained metadata. Runtime activation consumes
 that trusted resolution; it does not fetch or compile arbitrary source.
+
+A candidate reaches installation from one of three sources: an application built
+in this repository, a filesystem location the host admits, or a package registry
+such as Hex. All three are acquisition sources for the builder or validation
+distribution, which resolves, compiles, and seals a candidate into a retained
+artifact. None is a load path: a minimal runtime distribution carries no
+compiler, and shared-VM activation already rejects loading from unvalidated
+paths, so a directory of packages is never activated by being present. The host
+owns the configuration naming admissible sources and the policy admitting each
+candidate; Loopex core reads no host or user configuration location. Because
+conflicts are resolved across the whole sealed closure rather than per package,
+admitting a new candidate may require re-resolving and re-sealing the installed
+set, or placing the candidate in a separate extension-host VM.
+
+Before activation, the manager verifies the artifact's declared build toolchain
+against the running Erlang/OTP and Elixir versions and rejects a mismatch. A
+prebuilt artifact is bytes, not source; compatibility is checked, never assumed.
 
 A trusted extension is a sealed immutable closure. Validation resolves its
 declared OTP applications, extension-owned BEAM modules, non-core dependencies,
@@ -2718,11 +2737,19 @@ Loopex has at least these compatibility surfaces:
 3. executor job/receipt/reconciliation protocol;
 4. extension manifest, contribution, and lifecycle API;
 5. embedded Elixir API;
-6. artifact/archive formats when they become public.
+6. artifact/archive formats when they become public;
+7. released package names, their contents, and the version constraints they
+   declare, from the first publication onward.
 
 They do not freeze together. A stable public event does not freeze the private
 journal. A store migration does not imply a wire migration. A package version
 does not replace protocol negotiation.
+
+Surface 7 is inert while nothing is published and permanent afterward. It is
+also the surface most easily created by accident: publishing one package that
+contains two surfaces welds their versions together, because a consumer pins the
+package rather than the surface inside it. Deciding what a package contains is
+therefore a compatibility decision, not a packaging convenience.
 
 ### 24.2 0.x policy
 
