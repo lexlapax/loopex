@@ -55,6 +55,20 @@ plan pair and gate also define the first scope-specific minimalism budget rather
 a universal line-count target. Its closure removes the temporary Python/`jq`
 bridge by migrating repository checks and tested client-hook paths to the
 accepted Elixir/OTP toolchain and proving the adapter path with `jq` absent.
+
+That migration belongs to M0 rather than a later milestone because M0 is the
+first milestone to produce an accepted Elixir/OTP toolchain and application
+layout, and hosting the repository's own checks on it is the cheapest real
+exercise of [ADR 0001](../adr/0001-repository-and-application-layout.md#concept)
+application boundaries and
+[ADR 0002](../adr/0002-bootstrap-runtime-floor.md#concept) validated version
+pairs. Self-hosting the checks is evidence about the accepted decisions, not
+incidental tooling. Two constraints keep it from displacing the durability,
+effect-truth, and code-evolution questions M0 exists to answer: the plan carries
+it as its own workstream with a declared rejoin barrier, and its minimalism
+budget requires the replacement to be materially smaller than the bridge it
+retires and to name what it drops and why. A line-for-line port would make the
+bridge's size permanent, which is the opposite of retiring it.
 Each founding ADR's Acceptance row uses the same authority and disposition
 syntax as a plan, with Bound bytes in this exact form:
 
@@ -372,14 +386,48 @@ the pair conflicts.
 ## Directing the Work
 
 The full authority rules live in [AGENTS.md](../../AGENTS.md) § Task and
-Autonomy Contract. In practice:
+Autonomy Contract. This section is the practical view: what to ask for, and
+where each request stops.
 
-| Ask | What happens |
-| --- | --- |
-| "open M0" | Concept plan, Technical depth plan, and red gate are written on a branch, then work stops for acceptance |
-| "go complete M0" | Implementation proceeds inside an accepted plan pair until ready for review |
-| "why is the fencing test failing?" | Diagnosis and recommendation only |
-| "close M0" | A closure candidate is assembled; the recorded closing authority decides closure |
+Ask for the outcome in ordinary words. These verbs belong to the repository, not
+to any tool. A development client may offer a shortcut for one — a named skill,
+a menu entry, a slash command — and those shortcuts are adapter conveniences
+recorded in
+[the adapter smoke evidence](../developer/agent-adapter-smoke.md). A shortcut
+never changes what a request authorizes, and a client that has no shortcut
+changes nothing about how the work is directed.
 
-No phrasing authorizes self-acceptance, gate weakening, a protected-branch
-merge, release publication, or an unrecorded ADR-class decision.
+| Ask for | What happens | Where it stops |
+| --- | --- | --- |
+| An explanation, diagnosis, or review | Findings and a recommendation | Before any edit |
+| A proposal for an unsettled decision | Options, evidence, and a recommendation | Before dependent work begins |
+| Dispositioning a named ADR or plan | Your explicit decision is recorded against the exact candidate bytes | A disposition is recorded, never inferred |
+| Opening a named milestone | Concept plan, Technical depth plan, and red gate written together on a branch | Acceptance by the recorded authority |
+| Completing an accepted milestone | Implementation inside the accepted envelopes until the locked gate is green | Independent review |
+| Closing a reviewed milestone | A closure candidate is assembled from evidence, review, and demonstrations | Closure by the recorded authority |
+| Integrating approved work | Merge, push, and branch cleanup | Your explicit approval each time |
+
+Some things stop regardless of how a request is phrased: self-acceptance, gate
+weakening, evidence waiver, scope deferral, a protected-branch merge, release
+publication, and any unrecorded ADR-class decision. So does a new decision about
+ownership, transactions, trust, public contracts, persistent schema, a major
+dependency, the runtime floor, migration, or packaging — asking to complete a
+milestone does not pre-authorize choosing a database.
+
+Two habits save a round trip. Asking why something is broken authorizes
+diagnosis only, so ask for the fix when you want the fix. Naming a workstream or
+file bounds the work to it, which is usually faster than correcting scope
+afterward.
+
+**Today.** No milestone is accepted, so only the first three rows do anything.
+The Current Status capsule at the top of this file names the exact next
+decision; it is not repeated here, because a second copy would drift.
+
+**After a milestone opens.** The last four rows become live and the lifecycle
+repeats: open, accept, complete, review, close.
+
+**After M0 closes.** None of this changes. The verbs, their authority, and their
+stopping points are independent of the toolchain underneath. M0 replaces the
+temporary Python and `jq` bridges with the accepted Elixir/Mix entrypoints, and
+the commands those verbs run are recorded in
+[DEVELOPMENT.md](../../DEVELOPMENT.md), which is where that migration lands.

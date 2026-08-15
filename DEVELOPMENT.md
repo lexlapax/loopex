@@ -7,8 +7,11 @@ test suite yet.
 
 The canonical status for the checked-out revision, including currently
 authorized work and the next maintainer decision, is in
-[docs/plans/README.md](docs/plans/README.md). This file owns setup and commands,
-not milestone state. The
+[docs/plans/README.md](docs/plans/README.md). Its Directing the Work section
+owns how development is requested — the verbs and where each one stops. This
+file owns the commands those verbs run, and milestone state lives in neither.
+The split is deliberate: the verbs outlive the toolchain, so replacing the seed
+bridges with Mix entrypoints changes the commands here and nothing there. The
 [development charter](docs/developer/development-charter.md#concept) explains the
 project's clarity and traceability commitments; its
 [technical companion](docs/developer/development-charter-technical.md#technical-depth) defines

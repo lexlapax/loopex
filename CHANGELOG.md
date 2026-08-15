@@ -59,6 +59,11 @@ the exact document set its milestone must update.
   general Markdown parser. M0 replaces the bridge with Elixir/Mix.
 - A `## Where Things Stand` block at the top of `README.md`, so the GitHub
   landing page answers what is happening and what is next.
+- A developer workflow guide in `docs/plans/README.md` § Directing the Work:
+  what to ask for, where each request stops, what stops regardless of phrasing,
+  and what changes when a milestone opens. The verbs belong to the repository,
+  so client shortcuts and the seed-to-Mix migration leave them unchanged;
+  `DEVELOPMENT.md` owns the commands they run.
 - This changelog.
 
 ### Changed
@@ -151,7 +156,12 @@ the exact document set its milestone must update.
 - Python 3.11 and `jq` are explicitly temporary seed/M0 bridges. Before M0
   closes, checks and tested client-hook paths migrate to the accepted Elixir/OTP
   toolchain and prove behavior with `jq` absent, so the enduring development
-  baseline is Git, shell/POSIX tools, and Elixir/OTP.
+  baseline is Git, shell/POSIX tools, and Elixir/OTP. The register now records
+  why that migration belongs to M0 — self-hosting the checks exercises ADR 0001
+  boundaries and ADR 0002 version pairs, making it evidence rather than
+  incidental tooling — and constrains it to a separate workstream whose
+  minimalism budget requires the replacement to be materially smaller than the
+  bridge it retires and to name what it drops.
 - M0 also installs the repository-owned compiled-documentation check for the
   dual-depth public-code contract; semantic usefulness and proportional private
   comments remain review obligations.
