@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
-"""Validate the small, marked set of human-facing project-status facts."""
+"""Validate paired project documents and the marked status facts they govern.
+
+Concept:
+    Keep the repository's visible project state and two-depth documentation
+    complete, connected, and honest.
+
+Technical depth:
+    Parse a deliberately small Markdown subset, bind accepted ADR and milestone
+    bytes to reachable Git history, and fail closed on ambiguous structure.
+"""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -27,8 +37,8 @@ SEED_BLOCKED_VALUES = {
     "Integrated phase": "Pre-implementation planning",
     "Last integrated checkpoint": "Seed bootstrap — 2026-08-15",
     "Blockers": (
-        "[ADR 0001](../adr/0001-repository-and-application-layout.md) and "
-        "[ADR 0002](../adr/0002-bootstrap-runtime-floor.md) must be accepted before "
+        "[ADR 0001](../adr/0001-repository-and-application-layout.md#concept) and "
+        "[ADR 0002](../adr/0002-bootstrap-runtime-floor.md#concept) must be accepted before "
         "M0 opens; a replacement requires a governed guard change"
     ),
     "Authorized work": (
@@ -42,13 +52,13 @@ SEED_BLOCKED_VALUES = {
     ),
     "Validation": "`bash scripts/check-bootstrap.sh`",
 }
-ADR_PATHS = (
+BOOTSTRAP_ADR_PATHS = (
     "docs/adr/0001-repository-and-application-layout.md",
     "docs/adr/0002-bootstrap-runtime-floor.md",
 )
 ADR_NAMES = {
-    ADR_PATHS[0]: "ADR 0001",
-    ADR_PATHS[1]: "ADR 0002",
+    BOOTSTRAP_ADR_PATHS[0]: "ADR 0001",
+    BOOTSTRAP_ADR_PATHS[1]: "ADR 0002",
 }
 STATES = {"Blocked", "Open", "Accepted", "In progress", "In review", "Closed"}
 ACTIVE_STATES = {"Open", "Accepted", "In progress", "In review"}
@@ -62,25 +72,54 @@ ATX = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+|$)")
 SETEXT = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
 AUTHORITY = re.compile(r"(?:Maintainer|Delegate: [A-Za-z0-9][A-Za-z0-9 ._@-]*)\Z")
 EVIDENCE = re.compile(r"\[disposition\]\([^) \t]+\)\Z")
-BOUND = re.compile(r"candidate `([0-9a-f]{40})`; gate `sha256:([0-9a-f]{64})`\Z")
-ADR_BOUND = re.compile(
-    r"candidate `([0-9a-f]{40})`; document `sha256:([0-9a-f]{64})`\Z"
+BOUND = re.compile(
+    r"candidate `([0-9a-f]{40})`; "
+    r"concept `sha256:([0-9a-f]{64})`; "
+    r"technical `sha256:([0-9a-f]{64})`; "
+    r"gate `sha256:([0-9a-f]{64})`\Z"
 )
+ADR_BOUND = re.compile(
+    r"candidate `([0-9a-f]{40})`; "
+    r"concept `sha256:([0-9a-f]{64})`; "
+    r"technical `sha256:([0-9a-f]{64})`\Z"
+)
+ANCHOR_ID = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+ANCHOR_TAG = re.compile(rf'<a id="({ANCHOR_ID})"></a>')
+ANCHOR = re.compile(rf'<a id="({ANCHOR_ID})"></a>\Z')
+LINK = re.compile(r"\[([^\]\r\n]*)\]\(([^()\s]+)\)\Z")
+LINK_ANY = re.compile(r"\[([^\]\r\n]*)\]\(([^()\s]+)\)")
+ADR_CONCEPT_PATH = re.compile(r"docs/adr/[0-9]{4}-[a-z0-9]+(?:-[a-z0-9]+)*\.md\Z")
 
 MARKERS = {
     "readme": ("<!-- loopex:readme-status:start -->", "<!-- loopex:readme-status:end -->"),
     "current": ("<!-- loopex:current-status:start -->", "<!-- loopex:current-status:end -->"),
     "register": ("<!-- loopex:milestone-register:start -->", "<!-- loopex:milestone-register:end -->"),
-    "plan_envelope": ("<!-- loopex:plan-envelope:start -->", "<!-- loopex:plan-envelope:end -->"),
+    "plan_concept_envelope": (
+        "<!-- loopex:plan-concept-envelope:start -->",
+        "<!-- loopex:plan-concept-envelope:end -->",
+    ),
+    "plan_technical_envelope": (
+        "<!-- loopex:plan-technical-envelope:start -->",
+        "<!-- loopex:plan-technical-envelope:end -->",
+    ),
     "rejoin_source": ("<!-- loopex:rejoin-source:start -->", "<!-- loopex:rejoin-source:end -->"),
     "rejoin_copy": ("<!-- loopex:rejoin-copy:start -->", "<!-- loopex:rejoin-copy:end -->"),
 }
 
-PLAN_ENVELOPE_SECTIONS = (
+PLAN_CONCEPT_SECTIONS = (
     "### Purpose",
     "### Outcomes",
     "### Scope",
     "### Non-Goals",
+)
+PLAN_CONCEPT_ANCHORS = (
+    "concept-plan-purpose",
+    "concept-plan-outcomes",
+    "concept-plan-scope",
+    "concept-plan-non-goals",
+)
+
+PLAN_TECHNICAL_SECTIONS = (
     "### Prerequisites and Acceptance Points",
     "### Ownership, Decision Owners, and Rejoin Barriers",
     "### Evidence Obligations and Mapping",
@@ -89,6 +128,26 @@ PLAN_ENVELOPE_SECTIONS = (
     "### Packaging",
     "### Proportional Minimalism Budget",
 )
+PLAN_TECHNICAL_ANCHORS = (
+    "technical-plan-prerequisites",
+    "technical-plan-ownership",
+    "technical-plan-evidence",
+    "technical-plan-compatibility",
+    "technical-plan-migration",
+    "technical-plan-packaging",
+    "technical-plan-minimalism",
+)
+PLAN_RELATIONSHIPS = {
+    ("concept", "technical-depth"),
+    ("concept-plan-outcomes", "technical-plan-evidence"),
+    ("concept-plan-scope", "technical-plan-prerequisites"),
+    ("concept-plan-scope", "technical-plan-ownership"),
+    ("concept-plan-scope", "technical-plan-compatibility"),
+    ("concept-plan-scope", "technical-plan-migration"),
+    ("concept-plan-scope", "technical-plan-packaging"),
+    ("concept-plan-scope", "technical-plan-minimalism"),
+    ("concept-plan-non-goals", "technical-plan-prerequisites"),
+}
 
 
 class Invalid(Exception):
@@ -164,12 +223,547 @@ def _visible_line_numbers(text: str, path: str) -> set[int]:
         if not started_in_code:
             visible.add(number)
             exposed_text = "".join(exposed)
-            if HTML_TAG.search(exposed_text) or exposed_text.lstrip().startswith("<"):
-                raise Invalid(f"{path}: raw HTML is not allowed in a governed status document")
+            without_anchors = ANCHOR_TAG.sub("", exposed_text)
+            if HTML_TAG.search(without_anchors) or without_anchors.lstrip().startswith("<"):
+                raise Invalid(f"{path}: raw HTML is not allowed in active Markdown")
 
     if fence or comment or ticks is not None:
         raise Invalid(f"{path}: unclosed Markdown or HTML hiding construct")
     return visible
+
+
+def _exposed_line(line: str) -> str:
+    """Remove inline code and comments from a line already known to start visible."""
+    exposed: list[str] = []
+    ticks: int | None = None
+    index = 0
+    while index < len(line):
+        if ticks is not None:
+            if line[index] == "`":
+                end = index
+                while end < len(line) and line[end] == "`":
+                    end += 1
+                if end - index == ticks:
+                    ticks = None
+                index = end
+            else:
+                index += 1
+            continue
+        if line.startswith("<!--", index):
+            end = line.find("-->", index + 4)
+            if end < 0:
+                break
+            index = end + 3
+            continue
+        if line[index] == "`":
+            end = index
+            while end < len(line) and line[end] == "`":
+                end += 1
+            ticks = end - index
+            index = end
+            continue
+        exposed.append(line[index])
+        index += 1
+    return "".join(exposed)
+
+
+def _technical_path(concept_path: str) -> str:
+    return concept_path.removesuffix(".md") + "-technical.md"
+
+
+def _concept_path(technical_path: str) -> str:
+    return technical_path.removesuffix("-technical.md") + ".md"
+
+
+def _adr_concept_paths(documents: Mapping[str, str]) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            path
+            for path in documents
+            if ADR_CONCEPT_PATH.fullmatch(path) and not path.endswith("-technical.md")
+        )
+    )
+
+
+def _relative_target(source: str, target: str) -> str:
+    return posixpath.relpath(target, posixpath.dirname(source) or ".")
+
+
+def _is_depth_anchor(anchor: str, prefix: str) -> bool:
+    return anchor == ("concept" if prefix == "concept" else "technical-depth") or anchor.startswith(
+        prefix + "-"
+    )
+
+
+def _relationship(
+    text: str,
+    path: str,
+    *,
+    heading: str,
+    own_prefix: str,
+    label: str,
+) -> tuple[str, str, str]:
+    """Read the single top-level relationship carried by one paired document.
+
+    Concept:
+        Each depth announces itself once and immediately names the other depth.
+
+    Technical depth:
+        Only a visible semantic anchor, exact H2, optional blank line, and one
+        labelled Markdown link are accepted. The returned fragment is resolved
+        after both documents have been parsed.
+    """
+    lines = _lines(text, path)
+    visible = _visible_line_numbers(text, path)
+    expected_heading_text = heading.removeprefix("## ")
+    headings: list[int] = []
+    for index in visible:
+        match = ATX.match(lines[index])
+        if match and match.group(1) == "##":
+            payload = lines[index][match.end() :].strip()
+            payload = re.sub(r"[ \t]+#+[ \t]*\Z", "", payload).rstrip()
+            if payload == expected_heading_text:
+                headings.append(index)
+        if (
+            lines[index].strip() == expected_heading_text
+            and index + 1 in visible
+            and re.fullmatch(r" {0,3}-+[ \t]*", lines[index + 1])
+        ):
+            headings.append(index)
+    if len(headings) != 1:
+        raise Invalid(f"{path}: expected exactly one visible {heading}")
+    heading_index = headings[0]
+    if lines[heading_index] != heading:
+        raise Invalid(f"{path}: {heading} must use its exact canonical ATX heading")
+    anchor_index = heading_index - 1
+    if anchor_index not in visible:
+        raise Invalid(f"{path}: {heading} needs an immediately preceding semantic anchor")
+    anchor = ANCHOR.fullmatch(lines[anchor_index])
+    if anchor is None or not _is_depth_anchor(anchor.group(1), own_prefix):
+        expected = "concept" if own_prefix == "concept" else "technical-depth"
+        raise Invalid(f"{path}: {heading} needs the explicit {expected!r} relationship anchor")
+
+    preamble = [line for line in lines[:anchor_index] if line.strip()]
+    optional_title = ATX.match(preamble[0]) if len(preamble) == 1 else None
+    optional_title_text = ""
+    if optional_title is not None:
+        optional_title_text = preamble[0][optional_title.end() :].strip()
+        optional_title_text = re.sub(
+            r"[ \t]+#+[ \t]*\Z", "", optional_title_text
+        ).rstrip()
+    if preamble and (
+        optional_title is None
+        or optional_title.group(1) != "#"
+        or not optional_title_text
+    ):
+        raise Invalid(
+            f"{path}: paired document must start with an optional H1 and its {heading} relationship"
+        )
+
+    link_index = heading_index + 1
+    if link_index < len(lines) and not lines[link_index]:
+        link_index += 1
+    prefix = f"{label}: "
+    if link_index not in visible or not lines[link_index].startswith(prefix):
+        raise Invalid(f"{path}: {heading} must be followed immediately by {label}: link")
+    payload = lines[link_index].removeprefix(prefix)
+    if payload.endswith("."):
+        payload = payload[:-1]
+    link = LINK.fullmatch(payload)
+    if link is None:
+        raise Invalid(f"{path}: {label} relationship must be one exact Markdown link")
+    destination = link.group(2)
+    if destination.count("#") != 1:
+        raise Invalid(f"{path}: {label} relationship needs one nonempty fragment")
+    target, fragment = destination.split("#", 1)
+    if not target or not fragment:
+        raise Invalid(f"{path}: {label} relationship needs one nonempty fragment")
+    return anchor.group(1), target, fragment
+
+
+def _anchors(text: str, path: str, prefix: str) -> dict[str, int]:
+    lines = _lines(text, path)
+    visible = _visible_line_numbers(text, path)
+    anchors: dict[str, int] = {}
+    for index in visible:
+        for match in ANCHOR_TAG.finditer(_exposed_line(lines[index])):
+            anchor = match.group(1)
+            if not _is_depth_anchor(anchor, prefix):
+                raise Invalid(f"{path}: semantic anchor {anchor!r} has the wrong depth prefix")
+            if anchor in anchors:
+                raise Invalid(f"{path}: semantic anchor {anchor!r} must resolve exactly once")
+            anchors[anchor] = index
+    if not anchors:
+        raise Invalid(f"{path}: no visible {prefix}-... semantic anchor")
+    return anchors
+
+
+def _labelled_links(
+    text: str, path: str, *, label: str, own_prefix: str
+) -> tuple[tuple[str, str, str], ...]:
+    lines = _lines(text, path)
+    visible = _visible_line_numbers(text, path)
+    current_anchor: str | None = None
+    links: list[tuple[str, str, str]] = []
+    prefix = f"{label}: "
+    for index, line in enumerate(lines):
+        if index not in visible:
+            continue
+        exposed = _exposed_line(line)
+        anchors = tuple(ANCHOR_TAG.finditer(exposed))
+        if anchors:
+            current_anchor = anchors[-1].group(1)
+        if not exposed.startswith(prefix):
+            continue
+        if current_anchor is None or not _is_depth_anchor(current_anchor, own_prefix):
+            raise Invalid(f"{path}: {label} link needs a preceding {own_prefix}-... anchor")
+        payload = exposed.removeprefix(prefix)
+        if payload.endswith("."):
+            payload = payload[:-1]
+        link = LINK.fullmatch(payload)
+        if link is None or link.group(2).count("#") != 1:
+            raise Invalid(f"{path}: {label} relationship must be one exact fragmented link")
+        target, fragment = link.group(2).split("#", 1)
+        if not target or not fragment:
+            raise Invalid(f"{path}: {label} relationship needs one nonempty fragment")
+        links.append((current_anchor, target, fragment))
+    if len(set(links)) != len(links):
+        raise Invalid(f"{path}: duplicate {label} relationship")
+    return tuple(links)
+
+
+def _companion_backlinks(
+    text: str,
+    path: str,
+    *,
+    companion_target: str,
+    own_prefix: str,
+) -> tuple[tuple[str, str], ...]:
+    lines = _lines(text, path)
+    visible = _visible_line_numbers(text, path)
+    current_anchor: str | None = None
+    backlinks: list[tuple[str, str]] = []
+    for index, line in enumerate(lines):
+        if index not in visible:
+            continue
+        exposed = _exposed_line(line)
+        anchors = tuple(ANCHOR_TAG.finditer(exposed))
+        anchored_here = bool(anchors)
+        if anchors:
+            current_anchor = anchors[-1].group(1)
+        if current_anchor is None or not _is_depth_anchor(current_anchor, own_prefix):
+            continue
+        if not anchored_here and not exposed.startswith("Concept: "):
+            continue
+        for link in LINK_ANY.finditer(exposed):
+            destination = link.group(2)
+            if destination.count("#") != 1:
+                continue
+            target, fragment = destination.split("#", 1)
+            if target == companion_target and fragment:
+                backlinks.append((fragment, current_anchor))
+    if len(set(backlinks)) != len(backlinks):
+        raise Invalid(f"{path}: duplicate reciprocal companion relationship")
+    return tuple(backlinks)
+
+
+def _reject_label(text: str, path: str, label: str) -> None:
+    lines = _lines(text, path)
+    visible = _visible_line_numbers(text, path)
+    if any(_exposed_line(lines[index]).startswith(f"{label}: ") for index in visible):
+        raise Invalid(f"{path}: {label} relationship label belongs in the other depth")
+
+
+def _visible_local_link_targets(text: str, path: str) -> set[str]:
+    """Return repository-relative targets of visible local Markdown links."""
+    lines = _lines(text, path)
+    visible = _visible_line_numbers(text, path)
+    targets: set[str] = set()
+    for index in visible:
+        for link in _markdown_links(_exposed_line(lines[index]), path):
+            target = link.group(2).split("#", 1)[0]
+            if not target or target.startswith("/") or ":" in target.split("/", 1)[0]:
+                continue
+            targets.add(posixpath.normpath(posixpath.join(posixpath.dirname(path), target)))
+    return targets
+
+
+def _markdown_links(
+    line: str, path: str, *, raw_line: str | None = None
+) -> tuple[re.Match[str], ...]:
+    """Accept only the repository's small, unambiguous inline-link grammar."""
+    matches = tuple(LINK_ANY.finditer(line))
+    if any(match.start() and line[match.start() - 1] == "!" for match in matches):
+        raise Invalid(f"{path}: unsupported Markdown image syntax")
+    for match in matches:
+        if match.group(1).strip():
+            continue
+        code_label = (
+            raw_line is not None
+            and "[](" not in raw_line
+            and re.search(
+                rf"\[`[^`\]\r\n]+`\]\({re.escape(match.group(2))}\)", raw_line
+            )
+        )
+        if not code_label:
+            raise Invalid(f"{path}: unsupported Markdown link syntax")
+    remainder = list(line)
+    for match in matches:
+        remainder[match.start() : match.end()] = " " * (match.end() - match.start())
+    unsupported = "".join(remainder)
+    if (
+        "](" in unsupported
+        or re.search(r"\[[^\]\r\n]+\]\(", unsupported)
+        or re.search(r"\[[^\]\r\n]+\]\[[^\]\r\n]*\]", unsupported)
+        or re.match(r"[ \t]*\[(?!\^)[^\]\r\n]+\]:", unsupported)
+    ):
+        raise Invalid(f"{path}: unsupported Markdown link syntax")
+    return matches
+
+
+def _validate_local_links(documents: Mapping[str, str]) -> None:
+    """Resolve visible local Markdown paths and explicit semantic fragments."""
+    for source, text in documents.items():
+        if source.startswith("docs/archive/"):
+            continue
+        lines = _lines(text, source)
+        visible = _visible_line_numbers(text, source)
+        for index in visible:
+            for link in _markdown_links(
+                _exposed_line(lines[index]), source, raw_line=lines[index]
+            ):
+                destination = link.group(2)
+                if destination.startswith(("http://", "https://", "mailto:", "//")):
+                    continue
+                if "?" in destination:
+                    raise Invalid(f"{source}: unsupported local Markdown query destination")
+                raw_target, separator, fragment = destination.partition("#")
+                if raw_target.startswith("/"):
+                    raise Invalid(f"{source}: local Markdown link escapes the repository")
+                target = (
+                    source
+                    if not raw_target
+                    else posixpath.normpath(
+                        posixpath.join(posixpath.dirname(source), raw_target)
+                    )
+                )
+                if target == ".." or target.startswith("../"):
+                    raise Invalid(f"{source}: local Markdown link escapes the repository")
+                if raw_target.endswith("/"):
+                    prefix = target.rstrip("/") + "/"
+                    if not any(path.startswith(prefix) for path in documents):
+                        raise Invalid(f"{source}: local documentation directory does not resolve: {destination}")
+                    continue
+                if target not in documents:
+                    if raw_target.endswith(".md") or separator:
+                        raise Invalid(f"{source}: local Markdown target does not resolve: {destination}")
+                    continue
+                if separator:
+                    anchor = f'<a id="{fragment}"></a>'
+                    target_lines = _lines(documents[target], target)
+                    target_visible = _visible_line_numbers(documents[target], target)
+                    if sum(target_lines[i].count(anchor) for i in target_visible) != 1:
+                        raise Invalid(f"{source}: local Markdown fragment does not resolve exactly once: {destination}")
+
+
+def _validate_pair(documents: Mapping[str, str], concept_path: str) -> None:
+    """Validate one concept/technical pair without interpreting its prose.
+
+    Concept:
+        A reader can move between the two depths through one unambiguous entry.
+
+    Technical depth:
+        Paths, prefixes, fragments, and reciprocal relationship bytes are exact;
+        semantic quality remains an independent review responsibility.
+    """
+    technical_path = _technical_path(concept_path)
+    if concept_path not in documents:
+        raise Invalid(f"{concept_path}: paired concept document is missing")
+    if technical_path not in documents:
+        raise Invalid(f"{technical_path}: paired technical document is missing")
+    concept_anchor, concept_target, technical_fragment = _relationship(
+        documents[concept_path],
+        concept_path,
+        heading="## Concept",
+        own_prefix="concept",
+        label="Technical depth",
+    )
+    technical_anchor, technical_target, concept_fragment = _relationship(
+        documents[technical_path],
+        technical_path,
+        heading="## Technical depth",
+        own_prefix="technical",
+        label="Concept",
+    )
+    if concept_target != _relative_target(concept_path, technical_path):
+        raise Invalid(f"{concept_path}: Technical depth link must name its own companion")
+    if technical_target != _relative_target(technical_path, concept_path):
+        raise Invalid(f"{technical_path}: Concept link must name its own companion")
+    concept_anchors = _anchors(documents[concept_path], concept_path, "concept")
+    technical_anchors = _anchors(documents[technical_path], technical_path, "technical")
+    if concept_fragment not in concept_anchors:
+        raise Invalid(f"{technical_path}: Concept fragment does not resolve exactly once")
+    if technical_fragment not in technical_anchors:
+        raise Invalid(f"{concept_path}: Technical depth fragment does not resolve exactly once")
+    if concept_fragment != concept_anchor or technical_fragment != technical_anchor:
+        raise Invalid(f"{concept_path}: paired relationship links are not reciprocal")
+    concept_links = _labelled_links(
+        documents[concept_path],
+        concept_path,
+        label="Technical depth",
+        own_prefix="concept",
+    )
+    labelled_technical_links = _labelled_links(
+        documents[technical_path],
+        technical_path,
+        label="Concept",
+        own_prefix="technical",
+    )
+    _reject_label(documents[concept_path], concept_path, "Concept")
+    _reject_label(documents[technical_path], technical_path, "Technical depth")
+    expected_technical = _relative_target(concept_path, technical_path)
+    expected_concept = _relative_target(technical_path, concept_path)
+    if any(target != expected_technical for _, target, _ in concept_links):
+        raise Invalid(f"{concept_path}: labelled Technical depth links may name only its companion")
+    if any(fragment not in technical_anchors for _, _, fragment in concept_links):
+        raise Invalid(f"{concept_path}: Technical depth fragment does not resolve exactly once")
+    if any(target != expected_concept for _, target, _ in labelled_technical_links):
+        raise Invalid(f"{technical_path}: labelled Concept links may name only its companion")
+    if any(fragment not in concept_anchors for _, _, fragment in labelled_technical_links):
+        raise Invalid(f"{technical_path}: Concept fragment does not resolve exactly once")
+    forward = {(source, fragment) for source, _, fragment in concept_links}
+    backward = set(
+        _companion_backlinks(
+            documents[technical_path],
+            technical_path,
+            companion_target=expected_concept,
+            own_prefix="technical",
+        )
+    )
+    if forward != backward:
+        raise Invalid(f"{concept_path}: labelled relationship links are not reciprocal")
+
+
+def _document_topology(documents: Mapping[str, str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Classify every active Markdown path before semantic status validation.
+
+    Concept:
+        A new active document cannot silently fall outside the repository's
+        declared documentation model.
+
+    Technical depth:
+        Required and newly discovered pairs, ADR pairs, and plan triples are
+        enumerated; operational, index, adapter, skill, gate, and archived paths
+        are explicit exceptions.
+    """
+    folded: dict[str, str] = {}
+    for path in documents:
+        prior = folded.setdefault(path.casefold(), path)
+        if prior != path:
+            raise Invalid(f"{path}: Markdown path collides by case with {prior}")
+        if path.endswith("-technical-technical.md"):
+            raise Invalid(f"{path}: doubled technical suffix is not a document class")
+
+    fixed = {
+        "docs/vision.md",
+        "docs/roadmap.md",
+        "docs/developer/development-charter.md",
+    }
+    adr_concepts = _adr_concept_paths(documents)
+    pairs = fixed | set(adr_concepts)
+
+    exact_exceptions = {
+        "docs/README.md",
+        "docs/developer/agent-context-map.md",
+        "docs/developer/agent-adapter-smoke.md",
+    }
+    unpaired_prefixes = (
+        "docs/archive/",
+        "docs/operator/",
+        "docs/generated/",
+        "docs/evidence/",
+        "docs/schemas/",
+        "docs/fixtures/",
+    )
+    repository_exception_prefixes = (
+        "conformance/",
+        "schemas/",
+        "fixtures/",
+        "test/fixtures/",
+    )
+    repository_exception_paths = (
+        re.compile(r"\.agents/skills/[a-z0-9]+(?:-[a-z0-9]+)*/SKILL\.md\Z"),
+        re.compile(r"\.claude/agents/[a-z0-9]+(?:-[a-z0-9]+)*\.md\Z"),
+        re.compile(r"\.github/ISSUE_TEMPLATE/[^/]+\.md\Z"),
+        re.compile(r"\.github/PULL_REQUEST_TEMPLATE/[^/]+\.md\Z"),
+        re.compile(r"\.github/pull_request_template\.md\Z"),
+    )
+    for path in documents:
+        if (
+            not path.startswith("docs/")
+            or path in exact_exceptions
+            or path.endswith("/README.md")
+            or path.startswith("docs/adr/")
+            or path.startswith("docs/plans/")
+            or path.startswith(unpaired_prefixes)
+        ):
+            continue
+        pairs.add(_concept_path(path) if path.endswith("-technical.md") else path)
+
+    for concept in sorted(pairs):
+        _validate_pair(documents, concept)
+
+    plan_concepts: set[str] = set()
+    plan_technical: set[str] = set()
+    plan_gates: set[str] = set()
+    for path in documents:
+        if not path.startswith("docs/plans/") or path == "docs/plans/README.md":
+            continue
+        relative = path.removeprefix("docs/plans/")
+        if "/" in relative:
+            raise Invalid(f"{path}: nested plan Markdown is not allowed")
+        if relative.endswith("-technical.md"):
+            plan_technical.add(relative.removesuffix("-technical.md"))
+        elif relative.endswith("-gate.md"):
+            plan_gates.add(relative.removesuffix("-gate.md"))
+        else:
+            plan_concepts.add(relative.removesuffix(".md"))
+    if plan_concepts != plan_technical or plan_concepts != plan_gates:
+        raise Invalid("docs/plans: concept, technical depth, and gate files must form exact triples")
+    for name in sorted(plan_concepts):
+        _milestone(f"`{name}`", f"docs/plans/{name}.md")
+        _validate_pair(documents, f"docs/plans/{name}.md")
+
+    pair_paths = set(pairs) | {_technical_path(path) for path in pairs}
+    index = documents.get("docs/README.md")
+    if index is None:
+        raise Invalid("docs/README.md: documentation index is missing")
+    indexed = _visible_local_link_targets(index, "docs/README.md")
+    missing_from_index = sorted(pair_paths - indexed)
+    if missing_from_index:
+        raise Invalid(
+            "docs/README.md: active document pairs are missing from the index: "
+            + ", ".join(missing_from_index)
+        )
+    plan_paths = {
+        f"docs/plans/{name}{suffix}"
+        for name in plan_concepts
+        for suffix in (".md", "-technical.md", "-gate.md")
+    }
+    root_exceptions = {"AGENTS.md", "README.md", "DEVELOPMENT.md", "CHANGELOG.md", "CLAUDE.md"}
+    for path in documents:
+        exception = (
+            path in root_exceptions
+            or path in exact_exceptions
+            or path.endswith("/README.md")
+            or path.startswith(unpaired_prefixes)
+            or path.startswith(repository_exception_prefixes)
+            or posixpath.basename(path).casefold().startswith("license")
+            or any(pattern.fullmatch(path) for pattern in repository_exception_paths)
+        )
+        if path not in pair_paths and path not in plan_paths and not exception:
+            raise Invalid(f"{path}: unknown active Markdown document class")
+    return tuple(sorted(adr_concepts)), tuple(sorted(plan_concepts))
 
 
 def _block(text: str, path: str, key: str, heading: str | None = None) -> list[str]:
@@ -226,14 +820,15 @@ def _milestone(raw: str, path: str) -> str:
         or len(name.encode("ascii")) > MAX_NAME_BYTES
         or folded in RESERVED
         or folded.endswith("-gate")
+        or folded.endswith("-technical")
     ):
         raise Invalid(f"{path}: invalid or reserved milestone name {name!r}")
     return name
 
 
-def _summary(phase: str, rows: list[tuple[str, str, str, str]]) -> str:
-    active = [(name, state) for name, state, _, _ in rows if state in ACTIVE_STATES]
-    blocked = [name for name, state, _, _ in rows if state == "Blocked"]
+def _summary(phase: str, rows: list[tuple[str, str, str, str, str]]) -> str:
+    active = [(name, state) for name, state, _, _, _ in rows if state in ACTIVE_STATES]
+    blocked = [name for name, state, _, _, _ in rows if state == "Blocked"]
     if len(active) > 1 or len(blocked) > 1:
         raise Invalid("docs/plans/README.md: at most one active and one Blocked milestone are allowed")
     if active:
@@ -249,13 +844,13 @@ def _summary(phase: str, rows: list[tuple[str, str, str, str]]) -> str:
 
 def _blocked_m0_values(statuses: Mapping[str, str]) -> dict[str, str]:
     values = dict(SEED_BLOCKED_VALUES)
-    unresolved = [path for path in ADR_PATHS if statuses[path] != "Accepted"]
+    unresolved = [path for path in BOOTSTRAP_ADR_PATHS if statuses[path] != "Accepted"]
     if len(unresolved) == 1:
         path = unresolved[0]
         name = ADR_NAMES[path]
         filename = path.removeprefix("docs/adr/")
         values["Blockers"] = (
-            f"[{name}](../adr/{filename}) must be accepted before M0 opens; "
+            f"[{name}](../adr/{filename}#concept) must be accepted before M0 opens; "
             "a replacement requires a governed guard change"
         )
         values["Next maintainer decision"] = f"Disposition {name}"
@@ -263,8 +858,8 @@ def _blocked_m0_values(statuses: Mapping[str, str]) -> dict[str, str]:
         values["Blockers"] = "M0 has not been explicitly opened gate-first"
         values["Next maintainer decision"] = "Explicitly open or defer M0"
         values["Next transition"] = (
-            "Create the branch-only M0 plan and red gate, install lifecycle-specific "
-            "status checks, and move M0 to Open"
+            "Create the branch-only M0 Concept plan, Technical depth plan, and red gate; "
+            "install lifecycle-specific status checks; and move M0 to Open"
         )
     return values
 
@@ -312,7 +907,16 @@ def _records_table(
     text: str, path: str, heading: str, decisions: tuple[str, ...]
 ) -> tuple[list[list[str]], list[int]]:
     body, body_start = _section_body(text, path, heading)
-    rows = _table(body, ("Decision", "Authority", "Authority evidence", "Bound bytes"), path)
+    table_length = 2 + len(decisions)
+    table_body = body[:table_length]
+    trailing = [line for line in body[table_length:] if line]
+    if trailing and not (len(trailing) == 1 and ANCHOR.fullmatch(trailing[0])):
+        raise Invalid(f"{path}: governance rows have trailing content")
+    rows = _table(
+        table_body,
+        ("Decision", "Authority", "Authority evidence", "Bound bytes"),
+        path,
+    )
     if len(rows) != len(decisions) or [row[0] for row in rows] != list(decisions):
         expected = " then ".join(decisions)
         raise Invalid(f"{path}: governance rows must be {expected}")
@@ -383,6 +987,7 @@ def _adr_record(
 
 def _validate_adr(
     text: str,
+    technical_text: str,
     path: str,
     resolve_file: Callable[[str, str], str | None] | None,
 ) -> str:
@@ -397,8 +1002,14 @@ def _validate_adr(
     if bound is None:
         raise Invalid(f"{path}: accepted ADR bound bytes are malformed")
     candidate = resolve_file(bound.group(1), path) if resolve_file else None
+    technical_path = _technical_path(path)
+    technical_candidate = (
+        resolve_file(bound.group(1), technical_path) if resolve_file else None
+    )
     if candidate is None:
         raise Invalid(f"{path}: accepted ADR candidate is unavailable")
+    if technical_candidate is None:
+        raise Invalid(f"{technical_path}: accepted ADR candidate is unavailable")
     candidate_record = _adr_record(
         candidate, f"{path} at historical candidate {bound.group(1)}"
     )
@@ -406,9 +1017,14 @@ def _validate_adr(
         raise Invalid(f"{path}: historical candidate ADR governance record is unavailable")
     if candidate_record[0] != "Proposed" or candidate_record[2]:
         raise Invalid(f"{path}: historical candidate must be the Proposed ADR with an empty record")
-    digest = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
-    if digest != bound.group(2):
-        raise Invalid(f"{path}: ADR document digest does not match its historical candidate")
+    concept_digest = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
+    technical_digest = hashlib.sha256(technical_candidate.encode("utf-8")).hexdigest()
+    if concept_digest != bound.group(2):
+        raise Invalid(f"{path}: ADR concept digest does not match its historical candidate")
+    if technical_digest != bound.group(3):
+        raise Invalid(f"{path}: ADR technical digest does not match its historical candidate")
+    if technical_text != technical_candidate:
+        raise Invalid(f"{technical_path}: accepted ADR technical depth differs from its candidate")
 
     reconstructed = _lines(text, path)
     reconstructed[status_index] = "- **Status:** Proposed"
@@ -420,15 +1036,50 @@ def _validate_adr(
     return status
 
 
-def _plan_envelope(text: str, path: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _plan_envelope(
+    text: str,
+    path: str,
+    *,
+    key: str,
+    title: str,
+    sections_expected: tuple[str, ...],
+    section_anchors: tuple[str, ...],
+    depth_heading: str,
+    trailing: tuple[str, ...] = (),
+) -> tuple[tuple[str, ...], tuple[tuple[int, str], ...]]:
+    """Parse one locked half of a milestone plan.
+
+    Concept:
+        The accepted intent and its technical obligations are separately clear
+        while remaining one milestone commitment.
+
+    Technical depth:
+        Exact markers and heading order delimit immutable bytes; mutable progress
+        can exist only after the concept envelope.
+    """
     if "\r" in text:
         raise Invalid(f"{path}: plan text must use canonical UTF-8/LF bytes")
-    body = _block(text, path, "plan_envelope")
+    body = _block(text, path, key)
     lines = _lines(text, path)
     first_content = next((line for line in lines if line.strip()), None)
-    if first_content != MARKERS["plan_envelope"][0]:
-        raise Invalid(f"{path}: plan document must start with the plan-envelope marker")
-
+    expected_anchor = "concept" if depth_heading == "## Concept" else "technical-depth"
+    first_anchor = ANCHOR.fullmatch(first_content or "")
+    if first_anchor is None or first_anchor.group(1) != expected_anchor:
+        raise Invalid(f"{path}: plan document must start with its semantic anchor")
+    marker_start = lines.index(MARKERS[key][0])
+    before_marker = next(
+        (line for line in reversed(lines[:marker_start]) if line.strip()), None
+    )
+    expected_label = "Technical depth: " if depth_heading == "## Concept" else "Concept: "
+    if before_marker is None or not before_marker.startswith(expected_label):
+        raise Invalid(f"{path}: normative envelope must directly follow its relationship link")
+    marker_end = lines.index(MARKERS[key][1])
+    after_marker = next((line for line in lines[marker_end + 1 :] if line.strip()), None)
+    if trailing:
+        if after_marker != trailing[0]:
+            raise Invalid(f"{path}: envelope end must be followed directly by {trailing[0]}")
+    elif after_marker is not None:
+        raise Invalid(f"{path}: technical plan contains content outside its normative envelope")
     visible_document = _visible_line_numbers(text, path)
     document_headings: list[str] = []
     for index, line in enumerate(lines):
@@ -445,29 +1096,18 @@ def _plan_envelope(text: str, path: str) -> tuple[tuple[str, ...], tuple[str, ..
         if match:
             document_headings.append(line)
     expected_document_headings = (
-        "## Normative Envelope",
-        *PLAN_ENVELOPE_SECTIONS,
-        "## Workstreams",
-        "## Progress and Evidence",
-        "## Governance Records",
+        depth_heading,
+        title,
+        *sections_expected,
+        *trailing,
     )
     if tuple(document_headings) != expected_document_headings:
-        raise Invalid(
-            f"{path}: plan document headings must be exactly the governed plan sequence"
-        )
+        raise Invalid(f"{path}: plan document headings must be exactly the governed plan sequence")
 
-    envelope_end = lines.index(MARKERS["plan_envelope"][1])
-    following = lines[envelope_end + 1 :]
-    if following and following[0] == "":
-        following = following[1:]
-    if not following or following[0] != "## Workstreams":
-        raise Invalid(
-            f"{path}: plan-envelope end must be followed directly by Workstreams"
-        )
     body_text = "\n".join(body)
     visible = _visible_line_numbers(body_text, path)
-    if not body or body[0] != "## Normative Envelope":
-        raise Invalid(f"{path}: normative plan envelope must start with its exact heading")
+    if not body or body[0] != title:
+        raise Invalid(f"{path}: normative plan envelope must start with {title}")
     sections: list[tuple[int, str]] = []
     for index, line in enumerate(body):
         if index not in visible:
@@ -482,29 +1122,58 @@ def _plan_envelope(text: str, path: str) -> tuple[tuple[str, ...], tuple[str, ..
             raise Invalid(f"{path}: setext headings are not allowed in the normative envelope")
         if match:
             sections.append((index, line))
-    expected = ("## Normative Envelope", *PLAN_ENVELOPE_SECTIONS)
+    expected = (title, *sections_expected)
     if tuple(line for _, line in sections) != expected:
         raise Invalid(f"{path}: normative plan-envelope headings are missing, duplicated, or reordered")
+    if len(section_anchors) != len(sections_expected):
+        raise Invalid(f"{path}: plan section-anchor contract is misconfigured")
+    for (start, heading), anchor in zip(sections[1:], section_anchors):
+        if start < 1 or body[start - 1] != f'<a id="{anchor}"></a>':
+            raise Invalid(f"{path}: {heading} needs its exact semantic anchor {anchor!r}")
     for position, (start, heading) in enumerate(sections[1:], 1):
         end = sections[position + 1][0] if position + 1 < len(sections) else len(body)
-        content = [
-            body[index]
-            for index in range(start + 1, end)
-            if index in visible and body[index].strip()
-        ]
+        content: list[str] = []
+        for index in range(start + 1, end):
+            if index not in visible or not body[index].strip():
+                continue
+            line = body[index].strip()
+            if ANCHOR.fullmatch(line):
+                continue
+            relationship = line.removeprefix("Concept: ").removeprefix(
+                "Technical depth: "
+            )
+            if relationship.endswith("."):
+                relationship = relationship[:-1]
+            if relationship != line and LINK.fullmatch(relationship):
+                continue
+            content.append(line)
         if not content:
             raise Invalid(f"{path}: {heading} must contain a concrete commitment")
+    return tuple(body), tuple(sections)
 
+
+def _plan_concept_envelope(text: str, path: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    envelope, sections = _plan_envelope(
+        text,
+        path,
+        key="plan_concept_envelope",
+        title="## Normative Concept Envelope",
+        sections_expected=PLAN_CONCEPT_SECTIONS,
+        section_anchors=PLAN_CONCEPT_ANCHORS,
+        depth_heading="## Concept",
+        trailing=("## Workstreams", "## Progress and Evidence", "## Governance Records"),
+    )
     outcomes_start = sections[2][0] + 1
     outcomes_end = sections[3][0]
-    outcomes = body[outcomes_start:outcomes_end]
+    outcomes = list(envelope[outcomes_start:outcomes_end])
     header = "| # | Outcome | Evidence class | Gate selector |"
     if outcomes.count(header) != 1:
         raise Invalid(f"{path}: Outcomes must contain one exact normative outcomes table")
     table_start = outcomes.index(header)
-    table_lines = outcomes[table_start:]
-    while table_lines and not table_lines[-1]:
-        table_lines.pop()
+    table_end = table_start
+    while table_end < len(outcomes) and outcomes[table_end].startswith("|"):
+        table_end += 1
+    table_lines = outcomes[table_start:table_end]
     rows = _table(
         table_lines,
         ("#", "Outcome", "Evidence class", "Gate selector"),
@@ -512,7 +1181,24 @@ def _plan_envelope(text: str, path: str) -> tuple[tuple[str, ...], tuple[str, ..
     )
     if not rows or [row[0] for row in rows] != [str(index) for index in range(1, len(rows) + 1)]:
         raise Invalid(f"{path}: Outcomes must contain consecutively numbered commitments")
-    return tuple(body), tuple(row[0] for row in rows)
+    return envelope, tuple(row[0] for row in rows)
+
+
+def _plan_technical_envelope(text: str, path: str) -> tuple[str, ...]:
+    envelope, _ = _plan_envelope(
+        text,
+        path,
+        key="plan_technical_envelope",
+        title="## Normative Technical Envelope",
+        sections_expected=PLAN_TECHNICAL_SECTIONS,
+        section_anchors=PLAN_TECHNICAL_ANCHORS,
+        depth_heading="## Technical depth",
+    )
+    return envelope
+
+
+def _envelope_digest(envelope: tuple[str, ...]) -> str:
+    return hashlib.sha256("\n".join(envelope).encode("utf-8")).hexdigest()
 
 
 def _progress(
@@ -541,13 +1227,26 @@ def _progress(
 
 def _governance(
     text: str,
+    technical_text: str,
     gate_text: str,
     name: str,
     state: str,
     resolve_file: Callable[[str, str], str | None] | None,
 ) -> None:
     path = f"docs/plans/{name}.md"
-    envelope, outcome_ids = _plan_envelope(text, path)
+    technical_path = f"docs/plans/{name}-technical.md"
+    relationships = {
+        (source, fragment)
+        for source, _, fragment in _labelled_links(
+            text, path, label="Technical depth", own_prefix="concept"
+        )
+    }
+    if relationships != PLAN_RELATIONSHIPS:
+        raise Invalid(f"{path}: plan sections need the exact Concept-to-Technical-depth mapping")
+    envelope, outcome_ids = _plan_concept_envelope(text, path)
+    technical_envelope = _plan_technical_envelope(technical_text, technical_path)
+    current_concept_digest = _envelope_digest(envelope)
+    current_technical_digest = _envelope_digest(technical_envelope)
     _progress(text, path, outcome_ids, state)
     rows, bound, complete = _governance_records(text, path)
     expected = [False, False] if state == "Open" else [True, True] if state == "Closed" else [True, False]
@@ -555,20 +1254,43 @@ def _governance(
         raise Invalid(f"{path}: governance records do not match {state} lifecycle state")
     gate_path = f"docs/plans/{name}-gate.md"
     gate_digest = _gate_digest(gate_text, gate_path)
+    candidates: dict[str, tuple[str, str, str]] = {}
     for digest in (item for item in bound if item):
-        historical = resolve_file(digest.group(1), gate_path) if resolve_file else None
-        if historical is None:
-            raise Invalid(f"{path}: governance candidate SHA or historical gate is unavailable")
-        historical_digest = _gate_digest(historical, f"{gate_path} at {digest.group(1)}")
-        if digest.group(2) != gate_digest or digest.group(2) != historical_digest:
-            raise Invalid(f"{path}: governance digest does not match current and historical canonical gate text")
+        revision = digest.group(1)
+        historical_concept = resolve_file(revision, path) if resolve_file else None
+        historical_technical = resolve_file(revision, technical_path) if resolve_file else None
+        historical_gate = resolve_file(revision, gate_path) if resolve_file else None
+        if None in (historical_concept, historical_technical, historical_gate):
+            raise Invalid(f"{path}: governance candidate or one of its bound files is unavailable")
+        assert historical_concept is not None
+        assert historical_technical is not None
+        assert historical_gate is not None
+        historical_concept_envelope, _ = _plan_concept_envelope(
+            historical_concept, f"{path} at {revision}"
+        )
+        historical_technical_envelope = _plan_technical_envelope(
+            historical_technical, f"{technical_path} at {revision}"
+        )
+        concept_digest = _envelope_digest(historical_concept_envelope)
+        technical_digest = _envelope_digest(historical_technical_envelope)
+        historical_gate_digest = _gate_digest(
+            historical_gate, f"{gate_path} at {revision}"
+        )
+        if digest.group(2) != concept_digest or digest.group(2) != current_concept_digest:
+            raise Invalid(f"{path}: governance concept digest does not match current and candidate envelopes")
+        if digest.group(3) != technical_digest or digest.group(3) != current_technical_digest:
+            raise Invalid(f"{path}: governance technical digest does not match current and candidate envelopes")
+        if digest.group(4) != gate_digest or digest.group(4) != historical_gate_digest:
+            raise Invalid(f"{path}: governance gate digest does not match current and historical gate text")
+        candidates[revision] = (historical_concept, historical_technical, historical_gate)
 
     if bound[0]:
-        candidate = resolve_file(bound[0].group(1), path) if resolve_file else None
-        if candidate is None:
-            raise Invalid(f"{path}: accepted plan candidate is unavailable")
-        candidate_envelope, candidate_outcomes = _plan_envelope(
+        candidate, technical_candidate, _ = candidates[bound[0].group(1)]
+        candidate_envelope, candidate_outcomes = _plan_concept_envelope(
             candidate, f"{path} at {bound[0].group(1)}"
+        )
+        candidate_technical_envelope = _plan_technical_envelope(
+            technical_candidate, f"{technical_path} at {bound[0].group(1)}"
         )
         _progress(
             candidate,
@@ -582,16 +1304,18 @@ def _governance(
         if candidate_complete != [False, False]:
             raise Invalid(f"{path}: acceptance candidate governance must be empty")
         if envelope != candidate_envelope:
-            raise Invalid(f"{path}: accepted normative plan envelope differs from its candidate")
+            raise Invalid(f"{path}: accepted normative concept envelope differs from its candidate")
+        if technical_envelope != candidate_technical_envelope:
+            raise Invalid(f"{technical_path}: accepted normative technical envelope differs from its candidate")
 
     if bound[1]:
-        closure_candidate = (
-            resolve_file(bound[1].group(1), path) if resolve_file else None
-        )
-        if closure_candidate is None:
-            raise Invalid(f"{path}: closure candidate plan is unavailable")
-        closure_envelope, closure_outcomes = _plan_envelope(
+        closure_candidate, closure_technical_candidate, _ = candidates[bound[1].group(1)]
+        closure_envelope, closure_outcomes = _plan_concept_envelope(
             closure_candidate, f"{path} at closure candidate {bound[1].group(1)}"
+        )
+        closure_technical_envelope = _plan_technical_envelope(
+            closure_technical_candidate,
+            f"{technical_path} at closure candidate {bound[1].group(1)}",
         )
         _progress(
             closure_candidate,
@@ -607,7 +1331,9 @@ def _governance(
                 f"{path}: closure candidate must retain Acceptance and leave Closure empty"
             )
         if closure_envelope != envelope:
-            raise Invalid(f"{path}: closure candidate changed the accepted normative envelope")
+            raise Invalid(f"{path}: closure candidate changed the accepted normative concept envelope")
+        if closure_technical_envelope != technical_envelope:
+            raise Invalid(f"{technical_path}: closure candidate changed the accepted normative technical envelope")
 
     visible = _visible_line_numbers(text, path)
     lines = _lines(text, path)
@@ -627,11 +1353,19 @@ def _governance_history(
         raise Invalid("governed documents: complete reachable governance history is unavailable")
     head, snapshots = history
 
-    all_paths = set(current)
+    all_governed_paths = set(current)
     for _, _, governed in snapshots:
-        all_paths.update(governed)
-    for path in all_paths:
-        if path in ADR_PATHS:
+        all_governed_paths.update(governed)
+
+    adr_concepts = {
+        path
+        for path in all_governed_paths
+        if ADR_CONCEPT_PATH.fullmatch(path) and not path.endswith("-technical.md")
+    }
+    plan_concepts: set[str] = set()
+    gates: set[str] = set()
+    for path in all_governed_paths:
+        if path in adr_concepts or path.endswith("-technical.md"):
             continue
         relative = path.removeprefix("docs/plans/")
         if (
@@ -641,12 +1375,11 @@ def _governance_history(
             or relative == "README.md"
         ):
             raise Invalid(f"{path}: invalid historical governed-document path")
-        name = (
-            relative.removesuffix("-gate.md")
-            if relative.endswith("-gate.md")
-            else relative.removesuffix(".md")
-        )
+        is_gate = relative.endswith("-gate.md")
+        name = relative.removesuffix("-gate.md") if is_gate else relative.removesuffix(".md")
         _milestone(f"`{name}`", path)
+        (gates if is_gate else plan_concepts).add(path)
+    primary_paths = adr_concepts | plan_concepts | gates
 
     def plan_is_accepted(text: str | None, path: str, revision: str) -> bool:
         if text is None or "## Governance Records" not in text:
@@ -661,11 +1394,17 @@ def _governance_history(
         governed: Mapping[str, str],
     ) -> tuple[str | None, ...]:
         historical_path = f"{path} at {revision}"
-        if path in ADR_PATHS:
+        if path in adr_concepts:
             record = _adr_record(text, historical_path, legacy_ok=True)
             if record is None or not record[2]:
-                return (None, None)
-            return ("\0".join(record[1]), text)
+                return (None, None, None)
+            technical_path = _technical_path(path)
+            technical = governed.get(technical_path)
+            if technical is None:
+                raise Invalid(
+                    f"{technical_path}: accepted ADR technical depth disappeared at {revision}"
+                )
+            return ("\0".join(record[1]), text, technical)
         if path.endswith("-gate.md"):
             plan_path = path.removesuffix("-gate.md") + ".md"
             if not plan_is_accepted(governed.get(plan_path), plan_path, revision):
@@ -673,24 +1412,37 @@ def _governance_history(
             digest = _gate_digest(text, historical_path)
             return (f"{digest}\0{text}",)
         rows, _, complete = _governance_records(text, historical_path)
-        envelope = (
-            "\n".join(_plan_envelope(text, historical_path)[0])
-            if complete[0]
-            else None
+        if not complete[0]:
+            return (None, None, None, None)
+        technical_path = path.removesuffix(".md") + "-technical.md"
+        technical = governed.get(technical_path)
+        if technical is None:
+            raise Invalid(
+                f"{technical_path}: accepted plan technical depth disappeared at {revision}"
+            )
+        concept_envelope = "\n".join(_plan_concept_envelope(text, historical_path)[0])
+        technical_envelope = "\n".join(
+            _plan_technical_envelope(technical, f"{technical_path} at {revision}")
         )
         return (
-            "\0".join(rows[0]) if complete[0] else None,
+            "\0".join(rows[0]),
             "\0".join(rows[1]) if complete[1] else None,
-            envelope,
+            concept_envelope,
+            technical_envelope,
         )
 
     def labels(path: str) -> tuple[str, ...]:
         return (
-            ("Acceptance", "accepted document")
-            if path in ADR_PATHS
+            ("Acceptance", "accepted concept", "accepted technical depth")
+            if path in adr_concepts
             else ("accepted gate",)
             if path.endswith("-gate.md")
-            else ("Acceptance", "Closure", "normative envelope")
+            else (
+                "Acceptance",
+                "Closure",
+                "normative concept envelope",
+                "normative technical envelope",
+            )
         )
 
     inherited: dict[str, dict[str, list[str | None]]] = {}
@@ -701,7 +1453,7 @@ def _governance_history(
         if revision in inherited or any(parent not in inherited for parent in parents):
             raise Invalid("governed documents: history is duplicated or not parent-first")
         anchors: dict[str, list[str | None]] = {}
-        for path in all_paths:
+        for path in primary_paths:
             path_anchors: list[str | None] = []
             path_labels = labels(path)
             for index, label in enumerate(path_labels):
@@ -756,12 +1508,19 @@ def validate(
 ) -> list[str]:
     errors: list[str] = []
     try:
+        adr_paths, plan_names = _document_topology(documents)
+        _validate_local_links(documents)
         required = (
             "README.md",
             "docs/plans/README.md",
             "docs/vision.md",
+            "docs/vision-technical.md",
             "docs/roadmap.md",
-            *ADR_PATHS,
+            "docs/roadmap-technical.md",
+            "docs/developer/development-charter.md",
+            "docs/developer/development-charter-technical.md",
+            *BOOTSTRAP_ADR_PATHS,
+            *(_technical_path(path) for path in BOOTSTRAP_ADR_PATHS),
         )
         for path in required:
             if path not in documents:
@@ -781,10 +1540,12 @@ def validate(
         register = _block(plans_text, "docs/plans/README.md", "register")
         if len(register) < 4 or register[0] != "## Milestone Register" or register[1]:
             raise Invalid("docs/plans/README.md: Milestone Register block has the wrong shape")
-        parsed_rows: list[tuple[str, str, str, str]] = []
+        parsed_rows: list[tuple[str, str, str, str, str]] = []
         names: set[str] = set()
-        for raw_name, state, plan_link, gate_link in _table(
-            register[2:], ("Milestone", "State", "Plan", "Gate"), "docs/plans/README.md Milestone Register"
+        for raw_name, state, concept_link, technical_link, gate_link in _table(
+            register[2:],
+            ("Milestone", "State", "Concept", "Technical depth", "Gate"),
+            "docs/plans/README.md Milestone Register",
         ):
             name = _milestone(raw_name, "docs/plans/README.md Milestone Register")
             if name.casefold() in names:
@@ -792,12 +1553,20 @@ def validate(
             names.add(name.casefold())
             if state not in STATES:
                 raise Invalid(f"docs/plans/README.md: unknown milestone state {state!r}")
-            expected = ("—", "—") if state == "Blocked" else (f"[plan]({name}.md)", f"[gate]({name}-gate.md)")
-            if (plan_link, gate_link) != expected:
-                raise Invalid(f"docs/plans/README.md: {name} has incorrect plan/gate links for {state}")
-            parsed_rows.append((name, state, plan_link, gate_link))
+            expected = (
+                ("—", "—", "—")
+                if state == "Blocked"
+                else (
+                    f"[concept]({name}.md)",
+                    f"[technical depth]({name}-technical.md)",
+                    f"[gate]({name}-gate.md)",
+                )
+            )
+            if (concept_link, technical_link, gate_link) != expected:
+                raise Invalid(f"docs/plans/README.md: {name} has incorrect paired plan/gate links for {state}")
+            parsed_rows.append((name, state, concept_link, technical_link, gate_link))
 
-        closed = [name for name, state, _, _ in parsed_rows if state == "Closed"]
+        closed = [name for name, state, _, _, _ in parsed_rows if state == "Closed"]
         checkpoint = values["Last integrated checkpoint"]
         if closed:
             match = re.fullmatch(r"`([^`]+)` — [0-9]{4}-[0-9]{2}-[0-9]{2}", checkpoint)
@@ -827,10 +1596,12 @@ def validate(
             raise Invalid("README.md: status block must be the exact derived summary and visible plans link")
 
         adr_statuses = {
-            path: _validate_adr(documents[path], path, resolve_file)
-            for path in ADR_PATHS
+            path: _validate_adr(
+                documents[path], documents[_technical_path(path)], path, resolve_file
+            )
+            for path in adr_paths
         }
-        if parsed_rows != [("M0", "Blocked", "—", "—")]:
+        if parsed_rows != [("M0", "Blocked", "—", "—", "—")]:
             raise Invalid(
                 "docs/plans/README.md: bootstrap permits only Blocked M0; its opening "
                 "branch must replace this seed guard with lifecycle-specific enforcement"
@@ -840,26 +1611,14 @@ def validate(
                 "docs/plans/README.md: ADR disposition requires the exact blocked-M0 status capsule"
             )
 
-        plan_keys: set[str] = set()
-        gate_keys: set[str] = set()
-        for path in documents:
-            if not path.startswith("docs/plans/") or path == "docs/plans/README.md" or not path.endswith(".md"):
-                continue
-            relative = path.removeprefix("docs/plans/")
-            if "/" in relative:
-                raise Invalid(f"{path}: nested plan Markdown is not allowed")
-            if relative.endswith("-gate.md"):
-                gate_keys.add(relative.removesuffix("-gate.md"))
-            else:
-                plan_keys.add(relative.removesuffix(".md"))
-        represented = {name for name, state, _, _ in parsed_rows if state != "Blocked"}
-        if plan_keys != gate_keys or plan_keys != represented:
-            raise Invalid("docs/plans: plan files, gate files, and non-Blocked register rows must match exactly")
-        state_by_name = {name: state for name, state, _, _ in parsed_rows}
-        for name in plan_keys:
-            _milestone(f"`{name}`", f"docs/plans/{name}.md")
+        represented = {name for name, state, _, _, _ in parsed_rows if state != "Blocked"}
+        if set(plan_names) != represented:
+            raise Invalid("docs/plans: paired plan triples and non-Blocked register rows must match exactly")
+        state_by_name = {name: state for name, state, _, _, _ in parsed_rows}
+        for name in plan_names:
             _governance(
                 documents[f"docs/plans/{name}.md"],
+                documents[f"docs/plans/{name}-technical.md"],
                 documents[f"docs/plans/{name}-gate.md"],
                 name,
                 state_by_name[name],
@@ -869,7 +1628,8 @@ def validate(
         current_governed = {
             path: documents[path]
             for path in documents
-            if path in ADR_PATHS
+            if path in adr_paths
+            or path in {_technical_path(adr_path) for adr_path in adr_paths}
             or (
                 path.startswith("docs/plans/")
                 and path != "docs/plans/README.md"
@@ -882,39 +1642,49 @@ def validate(
         )
 
         source = _block(
-            documents["docs/vision.md"], "docs/vision.md", "rejoin_source", "## 22. Ownership and serial barriers"
+            documents["docs/vision-technical.md"],
+            "docs/vision-technical.md",
+            "rejoin_source",
+            "## 22. Ownership and serial barriers",
         )
         copy = _block(
-            documents["docs/roadmap.md"], "docs/roadmap.md", "rejoin_copy", "## The Enduring Rejoin Order"
+            documents["docs/roadmap-technical.md"],
+            "docs/roadmap-technical.md",
+            "rejoin_copy",
+            "## The Enduring Rejoin Order",
         )
         if source != copy:
-            raise Invalid("docs/roadmap.md: rejoin block differs from vision §22")
+            raise Invalid("docs/roadmap-technical.md: rejoin block differs from vision technical §22")
         if len(source) < 4 or source[0] != "```text" or source[-1] != "```":
-            raise Invalid("docs/vision.md: rejoin payload must be one complete text fence")
+            raise Invalid("docs/vision-technical.md: rejoin payload must be one complete text fence")
         steps = source[1:-1]
         if len(steps) < 2 or not steps[0].strip() or steps[0].startswith("-> "):
-            raise Invalid("docs/vision.md: rejoin payload needs an initial step and at least one transition")
+            raise Invalid("docs/vision-technical.md: rejoin payload needs an initial step and at least one transition")
         if any(not step.startswith("-> ") or not step[3:].strip() for step in steps[1:]):
-            raise Invalid("docs/vision.md: every later rejoin step must start with '-> '")
+            raise Invalid("docs/vision-technical.md: every later rejoin step must start with '-> '")
     except Invalid as error:
         errors.append(str(error))
     return errors
 
 
 def _load(root: Path) -> dict[str, str]:
-    paths = [
-        root / name
-        for name in (
-            "README.md",
-            "docs/plans/README.md",
-            "docs/vision.md",
-            "docs/roadmap.md",
-            *ADR_PATHS,
-        )
-    ]
-    plans = root / "docs/plans"
-    if plans.exists():
-        paths.extend(path for path in plans.rglob("*.md") if path != plans / "README.md")
+    listed = _git_run(
+        root,
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        "*.md",
+    )
+    if listed.returncode or not listed.stdout.endswith(b"\0"):
+        raise Invalid("repository Markdown inventory is unavailable")
+    try:
+        names = [item.decode("utf-8") for item in listed.stdout[:-1].split(b"\0")]
+    except UnicodeDecodeError as error:
+        raise Invalid("repository Markdown paths must be UTF-8") from error
+    paths = [root / name for name in names]
     documents: dict[str, str] = {}
     for path in paths:
         if not path.exists():
@@ -1023,7 +1793,7 @@ def _git_plan_history(
                 sha,
                 "--",
                 "docs/plans",
-                *ADR_PATHS,
+                "docs/adr",
             )
             if tree.returncode:
                 return None
@@ -1046,7 +1816,14 @@ def _git_plan_history(
                     and relative.endswith(".md")
                     and relative != "README.md"
                 )
-                if path not in ADR_PATHS and not plan:
+                adr = bool(
+                    ADR_CONCEPT_PATH.fullmatch(path)
+                    or (
+                        path.endswith("-technical.md")
+                        and ADR_CONCEPT_PATH.fullmatch(_concept_path(path))
+                    )
+                )
+                if not adr and not plan:
                     continue
                 mode, object_type, object_id = fields
                 if mode != b"100644" or object_type != b"blob":

@@ -1,9 +1,14 @@
 # 0002. Bootstrap runtime floor and version matrix
 
+<a id="concept"></a>
+## Concept
+
+Technical depth: [Runtime floor mechanics](0002-bootstrap-runtime-floor-technical.md#technical-depth).
+
 - **Status:** Proposed
 - **Date:** 2026-08-15
 - **Decision owner:** Maintainer
-- **Prerequisite for:** the M0 gate (see [docs/roadmap.md](../roadmap.md))
+- **Prerequisite for:** the M0 gate (see [the roadmap](../roadmap.md#concept-roadmap-m0))
 
 ## Governance Record
 
@@ -11,148 +16,86 @@
 | --- | --- | --- | --- |
 | Acceptance | — | — | — |
 
+<a id="concept-adr-0002-context"></a>
 ## Context
 
-[Vision §20.1](../vision.md) sets Erlang/OTP 26+ and Elixir 1.17+ as the
-repository-start compatibility target and calls it "not an eternal promise." It
-requires a runtime-floor ADR to validate the exact code-loading, terminal,
-disposable-node, dependency, and platform requirements **before the first
-compatibility claim**. [AGENTS.md](../../AGENTS.md) pins that floor until an
-accepted ADR changes it, and requires locally runnable repository validation,
-which hosted CI may mirror, to cover the floor and current supported versions.
-[Vision §27](../vision.md) keeps the question open: does the floor survive
-dependency and platform evidence?
+Loopex starts with OTP 26+ and Elixir 1.17+, but that starting floor is not a
+release promise. The evidence needed to make a compatibility claim—code-loading
+behavior, terminal and disposable-node requirements, adapter dependencies, and
+tested platforms—is work that M0 must produce. At the same time, the M0 gate
+needs a reproducible toolchain policy before M0 can open.
 
-There is a sequencing problem in that requirement. The validating evidence —
-how BEAM code loading behaves across generations, whether disposable nodes work
-as assumed, what the terminal client needs — is exactly what M0 exists to
-produce. An ADR written now cannot honestly carry it. But the M0 gate must name
-the toolchain its commands run under before M0 can start.
+This ADR decides only the development and locally runnable validation target
+needed to break that sequencing loop. It makes no compatibility claim.
 
-This ADR therefore decides only what M0 needs, and explicitly makes no
-compatibility claim.
+Technical depth: [Sequencing and upstream constraint](0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-context).
 
-Upstream constraint: Elixir aims to support the three most recent major
-Erlang/OTP releases at the time of each Elixir release, and may add newer OTP
-support in patch releases with only the minimum changes needed for stable
-operation.[^compat] A consequence is that the floor pair and the current-stable
-pair may share no OTP version — the matrix is a set of validated pairs, never a
-cross-product.
-
+<a id="concept-adr-0002-decision"></a>
 ## Decision
 
-1. **The floor stays OTP 26 / Elixir 1.17 for development and M0**, unchanged
-   from the AGENTS.md bootstrap pin. This ADR restates it as the development and
-   locally runnable validation target only.
-2. **This ADR carries no compatibility claim.** No released surface, package, or
-   support statement may cite it. The first compatibility-bearing release
-   requires this ADR to be amended with the vision §20.1 evidence: code-loading
-   behavior across trusted generations, terminal requirements, disposable-node
-   behavior, the dependency floor of every adapter application, and the
-   platforms actually exercised.
-3. **The matrix is exactly two validated pairs**, locked by the M0 gate:
-   - the floor pair — the lowest Elixir 1.17.x with the lowest OTP 26.x that
-     Elixir's own compatibility table supports; and
-   - the current-stable pair — the newest released Elixir with its newest
-     supported OTP.
+- Keep OTP 26 / Elixir 1.17 as the development and M0 floor family.
+- Make no released compatibility or support claim from this ADR.
+- Have the M0 gate lock exactly two upstream-supported pairs: the lowest
+  supported pair in the floor family and the newest stable supported pair.
+- Validate those pairs individually rather than constructing a cross-product.
+- Require core to compile and pass on the floor pair.
+- Exercise macOS/arm64 and Linux/x86_64; use WSL for Windows development.
+- Record and verify the exact matrix in the repository without requiring a
+  particular third-party toolchain manager.
+- Complete the self-hosting transition before M0 closes: repository checks and
+  tested client-hook paths move to Elixir standard-library or Mix entrypoints,
+  prove required behavior with `jq` absent, and remove Python and `jq` from the
+  prerequisites.
 
-   The exact versions are resolved and recorded when the M0 gate is written, by
-   reading Elixir's `compatibility-and-deprecations` reference — not asserted
-   here, and not inferred from whatever a developer machine happens to have.
-4. **Pairs are validated, not composed.** A gate run names an exact
-   (Elixir, OTP) pair. If the two pairs share no OTP version, that is expected
-   and is not a failure.
-5. **Core must compile and pass on the floor pair.** No `apps/loopex` code may
-   use a stdlib or language feature unavailable on the floor pair. A green run on
-   the current pair alone is not evidence.
-6. **Platforms** for development and CI are macOS on arm64 and Linux on x86_64.
-   Windows is supported through WSL only, matching
-   [DEVELOPMENT.md](../../DEVELOPMENT.md). Any other platform is untested and
-   must not be claimed.
-7. **The version matrix is recorded and checked in-repo.** The M0 gate chooses
-   and locks the plain repository representation plus a preflight that reports
-   and verifies the active Elixir/OTP pair. Loopex does not require a particular
-   third-party toolchain manager; developers may use one locally, while
-   DEVELOPMENT.md documents commands that work with the active `elixir` and
-   `mix` executables.
-8. **M0 completes the self-hosting transition.** Python 3.11 and `jq` remain
-   temporary seed/M0 bridges only. Before M0 closes, repository checks migrate
-   to Elixir standard-library or Mix entrypoints and remove both prerequisites.
-   Tested Claude hooks migrate to those entrypoints. Removing one instead
-   requires the accepted M0 plan to disposition that behavior explicitly with
-   equivalent protection or an explicitly accepted loss. The M0 gate proves
-   adapter behavior with `jq` absent. The enduring development baseline is Git,
-   shell/POSIX tools, and the accepted Elixir/OTP matrix; another development
-   dependency requires its own disposition.
+The enduring development baseline is Git, shell/POSIX tools, and the accepted
+Elixir/OTP matrix. Another development dependency requires its own governed
+decision.
 
-## Alternatives and evidence
+Technical depth: [Matrix and validation contract](0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-decision).
 
-**Raise the floor to the current stable pair only.** Rejected. It would remove
-the floor coverage AGENTS.md requires, and it silently narrows who can embed
-Loopex — the opposite of a host-neutral, embeddable runtime. Raising the floor
-is a compatibility decision that needs the §20.1 evidence, in either direction.
+<a id="concept-adr-0002-alternatives"></a>
+## Alternatives
 
-**Defer the floor decision until M0 produces evidence.** Rejected as circular:
-the M0 gate must lock exact commands, and a command with no named toolchain is
-not a lock. Deciding the development target now and deferring only the
-*compatibility claim* resolves the circularity honestly.
+Testing only the newest pair would discard the intended floor without evidence.
+Deferring every version decision would leave the M0 gate without a reproducible
+toolchain. Testing a full cross-product would include combinations upstream does
+not support. Freezing exact patch versions in this proposal would turn moving
+upstream facts into a stale project decision.
 
-**Test the full cross-product of supported Elixir and OTP versions.** Rejected.
-Upstream does not support every combination, so most cells would be meaningless,
-and CI cost would grow without adding evidence about any claim Loopex makes.
+Technical depth: [Alternative analysis and evidence](0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-alternatives).
 
-**Assert the exact version pairs in this ADR.** Rejected. The pairs are facts
-owned by upstream release tables that move between now and the M0 gate. Naming
-the rule and the source is durable; naming the numbers here would be a guess
-with an ADR's authority attached to it.
-
+<a id="concept-adr-0002-consequences"></a>
 ## Consequences
 
-- The M0 gate can name a toolchain, so it can be written.
-- Floor coverage is a standing constraint on core: two pairs run, and the floor
-  pair is not optional.
+The M0 gate can name a toolchain, and floor coverage becomes a standing
+constraint on core. Validation cost grows because two pairs run. Newer language
+or standard-library conveniences remain unavailable in core until the floor is
+changed with evidence. A local green run on an unlisted pair does not satisfy a
+locked matrix lane.
 
-What becomes harder:
+M0 also carries an explicit tooling-migration outcome: the aggregate, mutation
+tests, and tested client paths must run without Python or `jq` before closure.
 
-- Every core change is constrained by the oldest supported stdlib. Convenient
-  newer APIs are unavailable in `apps/loopex` even when a developer machine has
-  them, and the failure surfaces in the floor-pair validation run rather than on
-  that machine's default pair; hosted CI may mirror the same run.
-- Gate runs roughly double in wall-clock and cost from the second pair.
-- Developer machines will commonly run neither pair. The local aggregate must
-  report the active pair and fail when a locked gate requires a different one;
-  developers remain free to activate it with their own toolchain manager. An
-  unvalidated local green is weaker evidence than it looks.
-- The in-repository matrix representation and preflight become gate-locked
-  bytes; changing either invalidates affected evidence.
-- M0 carries a tooling-migration outcome: its closure evidence must show the
-  aggregate, mutation tests, and tested client-hook paths running without Python
-  or `jq`.
+Technical depth: [Evidence, cost, and failure cases](0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-consequences).
 
-## Compatibility
+<a id="concept-adr-0002-compatibility"></a>
+## Compatibility, Migration, and Rollback
 
-None claimed. This ADR is explicitly not a supported-version statement. The
-first release that claims a supported version span must amend this ADR with
-evidence and record the span in release notes.
+None is claimed. The first release that states a supported version span must
+amend this pair with evidence and record the span in release notes.
 
-## Migration and rollback
+Before M0 closes, rollback restores bootstrap checks, hook wiring, and the
+Python/`jq` prerequisites together. After closure, changing the matrix,
+reintroducing a development dependency, or changing the floor requires an
+amendment with compatibility and migration consequences.
 
-No product code exists. Before M0 closure, rollback restores the prior bootstrap
-checks, hook wiring, and Python/`jq` prerequisites together; a partial rollback
-that silently disables a hook is invalid. After M0 closure, changing the matrix
-or reintroducing a development dependency requires an amendment with migration
-notes. A later floor change is also an amendment to this ADR with compatibility
-notes, per vision §20.1.
+Technical depth: [Compatibility, migration, and rollback mechanics](0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-compatibility).
 
 ## Links
 
-- [Vision §20.1](../vision.md) — bootstrap runtime floor and its evidence duty
-- [Vision §27](../vision.md) — the open floor question and its trigger
+- [Vision — repository seed](../vision.md#concept-vision-repository-seed)
+- [Vision — open questions](../vision.md#concept-vision-open-questions)
 - [AGENTS.md](../../AGENTS.md) — the current pin and repository-validation
   coverage requirement
 - [DEVELOPMENT.md](../../DEVELOPMENT.md) — prerequisites and platform support
-- [docs/roadmap.md](../roadmap.md) — capability guidance and ADR agenda
-
-[^compat]: Elixir's `compatibility-and-deprecations` reference, retrieved
-    2026-08-15 via Context7 from the `elixir-lang/elixir` repository. The exact
-    per-version table is read again when the M0 gate locks the pairs.
+- [Roadmap — M0](../roadmap.md#concept-roadmap-m0)

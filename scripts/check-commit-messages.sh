@@ -78,7 +78,7 @@ valid_title() {
     return 1
   fi
   case "$marker" in
-    readme|con|prn|aux|nul|com[1-9]|lpt[1-9]|*-gate) return 1 ;;
+    readme|con|prn|aux|nul|com[1-9]|lpt[1-9]|*-gate|*-technical) return 1 ;;
   esac
 }
 
@@ -102,6 +102,7 @@ for title in \
   'repo(README): control' \
   'repo(readme): control' \
   'repo(kernel-gate): control' \
+  'repo(kernel-technical): control' \
   'repo(kernel--a): control' \
   'repo(kernel_a): control' \
   'repo(kernel.a): control' \
@@ -176,7 +177,7 @@ for sha in $commits; do
     continue
   fi
   if scan_attribution "$body"; then
-    echo "$sha: no AI-attribution or generated-by claims in commit messages" >&2
+    echo "$sha: no content-origin attribution or generated-by claims in commit messages" >&2
     status=1
   else
     scan_status=$?

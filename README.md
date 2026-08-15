@@ -2,6 +2,11 @@
 
 **The loop, in Elixir.**
 
+> **Clarity before mechanism.** Loopex explains purpose, constraints, and
+> observable behavior before implementation machinery. Every important
+> commitment remains traceable to precise technical contracts and evidence.
+> Nothing essential depends on hidden context.
+
 An agent is a loop around an LLM. Loopex makes that loop an OTP-native,
 embeddable runtime for durable coding-agent sessions and controlled effects:
 a small, provider-neutral model loop with truthful recovery, versioned client
@@ -25,13 +30,14 @@ while the session lives; a session "brain" can coordinate local or remote
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
 
-The [roadmap](docs/roadmap.md) is non-normative capability guidance;
+The [roadmap](docs/roadmap.md#concept) is non-normative capability guidance;
 [CHANGELOG.md](CHANGELOG.md) records what changed.
 
-The founding vision — [docs/vision.md](docs/vision.md) — is complete and
-decision-bearing: boundaries, invariants, protocol planes, trust model, and
-delivery shape are settled there. This section will keep changing; the shape
-below should not, much.
+The founding [Concept vision](docs/vision.md#concept) and its
+[Technical depth](docs/vision-technical.md#technical-depth) are one decision-bearing authority:
+boundaries, invariants, protocol planes, trust model, and delivery shape are
+settled there. The [documentation index](docs/) is the approachable route into
+the rest of the project.
 
 ## Why It Exists
 
@@ -70,8 +76,10 @@ It is deliberately **not** a generic agent framework, a workflow engine, an
 identity or policy product, a memory product or RAG framework, a
 social-channel hub, a marketplace, or a sandbox-by-supervision-tree. Those
 belong to hosts, adapters, and extensions around the core. Memory, retrieval,
-and prompt systems plug in through one governed context pipeline
-([docs/vision.md](docs/vision.md) §13.5) without entering the kernel.
+and prompt systems plug in through one governed context pipeline in the
+[vision](docs/vision.md#concept-vision-model-boundary), with its exact contract
+in the [technical companion](docs/vision-technical.md#technical-vision-model-boundary),
+without entering the kernel.
 
 ## The Shape
 
@@ -120,10 +128,10 @@ regardless of what can be promised about support.
 
 ## Roadmap
 
-[docs/roadmap.md](docs/roadmap.md) — candidate capability sequencing, the
-decisions that precede each capability, and the orderings that cannot be
-resequenced. Each accepted milestone maps its bounded outcomes back to those
-capabilities.
+[The roadmap](docs/roadmap.md#concept) gives the candidate capability sequence and why
+the ordering matters. Its [technical companion](docs/roadmap-technical.md#technical-depth)
+holds the exact prerequisite and evidence projection. Each accepted milestone
+maps its bounded outcomes back to those capabilities.
 
 The roadmap is guidance. The commitment is an accepted plan.
 
@@ -131,17 +139,23 @@ The roadmap is guidance. The commitment is an accepted plan.
 
 - [DEVELOPMENT.md](DEVELOPMENT.md) — current bootstrap prerequisites and the
   provider-neutral local validation command.
-- [docs/vision.md](docs/vision.md) — the founding vision and architecture;
-  everything else derives from it.
-- [docs/roadmap.md](docs/roadmap.md) — candidate capability sequencing, ADR
-  agenda, and serial barriers. Non-normative guidance.
-- [AGENTS.md](AGENTS.md) — repository rules for coding agents and
-  agent-assisted work.
+- [docs/](docs/) — documentation index, including every active Concept and
+  Technical depth pair.
+- [docs/developer/development-charter.md](docs/developer/development-charter.md#concept)
+  and its [technical companion](docs/developer/development-charter-technical.md#technical-depth)
+  — clarity, traceability, and development form.
+- [docs/vision.md](docs/vision.md#concept) and
+  [docs/vision-technical.md](docs/vision-technical.md#technical-depth) — the paired founding
+  vision and architecture; everything else derives from them.
+- [docs/roadmap.md](docs/roadmap.md#concept) and
+  [docs/roadmap-technical.md](docs/roadmap-technical.md#technical-depth) — candidate capability
+  sequencing and exact evidence projection. Non-normative guidance.
+- [AGENTS.md](AGENTS.md) — the repository's tool-neutral development contract.
 - [docs/developer/agent-context-map.md](docs/developer/agent-context-map.md)
   — routing map by area.
 - `docs/adr/` — architectural decisions, as they land.
 - [docs/plans/](docs/plans/) — canonical milestone status plus accepted, active,
-  and closed plan/gate records.
+  and closed paired-plan/gate records.
 - [CHANGELOG.md](CHANGELOG.md) — what changed, per milestone.
 
 ## License

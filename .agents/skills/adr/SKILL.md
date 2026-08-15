@@ -8,20 +8,28 @@ description: "Prepare, revise, or record a governed Loopex architecture decision
 Follow `AGENTS.md` authority and decision tiers first; read
 `docs/plans/README.md` for canonical status, then use
 `docs/developer/agent-context-map.md` for routing and version-specific technical
-guidance.
+guidance. Read the development charter pair for Concept/Technical depth
+ownership, anchors, reciprocal links, and review form.
 
 1. Read the current task, constraining vision sections, accepted ADRs, and any
    accepted active plan. Classify the unresolved decision before writing.
 2. Record a reversible internal choice in the nearest existing code, test,
    progress note, or subsystem document. Do not create an ADR for it.
-3. For an ADR-class decision, present the evidence, viable options,
-   recommendation, decision owner, compatibility impact, and migration or
-   rollback implications. Propose and pause before dependent implementation.
-4. When the current task authorizes a proposal file, create the next
-   `docs/adr/NNNN-short-title.md` with `Status: Proposed`, date, decision owner,
-   context, decision, alternatives and evidence, consequences including what
-   becomes harder, compatibility, migration/rollback, and links to constraining
-   vision sections. Add this empty record after the metadata:
+3. For an ADR-class decision, use `## Concept` and then `## Technical depth` to
+   present evidence, viable options, recommendation, decision owner,
+   compatibility impact, and migration or rollback implications. Propose and
+   pause before dependent implementation.
+4. When the current task authorizes a proposal, create one pair:
+
+   ```text
+   docs/adr/NNNN-short-title.md
+   docs/adr/NNNN-short-title-technical.md
+   ```
+
+   The Concept file starts with its `concept` anchor, one `## Concept`, and an
+   immediate exact link to `#technical-depth`. It owns `Status: Proposed`, date,
+   decision owner, purpose/context, decision, observable consequences,
+   compatibility and rollback summary, and this empty governance record:
 
    ```markdown
    ## Governance Record
@@ -31,19 +39,27 @@ guidance.
    | Acceptance | — | — | — |
    ```
 
-   Keep the ADR to one page unless the decision requires more.
+   The Technical depth file starts with its `technical-depth` anchor, one
+   `## Technical depth`, and an immediate exact backlink to `#concept`. It owns
+   detailed evidence, invariants, schemas or commands, edge cases,
+   implementation constraints, alternatives, compatibility mechanics, and
+   migration/rollback mechanics. Every substantive section has exact reciprocal
+   anchors. Neither file may introduce a decision absent from the other. Add the
+   pair to `docs/README.md`. Keep Concept compact; add only depth the decision
+   requires.
 5. Never mark your own proposal `Accepted`. Record acceptance only when the
    maintainer or a previously recorded delegate explicitly accepts the exact ADR
-   candidate. In one administrative transition, change only `Status: Proposed`
-   to `Status: Accepted` and fill the Acceptance row with `Maintainer` or
+   pair candidate. In one administrative transition, change only
+   `Status: Proposed` to `Status: Accepted` and fill the Concept file's
+   Acceptance row with `Maintainer` or
    `Delegate: <recorded identity>`, `[disposition](<durable-pointer>)`, and
-   the exact candidate/document-digest form defined in `docs/plans/README.md`.
-   The digest binds the historical Proposed candidate bytes. Do not change the
-   decision text in that transition, and require independent exact-diff review
-   before integration; the candidate commit must remain reachable from the
-   integrated history. Within the ADR, only Status and the empty row change;
-   the same administrative commit updates the plans index's complete derived
-   Current Status capsule when the ADR is a current blocker.
+   the exact candidate/concept-digest/technical-digest form defined in
+   `docs/plans/README.md`. The digests bind both historical Proposed files. Do
+   not change decision or technical bytes in that transition, and require
+   independent exact-diff review before integration; the candidate commit must
+   remain reachable from the integrated history. Within the pair, only Status
+   and the empty row change; the same administrative commit updates the plans
+   index's complete derived Current Status capsule when the ADR is a blocker.
 6. A gate weakening, waiver, scope deferral, baseline exception, or vision
    reversal requires the exact approval named by `AGENTS.md`; an ADR cannot grant
    that authority.

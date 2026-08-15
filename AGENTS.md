@@ -3,12 +3,13 @@
 Loopex is an OTP-native, embeddable runtime for durable coding-agent sessions
 and controlled effects. Its doctrine is **"the runtime is the framework"**:
 ordinary OTP, small behaviours at real boundaries, and no agent DSL. The
-founding authority is [docs/vision.md](docs/vision.md).
+founding authority is the paired [Concept vision](docs/vision.md#concept) and
+[Technical depth](docs/vision-technical.md#technical-depth).
 
-Development is agent-first. Agents choose implementation, decomposition,
-debugging, tests, and safe parallelism autonomously inside this contract.
-Maintainer attention is reserved for purpose, authority, irreversible choices,
-accepted gates, demonstrations, and publication—not ordinary implementation.
+Development is maintainer-directed and uses coding tools as a normal part of
+implementation, decomposition, debugging, testing, and safe parallel work.
+Maintainer decisions govern purpose, authority, irreversible choices, accepted
+gates, demonstrations, promotion, and publication.
 
 `AGENTS.md` is the canonical tool-neutral development contract. Client files
 may import it and add discovery, invocation, permission UX, hooks, skills, or
@@ -25,13 +26,16 @@ routing in the context map.
 
 Start with the current task, this file, and
 [docs/plans/README.md](docs/plans/README.md) for the checked-out revision's
-canonical milestone status. Then read any accepted active plan and gate contract
+canonical milestone status. Then read any accepted active plan pair and gate contract
 and the relevant code and tests. Use
 [docs/developer/agent-context-map.md](docs/developer/agent-context-map.md) to
 load constraining vision sections, accepted ADRs, and version-specific technical
 guidance. Use [DEVELOPMENT.md](DEVELOPMENT.md) for current local prerequisites
 and repository entrypoints; it is setup guidance, not acceptance authority.
-Read the full vision for
+Read the [development charter](docs/developer/development-charter.md#concept)
+and its [technical companion](docs/developer/development-charter-technical.md#technical-depth) before
+creating or restructuring project documentation or public code documentation.
+Read the full vision pair for
 architecture, trust, public contracts, cross-domain work, or a new plan. Do not
 bulk-read historical plans.
 
@@ -40,17 +44,22 @@ When normative sources conflict:
 1. An explicit current decision from the maintainer or delegated operator; the
    current task controls authorized action scope.
 2. Released public contracts and accepted security or architecture ADRs.
-3. The accepted active plan and its retained acceptance evidence.
-4. [docs/vision.md](docs/vision.md).
+3. The accepted active plan pair and its retained acceptance evidence.
+4. The paired [Concept vision](docs/vision.md#concept) and
+   [Technical depth](docs/vision-technical.md#technical-depth).
 5. Historical material.
 
-Sequence authority lives in the vision and this contract, never the roadmap.
-Vision §21 sets capability strategy and prerequisite evidence, §22 fixes the
-enduring rejoin order, and §24 governs compatibility and freezes. The order a
+Sequence authority lives in the vision pair and this contract, never the
+roadmap. The [delivery strategy](docs/vision.md#concept-vision-delivery-strategy)
+sets capability purpose, the
+[technical serial barriers](docs/vision-technical.md#technical-vision-serial-barriers)
+fix the enduring rejoin order, and the
+[compatibility contract](docs/vision.md#concept-vision-compatibility) governs
+freezes. The order a
 milestone itself runs — green base, red gate before implementation, acceptance,
 work, independent review, closure — is fixed by § Milestones and Gates below.
-An accepted plan adds its own prerequisites and rejoin barriers within those.
-[docs/roadmap.md](docs/roadmap.md) is a readable projection and authorizes
+An accepted plan pair adds its own prerequisites and rejoin barriers within those.
+[docs/roadmap.md](docs/roadmap.md#concept) is a readable projection and authorizes
 nothing.
 
 Code, tests, gates, CI, traces, and demonstrations are evidence, not independent
@@ -64,11 +73,50 @@ Flag conflicts instead of silently reinterpreting stale material. Reversing a
 vision boundary or invariant requires a decision that names the principle,
 evidence, compatibility impact, and migration path.
 
-Edit [docs/vision.md](docs/vision.md) only when the current maintainer or
-developer request explicitly asks for a vision change. A general documentation,
-alignment, refactoring, or implementation request does not grant that scope.
-Explicit edit scope does not waive the decision and evidence required to change
-a founding boundary or invariant.
+Edit either [docs/vision.md](docs/vision.md#concept) or
+[docs/vision-technical.md](docs/vision-technical.md#technical-depth) only when the current
+maintainer or developer request explicitly names a vision change. A general
+documentation, alignment, refactoring, or implementation request does not grant
+that scope. Explicit edit scope does not waive the decision and evidence
+required to change a founding boundary or invariant. The two files remain one
+authority; change and review every affected concept and technical section
+together.
+
+## Clarity and Documentation Contract
+
+Lead with purpose, constraints, observable behavior, workflow, and user-facing
+expectations; then supply implementation mechanics and evidence. Substantive
+updates, reviews, questions, and decision packets use exactly `## Concept`
+followed by `## Technical depth`. Short acknowledgements, direct answers, and
+compact status notifications are exempt when the split would add no clarity.
+
+Substantive concept documents use a `<name>.md` and
+`<name>-technical.md` pair. The Concept file owns purpose, constraints,
+observable behavior, and decisions. The Technical depth file owns invariants,
+schemas, commands, evidence, edge cases, and implementation constraints. It may
+explain or prove a concept but cannot introduce hidden scope or a decision. The
+pair is one authority and review unit; a conflict blocks dependent work and
+acceptance.
+
+Every paired file starts with its one visible `## Concept` or
+`## Technical depth` section and an immediate reciprocal link to the exact
+companion anchor. Sections needing depth use stable explicit `concept-*` and
+`technical-*` anchors and adjacent exact reciprocal links. This canonical
+development contract, client entrypoints, README files, indexes/status
+registers, setup or operator runbooks, changelogs, evidence logs, executable
+skills and gates, generated references, licenses, source, configuration, and
+immutable archive material are explicit exceptions. They
+may route to both depths but may not hide a decision. The complete classification
+and mechanics live in the
+[charter technical companion](docs/developer/development-charter-technical.md#technical-depth).
+
+Elixir modules, behaviours, callbacks, public APIs, public types, and important
+boundaries document `## Concept` before `## Technical depth`. Non-obvious
+private invariants, effects, failure modes, or design choices use adjacent
+`# Concept:` and `# Technical depth:` comments; obvious helpers rely on clear
+names and direct code. Define specialized terms where first used. Describe
+roles, artifacts, workflows, and depth positively; do not rank participants,
+speculate about content origin, or divide expectations by producer.
 
 ## Task and Autonomy Contract
 
@@ -94,8 +142,8 @@ No actor accepts its own gate, ADR, waiver, blocking-finding disposition, or
 closure candidate. Gate weakening, evidence waiver, and scope deferral remain
 non-delegable unless the maintainer explicitly delegates that exact decision.
 
-Released contracts; accepted ADR decision, status, and consequences; accepted
-plan purpose, scope, outcomes, ownership, rejoin barriers, and evidence
+Released contracts; accepted ADR-pair decision, status, and consequences;
+accepted plan-pair purpose, scope, outcomes, ownership, rejoin barriers, and evidence
 obligations; and locked gates are immutable records. Change their meaning only
 through a versioned amendment accepted by the same authority class. Conforming
 explanations and progress may be updated.
@@ -115,14 +163,16 @@ an unresolved observation for the maintainer to triage.
 
 ## Milestones and Gates
 
-**Vocabulary.** A *capability rung* is one of the non-normative questions in
-vision §21; it guides decomposition but does not dictate milestone or release
-boundaries. A *milestone* is bounded work governed by one accepted plan, one
+**Vocabulary.** A *capability rung* is one of the non-normative questions in the
+[delivery strategy](docs/vision.md#concept-vision-delivery-strategy); it guides
+decomposition but does not dictate milestone or release
+boundaries. A *milestone* is bounded work governed by one accepted plan pair, one
 gate, and one closure. It may prove part or all of one or more rungs while
-respecting vision §21–§22 and, for compatibility claims, §24. A *workstream* is
+respecting the vision's delivery strategy and serial barriers and, for
+compatibility claims, its compatibility contract. A *workstream* is
 a parallel slice inside a milestone and has no independent plan or gate. A
 *release* is a separately authorized publication; a milestone may or may not
-produce one, and only its accepted plan may couple the two. Milestone names are
+produce one, and only its accepted plan pair may couple the two. Milestone names are
 stable operator-chosen slugs and grant no release authority. They use lowercase
 ASCII letters/digits separated by single hyphens, an `M` followed by digits, or
 a version-shaped numeric slug;
@@ -130,7 +180,10 @@ names are at most 64 ASCII bytes and unique under case folding. `planning`,
 `seed`, `readme`, Windows
 device basenames (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, and
 `lpt1`–`lpt9`), and names ending in `-gate` are reserved in any letter case.
-Plans live in `docs/plans/<name>.md`, with the locked gate beside them in
+Names ending in `-technical` are also reserved because that suffix identifies a
+plan companion.
+Plans live in paired `docs/plans/<name>.md` and
+`docs/plans/<name>-technical.md` files, with the locked gate beside them in
 `<name>-gate.md`;
 [docs/plans/README.md](docs/plans/README.md) is the canonical current-status
 register and plan index.
@@ -150,25 +203,30 @@ register and plan index.
   create a branch-only gate checkpoint with the plan candidate and executable
   acceptance. Existing gates stay green; the new gate fails for the declared
   missing behavior. The red tree is never mergeable to `main`.
-- The accepted plan's marked normative envelope names purpose/outcomes,
-  scope/non-goals, ADR prerequisites and acceptance points, ownership and rejoin
-  barriers, evidence obligations and mapping, compatibility, migration,
-  rollback, packaging, decision owners, and a proportional minimalism budget.
-  The accepted candidate SHA binds those exact envelope bytes. Workstream
-  decomposition, progress, resolved outcome state, and evidence links stay
-  outside the envelope and may change only in conformance with it.
+- The accepted Concept plan's marked normative envelope names purpose/outcomes,
+  scope/non-goals, and observable constraints including compatibility and
+  rollout expectations. Its Technical depth
+  envelope names ADR prerequisites and acceptance points, ownership and rejoin
+  barriers, evidence obligations and mapping, implementation constraints,
+  migration, rollback, packaging, decision owners, and exact minimalism
+  constraints. The accepted candidate SHA binds both envelope digests and the
+  gate digest. Workstream decomposition, progress, resolved outcome state, and
+  evidence links stay outside the envelopes and may change only in conformance
+  with the pair.
   The budget states what code and abstraction growth is justified and which
   measurable ceilings or negative constraints the gate locks. Raw line count is
-  a review signal unless the accepted plan makes a scope-specific cap; never
+  a review signal unless the accepted plan pair makes a scope-specific cap; never
   trade clarity or required evidence for a smaller number.
 - Lifecycle transitions retain their authority. Before the canonical register
   moves to `Accepted`, the plan records the accepting maintainer or previously
   delegated authority, durable evidence of the explicit disposition, the
-  accepted plan-candidate SHA, and gate digest. A bound candidate must remain
+  accepted plan-candidate SHA, Concept digest, Technical depth digest, and gate
+  digest. A bound candidate must remain
   reachable from the integrated Git history. Before the register moves to
   `Closed`, the plan records the closing authority and disposition, reviewed
-  candidate SHA, and gate digest. Agents may transcribe explicit decisions;
-  they may not infer or supply them. A transition-only commit may update
+  candidate SHA, Concept digest, Technical depth digest, and gate digest.
+  Explicit decisions may be transcribed; they may not be inferred or supplied.
+  A transition-only commit may update
   governance and derived status bytes, but not the bound candidate, locked gate,
   or product bytes. Before
   integration, an independent read-only review compares that exact transition
@@ -178,7 +236,7 @@ register and plan index.
 - Every lifecycle transition atomically updates the canonical register, the
   plans index's complete marked Current Status capsule, and README's derived
   summary. No client-specific memory or prose elsewhere substitutes for those
-  three human-visible records.
+  three primary project records.
 - Acceptance locks exact commands and protected tests, selectors, fixtures,
   vectors, canonical UTF-8/LF harness/configuration bytes, evidence classes, and
   their digest. The accepted gate file and digest remain immutable for that
@@ -199,7 +257,7 @@ register and plan index.
   build and endpoint class; credentials and tenant identifiers are redacted.
   Release evidence also binds artifact digests. Relevant byte changes invalidate
   affected evidence and review.
-- An agent may assemble closure; only the acceptance authority closes it after
+- A closure candidate may be assembled; only the acceptance authority closes it after
   every Purpose outcome maps to evidence, demonstration, or an explicitly
   approved limitation/deferral. Do not mutate tracked bytes merely to paste a
   final run link.
@@ -254,6 +312,11 @@ adapter path is proved rather than silently disabling feedback. Both
 prerequisites then disappear. The enduring development baseline is Git,
 shell/POSIX tools, and the accepted Elixir/OTP toolchain; adding another
 development dependency requires the ordinary dependency decision.
+The M0 gate also installs a repository-owned Elixir/Mix documentation check over
+compiled docs. It enforces the ordered Concept and Technical depth sections on
+covered public code; the accepted plan pair names any additional important
+boundaries, while semantic usefulness and proportional private comments remain
+review obligations.
 Inspection-only checks required of a read-only reviewer run without modifying
 the checkout or relying on a writable ambient temporary directory. A check that
 must produce artifacts uses an explicit isolated task root and belongs to the
@@ -276,10 +339,10 @@ requires it, and those workflows stay thin wrappers over repository commands.
 - Replaceable store, model, executor, broker, extension, and transport boundaries
   run reusable conformance suites.
 - Repository checks, mirrored by CI, check gate locks, client/workflow drift,
-  and the ban on AI-attribution or generated-by claims. Commit messages are
-  enforced today; PRs, release notes, and project docs come under the same check
-  as each surface appears. The ban applies to all of them now regardless of what
-  is mechanically enforced.
+  and the ban on content-origin attribution or generated-by claims. Commit
+  messages are enforced today; PRs, release notes, and project docs come under
+  the same check as each surface appears. The ban applies to all of them now
+  regardless of what is mechanically enforced.
 
 ## Product Non-Negotiables
 
@@ -345,7 +408,9 @@ requires it, and those workflows stay thin wrappers over repository commands.
   abstraction names the concrete examples or current implementations it unifies
   and why direct code is insufficient. Speculative single-use layers stay out.
   Anything that can live in an extension, adapter, executor, client, or host
-  without weakening the kernel stays out of core. Vision §23.4 and accepted-plan
+  without weakening the kernel stays out of core. The
+  [technical verification contract](docs/vision-technical.md#technical-vision-verification)
+  and accepted-plan
   budgets are executable constraints, not slogans or excuses to omit tests.
 - **Sequence and compatibility follow evidence.** Prove the single-machine loop
   and restart/replay before distribution or production hot upgrades. Public

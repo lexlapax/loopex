@@ -8,12 +8,14 @@ disable-model-invocation: true
 
 Follow `AGENTS.md` first; read `docs/plans/README.md` for canonical status, then
 use `docs/developer/agent-context-map.md` for routing and version-specific
-technical guidance.
+technical guidance. Read the development charter pair for Concept/Technical
+depth ownership and closure-packet form.
 
 For the named milestone:
 
-1. Assemble the tracked candidate first. Update only conforming plan
-   progress/evidence fields, the canonical plans register to `In review`, and
+1. Assemble the tracked candidate first. Confirm the Concept plan and Technical
+   depth plan agree, then update only conforming progress/evidence fields, the
+   canonical plans register to `In review`, and
    the plans index's complete marked Current Status capsule and README's marked
    derived summary, plus the exact documentation set locked by the gate. Do not
    set `Closed`.
@@ -30,17 +32,22 @@ For the named milestone:
    finding blocks closure regardless of green gates.
 5. Reproduce the required demonstration, map every accepted Purpose outcome to
    evidence, demonstration, or an explicitly approved limitation or deferral,
-   and assemble a concise closure packet in the task response or an
-   already-bound CI artifact. The packet proposes the post-acceptance `Closed`
-   transition; it does not record it. After exact-SHA evidence begins, do not
-   change tracked candidate bytes merely to paste run links or closure prose.
+   and assemble a concise `## Concept` then `## Technical depth` closure packet
+   in the task response or an already-bound evidence artifact. Concept states
+   the outcomes, limitations, and requested decision; Technical depth maps exact
+   commands, digests, evidence, findings, compatibility, and rollback. The
+   packet proposes the post-acceptance `Closed` transition; it does not record
+   it. After exact-SHA evidence begins, do not change tracked candidate bytes
+   merely to paste run links or closure prose.
 6. Pause for the recorded closing authority. Do not close the milestone, accept
    your own review, merge, tag, release, or publish. Only that authority's
    explicit disposition authorizes a subsequent update. That update first
    records the closing authority, durable disposition evidence, reviewed
-   candidate SHA, and gate digest in the plan's Closure governance row, then
+   candidate SHA, Concept-envelope digest, Technical-depth-envelope digest, and
+   gate digest in the Concept plan's Closure governance row, then
    moves the canonical register to `Closed` and updates the plans index's
    complete marked Current Status capsule plus README's derived summary. That
-   administrative transition changes no bound candidate, locked gate, or
-   product bytes. Commit it separately, then require independent read-only review
-   of its exact diff against the bound candidate before integration.
+   administrative transition changes no Technical depth, bound envelope, locked
+   gate, or product bytes. Commit it separately, then require independent
+   read-only review of its exact diff against the bound candidate before
+   integration.

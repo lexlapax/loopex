@@ -8,7 +8,11 @@ test suite yet.
 The canonical status for the checked-out revision, including currently
 authorized work and the next maintainer decision, is in
 [docs/plans/README.md](docs/plans/README.md). This file owns setup and commands,
-not milestone state.
+not milestone state. The
+[development charter](docs/developer/development-charter.md#concept) explains the
+project's clarity and traceability commitments; its
+[technical companion](docs/developer/development-charter-technical.md#technical-depth) defines
+the exact documentation, review, and code-comment conventions.
 
 ## Bootstrap Prerequisites
 
@@ -22,7 +26,7 @@ The provider-neutral bootstrap check requires:
 
 Python and `jq` are temporary seed/M0 bridges, not enduring project
 dependencies. Before M0 closes, repository checks migrate to Elixir
-standard-library or Mix entrypoints, and tested Claude hooks migrate to them.
+standard-library or Mix entrypoints, and tested client-hook paths migrate to them.
 Removing a tested hook instead requires the accepted M0 plan to disposition the
 behavior explicitly with equivalent protection or an explicitly accepted loss.
 The M0 gate proves adapter behavior with `jq` absent, so feedback cannot silently
@@ -42,7 +46,7 @@ bash scripts/check-bootstrap.sh
 ```
 
 The aggregate runs five checks: agent/client bootstrap, ignore policy, commit
-messages, branch/worktree hygiene, and human-status/document drift. It requires
+messages, branch/worktree hygiene, and status/document drift. It requires
 no GitHub account, `gh` CLI, hosted CI service, credentials, network access,
 coding-agent client, or product dependency download. Hosted CI may mirror this
 command but does not define it. The aggregate, its in-memory mutation tests, and
@@ -50,11 +54,11 @@ its Git-history resolver controls only read the checkout and do not rely on a
 writable ambient temporary directory, so an effectively read-only reviewer can
 run the exact same command.
 
-## Coding-Agent Clients
+## Optional Development Clients
 
-Coding-agent clients are optional development tools, not project dependencies.
-The currently tested adapters are Claude Code and Codex; their retained versions
-and loading evidence live in
+Development clients are optional tools, not project dependencies. The currently
+tested adapters are Claude Code and Codex; their retained versions and loading
+evidence live in
 [docs/developer/agent-adapter-smoke.md](docs/developer/agent-adapter-smoke.md).
 Canonical behavior lives in [AGENTS.md](AGENTS.md) and routes through
 [the agent context map](docs/developer/agent-context-map.md). Candidate clients,
@@ -73,7 +77,10 @@ entrypoints that make those commands pass.
 
 The M0 gate also locks the self-hosting transition: by closure, the local
 aggregate, its structural/mutation checks, and tested client-hook paths run
-through the accepted Elixir/OTP toolchain without Python or `jq`.
+through the accepted Elixir/OTP toolchain without Python or `jq`. The same gate
+adds a Mix check over compiled documentation so covered public code carries
+Concept before Technical depth; semantic usefulness and proportional private
+comments remain review obligations.
 
 Core will use only the Elixir/Erlang standard runtime. Provider, store, client,
 transport, and other integration dependencies belong in adapter applications,
@@ -93,12 +100,19 @@ not a universal gate: it must not reward compressed code, hidden complexity, or
 missing evidence. Keep tests focused and reusable, but never delete required
 coverage merely to make the repository smaller.
 
+Elixir modules, behaviours, callbacks, public APIs, public types, and important
+boundaries explain both `## Concept` and `## Technical depth` in their standard
+documentation. A private function uses adjacent `# Concept:` and
+`# Technical depth:` comments only for a non-obvious invariant, effect, failure
+mode, or design decision. Obvious helpers rely on clear names and direct code;
+documentation should clarify rather than paraphrase syntax.
+
 ## Before Product Work
 
 Read [AGENTS.md](AGENTS.md), then the
 [plans status register](docs/plans/README.md), and use the
 [agent context map](docs/developer/agent-context-map.md) only to load relevant
-vision sections and technical guidance. Product implementation remains
+Concept sections and their exact Technical depth. Product implementation remains
 unauthorized until the maintainer or a recorded delegate explicitly opens and
 accepts the first milestone plan and branch-only red gate.
 

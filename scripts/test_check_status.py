@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Adversarial controls for the temporary status checker."""
+"""Adversarial controls for paired documents and governed project status.
+
+Concept:
+    Mutations that could make project state or documentation ambiguous fail.
+
+Technical depth:
+    Compact in-memory fixtures exercise structural parsing, digest binding, and
+    full reachable-history anchoring without changing the checkout.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +22,9 @@ from check_status import (
     _git_resolver,
     _governance,
     _governance_history,
+    _plan_concept_envelope,
+    _plan_technical_envelope,
+    _validate_pair,
     validate,
 )
 
@@ -28,7 +39,7 @@ CURRENT = f"""<!-- loopex:current-status:start -->
 | --- | --- |
 | Integrated phase | Pre-implementation planning |
 | Last integrated checkpoint | Seed bootstrap — 2026-08-15 |
-| Blockers | [ADR 0001](../adr/0001-repository-and-application-layout.md) and [ADR 0002](../adr/0002-bootstrap-runtime-floor.md) must be accepted before M0 opens; a replacement requires a governed guard change |
+| Blockers | [ADR 0001](../adr/0001-repository-and-application-layout.md#concept) and [ADR 0002](../adr/0002-bootstrap-runtime-floor.md#concept) must be accepted before M0 opens; a replacement requires a governed guard change |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
 | Next maintainer decision | Disposition ADR 0001 and ADR 0002 |
 | Next transition | After the prerequisites are accepted, the maintainer explicitly opens `M0` gate-first |
@@ -37,9 +48,9 @@ CURRENT = f"""<!-- loopex:current-status:start -->
 REGISTER = """<!-- loopex:milestone-register:start -->
 ## Milestone Register
 
-| Milestone | State | Plan | Gate |
-| --- | --- | --- | --- |
-| `M0` | Blocked | — | — |
+| Milestone | State | Concept | Technical depth | Gate |
+| --- | --- | --- | --- | --- |
+| `M0` | Blocked | — | — | — |
 <!-- loopex:milestone-register:end -->"""
 README = f"""# Loopex
 
@@ -68,55 +79,107 @@ GATE_SEPARATORS = (
     "\u2028",
     "\u2029",
 )
-ENVELOPE = """<!-- loopex:plan-envelope:start -->
-## Normative Envelope
+PLAN_PREAMBLE = """<a id="concept"></a>
+## Concept
 
+Technical depth: [Milestone technical depth](M0-technical.md#technical-depth)
+"""
+ENVELOPE = """<!-- loopex:plan-concept-envelope:start -->
+## Normative Concept Envelope
+
+<a id="concept-plan-purpose"></a>
 ### Purpose
 
 Prove one bounded behavior.
 
+<a id="concept-plan-outcomes"></a>
 ### Outcomes
 
 | # | Outcome | Evidence class | Gate selector |
 | --- | --- | --- | --- |
 | 1 | One bounded outcome | focused test | `test/example_test.exs` |
 
+Technical depth: [Evidence obligations and mapping](M0-technical.md#technical-plan-evidence)
+
+<a id="concept-plan-scope"></a>
 ### Scope
 
 Only the bounded outcome.
 
+Technical depth: [Prerequisites and acceptance points](M0-technical.md#technical-plan-prerequisites)
+Technical depth: [Ownership and rejoin barriers](M0-technical.md#technical-plan-ownership)
+Technical depth: [Compatibility mechanics](M0-technical.md#technical-plan-compatibility)
+Technical depth: [Migration and rollback](M0-technical.md#technical-plan-migration)
+Technical depth: [Packaging mechanics](M0-technical.md#technical-plan-packaging)
+Technical depth: [Proportional minimalism budget](M0-technical.md#technical-plan-minimalism)
+
+<a id="concept-plan-non-goals"></a>
 ### Non-Goals
 
 No public freeze.
 
+Technical depth: [Deferral acceptance points](M0-technical.md#technical-plan-prerequisites)
+<!-- loopex:plan-concept-envelope:end -->"""
+
+TECHNICAL_PLAN = """<a id="technical-depth"></a>
+## Technical depth
+
+Concept: [Milestone concept](M0.md#concept)
+
+<!-- loopex:plan-technical-envelope:start -->
+## Normative Technical Envelope
+
+<a id="technical-plan-prerequisites"></a>
 ### Prerequisites and Acceptance Points
+
+Concept: [Milestone scope](M0.md#concept-plan-scope)
+Concept: [Milestone non-goals](M0.md#concept-plan-non-goals)
 
 Prerequisites are accepted before plan acceptance.
 
+<a id="technical-plan-ownership"></a>
 ### Ownership, Decision Owners, and Rejoin Barriers
+
+Concept: [Milestone scope](M0.md#concept-plan-scope)
 
 The maintainer owns decisions; there is one serial rejoin.
 
+<a id="technical-plan-evidence"></a>
 ### Evidence Obligations and Mapping
+
+Concept: [Milestone outcomes](M0.md#concept-plan-outcomes)
 
 Outcome 1 maps to the named focused test.
 
+<a id="technical-plan-compatibility"></a>
 ### Compatibility
+
+Concept: [Milestone scope](M0.md#concept-plan-scope)
 
 No compatibility claim.
 
+<a id="technical-plan-migration"></a>
 ### Migration and Rollback
+
+Concept: [Milestone scope](M0.md#concept-plan-scope)
 
 Rollback removes the candidate.
 
+<a id="technical-plan-packaging"></a>
 ### Packaging
+
+Concept: [Milestone scope](M0.md#concept-plan-scope)
 
 No package or release.
 
+<a id="technical-plan-minimalism"></a>
 ### Proportional Minimalism Budget
 
+Concept: [Milestone scope](M0.md#concept-plan-scope)
+
 Use direct code; add no abstraction without two concrete examples.
-<!-- loopex:plan-envelope:end -->"""
+<!-- loopex:plan-technical-envelope:end -->
+"""
 
 ADR_PATHS = (
     "docs/adr/0001-repository-and-application-layout.md",
@@ -124,9 +187,28 @@ ADR_PATHS = (
 )
 
 
+def adr_technical(number: int) -> str:
+    concept_name = ADR_PATHS[number - 1].removeprefix("docs/adr/")
+    return f"""# 000{number}. Decision {number}: Technical depth
+
+<a id="technical-depth"></a>
+## Technical depth
+
+Concept: [Decision]({concept_name}#concept)
+
+Exact constraints for decision {number}.
+"""
+
+
 def adr(number: int, accepted: bool = False) -> str:
     path = ADR_PATHS[number - 1]
+    technical_name = path.removeprefix("docs/adr/").removesuffix(".md") + "-technical.md"
     proposal = f"""# 000{number}. Decision {number}
+
+<a id="concept"></a>
+## Concept
+
+Technical depth: [Decision details]({technical_name}#technical-depth)
 
 - **Status:** Proposed
 - **Date:** 2026-08-15
@@ -149,44 +231,77 @@ Choose the bounded decision.
     if not accepted:
         return proposal
     candidate = ("d" if number == 1 else "e") * 40
-    digest = hashlib.sha256(proposal.encode()).hexdigest()
+    concept_digest = hashlib.sha256(proposal.encode()).hexdigest()
+    technical_digest = hashlib.sha256(adr_technical(number).encode()).hexdigest()
     return proposal.replace("- **Status:** Proposed", "- **Status:** Accepted").replace(
         "| Acceptance | — | — | — |",
-        "| Acceptance | Maintainer | [disposition](decision.md#accept) | "
-        f"candidate `{candidate}`; document `sha256:{digest}` |",
+        "| Acceptance | Maintainer | [disposition](../vision.md#concept) | "
+        f"candidate `{candidate}`; concept `sha256:{concept_digest}`; "
+        f"technical `sha256:{technical_digest}` |",
     )
 
 
 def documents() -> dict[str, str]:
     result = {
         "README.md": README,
+        "docs/README.md": """# Documentation
+
+[Vision](vision.md#concept)
+[Vision technical](vision-technical.md#technical-depth)
+[Roadmap](roadmap.md#concept)
+[Roadmap technical](roadmap-technical.md#technical-depth)
+[Development charter](developer/development-charter.md#concept)
+[Development charter technical](developer/development-charter-technical.md#technical-depth)
+[ADR 0001](adr/0001-repository-and-application-layout.md#concept)
+[ADR 0001 technical](adr/0001-repository-and-application-layout-technical.md#technical-depth)
+[ADR 0002](adr/0002-bootstrap-runtime-floor.md#concept)
+[ADR 0002 technical](adr/0002-bootstrap-runtime-floor-technical.md#technical-depth)
+""",
         "docs/plans/README.md": f"# Plans\n\n{CURRENT}\n\n{REGISTER}\n",
         "docs/vision.md": (
-            "# Vision\n\n## 22. Ownership and serial barriers\n\n"
+            "# Vision\n\n<a id=\"concept\"></a>\n## Concept\n\n"
+            "Technical depth: [Vision details](vision-technical.md#technical-depth)\n"
+        ),
+        "docs/vision-technical.md": (
+            "# Vision: Technical depth\n\n<a id=\"technical-depth\"></a>\n"
+            "## Technical depth\n\nConcept: [Vision](vision.md#concept)\n\n"
+            "## 22. Ownership and serial barriers\n\n"
             f"<!-- loopex:rejoin-source:start -->\n{REJOIN}\n<!-- loopex:rejoin-source:end -->\n"
         ),
         "docs/roadmap.md": (
-            "# Roadmap\n\n## The Enduring Rejoin Order\n\n"
+            "# Roadmap\n\n<a id=\"concept\"></a>\n## Concept\n\n"
+            "Technical depth: [Roadmap details](roadmap-technical.md#technical-depth)\n"
+        ),
+        "docs/roadmap-technical.md": (
+            "# Roadmap: Technical depth\n\n<a id=\"technical-depth\"></a>\n"
+            "## Technical depth\n\nConcept: [Roadmap](roadmap.md#concept)\n\n"
+            "## The Enduring Rejoin Order\n\n"
             f"<!-- loopex:rejoin-copy:start -->\n{REJOIN}\n<!-- loopex:rejoin-copy:end -->\n"
         ),
+        "docs/developer/development-charter.md": (
+            "# Development charter\n\n<a id=\"concept\"></a>\n"
+            "## Concept\n\nTechnical depth: [Charter mechanics]"
+            "(development-charter-technical.md#technical-depth)\n"
+        ),
+        "docs/developer/development-charter-technical.md": (
+            "# Development charter: Technical depth\n\n"
+            "<a id=\"technical-depth\"></a>\n## Technical depth\n\n"
+            "Concept: [Development charter](development-charter.md#concept)\n"
+        ),
+        "docs/developer/agent-context-map.md": (
+            "# Context map\n\n[Product definition]"
+            "(../vision.md#concept)\n"
+        ),
     }
-    result.update({path: adr(index) for index, path in enumerate(ADR_PATHS, 1)})
+    for index, path in enumerate(ADR_PATHS, 1):
+        result[path] = adr(index)
+        result[path.removesuffix(".md") + "-technical.md"] = adr_technical(index)
     return result
 
 
-def plan(
-    governed: bool = False,
-    closed: bool = False,
-    gate: str = GATE,
-    progress: str | None = None,
-) -> str:
-    digest = hashlib.sha256(gate.encode()).hexdigest()
-    acceptance_bound = f"candidate `{'a' * 40}`; gate `sha256:{digest}`"
-    closure_bound = f"candidate `{'c' * 40}`; gate `sha256:{digest}`"
-    acceptance = f"Maintainer | [disposition](decision.md#accept) | {acceptance_bound}" if governed else "— | — | —"
-    closure = f"Maintainer | [disposition](decision.md#close) | {closure_bound}" if closed else "— | — | —"
-    progress_state = progress or ("Proved" if closed else "Open")
-    return f"""{ENVELOPE}
+def _plan_text(acceptance: str, closure: str, progress_state: str) -> str:
+    return f"""{PLAN_PREAMBLE}
+{ENVELOPE}
 
 ## Workstreams
 
@@ -207,6 +322,72 @@ One direct workstream.
 """
 
 
+def fixture_envelope_digest(text: str, start: str, end: str) -> str:
+    lines = text.splitlines()
+    body = lines[lines.index(start) + 1 : lines.index(end)]
+    return hashlib.sha256("\n".join(body).encode()).hexdigest()
+
+
+def plan(
+    governed: bool = False,
+    closed: bool = False,
+    gate: str = GATE,
+    progress: str | None = None,
+) -> str:
+    progress_state = progress or ("Proved" if closed else "Open")
+    empty = "— | — | —"
+    concept_digest = fixture_envelope_digest(
+        ENVELOPE,
+        "<!-- loopex:plan-concept-envelope:start -->",
+        "<!-- loopex:plan-concept-envelope:end -->",
+    )
+    technical_digest = fixture_envelope_digest(
+        TECHNICAL_PLAN,
+        "<!-- loopex:plan-technical-envelope:start -->",
+        "<!-- loopex:plan-technical-envelope:end -->",
+    )
+    gate_digest = hashlib.sha256(gate.encode()).hexdigest()
+    acceptance_bound = (
+        f"candidate `{'a' * 40}`; "
+        f"concept `sha256:{concept_digest}`; "
+        f"technical `sha256:{technical_digest}`; gate `sha256:{gate_digest}`"
+    )
+    acceptance = (
+        f"Maintainer | [disposition](../vision.md#concept) | {acceptance_bound}"
+        if governed
+        else empty
+    )
+    closure_bound = (
+        f"candidate `{'c' * 40}`; "
+        f"concept `sha256:{concept_digest}`; "
+        f"technical `sha256:{technical_digest}`; gate `sha256:{gate_digest}`"
+    )
+    closure = (
+        f"Maintainer | [disposition](../roadmap.md#concept) | {closure_bound}"
+        if closed
+        else empty
+    )
+    return _plan_text(acceptance, closure, progress_state)
+
+
+def plan_snapshot(concept: str, gate: str | None = None, technical: str = TECHNICAL_PLAN) -> dict[str, str]:
+    result = {
+        "docs/plans/M0.md": concept,
+        "docs/plans/M0-technical.md": technical,
+    }
+    if gate is not None:
+        result["docs/plans/M0-gate.md"] = gate
+    return result
+
+
+def adr_snapshot(number: int, concept: str) -> dict[str, str]:
+    path = ADR_PATHS[number - 1]
+    return {
+        path: concept,
+        path.removesuffix(".md") + "-technical.md": adr_technical(number),
+    }
+
+
 def checked(
     docs: dict[str, str],
     historical_gate: str = GATE,
@@ -222,6 +403,8 @@ def checked(
     def resolve(sha: str, path: str) -> str | None:
         if path.endswith("M0-gate.md") and sha in {"a" * 40, "b" * 40, "c" * 40}:
             return historical_gate
+        if path.endswith("M0-technical.md") and sha in {"a" * 40, "b" * 40, "c" * 40}:
+            return TECHNICAL_PLAN
         if path.endswith("M0.md"):
             if sha in {"a" * 40, "b" * 40}:
                 return plan(False)
@@ -229,8 +412,12 @@ def checked(
                 return plan(True, progress="Proved")
         if path == ADR_PATHS[0] and sha == "d" * 40:
             return adr(1)
+        if path == ADR_PATHS[0].removesuffix(".md") + "-technical.md" and sha == "d" * 40:
+            return adr_technical(1)
         if path == ADR_PATHS[1] and sha == "e" * 40:
             return adr(2)
+        if path == ADR_PATHS[1].removesuffix(".md") + "-technical.md" and sha == "e" * 40:
+            return adr_technical(2)
         return None
 
     return validate(
@@ -249,25 +436,26 @@ def accepted_adr_documents(*accepted: int) -> dict[str, str]:
         number = unresolved[0]
         filename = ADR_PATHS[number - 1].removeprefix("docs/adr/")
         docs["docs/plans/README.md"] = docs["docs/plans/README.md"].replace(
-            "[ADR 0001](../adr/0001-repository-and-application-layout.md) and "
-            "[ADR 0002](../adr/0002-bootstrap-runtime-floor.md) must be accepted before "
+            "[ADR 0001](../adr/0001-repository-and-application-layout.md#concept) and "
+            "[ADR 0002](../adr/0002-bootstrap-runtime-floor.md#concept) must be accepted before "
             "M0 opens; a replacement requires a governed guard change",
-            f"[ADR 000{number}](../adr/{filename}) must be accepted before M0 opens; "
+            f"[ADR 000{number}](../adr/{filename}#concept) must be accepted before M0 opens; "
             "a replacement requires a governed guard change",
         ).replace(
             "Disposition ADR 0001 and ADR 0002", f"Disposition ADR 000{number}"
         )
     elif not unresolved:
         docs["docs/plans/README.md"] = docs["docs/plans/README.md"].replace(
-            "[ADR 0001](../adr/0001-repository-and-application-layout.md) and "
-            "[ADR 0002](../adr/0002-bootstrap-runtime-floor.md) must be accepted before "
+            "[ADR 0001](../adr/0001-repository-and-application-layout.md#concept) and "
+            "[ADR 0002](../adr/0002-bootstrap-runtime-floor.md#concept) must be accepted before "
             "M0 opens; a replacement requires a governed guard change",
             "M0 has not been explicitly opened gate-first",
         ).replace(
             "Disposition ADR 0001 and ADR 0002", "Explicitly open or defer M0"
         ).replace(
             "After the prerequisites are accepted, the maintainer explicitly opens `M0` gate-first",
-            "Create the branch-only M0 plan and red gate, install lifecycle-specific status checks, and move M0 to Open",
+            "Create the branch-only M0 Concept plan, Technical depth plan, and red gate; "
+            "install lifecycle-specific status checks; and move M0 to Open",
         )
     return docs
 
@@ -285,6 +473,261 @@ class StatusTest(unittest.TestCase):
         self.assertEqual([], checked(docs))
         self.assertEqual(before, docs)
 
+    def test_pair_topology_links_and_anchors_fail_closed(self) -> None:
+        cases: list[tuple[str, callable, str]] = [
+            (
+                "missing companion",
+                lambda docs: docs.pop("docs/vision-technical.md"),
+                "paired technical document is missing",
+            ),
+            (
+                "orphan companion",
+                lambda docs: docs.pop("docs/vision.md"),
+                "paired concept document is missing",
+            ),
+            (
+                "hidden heading",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md",
+                    docs["docs/vision.md"].replace(
+                        "## Concept", "<!--\n## Concept\n-->", 1
+                    ),
+                ),
+                "visible ## Concept",
+            ),
+            (
+                "duplicate heading",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md", docs["docs/vision.md"] + "\n## Concept\n"
+                ),
+                "exactly one visible",
+            ),
+            (
+                "duplicate heading with trailing spaces",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md", docs["docs/vision.md"] + "\n## Concept   \n"
+                ),
+                "exactly one visible",
+            ),
+            (
+                "duplicate heading with closing hashes",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md", docs["docs/vision.md"] + "\n## Concept ##\n"
+                ),
+                "exactly one visible",
+            ),
+            (
+                "duplicate setext heading",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md", docs["docs/vision.md"] + "\nConcept\n---\n"
+                ),
+                "exactly one visible",
+            ),
+            (
+                "hidden anchor",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md",
+                    docs["docs/vision.md"].replace(
+                        '<a id="concept"></a>',
+                        '<!-- <a id="concept"></a> -->',
+                    ),
+                ),
+                "relationship anchor",
+            ),
+            (
+                "duplicate anchor",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md",
+                    docs["docs/vision.md"] + '\n<a id="concept"></a>\n',
+                ),
+                "exactly once",
+            ),
+            (
+                "wrong companion",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md",
+                    docs["docs/vision.md"].replace(
+                        "vision-technical.md#technical-depth",
+                        "roadmap-technical.md#technical-depth",
+                    ),
+                ),
+                "own companion",
+            ),
+            (
+                "empty fragment",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md",
+                    docs["docs/vision.md"].replace(
+                        "#technical-depth", "#"
+                    ),
+                ),
+                "nonempty fragment",
+            ),
+            (
+                "unknown fragment",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md",
+                    docs["docs/vision.md"].replace(
+                        "#technical-depth", "#technical-missing"
+                    ),
+                ),
+                "does not resolve",
+            ),
+            (
+                "nonreciprocal backlink",
+                lambda docs: docs.__setitem__(
+                    "docs/vision-technical.md",
+                    docs["docs/vision-technical.md"].replace(
+                        "vision.md#concept", "vision.md#concept-other"
+                    ),
+                )
+                or docs.__setitem__(
+                    "docs/vision.md",
+                    docs["docs/vision.md"]
+                    + '\n<a id="concept-other"></a>\n### Other concept\n',
+                ),
+                "not reciprocal",
+            ),
+            (
+                "wrong depth label",
+                lambda docs: docs.__setitem__(
+                    "docs/vision-technical.md",
+                    docs["docs/vision-technical.md"]
+                    + "\nTechnical depth: [Wrong direction]"
+                    "(vision.md#concept).\n",
+                ),
+                "belongs in the other depth",
+            ),
+            (
+                "visible preamble before relationship",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md", "Unexpected preamble.\n\n" + docs["docs/vision.md"]
+                ),
+                "must start with an optional H1",
+            ),
+            (
+                "section before relationship",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md",
+                    docs["docs/vision.md"].replace(
+                        '<a id="concept"></a>',
+                        "## Earlier section\n\nText.\n\n<a id=\"concept\"></a>",
+                        1,
+                    ),
+                ),
+                "must start with an optional H1",
+            ),
+            (
+                "fenced preamble before relationship",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md",
+                    "```text\nHidden preamble.\n```\n\n" + docs["docs/vision.md"],
+                ),
+                "must start with an optional H1",
+            ),
+            (
+                "empty optional title",
+                lambda docs: docs.__setitem__(
+                    "docs/vision.md", docs["docs/vision.md"].replace("# Vision", "#", 1)
+                ),
+                "must start with an optional H1",
+            ),
+        ]
+        for label, mutate, error in cases:
+            with self.subTest(label=label):
+                docs = documents()
+                mutate(docs)
+                self.assert_invalid(docs, error)
+
+        docs = documents()
+        docs["docs/vision.md"] += (
+            '\n<a id="concept-effects"></a>\n### Effects\n\n'
+            "Technical depth: [Effect ordering]"
+            "(vision-technical.md#technical-effects)\n"
+        )
+        docs["docs/vision-technical.md"] += (
+            '\n<a id="technical-effects"></a>\n### Effect ordering\n\n'
+            "Concept: [Effects](vision.md#concept-effects)\n"
+        )
+        self.assertEqual([], checked(docs))
+        docs["docs/vision.md"] = docs["docs/vision.md"].replace(
+            "vision-technical.md#technical-effects",
+            "roadmap-technical.md#technical-depth",
+        )
+        self.assert_invalid(docs, "only its companion")
+
+        docs = documents()
+        docs["docs/developer/agent-context-map.md"] = docs[
+            "docs/developer/agent-context-map.md"
+        ].replace("#concept", "#concept-does-not-exist")
+        self.assert_invalid(docs, "fragment does not resolve")
+
+        for link, error in (
+            ('[broken](missing.md "title")', "unsupported Markdown link syntax"),
+            ('[broken](<missing file.md>)', "raw HTML"),
+            ('[broken][target]\n\n[target]: missing.md', "unsupported Markdown link syntax"),
+            ('[broken](missing.md?x=1)', "unsupported local Markdown query"),
+            ('[](docs/vision.md#concept)', "unsupported Markdown link syntax"),
+            ('![](missing.md)', "unsupported Markdown image syntax"),
+            ('![broken](missing.md)', "unsupported Markdown image syntax"),
+            ('[a [nested]](missing.md)', "unsupported Markdown link syntax"),
+        ):
+            with self.subTest(link=link):
+                docs = documents()
+                docs["README.md"] += f"\n{link}\n"
+                self.assert_invalid(docs, error)
+
+    def test_markdown_classification_rejects_ambiguous_paths(self) -> None:
+        for path, error in (
+            ("docs/unknown.md", "paired technical document is missing"),
+            ("OTHER.md", "unknown active"),
+            ("docs/vision-technical-technical.md", "doubled technical suffix"),
+            ("Docs/VISION.md", "collides by case"),
+            ("docs/adr/0003-new-decision.md", "paired technical document is missing"),
+            ("docs/plans/sample-technical.md", "exact triples"),
+            ("docs/plans/sample-technical-technical.md", "doubled technical suffix"),
+        ):
+            with self.subTest(path=path):
+                docs = documents()
+                docs[path] = "# Unexpected\n"
+                self.assert_invalid(docs, error)
+
+        docs = documents()
+        docs[".agents/skills/example/SKILL.md"] = "# Portable skill\n"
+        docs[".claude/agents/example.md"] = "# Client role prompt\n"
+        docs[".github/ISSUE_TEMPLATE/bug.md"] = "# Issue template\n"
+        docs["docs/archive/old.md"] = "# Historical bytes\n"
+        docs["docs/operator/recovery.md"] = "# Recovery runbook\n"
+        self.assertEqual([], checked(docs))
+
+        for path in (
+            ".agents/policy.md",
+            ".claude/policy.md",
+            ".codex/policy.md",
+            ".github/policy.md",
+        ):
+            with self.subTest(path=path):
+                docs = documents()
+                docs[path] = "# Hidden policy\n"
+                self.assert_invalid(docs, "unknown active Markdown document class")
+
+        docs = documents()
+        docs["docs/architecture.md"] = (
+            '<a id="concept"></a>\n## Concept\n\n'
+            "Technical depth: [Architecture mechanics]"
+            "(architecture-technical.md#technical-depth)\n"
+        )
+        docs["docs/architecture-technical.md"] = (
+            '<a id="technical-depth"></a>\n## Technical depth\n\n'
+            "Concept: [Architecture](architecture.md#concept)\n"
+        )
+        self.assert_invalid(docs, "missing from the index")
+        docs["docs/README.md"] += (
+            "\n[Architecture](architecture.md#concept)\n"
+            "[Architecture technical](architecture-technical.md#technical-depth)\n"
+        )
+        self.assertEqual([], checked(docs))
+
     def test_adr_acceptance_is_bound_and_drives_the_blocked_capsule(self) -> None:
         for accepted in ((), (1,), (2,), (1, 2)):
             with self.subTest(accepted=accepted):
@@ -300,23 +743,76 @@ class StatusTest(unittest.TestCase):
         docs[ADR_PATHS[0]] = docs[ADR_PATHS[0]].replace("d" * 40, "f" * 40)
         self.assert_invalid(docs, "candidate")
 
+        docs = accepted_adr_documents(1)
+        technical_path = ADR_PATHS[0].removesuffix(".md") + "-technical.md"
+        docs[technical_path] = docs[technical_path].replace(
+            "Exact constraints", "Changed constraints"
+        )
+        self.assert_invalid(docs, "accepted ADR technical depth differs")
+
+        docs = accepted_adr_documents(1)
+        technical_digest = hashlib.sha256(adr_technical(1).encode()).hexdigest()
+        docs[ADR_PATHS[0]] = docs[ADR_PATHS[0]].replace(
+            technical_digest, "f" * 64
+        )
+        self.assert_invalid(docs, "ADR technical digest")
+
     def test_plan_envelope_and_candidate_shapes_are_locked(self) -> None:
+        _validate_pair(
+            {
+                "docs/plans/M0.md": plan(False),
+                "docs/plans/M0-technical.md": TECHNICAL_PLAN,
+            },
+            "docs/plans/M0.md",
+        )
+        with self.assertRaisesRegex(Exception, "not reciprocal"):
+            _validate_pair(
+                {
+                    "docs/plans/M0.md": plan(False),
+                    "docs/plans/M0-technical.md": TECHNICAL_PLAN.replace(
+                        "Concept: [Milestone outcomes](M0.md#concept-plan-outcomes)",
+                        "Concept: [Milestone outcomes](M0.md#concept-plan-scope)",
+                    ),
+                },
+                "docs/plans/M0.md",
+            )
+
         resolve = lambda sha, path: (
             GATE
             if path.endswith("M0-gate.md")
+            else TECHNICAL_PLAN
+            if path.endswith("M0-technical.md")
             else plan(False)
             if sha == "a" * 40
             else plan(True, progress="Proved")
             if sha == "c" * 40
             else None
         )
-        _governance(plan(True), GATE, "M0", "Accepted", resolve)
-        _governance(plan(True, True), GATE, "M0", "Closed", resolve)
+        _governance(plan(True), TECHNICAL_PLAN, GATE, "M0", "Accepted", resolve)
+        _governance(plan(True, True), TECHNICAL_PLAN, GATE, "M0", "Closed", resolve)
+
+        with self.assertRaisesRegex(Exception, "concrete commitment"):
+            _plan_concept_envelope(
+                plan(False).replace("Only the bounded outcome.\n", "", 1),
+                "docs/plans/M0.md",
+            )
+        with self.assertRaisesRegex(Exception, "concrete commitment"):
+            _plan_concept_envelope(
+                plan(False).replace("No public freeze.\n", "", 1),
+                "docs/plans/M0.md",
+            )
+        with self.assertRaisesRegex(Exception, "concrete commitment"):
+            _plan_technical_envelope(
+                TECHNICAL_PLAN.replace(
+                    "Prerequisites are accepted before plan acceptance.\n", "", 1
+                ),
+                "docs/plans/M0-technical.md",
+            )
 
         mutable = plan(True).replace("One direct workstream.", "Two direct workstreams.").replace(
             "| 1 | Open | — |", "| 1 | Proved | [run](evidence.md) |"
         )
-        _governance(mutable, GATE, "M0", "Accepted", resolve)
+        _governance(mutable, TECHNICAL_PLAN, GATE, "M0", "Accepted", resolve)
 
         for heading in (
             "### Purpose",
@@ -332,33 +828,47 @@ class StatusTest(unittest.TestCase):
             "### Proportional Minimalism Budget",
         ):
             with self.subTest(heading=heading):
+                concept_heading = heading in {
+                    "### Purpose",
+                    "### Outcomes",
+                    "### Scope",
+                    "### Non-Goals",
+                }
                 changed = plan(True).replace(heading, heading + " changed", 1)
+                changed_technical = TECHNICAL_PLAN.replace(
+                    heading, heading + " changed", 1
+                )
                 with self.assertRaisesRegex(Exception, "headings"):
-                    _governance(changed, GATE, "M0", "Accepted", resolve)
+                    _governance(
+                        changed if concept_heading else plan(True),
+                        TECHNICAL_PLAN if concept_heading else changed_technical,
+                        GATE,
+                        "M0",
+                        "Accepted",
+                        resolve,
+                    )
 
         for label, changed in (
             (
                 "missing marker",
-                plan(True).replace("<!-- loopex:plan-envelope:start -->\n", "", 1),
+                plan(True).replace("<!-- loopex:plan-concept-envelope:start -->\n", "", 1),
             ),
             (
                 "duplicate marker",
-                plan(True) + "\n<!-- loopex:plan-envelope:start -->\n",
+                plan(True) + "\n<!-- loopex:plan-concept-envelope:start -->\n",
             ),
             (
                 "hidden marker",
                 plan(True).replace(
-                    "<!-- loopex:plan-envelope:start -->",
-                    "<!--\n<!-- loopex:plan-envelope:start -->\n-->",
+                    "<!-- loopex:plan-concept-envelope:start -->",
+                    "<!--\n<!-- loopex:plan-concept-envelope:start -->\n-->",
                     1,
                 ),
             ),
             (
                 "empty section",
                 plan(True).replace(
-                    "### Compatibility\n\nNo compatibility claim.",
-                    "### Compatibility\n",
-                    1,
+                    "### Scope\n\nOnly the bounded outcome.", "### Scope\n", 1
                 ),
             ),
             (
@@ -371,71 +881,146 @@ class StatusTest(unittest.TestCase):
                     "Only the bounded outcome.", "Only the bounded outcome.\n---"
                 ),
             ),
+            (
+                "missing section anchor",
+                plan(True).replace('<a id="concept-plan-scope"></a>\n', "", 1),
+            ),
+            (
+                "missing section mapping",
+                plan(True).replace(
+                    "Technical depth: [Packaging mechanics]"
+                    "(M0-technical.md#technical-plan-packaging)\n",
+                    "",
+                    1,
+                ),
+            ),
         ):
             with self.subTest(label=label):
                 with self.assertRaises(Exception):
-                    _governance(changed, GATE, "M0", "Accepted", resolve)
+                    _governance(changed, TECHNICAL_PLAN, GATE, "M0", "Accepted", resolve)
 
         candidate_with_completed_acceptance = lambda sha, path: (
-            GATE if path.endswith("M0-gate.md") else plan(True)
+            GATE
+            if path.endswith("M0-gate.md")
+            else TECHNICAL_PLAN
+            if path.endswith("M0-technical.md")
+            else plan(True)
         )
-        with self.assertRaisesRegex(Exception, "candidate.*governance"):
+        with self.assertRaisesRegex(Exception, "concept digest|candidate.*governance"):
             _governance(
-                plan(True), GATE, "M0", "Accepted", candidate_with_completed_acceptance
+                plan(True),
+                TECHNICAL_PLAN,
+                GATE,
+                "M0",
+                "Accepted",
+                candidate_with_completed_acceptance,
             )
 
         candidate_without_progress = lambda sha, path: (
             GATE
             if path.endswith("M0-gate.md")
+            else TECHNICAL_PLAN
+            if path.endswith("M0-technical.md")
             else plan(False).replace("## Progress and Evidence", "## Progress")
         )
-        with self.assertRaisesRegex(Exception, "plan document|Progress and Evidence"):
-            _governance(plan(True), GATE, "M0", "Accepted", candidate_without_progress)
+        with self.assertRaisesRegex(Exception, "plan document|Progress and Evidence|concept digest"):
+            _governance(
+                plan(True), TECHNICAL_PLAN, GATE, "M0", "Accepted", candidate_without_progress
+            )
 
         closure_without_acceptance = lambda sha, path: (
-            GATE if path.endswith("M0-gate.md") else plan(False, progress="Proved")
+            GATE
+            if path.endswith("M0-gate.md")
+            else TECHNICAL_PLAN
+            if path.endswith("M0-technical.md")
+            else plan(False, progress="Proved")
         )
-        with self.assertRaisesRegex(Exception, "closure candidate"):
+        with self.assertRaisesRegex(Exception, "closure candidate|concept digest"):
             _governance(
-                plan(True, True), GATE, "M0", "Closed", closure_without_acceptance
+                plan(True, True),
+                TECHNICAL_PLAN,
+                GATE,
+                "M0",
+                "Closed",
+                closure_without_acceptance,
             )
 
         closure_with_open_progress = lambda sha, path: (
             GATE
             if path.endswith("M0-gate.md")
+            else TECHNICAL_PLAN
+            if path.endswith("M0-technical.md")
             else plan(False)
             if sha == "a" * 40
             else plan(True)
         )
-        with self.assertRaisesRegex(Exception, "no Open"):
+        with self.assertRaisesRegex(Exception, "no Open|concept digest"):
             _governance(
-                plan(True, True), GATE, "M0", "Closed", closure_with_open_progress
+                plan(True, True),
+                TECHNICAL_PLAN,
+                GATE,
+                "M0",
+                "Closed",
+                closure_with_open_progress,
             )
 
         different_candidate = lambda sha, path: (
             GATE
             if path.endswith("M0-gate.md")
+            else TECHNICAL_PLAN
+            if path.endswith("M0-technical.md")
             else plan(False).replace("Only the bounded outcome.", "Different scope.")
         )
-        with self.assertRaisesRegex(Exception, "differs from its candidate"):
-            _governance(plan(True), GATE, "M0", "Accepted", different_candidate)
+        with self.assertRaisesRegex(Exception, "differs from its candidate|concept digest"):
+            _governance(
+                plan(True), TECHNICAL_PLAN, GATE, "M0", "Accepted", different_candidate
+            )
 
         different_closure = lambda sha, path: (
             GATE
             if path.endswith("M0-gate.md")
+            else TECHNICAL_PLAN
+            if path.endswith("M0-technical.md")
             else plan(False)
             if sha == "a" * 40
             else plan(True, progress="Proved").replace(
                 "Only the bounded outcome.", "Different scope."
             )
         )
-        with self.assertRaisesRegex(Exception, "closure candidate changed"):
-            _governance(plan(True, True), GATE, "M0", "Closed", different_closure)
+        with self.assertRaisesRegex(Exception, "closure candidate changed|concept digest"):
+            _governance(
+                plan(True, True), TECHNICAL_PLAN, GATE, "M0", "Closed", different_closure
+            )
+
+        with self.assertRaisesRegex(Exception, "normative technical envelope|technical digest"):
+            _governance(
+                plan(True),
+                TECHNICAL_PLAN.replace("No compatibility claim.", "Changed compatibility."),
+                GATE,
+                "M0",
+                "Accepted",
+                resolve,
+            )
+
+        technical_digest = fixture_envelope_digest(
+            TECHNICAL_PLAN,
+            "<!-- loopex:plan-technical-envelope:start -->",
+            "<!-- loopex:plan-technical-envelope:end -->",
+        )
+        with self.assertRaisesRegex(Exception, "technical digest"):
+            _governance(
+                plan(True).replace(technical_digest, "f" * 64),
+                TECHNICAL_PLAN,
+                GATE,
+                "M0",
+                "Accepted",
+                resolve,
+            )
 
     def test_progress_table_is_total_and_lifecycle_aware(self) -> None:
         def invalid(text: str, state: str, fragment: str) -> None:
             with self.assertRaisesRegex(Exception, fragment):
-                _governance(text, GATE, "M0", state, lambda sha, path: None)
+                _governance(text, TECHNICAL_PLAN, GATE, "M0", state, lambda sha, path: None)
 
         for label, text in (
             (
@@ -487,6 +1072,7 @@ class StatusTest(unittest.TestCase):
                         "| 1 | Open | — |",
                         f"| 1 | {state} | [disposition](decision.md) |",
                     ),
+                    TECHNICAL_PLAN,
                     GATE,
                     "M0",
                     "Open",
@@ -516,8 +1102,8 @@ class StatusTest(unittest.TestCase):
             (
                 "interstitial prose",
                 plan(False).replace(
-                    "<!-- loopex:plan-envelope:end -->\n\n## Workstreams",
-                    "<!-- loopex:plan-envelope:end -->\n\nScope override.\n\n## Workstreams",
+                    "<!-- loopex:plan-concept-envelope:end -->\n\n## Workstreams",
+                    "<!-- loopex:plan-concept-envelope:end -->\n\nScope override.\n\n## Workstreams",
                 ),
             ),
             (
@@ -531,18 +1117,20 @@ class StatusTest(unittest.TestCase):
             with self.subTest(label=label), self.assertRaisesRegex(
                 Exception, "plan document|headings|Workstreams"
             ):
-                _governance(text, GATE, "M0", "Open", lambda sha, path: None)
+                _governance(text, TECHNICAL_PLAN, GATE, "M0", "Open", lambda sha, path: None)
 
         bad_candidate = lambda sha, path: (
             GATE
             if path.endswith("M0-gate.md")
+            else TECHNICAL_PLAN
+            if path.endswith("M0-technical.md")
             else plan(False).replace(
-                "<!-- loopex:plan-envelope:end -->\n\n## Workstreams",
-                "<!-- loopex:plan-envelope:end -->\n\nScope override.\n\n## Workstreams",
+                "<!-- loopex:plan-concept-envelope:end -->\n\n## Workstreams",
+                "<!-- loopex:plan-concept-envelope:end -->\n\nScope override.\n\n## Workstreams",
             )
         )
-        with self.assertRaisesRegex(Exception, "Workstreams"):
-            _governance(plan(True), GATE, "M0", "Accepted", bad_candidate)
+        with self.assertRaisesRegex(Exception, "Workstreams|concept digest"):
+            _governance(plan(True), TECHNICAL_PLAN, GATE, "M0", "Accepted", bad_candidate)
 
         path = "docs/plans/M0.md"
         original = plan(True)
@@ -551,10 +1139,10 @@ class StatusTest(unittest.TestCase):
         )
         history = (
             "accepted",
-            (("root", (), {}), ("accepted", ("root",), {path: original})),
+            (("root", (), {}), ("accepted", ("root",), plan_snapshot(original))),
         )
-        with self.assertRaisesRegex(Exception, "headings"):
-            _governance_history({path: bad_history}, history)
+        with self.assertRaisesRegex(Exception, "headings|Workstreams"):
+            _governance_history(plan_snapshot(bad_history), history)
 
     def test_plan_envelope_is_anchored_with_acceptance_history(self) -> None:
         path = "docs/plans/M0.md"
@@ -562,26 +1150,26 @@ class StatusTest(unittest.TestCase):
         changed = original.replace("Only the bounded outcome.", "A larger scope.")
         history = (
             "accepted",
-            (("root", (), {}), ("accepted", ("root",), {path: original})),
+            (("root", (), {}), ("accepted", ("root",), plan_snapshot(original))),
         )
         progress_changed = original.replace(
             "| 1 | Open | — |", "| 1 | Proved | [run](evidence.md) |"
         )
-        _governance_history({path: progress_changed}, history)
-        with self.assertRaisesRegex(Exception, "normative envelope"):
-            _governance_history({path: changed}, history)
+        _governance_history(plan_snapshot(progress_changed), history)
+        with self.assertRaisesRegex(Exception, "normative concept envelope"):
+            _governance_history(plan_snapshot(changed), history)
 
         merge = (
             "merge",
             (
                 ("root", (), {}),
-                ("accepted", ("root",), {path: original}),
+                ("accepted", ("root",), plan_snapshot(original)),
                 ("main", ("root",), {}),
-                ("merge", ("main", "accepted"), {path: changed}),
+                ("merge", ("main", "accepted"), plan_snapshot(changed)),
             ),
         )
-        with self.assertRaisesRegex(Exception, "normative envelope"):
-            _governance_history({path: changed}, merge)
+        with self.assertRaisesRegex(Exception, "normative concept envelope"):
+            _governance_history(plan_snapshot(changed), merge)
 
     def test_accepted_adr_history_is_anchored_through_merges(self) -> None:
         path = ADR_PATHS[0]
@@ -592,40 +1180,140 @@ class StatusTest(unittest.TestCase):
             "accepted",
             (
                 ("legacy", (), {path: legacy}),
-                ("proposal", ("legacy",), {path: proposal}),
-                ("accepted", ("proposal",), {path: accepted}),
+                ("proposal", ("legacy",), adr_snapshot(1, proposal)),
+                ("accepted", ("proposal",), adr_snapshot(1, accepted)),
             ),
         )
-        _governance_history({path: accepted}, history)
+        _governance_history(adr_snapshot(1, accepted), history)
 
         changed = accepted.replace(
             "Choose the bounded decision.", "Rewrite the accepted decision."
         )
-        with self.assertRaisesRegex(Exception, "accepted document"):
-            _governance_history({path: changed}, history)
+        with self.assertRaisesRegex(Exception, "accepted concept"):
+            _governance_history(adr_snapshot(1, changed), history)
 
         deleted = (
             "deleted",
             (*history[1], ("deleted", ("accepted",), {})),
         )
         with self.assertRaisesRegex(Exception, "disappeared"):
-            _governance_history({path: accepted}, deleted)
+            _governance_history(adr_snapshot(1, accepted), deleted)
 
         merge = (
             "merge",
             (
                 ("root", (), {}),
-                ("accepted", ("root",), {path: accepted}),
+                ("accepted", ("root",), adr_snapshot(1, accepted)),
                 ("main", ("root",), {}),
-                ("merge", ("main", "accepted"), {path: changed}),
+                ("merge", ("main", "accepted"), adr_snapshot(1, changed)),
             ),
         )
-        with self.assertRaisesRegex(Exception, "accepted document"):
-            _governance_history({path: changed}, merge)
+        with self.assertRaisesRegex(Exception, "accepted concept"):
+            _governance_history(adr_snapshot(1, changed), merge)
 
         docs = documents()
         del docs[ADR_PATHS[1]]
-        self.assert_invalid(docs, "missing")
+        self.assert_invalid(docs, "unknown active")
+
+    def test_paired_technical_history_rejects_restore_delete_and_merge_divergence(self) -> None:
+        accepted = plan(True)
+        changed_technical = TECHNICAL_PLAN.replace(
+            "No compatibility claim.", "A different compatibility claim."
+        )
+        accepted_snapshot = plan_snapshot(accepted, GATE)
+        history = (
+            "accepted",
+            (
+                ("root", (), {}),
+                ("accepted", ("root",), accepted_snapshot),
+            ),
+        )
+        with self.assertRaisesRegex(Exception, "normative technical envelope"):
+            _governance_history(
+                plan_snapshot(accepted, GATE, changed_technical), history
+            )
+
+        mutated = (
+            "mutated",
+            (
+                *history[1],
+                (
+                    "mutated",
+                    ("accepted",),
+                    plan_snapshot(accepted, GATE, changed_technical),
+                ),
+            ),
+        )
+        with self.assertRaisesRegex(Exception, "normative technical envelope"):
+            _governance_history(accepted_snapshot, mutated)
+
+        without_technical = {
+            "docs/plans/M0.md": accepted,
+            "docs/plans/M0-gate.md": GATE,
+        }
+        deleted = (
+            "deleted",
+            (*history[1], ("deleted", ("accepted",), without_technical)),
+        )
+        with self.assertRaisesRegex(Exception, "technical depth disappeared"):
+            _governance_history(accepted_snapshot, deleted)
+
+        merged = (
+            "merge",
+            (
+                ("root", (), {}),
+                ("accepted", ("root",), accepted_snapshot),
+                ("main", ("root",), {}),
+                (
+                    "merge",
+                    ("main", "accepted"),
+                    plan_snapshot(accepted, GATE, changed_technical),
+                ),
+            ),
+        )
+        with self.assertRaisesRegex(Exception, "normative technical envelope"):
+            _governance_history(
+                plan_snapshot(accepted, GATE, changed_technical), merged
+            )
+
+        open_history = (
+            "open",
+            (
+                ("root", (), {}),
+                ("open", ("root",), plan_snapshot(plan(False), GATE)),
+            ),
+        )
+        _governance_history(
+            plan_snapshot(plan(False), GATE, changed_technical), open_history
+        )
+
+        adr_path = ADR_PATHS[0]
+        accepted_adr = adr(1, True)
+        accepted_adr_snapshot = adr_snapshot(1, accepted_adr)
+        adr_history = (
+            "accepted-adr",
+            (
+                ("root", (), {}),
+                ("accepted-adr", ("root",), accepted_adr_snapshot),
+            ),
+        )
+        changed_adr_snapshot = dict(accepted_adr_snapshot)
+        technical_path = adr_path.removesuffix(".md") + "-technical.md"
+        changed_adr_snapshot[technical_path] = changed_adr_snapshot[technical_path].replace(
+            "Exact constraints", "Different constraints"
+        )
+        with self.assertRaisesRegex(Exception, "accepted technical depth"):
+            _governance_history(changed_adr_snapshot, adr_history)
+
+        restored_adr_history = (
+            "restored",
+            (
+                *adr_history[1],
+                ("changed", ("accepted-adr",), changed_adr_snapshot),
+            ),
+        )
+        with self.assertRaisesRegex(Exception, "accepted technical depth"):
+            _governance_history(accepted_adr_snapshot, restored_adr_history)
 
     def test_git_resolver_requires_a_commit_object(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -668,8 +1356,11 @@ class StatusTest(unittest.TestCase):
     def test_open_and_closed_plans(self) -> None:
         for state, governed, closed in (("Open", False, False), ("Closed", True, True)):
             docs = documents()
-            old_row = "| `M0` | Blocked | — | — |"
-            new_row = f"| `M0` | {state} | [plan](M0.md) | [gate](M0-gate.md) |"
+            old_row = "| `M0` | Blocked | — | — | — |"
+            new_row = (
+                f"| `M0` | {state} | [concept](M0.md) | "
+                "[technical depth](M0-technical.md) | [gate](M0-gate.md) |"
+            )
             old_summary = SUMMARY
             if state == "Open":
                 new_summary = "**Revision status:** Pre-implementation planning; active milestone `M0` is open; no next candidate is recorded."
@@ -681,6 +1372,7 @@ class StatusTest(unittest.TestCase):
                     "Seed bootstrap — 2026-08-15", "`M0` — 2026-08-15"
                 )
             docs["docs/plans/M0.md"] = plan(governed, closed)
+            docs["docs/plans/M0-technical.md"] = TECHNICAL_PLAN
             docs["docs/plans/M0-gate.md"] = GATE
             self.assert_invalid(docs, "must replace this seed guard")
 
@@ -728,7 +1420,7 @@ class StatusTest(unittest.TestCase):
         for label, row, summary in (
             (
                 "renamed M0",
-                "| `m0` | Blocked | — | — |",
+                "| `m0` | Blocked | — | — | — |",
                 "**Revision status:** Pre-implementation planning; no milestone is active; next candidate `m0` is blocked.",
             ),
             (
@@ -738,7 +1430,7 @@ class StatusTest(unittest.TestCase):
             ),
         ):
             with self.subTest(label):
-                source_row = "| `M0` | Blocked | — | — |"
+                source_row = "| `M0` | Blocked | — | — | — |"
                 docs = {}
                 for path, text in documents().items():
                     replacement = text.replace(source_row, row) if row else text.replace(source_row + "\n", "")
@@ -783,9 +1475,9 @@ class StatusTest(unittest.TestCase):
             ("bad state", "Blocked", "Ready"),
             ("reserved", "`M0`", "`con`"),
             ("bad name", "`M0`", "`kernel--a`"),
-            ("wrong links", "| `M0` | Blocked | — | — |", "| `M0` | Open | [M0](M0.md) | [gate](M0-gate.md) |"),
-            ("second blocked", "| `M0` | Blocked | — | — |", "| `M0` | Blocked | — | — |\n| `M1` | Blocked | — | — |"),
-            ("case collision", "| `M0` | Blocked | — | — |", "| `M0` | Blocked | — | — |\n| `m0` | Closed | [plan](m0.md) | [gate](m0-gate.md) |"),
+            ("wrong links", "| `M0` | Blocked | — | — | — |", "| `M0` | Open | [M0](M0.md) | — | [gate](M0-gate.md) |"),
+            ("second blocked", "| `M0` | Blocked | — | — | — |", "| `M0` | Blocked | — | — | — |\n| `M1` | Blocked | — | — | — |"),
+            ("case collision", "| `M0` | Blocked | — | — | — |", "| `M0` | Blocked | — | — | — |\n| `m0` | Closed | [concept](m0.md) | [technical depth](m0-technical.md) | [gate](m0-gate.md) |"),
             ("name too long", "`M0`", f"`{'a' * 65}`"),
         )
         for label, old, new in mutations:
@@ -803,6 +1495,8 @@ class StatusTest(unittest.TestCase):
         def resolve(sha: str, path: str, historical_gate: str = GATE) -> str | None:
             if path.endswith("M0-gate.md"):
                 return historical_gate
+            if path.endswith("M0-technical.md"):
+                return TECHNICAL_PLAN
             if path.endswith("M0.md") and sha in {"a" * 40, "b" * 40}:
                 return plan(False)
             if path.endswith("M0.md") and sha == "c" * 40:
@@ -811,7 +1505,7 @@ class StatusTest(unittest.TestCase):
 
         def invalid(text: str, state: str, fragment: str, gate: str = GATE) -> None:
             with self.assertRaisesRegex(Exception, fragment):
-                _governance(text, gate, "M0", state, resolve)
+                _governance(text, TECHNICAL_PLAN, gate, "M0", state, resolve)
 
         invalid(plan(False), "Accepted", "lifecycle state")
         invalid(
@@ -828,9 +1522,13 @@ class StatusTest(unittest.TestCase):
                 "| --- | --- | --- | --- |\n```text\ndecoy\n````",
             ),
             "Accepted",
-            "malformed table",
+            "malformed table|consecutively numbered",
         )
-        invalid(plan(True) + "\n---\n\nignored extra\n", "Accepted", "malformed table")
+        invalid(
+            plan(True) + "\n---\n\nignored extra\n",
+            "Accepted",
+            "malformed table|trailing content",
+        )
         invalid(
             plan(True).replace(hashlib.sha256(GATE.encode()).hexdigest(), "b" * 64),
             "Accepted",
@@ -840,6 +1538,7 @@ class StatusTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "historical"):
             _governance(
                 plan(True, gate=changed_gate),
+                TECHNICAL_PLAN,
                 changed_gate,
                 "M0",
                 "Accepted",
@@ -861,6 +1560,7 @@ class StatusTest(unittest.TestCase):
                 with self.assertRaisesRegex(Exception, "UTF-8/LF"):
                     _governance(
                         plan(True),
+                        TECHNICAL_PLAN,
                         GATE,
                         "M0",
                         "Accepted",
@@ -869,13 +1569,18 @@ class StatusTest(unittest.TestCase):
         closed_docs = documents()
         closed_summary = "**Revision status:** Pre-implementation planning; no milestone is active; no next candidate is recorded."
         closed_docs = {
-            key: value.replace("| `M0` | Blocked | — | — |", "| `M0` | Closed | [plan](M0.md) | [gate](M0-gate.md) |").replace(SUMMARY, closed_summary)
+            key: value.replace(
+                "| `M0` | Blocked | — | — | — |",
+                "| `M0` | Closed | [concept](M0.md) | "
+                "[technical depth](M0-technical.md) | [gate](M0-gate.md) |",
+            ).replace(SUMMARY, closed_summary)
             for key, value in closed_docs.items()
         }
         closed_docs["docs/plans/README.md"] = closed_docs["docs/plans/README.md"].replace(
             "Seed bootstrap — 2026-08-15", "`M0` — 2026-99-99"
         )
         closed_docs["docs/plans/M0.md"] = plan(True, True)
+        closed_docs["docs/plans/M0-technical.md"] = TECHNICAL_PLAN
         closed_docs["docs/plans/M0-gate.md"] = GATE
         self.assert_invalid(closed_docs, "Last integrated checkpoint")
         invalid(
@@ -894,29 +1599,29 @@ class StatusTest(unittest.TestCase):
             "first-completion",
             (
                 ("root", (), {}),
-                ("first-completion", ("root",), {path: original}),
+                ("first-completion", ("root",), plan_snapshot(original)),
             ),
         )
-        _governance_history({path: current}, anchored)
+        _governance_history(plan_snapshot(current), anchored)
 
         mutations = (
             ("authority", "Maintainer", "Delegate: Reviewer"),
-            ("evidence", "decision.md#accept", "decision.md#different"),
+            ("evidence", "../vision.md#concept", "../vision.md#concept-other"),
             ("candidate", "a" * 40, "b" * 40),
         )
         for label, old, new in mutations:
             with self.subTest(label):
                 changed = original.replace(old, new, 1)
                 with self.assertRaisesRegex(Exception, "completed Acceptance"):
-                    _governance_history({path: changed}, anchored)
+                    _governance_history(plan_snapshot(changed), anchored)
 
         changed_gate = "# Changed gate\n"
         changed = plan(True, gate=changed_gate).replace(
-            "Maintainer | [disposition](decision.md#accept)",
-            "Delegate: Reviewer | [disposition](decision.md#different)",
+            "Maintainer | [disposition](../vision.md#concept)",
+            "Delegate: Reviewer | [disposition](../vision.md#concept-other)",
         )
         with self.assertRaisesRegex(Exception, "completed Acceptance"):
-            _governance_history({path: changed}, anchored)
+            _governance_history(plan_snapshot(changed), anchored)
 
         for label, intermediate in (
             ("mutate then restore", original.replace("Maintainer", "Delegate: Reviewer", 1)),
@@ -927,23 +1632,23 @@ class StatusTest(unittest.TestCase):
                     "later",
                     (
                         ("root", (), {}),
-                        ("first-completion", ("root",), {path: original}),
-                        ("later", ("first-completion",), {path: intermediate}),
+                        ("first-completion", ("root",), plan_snapshot(original)),
+                        ("later", ("first-completion",), plan_snapshot(intermediate)),
                     ),
                 )
                 with self.assertRaisesRegex(Exception, "completed Acceptance"):
-                    _governance_history({path: original}, history)
+                    _governance_history(plan_snapshot(original), history)
 
         deleted = (
             "deleted",
             (
                 ("root", (), {}),
-                ("first-completion", ("root",), {path: original}),
+                ("first-completion", ("root",), plan_snapshot(original)),
                 ("deleted", ("first-completion",), {}),
             ),
         )
         with self.assertRaisesRegex(Exception, "disappeared"):
-            _governance_history({path: original}, deleted)
+            _governance_history(plan_snapshot(original), deleted)
         with self.assertRaisesRegex(Exception, "disappeared"):
             _governance_history({}, anchored)
 
@@ -952,29 +1657,33 @@ class StatusTest(unittest.TestCase):
             "closure",
             (
                 ("root", (), {}),
-                ("closure", ("root",), {path: closed_original}),
+                ("closure", ("root",), plan_snapshot(closed_original)),
             ),
         )
         with self.assertRaisesRegex(Exception, "completed Closure"):
             _governance_history(
-                {path: closed_original.replace("decision.md#close", "decision.md#new-close")},
+                plan_snapshot(
+                    closed_original.replace(
+                        "../roadmap.md#concept", "../roadmap.md#concept-other", 1
+                    )
+                ),
                 closure_history,
             )
         with self.assertRaisesRegex(Exception, "history is unavailable"):
-            _governance_history({path: original}, None)
+            _governance_history(plan_snapshot(original), None)
 
         merged = original.replace("Maintainer", "Delegate: Reviewer", 1)
         history = (
             "merge",
             (
                 ("root", (), {}),
-                ("accepted-topic", ("root",), {path: original}),
+                ("accepted-topic", ("root",), plan_snapshot(original)),
                 ("main-work", ("root",), {}),
-                ("merge", ("main-work", "accepted-topic"), {path: merged}),
+                ("merge", ("main-work", "accepted-topic"), plan_snapshot(merged)),
             ),
         )
         with self.assertRaisesRegex(Exception, "completed Acceptance"):
-            _governance_history({path: merged}, history)
+            _governance_history(plan_snapshot(merged), history)
 
     def test_accepted_gate_is_anchored_but_open_gate_is_mutable(self) -> None:
         plan_path = "docs/plans/M0.md"
@@ -987,24 +1696,24 @@ class StatusTest(unittest.TestCase):
                 (
                     "accepted",
                     ("root",),
-                    {plan_path: accepted, gate_path: GATE},
+                    plan_snapshot(accepted, GATE),
                 ),
             ),
         )
-        _governance_history({plan_path: accepted, gate_path: GATE}, history)
+        _governance_history(plan_snapshot(accepted, GATE), history)
 
         changed_gate = "# Changed gate\n"
         with self.assertRaisesRegex(Exception, "accepted gate"):
             _governance_history(
-                {plan_path: accepted, gate_path: changed_gate}, history
+                plan_snapshot(accepted, changed_gate), history
             )
 
         for label, later in (
             (
                 "mutate then restore",
-                {plan_path: accepted, gate_path: changed_gate},
+                plan_snapshot(accepted, changed_gate),
             ),
-            ("delete then restore", {plan_path: accepted}),
+            ("delete then restore", plan_snapshot(accepted)),
         ):
             with self.subTest(label=label):
                 traversed = (
@@ -1013,7 +1722,7 @@ class StatusTest(unittest.TestCase):
                 )
                 with self.assertRaisesRegex(Exception, "accepted gate|gate is missing"):
                     _governance_history(
-                        {plan_path: accepted, gate_path: GATE}, traversed
+                        plan_snapshot(accepted, GATE), traversed
                     )
 
         merged = (
@@ -1023,23 +1732,23 @@ class StatusTest(unittest.TestCase):
                 (
                     "accepted",
                     ("root",),
-                    {plan_path: accepted, gate_path: GATE},
+                    plan_snapshot(accepted, GATE),
                 ),
                 (
                     "main",
                     ("root",),
-                    {plan_path: plan(False), gate_path: changed_gate},
+                    plan_snapshot(plan(False), changed_gate),
                 ),
                 (
                     "merge",
                     ("main", "accepted"),
-                    {plan_path: accepted, gate_path: changed_gate},
+                    plan_snapshot(accepted, changed_gate),
                 ),
             ),
         )
         with self.assertRaisesRegex(Exception, "accepted gate"):
             _governance_history(
-                {plan_path: accepted, gate_path: changed_gate}, merged
+                plan_snapshot(accepted, changed_gate), merged
             )
 
         open_history = (
@@ -1049,18 +1758,18 @@ class StatusTest(unittest.TestCase):
                 (
                     "open",
                     ("root",),
-                    {plan_path: plan(False), gate_path: GATE},
+                    plan_snapshot(plan(False), GATE),
                 ),
             ),
         )
         _governance_history(
-            {plan_path: plan(False), gate_path: changed_gate}, open_history
+            plan_snapshot(plan(False), changed_gate), open_history
         )
 
         noncanonical = "# Gate\r\n"
         with self.assertRaisesRegex(Exception, "UTF-8/LF"):
             _governance_history(
-                {plan_path: accepted, gate_path: noncanonical},
+                plan_snapshot(accepted, noncanonical),
                 (
                     "accepted",
                     (
@@ -1068,7 +1777,7 @@ class StatusTest(unittest.TestCase):
                         (
                             "accepted",
                             ("root",),
-                            {plan_path: accepted, gate_path: noncanonical},
+                            plan_snapshot(accepted, noncanonical),
                         ),
                     ),
                 ),
@@ -1077,12 +1786,12 @@ class StatusTest(unittest.TestCase):
 
     def test_barrier_mutations_fail_and_matching_change_passes(self) -> None:
         mutations = (
-            ("source append", "docs/vision.md", "-> multi-client attachment and protocol candidate", "-> multi-client attachment and protocol candidate\n-> extra"),
-            ("renamed heading", "docs/vision.md", "## 22. Ownership and serial barriers", "## 22. Barriers"),
-            ("different section", "docs/vision.md", "<!-- loopex:rejoin-source:start -->", "# Different section\n\n<!-- loopex:rejoin-source:start -->"),
-            ("setext h1", "docs/vision.md", "<!-- loopex:rejoin-source:start -->", "Different\n=========\n\n<!-- loopex:rejoin-source:start -->"),
-            ("setext h2", "docs/vision.md", "<!-- loopex:rejoin-source:start -->", "Different\n---------\n\n<!-- loopex:rejoin-source:start -->"),
-            ("hidden", "docs/roadmap.md", "<!-- loopex:rejoin-copy:start -->", "<!--\n<!-- loopex:rejoin-copy:start -->"),
+            ("source append", "docs/vision-technical.md", "-> multi-client attachment and protocol candidate", "-> multi-client attachment and protocol candidate\n-> extra"),
+            ("renamed heading", "docs/vision-technical.md", "## 22. Ownership and serial barriers", "## 22. Barriers"),
+            ("different section", "docs/vision-technical.md", "<!-- loopex:rejoin-source:start -->", "# Different section\n\n<!-- loopex:rejoin-source:start -->"),
+            ("setext h1", "docs/vision-technical.md", "<!-- loopex:rejoin-source:start -->", "Different\n=========\n\n<!-- loopex:rejoin-source:start -->"),
+            ("setext h2", "docs/vision-technical.md", "<!-- loopex:rejoin-source:start -->", "Different\n---------\n\n<!-- loopex:rejoin-source:start -->"),
+            ("hidden", "docs/roadmap-technical.md", "<!-- loopex:rejoin-copy:start -->", "<!--\n<!-- loopex:rejoin-copy:start -->"),
         )
         for label, path, old, new in mutations:
             with self.subTest(label):

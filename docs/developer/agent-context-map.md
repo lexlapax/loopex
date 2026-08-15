@@ -1,52 +1,59 @@
 # Agent Context Map
 
-This is the lazy-loaded routing map for coding agents. It points to the first
-documents to read when the active plan and local code are not enough. Until
-implementation produces code, ADRs, and developer docs, most rows route into
-[docs/vision.md](../vision.md) by section; replace vision-section pointers
-with ADR and code pointers as they land.
+This is the lazy-loaded routing map for development work. It points to the first
+documents to read when the active plan and local code are not enough. Each
+paired route starts with Concept and then identifies the exact Technical depth.
+Replace founding-document pointers with nearer accepted decisions as they land,
+and add code and test evidence pointers without changing the authority order in
+`AGENTS.md`.
 
 ## How To Use
 
 1. Read `AGENTS.md` first.
 2. Read [docs/plans/README.md](../plans/README.md) for the checked-out
    revision's canonical milestone status.
-3. Read the accepted active plan and gate contract when one exists, plus its
-   constraining accepted ADRs.
-4. Use the table below to find an area's anchor sections and docs.
-5. Prefer code and tests over stale prose. Flag conflicts.
+3. Read the [development charter](development-charter.md#concept), following its
+   [Technical depth](development-charter-technical.md#technical-depth) when the
+   task changes documentation, review form, or public code documentation.
+4. Read the accepted active Concept plan, its Technical depth, and gate contract
+   when they exist, plus constraining accepted ADR pairs.
+5. Use the table below to read the relevant Concept anchor first and then the
+   exact Technical depth anchor. Follow the authority order in `AGENTS.md`;
+   treat code and tests as evidence, and flag stale or conflicting prose.
+6. Flag any pair conflict; neither side silently wins.
 
-`docs/vision.md` may be edited only under an explicit current maintainer or
-developer request naming a vision change; see `AGENTS.md` for the separate
-decision duty when a founding boundary or invariant would change.
+Either member of the vision pair may be edited only under an explicit current
+maintainer or developer request naming a vision change; see `AGENTS.md` for the
+separate decision duty when a founding boundary or invariant would change.
 
 ## Area Routing
 
-| Area | Start with | Notes |
-| --- | --- | --- |
-| Doctrine, product definition, principles | Vision §2–§4 | "Runtime is the framework"; what Loopex is and is not; the 21 principles. |
-| Domain language | Vision §5 | Session/run/turn, operation/attempt/epoch/fence, journal vs public event, brain vs hand. Use these terms exactly. |
-| Ownership and trust boundaries | Vision §6 | The Loopex/host/executor ownership map; policy port (`allow/deny/defer`); grants. Mechanism in Loopex, governance in the host. |
-| Stack, dependency budget, runtime floor | Vision §7 | Protocol/Core/Runtime namespaces; stdlib+OTP-only core; BEAM-native persistence doctrine; OTP 26+/Elixir 1.17+. |
-| Runtime instances, supervision, reducer | Vision §8, later `docs/architecture.md` | Multi-instance; SessionTree `:one_for_all`; pure reducer; one bounded journal transaction. |
-| Transactions, operations, recovery, cancellation | Vision §9 | `commit_unknown` three-state store contract; operation lifecycle; reconciliation table; closed outcome algebra. |
-| Agent loop, queues, tool ordering | Vision §10 | One run per session; prompt/steer/follow-up/respond_interaction; serial tools first; split payloads. |
-| Public protocol, events, attachments | Vision §11, later `docs/protocol/` | Four stream planes; command/event envelopes; snapshot-first attach; no controller lease in core. |
-| Journal, stores, branches, compaction, artifacts | Vision §12 | Private journal surfaces; in-memory for tests and simple embedding; a human-readable local adapter is optional, private, and experimental; durable store selection remains open pending evidence and an ADR; credentials and content protection. |
-| Model boundary and continuation | Vision §13.1–§13.4 | Canonical Loopex types; `Loopex.LLM`; ReqLLM reference adapter; provider-native sidecar. |
-| Context pipeline (memory, retrieval, prompts) | Vision §13.5, §17.3 | The sole seam for memory/RAG/prompt systems; providers/transformers/selectors/observers; receipts; agentic-search code posture. |
-| Tools and the coding surface | Vision §14 | Seven tools, budget-constrained; tool metadata grants nothing. |
-| Executors, brain/hand, distribution security | Vision §15 | Job/receipt protocol; three trust classes; distribution connects trusted gateways only. |
-| Trust classes, project resources, sensitive data | Vision §16 | Resource admission; multi-tenant rule; observability redaction. |
-| Extensions, generations, generated code | Vision §17 | Three package classes; quiescent activation; exact A→B→A rollback; generated-code promotion path. |
-| Embedded API, transports, clients, ACP | Vision §18 | One semantic contract; JSONL RPC first; reference daemon/CLI; ACP before protocol v1 freeze. |
-| Hosts and wrappers | Vision §19 | Expected consumers; secured sample host; prior-system evidence and clean-room rule. |
-| Repository layout, derived docs, ADR agenda | Vision §20 | What to create next and which decisions need ADRs. |
-| Delivery shape and milestones | Vision §21, [plans index](../plans/README.md), the active plan, [roadmap.md](../roadmap.md) | The plans index owns current status; §21's capability ladder and the roadmap are non-normative guidance, while §21's planning and prerequisite duties remain controlling; an accepted plan is the commitment. |
-| Verification, invariants, budgets | Vision §23; AGENTS.md § Product Non-Negotiables; the active plan | Test layers; the named invariant suite; scope-specific minimalism budgets; every abstraction names concrete examples or current implementations; raw line count is only a signal unless the accepted plan locks a cap. |
-| Compatibility and release governance | Vision §24 | Six separately versioned surfaces; 0.x labeling; migration/rollback duties. |
-| Prior-system evidence (Allbert Assist) | Vision §19.3, §29.6 | All consulted documents are directly linked there with full URLs. Lessons flow in; code does not. |
-| Coding-agent ecosystem, adapters, skills, portable enforcement | AGENTS.md § Project State and Client Adapters and § Parallel Work and Portable Enforcement; [DEVELOPMENT.md](../../DEVELOPMENT.md); [agent-adapter-smoke.md](agent-adapter-smoke.md); `scripts/` | Check current primary vendor docs and installed behavior, derive coding-agent-agnostic consequences first, then keep `.claude/`, `.codex/`, and future tested adapters thin. OpenCode, Pi, and a future Loopex coding surface are candidates, not supported clients. Every check runs locally; hosted CI is replaceable. |
+| Area | Concept | Technical depth | Notes |
+| --- | --- | --- | --- |
+| Doctrine, product definition, principles | [Product definition](../vision.md#concept-vision-product-definition) and [principles](../vision.md#concept-vision-product-principles) | [Product boundaries](../vision-technical.md#technical-vision-product-definition) and [principle mechanics](../vision-technical.md#technical-vision-product-principles) | “Runtime is the framework”; what Loopex is and is not. |
+| Domain language | [Domain language](../vision.md#concept-vision-domain-language) | [Exact terms](../vision-technical.md#technical-vision-domain-language) | Session/run/turn, operation/attempt/epoch/fence, journal/public event, brain/hand. |
+| Ownership and trust boundaries | [Ownership](../vision.md#concept-vision-ownership-trust) | [Ownership mechanics](../vision-technical.md#technical-vision-ownership-trust) | Loopex/host/executor ownership, policy decisions, and grants. |
+| Stack, dependency budget, runtime floor | [Dependency doctrine](../vision.md#concept-vision-dependency-doctrine) and [ADR 0002 decision](../adr/0002-bootstrap-runtime-floor.md#concept-adr-0002-decision) | [Exact dependency constraints](../vision-technical.md#technical-vision-dependency-doctrine) and [ADR 0002 mechanics](../adr/0002-bootstrap-runtime-floor-technical.md#technical-adr-0002-decision) | Protocol/Core/Runtime, stdlib+OTP-only core, bootstrap floor. |
+| Runtime instances, supervision, reducer | [Runtime ownership](../vision.md#concept-vision-runtime-supervision) | [Supervision and reducer mechanics](../vision-technical.md#technical-vision-runtime-supervision) | Multi-instance supervision, pure reducer, bounded journal transaction. |
+| Transactions, operations, recovery, cancellation | [Recovery truth](../vision.md#concept-vision-recovery-truth) | [Transaction and recovery mechanics](../vision-technical.md#technical-vision-recovery-truth) | `commit_unknown`, operation lifecycle, reconciliation, outcome algebra. |
+| Agent loop, queues, tool ordering | [Loop semantics](../vision.md#concept-vision-loop-semantics) | [Loop mechanics](../vision-technical.md#technical-vision-loop-semantics) | One run per session, input classes, ordering, and split payloads. |
+| Public protocol, events, attachments | [Public protocol](../vision.md#concept-vision-public-protocol) | [Protocol mechanics](../vision-technical.md#technical-vision-public-protocol) | Stream planes, envelopes, attach behavior, and authority boundaries. |
+| Journal, stores, branches, compaction, artifacts | [Sessions and storage](../vision.md#concept-vision-sessions-storage) | [Storage mechanics](../vision-technical.md#technical-vision-sessions-storage) | Recovery surfaces, private adapters, store decision, protection. |
+| Model boundary and continuation | [Model boundary](../vision.md#concept-vision-model-boundary) | [Model mechanics](../vision-technical.md#technical-vision-model-boundary) | Canonical types, `Loopex.LLM`, reference adapter, native sidecar. |
+| Context pipeline | [Model boundary](../vision.md#concept-vision-model-boundary) | [Context-pipeline mechanics](../vision-technical.md#technical-vision-model-boundary) | The sole seam for memory, retrieval, prompts, provenance, and receipts. |
+| Tools and coding surface | [Tools](../vision.md#concept-vision-tools) | [Tool mechanics](../vision-technical.md#technical-vision-tools) | Seven-tool surface, budget, and non-authority of metadata. |
+| Executors, brain/hand, distribution | [Executor protocol](../vision.md#concept-vision-executor-protocol) | [Executor mechanics](../vision-technical.md#technical-vision-executor-protocol) | Job/receipt protocol, trust classes, trusted gateways. |
+| Trust, resources, sensitive data | [Sensitive data](../vision.md#concept-vision-sensitive-data) | [Trust mechanics](../vision-technical.md#technical-vision-sensitive-data) | Resource admission, tenancy, credentials, and redaction. |
+| Extensions, generations, generated code | [Extensions](../vision.md#concept-vision-extensions) | [Extension mechanics](../vision-technical.md#technical-vision-extensions) | Package classes, quiescent activation, A→B→A rollback, promotion. |
+| Embedded API, transports, clients, ACP | [API and transports](../vision.md#concept-vision-api-transports) | [Transport mechanics](../vision-technical.md#technical-vision-api-transports) | One semantic contract, JSONL RPC first, reference surfaces. |
+| Hosts and wrappers | [Hosts](../vision.md#concept-vision-hosts) | [Host mechanics](../vision-technical.md#technical-vision-hosts) | Expected consumers, secured sample host, independent implementation. |
+| Repository layout and ADR agenda | [Repository seed](../vision.md#concept-vision-repository-seed) | [Exact seed](../vision-technical.md#technical-vision-repository-seed) | Pair with the [ADR 0001 decision](../adr/0001-repository-and-application-layout.md#concept-adr-0001-decision) and its [technical mechanics](../adr/0001-repository-and-application-layout-technical.md#technical-adr-0001-decision). |
+| Delivery shape and milestones | [Delivery strategy](../vision.md#concept-vision-delivery-strategy) and [roadmap](../roadmap.md#concept-roadmap-ladder) | [Delivery mechanics](../vision-technical.md#technical-vision-delivery-strategy) and [roadmap evidence](../roadmap-technical.md#technical-roadmap-ladder) | The [plans index](../plans/README.md) owns current status; an accepted plan pair is the commitment. |
+| Serial barriers | [Ordering constraint](../vision.md#concept-vision-serial-barriers) | [Exact rejoin order](../vision-technical.md#technical-vision-serial-barriers) | A milestone may add barriers but cannot weaken the founding sequence. |
+| Verification, invariants, budgets | [Verification](../vision.md#concept-vision-verification) | [Exact evidence](../vision-technical.md#technical-vision-verification) | Claim-proportional tests and scope-specific minimalism budgets. |
+| Compatibility and release governance | [Compatibility](../vision.md#concept-vision-compatibility) | [Compatibility mechanics](../vision-technical.md#technical-vision-compatibility) | Versioned surfaces, 0.x labels, migrations, rollback, freezes. |
+| Prior-system evidence | [Sources](../vision.md#concept-vision-sources) | [Source record](../vision-technical.md#technical-vision-sources) | Consulted sources are linked; independent implementation remains mandatory. |
+| Development method and portable clients | [Development charter](development-charter.md#concept-portable-development) | [Portable enforcement](development-charter-technical.md#technical-portable-development) | Also read `AGENTS.md`, [DEVELOPMENT.md](../../DEVELOPMENT.md), retained [smoke evidence](agent-adapter-smoke.md), and repository commands. |
 
 ## Test Quick Reference
 
@@ -59,7 +66,7 @@ change; property tests own reducer/replay claims; fault injection owns
 durable-transition claims. Real-provider runs are a tagged, explicitly invoked
 lane — never part of the default suite.
 
-## Coding-Agent Ecosystem Guidance
+## Development Client Guidance
 
 - `scripts/check-agent-bootstrap.sh`, `scripts/check-gitignore.sh`,
   `scripts/check-commit-messages.sh`, `scripts/check-repo-hygiene.sh`, and
@@ -97,9 +104,9 @@ lane — never part of the default suite.
   Required inspection checks must also execute in that environment: during the
   bridge period, Python assertions live in tracked scripts rather than shell
   here-documents that need ambient temporary writes.
-- For coding-agent ecosystem changes, check current primary vendor docs or
-  release notes plus installed behavior, derive any coding-agent-agnostic
-  consequence first, and retain version-specific facts here. Material changes
+- For development-client ecosystem changes, check current primary vendor docs
+  or release notes plus installed behavior, derive shared consequences first,
+  and retain version-specific facts here. Material changes
   to development behavior require an option-and-implication packet and
   maintainer approval before adapter edits.
 - Current Codex compatibility: `[features] multi_agent_v2` stays in
@@ -112,7 +119,9 @@ lane — never part of the default suite.
   consumes `disable-model-invocation: true`, while Codex consumes
   `agents/openai.yaml` policy `allow_implicit_invocation: false`. Enforcement
   scripts use stock `grep -E`, never ripgrep.
-- Mix-scaffold rider: proposed ADR 0001 makes the first accepted scaffold create
+- Mix-scaffold rider: [ADR 0001](../adr/0001-repository-and-application-layout.md#concept-adr-0001-decision)
+  and its [technical companion](../adr/0001-repository-and-application-layout-technical.md#technical-adr-0001-decision)
+  make the first accepted scaffold create
   a repository-owned dependency-budget/direction command and turn
   `.claude/hooks/deps-budget.sh` into a thin caller. Until the M0 gate creates
   and proves that command, the current Claude-only hook is early feedback and
@@ -143,8 +152,9 @@ and any hosted-wrapper result are supplementary publication evidence, not
 closure authority or a development dependency. Any client should derive the
 closed state from these facts alone:
 
-- The permanent Coding-Agent Ecosystem Guidance above, retained smoke evidence,
-  and the AGENTS.md durability paragraph (complete per vision §20.3) are the
+- The permanent Development Client Guidance above, retained smoke evidence,
+  and the AGENTS.md durability paragraph (complete under the
+  [repository-seed contract](../vision-technical.md#technical-vision-repository-seed)) are the
   candidate's shared memory; do not move these facts into client-only state.
 - Current authorization and the next transition are recorded only in the
   [canonical plans status register](../plans/README.md).

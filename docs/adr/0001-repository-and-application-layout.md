@@ -1,9 +1,14 @@
 # 0001. Repository and application layout
 
+<a id="concept"></a>
+## Concept
+
+Technical depth: [Repository layout mechanics](0001-repository-and-application-layout-technical.md#technical-depth).
+
 - **Status:** Proposed
 - **Date:** 2026-08-15
 - **Decision owner:** Maintainer
-- **Prerequisite for:** the M0 gate (see [docs/roadmap.md](../roadmap.md))
+- **Prerequisite for:** the M0 gate (see [the roadmap](../roadmap.md#concept-roadmap-m0))
 
 ## Governance Record
 
@@ -11,146 +16,82 @@
 | --- | --- | --- | --- |
 | Acceptance | — | — | — |
 
+<a id="concept-adr-0001-context"></a>
 ## Context
 
-[Vision §20.1](../vision.md) names one monorepo and one version train with four
-visible areas — the standard-runtime-only protocol/core/runtime application,
-replaceable adapter and reference-client applications, language-neutral
-conformance fixtures, and executable examples plus documentation — and
-deliberately does not freeze names or a directory tree. It requires the tree to
-make dependency direction obvious: core never imports adapter, client, provider,
-store, executor, or host implementations.
+Loopex needs one repository and one version train whose layout makes dependency
+direction visible. The core must use only the Elixir/Erlang standard runtime,
+while replaceable adapters may carry their own dependencies. Folder names alone
+cannot prove that boundary, and application boundaries must not imply separate
+packages or release trains.
 
-[Vision §7.2](../vision.md) is stricter than a naming preference. The `loopex`
-core application must have **no external runtime dependency**, while the
-reference model adapter is specified as using ReqLLM directly (founding
-decisions 5 and 6). Those two requirements cannot both hold inside a single Mix
-project: one `mix.exs` listing `req_llm` puts an external dependency in the core
-application's dependency list on the day the reference adapter lands.
+A current client hook anticipates `apps/loopex/mix.exs`, but it is early feedback
+and is ineffective before a scaffold exists. The accepted scaffold must replace
+that layout assumption with repository-owned enforcement.
 
-The same section warns the other way: "Folder structure alone is not evidence
-for a package boundary," and physical application or Hex-package splits require
-demonstrated pressure and an ADR. So the tree must separate applications without
-implying separate packages or release trains.
+Technical depth: [Constraints and current rider](0001-repository-and-application-layout-technical.md#technical-adr-0001-context).
 
-A repository rider exists. `.claude/hooks/deps-budget.sh` hardcodes
-`apps/loopex/mix.exs` and is silently inert before the scaffold exists. It is
-client-only early feedback, not repository enforcement. That hook rejects
-*every* dependency tuple in the core's deps list, including dev-only ones, so
-any accepted layout permitting dev/test dependencies in `apps/loopex` would
-also contradict the budget it previews.
-
+<a id="concept-adr-0001-decision"></a>
 ## Decision
 
 Use a single Elixir umbrella project at the repository root.
 
-```text
-mix.exs                    umbrella root; one version train
-apps/loopex/               Loopex.Protocol + Loopex.Core + Loopex.Runtime
-apps/<adapter apps>/       model, store, executor, transport adapters
-apps/<client apps>/        reference daemon and CLI
-conformance/               language-neutral fixtures and golden vectors
-examples/
-docs/
-```
+- `apps/loopex` contains protocol, pure core, and OTP runtime in one application
+  with an empty dependency list, including development and test dependencies.
+- Every replaceable edge and reference client is a separate umbrella
+  application that depends inward on `apps/loopex`.
+- Application boundaries express dependency direction, not package boundaries.
+  Loopex remains one version train through 0.x.
+- Adapter and client applications are added only by accepted plans with a named
+  responsibility and a concrete need.
+- Language-neutral conformance fixtures stay outside `apps/`.
+- The first accepted scaffold creates the repository-owned dependency-budget
+  and direction command, connects the existing client hook to it, and proves
+  both positive and adversarial cases in the M0 gate.
 
-1. `apps/loopex` holds the protocol, pure core, and OTP runtime as one
-   application, matching vision §20.1's singular "protocol/core/runtime
-   application." Its `deps` list is **empty** — no runtime dependencies and no
-   dev or test tooling either. By M0 closure, repository and development checks
-   use only standard Elixir/OTP/Mix entrypoints; accepted adapter runtime
-   dependencies remain outside core. If a later accepted decision adds a
-   project-wide external formatter, analysis, or documentation dependency, it
-   is declared once at the umbrella root rather than appearing in the core's
-   dependency list.
-2. Every replaceable edge and every reference client is its own umbrella
-   application. Application boundaries carry the dependency direction
-   structurally: `apps/loopex` never lists an in-umbrella dependency, and
-   adapters depend inward on it.
-3. Umbrella application boundaries are **not** package boundaries. Everything
-   ships as one version train through 0.x. A Hex-package or repository split
-   remains a separate decision requiring its own evidence and ADR
-   (vision §7.2, §24.4).
-4. Adapter and client applications are created by an accepted plan, each with a
-   named owner and a reason beyond folder tidiness. This ADR fixes the shape,
-   not the inventory.
-5. `conformance/` sits outside `apps/` because the fixtures are language-neutral
-   data for adapter authors in any language, not an OTP application.
-6. The first accepted scaffold creates the repository-owned, client-neutral
-   dependency-budget and direction command, currently proposed as
-   `scripts/check-deps-budget.sh`, and wires it into the aggregate.
-   `.claude/hooks/deps-budget.sh` becomes a thin caller of that command so every
-   client and CI invoke the same enforcement. The repository command does not
-   exist yet.
-7. The **M0 gate** locks proof against a real `apps/loopex/mix.exs`, including an
-   adversarial fixture that introduces a forbidden core-to-adapter reference and
-   demonstrates that the repository command fails. This is an implementation
-   obligation, not a condition of accepting this ADR: scaffolding cannot exist
-   until an accepted plan and red gate authorize it.
+This ADR fixes the repository shape, not the future adapter inventory, package
+publication, or implementation scaffold.
 
-## Alternatives and evidence
+Technical depth: [Exact tree and enforcement obligations](0001-repository-and-application-layout-technical.md#technical-adr-0001-decision).
 
-**Single Mix project with directory separation, enforced by `mix xref`.**
-Rejected. The reference ReqLLM adapter would place an external dependency in the
-core application's `mix.exs`, contradicting founding decision 5 directly. It
-also erases the explicit application graph between core and adapter. A repository
-check could reconstruct that boundary from directories and `mix xref` output,
-but the umbrella represents the graph directly and still pairs it with the
-adversarial enforcement required for static and dynamic references.
+<a id="concept-adr-0001-alternatives"></a>
+## Alternatives
 
-**Poncho projects — separate Mix projects joined by path dependencies.**
-Rejected for now. It buys independent release cadence, which vision §7.2
-explicitly does not want through 0.x, at the cost of a shared build, shared
-test invocation, and shared configuration. Revisit only under demonstrated
-release-cadence pressure, which would be the same evidence a package split
-needs.
+A single Mix application would obscure the boundary between a dependency-free
+core and adapters with external dependencies. Separate poncho projects or
+repositories would buy independent release cadence that the project does not
+need through 0.x, while making the shared build and one-version train harder.
 
-**Multiple repositories.** Rejected: vision §7.2 mandates one repository and one
-release version through 0.x.
+Technical depth: [Alternative analysis and evidence](0001-repository-and-application-layout-technical.md#technical-adr-0001-alternatives).
 
+<a id="concept-adr-0001-consequences"></a>
 ## Consequences
 
-- Umbrella application boundaries make dependency direction explicit and
-  enforceable, but do not prove it alone. The repository command and its
-  adversarial fixture carry that proof; ordinary compilation is not claimed to
-  detect every static or dynamically constructed module reference.
-- The core-against-fakes build that vision §7.2 requires is expressible as an
-  ordinary per-application test command.
+The umbrella makes dependency direction inspectable and gives core an ordinary
+fakes-only build, but the layout alone is not proof. Repository checks and an
+adversarial fixture carry that evidence.
 
-What becomes harder:
+Repository-wide configuration, core-only validation, analysis setup, and later
+publication require explicit commands. Runtime state must still be passed by
+reference rather than hidden in application environment. A later package split
+or project-wide external development tool remains a separate decision.
 
-- Umbrella configuration is repository-wide. This collides with the vision's
-  runtime-instance rule: per-runtime state must not hide in application
-  environment. Tests and examples must pass runtime references explicitly, and
-  the M0 gate should include a check that core reads no global application
-  environment for per-runtime state.
-- Root `mix test` runs every application. The core-only, fakes-only build needs
-  its own locked command; ambiguity there would let an adapter dependency leak
-  into a "core" claim.
-- Built-in analysis and formatter configuration lives at the umbrella root, and
-  Dialyzer PLT handling in umbrellas needs explicit setup. Any later separately
-  accepted external project-wide tool also lives at the root; this ADR does not
-  authorize one.
-- Publishing from an umbrella is per-application. The one-version-train rule
-  becomes a check to write, not a property the tooling gives for free.
+Technical depth: [Operational consequences and edge cases](0001-repository-and-application-layout-technical.md#technical-adr-0001-consequences).
 
-## Compatibility
+<a id="concept-adr-0001-compatibility"></a>
+## Compatibility, Migration, and Rollback
 
-No released surface exists; nothing to break. Application names inside `apps/`
-are internal until a package is published, at which point the name becomes a
-compatibility surface under vision §24.1.
+No released surface exists. Application names remain internal until a package
+is published. Before product code exists, rollback removes the scaffold on the
+same branch; after applications exist, renaming one requires an amendment with
+compatibility and migration consequences.
 
-## Migration and rollback
-
-No code exists. Rollback is deleting the scaffold in the same branch that
-created it. After applications exist, renaming one is a breaking change for any
-in-repo dependent and must go through an amendment to this ADR.
+Technical depth: [Compatibility and rollback mechanics](0001-repository-and-application-layout-technical.md#technical-adr-0001-compatibility).
 
 ## Links
 
-- [Vision §7.1–§7.2](../vision.md) — four layers, core dependency budget
-- [Vision §20.1](../vision.md) — repository seed and initial layout
-- [Vision §24.1, §24.4](../vision.md) — versioned surfaces, publication posture
-- [docs/roadmap.md](../roadmap.md) — capability guidance and ADR agenda
-- [docs/developer/agent-context-map.md](../developer/agent-context-map.md) —
-  the `deps-budget.sh` rider
+- [Vision — dependency doctrine](../vision.md#concept-vision-dependency-doctrine)
+- [Vision — repository seed](../vision.md#concept-vision-repository-seed)
+- [Vision — compatibility](../vision.md#concept-vision-compatibility)
+- [Roadmap — M0](../roadmap.md#concept-roadmap-m0)
+- [Context map](../developer/agent-context-map.md)
