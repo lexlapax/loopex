@@ -133,7 +133,17 @@ the exact document set its milestone must update.
   reordered, or changed commitments and history rewrites while leaving
   conforming workstream, progress, outcome-state, and evidence-link updates
   outside the locks.
-- Proposed ADR 0002 now names two events that trigger its amendment: publishing
+- ADR 0001, ADR 0002, and ADR 0003 are **Accepted**, bound to candidate
+  `c703a65` with concept and technical digests recorded in each governance row.
+  The maintainer's disposition is retained in the context map under
+  Retained Authority Dispositions, written before the administrative transition
+  so the pointer resolves to integrated bytes. The transition changed nine
+  lines — three statuses, three governance rows, three derived capsule fields —
+  and was independently reviewed before integration.
+- M0 is no longer blocked on decisions. The derived status capsule now reports
+  that M0 has not been explicitly opened gate-first, and the next maintainer
+  decision is to open or defer it.
+- ADR 0002 names two events that trigger its amendment: publishing
   any package, which declares a language requirement to consumers, and retaining
   a prebuilt extension artifact, whose declared build toolchain is verified
   against the running runtime before activation. Validated pairs therefore bound
