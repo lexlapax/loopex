@@ -5,6 +5,18 @@ Adapter parity requires proof of effective loading, not file presence
 manual smoke results; the deterministic subset runs in CI via
 `scripts/check-agent-bootstrap.sh`.
 
+## 2026-08-15 — source SHA `f747b97` (canonical-context pointers)
+
+Skill and client-agent bytes changed (each artifact now defers to `AGENTS.md`
+and the context map first). Rerun: `codex-cli 0.147.0`,
+`codex exec --sandbox read-only`, ChatGPT login.
+
+| Check | Result |
+| --- | --- |
+| All four subagent roles still registered | PASS |
+| Skills `adr`, `gate`, `close-milestone` still discovered and parsed | PASS |
+| Codex reads back the gate skill's read-AGENTS.md-first routing correctly | PASS |
+
 ## 2026-08-15 — source SHA `1ee75ef44a73feafc26043fd344c4aecfca71d9e`
 
 ### Codex
