@@ -12,4 +12,10 @@ if [ -f mix.exs ] && command -v mix >/dev/null 2>&1; then
   fi
 fi
 .claude/hooks/deps-budget.sh || fail=2
+# Repository-owned seed check; subsecond today. Move to CI gates when they
+# exist rather than letting Stop grow slow.
+if ! bootstrap_err="$(scripts/check-agent-bootstrap.sh 2>&1 >/dev/null)"; then
+  echo "Stop blocked: ${bootstrap_err:-scripts/check-agent-bootstrap.sh failed}" >&2
+  fail=2
+fi
 exit $fail

@@ -25,7 +25,7 @@ with ADR and code pointers as they land.
 | Transactions, operations, recovery, cancellation | Vision §9 | `commit_unknown` three-state store contract; operation lifecycle; reconciliation table; closed outcome algebra. |
 | Agent loop, queues, tool ordering | Vision §10 | One run per session; prompt/steer/follow-up/respond_interaction; serial tools first; split payloads. |
 | Public protocol, events, attachments | Vision §11, later `docs/protocol/` | Four stream planes; command/event envelopes; snapshot-first attach; no controller lease in core. |
-| Journal, stores, branches, compaction, artifacts | Vision §12 | Private journal port; in-memory → JSONL (experimental) → ADR-selected daemon store; credentials and content protection. |
+| Journal, stores, branches, compaction, artifacts | Vision §12 | Private journal surfaces; in-memory for tests and simple embedding; a human-readable local adapter is optional, private, and experimental; durable store selection remains open pending evidence and an ADR; credentials and content protection. |
 | Model boundary and continuation | Vision §13.1–§13.4 | Canonical Loopex types; `Loopex.LLM`; ReqLLM reference adapter; provider-native sidecar. |
 | Context pipeline (memory, retrieval, prompts) | Vision §13.5, §17.3 | The sole seam for memory/RAG/prompt systems; providers/transformers/selectors/observers; receipts; agentic-search code posture. |
 | Tools and the coding surface | Vision §14 | Seven tools, budget-constrained; tool metadata grants nothing. |

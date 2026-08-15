@@ -1,6 +1,6 @@
 name = "mechanical_worker"
-description = "Luna worker for narrow repeatable scans, inventories, extraction, mechanical transformations, fixture work, and test-log triage."
-model = "gpt-5.6-luna"
+description = "Worker for narrow repeatable scans, inventories, extraction, mechanical transformations, fixture work, and test-log triage."
+# Inherit the parent model so this project does not pin account-specific aliases.
 model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 developer_instructions = """

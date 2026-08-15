@@ -22,8 +22,8 @@ and subsystem routing in the context map.
 
 ## Context and Authority
 
-Start with the current task, this file, the active plan and gate contract, and
-relevant code and tests. Use
+Start with the current task, this file, any accepted active plan and gate
+contract, and relevant code and tests. Use
 [docs/developer/agent-context-map.md](docs/developer/agent-context-map.md) to
 load constraining vision sections and accepted ADRs. Read the full vision for
 architecture, trust, public contracts, cross-domain work, or a new plan. Do not
@@ -87,12 +87,18 @@ evidence-backed decision packet.
 
 ## Milestones and Gates
 
+- **Seed bootstrap.** Before the first plan and gate contract are accepted, an
+  explicit maintainer task may authorize founding-document,
+  portable-enforcement, and client-adapter work, plus plan/ADR proposals and
+  executable gate scaffolding; it does not authorize product implementation.
+  Use the latest committed seed as the base and run every available repository
+  check. A missing product gate is unavailable evidence, not PASS.
 - Begin from a base whose required gates are green. A claimed pre-existing
   failure requires the same command and matching signature at the base SHA.
-- Before production implementation, create a branch-only gate checkpoint with
-  the plan candidate and executable acceptance. Existing gates stay green; the
-  new gate fails for the declared missing behavior. The red tree is never
-  mergeable to `main`.
+- Before implementation of any stage, including bounded contract experiments,
+  create a branch-only gate checkpoint with the plan candidate and executable
+  acceptance. Existing gates stay green; the new gate fails for the declared
+  missing behavior. The red tree is never mergeable to `main`.
 - The accepted plan names purpose/outcomes, scope/non-goals, ADR prerequisites,
   workstreams and rejoin barriers, evidence mapping, compatibility, migration,
   rollback, packaging, and decision owners.
@@ -177,10 +183,20 @@ fails closed when a required check is missing or silently ineffective.
   writer of that session's durable truth. Workers return evidence; they never
   mutate session state or publish durable facts independently.
 - **Durability and recovery truth.** Effect intent commits before dispatch and
-  facts before publication. `commit_unknown` fences its mutation domain. Async
-  results carry operation/attempt, request digest and epochs, plus applicable
-  executor identity/fence. Reject stale completions; admit prior receipts only
-  by current validated reconciliation; never blindly retry an effectful unknown.
+  facts before publication. `commit_unknown(tx_id)` fences its mutation domain:
+  no acknowledgement, publication, or dispatch occurs until the preallocated ID,
+  bound to the expected domain version and canonical mutation digest and
+  recoverable from the owning command or operation identity, is resolved. A live
+  result matches operation, attempt, journaled `canonical_request_digest`,
+  current session epoch, and kind-specific dispatch identity; executor effects
+  also match executor epoch, identity, and fencing token. A prior receipt is
+  admitted only through a solicited response
+  matching the current `reconciliation_query_id`, current coordinator/session
+  epoch, expected executor identity, and current recovery contract; its retained
+  tuple must match the journaled `operation_id`, original attempt, journaled
+  `canonical_request_digest`, original session and executor epochs, executor
+  identity, and fencing token. Reject stale completions; never blindly retry an
+  effectful unknown.
 - **Truth planes stay distinct.** Private recovery records, committed public
   events, snapshots, transient progress, and diagnostics have different
   guarantees. Notifications and progress are never durable truth.
@@ -220,10 +236,11 @@ authority, or acceptance evidence. Scheduled remediation inherits ordinary
 authority and otherwise produces a proposal.
 
 Claude Code uses a root `CLAUDE.md` importing `@AGENTS.md`; Codex reads this file
-directly. Other clients require a tested import or launcher shim. Client skill
-manifests may use Agent Skills where supported, but normative procedure stays in
-shared docs and repository commands. No policy exists only in a vendor directory;
-adapter smoke tests prove effective loading and workflow parity.
+directly. Canonical repository skills live in `.agents/skills`; clients discover
+those exact bytes directly or through a tested symlink or launcher shim. Client
+adapters may add invocation and permission UX, but normative procedure stays in
+shared skills, docs, and repository commands. No policy exists only in a vendor
+directory; adapter smoke tests prove effective loading and workflow parity.
 
 A future Loopex host treats this file, skills, plans, and nested instructions as
 provenance-bearing project context, never an effect grant. Host policy admits a

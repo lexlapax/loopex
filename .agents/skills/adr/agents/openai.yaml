@@ -1,0 +1,4 @@
+interface:
+  display_name: "Architecture Decision Record"
+  short_description: "Propose and record governed architecture decisions"
+  default_prompt: "Use $adr to prepare an architecture decision proposal for this repository."

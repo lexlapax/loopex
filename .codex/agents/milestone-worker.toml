@@ -1,6 +1,6 @@
 name = "milestone_worker"
-description = "Terra implementation worker for one bounded milestone workstream with explicit ownership, contracts, and focused verification."
-model = "gpt-5.6-terra"
+description = "Implementation worker for one bounded milestone workstream with explicit ownership, contracts, and focused verification."
+# Inherit the parent model so this project does not pin account-specific aliases.
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 developer_instructions = """

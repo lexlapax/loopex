@@ -16,8 +16,13 @@ case "$cmd" in
     ;;
 esac
 
-if printf '%s' "$cmd" | grep -qE '(~|\$HOME)/\.loopex'; then
-  echo "Blocked: never touch a real LOOPEX_HOME; use a temp dir (AGENTS.md)." >&2
-  exit 2
-fi
+path_view="${cmd//\"/}"
+path_view="${path_view//\'/}"
+real_loopex_home="${HOME%/}/.loopex"
+case "$path_view" in
+  *"~/.loopex"*|*'$HOME/.loopex'*|*'${HOME}/.loopex'*|*'${HOME%/}/.loopex'*|*"$real_loopex_home"*)
+    echo "Blocked: never touch a real LOOPEX_HOME; use a temp dir (AGENTS.md)." >&2
+    exit 2
+    ;;
+esac
 exit 0

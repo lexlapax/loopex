@@ -1,0 +1,4 @@
+interface:
+  display_name: "Close Milestone"
+  short_description: "Assemble exact-SHA closure evidence safely"
+  default_prompt: "Use $close-milestone to assemble a milestone closure candidate without accepting it."

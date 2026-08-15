@@ -6,7 +6,7 @@ Date: **2026-08-14**
 
 Project: **Loopex — “the loop, in Elixir”**
 
-Repository: **[github.com/lexlapax/loopex](https://github.com/lexlapax/loopex)** (to be created from this document)
+Repository: **[github.com/lexlapax/loopex](https://github.com/lexlapax/loopex)**
 
 License: **Apache-2.0**
 
@@ -14,8 +14,8 @@ Public name: **provisional pending trademark, domain, package, and repository cl
 
 ## 1. Purpose and authority
 
-This document is the founding vision for the Loopex repository, to be created
-at [github.com/lexlapax/loopex](https://github.com/lexlapax/loopex). It defines
+This document is the founding vision for the Loopex repository at
+[github.com/lexlapax/loopex](https://github.com/lexlapax/loopex). It defines
 the durable product boundary, architectural doctrine, domain language,
 non-negotiable correctness properties, ecosystem posture, and intended release
 sequence. It is deliberately complete enough to seed:
