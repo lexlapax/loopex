@@ -96,6 +96,12 @@ the exact document set its milestone must update.
 - The status check verifies that the complete rejoin-order fence in the roadmap
   matches the unique source fence inside vision §22, rather than comparing a
   loose line range.
+- While M0 remains blocked with no active milestone, the status check locks the
+  complete authority-bearing seed capsule; synchronized phase or authorization
+  drift can no longer pass merely because the table shape and README agree.
+- Isolated Codex 0.147 smokes now pair `--ignore-user-config` with trust scoped
+  to the exact checkout. Earlier no-trust runs cannot establish project profile
+  or skill loading because that flag also removes persisted project trust.
 - Landed work leaves no branch or worktree residue after integration.
 - Detached exact-SHA checkouts are no longer mistaken for merged local branches
   by the repository-hygiene check.

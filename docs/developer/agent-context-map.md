@@ -104,9 +104,12 @@ lane — never part of the default suite.
   maintainer approval before adapter edits.
 - Current Codex compatibility: `[features] multi_agent_v2` stays in
   `.codex/config.toml` because project roles are proven with codex-cli 0.147.0;
-  removal requires a separately reviewed compatibility smoke. The `gate` and
-  `close-milestone` skills require explicit invocation: Claude consumes
-  `disable-model-invocation: true`, while Codex consumes
+  removal requires a separately reviewed compatibility smoke. On that client,
+  `--ignore-user-config` also removes persisted project trust: an isolated
+  smoke must explicitly trust only its exact checkout through the invocation's
+  `projects` table, or project profiles and skills are unavailable evidence.
+  The `gate` and `close-milestone` skills require explicit invocation: Claude
+  consumes `disable-model-invocation: true`, while Codex consumes
   `agents/openai.yaml` policy `allow_implicit_invocation: false`. Enforcement
   scripts use stock `grep -E`, never ripgrep.
 - Mix-scaffold rider: proposed ADR 0001 makes the first accepted scaffold create
