@@ -88,6 +88,12 @@ only when plausible answers materially change scope, public behavior, authority,
 security, migration, cost, or external state; bundle questions into one
 evidence-backed decision packet.
 
+Report decisions, not discoveries. A report states what was decided and done, or
+puts a decision the maintainer owns in front of them with options, evidence, and
+a recommendation. An incidental finding is not a report: resolve it within the
+current scope, fold it into a decision packet, or leave it out. Never hand over
+an unresolved observation for the maintainer to triage.
+
 ## Milestones and Gates
 
 - **Seed bootstrap.** Before the first plan and gate contract are accepted, an

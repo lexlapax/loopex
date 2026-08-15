@@ -48,6 +48,8 @@ the exact document set its milestone must update.
   by `.claude/hooks/guard-bash.sh`, which left Codex and CI uncovered.
 - Milestone closure now explicitly includes updating the documentation set.
 - Landed work must leave no branch or worktree residue.
+- Agents report decisions, not incidental discoveries: resolve a finding in
+  scope, fold it into a decision packet, or leave it out.
 
 ## Seed bootstrap — closed 2026-08-15
 
