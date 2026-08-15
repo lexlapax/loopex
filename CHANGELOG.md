@@ -97,6 +97,8 @@ the exact document set its milestone must update.
   matches the unique source fence inside vision §22, rather than comparing a
   loose line range.
 - Landed work leaves no branch or worktree residue after integration.
+- Detached exact-SHA checkouts are no longer mistaken for merged local branches
+  by the repository-hygiene check.
 - Agents report decisions, not incidental discoveries: resolve a finding in
   scope, fold it into a decision packet, or leave it out.
 - Python 3.11 and `jq` are explicitly temporary seed/M0 bridges. Before M0

@@ -25,7 +25,9 @@ fi
 
 if git rev-parse --verify --quiet "$integration" >/dev/null; then
   # Branches already contained in the integration ref are landed work.
-  merged="$(git branch --merged "$integration" --format='%(refname:short)' \
+  # Query refs directly: `git branch` emits a synthetic detached-HEAD display
+  # line that is not a branch and must not become cleanup residue.
+  merged="$(git for-each-ref --merged "$integration" --format='%(refname:short)' refs/heads \
     | grep -vxE 'main' || true)"
   if [ -n "$merged" ]; then
     echo "branches already merged into ${integration}:" >&2
