@@ -2,8 +2,8 @@
 
 Adapter parity requires proof of effective loading, not file presence
 (AGENTS.md § Project State and Client Adapters). This file retains the latest
-manual smoke results; the deterministic subset runs in CI via
-`scripts/check-agent-bootstrap.sh`.
+manual smoke results; the deterministic subset is the repository-owned
+`scripts/check-bootstrap.sh` aggregate, which hosted CI may mirror.
 
 ## 2026-08-15 — closure candidate SHA `cd8d2ae8f8347d051e6ea82fbdd5f19005e0c427`
 
@@ -37,6 +37,22 @@ a9966e5c5aabcd0a66d80149794ce8fcbb19389b8663a88abaf7686d6c37a851  scripts/check-
 22162cef70f9440b839f5adf013dc410a93519b860a224eb3fc3498bfc870a5f  scripts/check-bootstrap.sh
 dbe9687987377f8b0d374a4e983afe43d20bfbc9a7fc2b1bb3556b30a76e173d  scripts/check-gitignore.sh
 ```
+
+## 2026-08-15 — live Claude session supplement at `fe45c1c27331a95f549fd274f5e6b71217194e3b`
+
+A logged-in interactive Claude Code 2.1.233 session at the closed tree
+supplied the inference observations the earlier headless probe could not
+(it had ended `authentication_failed` before any model turn):
+
+| Observation | Result |
+| --- | --- |
+| Root contract loaded through the `CLAUDE.md` `@AGENTS.md` import | PASS |
+| `.claude/settings.json` hooks active (PreToolUse guards and Stop gate ran live) | PASS |
+| Subagents `reviewer` and `conformance-author` registered | PASS |
+| `adr` model-invocable; `gate` and `close-milestone` absent from the model's invocable skill list (`disable-model-invocation` effective, mirroring the Codex protected-skill smoke) | PASS |
+
+Supplementary loading evidence only; the closure disposition and independent
+review above are unchanged.
 
 ## 2026-08-15 — source SHA `d1782a8d1c1c2c7f1399fe0aeebaa4a86b36f240` (bootstrap hardening)
 
