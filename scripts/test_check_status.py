@@ -22,10 +22,10 @@ CURRENT = f"""<!-- loopex:current-status:start -->
 | --- | --- |
 | Integrated phase | Pre-implementation planning |
 | Last integrated checkpoint | Seed bootstrap — 2026-08-15 |
-| Blockers | Decisions remain |
-| Authorized work | Planning only |
-| Next maintainer decision | Disposition decisions |
-| Next transition | Explicitly open `M0` |
+| Blockers | [ADR 0001](../adr/0001-repository-and-application-layout.md) and [ADR 0002](../adr/0002-bootstrap-runtime-floor.md) must be accepted or superseded by accepted replacements |
+| Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
+| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |
+| Next transition | After the prerequisites are accepted, the maintainer explicitly opens `M0` gate-first |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->"""
 REGISTER = """<!-- loopex:milestone-register:start -->
@@ -135,10 +135,22 @@ class StatusTest(unittest.TestCase):
     def test_status_shape_mutations_fail(self) -> None:
         cases = (
             ("summary drift", SUMMARY, SUMMARY.replace("blocked", "open")),
-            ("field removed", "| Blockers | Decisions remain |\n", ""),
-            ("field reordered", "| Blockers | Decisions remain |\n| Authorized work | Planning only |", "| Authorized work | Planning only |\n| Blockers | Decisions remain |"),
-            ("empty value", "| Blockers | Decisions remain |", "| Blockers |  |"),
-            ("whitespace value", "| Blockers | Decisions remain |", "| Blockers |    |"),
+            ("field removed", "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |\n", ""),
+            (
+                "field reordered",
+                "| Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |\n| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |",
+                "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |\n| Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |",
+            ),
+            (
+                "empty value",
+                "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |",
+                "| Next maintainer decision |  |",
+            ),
+            (
+                "whitespace value",
+                "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |",
+                "| Next maintainer decision |    |",
+            ),
             ("validation drift", "| Validation | `bash scripts/check-bootstrap.sh` |", "| Validation | true |"),
             ("wrong link", "[Canonical milestone status and plan records](docs/plans/)", "[Canonical milestone status and plan records](docs/roadmap.md)"),
         )
@@ -148,6 +160,18 @@ class StatusTest(unittest.TestCase):
                 target = "README.md" if "link" in label else "docs/plans/README.md"
                 docs[target] = docs[target].replace(old, new)
                 self.assert_invalid(docs)
+
+        authority_cases = (
+            ("phase", "Pre-implementation planning", "Product implementation authorized"),
+            ("blockers", "must be accepted or superseded by accepted replacements", "are optional"),
+            ("authorized work", "no product implementation", "product implementation is authorized"),
+            ("decision", "Disposition ADR 0001 and ADR 0002", "Begin product implementation"),
+            ("transition", "the maintainer explicitly opens `M0` gate-first", "implementation begins immediately"),
+        )
+        for label, old, new in authority_cases:
+            with self.subTest(label):
+                docs = {path: text.replace(old, new) for path, text in documents().items()}
+                self.assert_invalid(docs, "exact seed status capsule")
 
     def test_hidden_or_duplicated_markers_fail(self) -> None:
         wrappers = (

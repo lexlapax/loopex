@@ -32,6 +32,10 @@ register's final `Closed` row in this form:
 `<final Closed milestone>` — YYYY-MM-DD
 ```
 
+While `M0` is the sole blocked candidate, the repository status check locks the
+complete seed capsule above. Opening `M0` must replace that seed-specific lock
+with lifecycle-specific checks; it may not merely relax the status check.
+
 `M0` cannot open merely because a proposal was rejected: its gate must name an
 accepted repository layout and an accepted toolchain decision. Its plan and gate
 also define the first scope-specific minimalism budget rather than a universal

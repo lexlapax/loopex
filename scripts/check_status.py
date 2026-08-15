@@ -22,6 +22,25 @@ CURRENT_FIELDS = (
     "Next transition",
     "Validation",
 )
+SEED_BLOCKED_VALUES = {
+    "Integrated phase": "Pre-implementation planning",
+    "Last integrated checkpoint": "Seed bootstrap — 2026-08-15",
+    "Blockers": (
+        "[ADR 0001](../adr/0001-repository-and-application-layout.md) and "
+        "[ADR 0002](../adr/0002-bootstrap-runtime-floor.md) must be accepted "
+        "or superseded by accepted replacements"
+    ),
+    "Authorized work": (
+        "Explicitly authorized planning, ADR, bootstrap, and review work only; "
+        "no product implementation"
+    ),
+    "Next maintainer decision": "Disposition ADR 0001 and ADR 0002",
+    "Next transition": (
+        "After the prerequisites are accepted, the maintainer explicitly opens "
+        "`M0` gate-first"
+    ),
+    "Validation": "`bash scripts/check-bootstrap.sh`",
+}
 STATES = {"Blocked", "Open", "Accepted", "In progress", "In review", "Closed"}
 ACTIVE_STATES = {"Open", "Accepted", "In progress", "In review"}
 NAME = re.compile(r"(?:M[0-9]+|v?[0-9]+(?:\.[0-9]+)+|[a-z0-9]+(?:-[a-z0-9]+)*)\Z")
@@ -314,6 +333,15 @@ def validate(
             if (plan_link, gate_link) != expected:
                 raise Invalid(f"docs/plans/README.md: {name} has incorrect plan/gate links for {state}")
             parsed_rows.append((name, state, plan_link, gate_link))
+
+        if (
+            ("M0", "Blocked", "—", "—") in parsed_rows
+            and not any(state in ACTIVE_STATES for _, state, _, _ in parsed_rows)
+            and values != SEED_BLOCKED_VALUES
+        ):
+            raise Invalid(
+                "docs/plans/README.md: blocked M0 must retain the exact seed status capsule"
+            )
 
         closed = [name for name, state, _, _ in parsed_rows if state == "Closed"]
         checkpoint = values["Last integrated checkpoint"]
