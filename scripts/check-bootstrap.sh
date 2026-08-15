@@ -8,3 +8,4 @@ bash scripts/check-agent-bootstrap.sh
 bash scripts/check-gitignore.sh
 bash scripts/check-commit-messages.sh
 bash scripts/check-repo-hygiene.sh
+bash scripts/check-status.sh

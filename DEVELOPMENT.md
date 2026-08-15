@@ -27,8 +27,10 @@ git status --short --branch
 bash scripts/check-bootstrap.sh
 ```
 
-The aggregate runs the agent/client bootstrap check and the ignore-policy
-check. It requires no GitHub account, `gh` CLI, hosted CI service, credentials,
+The aggregate runs four checks: the agent/client bootstrap check, the
+ignore-policy check, the commit-message check (title markers and the
+AI-attribution ban), and the repository-hygiene check (branch and worktree
+residue). It requires no GitHub account, `gh` CLI, hosted CI service, credentials,
 network access, coding-agent client, or product dependency download. Hosted CI
 may mirror this command but does not define it. The aggregate only reads the
 checkout and does not rely on a writable ambient temporary directory, so an

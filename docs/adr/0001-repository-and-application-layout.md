@@ -29,7 +29,10 @@ implying separate packages or release trains.
 
 A repository rider exists. `.claude/hooks/deps-budget.sh` hardcodes
 `apps/loopex/mix.exs` and is silently inert under any other layout; the context
-map requires the layout decision to fix that hook in the same change.
+map requires the layout decision to fix that hook in the same change. That hook
+also rejects *every* dependency tuple in the core's deps list, including
+dev-only ones — so any layout permitting dev/test dependencies in `apps/loopex`
+would contradict the enforcement that already exists.
 
 ## Decision
 
@@ -47,8 +50,10 @@ docs/
 
 1. `apps/loopex` holds the protocol, pure core, and OTP runtime as one
    application, matching vision §20.1's singular "protocol/core/runtime
-   application." Its `deps` list stays empty except for dev/test-only tooling,
-   and the dependency-budget check enforces that.
+   application." Its `deps` list is **empty** — no runtime dependencies and no
+   dev or test tooling either. Formatter, static analysis, and documentation
+   tooling are declared once at the umbrella root, where every application
+   inherits them without any of them appearing in the core's dependency list.
 2. Every replaceable edge and every reference client is its own umbrella
    application. Application boundaries carry the dependency direction
    structurally: `apps/loopex` never lists an in-umbrella dependency, and
@@ -62,10 +67,16 @@ docs/
    not the inventory.
 5. `conformance/` sits outside `apps/` because the fixtures are language-neutral
    data for adapter authors in any language, not an OTP application.
-6. Accepting this ADR requires the scaffold commit to make
-   `.claude/hooks/deps-budget.sh` effective rather than inert, and to prove it
-   fires — the chosen path matches the hardcoded `apps/loopex/mix.exs`, so the
-   change is verification, not a rewrite.
+6. The dependency-budget check is repository-owned and client-neutral:
+   `scripts/check-deps-budget.sh`, wired into the aggregate.
+   `.claude/hooks/deps-budget.sh` becomes a thin caller of it, so Codex and CI
+   enforce the same budget that Claude does. Today the budget lives only in that
+   Claude hook, which means the core's defining constraint is enforced for
+   exactly one client.
+7. Proving the budget check actually fires against a real `apps/loopex/mix.exs`
+   is an obligation of the **M0 gate**, not a condition of accepting this ADR.
+   Scaffolding cannot exist until an accepted plan and red gate authorize it, so
+   conditioning acceptance on a scaffold commit would be circular.
 
 ## Alternatives and evidence
 
@@ -102,8 +113,10 @@ What becomes harder:
 - Root `mix test` runs every application. The core-only, fakes-only build needs
   its own locked command; ambiguity there would let an adapter dependency leak
   into a "core" claim.
-- Static-analysis and formatter configuration is duplicated or inherited across
-  applications, and Dialyzer PLT handling in umbrellas needs explicit setup.
+- Static-analysis and formatter configuration is inherited from the umbrella
+  root rather than declared per application, and Dialyzer PLT handling in
+  umbrellas needs explicit setup. Root-level tooling is what keeps the core's
+  deps list empty, so this is a constraint the layout depends on, not a detail.
 - Publishing from an umbrella is per-application. The one-version-train rule
   becomes a check to write, not a property the tooling gives for free.
 

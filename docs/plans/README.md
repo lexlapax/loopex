@@ -4,13 +4,12 @@ This is where you find out what Loopex is actually committed to building, and
 how you can tell when it's done.
 
 **Right now: no milestone is open.** The seed bootstrap closed on 2026-08-15.
-Two architecture decisions are proposed and waiting on acceptance; once they're
-accepted, the M0 gate opens. This directory being otherwise empty is the honest
-record of that, not an oversight.
+M0 is next, and is blocked on its two prerequisite decisions. This directory
+being otherwise empty is the honest record of that, not an oversight.
 
 | Milestone | Stage it serves | Ships | State |
 | --- | --- | --- | --- |
-| `M0` | Contract experiments | No | Not yet open |
+| `M0` | Contract experiments | No | Blocked — prerequisites below |
 | `v0.1` | Useful local kernel | Yes | Not started |
 | `v0.2` | Durable service | Yes | Not started |
 | `v0.3` | Governed extension runtime | Yes | Not started |
@@ -20,6 +19,15 @@ record of that, not an oversight.
 
 The ladder itself — what each stage proves and which orderings can never be
 changed — is in [docs/roadmap.md](../roadmap.md).
+
+**M0's prerequisites.** Architecture decisions belong to the milestone whose
+work they unblock. M0 cannot open until both of these are accepted or rejected,
+because its gate has to name a repository tree and a toolchain:
+
+- [ADR 0001](../adr/0001-repository-and-application-layout.md) — repository and
+  application layout · *proposed*
+- [ADR 0002](../adr/0002-bootstrap-runtime-floor.md) — bootstrap runtime floor
+  and version matrix · *proposed*
 
 ## Four words
 

@@ -41,11 +41,20 @@ if git rev-parse --verify --quiet "$integration" >/dev/null; then
     if [ ! -d "$wt_path" ]; then
       continue
     fi
+    # A detached worktree has no branch, so compare its commit directly.
+    # Skipping it would let landed work hide behind a detached HEAD.
     wt_branch="$(git -C "$wt_path" symbolic-ref --quiet --short HEAD || true)"
-    [ -n "$wt_branch" ] || continue
-    if git merge-base --is-ancestor "$wt_branch" "$integration" 2>/dev/null; then
-      echo "worktree on a branch already merged into ${integration}:" >&2
-      echo "  ${wt_path} (${wt_branch})" >&2
+    if [ -n "$wt_branch" ]; then
+      wt_ref="$wt_branch"
+      wt_label="$wt_branch"
+    else
+      wt_ref="$(git -C "$wt_path" rev-parse --quiet --verify HEAD || true)"
+      [ -n "$wt_ref" ] || continue
+      wt_label="detached at ${wt_ref}"
+    fi
+    if git merge-base --is-ancestor "$wt_ref" "$integration" 2>/dev/null; then
+      echo "worktree on work already merged into ${integration}:" >&2
+      echo "  ${wt_path} (${wt_label})" >&2
       echo "  remedy: git worktree remove ${wt_path}" >&2
       status=1
     fi

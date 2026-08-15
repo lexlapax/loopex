@@ -43,15 +43,19 @@ with ADR and code pointers as they land.
 
 ## Test Quick Reference
 
-Until a test-strategy doc exists: `mix test` against a temporary
-`LOOPEX_HOME`; run the affected conformance suites (`conformance/`) for any
-adapter or behaviour change; property tests own reducer/replay claims;
-fault-injection owns durable-transition claims. Real-provider runs are a
-tagged, explicitly invoked lane — never part of the default suite.
+No Mix project exists yet, so there is no product test command. Until the first
+accepted gate locks one, `bash scripts/check-bootstrap.sh` is the whole suite.
+
+When product tests arrive they run against a temporary `LOOPEX_HOME`; the
+affected conformance suites (`conformance/`) run for any adapter or behaviour
+change; property tests own reducer/replay claims; fault injection owns
+durable-transition claims. Real-provider runs are a tagged, explicitly invoked
+lane — never part of the default suite.
 
 ## Coding-Agent Ecosystem Guidance
 
-- `scripts/check-agent-bootstrap.sh` and `scripts/check-gitignore.sh` define
+- `scripts/check-agent-bootstrap.sh`, `scripts/check-gitignore.sh`,
+  `scripts/check-commit-messages.sh`, and `scripts/check-repo-hygiene.sh` define
   "bootstrap green" behind the provider-neutral aggregate
   `scripts/check-bootstrap.sh`. They run from a clean checkout with the
   toolchain in [DEVELOPMENT.md](../../DEVELOPMENT.md); hosted CI may invoke only

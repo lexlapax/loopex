@@ -19,13 +19,12 @@ while the session lives; a session "brain" can coordinate local or remote
 
 ## Where Things Stand
 
-- **Now** — Pre-implementation. No product code exists; nothing is installable.
-- **In flight** — [ADR 0001](docs/adr/0001-repository-and-application-layout.md)
-  (repository layout) and
-  [ADR 0002](docs/adr/0002-bootstrap-runtime-floor.md) (runtime floor) are
-  proposed, awaiting acceptance.
-- **Next** — Open the M0 gate: a bounded set of contract experiments, disposable,
-  freezing nothing.
+- **Now** — Pre-implementation. No milestone is open; no product code exists.
+- **Next** — **M0**, a bounded set of contract experiments — disposable, freezing
+  nothing. Blocked on its two prerequisite decisions:
+  [ADR 0001](docs/adr/0001-repository-and-application-layout.md) (repository
+  layout) and [ADR 0002](docs/adr/0002-bootstrap-runtime-floor.md) (runtime
+  floor), both proposed and awaiting acceptance.
 - **Last closed** — Seed bootstrap, 2026-08-15.
 
 **[What's committed and how you tell it's done →](docs/plans/)** ·
