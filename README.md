@@ -17,18 +17,16 @@ processes; durable truth is an append-only journal; clients attach and detach
 while the session lives; a session "brain" can coordinate local or remote
 "hands"; trusted code can evolve while session state stays in place.
 
+<!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-- **Now** — Pre-implementation. No milestone is open; no product code exists.
-- **Next** — **M0**, a bounded set of contract experiments — disposable, freezing
-  nothing. Blocked on its two prerequisite decisions:
-  [ADR 0001](docs/adr/0001-repository-and-application-layout.md) (repository
-  layout) and [ADR 0002](docs/adr/0002-bootstrap-runtime-floor.md) (runtime
-  floor), both proposed and awaiting acceptance.
-- **Last closed** — Seed bootstrap, 2026-08-15.
+**Revision status:** Pre-implementation planning; no milestone is active; next candidate `M0` is blocked.
 
-**[What's committed and how you tell it's done →](docs/plans/)** ·
-[the map](docs/roadmap.md) · [what changed](CHANGELOG.md)
+[Canonical milestone status and plan records](docs/plans/)
+<!-- loopex:readme-status:end -->
+
+The [roadmap](docs/roadmap.md) is non-normative capability guidance;
+[CHANGELOG.md](CHANGELOG.md) records what changed.
 
 The founding vision — [docs/vision.md](docs/vision.md) — is complete and
 decision-bearing: boundaries, invariants, protocol planes, trust model, and
@@ -58,6 +56,8 @@ The rules it holds itself to:
 - Everything entering model context is provenance-typed, budgeted data.
 - Every core concept pays rent: if it can be an extension, adapter, or host
   concern, it stays out of the kernel.
+- The smallest sufficient system wins; every abstraction names the concrete
+  examples or implementations it serves.
 
 ## What It Is — and Is Not
 
@@ -120,9 +120,10 @@ regardless of what can be promised about support.
 
 ## Roadmap
 
-[docs/roadmap.md](docs/roadmap.md) — what each milestone proves, which decisions
-precede it, and the orderings that cannot be resequenced. Each rung links to its
-plan in [docs/plans/](docs/plans/) once that milestone opens.
+[docs/roadmap.md](docs/roadmap.md) — candidate capability sequencing, the
+decisions that precede each capability, and the orderings that cannot be
+resequenced. Each accepted milestone maps its bounded outcomes back to those
+capabilities.
 
 The roadmap is guidance. The commitment is an accepted plan.
 
@@ -132,14 +133,15 @@ The roadmap is guidance. The commitment is an accepted plan.
   provider-neutral local validation command.
 - [docs/vision.md](docs/vision.md) — the founding vision and architecture;
   everything else derives from it.
-- [docs/roadmap.md](docs/roadmap.md) — milestone sequencing, ADR agenda, and
-  serial barriers. Non-normative guidance.
+- [docs/roadmap.md](docs/roadmap.md) — candidate capability sequencing, ADR
+  agenda, and serial barriers. Non-normative guidance.
 - [AGENTS.md](AGENTS.md) — repository rules for coding agents and
   agent-assisted work.
 - [docs/developer/agent-context-map.md](docs/developer/agent-context-map.md)
   — routing map by area.
 - `docs/adr/` — architectural decisions, as they land.
-- `docs/plans/` — the active milestone plan.
+- [docs/plans/](docs/plans/) — canonical milestone status plus accepted, active,
+  and closed plan/gate records.
 - [CHANGELOG.md](CHANGELOG.md) — what changed, per milestone.
 
 ## License

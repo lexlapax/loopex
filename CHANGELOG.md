@@ -19,28 +19,27 @@ the exact document set its milestone must update.
 
 ### Added
 
-- `docs/roadmap.md` — non-normative milestone sequencing: the ladder from M0 to
-  1.0, the vision §22 serial barriers, an ADR agenda mapped to the milestone
-  each decision blocks, and the plan/ADR/architecture file layout.
+- `docs/roadmap.md` — non-normative capability guidance: revisable working
+  labels, the vision §22 serial barriers, and an ADR agenda mapped to the first
+  capability each decision blocks.
 - `docs/adr/0001-repository-and-application-layout.md` (Proposed) — Elixir
   umbrella; application boundaries carry dependency direction, and are not
   package boundaries.
 - `docs/adr/0002-bootstrap-runtime-floor.md` (Proposed) — OTP 26 / Elixir 1.17
-  as the development and CI floor, carrying no compatibility claim; matrix as
-  two validated (Elixir, OTP) pairs.
+  as the development and locally runnable validation floor, carrying no
+  compatibility claim; matrix as two validated (Elixir, OTP) pairs.
 - `scripts/check-commit-messages.sh` — portable commit-title and
   AI-attribution enforcement, wired into `scripts/check-bootstrap.sh`.
 - `scripts/check-repo-hygiene.sh` — fails on branches already merged into the
   integration ref and on worktrees that are stale or sitting on landed work.
   In-flight branches and live worktrees pass untouched.
-- `docs/plans/README.md` — the human entry point for what the project is
-  committed to: the vocabulary, the gate lifecycle, every milestone with its
-  state, and how a request's phrasing selects its authority. Git does not track
-  empty directories, so `docs/plans/` did not exist in a fresh clone despite
-  being referenced by README, the roadmap, and the `gate` skill.
-- `scripts/check-status.sh` — asserts the README status block exists and routes
-  to the plans index, that every plan file is listed there, and that no gate is
-  orphaned.
+- `docs/plans/README.md` — the canonical revision-scoped status register,
+  accepted/active/closed plan index, milestone lifecycle, and request-authority
+  guide. Future roadmap rungs remain candidates rather than commitments.
+- `scripts/check-status.sh` and its tracked Python bridge — validate exact marked
+  status, register, and rejoin blocks; plan/gate/governance correspondence; and
+  the derived README summary, with in-memory adversarial controls rather than a
+  general Markdown parser. M0 replaces the bridge with Elixir/Mix.
 - A `## Where Things Stand` block at the top of `README.md`, so the GitHub
   landing page answers what is happening and what is next.
 - This changelog.
@@ -53,34 +52,60 @@ the exact document set its milestone must update.
 - The AI-attribution ban is now enforced by a repository check rather than only
   by `.claude/hooks/guard-bash.sh`, which left Codex and CI uncovered.
 - Milestone closure now explicitly includes updating the documentation set.
-- **Vocabulary defined.** *Stage*, *milestone*, *workstream*, and *release* were
-  used interchangeably and never defined. Each now has one meaning and one home,
-  and a milestone's name states whether it ships — `M0` is the only M-named
-  milestone because it alone produces no release, so the milestone after it is
-  `v0.1`, not `M1`.
+- Accepted and Closed register transitions now require immutable governance
+  records binding the explicit authority disposition, candidate SHA, and gate
+  digest; the check verifies that digest against immutable canonical UTF-8/LF
+  gate text, while a separate independent exact-diff review proves the later
+  administrative transition changed only its governance row and marked status
+  blocks.
+- **Vocabulary defined without freezing the roadmap.** A capability rung is a
+  non-normative question; a milestone is one bounded plan/gate/closure that may
+  serve part or all of one or more rungs; a workstream is an internal parallel
+  slice; and a release remains separately authorized.
+- Plans now carry scope-specific minimalism budgets. Raw line count remains a
+  review signal rather than a universal gate; every abstraction must name the
+  concrete examples or current implementations it serves, and test code counts
+  as system cost without making required evidence optional.
 - Milestone files are two flat documents, `docs/plans/<name>.md` and
   `<name>-gate.md`, replacing the three-file folder. The gate stays separate
-  because its bytes are digested at acceptance; there is no evidence file until
-  evidence outgrows the plan's outcomes table.
+  because its bytes are digested at acceptance. Evidence stays in the plan's
+  outcomes table or in gate-defined artifacts outside the flat plan namespace;
+  plan-adjacent evidence sidecars are not a third lifecycle document.
 - ADR 0001 no longer conditions its own acceptance on a scaffold commit that
   cannot exist until an accepted gate authorizes it, and now requires
   `apps/loopex` to carry zero dependencies — including dev and test tooling,
-  which moves to the umbrella root — matching what the dependency-budget hook
-  already enforces.
-- The dependency-budget command becomes repository-owned rather than living only
-  in a Claude hook.
-- `README.md` M0 row: operation truth "across two nodes" → "across a restart".
-  The old text contradicted the vision §22 barrier requiring local
-  restart-and-replay before any multi-node claim.
-- `DEVELOPMENT.md` and the context map described two checks where the aggregate
-  runs five, and the context map advertised `mix test` with no Mix project in
-  existence.
-
-- `AGENTS.md` now names where sequence authority lives — vision §22 for which
-  capability may precede which, § Milestones and Gates for a milestone's own
-  lifecycle — instead of leaving it to be inferred.
-- `scripts/check-status.sh` also verifies that the rejoin order quoted in
-  `docs/roadmap.md` still matches `docs/vision.md` §22 verbatim.
+  while repository/development checks use standard Elixir/OTP/Mix only by M0
+  closure; accepted adapter runtime dependencies remain separate. A separately
+  accepted project-wide tool would live at the umbrella root.
+- Proposed ADR 0001 requires the first accepted scaffold to create a
+  repository-owned dependency-budget/direction command and adversarial fixture;
+  the current Claude hook remains early feedback until then.
+- The roadmap's M0 candidate proof now uses operation truth across a restart,
+  not two nodes, and limits VM-code work to a feasibility spike with no
+  extension-activation claim. The public-protocol release-candidate decision
+  now follows activation proof. All three changes repair vision §21–§22 serial
+  barriers.
+- `DEVELOPMENT.md` and the context map now describe all five aggregate checks and
+  no longer advertise `mix test` before a Mix project exists.
+- `AGENTS.md` now names where sequence authority lives — vision §21–§22 for
+  capability prerequisites and rejoin, §24 for compatibility/freezes, and
+  § Milestones and Gates for a milestone's lifecycle.
+- Vision edits now require an explicit current maintainer or developer request;
+  broad documentation or implementation scope no longer implies permission to
+  change the founding authority.
+- The status check verifies that the complete rejoin-order fence in the roadmap
+  matches the unique source fence inside vision §22, rather than comparing a
+  loose line range.
+- Landed work leaves no branch or worktree residue after integration.
+- Agents report decisions, not incidental discoveries: resolve a finding in
+  scope, fold it into a decision packet, or leave it out.
+- Python 3.11 and `jq` are explicitly temporary seed/M0 bridges. Before M0
+  closes, checks and tested client-hook paths migrate to the accepted Elixir/OTP
+  toolchain and prove behavior with `jq` absent, so the enduring development
+  baseline is Git, shell/POSIX tools, and Elixir/OTP.
+- Portable enforcement and toolchain coverage now live in repository-owned
+  local commands; hosted CI may mirror them but remains supplementary for
+  development and cannot become the project's only evidence path.
 
 ### Removed
 
@@ -89,11 +114,8 @@ the exact document set its milestone must update.
   makes the restatement read as authority while answering to nothing. The
   verbatim quotation stays and is now checked against its source.
 - The duplicated milestone ladder in `README.md`. It restated `docs/roadmap.md`
-  and had already drifted from it; the README now points at the roadmap, and the
-  roadmap links each rung to its plan file as milestones open.
-- Landed work must leave no branch or worktree residue.
-- Agents report decisions, not incidental discoveries: resolve a finding in
-  scope, fold it into a decision packet, or leave it out.
+  and had already drifted from it; the README now points at the roadmap and the
+  canonical plans status register.
 
 ## Seed bootstrap — closed 2026-08-15
 

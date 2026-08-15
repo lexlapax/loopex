@@ -14,6 +14,13 @@ import tomllib
 
 
 ROOT = Path.cwd()
+ROUTING_GUIDANCE = "routing and version-specific technical guidance"
+STALE_ROUTING_GUIDANCE = (
+    "routing and current stage guidance",
+    "routing and current-stage guidance",
+    "routing and current milestone guidance",
+    "routing and current-milestone guidance",
+)
 
 for shell_check in (
     ROOT / "scripts/check-bootstrap.sh",
@@ -49,6 +56,10 @@ def assert_ordered_pointers(path, body):
     context = "docs/developer/agent-context-map.md"
     assert contract in body and context in body, (path, "missing canonical pointer")
     assert body.index(contract) < body.index(context), (path, "pointer order")
+    normalized = " ".join(body.split()).lower()
+    assert ROUTING_GUIDANCE in normalized, (path, "canonical routing guidance missing")
+    for stale in STALE_ROUTING_GUIDANCE:
+        assert stale not in normalized, (path, "stale status-routing guidance", stale)
 
 
 codex_root = ROOT / ".codex"
@@ -62,6 +73,10 @@ for pointer in ("AGENTS.md", "docs/developer/agent-context-map.md"):
 assert config_text.index("AGENTS.md") < config_text.index(
     "docs/developer/agent-context-map.md"
 ), "Codex config must route AGENTS.md before the context map"
+normalized_config = " ".join(config_text.split()).lower()
+assert ROUTING_GUIDANCE in normalized_config, "Codex config missing canonical routing guidance"
+for stale in STALE_ROUTING_GUIDANCE:
+    assert stale not in normalized_config, ("Codex config has stale status routing", stale)
 
 roles = config.get("agents", {})
 assert roles, "no Codex roles registered"
@@ -74,7 +89,7 @@ expected_sandboxes = {
 assert set(roles) == set(expected_sandboxes), ("unexpected Codex roles", sorted(roles))
 prologue = (
     "Authority loads first: `AGENTS.md`, then "
-    "`docs/developer/agent-context-map.md` for routing and current-stage guidance. "
+    "`docs/developer/agent-context-map.md` for routing and version-specific technical guidance. "
     "This profile only frames the assigned role."
 )
 for key, entry in roles.items():

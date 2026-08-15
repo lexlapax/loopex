@@ -1,7 +1,7 @@
 # Destination: .codex/config.toml
 #
 # Authority loads first from AGENTS.md, then
-# docs/developer/agent-context-map.md for routing and current-stage guidance.
+# docs/developer/agent-context-map.md for routing and version-specific technical guidance.
 # This compatibility index only registers Codex-native agent profiles; it
 # grants no project or product authority and defines no acceptance rule.
 

@@ -12,23 +12,26 @@ accepted gates, demonstrations, and publication—not ordinary implementation.
 
 `AGENTS.md` is the canonical tool-neutral development contract. Client files
 may import it and add discovery, invocation, permission UX, hooks, skills, or
-profiles, but may not redefine authority or acceptance. Repository checks and
-CI provide portable enforcement and retained evidence; client hooks are early
-feedback only.
+profiles, but may not redefine authority or acceptance. Repository checks
+provide portable enforcement and retained evidence; hosted CI may mirror them,
+and client hooks are early feedback only.
 
-Keep this file compact. Put mechanics in product/test code, repository commands,
-and CI; task procedures in portable skills; rationale in the vision or ADRs;
-and subsystem routing in the context map.
+Keep this file compact. Put mechanics in product/test code and repository
+commands; let client hooks and hosted CI invoke those entrypoints. Put task
+procedures in portable skills, rationale in the vision or ADRs, and subsystem
+routing in the context map.
 
 ## Context and Authority
 
-Start with the current task, this file, any accepted active plan and gate
-contract, and relevant code and tests. Use
+Start with the current task, this file, and
+[docs/plans/README.md](docs/plans/README.md) for the checked-out revision's
+canonical milestone status. Then read any accepted active plan and gate contract
+and the relevant code and tests. Use
 [docs/developer/agent-context-map.md](docs/developer/agent-context-map.md) to
-load constraining vision sections, accepted ADRs, and the current milestone's
-version-specific guidance. Use [DEVELOPMENT.md](DEVELOPMENT.md) for current
-local prerequisites and repository entrypoints; it is setup guidance, not
-acceptance authority. Read the full vision for
+load constraining vision sections, accepted ADRs, and version-specific technical
+guidance. Use [DEVELOPMENT.md](DEVELOPMENT.md) for current local prerequisites
+and repository entrypoints; it is setup guidance, not acceptance authority.
+Read the full vision for
 architecture, trust, public contracts, cross-domain work, or a new plan. Do not
 bulk-read historical plans.
 
@@ -41,13 +44,14 @@ When normative sources conflict:
 4. [docs/vision.md](docs/vision.md).
 5. Historical material.
 
-Sequence has two normative sources and neither is the roadmap. Which capability
-may be proved before which is fixed by the vision's serial barriers and rejoin
-order (§22). The order a milestone itself runs — green base, red gate before
-implementation, acceptance, work, independent review, closure — is fixed by
-§ Milestones and Gates below. An accepted plan adds its own prerequisites and
-rejoin barriers within those. [docs/roadmap.md](docs/roadmap.md) is a readable
-projection of the first and authorizes nothing.
+Sequence authority lives in the vision and this contract, never the roadmap.
+Vision §21 sets capability strategy and prerequisite evidence, §22 fixes the
+enduring rejoin order, and §24 governs compatibility and freezes. The order a
+milestone itself runs — green base, red gate before implementation, acceptance,
+work, independent review, closure — is fixed by § Milestones and Gates below.
+An accepted plan adds its own prerequisites and rejoin barriers within those.
+[docs/roadmap.md](docs/roadmap.md) is a readable projection and authorizes
+nothing.
 
 Code, tests, gates, CI, traces, and demonstrations are evidence, not independent
 normative authority. Evidence retained with a plan establishes what was proved
@@ -59,6 +63,12 @@ evidence, or blocking review. A red required gate blocks closure.
 Flag conflicts instead of silently reinterpreting stale material. Reversing a
 vision boundary or invariant requires a decision that names the principle,
 evidence, compatibility impact, and migration path.
+
+Edit [docs/vision.md](docs/vision.md) only when the current maintainer or
+developer request explicitly asks for a vision change. A general documentation,
+alignment, refactoring, or implementation request does not grant that scope.
+Explicit edit scope does not waive the decision and evidence required to change
+a founding boundary or invariant.
 
 ## Task and Autonomy Contract
 
@@ -85,9 +95,10 @@ closure candidate. Gate weakening, evidence waiver, and scope deferral remain
 non-delegable unless the maintainer explicitly delegates that exact decision.
 
 Released contracts; accepted ADR decision, status, and consequences; accepted
-plan purpose, scope, outcomes, and ownership; and locked gates are immutable
-records. Change their meaning only through a versioned amendment accepted by
-the same authority class. Conforming explanations and progress may be updated.
+plan purpose, scope, outcomes, ownership, rejoin barriers, and evidence
+obligations; and locked gates are immutable records. Change their meaning only
+through a versioned amendment accepted by the same authority class. Conforming
+explanations and progress may be updated.
 Record reversible choices in the nearest existing code, test, plan progress, or
 subsystem document—never a new ADR or sidecar diary merely to log activity.
 
@@ -104,16 +115,25 @@ an unresolved observation for the maintainer to triage.
 
 ## Milestones and Gates
 
-**Vocabulary.** A *stage* is a capability rung from the vision's delivery ladder;
-there are seven and the list does not grow. A *milestone* is one stage's bounded
-work, with exactly one plan, one gate, and one closure. A *workstream* is a
-parallel slice inside a milestone and has no plan or gate of its own. A *release*
-is the tag published when a milestone completes and its release criteria pass. A
-milestone's name states whether it ships: `M0` is the only M-named milestone
-because it alone produces no release, and every later milestone takes the name of
-the release it produces. Plans live in `docs/plans/<name>.md` with the locked
-gate beside them in `<name>-gate.md`; [docs/plans/README.md](docs/plans/README.md)
-is their index and the human entry point.
+**Vocabulary.** A *capability rung* is one of the non-normative questions in
+vision §21; it guides decomposition but does not dictate milestone or release
+boundaries. A *milestone* is bounded work governed by one accepted plan, one
+gate, and one closure. It may prove part or all of one or more rungs while
+respecting vision §21–§22 and, for compatibility claims, §24. A *workstream* is
+a parallel slice inside a milestone and has no independent plan or gate. A
+*release* is a separately authorized publication; a milestone may or may not
+produce one, and only its accepted plan may couple the two. Milestone names are
+stable operator-chosen slugs and grant no release authority. They use lowercase
+ASCII letters/digits separated by single hyphens, an `M` followed by digits, or
+a version-shaped numeric slug;
+names are at most 64 ASCII bytes and unique under case folding. `planning`,
+`seed`, `readme`, Windows
+device basenames (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, and
+`lpt1`–`lpt9`), and names ending in `-gate` are reserved in any letter case.
+Plans live in `docs/plans/<name>.md`, with the locked gate beside them in
+`<name>-gate.md`;
+[docs/plans/README.md](docs/plans/README.md) is the canonical current-status
+register and plan index.
 
 - **Seed bootstrap.** Before the first plan and gate contract are accepted, an
   explicit maintainer task may authorize founding-document,
@@ -129,12 +149,34 @@ is their index and the human entry point.
   missing behavior. The red tree is never mergeable to `main`.
 - The accepted plan names purpose/outcomes, scope/non-goals, ADR prerequisites,
   workstreams and rejoin barriers, evidence mapping, compatibility, migration,
-  rollback, packaging, and decision owners.
+  rollback, packaging, decision owners, and a proportional minimalism budget.
+  The budget states what code and abstraction growth is justified and which
+  measurable ceilings or negative constraints the gate locks. Raw line count is
+  a review signal unless the accepted plan makes a scope-specific cap; never
+  trade clarity or required evidence for a smaller number.
+- Lifecycle transitions retain their authority. Before the canonical register
+  moves to `Accepted`, the plan records the accepting maintainer or previously
+  delegated authority, durable evidence of the explicit disposition, the
+  accepted plan-candidate SHA, and gate digest. Before it moves to `Closed`, it
+  records the closing authority and disposition, reviewed candidate SHA, and
+  gate digest. Agents may transcribe explicit decisions; they may not infer or
+  supply them. A transition-only commit may update governance and derived status
+  bytes, but not the bound candidate, locked gate, or product bytes. Before
+  integration, an independent read-only review compares that exact transition
+  SHA with the bound candidate and reports its changed paths and verdict to the
+  current integrator; structural validation does not substitute for this
+  one-time pre-integration review or make its task output durable project state.
+- Every lifecycle transition atomically updates the canonical register, the
+  plans index's complete marked Current Status capsule, and README's derived
+  summary. No client-specific memory or prose elsewhere substitutes for those
+  three human-visible records.
 - Acceptance locks exact commands and protected tests, selectors, fixtures,
-  vectors, harness/configuration bytes, evidence classes, and their digest.
+  vectors, canonical UTF-8/LF harness/configuration bytes, evidence classes, and
+  their digest. The accepted gate file and digest remain immutable for that
+  milestone; stricter supplementary checks may inform a later milestone but do
+  not silently advance the lock.
   Never skip, filter, soften, quarantine, rewrite, inflate retries/timeouts, or
-  substitute a fake for a required real path to make work pass. Stricter
-  append-only coverage advances the lock and needs independent gate review.
+  substitute a fake for a required real path to make work pass.
 - Evidence is claim-proportional: properties for reducers; conformance at
   changed boundaries; process/store fault injection for durability; vectors and
   compatibility for protocols; negative tests and security review for trust;
@@ -153,10 +195,10 @@ is their index and the human entry point.
   approved limitation/deferral. Do not mutate tracked bytes merely to paste a
   final run link.
 - A closure candidate also updates the documentation its milestone changed:
-  `CHANGELOG.md`, `README.md`, affected `docs/` indexes, and the current-milestone
-  pointer in the context map. Each gate locks that milestone's exact document
-  set, since the set differs by milestone; documentation drift blocks closure
-  like any other unmet outcome.
+  `CHANGELOG.md`, `README.md`, the canonical plans status register, affected
+  `docs/` indexes, and any technical guidance that must be changed or cleared.
+  Each gate locks that milestone's exact document set, since the set differs by
+  milestone; documentation drift blocks closure like any other unmet outcome.
 
 A retry is diagnostic, not a pass. A same-SHA/seed/environment failure that
 disappears is a blocking flake until fixed or explicitly dispositioned.
@@ -184,14 +226,25 @@ a branch or worktree that survives its merge is stale state a later agent or
 client can misread as in-flight work. Unmerged branches and live worktrees are
 ordinary parallel work and stay.
 
-Portable enforcement lives in product/test code, repository-owned Mix tasks,
-and CI. Client hooks call the same entrypoints but never waive them. Enforcement
-fails closed when a required check is missing or silently ineffective.
+Portable enforcement lives in repository-owned commands and product/test code.
+Hosted CI calls those entrypoints. Client hooks call them where the repository
+entrypoint exists; M0 must migrate or explicitly disposition the remaining
+tested client-local behavior. Hooks and CI never waive repository checks, which
+fail closed when missing or silently ineffective.
 
 Every required check runs locally from a clean checkout with the documented
 portable toolchain in [DEVELOPMENT.md](DEVELOPMENT.md). Bootstrap currently
 requires Bash, Git, the documented POSIX userland, Python 3.11+ and `jq`;
 product checks move to the declared Elixir/OTP toolchain when it exists.
+Python and `jq` are seed/M0 bridge dependencies only. Before M0 closes,
+repository checks migrate to Elixir standard-library or Mix entrypoints, and
+tested client hooks migrate to those entrypoints. Removing a tested hook instead
+requires the M0 plan's explicit accepted behavior disposition, with equivalent
+repository/client protection or an explicitly accepted loss; the no-`jq`
+adapter path is proved rather than silently disabling feedback. Both
+prerequisites then disappear. The enduring development baseline is Git,
+shell/POSIX tools, and the accepted Elixir/OTP toolchain; adding another
+development dependency requires the ordinary dependency decision.
 Inspection-only checks required of a read-only reviewer run without modifying
 the checkout or relying on a writable ambient temporary directory. A check that
 must produce artifacts uses an explicit isolated task root and belongs to the
@@ -202,13 +255,15 @@ depends on no host-specific service, workflow feature, or repository setting.
 Releases may use a hosted provider only where retained release evidence
 requires it, and those workflows stay thin wrappers over repository commands.
 
-- Core uses stdlib and OTP only; CI checks the dependency budget and direction.
+- Core uses stdlib and OTP only; repository checks, mirrored by CI, enforce the
+  dependency budget and direction.
 - Checkpoints are warning-free under formatting, compilation, static analysis,
   and relevant documentation/protocol checks.
 - Tests use temporary `LOOPEX_HOME` and workspaces; helpers fail before touching
   real user state.
 - OTP 26+/Elixir 1.17+ is the bootstrap floor until an accepted ADR changes it;
-  CI covers the floor and current supported versions.
+  repository validation, mirrored by CI, covers the floor and current supported
+  versions.
 - Replaceable store, model, executor, broker, extension, and transport boundaries
   run reusable conformance suites.
 - Repository checks, mirrored by CI, check gate locks, client/workflow drift,
@@ -275,9 +330,14 @@ requires it, and those workflows stay thin wrappers over repository commands.
   enter journals, public/progress/diagnostic planes, fixtures, or ordinary jobs
   beyond an approved scoped ephemeral hand secret. Injected context is
   provenance-typed, budgeted, exactly staged, receipt-journaled data—not a grant.
-- **Core concepts pay rent.** Anything that can live in an extension, adapter,
-  executor, client, or host without weakening the kernel stays out of core.
-  Vision §23.4 budgets are tests, not slogans.
+- **The smallest sufficient system wins.** Production code, tests, fixtures,
+  helpers, public surface, and abstractions all carry cost. Prefer direct OTP and
+  the smallest clear implementation; delete or reuse before adding. Every new
+  abstraction names the concrete examples or current implementations it unifies
+  and why direct code is insufficient. Speculative single-use layers stay out.
+  Anything that can live in an extension, adapter, executor, client, or host
+  without weakening the kernel stays out of core. Vision §23.4 and accepted-plan
+  budgets are executable constraints, not slogans or excuses to omit tests.
 - **Sequence and compatibility follow evidence.** Prove the single-machine loop
   and restart/replay before distribution or production hot upgrades. Public
   compatibility is behavioral and requires schemas, vectors, independent

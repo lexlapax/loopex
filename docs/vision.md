@@ -24,7 +24,7 @@ sequence. It is deliberately complete enough to seed:
 - a compact `AGENTS.md`;
 - architectural decision records;
 - public protocol and conformance documentation;
-- bounded contract-experiment and capability-stage plans;
+- bounded contract-experiment and capability-rung milestone plans;
 - contributor, operator, extension-author, and executor-author guides.
 
 This is a north-star and boundary document. It is not itself a frozen wire
@@ -482,9 +482,10 @@ The core has no compile-time dependency on:
 - Docker, Kubernetes, FLAME, or a cloud SDK;
 - OpenTelemetry or an external pub/sub system.
 
-Those dependencies belong in adapters or reference applications. CI enforces
-namespace and dependency direction with `mix xref`, compile-time checks, and
-tests that build the core against only fake edge implementations.
+Those dependencies belong in adapters or reference applications. Repository
+checks, mirrored by CI, enforce namespace and dependency direction with
+`mix xref`, compile-time checks, and tests that build the core against only fake
+edge implementations.
 
 Use one repository and one release version through 0.x. Physical application
 or Hex-package splits require demonstrated compile, runtime, ownership,
@@ -2347,9 +2348,9 @@ implementations.
 **Bootstrap runtime floor.** Erlang/OTP 26+ and Elixir 1.17+ are the
 repository-start compatibility target, not an eternal promise. A runtime-floor
 ADR validates the exact code-loading, terminal, disposable-node, dependency,
-and platform requirements before the first compatibility claim. CI then tests
-the accepted floor and current stable releases; later floor changes require an
-ADR and compatibility notes.
+and platform requirements before the first compatibility claim. Repository
+checks, mirrored by CI, then test the accepted floor and current stable
+releases; later floor changes require an ADR and compatibility notes.
 
 ### 20.2 First documents to derive
 
@@ -2399,14 +2400,14 @@ The repository should become practical learning material for Elixir and AI:
 
 Delivery is vertical and useful. Loopex should become a real coding loop early,
 then deepen its durability and ecosystem evidence without turning the vision
-into a release backlog. A bounded contract-experiment stage may test the
-riskiest OTP claims and freezes nothing. Every actual stage receives its own
+into a release backlog. A bounded contract-experiment milestone may test the
+riskiest OTP claims and freezes nothing. Every actual milestone receives its own
 accepted plan, which may split, resequence, or omit future capabilities while
 preserving the founding boundaries.
 
 The capability ladder is guidance rather than version scope:
 
-| Stage | Constitutional question answered |
+| Capability rung | Constitutional question answered |
 | --- | --- |
 | Contract experiments | Are session durability, effect truth, and VM-global trusted-code evolution feasible with the stated OTP semantics? |
 | Useful local kernel | Can one developer use a small, durable, truthful coding loop through the embedded API and reference client? |
@@ -2439,6 +2440,7 @@ loop, private authority path, or competing durability truth to avoid a barrier.
 
 The enduring rejoin order is:
 
+<!-- loopex:rejoin-source:start -->
 ```text
 durable local session and operation truth
 -> multi-client attachment and protocol candidate
@@ -2447,6 +2449,7 @@ durable local session and operation truth
 -> isolated-hand conformance
 -> remote-worker and multi-host compatibility evidence
 ```
+<!-- loopex:rejoin-source:end -->
 
 Active plans decide staffing and exact gates. Rejoin evidence remains
 proportional to the claim: pure/property tests for reducers, reusable
@@ -2692,7 +2695,7 @@ Docker.
 | Credentials leak through traces or persistence | References only, bounded content protection, capture-off observability, seeded negative tests. |
 | Retrieved memory becomes a persistent injection channel | Provenance-typed, delimited context blocks; untrusted-by-default recalls; stricter write gates for always-in-context tiers; poisoned-recall negative tests; tool policy unchanged by context. |
 | TUI scope delays runtime | Useful line-oriented client first; richer client can attach over protocol. |
-| Planning outruns software | Bounded non-freezing experiments, vertical useful stages, and plans that own estimates and exact acceptance. |
+| Planning outruns software | Bounded non-freezing experiments, vertical useful milestones, and plans that own estimates and exact acceptance. |
 | Package/app structure becomes its own framework | One repo/version through 0.x; split only on observed boundary and ADR. |
 | Name collides after launch | Complete clearance before first public release while rename cost is low. |
 
@@ -2733,8 +2736,9 @@ The following are project doctrine unless deliberately revised:
 16. Production brains need not contain a compiler; builder and validation
     distributions are separate.
 17. Bounded contract experiments freeze nothing. Useful local session/effect
-    truth precedes multi-client freeze; governed extensions precede protocol v1;
-    isolated hands precede remote workers.
+    truth precedes multi-client attachment and a protocol candidate; governed
+    extension activation precedes any public-protocol compatibility decision;
+    isolated-hand conformance precedes remote workers.
 18. ACP mapping occurs before public protocol v1 freeze.
 19. Actual integration into an external host is separately authorized by that
     host and is not Loopex release acceptance.

@@ -28,11 +28,11 @@ demonstrated pressure and an ADR. So the tree must separate applications without
 implying separate packages or release trains.
 
 A repository rider exists. `.claude/hooks/deps-budget.sh` hardcodes
-`apps/loopex/mix.exs` and is silently inert under any other layout; the context
-map requires the layout decision to fix that hook in the same change. That hook
-also rejects *every* dependency tuple in the core's deps list, including
-dev-only ones — so any layout permitting dev/test dependencies in `apps/loopex`
-would contradict the enforcement that already exists.
+`apps/loopex/mix.exs` and is silently inert before the scaffold exists. It is
+client-only early feedback, not repository enforcement. That hook rejects
+*every* dependency tuple in the core's deps list, including dev-only ones, so
+any accepted layout permitting dev/test dependencies in `apps/loopex` would
+also contradict the budget it previews.
 
 ## Decision
 
@@ -51,9 +51,12 @@ docs/
 1. `apps/loopex` holds the protocol, pure core, and OTP runtime as one
    application, matching vision §20.1's singular "protocol/core/runtime
    application." Its `deps` list is **empty** — no runtime dependencies and no
-   dev or test tooling either. Formatter, static analysis, and documentation
-   tooling are declared once at the umbrella root, where every application
-   inherits them without any of them appearing in the core's dependency list.
+   dev or test tooling either. By M0 closure, repository and development checks
+   use only standard Elixir/OTP/Mix entrypoints; accepted adapter runtime
+   dependencies remain outside core. If a later accepted decision adds a
+   project-wide external formatter, analysis, or documentation dependency, it
+   is declared once at the umbrella root rather than appearing in the core's
+   dependency list.
 2. Every replaceable edge and every reference client is its own umbrella
    application. Application boundaries carry the dependency direction
    structurally: `apps/loopex` never lists an in-umbrella dependency, and
@@ -67,24 +70,27 @@ docs/
    not the inventory.
 5. `conformance/` sits outside `apps/` because the fixtures are language-neutral
    data for adapter authors in any language, not an OTP application.
-6. The dependency-budget check is repository-owned and client-neutral:
-   `scripts/check-deps-budget.sh`, wired into the aggregate.
-   `.claude/hooks/deps-budget.sh` becomes a thin caller of it, so Codex and CI
-   enforce the same budget that Claude does. Today the budget lives only in that
-   Claude hook, which means the core's defining constraint is enforced for
-   exactly one client.
-7. Proving the budget check actually fires against a real `apps/loopex/mix.exs`
-   is an obligation of the **M0 gate**, not a condition of accepting this ADR.
-   Scaffolding cannot exist until an accepted plan and red gate authorize it, so
-   conditioning acceptance on a scaffold commit would be circular.
+6. The first accepted scaffold creates the repository-owned, client-neutral
+   dependency-budget and direction command, currently proposed as
+   `scripts/check-deps-budget.sh`, and wires it into the aggregate.
+   `.claude/hooks/deps-budget.sh` becomes a thin caller of that command so every
+   client and CI invoke the same enforcement. The repository command does not
+   exist yet.
+7. The **M0 gate** locks proof against a real `apps/loopex/mix.exs`, including an
+   adversarial fixture that introduces a forbidden core-to-adapter reference and
+   demonstrates that the repository command fails. This is an implementation
+   obligation, not a condition of accepting this ADR: scaffolding cannot exist
+   until an accepted plan and red gate authorize it.
 
 ## Alternatives and evidence
 
 **Single Mix project with directory separation, enforced by `mix xref`.**
 Rejected. The reference ReqLLM adapter would place an external dependency in the
-core application's `mix.exs`, contradicting founding decision 5 directly. It also
-demotes dependency direction from a structural property the compiler enforces to
-a convention a check must chase, which is the weaker form of the same guarantee.
+core application's `mix.exs`, contradicting founding decision 5 directly. It
+also erases the explicit application graph between core and adapter. A repository
+check could reconstruct that boundary from directories and `mix xref` output,
+but the umbrella represents the graph directly and still pairs it with the
+adversarial enforcement required for static and dynamic references.
 
 **Poncho projects — separate Mix projects joined by path dependencies.**
 Rejected for now. It buys independent release cadence, which vision §7.2
@@ -98,8 +104,10 @@ release version through 0.x.
 
 ## Consequences
 
-- Dependency direction becomes a compile-time property. A core module that
-  reaches for an adapter fails to compile rather than failing review.
+- Umbrella application boundaries make dependency direction explicit and
+  enforceable, but do not prove it alone. The repository command and its
+  adversarial fixture carry that proof; ordinary compilation is not claimed to
+  detect every static or dynamically constructed module reference.
 - The core-against-fakes build that vision §7.2 requires is expressible as an
   ordinary per-application test command.
 
@@ -113,10 +121,10 @@ What becomes harder:
 - Root `mix test` runs every application. The core-only, fakes-only build needs
   its own locked command; ambiguity there would let an adapter dependency leak
   into a "core" claim.
-- Static-analysis and formatter configuration is inherited from the umbrella
-  root rather than declared per application, and Dialyzer PLT handling in
-  umbrellas needs explicit setup. Root-level tooling is what keeps the core's
-  deps list empty, so this is a constraint the layout depends on, not a detail.
+- Built-in analysis and formatter configuration lives at the umbrella root, and
+  Dialyzer PLT handling in umbrellas needs explicit setup. Any later separately
+  accepted external project-wide tool also lives at the root; this ADR does not
+  authorize one.
 - Publishing from an umbrella is per-application. The one-version-train rule
   becomes a check to write, not a property the tooling gives for free.
 
@@ -137,6 +145,6 @@ in-repo dependent and must go through an amendment to this ADR.
 - [Vision §7.1–§7.2](../vision.md) — four layers, core dependency budget
 - [Vision §20.1](../vision.md) — repository seed and initial layout
 - [Vision §24.1, §24.4](../vision.md) — versioned surfaces, publication posture
-- [docs/roadmap.md](../roadmap.md) — ADR agenda and milestone sequencing
+- [docs/roadmap.md](../roadmap.md) — capability guidance and ADR agenda
 - [docs/developer/agent-context-map.md](../developer/agent-context-map.md) —
   the `deps-budget.sh` rider

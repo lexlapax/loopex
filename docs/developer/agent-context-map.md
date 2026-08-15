@@ -8,10 +8,17 @@ with ADR and code pointers as they land.
 
 ## How To Use
 
-1. Read `AGENTS.md`, any accepted active plan and gate contract when one exists,
-   and constraining accepted ADRs first.
-2. Use the table below to find an area's anchor sections and docs.
-3. Prefer code and tests over stale prose. Flag conflicts.
+1. Read `AGENTS.md` first.
+2. Read [docs/plans/README.md](../plans/README.md) for the checked-out
+   revision's canonical milestone status.
+3. Read the accepted active plan and gate contract when one exists, plus its
+   constraining accepted ADRs.
+4. Use the table below to find an area's anchor sections and docs.
+5. Prefer code and tests over stale prose. Flag conflicts.
+
+`docs/vision.md` may be edited only under an explicit current maintainer or
+developer request naming a vision change; see `AGENTS.md` for the separate
+decision duty when a founding boundary or invariant would change.
 
 ## Area Routing
 
@@ -35,8 +42,8 @@ with ADR and code pointers as they land.
 | Embedded API, transports, clients, ACP | Vision §18 | One semantic contract; JSONL RPC first; reference daemon/CLI; ACP before protocol v1 freeze. |
 | Hosts and wrappers | Vision §19 | Expected consumers; secured sample host; prior-system evidence and clean-room rule. |
 | Repository layout, derived docs, ADR agenda | Vision §20 | What to create next and which decisions need ADRs. |
-| Delivery shape and milestones | Vision §21, the active plan, [roadmap.md](../roadmap.md) | §21 is a suggestion and the roadmap is non-normative sequencing guidance; the accepted plan is the commitment. The roadmap also records the plan/ADR/architecture file layout. |
-| Verification, invariants, budgets | Vision §23 | Test layers; the named invariant suite; minimalism budgets; performance evidence rules. |
+| Delivery shape and milestones | Vision §21, [plans index](../plans/README.md), the active plan, [roadmap.md](../roadmap.md) | The plans index owns current status; §21's capability ladder and the roadmap are non-normative guidance, while §21's planning and prerequisite duties remain controlling; an accepted plan is the commitment. |
+| Verification, invariants, budgets | Vision §23; AGENTS.md § Product Non-Negotiables; the active plan | Test layers; the named invariant suite; scope-specific minimalism budgets; every abstraction names concrete examples or current implementations; raw line count is only a signal unless the accepted plan locks a cap. |
 | Compatibility and release governance | Vision §24 | Six separately versioned surfaces; 0.x labeling; migration/rollback duties. |
 | Prior-system evidence (Allbert Assist) | Vision §19.3, §29.6 | All consulted documents are directly linked there with full URLs. Lessons flow in; code does not. |
 | Coding-agent ecosystem, adapters, skills, portable enforcement | AGENTS.md § Project State and Client Adapters and § Parallel Work and Portable Enforcement; [DEVELOPMENT.md](../../DEVELOPMENT.md); [agent-adapter-smoke.md](agent-adapter-smoke.md); `scripts/` | Check current primary vendor docs and installed behavior, derive coding-agent-agnostic consequences first, then keep `.claude/`, `.codex/`, and future tested adapters thin. OpenCode, Pi, and a future Loopex coding surface are candidates, not supported clients. Every check runs locally; hosted CI is replaceable. |
@@ -55,20 +62,29 @@ lane — never part of the default suite.
 ## Coding-Agent Ecosystem Guidance
 
 - `scripts/check-agent-bootstrap.sh`, `scripts/check-gitignore.sh`,
-  `scripts/check-commit-messages.sh`, and `scripts/check-repo-hygiene.sh` define
-  "bootstrap green" behind the provider-neutral aggregate
+  `scripts/check-commit-messages.sh`, `scripts/check-repo-hygiene.sh`, and
+  `scripts/check-status.sh` define "bootstrap green" behind the provider-neutral aggregate
   `scripts/check-bootstrap.sh`. They run from a clean checkout with the
   toolchain in [DEVELOPMENT.md](../../DEVELOPMENT.md); hosted CI may invoke only
   the aggregate as a replaceable thin wrapper.
 - Maintainer decision (explicit bootstrap task, 2026-08-15): the exact-SHA,
   repository-owned local aggregate is mandatory evidence; hosted CI is
-  supplementary unless an accepted gate or release claim explicitly locks a
-  hosted or real-provider lane. A hosted-required default was rejected because
-  it would make an open-source checkout depend on one provider; removing the
-  thin hosted mirror was rejected because it remains useful supplementary
-  signal. Existing GitHub automation therefore stays replaceable, forks need no
-  GitHub tooling to develop, and a later material change requires a new
-  option-and-implication packet and maintainer approval.
+  supplementary for every development milestone. Only separately authorized
+  release evidence may require a hosted provider; gate-locked real-provider,
+  store, and executor lanes remain independent of hosted CI. A hosted-required
+  default was rejected because it would make an open-source checkout depend on
+  one provider; removing the thin hosted mirror was rejected because it remains
+  useful supplementary signal. Existing GitHub automation therefore stays
+  replaceable, forks need no GitHub tooling to develop, and a later material
+  change requires a new option-and-implication packet and maintainer approval.
+- Maintainer decision (2026-08-15): Python 3.11 and `jq` are temporary seed/M0
+  bridges. Before M0 closes, repository checks migrate to Elixir
+  standard-library or Mix entrypoints and tested client hooks migrate to them.
+  Removing a tested hook instead requires the accepted M0 plan to disposition
+  that behavior explicitly with equivalent protection or an explicitly
+  accepted loss. Adapter behavior is proved with `jq` absent; both prerequisites
+  then disappear. The enduring development baseline is Git, shell/POSIX tools,
+  and the accepted Elixir/OTP toolchain.
 - Client-adapter loading is proven, not assumed. Retain versions, source SHA,
   adapter digests, prompts, observed instruction/role/skill loading, and
   permission results in [agent-adapter-smoke.md](agent-adapter-smoke.md). Rerun
@@ -78,9 +94,9 @@ lane — never part of the default suite.
   role default is not proof: if the live parent or client overrides it with a
   writable profile, the reviewer reports unavailable and stops. Retain both a
   positive read-only smoke and a negative fail-closed smoke where supported.
-  Required inspection checks must also execute in that environment: bootstrap
-  Python assertions live in the tracked `scripts/check-agent-bootstrap.py`, not
-  a shell here-document that needs ambient temporary writes.
+  Required inspection checks must also execute in that environment: during the
+  bridge period, Python assertions live in tracked scripts rather than shell
+  here-documents that need ambient temporary writes.
 - For coding-agent ecosystem changes, check current primary vendor docs or
   release notes plus installed behavior, derive any coding-agent-agnostic
   consequence first, and retain version-specific facts here. Material changes
@@ -93,18 +109,24 @@ lane — never part of the default suite.
   `disable-model-invocation: true`, while Codex consumes
   `agents/openai.yaml` policy `allow_implicit_invocation: false`. Enforcement
   scripts use stock `grep -E`, never ripgrep.
-- Mix-scaffold rider: `.claude/hooks/deps-budget.sh` hardcodes
-  `apps/loopex/mix.exs` and is silently inert under any other layout. Vision
-  §20.1 leaves the tree unfrozen; the layout decision must update that hook in
-  the same change.
+- Mix-scaffold rider: proposed ADR 0001 makes the first accepted scaffold create
+  a repository-owned dependency-budget/direction command and turn
+  `.claude/hooks/deps-budget.sh` into a thin caller. Until the M0 gate creates
+  and proves that command, the current Claude-only hook is early feedback and
+  must not be described as repository enforcement.
 
-## Version-Specific Guidance
+## Version-Specific Technical Guidance
 
-This section holds temporary in-flight guidance while a specific version is
-being planned and implemented. It is cleared at release closeout; add the
-next version's working notes here when that work begins.
+This section holds temporary technical routing while a milestone is planned and
+implemented. It never owns milestone status; read the
+[plans index](../plans/README.md) for that. Clear in-flight notes at milestone
+closeout, including for milestones such as M0 that produce no release.
 
-### Seed bootstrap (closed 2026-08-15)
+Revision-scoped milestone status is deliberately not repeated here.
+
+## Retained Seed Bootstrap Evidence
+
+### Closed 2026-08-15
 
 The maintainer explicitly authorized the final cross-client hardening pass and
 its closure. The adapter-changing checkpoint is
@@ -113,7 +135,7 @@ its closure. The adapter-changing checkpoint is
 check passed in the configured read-only reviewer, which returned `APPROVE`
 with no findings. Exact smokes, commands, prompts, versions, digests, and the
 review are retained in [agent-adapter-smoke.md](agent-adapter-smoke.md). This
-closure-record commit changes evidence and current-stage pointers only. Push
+closure-record commit changes evidence and bootstrap pointers only. Push
 and any hosted-wrapper result are supplementary publication evidence, not
 closure authority or a development dependency. Any client should derive the
 closed state from these facts alone:
@@ -121,6 +143,5 @@ closed state from these facts alone:
 - The permanent Coding-Agent Ecosystem Guidance above, retained smoke evidence,
   and the AGENTS.md durability paragraph (complete per vision §20.3) are the
   candidate's shared memory; do not move these facts into client-only state.
-- Nothing beyond seed-scope work is authorized until the maintainer
-  explicitly opens the next stage gate-first (AGENTS.md § Milestones and
-  Gates, seed-bootstrap clause; `gate` skill).
+- Current authorization and the next transition are recorded only in the
+  [canonical plans status register](../plans/README.md).
