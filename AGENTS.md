@@ -153,6 +153,12 @@ subagent's scope is a subset of the parent request; spawning agents grants no
 authority. Do not assume a client propagates sandbox, credentials, approvals, or
 isolation—configure and verify each worker environment.
 
+Landed work leaves no residue. Once a change is pushed and contained in the
+integration branch, the integrator deletes its branch and removes its worktree;
+a branch or worktree that survives its merge is stale state a later agent or
+client can misread as in-flight work. Unmerged branches and live worktrees are
+ordinary parallel work and stay.
+
 Portable enforcement lives in product/test code, repository-owned Mix tasks,
 and CI. Client hooks call the same entrypoints but never waive them. Enforcement
 fails closed when a required check is missing or silently ineffective.

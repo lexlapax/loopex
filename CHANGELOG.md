@@ -30,6 +30,9 @@ the exact document set its milestone must update.
   two validated (Elixir, OTP) pairs.
 - `scripts/check-commit-messages.sh` — portable commit-title and
   AI-attribution enforcement, wired into `scripts/check-bootstrap.sh`.
+- `scripts/check-repo-hygiene.sh` — fails on branches already merged into the
+  integration ref and on worktrees that are stale or sitting on landed work.
+  In-flight branches and live worktrees pass untouched.
 - This changelog.
 
 ### Changed
@@ -40,6 +43,7 @@ the exact document set its milestone must update.
 - The AI-attribution ban is now enforced by a repository check rather than only
   by `.claude/hooks/guard-bash.sh`, which left Codex and CI uncovered.
 - Milestone closure now explicitly includes updating the documentation set.
+- Landed work must leave no branch or worktree residue.
 
 ## Seed bootstrap — closed 2026-08-15
 
