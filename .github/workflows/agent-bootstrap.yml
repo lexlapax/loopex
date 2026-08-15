@@ -1,0 +1,16 @@
+name: agent-bootstrap
+# Seed enforcement only: proves the committed base keeps the agent bootstrap
+# green. Product gates (mix loopex.gate) get their own workflow once the Mix
+# scaffold exists; this workflow must not be weakened to admit a red seed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  seed-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-agent-bootstrap.sh
+      - run: bash scripts/check-gitignore.sh
