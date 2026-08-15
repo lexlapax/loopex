@@ -100,16 +100,19 @@ This section holds temporary in-flight guidance while a specific version is
 being planned and implemented. It is cleared at release closeout; add the
 next version's working notes here when that work begins.
 
-### Seed bootstrap closure candidate (updated 2026-08-15)
+### Seed bootstrap (closed 2026-08-15)
 
-The maintainer authorized this final cross-client hardening pass and asked to
-close agent bootstrap after its evidence and review agree. The adapter-changing
-candidate is `d1782a8d1c1c2c7f1399fe0aeebaa4a86b36f240`; its retained smokes
-are in [agent-adapter-smoke.md](agent-adapter-smoke.md). Do not call the seed
-bootstrap closed until the following evidence commit passes repository checks
-and exact-SHA independent review. Push and any hosted-wrapper result are
-supplementary publication evidence, not closure authority or a development
-dependency. Any client should derive the candidate state from these facts alone:
+The maintainer explicitly authorized the final cross-client hardening pass and
+its closure. The adapter-changing checkpoint is
+`d1782a8d1c1c2c7f1399fe0aeebaa4a86b36f240`; the final technical candidate is
+`cd8d2ae8f8347d051e6ea82fbdd5f19005e0c427`. Its repository aggregate and diff
+check passed in the configured read-only reviewer, which returned `APPROVE`
+with no findings. Exact smokes, commands, prompts, versions, digests, and the
+review are retained in [agent-adapter-smoke.md](agent-adapter-smoke.md). This
+closure-record commit changes evidence and current-stage pointers only. Push
+and any hosted-wrapper result are supplementary publication evidence, not
+closure authority or a development dependency. Any client should derive the
+closed state from these facts alone:
 
 - The permanent Coding-Agent Ecosystem Guidance above, retained smoke evidence,
   and the AGENTS.md durability paragraph (complete per vision §20.3) are the

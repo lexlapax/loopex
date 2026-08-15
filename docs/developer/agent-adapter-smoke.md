@@ -5,6 +5,39 @@ Adapter parity requires proof of effective loading, not file presence
 manual smoke results; the deterministic subset runs in CI via
 `scripts/check-agent-bootstrap.sh`.
 
+## 2026-08-15 — closure candidate SHA `cd8d2ae8f8347d051e6ea82fbdd5f19005e0c427`
+
+The final technical candidate adds a tracked Python assertion script so the
+provider-neutral aggregate runs inside an effectively read-only reviewer
+without a writable checkout or ambient temporary directory. From a clean
+candidate checkout, `bash scripts/check-bootstrap.sh` and `git diff --check`
+both passed.
+
+Exact independent-review invocation and prompt:
+
+```sh
+RUST_LOG=error codex exec -C . --sandbox read-only --ignore-user-config \
+  -m gpt-5.6-sol -c 'model_reasoning_effort="medium"' \
+  "Review exact candidate SHA cd8d2ae8f8347d051e6ea82fbdd5f19005e0c427 against base 0d663d0b9c5412b908c15513e7dde2110f4250ec. Have release_reviewer perform the independent seed-bootstrap closure review. It must first report its effective filesystem, network, and approval profile and confirm custom instructions loaded; stop if not read-only. Verify HEAD and clean worktree, inspect the full exact diff and retained evidence, and run bash scripts/check-bootstrap.sh plus git diff --check in the read-only environment. Confirm the prior here-document blocker is resolved. Do not edit or affect external state. Wait and return its exact disposition."
+```
+
+Codex-cli 0.147.0 loaded the configured `release_reviewer` under filesystem
+`read-only`, restricted network, and approvals `never`. The reviewer verified
+the exact SHA and clean tree, ran both commands successfully, confirmed the
+here-document blocker resolved, reported no blocking, high-severity, or
+non-blocking findings, and returned `APPROVE`. This is independent review
+evidence; the maintainer's closure disposition is retained in the context map.
+
+The scripts tree object and changed check digests at the candidate SHA are:
+
+```text
+e8ee7b393c5ef716875668bd4255b814b096f8bf  scripts tree
+9061eac87afff739abc25c8f0a8dd855b30a5f55db7a8e94f38f2466aad81c30  scripts/check-agent-bootstrap.sh
+a9966e5c5aabcd0a66d80149794ce8fcbb19389b8663a88abaf7686d6c37a851  scripts/check-agent-bootstrap.py
+22162cef70f9440b839f5adf013dc410a93519b860a224eb3fc3498bfc870a5f  scripts/check-bootstrap.sh
+dbe9687987377f8b0d374a4e983afe43d20bfbc9a7fc2b1bb3556b30a76e173d  scripts/check-gitignore.sh
+```
+
 ## 2026-08-15 — source SHA `d1782a8d1c1c2c7f1399fe0aeebaa4a86b36f240` (bootstrap hardening)
 
 This is the exact adapter-changing candidate over base
