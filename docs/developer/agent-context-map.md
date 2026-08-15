@@ -174,6 +174,32 @@ closeout, including for milestones such as M0 that produce no release.
 
 Revision-scoped milestone status is deliberately not repeated here.
 
+## Retained Authority Dispositions
+
+Durable records of explicit maintainer decisions that governance records cite.
+Each entry is immutable once written; a later decision is a new entry.
+
+<a id="disposition-founding-adrs-2026-08-15"></a>
+### Founding ADR acceptance — 2026-08-15
+
+The maintainer explicitly accepted
+[ADR 0001](../adr/0001-repository-and-application-layout.md#concept),
+[ADR 0002](../adr/0002-bootstrap-runtime-floor.md#concept), and
+[ADR 0003](../adr/0003-extension-contract-boundary.md#concept) as the Proposed
+pairs existing at candidate `c703a65b665a5e64159e98833c63d29ff521cd2b`, in a
+direct instruction to accept all three. Acceptance binds both files of each pair
+as they existed at that candidate; the digests are recorded in each Concept
+file's governance record.
+
+Accepting ADR 0001 and ADR 0002 satisfies the M0 prerequisite guard. It does not
+open M0, which still requires an explicit gate-first instruction. ADR 0003
+blocked nothing and unblocks nothing.
+
+This record is written before the administrative acceptance commit so that the
+pointer resolves to already-integrated bytes. It is the maintainer's disposition
+evidence, not an independent review: the transition itself still requires the
+read-only exact-diff review the plans register mandates.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
