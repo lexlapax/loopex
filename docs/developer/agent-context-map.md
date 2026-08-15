@@ -35,7 +35,7 @@ with ADR and code pointers as they land.
 | Embedded API, transports, clients, ACP | Vision §18 | One semantic contract; JSONL RPC first; reference daemon/CLI; ACP before protocol v1 freeze. |
 | Hosts and wrappers | Vision §19 | Expected consumers; secured sample host; prior-system evidence and clean-room rule. |
 | Repository layout, derived docs, ADR agenda | Vision §20 | What to create next and which decisions need ADRs. |
-| Delivery shape and milestones | Vision §21, the active plan | §21 is a suggestion; the active plan is the commitment. |
+| Delivery shape and milestones | Vision §21, the active plan, [roadmap.md](../roadmap.md) | §21 is a suggestion and the roadmap is non-normative sequencing guidance; the accepted plan is the commitment. The roadmap also records the plan/ADR/architecture file layout. |
 | Verification, invariants, budgets | Vision §23 | Test layers; the named invariant suite; minimalism budgets; performance evidence rules. |
 | Compatibility and release governance | Vision §24 | Six separately versioned surfaces; 0.x labeling; migration/rollback duties. |
 | Prior-system evidence (Allbert Assist) | Vision §19.3, §29.6 | All consulted documents are directly linked there with full URLs. Lessons flow in; code does not. |

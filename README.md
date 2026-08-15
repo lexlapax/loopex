@@ -110,9 +110,6 @@ regardless of what can be promised about support.
 
 ## Roadmap (suggested shape)
 
-The delivery plan lives in [docs/vision.md](docs/vision.md) §21 and becomes
-real only as per-milestone plan documents in `docs/plans/`:
-
 | Milestone | Proves |
 | --- | --- |
 | M0 | Bounded contract experiments: durability/replay, operation truth across two nodes, extension activation/rollback, one real provider slice. Disposable; freezes nothing. |
@@ -121,6 +118,13 @@ real only as per-milestone plan documents in `docs/plans/`:
 | v0.3 | Governed extensions and live reload, with exact rollback proof. |
 | v0.4 | Isolated hands and generated-code trials behind the executor gateway. |
 | v0.5 | Remote hands and ecosystem beta: broker, trusted gateways, ACP adapter, sample hosts. |
+| 1.0 | A compatibility baseline: independent consumers, migrations, rollback, packaged operation. |
+
+[docs/roadmap.md](docs/roadmap.md) carries the fuller shape — what each rung
+proves, which ADRs precede it, and the serial barriers that cannot be
+resequenced. It is guidance; the delivery commitment is
+[docs/vision.md](docs/vision.md) §21 turned into accepted per-milestone plans
+in `docs/plans/`.
 
 ## Start Here
 
@@ -128,6 +132,8 @@ real only as per-milestone plan documents in `docs/plans/`:
   provider-neutral local validation command.
 - [docs/vision.md](docs/vision.md) — the founding vision and architecture;
   everything else derives from it.
+- [docs/roadmap.md](docs/roadmap.md) — milestone sequencing, ADR agenda, and
+  serial barriers. Non-normative guidance.
 - [AGENTS.md](AGENTS.md) — repository rules for coding agents and
   agent-assisted work.
 - [docs/developer/agent-context-map.md](docs/developer/agent-context-map.md)
