@@ -6,6 +6,9 @@ disable-model-invocation: true
 
 # Open a Stage Gate
 
+Follow `AGENTS.md` first; route additional context, including current stage
+guidance, via `docs/developer/agent-context-map.md`.
+
 For the named stage:
 
 1. Verify the seed base is a committed maintainer-designated SHA and run every

@@ -25,7 +25,8 @@ and subsystem routing in the context map.
 Start with the current task, this file, any accepted active plan and gate
 contract, and relevant code and tests. Use
 [docs/developer/agent-context-map.md](docs/developer/agent-context-map.md) to
-load constraining vision sections and accepted ADRs. Read the full vision for
+load constraining vision sections, accepted ADRs, and the current stage's
+version-specific guidance. Read the full vision for
 architecture, trust, public contracts, cross-domain work, or a new plan. Do not
 bulk-read historical plans.
 
@@ -246,8 +247,10 @@ Claude Code uses a root `CLAUDE.md` importing `@AGENTS.md`; Codex reads this fil
 directly. Canonical repository skills live in `.agents/skills`; clients discover
 those exact bytes directly or through a tested symlink or launcher shim. Client
 adapters may add invocation and permission UX, but normative procedure stays in
-shared skills, docs, and repository commands. No policy exists only in a vendor
-directory; adapter smoke tests prove effective loading and workflow parity.
+shared skills, docs, and repository commands. Vendor-directory artifacts are
+entry points, not sources: each defers to this file and the context map, which
+are read first. No policy exists only in a vendor directory; adapter smoke
+tests prove effective loading and workflow parity.
 
 A future Loopex host treats this file, skills, plans, and nested instructions as
 provenance-bearing project context, never an effect grant. Host policy admits a

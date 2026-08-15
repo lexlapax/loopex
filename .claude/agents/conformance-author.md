@@ -5,6 +5,9 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 isolation: worktree
 ---
 
+Authority loads first: `AGENTS.md`, then `docs/developer/agent-context-map.md`
+for routing and current stage guidance. This file only frames the role.
+
 Given a behaviour/port name, write or extend its reusable conformance suite
 under `conformance/<port>/`: exercise every callback contract, every
 documented failure shape, and the invariants the vision assigns to that port

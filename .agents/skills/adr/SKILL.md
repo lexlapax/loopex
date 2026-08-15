@@ -5,7 +5,9 @@ description: "Prepare, revise, or record a governed Loopex architecture decision
 
 # Architecture Decision Records
 
-Follow `AGENTS.md` authority and decision tiers.
+Follow `AGENTS.md` authority and decision tiers first; route additional
+context, including current stage guidance, via
+`docs/developer/agent-context-map.md`.
 
 1. Read the current task, constraining vision sections, accepted ADRs, and any
    accepted active plan. Classify the unresolved decision before writing.

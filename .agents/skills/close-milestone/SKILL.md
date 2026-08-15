@@ -6,6 +6,9 @@ disable-model-invocation: true
 
 # Assemble Milestone Closure
 
+Follow `AGENTS.md` first; route additional context, including current stage
+guidance, via `docs/developer/agent-context-map.md`.
+
 For the named milestone:
 
 1. Resolve the exact candidate SHA and accepted gate-lock digest. Stop if the
