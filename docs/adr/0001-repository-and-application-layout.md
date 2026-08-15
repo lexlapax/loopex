@@ -5,7 +5,7 @@
 
 Technical depth: [Repository layout mechanics](0001-repository-and-application-layout-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-15
 - **Decision owner:** Maintainer
 - **Prerequisite for:** the M0 gate (see [the roadmap](../roadmap.md#concept-roadmap-m0))
@@ -14,7 +14,7 @@ Technical depth: [Repository layout mechanics](0001-repository-and-application-l
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-founding-adrs-2026-08-15) | candidate `c703a65b665a5e64159e98833c63d29ff521cd2b`; concept `sha256:6828b73df1c7de02c053c7c2597324db80869bce021a43f7236944fcc28ab338`; technical `sha256:c46ba507edf5e85d3534b7b144f0c5643b95295db102054bead7c069a56e24c5` |
 
 <a id="concept-adr-0001-context"></a>
 ## Context

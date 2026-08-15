@@ -20,10 +20,10 @@ integrated; `main` describes integrated project state, not every remote activity
 | --- | --- |
 | Integrated phase | Pre-implementation planning |
 | Last integrated checkpoint | Seed bootstrap — 2026-08-15 |
-| Blockers | [ADR 0001](../adr/0001-repository-and-application-layout.md#concept) and [ADR 0002](../adr/0002-bootstrap-runtime-floor.md#concept) must be accepted before M0 opens; a replacement requires a governed guard change |
+| Blockers | M0 has not been explicitly opened gate-first |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |
-| Next transition | After the prerequisites are accepted, the maintainer explicitly opens `M0` gate-first |
+| Next maintainer decision | Explicitly open or defer M0 |
+| Next transition | Create the branch-only M0 Concept plan, Technical depth plan, and red gate; install lifecycle-specific status checks; and move M0 to Open |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
