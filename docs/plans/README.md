@@ -1,5 +1,7 @@
 # Plans
 
+Part of the [documentation index](../README.md).
+
 An accepted Concept plan, Technical depth plan, and gate form one commitment.
 Future capability rungs in
 [docs/roadmap.md](../roadmap.md#concept) are candidates, not commitments.
@@ -406,6 +408,13 @@ changes nothing about how the work is directed.
 | Completing an accepted milestone | Implementation inside the accepted envelopes until the locked gate is green | Independent review |
 | Closing a reviewed milestone | A closure candidate is assembled from evidence, review, and demonstrations | Closure by the recorded authority |
 | Integrating approved work | Merge, push, and branch cleanup | Your explicit approval each time |
+
+Opening and closing a milestone are the two rows the maintainer invokes
+directly, because no actor may open or close its own gate. Both clients require
+that invocation to be explicit; the current per-client keystrokes are recorded
+in the
+[context map](../developer/agent-context-map.md). Every other row is ordinary
+language.
 
 Some things stop regardless of how a request is phrased: self-acceptance, gate
 weakening, evidence waiver, scope deferral, a protected-branch merge, release

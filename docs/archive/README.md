@@ -1,5 +1,7 @@
 # Archive
 
+Part of the [documentation index](../README.md).
+
 This directory contains materially distinct historical seed inputs retained
 only for provenance. Archived files are non-normative; current authority follows
 the root `AGENTS.md`. Do not bulk-read or use them as implementation guidance.

@@ -1,0 +1,41 @@
+# Architecture Decisions
+
+Decisions that refine the vision, recorded where evidence had to choose among
+valid designs. Part of the [documentation index](../README.md).
+
+An ADR is not milestone-scoped. It is numbered, flat, and permanent: superseding
+a decision adds a new record rather than rewriting the old one.
+
+## Decisions
+
+| # | Decision | Status | Concept | Technical depth |
+| --- | --- | --- | --- | --- |
+| 0001 | Repository and application layout | Proposed | [Decision](0001-repository-and-application-layout.md#concept) | [Technical depth](0001-repository-and-application-layout-technical.md#technical-depth) |
+| 0002 | Bootstrap runtime floor and version matrix | Proposed | [Decision](0002-bootstrap-runtime-floor.md#concept) | [Technical depth](0002-bootstrap-runtime-floor-technical.md#technical-depth) |
+
+Both are prerequisites of the next milestone candidate; the
+[plans register](../plans/README.md) records what their disposition unblocks.
+
+## How a Decision Is Recorded
+
+Each ADR is a Concept and Technical depth pair that forms one decision. The
+Concept file owns context, the decision, alternatives, consequences,
+compatibility, and the governance record; its companion owns invariants,
+mechanics, and evidence. Acceptance binds both files as they existed at the
+recorded candidate.
+
+Status is `Proposed`, `Accepted`, `Rejected`, or `Superseded`, and lives in the
+Concept file. No actor accepts its own decision: acceptance is an explicit
+maintainer or recorded-delegate disposition, captured in the governance record
+rather than inferred from a status word.
+
+The [`adr` skill](../../.agents/skills/adr/SKILL.md) carries the procedure for
+preparing or revising one. A reversible implementation choice is recorded in the
+nearest code, test, or plan progress instead — an ADR is for a decision among
+valid designs, never an activity log.
+
+## Related
+
+- [Vision](../vision.md#concept) — the founding authority these decisions refine.
+- [Developer documentation](../developer/README.md) — method and routing.
+- [Plans](../plans/README.md) — milestone register and lifecycle.

@@ -148,6 +148,15 @@ lane — never part of the default suite.
   consumes `disable-model-invocation: true`, while Codex consumes
   `agents/openai.yaml` policy `allow_implicit_invocation: false`. Enforcement
   scripts use stock `grep -E`, never ripgrep.
+- Current invocation mapping. Opening and closing a milestone are maintainer
+  keystrokes because no actor may open or close its own gate. In Claude Code the
+  maintainer types `/gate <milestone>` and `/close-milestone <milestone>`; in
+  Codex the same skills are invoked explicitly rather than implicitly. Always
+  name the milestone — an unnamed invocation cannot resolve which one is
+  intended. Every other verb in
+  [Directing the Work](../plans/README.md) is ordinary language in both clients
+  and needs no shortcut. This row records client keystrokes only; the verbs and
+  their authority live in the plans register and survive any client change.
 - Mix-scaffold rider: [ADR 0001](../adr/0001-repository-and-application-layout.md#concept-adr-0001-decision)
   and its [technical companion](../adr/0001-repository-and-application-layout-technical.md#technical-adr-0001-decision)
   make the first accepted scaffold create

@@ -59,6 +59,21 @@ the exact document set its milestone must update.
   general Markdown parser. M0 replaces the bridge with Elixir/Mix.
 - A `## Where Things Stand` block at the top of `README.md`, so the GitHub
   landing page answers what is happening and what is next.
+- `docs/developer/README.md` — the directory index and the start-here reading
+  order for someone new to the repository. It routes to setup, status, contract,
+  and charter rather than restating them, so there is no separate quickstart to
+  drift.
+- `docs/adr/README.md` — the decision index, how a decision is recorded, and
+  what distinguishes an ADR from a reversible implementation choice.
+- A required documentation index chain: every directory under `docs/` carries a
+  `README.md` describing its contents and linking back to `docs/README.md`,
+  which links back to the root README. `scripts/check_status.py` enforces the
+  chain — missing index, missing forward link, and missing back-link each fail —
+  so a document cannot be reachable only by knowing it exists.
+- The current per-client milestone invocation is recorded in the context map:
+  opening and closing are maintainer keystrokes, because no actor may open or
+  close its own gate. Keystrokes live with the version-specific client facts;
+  the verbs and their authority stay in the plans register.
 - A developer workflow guide in `docs/plans/README.md` § Directing the Work:
   what to ask for, where each request stops, what stops regardless of phrasing,
   and what changes when a milestone opens. The verbs belong to the repository,

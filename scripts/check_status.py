@@ -521,6 +521,36 @@ def _markdown_links(
     return matches
 
 
+def _validate_directory_indexes(documents: Mapping[str, str]) -> None:
+    """Every documentation directory indexes itself and links back up.
+
+    A document reachable only by knowing it exists is not documented, so the
+    index chain from the root README down to each directory is structural
+    rather than a convention reviewers must remember.
+    """
+    directories: set[str] = set()
+    for path in documents:
+        if path.startswith("docs/") and path.endswith(".md"):
+            directories.add(posixpath.dirname(path))
+
+    for directory in sorted(directories):
+        index = posixpath.join(directory, "README.md")
+        if index not in documents:
+            raise Invalid(f"{directory}: directory with Markdown needs a README.md index")
+
+    root_index = "docs/README.md"
+    root_targets = _visible_local_link_targets(documents[root_index], root_index)
+    if "README.md" not in root_targets:
+        raise Invalid(f"{root_index}: must link back to the root README.md")
+
+    for directory in sorted(directories - {"docs"}):
+        index = posixpath.join(directory, "README.md")
+        if index not in root_targets:
+            raise Invalid(f"{root_index}: must link the {directory}/ index")
+        if root_index not in _visible_local_link_targets(documents[index], index):
+            raise Invalid(f"{index}: must link back to {root_index}")
+
+
 def _validate_local_links(documents: Mapping[str, str]) -> None:
     """Resolve visible local Markdown paths and explicit semantic fragments."""
     for source, text in documents.items():
@@ -1510,6 +1540,7 @@ def validate(
     try:
         adr_paths, plan_names = _document_topology(documents)
         _validate_local_links(documents)
+        _validate_directory_indexes(documents)
         required = (
             "README.md",
             "docs/plans/README.md",

@@ -246,6 +246,10 @@ def documents() -> dict[str, str]:
         "README.md": README,
         "docs/README.md": """# Documentation
 
+[Root](../README.md)
+[Developer](developer/README.md)
+[Decisions](adr/README.md)
+[Plans](plans/README.md)
 [Vision](vision.md#concept)
 [Vision technical](vision-technical.md#technical-depth)
 [Roadmap](roadmap.md#concept)
@@ -257,7 +261,13 @@ def documents() -> dict[str, str]:
 [ADR 0002](adr/0002-bootstrap-runtime-floor.md#concept)
 [ADR 0002 technical](adr/0002-bootstrap-runtime-floor-technical.md#technical-depth)
 """,
-        "docs/plans/README.md": f"# Plans\n\n{CURRENT}\n\n{REGISTER}\n",
+        "docs/plans/README.md": (
+            f"# Plans\n\n[Documentation](../README.md)\n\n{CURRENT}\n\n{REGISTER}\n"
+        ),
+        "docs/adr/README.md": "# Decisions\n\n[Documentation](../README.md)\n",
+        "docs/developer/README.md": (
+            "# Developer documentation\n\n[Documentation](../README.md)\n"
+        ),
         "docs/vision.md": (
             "# Vision\n\n<a id=\"concept\"></a>\n## Concept\n\n"
             "Technical depth: [Vision details](vision-technical.md#technical-depth)\n"
@@ -677,6 +687,37 @@ class StatusTest(unittest.TestCase):
                 docs["README.md"] += f"\n{link}\n"
                 self.assert_invalid(docs, error)
 
+    def test_documentation_directories_are_indexed(self) -> None:
+        """A document reachable only by knowing it exists is not documented."""
+        docs = documents()
+        docs["docs/operator/recovery.md"] = "# Recovery runbook\n"
+        self.assert_invalid(
+            docs, "docs/operator: directory with Markdown needs a README.md index"
+        )
+
+        docs = documents()
+        docs["docs/operator/recovery.md"] = "# Recovery runbook\n"
+        docs["docs/operator/README.md"] = "# Operator\n\n[Documentation](../README.md)\n"
+        self.assert_invalid(docs, "must link the docs/operator/ index")
+
+        docs = documents()
+        docs["docs/operator/recovery.md"] = "# Recovery runbook\n"
+        docs["docs/operator/README.md"] = "# Operator\n"
+        docs["docs/README.md"] += "[Operator](operator/README.md)\n"
+        self.assert_invalid(
+            docs, "docs/operator/README.md: must link back to docs/README.md"
+        )
+
+        docs = documents()
+        docs["docs/README.md"] = docs["docs/README.md"].replace("[Root](../README.md)\n", "")
+        self.assert_invalid(docs, "docs/README.md: must link back to the root README.md")
+
+        docs = documents()
+        docs["docs/operator/recovery.md"] = "# Recovery runbook\n"
+        docs["docs/operator/README.md"] = "# Operator\n\n[Documentation](../README.md)\n"
+        docs["docs/README.md"] += "[Operator](operator/README.md)\n"
+        self.assertEqual([], checked(docs))
+
     def test_markdown_classification_rejects_ambiguous_paths(self) -> None:
         for path, error in (
             ("docs/unknown.md", "paired technical document is missing"),
@@ -698,6 +739,9 @@ class StatusTest(unittest.TestCase):
         docs[".github/ISSUE_TEMPLATE/bug.md"] = "# Issue template\n"
         docs["docs/archive/old.md"] = "# Historical bytes\n"
         docs["docs/operator/recovery.md"] = "# Recovery runbook\n"
+        docs["docs/archive/README.md"] = "# Archive\n\n[Documentation](../README.md)\n"
+        docs["docs/operator/README.md"] = "# Operator\n\n[Documentation](../README.md)\n"
+        docs["docs/README.md"] += "[Archive](archive/README.md)\n[Operator](operator/README.md)\n"
         self.assertEqual([], checked(docs))
 
         for path in (

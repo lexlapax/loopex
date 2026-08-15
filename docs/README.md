@@ -5,6 +5,23 @@ to the exact technical depth needed to implement and verify it. Read the
 Concept document first, then follow only the technical links relevant to the
 work at hand.
 
+New here? [Developer documentation](developer/README.md) carries the reading
+order. This file is the index of what exists.
+
+## Directories
+
+| Directory | Contents |
+| --- | --- |
+| [developer/](developer/README.md) | Development method, routing, and retained client evidence. |
+| [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
+| [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
+| [archive/](archive/README.md) | Non-normative historical inputs, retained for provenance. |
+
+Every directory under `docs/` carries a `README.md` describing its contents and
+linking back here; this file links back to the
+[root README](../README.md). The repository status check enforces that chain, so
+a new document cannot be reachable only by knowing it exists.
+
 The [development charter](developer/development-charter.md#concept) explains this
 structure. Its
 [technical companion](developer/development-charter-technical.md#technical-depth) defines the

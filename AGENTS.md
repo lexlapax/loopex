@@ -110,6 +110,13 @@ may route to both depths but may not hide a decision. The complete classificatio
 and mechanics live in the
 [charter technical companion](docs/developer/development-charter-technical.md#technical-depth).
 
+Every directory under `docs/` carries a `README.md` describing its contents and
+linking back to [docs/README.md](docs/README.md), which links back to the root
+README. Creating a document in a directory means indexing it there in the same
+change; a document reachable only by knowing it exists is not documented. Adding
+a directory means adding its index. The repository status check enforces the
+chain, not the prose.
+
 Elixir modules, behaviours, callbacks, public APIs, public types, and important
 boundaries document `## Concept` before `## Technical depth`. Non-obvious
 private invariants, effects, failure modes, or design choices use adjacent
