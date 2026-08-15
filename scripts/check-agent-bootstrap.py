@@ -66,7 +66,7 @@ codex_root = ROOT / ".codex"
 config_text = (codex_root / "config.toml").read_text()
 config = tomllib.loads(config_text)
 assert config.get("features", {}).get("multi_agent_v2") is True, (
-    "multi_agent_v2 must expose project custom agents"
+    "multi_agent_v2 compatibility flag must remain enabled until removal is proven"
 )
 for pointer in ("AGENTS.md", "docs/developer/agent-context-map.md"):
     assert pointer in config_text, ("Codex config missing canonical pointer", pointer)

@@ -132,8 +132,11 @@ the exact document set its milestone must update.
   synchronized phase or authorization drift cannot pass merely because the
   table shape and README agree.
 - Isolated Codex 0.147 smokes now pair `--ignore-user-config` with trust scoped
-  to the exact checkout. Earlier no-trust runs cannot establish project profile
-  or skill loading because that flag also removes persisted project trust.
+  to the exact checkout. They establish project instruction and direct skill
+  discovery; the current exact-source named-role attempt could not bind a child
+  and is unavailable evidence, not a role-loading pass. Earlier no-trust runs
+  cannot establish project profile or skill loading because that flag also
+  removes persisted project trust.
 - Landed work leaves no branch or worktree residue after integration.
 - Detached exact-SHA checkouts are no longer mistaken for merged local branches
   by the repository-hygiene check.

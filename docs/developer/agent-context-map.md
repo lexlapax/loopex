@@ -109,12 +109,18 @@ lane — never part of the default suite.
   and retain version-specific facts here. Material changes
   to development behavior require an option-and-implication packet and
   maintainer approval before adapter edits.
-- Current Codex compatibility: `[features] multi_agent_v2` stays in
-  `.codex/config.toml` because project roles are proven with codex-cli 0.147.0;
-  removal requires a separately reviewed compatibility smoke. On that client,
-  `--ignore-user-config` also removes persisted project trust: an isolated
-  smoke must explicitly trust only its exact checkout through the invocation's
-  `projects` table, or project profiles and skills are unavailable evidence.
+- Current Codex compatibility: codex-cli 0.147.0 proves scoped-trust project
+  instruction and direct skill discovery. In the current exact-source
+  non-interactive smoke, named project-role delegation could not bind a child;
+  that run is unavailable evidence, not a role-loading pass. The role entries
+  remain statically validated configuration. `[features] multi_agent_v2` stays
+  in `.codex/config.toml`; removal requires a separately reviewed compatibility
+  smoke. This limitation is nonblocking because required review depends on a
+  separate effectively read-only invocation, not a named client role. On that
+  client, `--ignore-user-config` also
+  removes persisted project trust: an isolated smoke must explicitly trust
+  only its exact checkout through the invocation's `projects` table, or project
+  profiles and skills are unavailable evidence.
   The `gate` and `close-milestone` skills require explicit invocation: Claude
   consumes `disable-model-invocation: true`, while Codex consumes
   `agents/openai.yaml` policy `allow_implicit_invocation: false`. Enforcement
@@ -143,11 +149,11 @@ Revision-scoped milestone status is deliberately not repeated here.
 The maintainer explicitly authorized the final cross-client hardening pass and
 its closure. The adapter-changing checkpoint is
 `d1782a8d1c1c2c7f1399fe0aeebaa4a86b36f240`; the final technical candidate is
-`cd8d2ae8f8347d051e6ea82fbdd5f19005e0c427`. Its repository aggregate and diff
-check passed in the configured read-only reviewer, which returned `APPROVE`
-with no findings. Exact smokes, commands, prompts, versions, digests, and the
-review are retained in [agent-adapter-smoke.md](agent-adapter-smoke.md). This
-closure-record commit changes evidence and bootstrap pointers only. Push
+`cd8d2ae8f8347d051e6ea82fbdd5f19005e0c427`. Its repository aggregate, diff
+check, and independent review are retained at that source scope in
+[agent-adapter-smoke.md](agent-adapter-smoke.md); historical client-role
+observations do not prove current role loading. This closure-record commit
+changes evidence and bootstrap pointers only. Push
 and any hosted-wrapper result are supplementary publication evidence, not
 closure authority or a development dependency. Any client should derive the
 closed state from these facts alone:

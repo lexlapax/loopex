@@ -452,7 +452,8 @@ adapters may add invocation and permission UX, but normative procedure stays in
 shared skills, docs, and repository commands. Vendor-directory artifacts are
 entry points, not sources: each defers to this file and the context map, which
 are read first. No policy exists only in a vendor directory; adapter smoke
-tests prove effective loading and workflow parity.
+tests prove effective loading of exercised shared behavior, claim parity only
+for that exercised behavior, and retain client-specific limitations.
 
 A future Loopex host treats this file, skills, plans, and nested instructions as
 provenance-bearing project context, never an effect grant. Host policy admits a

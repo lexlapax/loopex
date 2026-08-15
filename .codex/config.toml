@@ -6,8 +6,11 @@
 # grants no project or product authority and defines no acceptance rule.
 
 [features]
-# Retained smoke evidence proves these project roles with codex-cli 0.147.0;
-# keep v2 until a separately reviewed compatibility change proves removal.
+# Retained codex-cli 0.147.0 evidence proves scoped-trust project instruction
+# and direct skill discovery. The current exact-source non-interactive smoke
+# could not bind a named project-role child; these profiles are configured, not
+# a live-delegation claim. Keep v2 until a separately reviewed compatibility
+# change proves removal.
 multi_agent_v2 = true
 
 [agents.mechanical_worker]
