@@ -220,9 +220,10 @@ def _summary(phase: str, rows: list[tuple[str, str, str, str]]) -> str:
     return f"**Revision status:** {phase}; {status}; {next_status}."
 
 
-def _canonical_digest(text: str) -> str:
-    canonical = text.replace("\r\n", "\n").replace("\r", "\n")
-    return hashlib.sha256(canonical.encode()).hexdigest()
+def _gate_digest(text: str, path: str) -> str:
+    if "\r" in text:
+        raise Invalid(f"{path}: gate text must use canonical UTF-8/LF bytes")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _governance_table(text: str, path: str) -> list[list[str]]:
@@ -279,12 +280,13 @@ def _governance(
     if complete != expected:
         raise Invalid(f"{path}: governance records do not match {state} lifecycle state")
     gate_path = f"docs/plans/{name}-gate.md"
-    gate_digest = _canonical_digest(gate_text)
+    gate_digest = _gate_digest(gate_text, gate_path)
     for digest in (item for item in bound if item):
         historical = resolve_file(digest.group(1), gate_path) if resolve_file else None
         if historical is None:
             raise Invalid(f"{path}: governance candidate SHA or historical gate is unavailable")
-        if digest.group(2) != gate_digest or digest.group(2) != _canonical_digest(historical):
+        historical_digest = _gate_digest(historical, f"{gate_path} at {digest.group(1)}")
+        if digest.group(2) != gate_digest or digest.group(2) != historical_digest:
             raise Invalid(f"{path}: governance digest does not match current and historical canonical gate text")
 
     visible = _visible_line_numbers(text, path)
@@ -333,15 +335,6 @@ def validate(
             if (plan_link, gate_link) != expected:
                 raise Invalid(f"docs/plans/README.md: {name} has incorrect plan/gate links for {state}")
             parsed_rows.append((name, state, plan_link, gate_link))
-
-        if (
-            ("M0", "Blocked", "—", "—") in parsed_rows
-            and not any(state in ACTIVE_STATES for _, state, _, _ in parsed_rows)
-            and values != SEED_BLOCKED_VALUES
-        ):
-            raise Invalid(
-                "docs/plans/README.md: blocked M0 must retain the exact seed status capsule"
-            )
 
         closed = [name for name, state, _, _ in parsed_rows if state == "Closed"]
         checkpoint = values["Last integrated checkpoint"]
@@ -398,6 +391,14 @@ def validate(
                 resolve_file,
             )
 
+        if checkpoint == "Seed bootstrap — 2026-08-15" and (
+            parsed_rows != [("M0", "Blocked", "—", "—")]
+            or values != SEED_BLOCKED_VALUES
+        ):
+            raise Invalid(
+                "docs/plans/README.md: the seed checkpoint requires the exact blocked-M0 status capsule"
+            )
+
         source = _block(
             documents["docs/vision.md"], "docs/vision.md", "rejoin_source", "## 22. Ownership and serial barriers"
         )
@@ -423,7 +424,16 @@ def _load(root: Path) -> dict[str, str]:
     plans = root / "docs/plans"
     if plans.exists():
         paths.extend(path for path in plans.rglob("*.md") if path != plans / "README.md")
-    return {path.relative_to(root).as_posix(): path.read_text(encoding="utf-8") for path in paths if path.exists()}
+    documents: dict[str, str] = {}
+    for path in paths:
+        if not path.exists():
+            continue
+        relative = path.relative_to(root).as_posix()
+        try:
+            documents[relative] = path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise Invalid(f"{relative}: governed Markdown must be UTF-8") from error
+    return documents
 
 
 def _git_resolver(root: Path) -> Callable[[str, str], str | None]:
@@ -458,7 +468,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path.cwd())
     root = parser.parse_args().root.resolve()
-    errors = validate(_load(root), _git_resolver(root))
+    try:
+        documents = _load(root)
+    except Invalid as error:
+        print(error, file=sys.stderr)
+        return 1
+    errors = validate(documents, _git_resolver(root))
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

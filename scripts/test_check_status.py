@@ -84,10 +84,10 @@ def plan(governed: bool = False, closed: bool = False, gate: str = GATE) -> str:
 """
 
 
-def checked(docs: dict[str, str]) -> list[str]:
+def checked(docs: dict[str, str], historical_gate: str = GATE) -> list[str]:
     return validate(
         docs,
-        lambda sha, path: GATE
+        lambda sha, path: historical_gate
         if sha in {"a" * 40, "c" * 40} and path.endswith("M0-gate.md")
         else None,
     )
@@ -130,7 +130,10 @@ class StatusTest(unittest.TestCase):
                 )
             docs["docs/plans/M0.md"] = plan(governed, closed)
             docs["docs/plans/M0-gate.md"] = GATE
-            self.assertEqual([], checked(docs))
+            if state == "Open":
+                self.assert_invalid(docs, "seed checkpoint requires")
+            else:
+                self.assertEqual([], checked(docs))
 
     def test_status_shape_mutations_fail(self) -> None:
         cases = (
@@ -171,7 +174,30 @@ class StatusTest(unittest.TestCase):
         for label, old, new in authority_cases:
             with self.subTest(label):
                 docs = {path: text.replace(old, new) for path, text in documents().items()}
-                self.assert_invalid(docs, "exact seed status capsule")
+                self.assert_invalid(docs, "exact blocked-M0 status capsule")
+
+        for label, row, summary in (
+            (
+                "renamed M0",
+                "| `m0` | Blocked | — | — |",
+                "**Revision status:** Pre-implementation planning; no milestone is active; next candidate `m0` is blocked.",
+            ),
+            (
+                "removed M0",
+                "",
+                "**Revision status:** Pre-implementation planning; no milestone is active; no next candidate is recorded.",
+            ),
+        ):
+            with self.subTest(label):
+                source_row = "| `M0` | Blocked | — | — |"
+                docs = {}
+                for path, text in documents().items():
+                    replacement = text.replace(source_row, row) if row else text.replace(source_row + "\n", "")
+                    docs[path] = (
+                        replacement.replace(SUMMARY, summary)
+                        .replace("no product implementation", "product implementation is authorized")
+                    )
+                self.assert_invalid(docs, "exact blocked-M0 status capsule")
 
     def test_hidden_or_duplicated_markers_fail(self) -> None:
         wrappers = (
@@ -253,6 +279,18 @@ class StatusTest(unittest.TestCase):
         docs["docs/plans/M0.md"] = plan(True) + "\n## Milestone Status\n"
         docs["docs/plans/M0-gate.md"] = GATE
         self.assert_invalid(docs, "lifecycle state")
+        for newline_gate in ("# Gate\r\n", "# Gate\r"):
+            with self.subTest(repr(newline_gate)):
+                docs["docs/plans/M0.md"] = plan(True, gate=newline_gate)
+                docs["docs/plans/M0-gate.md"] = newline_gate
+                self.assert_invalid(docs, "UTF-8/LF")
+        docs["docs/plans/M0.md"] = plan(True)
+        docs["docs/plans/M0-gate.md"] = GATE
+        for historical_gate in ("# Gate\r\n", "# Gate\r"):
+            with self.subTest(f"historical {historical_gate!r}"):
+                errors = checked(docs, historical_gate)
+                self.assertTrue(errors, "historical newline mutation unexpectedly passed")
+                self.assertIn("UTF-8/LF", errors[0])
         closed_docs = documents()
         closed_summary = "**Revision status:** Pre-implementation planning; no milestone is active; no next candidate is recorded."
         closed_docs = {
