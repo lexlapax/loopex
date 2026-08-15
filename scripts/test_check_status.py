@@ -9,7 +9,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from check_status import _git_resolver, validate
+from check_status import _git_plan_history, _git_resolver, validate
 
 
 SUMMARY = "**Revision status:** Pre-implementation planning; no milestone is active; next candidate `M0` is blocked."
@@ -50,6 +50,18 @@ durable local session and operation truth
 -> multi-client attachment and protocol candidate
 ```"""
 GATE = "# Gate\n"
+GATE_SEPARATORS = (
+    "\r\n",
+    "\r",
+    "\v",
+    "\f",
+    "\x1c",
+    "\x1d",
+    "\x1e",
+    "\x85",
+    "\u2028",
+    "\u2029",
+)
 
 
 def documents() -> dict[str, str]:
@@ -84,12 +96,24 @@ def plan(governed: bool = False, closed: bool = False, gate: str = GATE) -> str:
 """
 
 
-def checked(docs: dict[str, str], historical_gate: str = GATE) -> list[str]:
+def checked(
+    docs: dict[str, str],
+    historical_gate: str = GATE,
+    plan_history: tuple[tuple[str, dict[str, str]], ...] = (),
+) -> list[str]:
+    snapshots: list[tuple[str, tuple[str, ...], dict[str, str]]] = [
+        ("fixture-root", (), {})
+    ]
+    parent = "fixture-root"
+    for revision, plans in plan_history:
+        snapshots.append((revision, (parent,), plans))
+        parent = revision
     return validate(
         docs,
         lambda sha, path: historical_gate
-        if sha in {"a" * 40, "c" * 40} and path.endswith("M0-gate.md")
+        if sha in {"a" * 40, "b" * 40, "c" * 40} and path.endswith("M0-gate.md")
         else None,
+        lambda: (parent, tuple(snapshots)),
     )
 
 
@@ -112,6 +136,7 @@ class StatusTest(unittest.TestCase):
             ["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True
         ).strip()
         self.assertIsNone(_git_resolver(root)(tree, "README.md"))
+        self.assertIsNotNone(_git_plan_history(root)())
 
     def test_open_and_closed_plans(self) -> None:
         for state, governed, closed in (("Open", False, False), ("Closed", True, True)):
@@ -130,10 +155,7 @@ class StatusTest(unittest.TestCase):
                 )
             docs["docs/plans/M0.md"] = plan(governed, closed)
             docs["docs/plans/M0-gate.md"] = GATE
-            if state == "Open":
-                self.assert_invalid(docs, "seed checkpoint requires")
-            else:
-                self.assertEqual([], checked(docs))
+            self.assertEqual([], checked(docs))
 
     def test_status_shape_mutations_fail(self) -> None:
         cases = (
@@ -279,15 +301,17 @@ class StatusTest(unittest.TestCase):
         docs["docs/plans/M0.md"] = plan(True) + "\n## Milestone Status\n"
         docs["docs/plans/M0-gate.md"] = GATE
         self.assert_invalid(docs, "lifecycle state")
-        for newline_gate in ("# Gate\r\n", "# Gate\r"):
-            with self.subTest(repr(newline_gate)):
-                docs["docs/plans/M0.md"] = plan(True, gate=newline_gate)
-                docs["docs/plans/M0-gate.md"] = newline_gate
+        for separator in GATE_SEPARATORS:
+            with self.subTest(f"current {separator!r}"):
+                noncanonical_gate = f"# Gate{separator}continued\n"
+                docs["docs/plans/M0.md"] = plan(True, gate=noncanonical_gate)
+                docs["docs/plans/M0-gate.md"] = noncanonical_gate
                 self.assert_invalid(docs, "UTF-8/LF")
         docs["docs/plans/M0.md"] = plan(True)
         docs["docs/plans/M0-gate.md"] = GATE
-        for historical_gate in ("# Gate\r\n", "# Gate\r"):
-            with self.subTest(f"historical {historical_gate!r}"):
+        for separator in GATE_SEPARATORS:
+            with self.subTest(f"historical {separator!r}"):
+                historical_gate = f"# Gate{separator}continued\n"
                 errors = checked(docs, historical_gate)
                 self.assertTrue(errors, "historical newline mutation unexpectedly passed")
                 self.assertIn("UTF-8/LF", errors[0])
@@ -312,6 +336,119 @@ class StatusTest(unittest.TestCase):
         open_docs["docs/plans/M0.md"] = plan().replace("| Acceptance | — | — | — |", "| Acceptance | Maintainer | — | junk |")
         open_docs["docs/plans/M0-gate.md"] = GATE
         self.assert_invalid(open_docs, "exactly empty")
+
+    def test_completed_governance_rows_are_history_anchored(self) -> None:
+        row = "| `M0` | Accepted | [plan](M0.md) | [gate](M0-gate.md) |"
+        active = "**Revision status:** Pre-implementation planning; active milestone `M0` is accepted; no next candidate is recorded."
+        docs = {
+            key: value.replace("| `M0` | Blocked | — | — |", row).replace(SUMMARY, active)
+            for key, value in documents().items()
+        }
+        original = plan(True)
+        path = "docs/plans/M0.md"
+        docs[path] = original + "\n## Progress\n\nConforming progress.\n"
+        docs["docs/plans/M0-gate.md"] = GATE
+        anchored = (("first-completion", {path: original}),)
+        self.assertEqual([], checked(docs, plan_history=anchored))
+        self.assertEqual([], checked(docs))
+
+        mutations = (
+            ("authority", "Maintainer", "Delegate: Reviewer"),
+            ("evidence", "decision.md#accept", "decision.md#different"),
+            ("candidate", "a" * 40, "b" * 40),
+        )
+        for label, old, new in mutations:
+            with self.subTest(label):
+                changed = dict(docs)
+                changed[path] = original.replace(old, new, 1)
+                errors = checked(changed, plan_history=anchored)
+                self.assertTrue(errors, "completed governance mutation unexpectedly passed")
+                self.assertIn("completed Acceptance", errors[0])
+
+        changed_gate = "# Changed gate\n"
+        changed = dict(docs)
+        changed[path] = plan(True, gate=changed_gate).replace(
+            "Maintainer | [disposition](decision.md#accept)",
+            "Delegate: Reviewer | [disposition](decision.md#different)",
+        )
+        changed["docs/plans/M0-gate.md"] = changed_gate
+        errors = checked(changed, changed_gate, anchored)
+        self.assertTrue(errors, "coordinated governance mutation unexpectedly passed")
+        self.assertIn("completed Acceptance", errors[0])
+
+        for label, intermediate in (
+            ("mutate then restore", original.replace("Maintainer", "Delegate: Reviewer", 1)),
+            ("clear then restore", plan(False)),
+        ):
+            with self.subTest(label):
+                history = (
+                    ("first-completion", {path: original}),
+                    ("later", {path: intermediate}),
+                )
+                errors = checked(docs, plan_history=history)
+                self.assertTrue(errors, f"{label} unexpectedly passed")
+                self.assertIn("completed Acceptance", errors[0])
+
+        errors = checked(
+            docs,
+            plan_history=(("first-completion", {path: original}), ("deleted", {})),
+        )
+        self.assertTrue(errors, "delete and re-add unexpectedly passed")
+        self.assertIn("disappeared", errors[0])
+
+        current_without_plan = documents()
+        errors = checked(current_without_plan, plan_history=anchored)
+        self.assertTrue(errors, "completed plan deletion unexpectedly passed")
+        self.assertIn("disappeared", errors[0])
+
+        closed_row = "| `M0` | Closed | [plan](M0.md) | [gate](M0-gate.md) |"
+        closed_summary = "**Revision status:** Pre-implementation planning; no milestone is active; no next candidate is recorded."
+        closed = {
+            key: value.replace("| `M0` | Blocked | — | — |", closed_row).replace(SUMMARY, closed_summary)
+            for key, value in documents().items()
+        }
+        closed["docs/plans/README.md"] = closed["docs/plans/README.md"].replace(
+            "Seed bootstrap — 2026-08-15", "`M0` — 2026-08-15"
+        )
+        closed_original = plan(True, True)
+        closed[path] = closed_original.replace("decision.md#close", "decision.md#new-close")
+        closed["docs/plans/M0-gate.md"] = GATE
+        errors = checked(
+            closed,
+            plan_history=(("closure", {path: closed_original}),),
+        )
+        self.assertTrue(errors, "completed Closure mutation unexpectedly passed")
+        self.assertIn("completed Closure", errors[0])
+
+        errors = validate(
+            docs,
+            lambda sha, candidate_path: GATE
+            if sha == "a" * 40 and candidate_path.endswith("M0-gate.md")
+            else None,
+        )
+        self.assertTrue(errors, "missing governance history unexpectedly passed")
+        self.assertIn("history is unavailable", errors[0])
+
+        merged = dict(docs)
+        merged[path] = original.replace("Maintainer", "Delegate: Reviewer", 1)
+        history = (
+            "merge",
+            (
+                ("root", (), {}),
+                ("accepted-topic", ("root",), {path: original}),
+                ("main-work", ("root",), {}),
+                ("merge", ("main-work", "accepted-topic"), {path: merged[path]}),
+            ),
+        )
+        errors = validate(
+            merged,
+            lambda sha, candidate_path: GATE
+            if sha == "a" * 40 and candidate_path.endswith("M0-gate.md")
+            else None,
+            lambda: history,
+        )
+        self.assertTrue(errors, "merge-resolution governance mutation unexpectedly passed")
+        self.assertIn("completed Acceptance", errors[0])
 
 
     def test_barrier_mutations_fail_and_matching_change_passes(self) -> None:

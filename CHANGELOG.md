@@ -54,10 +54,11 @@ the exact document set its milestone must update.
 - Milestone closure now explicitly includes updating the documentation set.
 - Accepted and Closed register transitions now require immutable governance
   records binding the explicit authority disposition, candidate SHA, and gate
-  digest; the check verifies that digest against immutable canonical UTF-8/LF
-  gate text, while a separate independent exact-diff review proves the later
-  administrative transition changed only its governance row and marked status
-  blocks.
+  digest; the check anchors each completed row across all history reachable
+  from `HEAD` and verifies the digest against immutable canonical
+  UTF-8/LF gate text, while a separate independent exact-diff review proves the
+  later administrative transition changed only its governance row and marked
+  status blocks.
 - **Vocabulary defined without freezing the roadmap.** A capability rung is a
   non-normative question; a milestone is one bounded plan/gate/closure that may
   serve part or all of one or more rungs; a workstream is an internal parallel

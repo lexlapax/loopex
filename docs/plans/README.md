@@ -116,15 +116,17 @@ bytes uses exact lowercase digests in this form:
 candidate `<40-hex>`; gate `sha256:<64-hex>`
 ```
 
-The structural check proves the record is complete, resolves the candidate SHA,
-and verifies its digest against both the historical candidate's gate and the
-current immutable canonical gate text. Independent review proves candidate
-compliance and that the pointer identifies the named authority's actual
-disposition. A separate read-only review compares the exact administrative
-transition SHA with the bound candidate and reports to the current integrator
-that only the governance row and two marked status blocks changed; no gate or
-product byte may change in that transition. It is a mandatory pre-integration
-procedure, not another durable record or structural-check claim.
+The structural check proves the record is complete, anchors each completed row
+to its first form across the repository history reachable from `HEAD`, resolves the
+candidate SHA, and verifies its digest against both the historical candidate's
+gate and the current immutable canonical gate text. Independent review proves
+candidate compliance and that the pointer identifies the named authority's
+actual disposition. A separate read-only review compares the exact
+administrative transition SHA with the bound candidate and reports to the
+current integrator that only the governance row and two marked status blocks
+changed; no gate or product byte may change in that transition. It is a
+mandatory pre-integration procedure, not another durable record or
+structural-check claim.
 
 Moving the register to `Accepted` requires a complete acceptance row naming the
 accepting maintainer or recorded delegate, durable evidence of that authority's

@@ -186,29 +186,37 @@ for path in sorted((ROOT / ".agents/skills").glob("*/SKILL.md")):
         )
 
 workflow = ROOT / ".github/workflows/agent-bootstrap.yml"
-if workflow.exists():
-    structure = [
-        line.rstrip()
-        for line in workflow.read_text().splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
-    expected_structure = [
-        "name: agent-bootstrap",
-        "on:",
-        "  push:",
-        "    branches: [main]",
-        "  pull_request:",
-        "jobs:",
-        "  seed-checks:",
-        "    runs-on: ubuntu-latest",
-        "    steps:",
-        "      - uses: actions/checkout@v4",
-        "        with:",
-        # Full history only; the commit-message check needs its policy baseline.
-        "          fetch-depth: 0",
-        "      - run: bash scripts/check-bootstrap.sh",
-    ]
-    assert structure == expected_structure, (
-        "hosted bootstrap wrapper must remain the exact optional thin wrapper",
-        structure,
-    )
+assert workflow.is_file() and not workflow.is_symlink(), (
+    workflow,
+    "missing required regular-file hosted bootstrap wrapper",
+)
+workflow_text = workflow.read_bytes().decode("utf-8")
+assert not any(
+    separator in workflow_text
+    for separator in "\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
+), (workflow, "hosted bootstrap wrapper must use canonical UTF-8/LF bytes")
+structure = [
+    line.rstrip()
+    for line in workflow_text.split("\n")
+    if line.strip() and not line.lstrip().startswith("#")
+]
+expected_structure = [
+    "name: agent-bootstrap",
+    "on:",
+    "  push:",
+    "    branches: [main]",
+    "  pull_request:",
+    "jobs:",
+    "  seed-checks:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/checkout@v4",
+    "        with:",
+    # Full history only; the commit-message check needs its policy baseline.
+    "          fetch-depth: 0",
+    "      - run: bash scripts/check-bootstrap.sh",
+]
+assert structure == expected_structure, (
+    "hosted bootstrap wrapper must remain the exact thin wrapper",
+    structure,
+)

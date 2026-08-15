@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
 import subprocess
 import sys
@@ -221,7 +222,7 @@ def _summary(phase: str, rows: list[tuple[str, str, str, str]]) -> str:
 
 
 def _gate_digest(text: str, path: str) -> str:
-    if "\r" in text:
+    if any(separator in text for separator in "\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"):
         raise Invalid(f"{path}: gate text must use canonical UTF-8/LF bytes")
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -259,14 +260,9 @@ def _governance_table(text: str, path: str) -> list[list[str]]:
     return rows
 
 
-def _governance(
-    text: str,
-    gate_text: str,
-    name: str,
-    state: str,
-    resolve_file: Callable[[str, str], str | None] | None,
-) -> None:
-    path = f"docs/plans/{name}.md"
+def _governance_records(
+    text: str, path: str
+) -> tuple[list[list[str]], list[re.Match[str] | None], list[bool]]:
     rows = _governance_table(text, path)
     bound = [BOUND.fullmatch(row[3]) for row in rows]
     complete = [
@@ -276,6 +272,18 @@ def _governance(
     empty = [row[1:] == ["—", "—", "—"] for row in rows]
     if any(not (is_empty or is_complete) for is_empty, is_complete in zip(empty, complete)):
         raise Invalid(f"{path}: each governance row must be exactly empty or structurally complete")
+    return rows, bound, complete
+
+
+def _governance(
+    text: str,
+    gate_text: str,
+    name: str,
+    state: str,
+    resolve_file: Callable[[str, str], str | None] | None,
+) -> None:
+    path = f"docs/plans/{name}.md"
+    rows, bound, complete = _governance_records(text, path)
     expected = [False, False] if state == "Open" else [True, True] if state == "Closed" else [True, False]
     if complete != expected:
         raise Invalid(f"{path}: governance records do not match {state} lifecycle state")
@@ -295,9 +303,83 @@ def _governance(
         raise Invalid(f"{path}: lifecycle state belongs only in the canonical register")
 
 
+def _governance_history(
+    current: Mapping[str, str],
+    history: tuple[
+        str,
+        tuple[tuple[str, tuple[str, ...], Mapping[str, str]], ...],
+    ]
+    | None,
+) -> None:
+    if history is None:
+        raise Invalid("docs/plans: complete reachable governance history is unavailable")
+    head, snapshots = history
+
+    all_paths = set(current)
+    for _, _, plans in snapshots:
+        all_paths.update(plans)
+    for path in all_paths:
+        relative = path.removeprefix("docs/plans/")
+        if (
+            not path.startswith("docs/plans/")
+            or "/" in relative
+            or not relative.endswith(".md")
+            or relative == "README.md"
+            or relative.endswith("-gate.md")
+        ):
+            raise Invalid(f"{path}: invalid historical plan path")
+        _milestone(f"`{relative.removesuffix('.md')}`", path)
+
+    inherited: dict[str, dict[str, list[tuple[str, ...] | None]]] = {}
+    for revision, parents, plans in (*snapshots, ("working tree", (head,), current)):
+        if revision in inherited or any(parent not in inherited for parent in parents):
+            raise Invalid("docs/plans: governance history is duplicated or not parent-first")
+        anchors: dict[str, list[tuple[str, ...] | None]] = {}
+        for path in all_paths:
+            path_anchors: list[tuple[str, ...] | None] = []
+            for index, decision in enumerate(("Acceptance", "Closure")):
+                parent_anchors = {
+                    inherited[parent][path][index]
+                    for parent in parents
+                    if inherited[parent][path][index] is not None
+                }
+                if len(parent_anchors) > 1:
+                    raise Invalid(
+                        f"{path}: conflicting completed {decision} governance records meet at {revision}"
+                    )
+                path_anchors.append(next(iter(parent_anchors), None))
+            anchors[path] = path_anchors
+
+            text = plans.get(path)
+            if text is None:
+                if any(path_anchors):
+                    raise Invalid(f"{path}: completed governance record disappeared at {revision}")
+                continue
+            rows, _, complete = _governance_records(text, f"{path} at {revision}")
+            for index, decision in enumerate(("Acceptance", "Closure")):
+                row = tuple(rows[index])
+                anchor = path_anchors[index]
+                if anchor is None and complete[index]:
+                    path_anchors[index] = row
+                elif anchor is not None and (not complete[index] or row != anchor):
+                    raise Invalid(
+                        f"{path}: completed {decision} governance record changed at {revision}"
+                    )
+        inherited[revision] = anchors
+
+
 def validate(
     documents: Mapping[str, str],
     resolve_file: Callable[[str, str], str | None] | None = None,
+    first_parent_plans: Callable[
+        [],
+        tuple[
+            str,
+            tuple[tuple[str, tuple[str, ...], Mapping[str, str]], ...],
+        ]
+        | None,
+    ]
+    | None = None,
 ) -> list[str]:
     errors: list[str] = []
     try:
@@ -391,12 +473,29 @@ def validate(
                 resolve_file,
             )
 
-        if checkpoint == "Seed bootstrap — 2026-08-15" and (
+        current_plans = {
+            path: documents[path]
+            for path in documents
+            if path.startswith("docs/plans/")
+            and path != "docs/plans/README.md"
+            and path.endswith(".md")
+            and not path.endswith("-gate.md")
+        }
+        _governance_history(
+            current_plans,
+            first_parent_plans() if first_parent_plans else None,
+        )
+
+        seed_posture = not any(
+            state in ACTIVE_STATES or state == "Closed"
+            for _, state, _, _ in parsed_rows
+        )
+        if seed_posture and (
             parsed_rows != [("M0", "Blocked", "—", "—")]
             or values != SEED_BLOCKED_VALUES
         ):
             raise Invalid(
-                "docs/plans/README.md: the seed checkpoint requires the exact blocked-M0 status capsule"
+                "docs/plans/README.md: the pre-milestone seed posture requires the exact blocked-M0 status capsule"
             )
 
         source = _block(
@@ -436,24 +535,30 @@ def _load(root: Path) -> dict[str, str]:
     return documents
 
 
+def _git_run(root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    environment = os.environ.copy()
+    environment.update(
+        GIT_NO_LAZY_FETCH="1",
+        GIT_NO_REPLACE_OBJECTS="1",
+        GIT_OPTIONAL_LOCKS="0",
+        LC_ALL="C",
+    )
+    return subprocess.run(
+        ["git", "--no-replace-objects", *args],
+        cwd=root,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
 def _git_resolver(root: Path) -> Callable[[str, str], str | None]:
     def resolve(sha: str, path: str) -> str | None:
-        object_type = subprocess.run(
-            ["git", "--no-replace-objects", "cat-file", "-t", sha],
-            cwd=root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        object_type = _git_run(root, "cat-file", "-t", sha)
         if object_type.returncode or object_type.stdout != b"commit\n":
             return None
-        result = subprocess.run(
-            ["git", "--no-replace-objects", "show", f"{sha}:{path}"],
-            cwd=root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        result = _git_run(root, "show", f"{sha}:{path}")
         if result.returncode:
             return None
         try:
@@ -462,6 +567,93 @@ def _git_resolver(root: Path) -> Callable[[str, str], str | None]:
             return None
 
     return resolve
+
+
+def _git_plan_history(
+    root: Path,
+) -> Callable[
+    [],
+    tuple[
+        str,
+        tuple[tuple[str, tuple[str, ...], Mapping[str, str]], ...],
+    ]
+    | None,
+]:
+    def history() -> tuple[
+        str,
+        tuple[tuple[str, tuple[str, ...], Mapping[str, str]], ...],
+    ] | None:
+        shallow = _git_run(root, "rev-parse", "--is-shallow-repository")
+        if shallow.returncode or shallow.stdout != b"false\n":
+            return None
+
+        graft = _git_run(root, "rev-parse", "--git-path", "info/grafts")
+        if graft.returncode:
+            return None
+        try:
+            graft_path = Path(graft.stdout.decode("utf-8").strip())
+            if not graft_path.is_absolute():
+                graft_path = root / graft_path
+            if graft_path.exists() and (
+                not graft_path.is_file() or bool(graft_path.read_bytes())
+            ):
+                return None
+        except (OSError, UnicodeDecodeError):
+            return None
+
+        revisions = _git_run(root, "rev-list", "--parents", "--topo-order", "--reverse", "HEAD")
+        if revisions.returncode:
+            return None
+        records = [line.split() for line in revisions.stdout.splitlines()]
+        if not records or any(
+            not record
+            or any(not re.fullmatch(rb"[0-9a-f]{40}", item) for item in record)
+            for record in records
+        ):
+            return None
+
+        snapshots: list[tuple[str, tuple[str, ...], Mapping[str, str]]] = []
+        for record in records:
+            sha = record[0].decode("ascii")
+            parents = tuple(item.decode("ascii") for item in record[1:])
+            tree = _git_run(root, "ls-tree", "-rz", "--full-tree", sha, "--", "docs/plans")
+            if tree.returncode:
+                return None
+            plans: dict[str, str] = {}
+            entries = tree.stdout.split(b"\0")
+            if entries[-1]:
+                return None
+            for entry in entries[:-1]:
+                metadata, separator, raw_path = entry.partition(b"\t")
+                fields = metadata.split()
+                if not separator or len(fields) != 3:
+                    return None
+                try:
+                    path = raw_path.decode("utf-8")
+                except UnicodeDecodeError:
+                    return None
+                relative = path.removeprefix("docs/plans/")
+                if (
+                    not path.startswith("docs/plans/")
+                    or not relative.endswith(".md")
+                    or relative == "README.md"
+                    or relative.endswith("-gate.md")
+                ):
+                    continue
+                mode, object_type, object_id = fields
+                if mode != b"100644" or object_type != b"blob":
+                    return None
+                blob = _git_run(root, "cat-file", "blob", object_id.decode("ascii"))
+                if blob.returncode:
+                    return None
+                try:
+                    plans[path] = blob.stdout.decode("utf-8")
+                except UnicodeDecodeError:
+                    return None
+            snapshots.append((sha, parents, plans))
+        return snapshots[-1][0], tuple(snapshots)
+
+    return history
 
 
 def main() -> int:
@@ -473,7 +665,7 @@ def main() -> int:
     except Invalid as error:
         print(error, file=sys.stderr)
         return 1
-    errors = validate(documents, _git_resolver(root))
+    errors = validate(documents, _git_resolver(root), _git_plan_history(root))
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
