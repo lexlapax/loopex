@@ -74,6 +74,9 @@ tagged, explicitly invoked lane — never part of the default suite.
   role default is not proof: if the live parent or client overrides it with a
   writable profile, the reviewer reports unavailable and stops. Retain both a
   positive read-only smoke and a negative fail-closed smoke where supported.
+  Required inspection checks must also execute in that environment: bootstrap
+  Python assertions live in the tracked `scripts/check-agent-bootstrap.py`, not
+  a shell here-document that needs ambient temporary writes.
 - For coding-agent ecosystem changes, check current primary vendor docs or
   release notes plus installed behavior, derive any coding-agent-agnostic
   consequence first, and retain version-specific facts here. Material changes

@@ -156,6 +156,10 @@ Every required check runs locally from a clean checkout with the documented
 portable toolchain in [DEVELOPMENT.md](DEVELOPMENT.md). Bootstrap currently
 requires Bash, Git, the documented POSIX userland, Python 3.11+ and `jq`;
 product checks move to the declared Elixir/OTP toolchain when it exists.
+Inspection-only checks required of a read-only reviewer run without modifying
+the checkout or relying on a writable ambient temporary directory. A check that
+must produce artifacts uses an explicit isolated task root and belongs to the
+appropriate writable evidence lane, not the read-only review lane.
 Hosted CI is a replaceable runner of the same repository-owned commands, never
 the only home of a check, a policy, or acceptance evidence; development
 depends on no host-specific service, workflow feature, or repository setting.

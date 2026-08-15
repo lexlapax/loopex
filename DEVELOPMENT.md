@@ -30,7 +30,9 @@ bash scripts/check-bootstrap.sh
 The aggregate runs the agent/client bootstrap check and the ignore-policy
 check. It requires no GitHub account, `gh` CLI, hosted CI service, credentials,
 network access, coding-agent client, or product dependency download. Hosted CI
-may mirror this command but does not define it.
+may mirror this command but does not define it. The aggregate only reads the
+checkout and does not rely on a writable ambient temporary directory, so an
+effectively read-only reviewer can run the exact same command.
 
 ## Coding-Agent Clients
 

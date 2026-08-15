@@ -44,6 +44,7 @@ for candidate_path in \
   .vscode/settings.json \
   scripts/check-bootstrap.sh \
   scripts/check-agent-bootstrap.sh \
+  scripts/check-agent-bootstrap.py \
   test/fixtures/protocol/session.jsonl \
   test/fixtures/extensions/compat.ez \
   test/fixtures/extensions/rollback/exact-package.ez \
