@@ -5,6 +5,12 @@
 - **Decision owner:** Maintainer
 - **Prerequisite for:** the M0 gate (see [docs/roadmap.md](../roadmap.md))
 
+## Governance Record
+
+| Decision | Authority | Authority evidence | Bound bytes |
+| --- | --- | --- | --- |
+| Acceptance | — | — | — |
+
 ## Context
 
 [Vision §20.1](../vision.md) names one monorepo and one version train with four

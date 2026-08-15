@@ -54,11 +54,19 @@ the exact document set its milestone must update.
 - Milestone closure now explicitly includes updating the documentation set.
 - Accepted and Closed register transitions now require immutable governance
   records binding the explicit authority disposition, candidate SHA, and gate
-  digest; the check anchors each completed row across all history reachable
-  from `HEAD` and verifies the digest against immutable canonical
-  UTF-8/LF gate text, while a separate independent exact-diff review proves the
-  later administrative transition changed only its governance row and marked
-  status blocks.
+  digest; the check requires candidates to remain reachable, anchors each
+  completed row plus accepted envelope and gate bytes across all history
+  reachable from `HEAD`, and verifies canonical UTF-8/LF gate text, while a
+  separate independent exact-diff review proves the later administrative
+  transition changed only its governance row and marked status blocks.
+- Accepted plan candidates now bind one exact marked normative envelope;
+  structural validation rejects missing, reordered, or changed commitments and
+  history rewrites while leaving conforming workstream, progress, outcome-state,
+  and evidence-link updates outside the lock.
+- Proposed ADR 0001 and ADR 0002 now carry empty governance records. The seed
+  checker requires both exact records to be accepted before `M0` can leave
+  Blocked and keeps the seed guard fail-closed until the opening branch installs
+  lifecycle-specific status checks.
 - **Vocabulary defined without freezing the roadmap.** A capability rung is a
   non-normative question; a milestone is one bounded plan/gate/closure that may
   serve part or all of one or more rungs; a workstream is an internal parallel
@@ -69,9 +77,10 @@ the exact document set its milestone must update.
   as system cost without making required evidence optional.
 - Milestone files are two flat documents, `docs/plans/<name>.md` and
   `<name>-gate.md`, replacing the three-file folder. The gate stays separate
-  because its bytes are digested at acceptance. Evidence stays in the plan's
-  outcomes table or in gate-defined artifacts outside the flat plan namespace;
-  plan-adjacent evidence sidecars are not a third lifecycle document.
+  because its bytes are digested at acceptance. Evidence links stay in the
+  mutable Progress and Evidence table or in gate-defined artifacts outside the
+  flat plan namespace; plan-adjacent evidence sidecars are not a third lifecycle
+  document.
 - ADR 0001 no longer conditions its own acceptance on a scaffold commit that
   cannot exist until an accepted gate authorizes it, and now requires
   `apps/loopex` to carry zero dependencies — including dev and test tooling,
@@ -97,9 +106,11 @@ the exact document set its milestone must update.
 - The status check verifies that the complete rejoin-order fence in the roadmap
   matches the unique source fence inside vision §22, rather than comparing a
   loose line range.
-- While M0 remains blocked with no active milestone, the status check locks the
-  complete authority-bearing seed capsule; synchronized phase or authorization
-  drift can no longer pass merely because the table shape and README agree.
+- While M0 remains blocked with no active milestone, the status check derives
+  the complete authority-bearing seed capsule from the two founding ADR
+  records, including the partial-acceptance and accepted-but-not-open postures;
+  synchronized phase or authorization drift cannot pass merely because the
+  table shape and README agree.
 - Isolated Codex 0.147 smokes now pair `--ignore-user-config` with trust scoped
   to the exact checkout. Earlier no-trust runs cannot establish project profile
   or skill loading because that flag also removes persisted project trust.

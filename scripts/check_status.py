@@ -28,8 +28,8 @@ SEED_BLOCKED_VALUES = {
     "Last integrated checkpoint": "Seed bootstrap — 2026-08-15",
     "Blockers": (
         "[ADR 0001](../adr/0001-repository-and-application-layout.md) and "
-        "[ADR 0002](../adr/0002-bootstrap-runtime-floor.md) must be accepted "
-        "or superseded by accepted replacements"
+        "[ADR 0002](../adr/0002-bootstrap-runtime-floor.md) must be accepted before "
+        "M0 opens; a replacement requires a governed guard change"
     ),
     "Authorized work": (
         "Explicitly authorized planning, ADR, bootstrap, and review work only; "
@@ -41,6 +41,14 @@ SEED_BLOCKED_VALUES = {
         "`M0` gate-first"
     ),
     "Validation": "`bash scripts/check-bootstrap.sh`",
+}
+ADR_PATHS = (
+    "docs/adr/0001-repository-and-application-layout.md",
+    "docs/adr/0002-bootstrap-runtime-floor.md",
+)
+ADR_NAMES = {
+    ADR_PATHS[0]: "ADR 0001",
+    ADR_PATHS[1]: "ADR 0002",
 }
 STATES = {"Blocked", "Open", "Accepted", "In progress", "In review", "Closed"}
 ACTIVE_STATES = {"Open", "Accepted", "In progress", "In review"}
@@ -55,14 +63,32 @@ SETEXT = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
 AUTHORITY = re.compile(r"(?:Maintainer|Delegate: [A-Za-z0-9][A-Za-z0-9 ._@-]*)\Z")
 EVIDENCE = re.compile(r"\[disposition\]\([^) \t]+\)\Z")
 BOUND = re.compile(r"candidate `([0-9a-f]{40})`; gate `sha256:([0-9a-f]{64})`\Z")
+ADR_BOUND = re.compile(
+    r"candidate `([0-9a-f]{40})`; document `sha256:([0-9a-f]{64})`\Z"
+)
 
 MARKERS = {
     "readme": ("<!-- loopex:readme-status:start -->", "<!-- loopex:readme-status:end -->"),
     "current": ("<!-- loopex:current-status:start -->", "<!-- loopex:current-status:end -->"),
     "register": ("<!-- loopex:milestone-register:start -->", "<!-- loopex:milestone-register:end -->"),
+    "plan_envelope": ("<!-- loopex:plan-envelope:start -->", "<!-- loopex:plan-envelope:end -->"),
     "rejoin_source": ("<!-- loopex:rejoin-source:start -->", "<!-- loopex:rejoin-source:end -->"),
     "rejoin_copy": ("<!-- loopex:rejoin-copy:start -->", "<!-- loopex:rejoin-copy:end -->"),
 }
+
+PLAN_ENVELOPE_SECTIONS = (
+    "### Purpose",
+    "### Outcomes",
+    "### Scope",
+    "### Non-Goals",
+    "### Prerequisites and Acceptance Points",
+    "### Ownership, Decision Owners, and Rejoin Barriers",
+    "### Evidence Obligations and Mapping",
+    "### Compatibility",
+    "### Migration and Rollback",
+    "### Packaging",
+    "### Proportional Minimalism Budget",
+)
 
 
 class Invalid(Exception):
@@ -221,18 +247,40 @@ def _summary(phase: str, rows: list[tuple[str, str, str, str]]) -> str:
     return f"**Revision status:** {phase}; {status}; {next_status}."
 
 
+def _blocked_m0_values(statuses: Mapping[str, str]) -> dict[str, str]:
+    values = dict(SEED_BLOCKED_VALUES)
+    unresolved = [path for path in ADR_PATHS if statuses[path] != "Accepted"]
+    if len(unresolved) == 1:
+        path = unresolved[0]
+        name = ADR_NAMES[path]
+        filename = path.removeprefix("docs/adr/")
+        values["Blockers"] = (
+            f"[{name}](../adr/{filename}) must be accepted before M0 opens; "
+            "a replacement requires a governed guard change"
+        )
+        values["Next maintainer decision"] = f"Disposition {name}"
+    elif not unresolved:
+        values["Blockers"] = "M0 has not been explicitly opened gate-first"
+        values["Next maintainer decision"] = "Explicitly open or defer M0"
+        values["Next transition"] = (
+            "Create the branch-only M0 plan and red gate, install lifecycle-specific "
+            "status checks, and move M0 to Open"
+        )
+    return values
+
+
 def _gate_digest(text: str, path: str) -> str:
     if any(separator in text for separator in "\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"):
         raise Invalid(f"{path}: gate text must use canonical UTF-8/LF bytes")
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _governance_table(text: str, path: str) -> list[list[str]]:
+def _section_body(text: str, path: str, heading: str) -> tuple[list[str], int]:
     visible = _visible_line_numbers(text, path)
     lines = _lines(text, path)
-    headings = [i for i, line in enumerate(lines) if line == "## Governance Records" and i in visible]
+    headings = [i for i, line in enumerate(lines) if line == heading and i in visible]
     if len(headings) != 1:
-        raise Invalid(f"{path}: expected one top-level Governance Records section")
+        raise Invalid(f"{path}: expected one top-level {heading.removeprefix('## ')} section")
     end = len(lines)
     for index in sorted(visible):
         if index <= headings[0]:
@@ -252,11 +300,30 @@ def _governance_table(text: str, path: str) -> list[list[str]]:
     body = lines[headings[0] + 1 : end]
     while body and not body[0]:
         body.pop(0)
+    body_start = headings[0] + 1
+    while body_start < end and not lines[body_start]:
+        body_start += 1
     while body and not body[-1]:
         body.pop()
+    return body, body_start
+
+
+def _records_table(
+    text: str, path: str, heading: str, decisions: tuple[str, ...]
+) -> tuple[list[list[str]], list[int]]:
+    body, body_start = _section_body(text, path, heading)
     rows = _table(body, ("Decision", "Authority", "Authority evidence", "Bound bytes"), path)
-    if len(rows) != 2 or [row[0] for row in rows] != ["Acceptance", "Closure"]:
-        raise Invalid(f"{path}: governance rows must be Acceptance then Closure")
+    if len(rows) != len(decisions) or [row[0] for row in rows] != list(decisions):
+        expected = " then ".join(decisions)
+        raise Invalid(f"{path}: governance rows must be {expected}")
+    row_indices = list(range(body_start + 2, body_start + 2 + len(rows)))
+    return rows, row_indices
+
+
+def _governance_table(text: str, path: str) -> list[list[str]]:
+    rows, _ = _records_table(
+        text, path, "## Governance Records", ("Acceptance", "Closure")
+    )
     return rows
 
 
@@ -275,6 +342,203 @@ def _governance_records(
     return rows, bound, complete
 
 
+def _adr_record(
+    text: str, path: str, *, legacy_ok: bool = False
+) -> tuple[str, list[str], bool, int, int] | None:
+    if "\r" in text:
+        raise Invalid(f"{path}: ADR text must use canonical UTF-8/LF bytes")
+    lines = _lines(text, path)
+    visible = _visible_line_numbers(text, path)
+    statuses = [
+        index
+        for index, line in enumerate(lines)
+        if line.startswith("- **Status:** ") and index in visible
+    ]
+    heading_present = any(
+        lines[index] == "## Governance Record" for index in visible
+    )
+    if legacy_ok and not heading_present:
+        return None
+    if len(statuses) != 1:
+        raise Invalid(f"{path}: expected one visible ADR Status field")
+    status = lines[statuses[0]].removeprefix("- **Status:** ")
+    if status not in {"Proposed", "Accepted"}:
+        raise Invalid(f"{path}: bootstrap ADR status must be Proposed or Accepted")
+    rows, row_indices = _records_table(
+        text, path, "## Governance Record", ("Acceptance",)
+    )
+    row = rows[0]
+    complete = bool(
+        AUTHORITY.fullmatch(row[1])
+        and EVIDENCE.fullmatch(row[2])
+        and ADR_BOUND.fullmatch(row[3])
+    )
+    empty = row[1:] == ["—", "—", "—"]
+    if not (empty or complete):
+        raise Invalid(f"{path}: ADR governance row must be exactly empty or structurally complete")
+    if (status == "Proposed") != empty or (status == "Accepted") != complete:
+        raise Invalid(f"{path}: ADR Status and governance record do not match")
+    return status, row, complete, statuses[0], row_indices[0]
+
+
+def _validate_adr(
+    text: str,
+    path: str,
+    resolve_file: Callable[[str, str], str | None] | None,
+) -> str:
+    record = _adr_record(text, path)
+    if record is None:
+        raise Invalid(f"{path}: ADR governance record is unavailable")
+    status, row, complete, status_index, row_index = record
+    if not complete:
+        return status
+
+    bound = ADR_BOUND.fullmatch(row[3])
+    if bound is None:
+        raise Invalid(f"{path}: accepted ADR bound bytes are malformed")
+    candidate = resolve_file(bound.group(1), path) if resolve_file else None
+    if candidate is None:
+        raise Invalid(f"{path}: accepted ADR candidate is unavailable")
+    candidate_record = _adr_record(
+        candidate, f"{path} at historical candidate {bound.group(1)}"
+    )
+    if candidate_record is None:
+        raise Invalid(f"{path}: historical candidate ADR governance record is unavailable")
+    if candidate_record[0] != "Proposed" or candidate_record[2]:
+        raise Invalid(f"{path}: historical candidate must be the Proposed ADR with an empty record")
+    digest = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
+    if digest != bound.group(2):
+        raise Invalid(f"{path}: ADR document digest does not match its historical candidate")
+
+    reconstructed = _lines(text, path)
+    reconstructed[status_index] = "- **Status:** Proposed"
+    reconstructed[row_index] = "| Acceptance | — | — | — |"
+    if "\n".join(reconstructed) != candidate:
+        raise Invalid(
+            f"{path}: accepted ADR differs from its historical candidate outside the disposition record"
+        )
+    return status
+
+
+def _plan_envelope(text: str, path: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    if "\r" in text:
+        raise Invalid(f"{path}: plan text must use canonical UTF-8/LF bytes")
+    body = _block(text, path, "plan_envelope")
+    lines = _lines(text, path)
+    first_content = next((line for line in lines if line.strip()), None)
+    if first_content != MARKERS["plan_envelope"][0]:
+        raise Invalid(f"{path}: plan document must start with the plan-envelope marker")
+
+    visible_document = _visible_line_numbers(text, path)
+    document_headings: list[str] = []
+    for index, line in enumerate(lines):
+        if index not in visible_document:
+            continue
+        match = ATX.match(line)
+        setext = (
+            SETEXT.fullmatch(line)
+            and index - 1 in visible_document
+            and bool(lines[index - 1].strip())
+        )
+        if setext:
+            raise Invalid(f"{path}: setext headings are not allowed in a plan document")
+        if match:
+            document_headings.append(line)
+    expected_document_headings = (
+        "## Normative Envelope",
+        *PLAN_ENVELOPE_SECTIONS,
+        "## Workstreams",
+        "## Progress and Evidence",
+        "## Governance Records",
+    )
+    if tuple(document_headings) != expected_document_headings:
+        raise Invalid(
+            f"{path}: plan document headings must be exactly the governed plan sequence"
+        )
+
+    envelope_end = lines.index(MARKERS["plan_envelope"][1])
+    following = lines[envelope_end + 1 :]
+    if following and following[0] == "":
+        following = following[1:]
+    if not following or following[0] != "## Workstreams":
+        raise Invalid(
+            f"{path}: plan-envelope end must be followed directly by Workstreams"
+        )
+    body_text = "\n".join(body)
+    visible = _visible_line_numbers(body_text, path)
+    if not body or body[0] != "## Normative Envelope":
+        raise Invalid(f"{path}: normative plan envelope must start with its exact heading")
+    sections: list[tuple[int, str]] = []
+    for index, line in enumerate(body):
+        if index not in visible:
+            continue
+        match = ATX.match(line)
+        setext = (
+            SETEXT.fullmatch(line)
+            and index - 1 in visible
+            and bool(body[index - 1].strip())
+        )
+        if setext:
+            raise Invalid(f"{path}: setext headings are not allowed in the normative envelope")
+        if match:
+            sections.append((index, line))
+    expected = ("## Normative Envelope", *PLAN_ENVELOPE_SECTIONS)
+    if tuple(line for _, line in sections) != expected:
+        raise Invalid(f"{path}: normative plan-envelope headings are missing, duplicated, or reordered")
+    for position, (start, heading) in enumerate(sections[1:], 1):
+        end = sections[position + 1][0] if position + 1 < len(sections) else len(body)
+        content = [
+            body[index]
+            for index in range(start + 1, end)
+            if index in visible and body[index].strip()
+        ]
+        if not content:
+            raise Invalid(f"{path}: {heading} must contain a concrete commitment")
+
+    outcomes_start = sections[2][0] + 1
+    outcomes_end = sections[3][0]
+    outcomes = body[outcomes_start:outcomes_end]
+    header = "| # | Outcome | Evidence class | Gate selector |"
+    if outcomes.count(header) != 1:
+        raise Invalid(f"{path}: Outcomes must contain one exact normative outcomes table")
+    table_start = outcomes.index(header)
+    table_lines = outcomes[table_start:]
+    while table_lines and not table_lines[-1]:
+        table_lines.pop()
+    rows = _table(
+        table_lines,
+        ("#", "Outcome", "Evidence class", "Gate selector"),
+        f"{path} Outcomes",
+    )
+    if not rows or [row[0] for row in rows] != [str(index) for index in range(1, len(rows) + 1)]:
+        raise Invalid(f"{path}: Outcomes must contain consecutively numbered commitments")
+    return tuple(body), tuple(row[0] for row in rows)
+
+
+def _progress(
+    text: str, path: str, outcome_ids: tuple[str, ...], lifecycle_state: str
+) -> None:
+    body, _ = _section_body(text, path, "## Progress and Evidence")
+    rows = _table(body, ("#", "State", "Evidence"), f"{path} Progress and Evidence")
+    if tuple(row[0] for row in rows) != outcome_ids:
+        raise Invalid(
+            f"{path}: Progress and Evidence must contain exactly one row for every Outcome ID"
+        )
+    allowed = {"Open", "Proved", "Accepted limitation", "Accepted deferral"}
+    if any(row[1] not in allowed for row in rows):
+        raise Invalid(f"{path}: Progress and Evidence contains an unknown State")
+    if lifecycle_state == "Closed" and any(row[1] == "Open" for row in rows):
+        raise Invalid(f"{path}: Closed progress permits no Open outcomes")
+    if any(
+        row[1] in {"Accepted limitation", "Accepted deferral"}
+        and not EVIDENCE.fullmatch(row[2])
+        for row in rows
+    ):
+        raise Invalid(
+            f"{path}: an accepted limitation or deferral requires disposition evidence"
+        )
+
+
 def _governance(
     text: str,
     gate_text: str,
@@ -283,6 +547,8 @@ def _governance(
     resolve_file: Callable[[str, str], str | None] | None,
 ) -> None:
     path = f"docs/plans/{name}.md"
+    envelope, outcome_ids = _plan_envelope(text, path)
+    _progress(text, path, outcome_ids, state)
     rows, bound, complete = _governance_records(text, path)
     expected = [False, False] if state == "Open" else [True, True] if state == "Closed" else [True, False]
     if complete != expected:
@@ -296,6 +562,52 @@ def _governance(
         historical_digest = _gate_digest(historical, f"{gate_path} at {digest.group(1)}")
         if digest.group(2) != gate_digest or digest.group(2) != historical_digest:
             raise Invalid(f"{path}: governance digest does not match current and historical canonical gate text")
+
+    if bound[0]:
+        candidate = resolve_file(bound[0].group(1), path) if resolve_file else None
+        if candidate is None:
+            raise Invalid(f"{path}: accepted plan candidate is unavailable")
+        candidate_envelope, candidate_outcomes = _plan_envelope(
+            candidate, f"{path} at {bound[0].group(1)}"
+        )
+        _progress(
+            candidate,
+            f"{path} at acceptance candidate {bound[0].group(1)}",
+            candidate_outcomes,
+            "Open",
+        )
+        _, _, candidate_complete = _governance_records(
+            candidate, f"{path} at acceptance candidate {bound[0].group(1)}"
+        )
+        if candidate_complete != [False, False]:
+            raise Invalid(f"{path}: acceptance candidate governance must be empty")
+        if envelope != candidate_envelope:
+            raise Invalid(f"{path}: accepted normative plan envelope differs from its candidate")
+
+    if bound[1]:
+        closure_candidate = (
+            resolve_file(bound[1].group(1), path) if resolve_file else None
+        )
+        if closure_candidate is None:
+            raise Invalid(f"{path}: closure candidate plan is unavailable")
+        closure_envelope, closure_outcomes = _plan_envelope(
+            closure_candidate, f"{path} at closure candidate {bound[1].group(1)}"
+        )
+        _progress(
+            closure_candidate,
+            f"{path} at closure candidate {bound[1].group(1)}",
+            closure_outcomes,
+            "Closed",
+        )
+        closure_rows, _, closure_complete = _governance_records(
+            closure_candidate, f"{path} at closure candidate {bound[1].group(1)}"
+        )
+        if closure_complete != [True, False] or closure_rows[0] != rows[0]:
+            raise Invalid(
+                f"{path}: closure candidate must retain Acceptance and leave Closure empty"
+            )
+        if closure_envelope != envelope:
+            raise Invalid(f"{path}: closure candidate changed the accepted normative envelope")
 
     visible = _visible_line_numbers(text, path)
     lines = _lines(text, path)
@@ -312,32 +624,87 @@ def _governance_history(
     | None,
 ) -> None:
     if history is None:
-        raise Invalid("docs/plans: complete reachable governance history is unavailable")
+        raise Invalid("governed documents: complete reachable governance history is unavailable")
     head, snapshots = history
 
     all_paths = set(current)
-    for _, _, plans in snapshots:
-        all_paths.update(plans)
+    for _, _, governed in snapshots:
+        all_paths.update(governed)
     for path in all_paths:
+        if path in ADR_PATHS:
+            continue
         relative = path.removeprefix("docs/plans/")
         if (
             not path.startswith("docs/plans/")
             or "/" in relative
             or not relative.endswith(".md")
             or relative == "README.md"
-            or relative.endswith("-gate.md")
         ):
-            raise Invalid(f"{path}: invalid historical plan path")
-        _milestone(f"`{relative.removesuffix('.md')}`", path)
+            raise Invalid(f"{path}: invalid historical governed-document path")
+        name = (
+            relative.removesuffix("-gate.md")
+            if relative.endswith("-gate.md")
+            else relative.removesuffix(".md")
+        )
+        _milestone(f"`{name}`", path)
 
-    inherited: dict[str, dict[str, list[tuple[str, ...] | None]]] = {}
-    for revision, parents, plans in (*snapshots, ("working tree", (head,), current)):
+    def plan_is_accepted(text: str | None, path: str, revision: str) -> bool:
+        if text is None or "## Governance Records" not in text:
+            return False
+        _, _, complete = _governance_records(text, f"{path} at {revision}")
+        return complete[0]
+
+    def values(
+        text: str,
+        path: str,
+        revision: str,
+        governed: Mapping[str, str],
+    ) -> tuple[str | None, ...]:
+        historical_path = f"{path} at {revision}"
+        if path in ADR_PATHS:
+            record = _adr_record(text, historical_path, legacy_ok=True)
+            if record is None or not record[2]:
+                return (None, None)
+            return ("\0".join(record[1]), text)
+        if path.endswith("-gate.md"):
+            plan_path = path.removesuffix("-gate.md") + ".md"
+            if not plan_is_accepted(governed.get(plan_path), plan_path, revision):
+                return (None,)
+            digest = _gate_digest(text, historical_path)
+            return (f"{digest}\0{text}",)
+        rows, _, complete = _governance_records(text, historical_path)
+        envelope = (
+            "\n".join(_plan_envelope(text, historical_path)[0])
+            if complete[0]
+            else None
+        )
+        return (
+            "\0".join(rows[0]) if complete[0] else None,
+            "\0".join(rows[1]) if complete[1] else None,
+            envelope,
+        )
+
+    def labels(path: str) -> tuple[str, ...]:
+        return (
+            ("Acceptance", "accepted document")
+            if path in ADR_PATHS
+            else ("accepted gate",)
+            if path.endswith("-gate.md")
+            else ("Acceptance", "Closure", "normative envelope")
+        )
+
+    inherited: dict[str, dict[str, list[str | None]]] = {}
+    for revision, parents, governed in (
+        *snapshots,
+        ("working tree", (head,), current),
+    ):
         if revision in inherited or any(parent not in inherited for parent in parents):
-            raise Invalid("docs/plans: governance history is duplicated or not parent-first")
-        anchors: dict[str, list[tuple[str, ...] | None]] = {}
+            raise Invalid("governed documents: history is duplicated or not parent-first")
+        anchors: dict[str, list[str | None]] = {}
         for path in all_paths:
-            path_anchors: list[tuple[str, ...] | None] = []
-            for index, decision in enumerate(("Acceptance", "Closure")):
+            path_anchors: list[str | None] = []
+            path_labels = labels(path)
+            for index, label in enumerate(path_labels):
                 parent_anchors = {
                     inherited[parent][path][index]
                     for parent in parents
@@ -345,25 +712,31 @@ def _governance_history(
                 }
                 if len(parent_anchors) > 1:
                     raise Invalid(
-                        f"{path}: conflicting completed {decision} governance records meet at {revision}"
+                        f"{path}: conflicting completed {label} records meet at {revision}"
                     )
                 path_anchors.append(next(iter(parent_anchors), None))
             anchors[path] = path_anchors
 
-            text = plans.get(path)
+            text = governed.get(path)
             if text is None:
+                if path.endswith("-gate.md"):
+                    plan_path = path.removesuffix("-gate.md") + ".md"
+                    if plan_is_accepted(governed.get(plan_path), plan_path, revision):
+                        raise Invalid(
+                            f"{path}: gate is missing when Acceptance completes at {revision}"
+                        )
                 if any(path_anchors):
                     raise Invalid(f"{path}: completed governance record disappeared at {revision}")
                 continue
-            rows, _, complete = _governance_records(text, f"{path} at {revision}")
-            for index, decision in enumerate(("Acceptance", "Closure")):
-                row = tuple(rows[index])
+            current_values = values(text, path, revision, governed)
+            for index, label in enumerate(path_labels):
+                value = current_values[index]
                 anchor = path_anchors[index]
-                if anchor is None and complete[index]:
-                    path_anchors[index] = row
-                elif anchor is not None and (not complete[index] or row != anchor):
+                if anchor is None and value is not None:
+                    path_anchors[index] = value
+                elif anchor is not None and value != anchor:
                     raise Invalid(
-                        f"{path}: completed {decision} governance record changed at {revision}"
+                        f"{path}: completed {label} governance record changed at {revision}"
                     )
         inherited[revision] = anchors
 
@@ -383,7 +756,13 @@ def validate(
 ) -> list[str]:
     errors: list[str] = []
     try:
-        required = ("README.md", "docs/plans/README.md", "docs/vision.md", "docs/roadmap.md")
+        required = (
+            "README.md",
+            "docs/plans/README.md",
+            "docs/vision.md",
+            "docs/roadmap.md",
+            *ADR_PATHS,
+        )
         for path in required:
             if path not in documents:
                 raise Invalid(f"{path}: missing")
@@ -447,6 +826,20 @@ def validate(
         if readme != expected_readme:
             raise Invalid("README.md: status block must be the exact derived summary and visible plans link")
 
+        adr_statuses = {
+            path: _validate_adr(documents[path], path, resolve_file)
+            for path in ADR_PATHS
+        }
+        if parsed_rows != [("M0", "Blocked", "—", "—")]:
+            raise Invalid(
+                "docs/plans/README.md: bootstrap permits only Blocked M0; its opening "
+                "branch must replace this seed guard with lifecycle-specific enforcement"
+            )
+        if values != _blocked_m0_values(adr_statuses):
+            raise Invalid(
+                "docs/plans/README.md: ADR disposition requires the exact blocked-M0 status capsule"
+            )
+
         plan_keys: set[str] = set()
         gate_keys: set[str] = set()
         for path in documents:
@@ -473,30 +866,20 @@ def validate(
                 resolve_file,
             )
 
-        current_plans = {
+        current_governed = {
             path: documents[path]
             for path in documents
-            if path.startswith("docs/plans/")
-            and path != "docs/plans/README.md"
-            and path.endswith(".md")
-            and not path.endswith("-gate.md")
+            if path in ADR_PATHS
+            or (
+                path.startswith("docs/plans/")
+                and path != "docs/plans/README.md"
+                and path.endswith(".md")
+            )
         }
         _governance_history(
-            current_plans,
+            current_governed,
             first_parent_plans() if first_parent_plans else None,
         )
-
-        seed_posture = not any(
-            state in ACTIVE_STATES or state == "Closed"
-            for _, state, _, _ in parsed_rows
-        )
-        if seed_posture and (
-            parsed_rows != [("M0", "Blocked", "—", "—")]
-            or values != SEED_BLOCKED_VALUES
-        ):
-            raise Invalid(
-                "docs/plans/README.md: the pre-milestone seed posture requires the exact blocked-M0 status capsule"
-            )
 
         source = _block(
             documents["docs/vision.md"], "docs/vision.md", "rejoin_source", "## 22. Ownership and serial barriers"
@@ -519,7 +902,16 @@ def validate(
 
 
 def _load(root: Path) -> dict[str, str]:
-    paths = [root / name for name in ("README.md", "docs/plans/README.md", "docs/vision.md", "docs/roadmap.md")]
+    paths = [
+        root / name
+        for name in (
+            "README.md",
+            "docs/plans/README.md",
+            "docs/vision.md",
+            "docs/roadmap.md",
+            *ADR_PATHS,
+        )
+    ]
     plans = root / "docs/plans"
     if plans.exists():
         paths.extend(path for path in plans.rglob("*.md") if path != plans / "README.md")
@@ -553,12 +945,18 @@ def _git_run(root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
     )
 
 
-def _git_resolver(root: Path) -> Callable[[str, str], str | None]:
+def _git_resolver(
+    root: Path,
+    run: Callable[..., subprocess.CompletedProcess[bytes]] = _git_run,
+) -> Callable[[str, str], str | None]:
     def resolve(sha: str, path: str) -> str | None:
-        object_type = _git_run(root, "cat-file", "-t", sha)
+        object_type = run(root, "cat-file", "-t", sha)
         if object_type.returncode or object_type.stdout != b"commit\n":
             return None
-        result = _git_run(root, "show", f"{sha}:{path}")
+        reachable = run(root, "merge-base", "--is-ancestor", sha, "HEAD")
+        if reachable.returncode:
+            return None
+        result = run(root, "show", f"{sha}:{path}")
         if result.returncode:
             return None
         try:
@@ -616,7 +1014,17 @@ def _git_plan_history(
         for record in records:
             sha = record[0].decode("ascii")
             parents = tuple(item.decode("ascii") for item in record[1:])
-            tree = _git_run(root, "ls-tree", "-rz", "--full-tree", sha, "--", "docs/plans")
+            tree = _git_run(
+                root,
+                "ls-tree",
+                "-rz",
+                "-r",
+                "--full-tree",
+                sha,
+                "--",
+                "docs/plans",
+                *ADR_PATHS,
+            )
             if tree.returncode:
                 return None
             plans: dict[str, str] = {}
@@ -633,12 +1041,12 @@ def _git_plan_history(
                 except UnicodeDecodeError:
                     return None
                 relative = path.removeprefix("docs/plans/")
-                if (
-                    not path.startswith("docs/plans/")
-                    or not relative.endswith(".md")
-                    or relative == "README.md"
-                    or relative.endswith("-gate.md")
-                ):
+                plan = (
+                    path.startswith("docs/plans/")
+                    and relative.endswith(".md")
+                    and relative != "README.md"
+                )
+                if path not in ADR_PATHS and not plan:
                     continue
                 mode, object_type, object_id = fields
                 if mode != b"100644" or object_type != b"blob":

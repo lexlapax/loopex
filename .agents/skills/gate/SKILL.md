@@ -15,33 +15,42 @@ For the named milestone:
 1. Verify the designated green base is a committed maintainer-designated SHA
    and run every existing required check. Treat a missing check as unavailable
    evidence.
-2. Map the milestone's bounded outcomes to the capability rung or rungs they
+2. For `M0`, first require structurally Accepted records in ADR 0001 and ADR
+   0002. Do not create or open it for any other status. Its opening branch also
+   replaces the exact seed-status guard with lifecycle-specific checks; do not
+   remove or weaken the guard.
+3. Map the milestone's bounded outcomes to the capability rung or rungs they
    serve; roadmap labels do not dictate its boundary or name. Create the compact
    plan candidate at `docs/plans/<name>.md` with purpose and outcomes, scope and
-   non-goals, accepted and unresolved ADR prerequisites with their required
-   acceptance points, workstreams and rejoin barriers, evidence mapping,
+   non-goals including explicit deferrals, accepted and unresolved ADR
+   prerequisites with their required acceptance points, ownership and rejoin
+   barriers, cross-cutting evidence obligations,
    compatibility, migration, rollback, packaging, decision owners, and a
    proportional minimalism budget tying proposed abstractions to concrete
-   examples or current implementations. Include the required
+   examples or current implementations. Put those commitments inside the exact
+   marked `## Normative Envelope` skeleton in `docs/plans/README.md`; keep
+   workstreams, progress, resolved outcome state, and evidence links outside it.
+   Include the required
    `## Governance Records` table with empty Acceptance and Closure rows. Give
-   the plan an outcomes table; nothing closes with an open row. The filename
-   and canonical register own identity and lifecycle state, so do not duplicate
+   the plan a normative Outcomes table and exactly one Progress and Evidence
+   row for every outcome ID; nothing closes with an open row. The filename and
+   canonical register own identity and lifecycle state, so do not duplicate
    either in the plan. Update the canonical status capsule and add exact
    plan/gate links to the milestone register in `docs/plans/README.md`, then
    update README's marked derived status summary. Update `docs/roadmap.md` only
    if the opening changes its non-normative capability projection.
-3. Create the branch-only executable acceptance gate at
+4. Create the branch-only executable acceptance gate at
    `docs/plans/<name>-gate.md`, separate from the plan so its digested bytes do
    not churn as plan progress is recorded. Name exact commands and protected
    tests, selectors, fixtures, vectors, canonical UTF-8/LF
    harness/configuration bytes, evidence classes, and their SHA-256 digest. The
    accepted gate remains immutable for the milestone. Do not stub missing
    behavior green.
-4. Prove existing gates remain green and the new gate fails for the declared
+5. Prove existing gates remain green and the new gate fails for the declared
    missing outcome. Unknown or shared scope runs the full gate.
-5. Keep the red checkpoint off `main`. Commit it only when the current task
+6. Keep the red checkpoint off `main`. Commit it only when the current task
    authorizes that Git write.
-6. Stop for independent gate and plan acceptance. The recorded acceptance
+7. Stop for independent gate and plan acceptance. The recorded acceptance
    authority accepts the plan's normative envelope and the gate's canonical
    UTF-8/LF text and SHA-256 digest; conforming progress is not part of the lock.
    Do not accept while an implementation-blocking ADR prerequisite is

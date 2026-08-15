@@ -21,11 +21,29 @@ guidance.
    `docs/adr/NNNN-short-title.md` with `Status: Proposed`, date, decision owner,
    context, decision, alternatives and evidence, consequences including what
    becomes harder, compatibility, migration/rollback, and links to constraining
-   vision sections. Keep it to one page unless the decision requires more.
+   vision sections. Add this empty record after the metadata:
+
+   ```markdown
+   ## Governance Record
+
+   | Decision | Authority | Authority evidence | Bound bytes |
+   | --- | --- | --- | --- |
+   | Acceptance | — | — | — |
+   ```
+
+   Keep the ADR to one page unless the decision requires more.
 5. Never mark your own proposal `Accepted`. Record acceptance only when the
    maintainer or a previously recorded delegate explicitly accepts the exact ADR
-   bytes or digest; retain that authority pointer and do not change the decision
-   text in the same edit.
+   candidate. In one administrative transition, change only `Status: Proposed`
+   to `Status: Accepted` and fill the Acceptance row with `Maintainer` or
+   `Delegate: <recorded identity>`, `[disposition](<durable-pointer>)`, and
+   the exact candidate/document-digest form defined in `docs/plans/README.md`.
+   The digest binds the historical Proposed candidate bytes. Do not change the
+   decision text in that transition, and require independent exact-diff review
+   before integration; the candidate commit must remain reachable from the
+   integrated history. Within the ADR, only Status and the empty row change;
+   the same administrative commit updates the plans index's complete derived
+   Current Status capsule when the ADR is a current blocker.
 6. A gate weakening, waiver, scope deferral, baseline exception, or vision
    reversal requires the exact approval named by `AGENTS.md`; an ADR cannot grant
    that authority.

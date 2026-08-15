@@ -140,16 +140,23 @@ register and plan index.
   portable-enforcement, and client-adapter work, plus plan/ADR proposals and
   executable gate scaffolding; it does not authorize product implementation.
   Use the latest committed seed as the base and run every available repository
-  check. A missing product gate is unavailable evidence, not PASS.
+  check. A missing product gate is unavailable evidence, not PASS. `M0` remains
+  blocked until ADR 0001 and ADR 0002 carry recorded acceptance; its future
+  opening branch must replace the seed-specific status guard with exact
+  lifecycle checks rather than delete or relax it.
 - Begin from a base whose required gates are green. A claimed pre-existing
   failure requires the same command and matching signature at the base SHA.
 - Before implementation of any milestone, including bounded contract experiments,
   create a branch-only gate checkpoint with the plan candidate and executable
   acceptance. Existing gates stay green; the new gate fails for the declared
   missing behavior. The red tree is never mergeable to `main`.
-- The accepted plan names purpose/outcomes, scope/non-goals, ADR prerequisites,
-  workstreams and rejoin barriers, evidence mapping, compatibility, migration,
+- The accepted plan's marked normative envelope names purpose/outcomes,
+  scope/non-goals, ADR prerequisites and acceptance points, ownership and rejoin
+  barriers, evidence obligations and mapping, compatibility, migration,
   rollback, packaging, decision owners, and a proportional minimalism budget.
+  The accepted candidate SHA binds those exact envelope bytes. Workstream
+  decomposition, progress, resolved outcome state, and evidence links stay
+  outside the envelope and may change only in conformance with it.
   The budget states what code and abstraction growth is justified and which
   measurable ceilings or negative constraints the gate locks. Raw line count is
   a review signal unless the accepted plan makes a scope-specific cap; never
@@ -157,11 +164,13 @@ register and plan index.
 - Lifecycle transitions retain their authority. Before the canonical register
   moves to `Accepted`, the plan records the accepting maintainer or previously
   delegated authority, durable evidence of the explicit disposition, the
-  accepted plan-candidate SHA, and gate digest. Before it moves to `Closed`, it
-  records the closing authority and disposition, reviewed candidate SHA, and
-  gate digest. Agents may transcribe explicit decisions; they may not infer or
-  supply them. A transition-only commit may update governance and derived status
-  bytes, but not the bound candidate, locked gate, or product bytes. Before
+  accepted plan-candidate SHA, and gate digest. A bound candidate must remain
+  reachable from the integrated Git history. Before the register moves to
+  `Closed`, the plan records the closing authority and disposition, reviewed
+  candidate SHA, and gate digest. Agents may transcribe explicit decisions;
+  they may not infer or supply them. A transition-only commit may update
+  governance and derived status bytes, but not the bound candidate, locked gate,
+  or product bytes. Before
   integration, an independent read-only review compares that exact transition
   SHA with the bound candidate and reports its changed paths and verdict to the
   current integrator; structural validation does not substitute for this
