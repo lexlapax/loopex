@@ -39,6 +39,7 @@ with ADR and code pointers as they land.
 | Verification, invariants, budgets | Vision §23 | Test layers; the named invariant suite; minimalism budgets; performance evidence rules. |
 | Compatibility and release governance | Vision §24 | Six separately versioned surfaces; 0.x labeling; migration/rollback duties. |
 | Prior-system evidence (Allbert Assist) | Vision §19.3, §29.6 | All consulted documents are directly linked there with full URLs. Lessons flow in; code does not. |
+| Client adapters, skills, portable enforcement | AGENTS.md § Project State and Client Adapters and § Parallel Work and Portable Enforcement; [agent-adapter-smoke.md](agent-adapter-smoke.md); `scripts/` | Canonical skills live in `.agents/skills`; `.claude/` and `.codex/` are thin adapters over the same bytes; smoke evidence is appended whenever adapter bytes change; every check runs locally, hosted CI is a replaceable runner. |
 
 ## Test Quick Reference
 
@@ -53,3 +54,30 @@ tagged, explicitly invoked lane — never part of the default suite.
 This section holds temporary in-flight guidance while a specific version is
 being planned and implemented. It is cleared at release closeout; add the
 next version's working notes here when that work begins.
+
+### Seed bootstrap (updated 2026-08-15)
+
+The seed bootstrap is complete and green. Any client should reach the same
+state from these facts alone:
+
+- `scripts/check-agent-bootstrap.sh` and `scripts/check-gitignore.sh` are the
+  executable definition of "bootstrap green"; both pass from a clean checkout
+  with stock tools. Hosted CI runs the same scripts as a thin wrapper.
+- Client-adapter loading is proven, not assumed:
+  [agent-adapter-smoke.md](agent-adapter-smoke.md) retains the evidence.
+  Rerun and append whenever `.codex/`, `.claude/`, or `.agents/skills` bytes
+  change. The Codex read-only role-delegation check is still deferred to an
+  interactive session.
+- Settled seed decisions — do not relitigate without new evidence:
+  `[features] multi_agent_v2` stays in `.codex/config.toml` (project roles
+  load on codex-cli 0.147.0); the AGENTS.md durability paragraph stays
+  complete per vision §20.3; the `gate` and `close-milestone` skills carry
+  `disable-model-invocation: true` (Codex parses it); enforcement scripts use
+  stock `grep -E`, never ripgrep.
+- Known pre-commitment to revisit at the Mix scaffold:
+  `.claude/hooks/deps-budget.sh` hardcodes `apps/loopex/mix.exs` and is
+  silently inert under any other layout. The layout decision (vision §20.1
+  leaves the tree unfrozen) must update that hook in the same change.
+- Nothing beyond seed-scope work is authorized until the maintainer
+  explicitly opens the next stage gate-first (AGENTS.md § Milestones and
+  Gates, seed-bootstrap clause; `gate` skill).
