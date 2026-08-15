@@ -139,13 +139,24 @@ the exact document set its milestone must update.
   record. Each amendment records its class (`Correction`, `Strengthening`, or
   `Weakening`), authority, disposition pointer, superseded candidate, new bound
   bytes, and reason; the effective binding is the last complete amendment.
-  Weakening is never delegated, every amendment re-opens independent review, and
-  the superseded-candidate chain is verifiable end to end. Written because `M0`
+  The check **derives a minimum class** by comparing commitments, so a removed
+  outcome, removed protected selector, reduced locked-command count, or changed
+  evidence class can never be recorded as a correction. Corrected bytes and
+  their amendment row land in one commit, because the anchor validates every
+  intermediate revision and a two-phase transition is unrealizable. Sequence is
+  verified rather than declared: each row supersedes the previous binding's
+  exact digests, descends from the revision anchoring its predecessor, carries
+  every earlier row unchanged, and adds exactly one row. Written because `M0`
   was accepted with an outcome its gate could not prove, and the anchor that
-  makes acceptance tamper-evident also makes a revert impossible.
+  makes acceptance tamper-evident also makes a revert impossible. A first
+  proposal was rejected in independent review for permitting a disguised
+  weakening and for a transition that could not execute.
 - The ADR index recorded 0001 through 0003 as Proposed after they were accepted.
   The acceptance transition may change only governance rows and marked status
-  blocks, so the index correction lands separately here.
+  blocks, so the index correction lands separately here. The index also claimed
+  `Rejected` and `Superseded` were valid ADR statuses; the check accepts only
+  `Proposed` and `Accepted`, and a decision is replaced additively by a
+  successor declaring `Supersedes: NNNN`.
 - ADR 0001, ADR 0002, and ADR 0003 are **Accepted**, bound to candidate
   `c703a65` with concept and technical digests recorded in each governance row.
   The maintainer's disposition is retained in the context map under

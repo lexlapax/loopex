@@ -30,8 +30,11 @@ compatibility, and the governance record; its companion owns invariants,
 mechanics, and evidence. Acceptance binds both files as they existed at the
 recorded candidate.
 
-Status is `Proposed`, `Accepted`, `Rejected`, or `Superseded`, and lives in the
-Concept file. No actor accepts its own decision: acceptance is an explicit
+Status is `Proposed` or `Accepted` and lives in the Concept file. Those are the
+only two values the repository check accepts, because an accepted pair is
+anchored across history and its bytes are never edited afterwards. A decision is
+replaced additively: the successor declares `Supersedes: NNNN` and the
+predecessor stays exactly as accepted. No actor accepts its own decision: acceptance is an explicit
 maintainer or recorded-delegate disposition, captured in the governance record
 rather than inferred from a status word.
 
