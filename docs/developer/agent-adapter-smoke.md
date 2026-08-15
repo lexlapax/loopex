@@ -5,6 +5,41 @@ Adapter parity requires proof of effective loading, not file presence
 manual smoke results; the deterministic subset is the repository-owned
 `scripts/check-bootstrap.sh` aggregate, which hosted CI may mirror.
 
+## 2026-08-15 — `gate` skill vocabulary and plan-path revision
+
+The `gate` skill changed to match the milestone vocabulary defined in
+AGENTS.md § Milestones and Gates and the two-flat-file plan layout, so the
+context map's rerun obligation applies. Skill digests after the change:
+
+```text
+829f0782ba0e0c2ff8ee324e0a9cff1a10397d6eeadf7c2e90b40701dfd8e15e  .agents/skills/gate/SKILL.md
+122e32a3f2e3ec747093628736a230f0f4d6806f04a266a66ccb650ca6d96390  .agents/skills/adr/SKILL.md
+4ba218fd1a6d60f1b80a5698f84530d2955ba8f1a85ab9bff388ff4a92b3bd55  .agents/skills/close-milestone/SKILL.md
+```
+
+Codex-cli 0.147.0, read-only. Two runs; the first probed invocation policy and
+the plan path, and the second was rerun after the skill gained the roadmap-link
+step, since the earlier digest no longer described the bytes:
+
+```sh
+RUST_LOG=error codex exec -C . --sandbox read-only --ignore-user-config \
+  "Without editing anything: name the milestone-gate skill's exact title line, quote the path it says a plan candidate is created at, and list every document it says must be updated when a milestone opens."
+```
+
+| Observation | Result |
+| --- | --- |
+| Read the edited canonical bytes (`# Open a Milestone Gate`) | PASS |
+| Reported explicit invocation required, citing the protected-skill field (run 1) | PASS |
+| Quoted the revised plan path `docs/plans/<name>.md` | PASS |
+| Listed both `docs/plans/README.md` and `docs/roadmap.md` as update targets, and the gate at `docs/plans/<name>-gate.md` | PASS |
+| `bash scripts/check-bootstrap.sh` green (five checks) | PASS |
+
+Claude-side, the tracked relative symlink `.claude/skills -> ../.agents/skills`
+resolves to the same canonical bytes, so no separate copy exists to drift.
+Observing the revised skill *description* in a Claude session requires a fresh
+session, since the skill listing is built at session start; that observation is
+not claimed here.
+
 ## 2026-08-15 — closure candidate SHA `cd8d2ae8f8347d051e6ea82fbdd5f19005e0c427`
 
 The final technical candidate adds a tracked Python assertion script so the

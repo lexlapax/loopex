@@ -84,6 +84,12 @@ M0 is the only rung that ships nothing, which is why it is the only M-named
 milestone. Every other milestone is named for the release it produces, so the
 name alone tells you whether work there reaches users.
 
+**Plans.** A rung's name becomes a link to `docs/plans/<name>.md` when that
+milestone opens; an unlinked rung has no plan yet, which is the accurate state
+rather than a missing file. Current states for every milestone are in
+[docs/plans/README.md](plans/README.md) — that table lives in one place so it
+cannot drift, and this ladder does not repeat it.
+
 Compatibility surfaces do not freeze together
 ([vision §24.1](vision.md)): private journal schema, public protocol, executor
 protocol, extension API, embedded Elixir API, and artifact formats each freeze

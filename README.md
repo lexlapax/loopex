@@ -118,23 +118,13 @@ None of that is discouragement; it is the accurate shape of the project. The
 code is Apache-2.0, so the permission to use, fork, and embed it is real
 regardless of what can be promised about support.
 
-## Roadmap (suggested shape)
+## Roadmap
 
-| Milestone | Proves |
-| --- | --- |
-| M0 | Bounded contract experiments: durability/replay, operation truth across a restart, extension activation/rollback, one real provider slice. Disposable; freezes nothing. |
-| v0.1 | A useful local coding harness: full loop, seven tools, durable sessions, JSONL RPC, terminal client. |
-| v0.2 | A durable service: daemon, multi-client attach, snapshots/cursors, the ADR-selected daemon store, protocol release candidate. |
-| v0.3 | Governed extensions and live reload, with exact rollback proof. |
-| v0.4 | Isolated hands and generated-code trials behind the executor gateway. |
-| v0.5 | Remote hands and ecosystem beta: broker, trusted gateways, ACP adapter, sample hosts. |
-| 1.0 | A compatibility baseline: independent consumers, migrations, rollback, packaged operation. |
+[docs/roadmap.md](docs/roadmap.md) — what each milestone proves, which decisions
+precede it, and the orderings that cannot be resequenced. Each rung links to its
+plan in [docs/plans/](docs/plans/) once that milestone opens.
 
-[docs/roadmap.md](docs/roadmap.md) carries the fuller shape — what each rung
-proves, which ADRs precede it, and the serial barriers that cannot be
-resequenced. It is guidance; the delivery commitment is
-[docs/vision.md](docs/vision.md) §21 turned into accepted per-milestone plans
-in `docs/plans/`.
+The roadmap is guidance. The commitment is an accepted plan.
 
 ## Start Here
 
