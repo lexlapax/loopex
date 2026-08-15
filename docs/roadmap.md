@@ -36,20 +36,20 @@ Current stage state is never stored here — read
 
 ### Where the Files Go
 
-Maintainer decision, 2026-08-15. One folder per milestone under `docs/plans/`,
-which is what the `gate` and `close-milestone` skills already require:
+Maintainer decision, 2026-08-15, revised the same day after review. Two flat
+files per milestone under `docs/plans/`:
 
 ```text
-docs/plans/<milestone>/plan.md        purpose, scope, ADR prerequisites, workstreams,
-                                      evidence mapping, compatibility, rollback, owners
-docs/plans/<milestone>/gate.md        locked commands, protected tests, fixtures,
-                                      evidence classes, and the lock digest
-docs/plans/<milestone>/evidence.md    retained runs, review, demonstrations, deferrals
+docs/plans/<name>.md         the plan: purpose, scope, outcomes table, state
+docs/plans/<name>-gate.md    the locked acceptance contract
 ```
 
-`<milestone>` is the ladder name: `M0`, `v0.1`, … The folder is the retained
-evidence bundle at closure. Add companion files inside it only when they are
-milestone-scoped records.
+`<name>` is the milestone name — `M0`, `v0.1`, `v1.0`. The gate is separate
+because its bytes are digested at acceptance, and a plan's progress notes change
+constantly; sharing one file would churn the digest until it meant nothing.
+
+There is no separate evidence file. Evidence goes in the plan's outcomes table
+as links, and earns its own file only if it genuinely outgrows that.
 
 Design and flow documents are **not** plan artifacts. They are living
 architecture: they outlive the milestone that introduced them and are corrected
@@ -61,21 +61,28 @@ while the diagram stays true.
 ADRs stay flat and numbered in `docs/adr/NNNN-short-title.md`, per the `adr`
 skill — decisions are not milestone-scoped.
 
+[docs/plans/README.md](plans/README.md) is the human entry point: the vocabulary,
+the gate lifecycle, and every milestone with its current state.
+
 ## The Ladder
 
 Each rung answers one constitutional question from
 [vision §21](vision.md). "Proves" is the headline outcome a plan would have to
 turn into bounded scope and evidence.
 
-| Milestone | Constitutional question | Proves | Freezes |
-| --- | --- | --- | --- |
-| **M0** — contract experiments | Are session durability, effect truth, and VM-global trusted-code evolution feasible under the stated OTP semantics? | Journal write/replay, `commit_unknown` fencing and reconciliation across a restart, one extension activation plus exact A→B→A rollback, one real-provider slice. Disposable code. | Nothing, by construction. |
-| **v0.1** — useful local kernel | Can one developer use a small, durable, truthful coding loop through the embedded API and reference client? | The full loop: seven tools, durable sessions, embedded API, JSONL RPC, line-oriented terminal client, restart+replay continuity. | Nothing public; surfaces are experimental. |
-| **v0.2** — durable service | Can independent clients attach, recover, and agree on one protocol candidate without owning session lifetime? | Reference daemon, race-free multi-client attachment, snapshots and cursors, the ADR-selected durable store, public protocol as release candidate. | Protocol RC (schemas + conformance, no support promise). |
-| **v0.3** — governed extension runtime | Can trusted behavior evolve without changing session truth, weakening authority, or pretending code is runtime-local? | Extension manifest and namespaces, quiescent versioned activation, extension state upgrade/downgrade fixtures, exact rollback. | Extension contribution API as RC. |
-| **v0.4** — isolated hands | Can generated and less-trusted work execute outside the brain through the same effects contract? | Executor gateway to an OS-isolated hand, generated-code promotion path, executor conformance suite passing local and isolated. | Executor protocol for local + isolated transports. |
-| **v0.5** — remote ecosystem | Can the contract span workers and materially different hosts without becoming a fleet or policy platform? | Executor broker, trusted-gateway distribution, ACP adapter, secured sample host, remote-worker reconciliation evidence. | Executor protocol for the claimed remote transport; ACP mapping. |
-| **1.0** — compatibility baseline | Are public contracts proven by independent consumers, migrations, rollback, and packaged operation? | Materially different consumers, migration and rollback fixtures, exact packaged artifacts and install smoke, public protocol v1 decision. | Public protocol v1 and the surfaces whose freeze criteria passed. |
+| Milestone | Ships | Constitutional question | Proves | Freezes |
+| --- | --- | --- | --- | --- |
+| **M0** — contract experiments | No | Are session durability, effect truth, and VM-global trusted-code evolution feasible under the stated OTP semantics? | Journal write/replay, `commit_unknown` fencing and reconciliation across a restart, one extension activation plus exact A→B→A rollback, one real-provider slice. Disposable code. | Nothing, by construction. |
+| **v0.1** — useful local kernel | Yes | Can one developer use a small, durable, truthful coding loop through the embedded API and reference client? | The full loop: seven tools, durable sessions, embedded API, JSONL RPC, line-oriented terminal client, restart+replay continuity. | Nothing public; surfaces are experimental. |
+| **v0.2** — durable service | Yes | Can independent clients attach, recover, and agree on one protocol candidate without owning session lifetime? | Reference daemon, race-free multi-client attachment, snapshots and cursors, the ADR-selected durable store, public protocol as release candidate. | Protocol RC (schemas + conformance, no support promise). |
+| **v0.3** — governed extension runtime | Yes | Can trusted behavior evolve without changing session truth, weakening authority, or pretending code is runtime-local? | Extension manifest and namespaces, quiescent versioned activation, extension state upgrade/downgrade fixtures, exact rollback. | Extension contribution API as RC. |
+| **v0.4** — isolated hands | Yes | Can generated and less-trusted work execute outside the brain through the same effects contract? | Executor gateway to an OS-isolated hand, generated-code promotion path, executor conformance suite passing local and isolated. | Executor protocol for local + isolated transports. |
+| **v0.5** — remote ecosystem | Yes | Can the contract span workers and materially different hosts without becoming a fleet or policy platform? | Executor broker, trusted-gateway distribution, ACP adapter, secured sample host, remote-worker reconciliation evidence. | Executor protocol for the claimed remote transport; ACP mapping. |
+| **v1.0** — compatibility baseline | Yes | Are public contracts proven by independent consumers, migrations, rollback, and packaged operation? | Materially different consumers, migration and rollback fixtures, exact packaged artifacts and install smoke, public protocol v1 decision. | Public protocol v1 and the surfaces whose freeze criteria passed. |
+
+M0 is the only rung that ships nothing, which is why it is the only M-named
+milestone. Every other milestone is named for the release it produces, so the
+name alone tells you whether work there reaches users.
 
 Compatibility surfaces do not freeze together
 ([vision §24.1](vision.md)): private journal schema, public protocol, executor

@@ -17,13 +17,24 @@ processes; durable truth is an append-only journal; clients attach and detach
 while the session lives; a session "brain" can coordinate local or remote
 "hands"; trusted code can evolve while session state stays in place.
 
-## Status
+## Where Things Stand
 
-**Pre-implementation.** The founding vision — [docs/vision.md](docs/vision.md)
-— is complete and decision-bearing: boundaries, invariants, protocol planes,
-trust model, and delivery shape are settled there. M0, a bounded set of
-contract experiments, is the next milestone. Nothing is installable yet.
-This section will keep changing; the shape below should not, much.
+- **Now** — Pre-implementation. No product code exists; nothing is installable.
+- **In flight** — [ADR 0001](docs/adr/0001-repository-and-application-layout.md)
+  (repository layout) and
+  [ADR 0002](docs/adr/0002-bootstrap-runtime-floor.md) (runtime floor) are
+  proposed, awaiting acceptance.
+- **Next** — Open the M0 gate: a bounded set of contract experiments, disposable,
+  freezing nothing.
+- **Last closed** — Seed bootstrap, 2026-08-15.
+
+**[What's committed and how you tell it's done →](docs/plans/)** ·
+[the map](docs/roadmap.md) · [what changed](CHANGELOG.md)
+
+The founding vision — [docs/vision.md](docs/vision.md) — is complete and
+decision-bearing: boundaries, invariants, protocol planes, trust model, and
+delivery shape are settled there. This section will keep changing; the shape
+below should not, much.
 
 ## Why It Exists
 
@@ -112,7 +123,7 @@ regardless of what can be promised about support.
 
 | Milestone | Proves |
 | --- | --- |
-| M0 | Bounded contract experiments: durability/replay, operation truth across two nodes, extension activation/rollback, one real provider slice. Disposable; freezes nothing. |
+| M0 | Bounded contract experiments: durability/replay, operation truth across a restart, extension activation/rollback, one real provider slice. Disposable; freezes nothing. |
 | v0.1 | A useful local coding harness: full loop, seven tools, durable sessions, JSONL RPC, terminal client. |
 | v0.2 | A durable service: daemon, multi-client attach, snapshots/cursors, the ADR-selected daemon store, protocol release candidate. |
 | v0.3 | Governed extensions and live reload, with exact rollback proof. |

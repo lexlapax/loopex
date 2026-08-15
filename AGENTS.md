@@ -25,7 +25,7 @@ and subsystem routing in the context map.
 Start with the current task, this file, any accepted active plan and gate
 contract, and relevant code and tests. Use
 [docs/developer/agent-context-map.md](docs/developer/agent-context-map.md) to
-load constraining vision sections, accepted ADRs, and the current stage's
+load constraining vision sections, accepted ADRs, and the current milestone's
 version-specific guidance. Use [DEVELOPMENT.md](DEVELOPMENT.md) for current
 local prerequisites and repository entrypoints; it is setup guidance, not
 acceptance authority. Read the full vision for
@@ -96,6 +96,17 @@ an unresolved observation for the maintainer to triage.
 
 ## Milestones and Gates
 
+**Vocabulary.** A *stage* is a capability rung from the vision's delivery ladder;
+there are seven and the list does not grow. A *milestone* is one stage's bounded
+work, with exactly one plan, one gate, and one closure. A *workstream* is a
+parallel slice inside a milestone and has no plan or gate of its own. A *release*
+is the tag published when a milestone completes and its release criteria pass. A
+milestone's name states whether it ships: `M0` is the only M-named milestone
+because it alone produces no release, and every later milestone takes the name of
+the release it produces. Plans live in `docs/plans/<name>.md` with the locked
+gate beside them in `<name>-gate.md`; [docs/plans/README.md](docs/plans/README.md)
+is their index and the human entry point.
+
 - **Seed bootstrap.** Before the first plan and gate contract are accepted, an
   explicit maintainer task may authorize founding-document,
   portable-enforcement, and client-adapter work, plus plan/ADR proposals and
@@ -104,7 +115,7 @@ an unresolved observation for the maintainer to triage.
   check. A missing product gate is unavailable evidence, not PASS.
 - Begin from a base whose required gates are green. A claimed pre-existing
   failure requires the same command and matching signature at the base SHA.
-- Before implementation of any stage, including bounded contract experiments,
+- Before implementation of any milestone, including bounded contract experiments,
   create a branch-only gate checkpoint with the plan candidate and executable
   acceptance. Existing gates stay green; the new gate fails for the declared
   missing behavior. The red tree is never mergeable to `main`.
@@ -134,7 +145,7 @@ an unresolved observation for the maintainer to triage.
   approved limitation/deferral. Do not mutate tracked bytes merely to paste a
   final run link.
 - A closure candidate also updates the documentation its milestone changed:
-  `CHANGELOG.md`, `README.md`, affected `docs/` indexes, and the current-stage
+  `CHANGELOG.md`, `README.md`, affected `docs/` indexes, and the current-milestone
   pointer in the context map. Each gate locks that milestone's exact document
   set, since the set differs by milestone; documentation drift blocks closure
   like any other unmet outcome.
@@ -193,8 +204,10 @@ requires it, and those workflows stay thin wrappers over repository commands.
 - Replaceable store, model, executor, broker, extension, and transport boundaries
   run reusable conformance suites.
 - Repository checks, mirrored by CI, check gate locks, client/workflow drift,
-  and the ban on AI-attribution or generated-by claims in commits, PRs, release
-  notes, and project docs.
+  and the ban on AI-attribution or generated-by claims. Commit messages are
+  enforced today; PRs, release notes, and project docs come under the same check
+  as each surface appears. The ban applies to all of them now regardless of what
+  is mechanically enforced.
 
 ## Product Non-Negotiables
 
@@ -305,7 +318,7 @@ canonical workspace/revision and exact resource/digest set; headless use fails
 closed without a matching trust decision. Commands still cross the executor
 boundary.
 
-Commit titles are short and imperative and carry a stage marker:
+Commit titles are short and imperative and carry a milestone marker:
 `area(marker): summary`, where `marker` is `planning`, `seed`, or the milestone
 the work belongs to (`M0`, `v0.1`). Keep draft protocol
 docs, conformance fixtures, and operator guidance aligned; change accepted
