@@ -33,6 +33,10 @@ the exact document set its milestone must update.
 - `scripts/check-repo-hygiene.sh` — fails on branches already merged into the
   integration ref and on worktrees that are stale or sitting on landed work.
   In-flight branches and live worktrees pass untouched.
+- `docs/plans/README.md` — the plans index, layout convention, and current
+  no-stage-open state. Git does not track empty directories, so `docs/plans/`
+  did not exist in a fresh clone despite being referenced by README, the
+  roadmap, and the `gate` skill.
 - This changelog.
 
 ### Changed
