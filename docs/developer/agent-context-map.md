@@ -56,6 +56,15 @@ tagged, explicitly invoked lane — never part of the default suite.
   `scripts/check-bootstrap.sh`. They run from a clean checkout with the
   toolchain in [DEVELOPMENT.md](../../DEVELOPMENT.md); hosted CI may invoke only
   the aggregate as a replaceable thin wrapper.
+- Maintainer decision (explicit bootstrap task, 2026-08-15): the exact-SHA,
+  repository-owned local aggregate is mandatory evidence; hosted CI is
+  supplementary unless an accepted gate or release claim explicitly locks a
+  hosted or real-provider lane. A hosted-required default was rejected because
+  it would make an open-source checkout depend on one provider; removing the
+  thin hosted mirror was rejected because it remains useful supplementary
+  signal. Existing GitHub automation therefore stays replaceable, forks need no
+  GitHub tooling to develop, and a later material change requires a new
+  option-and-implication packet and maintainer approval.
 - Client-adapter loading is proven, not assumed. Retain versions, source SHA,
   adapter digests, prompts, observed instruction/role/skill loading, and
   permission results in [agent-adapter-smoke.md](agent-adapter-smoke.md). Rerun
@@ -90,9 +99,12 @@ next version's working notes here when that work begins.
 
 ### Seed bootstrap closure candidate (updated 2026-08-15)
 
-The maintainer authorized this final cross-client hardening pass. Do not call
-the seed bootstrap closed until its candidate SHA, adapter smokes, repository
-checks, and independent review agree. Push and any hosted-wrapper result are
+The maintainer authorized this final cross-client hardening pass and asked to
+close agent bootstrap after its evidence and review agree. The adapter-changing
+candidate is `d1782a8d1c1c2c7f1399fe0aeebaa4a86b36f240`; its retained smokes
+are in [agent-adapter-smoke.md](agent-adapter-smoke.md). Do not call the seed
+bootstrap closed until the following evidence commit passes repository checks
+and exact-SHA independent review. Push and any hosted-wrapper result are
 supplementary publication evidence, not closure authority or a development
 dependency. Any client should derive the candidate state from these facts alone:
 
