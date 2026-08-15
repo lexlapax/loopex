@@ -109,6 +109,29 @@ lane — never part of the default suite.
   and retain version-specific facts here. Material changes
   to development behavior require an option-and-implication packet and
   maintainer approval before adapter edits.
+- Maintainer decision (2026-08-15): development work uses the model-neutral
+  efficient, balanced, and deep capability classes in the
+  [development charter](development-charter.md#concept-capability-follows-consequence)
+  and its [technical routing](development-charter-technical.md#technical-capability-follows-consequence).
+  Current recommended mappings are Codex Luna/medium for efficient work,
+  Terra/high for balanced work, and Sol/high for deep work; Claude Haiku/medium,
+  Sonnet/high, and Opus/high respectively. A separately verified deeper setting
+  is reserved for unusually demanding work whose evidence justifies the extra
+  cost. These are
+  dated adapter recommendations, not project authority or repository model
+  pins. Profiles inherit the caller's model; the caller selects and verifies the
+  current mapping before invocation. Class labels and structural checks are
+  routing metadata, not capability proof. Use a separate direct invocation when
+  named-role delegation is unavailable. A stronger profile may perform
+  lower-class work, while missing required deep capability or effective
+  read-only review is unavailable evidence. Task-shaped smoke evidence records
+  the effective model and effort when observable. Primary references checked
+  for this mapping are
+  [OpenAI's model guidance](https://developers.openai.com/api/docs/models) and
+  [Claude Code model configuration](https://code.claude.com/docs/en/model-config).
+  Recheck primary documentation, installed catalogs, representative task
+  behavior, and smoke evidence when a client version, model family, catalog,
+  profile, or relevant adapter byte changes.
 - Current Codex compatibility: codex-cli 0.147.0 proves scoped-trust project
   instruction and direct skill discovery. In the current exact-source
   non-interactive smoke, named project-role delegation could not bind a child;

@@ -86,6 +86,13 @@ expected_sandboxes = {
     "release_architect": "read-only",
     "release_reviewer": "read-only",
 }
+allowed_role_keys = {
+    "name",
+    "description",
+    "model_reasoning_effort",
+    "sandbox_mode",
+    "developer_instructions",
+}
 assert set(roles) == set(expected_sandboxes), ("unexpected Codex roles", sorted(roles))
 prologue = (
     "Authority loads first: `AGENTS.md`, then "
@@ -108,6 +115,7 @@ for key, entry in roles.items():
         "sandbox drift",
         profile.get("sandbox_mode"),
     )
+    assert set(profile) == allowed_role_keys, (key, "unexpected role configuration")
     assert "model" not in profile, (key, "project-local model pin")
 
 settings = json.loads((ROOT / ".claude/settings.json").read_text())
@@ -148,6 +156,7 @@ assert claude_agents == expected_claude_agents, (
 for path in sorted(claude_agents):
     fields, body = markdown_frontmatter(path)
     assert_ordered_pointers(path, body)
+    assert fields.get("model") in {None, "inherit"}, (path, "project-local model pin")
     if path.name == "reviewer.md":
         tools = [item.strip() for item in fields.get("tools", "").split(",")]
         assert tools == ["Read", "Grep", "Glob"], (path, "reviewer tools", tools)

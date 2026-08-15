@@ -158,6 +158,46 @@ model, coding agent, client, maintainer, operator, and user remain appropriate
 when they identify actual domain roles. Specialized vocabulary is defined in
 ordinary language at first use in both depths.
 
+<a id="technical-capability-follows-consequence"></a>
+## Capability Routing and Escalation
+
+Concept: [Capability follows consequence](development-charter.md#concept-capability-follows-consequence).
+
+Classify the unresolved work by its highest-consequence decision. Split mixed
+work when independent parts can use different profiles without hiding a serial
+barrier or rejoin decision.
+
+| Work shape | Minimum capability class | Typical effort |
+| --- | --- | --- |
+| Inventories, extraction, deterministic transformations, cross-reference checks, and log triage with an objective completion check | Efficient | Low or medium |
+| Bounded implementation, integration, conformance work, and debugging inside accepted contracts | Balanced | Medium or high, proportional to ambiguity and boundary count |
+| Architecture, ownership, durability, concurrency, trust, security, public contracts, compatibility, gate design, rejoin decisions, and exact-SHA independent review | Deep | The required supported reasoning depth; use a deeper setting only when task evidence warrants it |
+
+An efficient profile stops when work requires judgment about scope, authority,
+security, persistence, public contracts, gates, or acceptance. A balanced
+profile escalates when accepted direction no longer determines the answer,
+evidence conflicts, or repeated focused attempts fail. A stronger available
+profile may perform a lower class of work; a weaker profile does not silently
+stand in for required deep reasoning. If the required class or an effectively
+read-only review environment is unavailable, the evidence is unavailable.
+
+Capability class, tool permissions, and project authority are independent.
+Selecting a model never changes the task's authorized scope, grants an effect,
+appoints an acceptance authority, or replaces exact gates and review. Named
+client roles are conveniences: a separate direct invocation may satisfy the
+same class only when it demonstrably reproduces the project contract, role
+instructions, effective permissions, and required read-only boundary.
+
+Shared policy uses capability classes, not provider names or effort labels.
+The context map records dated current-client mappings, fallback limits, and
+reevaluation triggers. Client profiles inherit the caller's model so account or
+catalog-specific aliases do not become repository prerequisites. Before
+invocation, the caller selects and verifies a model meeting the required class;
+the profile label and structural check are routing metadata, not capability
+proof. Relevant task-shaped smokes retain the client version, effective model
+and effort when observable, source SHA, profile or instruction discovery,
+permissions, result, and every unavailable capability.
+
 <a id="technical-smallest-system"></a>
 ## Proportional Documentation and Minimalism Review
 

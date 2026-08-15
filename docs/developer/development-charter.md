@@ -50,6 +50,22 @@ needed to choose. Specialized terms are explained where they first matter.
 
 Technical depth: [Development reports and decision packets](development-charter-technical.md#technical-development-decisions).
 
+<a id="concept-capability-follows-consequence"></a>
+## Capability Follows Consequence
+
+Use the quickest, least costly development profile that can still satisfy the
+task's constraints and evidence burden. Objective, repeatable work belongs to
+an efficient profile; bounded implementation belongs to a balanced profile;
+architecture, durability, concurrency, security, public contracts, gate design,
+rejoin judgment, and independent review require deep reasoning.
+
+Escalate when evidence conflicts, a boundary becomes ambiguous, or focused
+attempts fail. Return settled mechanical follow-through to an efficient
+profile. Model choice never grants authority, broadens scope or permissions, or
+substitutes for tests, gates, and independent review.
+
+Technical depth: [Capability routing and escalation](development-charter-technical.md#technical-capability-follows-consequence).
+
 <a id="concept-smallest-system"></a>
 ## The Smallest Sufficient System
 

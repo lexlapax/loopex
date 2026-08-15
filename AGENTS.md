@@ -287,6 +287,20 @@ subagent's scope is a subset of the parent request; spawning agents grants no
 authority. Do not assume a client propagates sandbox, credentials, approvals, or
 isolation—configure and verify each worker environment.
 
+Match capability to consequence as defined by the
+[development charter](docs/developer/development-charter.md#concept-capability-follows-consequence)
+and its [technical routing](docs/developer/development-charter-technical.md#technical-capability-follows-consequence).
+Use an efficient profile for objective repeatable work, a balanced profile for
+bounded implementation, and deep reasoning for architecture, durability,
+concurrency, security, public contracts, gates, rejoin judgment, and independent
+review. Escalate on ambiguity or conflicting evidence; return settled
+follow-through to an efficient profile. Model choice never changes authority,
+scope, permissions, or acceptance. Current client mappings live in the context
+map; the caller selects and verifies the required class before invocation,
+because a role label is not proof of effective capability. Missing required
+deep capability is unavailable evidence. Shared policy never depends on a
+provider name or account-specific alias.
+
 Landed work leaves no residue. Once a change is pushed and contained in the
 integration branch, the integrator deletes its branch and removes its worktree;
 a branch or worktree that survives its merge is stale state a later agent or

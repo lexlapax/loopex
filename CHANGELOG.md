@@ -20,6 +20,12 @@ the exact document set its milestone must update.
 
 ### Added
 
+- Model-neutral development routing now matches capability to consequence:
+  efficient profiles own objective repeatable work, balanced profiles own
+  bounded implementation, and deep reasoning owns architecture, durability,
+  security, public contracts, gate/rejoin judgment, and independent review.
+  Current client mappings remain dated context guidance; repository profiles
+  inherit the caller model rather than pinning account-specific aliases.
 - A paired documentation model: Concept documents state purpose, constraints,
   observable behavior, and decisions; Technical depth companions carry
   invariants, commands, evidence, edge cases, and implementation constraints.
