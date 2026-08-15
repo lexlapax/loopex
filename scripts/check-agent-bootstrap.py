@@ -188,6 +188,9 @@ if workflow.exists():
         "    runs-on: ubuntu-latest",
         "    steps:",
         "      - uses: actions/checkout@v4",
+        "        with:",
+        # Full history only; the commit-message check needs its policy baseline.
+        "          fetch-depth: 0",
         "      - run: bash scripts/check-bootstrap.sh",
     ]
     assert structure == expected_structure, (

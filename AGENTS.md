@@ -288,6 +288,8 @@ canonical workspace/revision and exact resource/digest set; headless use fails
 closed without a matching trust decision. Commands still cross the executor
 boundary.
 
-Commit titles are short and imperative: `area: summary`. Keep draft protocol
+Commit titles are short and imperative and carry a stage marker:
+`area(marker): summary`, where `marker` is `planning`, `seed`, or the milestone
+the work belongs to (`M0`, `v0.1`). Keep draft protocol
 docs, conformance fixtures, and operator guidance aligned; change accepted
 contracts, plans, and ADR semantics only through their amendment paths.
