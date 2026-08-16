@@ -80,6 +80,15 @@ the exact document set its milestone must update.
   status, register, and rejoin blocks; plan/gate/governance correspondence; and
   the derived README summary, with in-memory adversarial controls rather than a
   general Markdown parser. M0 replaces the bridge with Elixir/Mix.
+- `docs/adr/0006-maintainer-toolchain-matrix.md` (Proposed) and its technical
+  companion — the current lane tracks the newest pair available as Homebrew
+  stable, subject to being upstream-supported, rather than the newest upstream
+  release. Additive supersession: it declares `Supersedes: 0002` and ADR 0002's
+  accepted bytes are never edited. Today the two definitions coincide, but a
+  rule satisfied by coincidence is not a rule, and the earlier wording would
+  have turned a routine `brew upgrade` into a governed exception the first time
+  Homebrew lagged upstream. The floor lane is unchanged and still runs through a
+  version manager or CI.
 - The locked current toolchain pair was wrong. ADR 0002 requires the newest
   released Elixir with its newest supported OTP; the gate had locked Elixir
   1.19.5 with OTP 28.1, which is what happened to be installed. Verified against

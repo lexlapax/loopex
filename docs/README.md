@@ -45,6 +45,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0003 — extension contract boundary | [Decision](adr/0003-extension-contract-boundary.md#concept) | [Technical depth](adr/0003-extension-contract-boundary-technical.md#technical-depth) |
 | 0004 — plan amendment and supersession | [Decision](adr/0004-plan-amendment-supersession.md#concept) | [Technical depth](adr/0004-plan-amendment-supersession-technical.md#technical-depth) |
 | 0005 — milestone supersession | [Decision](adr/0005-milestone-supersession.md#concept) | [Technical depth](adr/0005-milestone-supersession-technical.md#technical-depth) |
+| 0006 — maintainer toolchain matrix | [Decision](adr/0006-maintainer-toolchain-matrix.md#concept) | [Technical depth](adr/0006-maintainer-toolchain-matrix-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
