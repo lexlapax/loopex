@@ -1529,6 +1529,57 @@ class StatusTest(unittest.TestCase):
         errors = run(absent)
         self.assertTrue(errors and "is missing" in errors[0], errors)
 
+    def test_malformed_or_removed_artifact_declaration_fails(self) -> None:
+        """A broken declaration must not read as predating the convention."""
+        good = "#!/usr/bin/env bash\nexit 1\n"
+        bad = "#!/usr/bin/env bash\nexit 0\n"
+        digest = hashlib.sha256(good.encode("utf-8")).hexdigest()
+        gate = (
+            "# Gate\n\n## Bound Artifacts\n\n"
+            "| SHA-256 | Path |\n| --- | --- |\n"
+            f"| `{digest}` | `scripts/run-gate.sh` |\n"
+        )
+        malformed = "# Gate\n\n## Bound Artifacts\n\nnot a table at all\n"
+        absent = "# Gate\n"
+        docs = documents()
+        docs["docs/plans/README.md"] = _open_capsule(
+            docs["docs/plans/README.md"]
+            .replace(
+                "| `M0` | Blocked | — | — | — |",
+                "| `M0` | Open | [concept](M0.md) | "
+                "[technical depth](M0-technical.md) | [gate](M0-gate.md) |",
+            )
+            .replace(SUMMARY, OPEN_SUMMARY)
+        )
+        docs["README.md"] = docs["README.md"].replace(SUMMARY, OPEN_SUMMARY)
+        docs["docs/plans/M0.md"] = plan(False)
+        docs["docs/plans/M0-technical.md"] = TECHNICAL_PLAN
+        docs["docs/plans/M0-gate.md"] = gate
+
+        def run(snapshots):
+            return validate(
+                docs,
+                None,
+                lambda: (snapshots[-1][0], tuple(snapshots)),
+                read_artifact=lambda _: good.encode("utf-8"),
+            )
+
+        # Malformed declaration hiding a mutated artifact, then restored.
+        errors = run([
+            ("a" * 40, (), {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": good}),
+            ("b" * 40, ("a" * 40,), {"docs/plans/M0-gate.md": malformed, "scripts/run-gate.sh": bad}),
+            ("c" * 40, ("b" * 40,), {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": good}),
+        ])
+        self.assertTrue(errors and "malformed" in errors[0], errors)
+
+        # Declaration removed entirely after being introduced.
+        errors = run([
+            ("a" * 40, (), {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": good}),
+            ("b" * 40, ("a" * 40,), {"docs/plans/M0-gate.md": absent, "scripts/run-gate.sh": bad}),
+            ("c" * 40, ("b" * 40,), {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": good}),
+        ])
+        self.assertTrue(errors and "disappeared" in errors[0], errors)
+
     def test_gate_bound_artifacts_are_verified(self) -> None:
         """A gate governs nothing executable unless its runner is bound."""
         runner = b"#!/usr/bin/env bash\nexit 1\n"

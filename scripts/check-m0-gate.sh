@@ -83,6 +83,17 @@ require_populated() {
 
 command -v mix >/dev/null 2>&1 || fail "mix is not installed; the accepted toolchain is required"
 
+# Every Mix invocation below runs against a temporary LOOPEX_HOME and workspace.
+# A helper that fell back to the real user home would otherwise modify user
+# state and still let this gate pass.
+isolated_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m0-home.XXXXXX")" \
+  || fail "could not create an isolated LOOPEX_HOME for the run"
+export LOOPEX_HOME="$isolated_root/home"
+export LOOPEX_WORKSPACE="$isolated_root/workspace"
+mkdir -p "$LOOPEX_HOME" "$LOOPEX_WORKSPACE"
+absence_root=""
+trap 'rm -rf "$isolated_root" ${absence_root:+"$absence_root"}' EXIT
+
 [ -f mix.exs ] || fail "no umbrella project at mix.exs (outcome 1)"
 [ -f apps/loopex_protocol/mix.exs ] || fail "no contract application at apps/loopex_protocol (outcome 1)"
 [ -f apps/loopex/mix.exs ] || fail "no runtime application at apps/loopex (outcome 1)"
@@ -98,6 +109,9 @@ require_named_test apps/loopex/test/fencing_test.exs "commit_unknown is fenced a
 require_named_test apps/loopex/test/fencing_test.exs "a stale completion is rejected after a coordinator restart"
 require_named_test apps/loopex/test/vm_code_spike_test.exs "a trusted generation loads and rolls back in an isolated VM"
 
+[ -f .formatter.exs ] || fail "no .formatter.exs; formatting scope would be unbound (outcome 1)"
+grep -qE 'apps/\*' .formatter.exs \
+  || fail ".formatter.exs does not cover apps/**; formatting could pass with applications unformatted (outcome 1)"
 mix format --check-formatted || fail "formatting is not clean"
 mix compile --warnings-as-errors || fail "compilation is not warning-free"
 mix loopex.deps_budget || fail "dependency budget or direction violated (outcome 1)"
@@ -134,6 +148,15 @@ provider_executed="$(executed_tests "$provider_output")" \
 [ "$provider_executed" -ge 1 ] \
   || fail "real-provider lane executed ${provider_executed} tests; a skipped or empty lane is not a pass (outcome 7)"
 
+# The gate claims this lane runs only when invoked explicitly. Prove it: an
+# unfiltered run of the same file must execute none of its tagged tests,
+# otherwise the full suite below would reach a real provider again.
+default_output="$(mix test apps/loopex_llm_reqllm/test/provider_test.exs 2>&1)" \
+  || { printf '%s\n' "$default_output" >&2; fail "the provider file fails in the default suite (outcome 7)"; }
+default_excluded="$(summary_field "$default_output" excluded)"
+[ "${default_excluded:-0}" -ge 1 ] \
+  || fail "the real_provider tag is not excluded by default; the full suite would call a provider (outcome 7)"
+
 provider_evidence="docs/evidence/M0-provider.md"
 [ -f "$provider_evidence" ] || fail "the real-provider lane retained no evidence at $provider_evidence (outcome 7)"
 for field in provider model endpoint recorded; do
@@ -151,11 +174,11 @@ done
 # sections would let a populated one cover a placeholder one, so exactly one
 # section per outcome is required.
 for outcome in 4 5 6; do
-  sections="$(grep -cE "^## Outcome ${outcome} " "$negatives" || true)"
+  sections="$(grep -cE "^## Outcome ${outcome}([[:space:]]|$)" "$negatives" || true)"
   [ "${sections:-0}" -eq 1 ] \
     || fail "$negatives has ${sections:-0} sections for outcome ${outcome}; exactly one is required"
   section="$(awk -v n="$outcome" '
-    $0 ~ "^## Outcome " n " " { capture = 1; next }
+    $0 ~ "^## Outcome " n "([ \t]|$)" { capture = 1; next }
     /^## / { capture = 0 }
     capture { print }
   ' "$negatives")"
@@ -173,7 +196,6 @@ done
 
 absence_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m0-absence.XXXXXX")" \
   || fail "could not create an isolated task root for the absence proof (outcome 8)"
-trap 'rm -rf "$absence_root"' EXIT
 for shadowed in python3 jq; do
   printf '#!/bin/sh\necho "%s is retired; outcome 8 requires its absence" >&2\nexit 127\n' \
     "$shadowed" > "$absence_root/$shadowed"
@@ -198,8 +220,9 @@ done
 # The scan covers apps/** too, because the replacement lives there and an
 # absolute invocation would bypass both the stubs and a scripts-only scan.
 bypass='(/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/|env +|command +-p +|(^|[[:space:]])PATH=[^[:space:]]+ +)(python3|jq)([^[:alnum:]_]|$)'
-if git grep -nE "$bypass" -- scripts apps .claude .codex .github >/dev/null 2>&1; then
-  git grep -nE "$bypass" -- scripts apps .claude .codex .github >&2
+scan_paths="scripts apps config .claude .codex .github mix.exs .formatter.exs"
+if git grep -nE "$bypass" -- $scan_paths >/dev/null 2>&1; then
+  git grep -nE "$bypass" -- $scan_paths >&2
   fail "a shadow-bypassing python3/jq invocation survives (outcome 8)"
 fi
 for residue in \

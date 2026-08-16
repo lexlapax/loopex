@@ -944,17 +944,31 @@ def _artifact_history(
     if history is None:
         return
     _, snapshots = history
+    # Once a gate has declared bound artifacts, every later revision must keep
+    # declaring them. Skipping a malformed or removed section would let a commit
+    # mutate an artifact behind a broken declaration and a later commit restore
+    # it, which is exactly the mutate-then-restore this walk exists to catch.
+    introduced: set[str] = set()
     for revision, _parents, files in snapshots:
         for path, text in files.items():
             if not path.startswith("docs/plans/") or not path.endswith("-gate.md"):
                 continue
+            declared = any(
+                line.strip() == "## Bound Artifacts" for line in text.splitlines()
+            )
+            if not declared:
+                if path in introduced:
+                    raise Invalid(
+                        f"{path} at {revision}: bound-artifact declaration disappeared"
+                    )
+                continue
             try:
                 artifacts = _bound_artifacts(text, path)
-            except Invalid:
-                # A revision whose gate predates the convention declares nothing.
-                # Removing the section changes the gate bytes, which an accepted
-                # gate digest already refuses.
-                continue
+            except Invalid as error:
+                raise Invalid(
+                    f"{path} at {revision}: bound-artifact declaration is malformed ({error})"
+                ) from error
+            introduced.add(path)
             for digest, target in artifacts:
                 content = files.get(target)
                 if content is None:

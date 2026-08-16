@@ -84,8 +84,9 @@ the exact document set its milestone must update.
   released Elixir with its newest supported OTP; the gate had locked Elixir
   1.19.5 with OTP 28.1, which is what happened to be installed. Verified against
   the official compatibility table: Elixir 1.20.3 is current and 1.20 supports
-  OTP 27-29, so the pair is now Elixir 1.20.3 with OTP 29.0.5. The floor pair is
-  unchanged and valid, since 1.17 supports OTP 25-27.
+  OTP 27-29, so the pair is now Elixir 1.20.3 with OTP 29.0.5. The floor pair
+  moved from a chosen 1.17.3/26.2.5 to the derived 1.17.0/26.0, because the
+  accepted rule says lowest supported and the table offers no patch selector.
 - Negative-demonstration sections must be unique per outcome. Scoping fields by
   section fixed the global-count defect, but duplicate sections concatenated, so
   a populated one could cover a placeholder one.

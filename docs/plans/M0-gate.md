@@ -18,8 +18,9 @@ outcomes permanently unprovable. A gate nobody has run is a hypothesis.
 bash scripts/check-m0-gate.sh
 ```
 
-The runner executes every command below in order and fails on the first
-unsatisfied requirement. It is separate from `scripts/check-bootstrap.sh`, which
+The commands below are an **inventory, not a sequence**. The runner defines the
+execution order and fails on the first unsatisfied requirement; the table lists
+what must pass, not when. It is separate from `scripts/check-bootstrap.sh`, which
 must remain green throughout the milestone.
 
 ## Bound Artifacts
@@ -31,10 +32,19 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `a4e6fd447cc065fc54a621246c640399c7cee1fc5e5d3e0f515535b1e08eeb5a` | `scripts/check-m0-gate.sh` |
+| `db7f74a116ff9524b2c57a7c148ddbcafa49c4092ad4e411185e161380e8cbba` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
+| `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
+| `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
+| `2611b0bdfdaefd9dec75a5afd6cf9325d8666ec360ce40a68b290df36add80db` | `scripts/fixtures/hook-cases/after-edit.stdin` |
+| `8d9984304a3f9176c25039ac3639c7c368f2b99784b7c645bcce2989f05947cf` | `scripts/fixtures/deps-budget-invalid/mix.exs` |
 
-Changing either file changes its digest, which changes this document, which
+The hook fixtures are bound too. They must exist at acceptance: a fixture
+created afterwards cannot establish what acceptance agreed to, and closure
+review can judge whether a fixture is meaningful but cannot retroactively fix
+when it appeared.
+
+Changing any bound file changes its digest, which changes this document, which
 changes the accepted gate digest. After acceptance that requires the authority
 that accepted it.
 
@@ -42,7 +52,7 @@ that accepted it.
 
 | # | Command | Proves |
 | --- | --- | --- |
-| 1 | `mix format --check-formatted` | Formatting is clean across every application |
+| 1 | `mix format --check-formatted` | Formatting is clean across every application, with `.formatter.exs` proven to cover `apps/**` |
 | 2 | `mix compile --warnings-as-errors` | The checkpoint is warning-free across every application |
 | 3 | `mix loopex.deps_budget` | Outcome 1: dependency budget and one-way direction |
 | 4 | `mix loopex.version_train` | Outcome 1: every application carries one version |
@@ -89,6 +99,28 @@ or renamed. It does not prove the test asserts anything, and review owns that.
 Minimums and names may be raised or extended by stricter append-only coverage
 with independent gate review. They may never be lowered while `M0` is open.
 
+## Closure Document Set
+
+The development contract requires each gate to name the documents its milestone
+must update before closure. For `M0` that set is exact:
+
+```text
+CHANGELOG.md
+README.md                              (derived status summary)
+docs/plans/README.md                   (register row and status capsule)
+docs/plans/M0.md                       (progress rows and governance)
+docs/evidence/M0-provider.md
+docs/evidence/M0-negative-demonstrations.md
+docs/evidence/M0-self-hosting.md
+docs/evidence/README.md
+docs/developer/agent-context-map.md    (version-specific guidance)
+DEVELOPMENT.md                         (prerequisites once Python and jq go)
+```
+
+Documentation drift blocks closure like any unmet outcome. The runner does not
+judge whether a document is current — that is a closure-review reading — but the
+set is fixed here so the reading has a checklist rather than a guess.
+
 ## Toolchain Matrix
 
 A single in-process Mix task cannot run two Erlang runtimes. Command 6 therefore
@@ -121,12 +153,19 @@ green run on an unlisted pair satisfies neither lane.
 | 1, 2 | Structural check plus adversarial fixture | A passing happy path alone |
 | 3 | Per-pair matrix run | One pair standing for both |
 | 4 | Property tests, process fault injection, and a negative demonstration | Clean-shutdown replay |
-| 5 | Fault injection, a no-second-dispatch assertion, and a negative demonstration | Retry-until-success |
+| 5 | Property tests, fault injection, a no-second-dispatch assertion, and a negative demonstration | Retry-until-success |
 | 6 | Isolated-VM demonstration and a negative demonstration | A same-VM reload |
 | 7 | Real-provider run with retained identity | A fake adapter |
 | 8 | Absence, inventory, and behavior proofs | Equivalence with the bridge present |
 | 9 | Isolated fakes-only lane | Root suite standing for core |
 | 10 | Compiled-documentation check | A source-text grep |
+
+## User-State Isolation
+
+Every Mix invocation runs with `LOOPEX_HOME` and `LOOPEX_WORKSPACE` pointed at a
+temporary root the runner creates and removes. The development contract forbids
+tests touching real user state, and a helper that silently fell back to the real
+home would otherwise mutate it while the gate still passed.
 
 ## Real-Provider Lane
 
@@ -137,8 +176,13 @@ journal, fixture, log, snapshot, diagnostic, or committed byte.
 The lane retains non-secret provider, model, and endpoint-class identity in
 `docs/evidence/M0-provider.md`, which the runner requires. A missing
 credential reports evidence unavailable and exits non-zero; it never reports
-success, and a skipped lane is not a pass. Because a tagged run exits zero
-having executed nothing, the runner requires at least one executed test.
+success, and a skipped lane is not a pass. Because a tagged run exits zero having executed nothing, the runner requires at
+least one executed test.
+
+The runner also proves the tag is excluded by default, by running the same file
+unfiltered and requiring it to execute none of its tagged tests. Without that,
+the full-suite command would reach a real provider a second time while the gate
+still turned green.
 
 ## Self-Hosting
 
