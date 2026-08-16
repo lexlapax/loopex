@@ -80,6 +80,12 @@ the exact document set its milestone must update.
   status, register, and rejoin blocks; plan/gate/governance correspondence; and
   the derived README summary, with in-memory adversarial controls rather than a
   general Markdown parser. M0 replaces the bridge with Elixir/Mix.
+- Bound artifacts are anchored across reachable history, not only the current
+  tree. A commit could previously change the runner and a later commit restore
+  it with final validation passing; merge divergence had the same shape. Every
+  reachable revision must now match the digest its gate declares there. Proved
+  in an isolated clone and covered by mutate-restore, merge-divergence, and
+  missing-artifact tests.
 - The M0 gate was rejected and hardened again: provider evidence moved to
   `docs/evidence/` because any `docs/plans/*.md` is read as another milestone and
   broke the aggregate; outcome 1 now says "no external dependencies" and
