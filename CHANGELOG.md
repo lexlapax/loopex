@@ -99,6 +99,18 @@ the exact document set its milestone must update.
   bypass scan covers quoted, `exec`-, `command`-, and assignment-prefixed
   absolute invocations, with the runner excluded from its own scan since its
   digest catches drift there.
+- The provider credential is removed from the environment for the whole run and
+  handed only to the explicit real-provider command. Unsetting it just before
+  the full suite left every earlier selector, task, and compile step holding it.
+- Inherited `TMPDIR`, `MIX_HOME`, and `HEX_HOME` are validated before anything
+  is allocated: pointing any of them inside the protected state directory would
+  have placed the isolated root, or Mix's own writes, inside the directory the
+  relocation exists to protect.
+- Hook registration and formatter scope became Mix obligations rather than text
+  searches. Independent greps passed with two hooks swapped between event
+  blocks, and an unrelated binding containing an apps glob satisfied the
+  formatter check while the effective configuration was root-only. Neither can
+  stay in shell, because `jq` and `python3` are gone by outcome 8.
 - Real user state is contained rather than detected. `HOME` is relocated into
   the isolated root, so a helper reaching for the real state directory resolves
   inside that root and finds nothing — the fail-before-touch property the

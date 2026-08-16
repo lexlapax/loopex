@@ -105,25 +105,42 @@ require_named_test apps/loopex/test/vm_code_spike_test.exs "a trusted generation
 # Everything above this line only reads the checkout, so an enforced read-only
 # reviewer reaches the declared red condition instead of failing on temporary
 # storage. Everything below runs Mix or writes, and needs isolation first.
-#
-# Mix runs against a temporary LOOPEX_HOME and workspace. HOME stays real,
-# because Mix needs its own caches, so real user state is fingerprinted instead
-# and any change to it fails the run.
+# The provider credential is removed from the environment for the entire run and
+# handed only to the explicit real-provider command. Unsetting it just before the
+# final suite would leave every earlier selector, task, and compile step holding
+# it, so an accidentally untagged provider call anywhere earlier would still
+# reach a provider.
+provider_key_value="${LOOPEX_PROVIDER_API_KEY:-}"
+unset LOOPEX_PROVIDER_API_KEY
+
+# Containment. HOME is relocated into an isolated root so a helper reaching for
+# the real user state directory finds nothing; that is fail-before-touch rather
+# than notice-afterwards. Package-manager caches are excluded deliberately, so
+# isolation costs no refetch.
+user_state_dirname=".loopex"
+real_home="${HOME%/}"
+real_user_state_path="$real_home/$user_state_dirname"
+
+# Every inherited root is validated before anything is allocated or run. A
+# TMPDIR, MIX_HOME, or HEX_HOME pointed inside the protected directory would
+# otherwise place the isolated root, or Mix's own writes, inside the very state
+# the relocation exists to protect.
+outside_protected_state() {
+  case "${1%/}/" in
+    "$real_user_state_path"/*|"$real_user_state_path"/) return 1 ;;
+  esac
+  return 0
+}
+for inherited in "${TMPDIR:-/tmp}" "${MIX_HOME:-$real_home/.mix}" "${HEX_HOME:-$real_home/.hex}"; do
+  outside_protected_state "$inherited" \
+    || fail "$inherited is inside the protected user state directory; refusing to run"
+done
+
 isolated_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m0-home.XXXXXX")" \
   || fail "could not create an isolated LOOPEX_HOME for the run"
 absence_root=""
 trap 'rm -rf "$isolated_root" ${absence_root:+"$absence_root"}' EXIT
 
-# Containment, not detection. HOME itself is relocated into the isolated root,
-# so a helper that reaches for the real user state directory cannot find it --
-# the contract requires failing before touching real state, not noticing after.
-#
-# Package-manager caches are kept out of that relocation: MIX_HOME and HEX_HOME
-# are pointed at their existing persistent locations, so isolation costs no
-# refetch. Product state is contained; tool caches are shared deliberately.
-user_state_dirname=".loopex"
-real_home="${HOME%/}"
-real_user_state_path="$real_home/$user_state_dirname"
 export MIX_HOME="${MIX_HOME:-$real_home/.mix}"
 export HEX_HOME="${HEX_HOME:-$real_home/.hex}"
 export HOME="$isolated_root/home"
@@ -132,7 +149,7 @@ export LOOPEX_WORKSPACE="$isolated_root/workspace"
 mkdir -p "$HOME" "$LOOPEX_HOME" "$LOOPEX_WORKSPACE"
 
 # Defense in depth only. Containment above is the safety property; this catches
-# a path that escaped it, and carries no claim of its own.
+# a path that escaped it and carries no claim of its own.
 real_user_state() {
   if [ -e "$real_user_state_path" ]; then
     find "$real_user_state_path" -type f -exec shasum -a 256 {} + 2>/dev/null | sort | shasum -a 256
@@ -143,12 +160,12 @@ real_user_state() {
 user_state_before="$(real_user_state)"
 
 [ -f .formatter.exs ] || fail "no .formatter.exs; formatting scope would be unbound (outcome 1)"
-# The glob must sit inside the inputs list, not merely appear in the file: a
-# comment or an unrelated binding would otherwise satisfy a presence check.
-grep -vE '^[[:space:]]*#' .formatter.exs \
-  | tr -d '\n' \
-  | grep -qE 'inputs:[[:space:]]*\[[^]]*apps/\*' \
-  || fail ".formatter.exs inputs do not cover apps/**; formatting could pass with applications unformatted (outcome 1)"
+# A text search over .formatter.exs passes on an unrelated binding that merely
+# contains an apps glob while the returned configuration is root-only. The task
+# evaluates the effective configuration and asserts application sources are in
+# its resolved input set.
+mix loopex.format_scope \
+  || fail "the effective formatter configuration does not cover application sources (outcome 1)"
 mix format --check-formatted || fail "formatting is not clean"
 mix compile --warnings-as-errors || fail "compilation is not warning-free"
 mix loopex.deps_budget || fail "dependency budget or direction violated (outcome 1)"
@@ -174,7 +191,8 @@ if grep -qE 'apps/loopex/mix\.exs|defp? deps' "$hook"; then
   fail "$hook still carries inline budget logic instead of calling the command (outcome 2)"
 fi
 
-provider_output="$(mix test apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider 2>&1)" \
+provider_output="$(env ${provider_key_value:+LOOPEX_PROVIDER_API_KEY="$provider_key_value"} \
+  mix test apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider 2>&1)" \
   || { printf '%s\n' "$provider_output" >&2; fail "real-provider lane failed (outcome 7)"; }
 provider_skipped="$(summary_field "$provider_output" skipped)"
 if [ "${provider_skipped:-0}" -ne 0 ]; then
@@ -269,7 +287,7 @@ done
 # absolute paths, exec, env with flags or assignments, command -p/-pv, and
 # assignment-prefixed runs. Deliberate obfuscation beyond this is a dishonest
 # implementer, which the stated boundary assigns to closure review.
-bypass='(/|(^|[[:space:]])(command|exec)[[:space:]]+(-[pv]+[[:space:]]+)?["'"'"']?|env([[:space:]]+-[^[:space:]]+)*[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*["'"'"']?|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+["'"'"']?)(python3|jq)([^[:alnum:]_]|$)'
+bypass='(/|(^|[[:space:]])(command|exec)([[:space:]]+-[^[:space:]]*)*[[:space:]]+["'"'"']?|env([[:space:]]+-[^[:space:]]+)*[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*["'"'"']?|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+["'"'"']?)(python3|jq)([^[:alnum:]_]|$)'
 # This runner is excluded from its own scan: it necessarily names both
 # interpreters to shadow and report them. Drift in it is caught instead by the
 # bound-artifact digest, which the status check verifies at every revision.
@@ -295,21 +313,13 @@ done
 # Each named hook is executed against its own fixture. Whether a fixture is
 # meaningful is a review judgment; that the hook still rejects it is not.
 # A hook file that still blocks is worthless if the client no longer invokes it,
-# so the registration is checked too.
-settings=".claude/settings.json"
-[ -f "$settings" ] || fail "no $settings; hook registration is unverifiable (outcome 8)"
-for registration in \
-  "PreToolUse:guard-bash" \
-  "PreToolUse:guard-filesystem" \
-  "PostToolUse:after-edit"
-do
-  event="${registration%%:*}"
-  script="${registration##*:}"
-  grep -qE "\"${event}\"" "$settings" \
-    || fail "$settings no longer registers ${event} (outcome 8)"
-  grep -qE "hooks/${script}\.sh" "$settings" \
-    || fail "$settings no longer registers ${script}.sh (outcome 8)"
-done
+# so registration is verified too. Independent greps for each event and script
+# name would pass with two hooks swapped between event blocks, and bash cannot
+# parse JSON once jq is retired, so this is a Mix obligation: the task asserts
+# each hook is registered under its required event and matcher.
+[ -f .claude/settings.json ] || fail "no .claude/settings.json; hook registration is unverifiable (outcome 8)"
+mix loopex.hook_registration \
+  || fail "a hook is not registered under its required event and matcher (outcome 8)"
 
 fixture_root="scripts/fixtures/hook-cases"
 [ -d "$fixture_root" ] || fail "no hook-behavior fixtures at $fixture_root (outcome 8)"
@@ -347,11 +357,9 @@ require_populated "$self_hosting_report" "measured size"
 require_populated "$self_hosting_report" "dropped behaviors"
 require_populated "$self_hosting_report" "recorded"
 
-# Containment rather than detection: the full suite runs with the provider
-# credential unset, so an untagged provider-calling test added anywhere cannot
-# reach a provider. Scanning for such a test would never be complete.
-env -u LOOPEX_PROVIDER_API_KEY mix test \
-  || fail "full suite failed with the provider credential unset"
+# The credential was removed from the environment at the top of this run, so the
+# full suite cannot reach a provider regardless of how a test is tagged.
+mix test || fail "full suite failed"
 
 # Defense in depth: containment should have made this unreachable.
 [ "$(real_user_state)" = "$user_state_before" ] \

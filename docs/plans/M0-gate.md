@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `4cef6e0cef392dcf412be0e6db399c3e59d4dd0b5d279bf0d4c2d4569f92745c` | `scripts/check-m0-gate.sh` |
+| `7f4eec0fa66b7066c219550e4203567678983ca488f7613a4d284e3a7dc1bb1d` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -55,6 +55,8 @@ that accepted it.
 | 1 | `mix format --check-formatted` | Formatting is clean across every application, with an `apps/**` glob proven to sit inside `.formatter.exs` `inputs` rather than merely appearing in the file |
 | 2 | `mix compile --warnings-as-errors` | The checkpoint is warning-free across every application |
 | 3 | `mix loopex.deps_budget` | Outcome 1: dependency budget and one-way direction |
+| 3b | `mix loopex.hook_registration` | Outcome 8: each hook is registered under its required event and matcher, checked structurally rather than by string presence |
+| 3c | `mix loopex.format_scope` | Outcome 1: the effective formatter configuration resolves to application sources |
 | 3a | `.claude/hooks/deps-budget.sh` | Outcome 2: exists, calls `mix loopex.deps_budget`, and carries no inline budget logic — no `apps/loopex/mix.exs` path handling and no `deps` definition of its own |
 | 4 | `mix loopex.version_train` | Outcome 1: every application carries one version |
 | 5 | `mix test apps/loopex/test/deps_budget_test.exs` | Outcome 2: forbidden dependency, reverse edge, dynamic reference |
@@ -67,7 +69,7 @@ that accepted it.
 | 9 | `mix test apps/loopex/test/vm_code_spike_test.exs` | Outcome 6: isolated VM load and rollback |
 | 10 | `mix test apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider` | Outcome 7: real model call from the adapter application |
 | 11 | `mix loopex.self_hosting` | Outcome 8: absence, inventory, hook behavior, measurement |
-| 13 | `env -u LOOPEX_PROVIDER_API_KEY mix test` | The full suite, with the provider credential unset so no test anywhere can reach a provider |
+| 13 | `mix test` | The full suite. The credential is absent from the whole run, so no test anywhere can reach a provider |
 
 Selectors are application-relative because an umbrella root runs no tests of its
 own. Command 10 is path-scoped for the same reason: `mix test --only <tag>` at
@@ -164,6 +166,11 @@ green run on an unlisted pair satisfies neither lane.
 
 ## User-State Isolation
 
+Before anything is allocated, the runner refuses to run if `TMPDIR`, `MIX_HOME`,
+or `HEX_HOME` points inside the protected state directory. Otherwise the
+isolated root, or Mix's own writes, would land inside the very directory the
+relocation exists to protect.
+
 `HOME` itself is relocated into a temporary root the runner creates and removes,
 along with `LOOPEX_HOME` and `LOOPEX_WORKSPACE`. A helper that reaches for the
 real user state directory resolves inside that root and finds nothing, which is
@@ -201,10 +208,11 @@ credential reports evidence unavailable and exits non-zero; it never reports
 success, and a skipped lane is not a pass. Because a tagged run exits zero having executed nothing, the runner requires at
 least one executed test.
 
-The credential is named `LOOPEX_PROVIDER_API_KEY` so the runner can unset it
-deterministically for the full suite. That is containment rather than detection:
-an untagged provider-calling test added anywhere else cannot reach a provider,
-where scanning for such a test would never be complete.
+The credential is named `LOOPEX_PROVIDER_API_KEY`. The runner captures it and
+removes it from the environment for the **entire** run, handing it only to the
+explicit real-provider command. Unsetting it just before the full suite would
+leave every earlier selector, task, and compile step holding it, so an
+accidentally untagged provider call earlier would still reach a provider.
 
 The runner also proves the tag is excluded by default, by running the same file
 unfiltered and requiring it to execute none of its tagged tests. Without that,
