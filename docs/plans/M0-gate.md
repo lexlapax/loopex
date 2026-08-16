@@ -32,7 +32,7 @@ against the file it names at every validation.
 | SHA-256 | Path |
 | --- | --- |
 | `5d39f6ab0e684a84bed8390bb80e4188790a70b5aa9051df337b6c0776ecf4ec` | `scripts/check-m0-gate.sh` |
-| `d5766c4d940a1d982f047125bc426f6a1e4db605b85cff251d74972e6f055678` | `.tool-versions` |
+| `5b3dc69d87a8b0d1fbf518738a6d51661f6bc1eccca08192f2da3574b505e477` | `.tool-versions` |
 
 Changing either file changes its digest, which changes this document, which
 changes the accepted gate digest. After acceptance that requires the authority
@@ -100,8 +100,13 @@ fails, and a claim of both lanes without two recorded runs fails. The exact pair
 
 ```text
 floor pair    Elixir 1.17.3 with OTP 26.2.5
-current pair  Elixir 1.20.3 with OTP 29.0.1
+current pair  Elixir 1.20.3 with OTP 29.0.5
 ```
+
+The current pair is Homebrew stable, so ordinary `brew upgrade elixir erlang`
+puts the maintainer on it. The floor pair predates what brew carries and runs
+through a version manager or CI. The gate requires both lanes recorded, not both
+run locally on every invocation.
 
 Changing a version changes those bytes and requires an amendment to ADR 0002,
 not a gate edit. A green run on one pair is not evidence for the other, and a
