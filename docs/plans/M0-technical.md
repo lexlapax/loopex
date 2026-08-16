@@ -191,7 +191,7 @@ Until a second store, provider, or executor exists, a behaviour is justified onl
 where the gate requires a fake to substitute for a real edge; anywhere else,
 direct code is the smaller system.
 
-The retiring bridge measures 4,313 lines across `scripts/check_status.py`,
+The retiring bridge measures 4,462 lines across `scripts/check_status.py`,
 `scripts/test_check_status.py`, `scripts/check-status.sh`, and
 `scripts/check-agent-bootstrap.py` at the gate commit. The replacement reports
 its own measured size and names every behavior it drops with the reason.

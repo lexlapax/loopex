@@ -97,6 +97,9 @@ require_named_test apps/loopex/test/deps_budget_test.exs "a reverse edge from co
 require_named_test apps/loopex/test/deps_budget_test.exs "a dynamic module reference across the boundary is rejected"
 require_named_test apps/loopex/test/core_only_test.exs "core starts with no adapter application resolved or started"
 require_named_test apps/loopex/test/core_only_test.exs "per-runtime state is not read from application environment"
+require_named_test apps/loopex/test/format_scope_test.exs "a root-only formatter configuration is rejected"
+require_named_test apps/loopex/test/hook_registration_test.exs "a hook registered under the wrong event is rejected"
+require_named_test apps/loopex/test/hook_registration_test.exs "a hook registered with the wrong matcher is rejected"
 require_named_test apps/loopex/test/journal_replay_test.exs "replay after an induced restart reconstructs the same durable state"
 require_named_test apps/loopex/test/fencing_test.exs "commit_unknown is fenced and never dispatched a second time"
 require_named_test apps/loopex/test/fencing_test.exs "a stale completion is rejected after a coordinator restart"
@@ -110,8 +113,16 @@ require_named_test apps/loopex/test/vm_code_spike_test.exs "a trusted generation
 # final suite would leave every earlier selector, task, and compile step holding
 # it, so an accidentally untagged provider call anywhere earlier would still
 # reach a provider.
+set +a  # an inherited allexport would export the holding variable too
 provider_key_value="${LOOPEX_PROVIDER_API_KEY:-}"
+export -n provider_key_value 2>/dev/null || true
 unset LOOPEX_PROVIDER_API_KEY
+# Prove neither name reaches a child process, rather than assuming it.
+for leaked in LOOPEX_PROVIDER_API_KEY provider_key_value; do
+  if env | grep -qE "^${leaked}="; then
+    fail "$leaked is exported; the credential would reach every Mix process"
+  fi
+done
 
 # Containment. HOME is relocated into an isolated root so a helper reaching for
 # the real user state directory finds nothing; that is fail-before-touch rather
@@ -125,9 +136,41 @@ real_user_state_path="$real_home/$user_state_dirname"
 # TMPDIR, MIX_HOME, or HEX_HOME pointed inside the protected directory would
 # otherwise place the isolated root, or Mix's own writes, inside the very state
 # the relocation exists to protect.
+# Lexical comparison accepts .., relative paths, and symlinks into the protected
+# directory, so both sides are resolved physically first. A path that does not
+# exist yet resolves through its deepest existing ancestor.
+resolve_physical() {
+  local target="$1" suffix="" link guard=0
+  case "$target" in
+    /*) ;;
+    *) target="$PWD/$target" ;;
+  esac
+  # Symlinks are followed before walking up, including dangling ones: a link
+  # aimed at a protected directory that does not exist yet would otherwise be
+  # walked past and the alias lost.
+  while [ "$guard" -lt 64 ]; do
+    guard=$((guard + 1))
+    if [ -L "$target" ]; then
+      link="$(readlink "$target")"
+      case "$link" in
+        /*) target="$link" ;;
+        *) target="$(dirname "$target")/$link" ;;
+      esac
+      continue
+    fi
+    [ -d "$target" ] && break
+    [ "$target" = "/" ] && break
+    suffix="/$(basename "$target")$suffix"
+    target="$(dirname "$target")"
+  done
+  printf '%s%s' "$(cd "$target" 2>/dev/null && pwd -P || printf '%s' "$target")" "$suffix"
+}
+protected_resolved="$(resolve_physical "$real_user_state_path")"
 outside_protected_state() {
-  case "${1%/}/" in
-    "$real_user_state_path"/*|"$real_user_state_path"/) return 1 ;;
+  local candidate
+  candidate="$(resolve_physical "$1")"
+  case "${candidate%/}/" in
+    "$protected_resolved"/*|"$protected_resolved"/) return 1 ;;
   esac
   return 0
 }
@@ -176,6 +219,8 @@ mix loopex.docs_check || fail "compiled dual-depth documentation check failed (o
 
 run_selector apps/loopex/test/deps_budget_test.exs 3
 run_selector apps/loopex/test/core_only_test.exs 2
+run_selector apps/loopex/test/format_scope_test.exs 1
+run_selector apps/loopex/test/hook_registration_test.exs 2
 run_selector apps/loopex/test/journal_replay_test.exs 2
 run_selector apps/loopex/test/fencing_test.exs 2
 run_selector apps/loopex/test/vm_code_spike_test.exs 1
@@ -185,6 +230,10 @@ run_selector apps/loopex/test/vm_code_spike_test.exs 1
 # skipping the check.
 hook=".claude/hooks/deps-budget.sh"
 [ -f "$hook" ] || fail "$hook is missing; removing a tested hook needs a recorded disposition (outcome 2)"
+# Without this, a non-executable hook exits 126 and after-edit's `|| exit 2`
+# turns that into the blocking status the fixture requires, while the budget
+# command never ran.
+[ -x "$hook" ] || fail "$hook is not executable; after-edit would report a block it never performed (outcome 2)"
 grep -qE 'mix +loopex\.deps_budget' "$hook" \
   || fail "$hook does not call the repository dependency-budget command (outcome 2)"
 if grep -qE 'apps/loopex/mix\.exs|defp? deps' "$hook"; then
@@ -287,7 +336,7 @@ done
 # absolute paths, exec, env with flags or assignments, command -p/-pv, and
 # assignment-prefixed runs. Deliberate obfuscation beyond this is a dishonest
 # implementer, which the stated boundary assigns to closure review.
-bypass='(/|(^|[[:space:]])(command|exec)([[:space:]]+-[^[:space:]]*)*[[:space:]]+["'"'"']?|env([[:space:]]+-[^[:space:]]+)*[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*["'"'"']?|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+["'"'"']?)(python3|jq)([^[:alnum:]_]|$)'
+bypass='(/|(^|[[:space:]])(command|exec)([[:space:]]+-[^[:space:]]*)*[[:space:]]+["'"'"']?|env([[:space:]]+[^[:space:]]+)*[[:space:]]+["'"'"']?|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+["'"'"']?)(python3|jq)([^[:alnum:]_]|$)'
 # This runner is excluded from its own scan: it necessarily names both
 # interpreters to shadow and report them. Drift in it is caught instead by the
 # bound-artifact digest, which the status check verifies at every revision.

@@ -136,8 +136,23 @@ the exact document set its milestone must update.
   is the only status the client treats as blocking.
 - The absolute-invocation scan covers any absolute path, `env` with flags and
   assignments, `command -p` and `-pv`, and assignment-prefixed runs.
-- `HOME` stays real so Mix keeps its caches, and the real user state directory is
-  fingerprinted before and after, failing the run if it changed.
+- `HOME` is relocated into the isolated root while `MIX_HOME` and `HEX_HOME` stay
+  persistent, so Mix keeps its caches without the run being able to reach real
+  user state. The before-and-after fingerprint is defense in depth only.
+- The credential is contained rather than merely unset: the runner disables
+  `allexport`, holds the value in an explicitly non-exported variable, and then
+  proves neither `LOOPEX_PROVIDER_API_KEY` nor the holding variable appears in a
+  child process environment. An inherited export would otherwise have handed the
+  value to every Mix process the run starts.
+- Inherited-root refusal compares physical paths, so `..`, a relative path, and
+  a symlink can no longer alias `TMPDIR`, `MIX_HOME`, or `HEX_HOME` past the
+  check. Symlinks are followed before any walk up the path, including one whose
+  target does not exist yet: a link aimed at a protected directory that has not
+  been created would otherwise have been walked past and the alias lost.
+- Both Mix obligations introduced for hook registration and formatter scope
+  carry protected selectors with locked names, so neither can be a successful
+  no-op, and `.claude/hooks/deps-budget.sh` is checked for its execute bit —
+  without it the hook exits 126 and the `|| exit 2` around it reads as a block.
 - `AGENTS.md` joins the closure document set, since outcome 8 makes its
   bootstrap-prerequisite text stale.
 - Formatter coverage must appear outside a comment; evidence fields reject
@@ -151,7 +166,8 @@ the exact document set its milestone must update.
   with locked names rather than files that merely exist; negative-demonstration
   fields are counted inside each outcome section instead of globally; the
   self-hosting baseline is corrected from a stale 3,990 to the measured 4,313
-  lines; the toolchain pins are derived from accepted ADR 0002 rather than
+  lines, and later re-measured at 4,462 as the checker grew; the toolchain pins
+  are derived from accepted ADR 0002 rather than
   chosen, so the floor is the lowest supported pair in the 1.17 family; and the
   executed-test arithmetic subtracts skipped tests only, since
   ExUnit reports excluded ones outside its total and subtracting them again

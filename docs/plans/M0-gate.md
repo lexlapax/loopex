@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `7f4eec0fa66b7066c219550e4203567678983ca488f7613a4d284e3a7dc1bb1d` | `scripts/check-m0-gate.sh` |
+| `837b3bd5a34b72120bc6913f4f9f1d236acf7fa860409f061a8575f5adcdfb0b` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -57,6 +57,8 @@ that accepted it.
 | 3 | `mix loopex.deps_budget` | Outcome 1: dependency budget and one-way direction |
 | 3b | `mix loopex.hook_registration` | Outcome 8: each hook is registered under its required event and matcher, checked structurally rather than by string presence |
 | 3c | `mix loopex.format_scope` | Outcome 1: the effective formatter configuration resolves to application sources |
+| 3d | `mix test apps/loopex/test/hook_registration_test.exs` | Outcome 8: the registration task rejects a wrong event and a wrong matcher |
+| 3e | `mix test apps/loopex/test/format_scope_test.exs` | Outcome 1: the scope task rejects a root-only configuration |
 | 3a | `.claude/hooks/deps-budget.sh` | Outcome 2: exists, calls `mix loopex.deps_budget`, and carries no inline budget logic — no `apps/loopex/mix.exs` path handling and no `deps` definition of its own |
 | 4 | `mix loopex.version_train` | Outcome 1: every application carries one version |
 | 5 | `mix test apps/loopex/test/deps_budget_test.exs` | Outcome 2: forbidden dependency, reverse edge, dynamic reference |
@@ -92,6 +94,8 @@ or renamed. It does not prove the test asserts anything, and review owns that.
 | Selector | Minimum tests | Locked test names |
 | --- | --- | --- |
 | `apps/loopex/test/deps_budget_test.exs` | 3 | `a forbidden core dependency is rejected`; `a reverse edge from contract to runtime is rejected`; `a dynamic module reference across the boundary is rejected` |
+| `apps/loopex/test/hook_registration_test.exs` | 2 | `a hook registered under the wrong event is rejected`; `a hook registered with the wrong matcher is rejected` |
+| `apps/loopex/test/format_scope_test.exs` | 1 | `a root-only formatter configuration is rejected` |
 | `apps/loopex/test/core_only_test.exs` | 2 | `core starts with no adapter application resolved or started`; `per-runtime state is not read from application environment` |
 | `apps/loopex/test/journal_replay_test.exs` | 2 | `replay after an induced restart reconstructs the same durable state` |
 | `apps/loopex/test/fencing_test.exs` | 2 | `commit_unknown is fenced and never dispatched a second time`; `a stale completion is rejected after a coordinator restart` |
@@ -167,7 +171,12 @@ green run on an unlisted pair satisfies neither lane.
 ## User-State Isolation
 
 Before anything is allocated, the runner refuses to run if `TMPDIR`, `MIX_HOME`,
-or `HEX_HOME` points inside the protected state directory. Otherwise the
+or `HEX_HOME` resolves inside the protected state directory. Both sides are
+resolved physically, so `..`, relative paths, and symlinks cannot alias past the
+check. Symlinks are followed before any walk up, including one whose target does
+not exist yet: a link aimed at a protected directory that has not been created
+would otherwise be walked past and the alias lost. A path that does not exist
+resolves through its deepest existing ancestor. Otherwise the
 isolated root, or Mix's own writes, would land inside the very directory the
 relocation exists to protect.
 
@@ -208,8 +217,10 @@ credential reports evidence unavailable and exits non-zero; it never reports
 success, and a skipped lane is not a pass. Because a tagged run exits zero having executed nothing, the runner requires at
 least one executed test.
 
-The credential is named `LOOPEX_PROVIDER_API_KEY`. The runner captures it and
-removes it from the environment for the **entire** run, handing it only to the
+The credential is named `LOOPEX_PROVIDER_API_KEY`. The runner disables
+`allexport`, captures the value into an explicitly non-exported variable, unsets
+the original, and then proves neither name appears in the environment of a child
+process. It removes the credential for the **entire** run, handing it only to the
 explicit real-provider command. Unsetting it just before the full suite would
 leave every earlier selector, task, and compile step holding it, so an
 accidentally untagged provider call earlier would still reach a provider.
@@ -247,7 +258,20 @@ Command 11 covers four separable things and fails on any of the first three:
    disposition — must be executable, and is run **as the configured executable**
    rather than through `bash`, so a lost execute bit or broken shebang is caught.
    Its registration in `.claude/settings.json` is checked too, because a hook
-   that still blocks is worthless if the client no longer invokes it. It must
+   that still blocks is worthless if the client no longer invokes it. The
+   required mappings are exact:
+
+   ```text
+   PreToolUse   Bash                                    guard-bash.sh
+   PreToolUse   Read|Grep|Glob|Edit|Write|NotebookEdit  guard-filesystem.sh
+   PostToolUse  Edit|Write                              after-edit.sh
+   ```
+
+   A task exit status alone would prove only that the task ran, so the task
+   carries its own protected tests: it must reject a hook registered under the
+   wrong event and one registered with the wrong matcher. The same applies to
+   the formatter scope task, which must reject a root-only configuration.
+   Without those, either task could be a successful no-op. It must
    exit exactly `2` on its fixture at
    `scripts/fixtures/hook-cases/<hook>.stdin`: the client treats 2 as blocking
    and any other nonzero status as a non-blocking error, so only 2 proves the
@@ -268,14 +292,14 @@ Shell is not retired. The enduring baseline is Git, shell and POSIX tools, and
 the accepted Elixir/OTP toolchain, so a check may remain a shell entrypoint that
 calls Mix.
 
-The retiring bridge measures 4,313 lines at the gate commit:
+The retiring bridge measures 4,462 lines at the gate commit:
 
 ```text
-2069  scripts/check_status.py
-2005  scripts/test_check_status.py
+2104  scripts/check_status.py
+2119  scripts/test_check_status.py
    8  scripts/check-status.sh
  231  scripts/check-agent-bootstrap.py
-4313  total
+4462  total
 ```
 
 **That figure is audit and review material, not a pass condition.** Requirement 4
