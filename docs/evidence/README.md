@@ -16,6 +16,7 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | --- | --- |
 | [M0 provider identity](M0-provider.md) | Non-secret provider, model, and endpoint class for the M0 real-provider lane. |
 | [M0 negative demonstrations](M0-negative-demonstrations.md) | For each constitutional outcome, that its protected test fails when the mechanism it covers is disabled. |
+| [M0 self-hosting report](M0-self-hosting.md) | Measured size of the Elixir replacement and the behaviors it dropped from the retired bridge. |
 
 ## Related
 

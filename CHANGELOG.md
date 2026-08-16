@@ -80,6 +80,23 @@ the exact document set its milestone must update.
   status, register, and rejoin blocks; plan/gate/governance correspondence; and
   the derived README summary, with in-memory adversarial controls rather than a
   general Markdown parser. M0 replaces the bridge with Elixir/Mix.
+- The M0 gate stopped trying to defeat a dishonest implementer. Five review
+  rounds found a bypass for every mechanical anti-faking control, because a
+  script cannot tell whether a test asserts anything, whether a fixture is real,
+  or whether a report is truthful. The runner now defends against accident and
+  drift — a command that stops passing, a protected test renamed or skipped, a
+  dependency creeping back, an evidence record never filled in — and the gate
+  assigns the remaining judgments explicitly to independent review of the
+  implementation at closure.
+- Real defects fixed in the same pass: the provider lane subtracts skipped and
+  excluded tests like every other selector; the compiled-documentation check the
+  development contract requires at M0 is restored as outcome 10; the absence
+  scan covers `apps/**` where the replacement lives; evidence records must be
+  populated rather than merely present; each named hook is executed against its
+  own fixture; the replacement must carry mutation-restore, merge-divergence,
+  and missing-artifact fixtures so retiring the checker does not drop the
+  history guarantee; and the plan's stale "two dependency-free applications"
+  wording and workstream A rejoin barrier are corrected.
 - Bound artifacts are anchored across reachable history, not only the current
   tree. A commit could previously change the runner and a later commit restore
   it with final validation passing; merge divergence had the same shape. Every

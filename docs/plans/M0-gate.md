@@ -31,7 +31,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `535496b8afa97291c177e7c2c2de92c9dc98d32796e8d66d4061295cda4126f9` | `scripts/check-m0-gate.sh` |
+| `0e17a5e6526545beef00f1d82e5f8213232a71449d6f0177a355fce1b9ee7dba` | `scripts/check-m0-gate.sh` |
 | `f26287082f2f58ff9f1e08acc0b87f472f3c79556dbf4f2c15fad76b47280d1d` | `.tool-versions` |
 
 Changing either file changes its digest, which changes this document, which
@@ -48,6 +48,7 @@ that accepted it.
 | 4 | `mix loopex.version_train` | Outcome 1: both applications carry one version |
 | 5 | `mix test apps/loopex/test/deps_budget_test.exs` | Outcome 2: forbidden dependency, reverse edge, dynamic reference |
 | 5a | `mix loopex.core_only` and `mix test apps/loopex/test/core_only_test.exs` | Outcome 9: fakes-only lane, no adapter started, no per-runtime application environment |
+| 5b | `mix loopex.docs_check` | Outcome 10: compiled dual-depth documentation, as the development contract requires |
 | 6 | `mix loopex.matrix` | Outcome 3: both locked pairs run individually |
 | 7 | `mix test apps/loopex/test/journal_replay_test.exs` | Outcome 4: journal replay across a restart |
 | 8 | `mix test apps/loopex/test/fencing_test.exs` | Outcome 5: fencing and reconciliation across a restart |
@@ -68,10 +69,10 @@ skipped, filtered, quarantined, or weakened while `M0` is open.
 
 An exit code proves a command ran, not that it did anything. Each selector
 carries a locked minimum of **executed** tests and a list of test names that
-must exist, both enforced by the runner. ExUnit counts skipped tests inside its
-total, so a `@tag :skip` test would satisfy a naive minimum without running:
-the runner subtracts skipped tests and rejects any skip on a protected
-selector outright.
+must exist. ExUnit counts skipped and excluded tests inside its total, so the
+runner subtracts both and rejects any skip on a protected selector outright.
+The name check is drift protection: it catches a protected test that is deleted
+or renamed. It does not prove the test asserts anything, and review owns that.
 
 | Selector | Minimum tests | Locked test names |
 | --- | --- | --- |
@@ -114,7 +115,8 @@ green run on an unlisted pair satisfies neither lane.
 | 6 | Isolated-VM demonstration and a negative demonstration | A same-VM reload |
 | 7 | Real-provider run with retained identity | A fake adapter |
 | 8 | Absence, inventory, and behavior proofs | Equivalence with the bridge present |
-| 9 | Compiled-documentation check | A source-text grep |
+| 9 | Isolated fakes-only lane | Root suite standing for core |
+| 10 | Compiled-documentation check | A source-text grep |
 
 ## Real-Provider Lane
 
@@ -151,13 +153,17 @@ Command 11 covers four separable things and fails on any of the first three:
    `jq` invocations in `scripts/check-agent-bootstrap.sh`,
    `.claude/hooks/guard-bash.sh`, `.claude/hooks/after-edit.sh`, and
    `.claude/hooks/guard-filesystem.sh`.
-3. **Preserved hook behavior.** Locked fixtures in `scripts/fixtures/hook-cases`
-   are executed against each migrated hook, and every one must still be
-   rejected. At least three fixtures run, one per migrated hook. This is proved
+3. **Preserved hook behavior.** Each named hook is executed against its own
+   fixture at `scripts/fixtures/hook-cases/<hook>.stdin`, and must still reject
+   it. The replacement must additionally carry mutation-restore,
+   merge-divergence, and missing-artifact fixtures proving it still anchors
+   bound artifacts across history, because retiring the current checker would
+   otherwise drop that guarantee. This is proved
    by execution, not by the task's exit status. Removing a behavior instead of
    migrating it requires an explicit disposition recorded against outcome 8.
-4. **Measurement.** The command reports the replacement's measured size and the
-   behaviors dropped from the bridge, with reasons.
+4. **Measurement.** `docs/evidence/M0-self-hosting.md` records the replacement's
+   measured size and the behaviors dropped from the bridge. The runner requires
+   the record to be populated; review judges whether it is truthful.
 
 Shell is not retired. The enduring baseline is Git, shell and POSIX tools, and
 the accepted Elixir/OTP toolchain, so a check may remain a shell entrypoint that
@@ -178,7 +184,24 @@ reports; it does not threshold. A line ceiling would reward compressed code,
 hidden complexity, and deleted coverage, so an independent reviewer weighs the
 measurement against the dropped-behavior list instead.
 
-## What This Gate Cannot Prove
+## What the Runner Is For, and What Review Owns
+
+The runner defends against **accident and drift**: a command that stops passing,
+a protected test renamed or skipped, a dependency creeping back, an evidence
+record never filled in. Those failures happen without anyone intending them, and
+a script catches them reliably.
+
+It does not defend against a **dishonest implementer**, and this gate no longer
+pretends to. Earlier versions added control after control — grep for locked test
+names, minimum counts, fixture counts, report schemas — and independent review
+found a bypass for each, because a script cannot tell whether a test asserts
+anything, whether a fixture is real, or whether a report is truthful.
+
+Those judgments are assigned to the independent review of the implementation at
+the closure candidate, which the plan requires. Concretely, that review must
+decide whether each protected test asserts the behavior its name claims, whether
+each hook and history fixture is meaningful rather than trivially satisfied, and
+whether the self-hosting report and negative demonstrations are truthful.
 
 Stated plainly so the closure reviewer knows where to look, rather than implying
 the runner covers it.

@@ -16,8 +16,8 @@ Concept: [Milestone non-goals](M0.md#concept-plan-non-goals).
 Accepted prerequisites, all recorded before this plan was written:
 
 - [ADR 0001](../adr/0001-repository-and-application-layout.md#concept) fixes the
-  umbrella shape, the two dependency-free applications, and the one-way edge
-  from runtime to contract.
+  umbrella shape, the contract application's empty dependency list, and the
+  single one-way edge from runtime to contract.
 - [ADR 0002](../adr/0002-bootstrap-runtime-floor.md#concept) fixes the floor
   family, the two-validated-pairs rule, and the obligation to complete the
   self-hosting transition before closure.
@@ -51,8 +51,8 @@ working directories or clones per writer.
 
 Rejoin barriers:
 
-- A rejoins when outcomes 1, 2, and 3 are green and the dependency-budget
-  command rejects its adversarial fixture.
+- A rejoins when outcomes 1, 2, 3, and 9 are green and the dependency-budget
+  command rejects its adversarial corpus.
 - B rejoins when outcomes 4 and 5 hold across an induced restart, not merely a
   clean shutdown.
 - C rejoins when outcome 6 demonstrates load and rollback in an isolated VM
@@ -100,6 +100,15 @@ Outcome 3 cannot be proved by one in-process task, because a single Mix run has
 one Erlang runtime. The task verifies that the running toolchain matches a
 locked pair; the gate runner is invoked once per pair under that toolchain, and
 both runs are recorded.
+
+Outcome 8's replacement must preserve the history guarantees the retired
+checker provided. Locked mutation-restore, merge-divergence, and
+missing-artifact fixtures prove the replacement still anchors bound artifacts
+across reachable history; ADR 0002 forbids dropping a tested behavior without an
+explicit disposition, and this is one.
+
+Outcome 10 is the compiled-documentation check the development contract requires
+this milestone to install.
 
 Outcome 8 requires four separable proofs: the aggregate runs to completion with
 Python and `jq` shadowed; every named bridge component is gone from the tree;
