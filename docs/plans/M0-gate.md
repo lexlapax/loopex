@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `f0a589aea4b5de18bc24194928d22421920e40f5688891b73584ace388bfe989` | `scripts/check-m0-gate.sh` |
+| `4cef6e0cef392dcf412be0e6db399c3e59d4dd0b5d279bf0d4c2d4569f92745c` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -164,16 +164,20 @@ green run on an unlisted pair satisfies neither lane.
 
 ## User-State Isolation
 
-Every Mix invocation runs with `LOOPEX_HOME` and `LOOPEX_WORKSPACE` pointed at a
-temporary root the runner creates and removes.
+`HOME` itself is relocated into a temporary root the runner creates and removes,
+along with `LOOPEX_HOME` and `LOOPEX_WORKSPACE`. A helper that reaches for the
+real user state directory resolves inside that root and finds nothing, which is
+the fail-before-touch containment the development contract requires — not a
+notice-afterwards check.
 
-`HOME` stays real, because Mix needs `~/.mix` and `~/.hex`. The runner therefore
-**detects** rather than **prevents** changes to real user state: it fingerprints
-the state directory before and after and fails if it changed. That is weaker
-than the development contract's fail-before-touch requirement, and it is
-recorded here as a known weakening rather than presented as containment. Closing
-it means relocating `HOME` and accepting that Mix refetches its caches on every
-gate run, which is a maintainer decision this gate does not take on its own.
+Package-manager caches are deliberately excluded from the relocation: `MIX_HOME`
+and `HEX_HOME` are pointed at their existing persistent locations, so isolation
+costs no refetch and needs no network on a cold cache. Product state is
+contained; tool caches are shared on purpose.
+
+The runner also fingerprints the real state directory before and after. That is
+defense in depth against a path that escaped containment, and carries no safety
+claim of its own — containment above is the property.
 
 Every check that only reads the checkout runs **before** any temporary storage
 is created, so the mandatory read-only review reaches the declared red condition

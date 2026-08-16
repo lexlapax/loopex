@@ -90,11 +90,11 @@ The provider credential is named `LOOPEX_PROVIDER_API_KEY`. The full suite runs
 with it unset, so no test outside the tagged lane can reach a provider by
 accident.
 
-Real user state is detected rather than contained: `HOME` stays real because Mix
-needs its caches, so the runner fingerprints the state directory and fails if it
-changed. That is weaker than the fail-before-touch requirement and is recorded
-as a known weakening; closing it means relocating `HOME` and accepting cache
-refetch on every run.
+Real user state is contained, not merely detected: `HOME` is relocated into the
+isolated root so a helper reaching for the real state directory finds nothing,
+while `MIX_HOME` and `HEX_HOME` stay pointed at their persistent locations so
+isolation costs no refetch. The before-and-after fingerprint remains as defense
+in depth and carries no claim of its own.
 
 Outcome 7 runs on an explicitly invoked lane excluded from the default suite.
 The credential arrives only through the environment and never enters a journal,

@@ -113,15 +113,29 @@ isolated_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m0-home.XXXXXX")" \
   || fail "could not create an isolated LOOPEX_HOME for the run"
 absence_root=""
 trap 'rm -rf "$isolated_root" ${absence_root:+"$absence_root"}' EXIT
-export LOOPEX_HOME="$isolated_root/home"
-export LOOPEX_WORKSPACE="$isolated_root/workspace"
-mkdir -p "$LOOPEX_HOME" "$LOOPEX_WORKSPACE"
 
+# Containment, not detection. HOME itself is relocated into the isolated root,
+# so a helper that reaches for the real user state directory cannot find it --
+# the contract requires failing before touching real state, not noticing after.
+#
+# Package-manager caches are kept out of that relocation: MIX_HOME and HEX_HOME
+# are pointed at their existing persistent locations, so isolation costs no
+# refetch. Product state is contained; tool caches are shared deliberately.
 user_state_dirname=".loopex"
+real_home="${HOME%/}"
+real_user_state_path="$real_home/$user_state_dirname"
+export MIX_HOME="${MIX_HOME:-$real_home/.mix}"
+export HEX_HOME="${HEX_HOME:-$real_home/.hex}"
+export HOME="$isolated_root/home"
+export LOOPEX_HOME="$isolated_root/home/$user_state_dirname"
+export LOOPEX_WORKSPACE="$isolated_root/workspace"
+mkdir -p "$HOME" "$LOOPEX_HOME" "$LOOPEX_WORKSPACE"
+
+# Defense in depth only. Containment above is the safety property; this catches
+# a path that escaped it, and carries no claim of its own.
 real_user_state() {
-  local target="${HOME%/}/$user_state_dirname"
-  if [ -e "$target" ]; then
-    find "$target" -exec stat -f '%N %m %z' {} + 2>/dev/null | sort | shasum -a 256
+  if [ -e "$real_user_state_path" ]; then
+    find "$real_user_state_path" -type f -exec shasum -a 256 {} + 2>/dev/null | sort | shasum -a 256
   else
     echo absent
   fi
@@ -339,7 +353,8 @@ require_populated "$self_hosting_report" "recorded"
 env -u LOOPEX_PROVIDER_API_KEY mix test \
   || fail "full suite failed with the provider credential unset"
 
+# Defense in depth: containment should have made this unreachable.
 [ "$(real_user_state)" = "$user_state_before" ] \
-  || fail "the run modified real user state outside the isolated LOOPEX_HOME"
+  || fail "the run reached real user state despite the relocated HOME"
 
 echo "M0 gate GREEN"

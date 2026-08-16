@@ -99,11 +99,13 @@ the exact document set its milestone must update.
   bypass scan covers quoted, `exec`-, `command`-, and assignment-prefixed
   absolute invocations, with the runner excluded from its own scan since its
   digest catches drift there.
-- Real user state remains detected rather than prevented, and the gate now says
-  so plainly: `HOME` stays real because Mix needs its caches, so the runner
-  fingerprints the state directory instead of relocating it. That is weaker than
-  the contract's fail-before-touch rule and is recorded as a known weakening
-  awaiting a maintainer decision.
+- Real user state is contained rather than detected. `HOME` is relocated into
+  the isolated root, so a helper reaching for the real state directory resolves
+  inside that root and finds nothing — the fail-before-touch property the
+  contract requires. The cold-cache cost is avoided by pointing `MIX_HOME` and
+  `HEX_HOME` at their persistent locations, verified to reuse them with nothing
+  written to the relocated home. The before-and-after fingerprint stays as
+  defense in depth and carries no claim of its own.
 - The isolation fix from the previous round broke the mandatory read-only review
   lane: the runner created its temporary root before the non-writing scaffold
   check, so an enforced read-only reviewer failed on unavailable temporary
