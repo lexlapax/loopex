@@ -80,20 +80,11 @@ the exact document set its milestone must update.
   status, register, and rejoin blocks; plan/gate/governance correspondence; and
   the derived README summary, with in-memory adversarial controls rather than a
   general Markdown parser. M0 replaces the bridge with Elixir/Mix.
-- `docs/adr/0006-maintainer-toolchain-matrix.md` (Proposed) and its technical
-  companion — the current lane tracks the newest pair available as Homebrew
-  stable, subject to being upstream-supported, rather than the newest upstream
-  release. Additive supersession: it declares `Supersedes: 0002` and ADR 0002's
-  accepted bytes are never edited. Today the two definitions coincide, but a
-  rule satisfied by coincidence is not a rule, and the earlier wording would
-  have turned a routine `brew upgrade` into a governed exception the first time
-  Homebrew lagged upstream. The floor lane is unchanged and still runs through a
-  version manager or CI.
 - The locked current toolchain pair was wrong. ADR 0002 requires the newest
   released Elixir with its newest supported OTP; the gate had locked Elixir
   1.19.5 with OTP 28.1, which is what happened to be installed. Verified against
   the official compatibility table: Elixir 1.20.3 is current and 1.20 supports
-  OTP 27-29, so the pair is now Elixir 1.20.3 with OTP 29.0.1. The floor pair is
+  OTP 27-29, so the pair is now Elixir 1.20.3 with OTP 29.0.5. The floor pair is
   unchanged and valid, since 1.17 supports OTP 25-27.
 - Negative-demonstration sections must be unique per outcome. Scoping fields by
   section fixed the global-count defect, but duplicate sections concatenated, so
@@ -105,7 +96,9 @@ the exact document set its milestone must update.
   with locked names rather than files that merely exist; negative-demonstration
   fields are counted inside each outcome section instead of globally; the
   self-hosting baseline is corrected from a stale 3,990 to the measured 4,313
-  lines; and the executed-test arithmetic subtracts skipped tests only, since
+  lines; the toolchain pins are derived from accepted ADR 0002 rather than
+  chosen, so the floor is the lowest supported pair in the 1.17 family; and the
+  executed-test arithmetic subtracts skipped tests only, since
   ExUnit reports excluded ones outside its total and subtracting them again
   would have falsely rejected a file holding both tagged and ordinary tests.
 - The M0 gate stopped trying to defeat a dishonest implementer. Five review
@@ -116,8 +109,8 @@ the exact document set its milestone must update.
   dependency creeping back, an evidence record never filled in — and the gate
   assigns the remaining judgments explicitly to independent review of the
   implementation at closure.
-- Real defects fixed in the same pass: the provider lane subtracts skipped and
-  excluded tests like every other selector; the compiled-documentation check the
+- Real defects fixed in the same pass: the provider lane subtracts skipped tests
+  like every other selector; the compiled-documentation check the
   development contract requires at M0 is restored as outcome 10; the absence
   scan covers `apps/**` where the replacement lives; evidence records must be
   populated rather than merely present; each named hook is executed against its

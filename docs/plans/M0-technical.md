@@ -35,7 +35,8 @@ expected to arise, and each stops work at the point named:
 - Any change to the accepted toolchain pairs stops for an amendment to ADR 0002
   rather than a gate edit. The pairs were verified against the official Elixir
   compatibility table when this gate was written, not chosen from what happened
-  to be installed.
+  to be installed. The floor is the lowest supported pair in the 1.17 family and
+  the table offers no patch selector, so the lowest patch of each is taken.
 
 <a id="technical-plan-ownership"></a>
 ### Ownership, Decision Owners, and Rejoin Barriers

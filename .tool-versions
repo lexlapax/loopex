@@ -6,14 +6,16 @@
 # Verified against the official Elixir compatibility table on 2026-08-16:
 # 1.20 supports OTP 27-29, and 1.17 supports OTP 25-27.
 #
-# The current pair is Homebrew stable, so the maintainer develops on ordinary
-# brew packages. The floor pair is older than brew carries and runs through a
-# version manager or CI; the gate requires both lanes recorded, not both run
-# locally on every invocation.
+# Pins are derived from accepted ADR 0002, not chosen. The floor is the lowest
+# supported pair in the 1.17 family, and the table offers no patch selector, so
+# the lowest patch of each is taken. The current pair is the newest supported
+# release, which is also Homebrew stable today. The floor lane predates what
+# brew carries and runs through a version manager or CI; the gate requires both
+# lanes recorded, not both run locally on every invocation.
 #
 # floor pair
-elixir 1.17.3-otp-26
-erlang 26.2.5
+elixir 1.17.0-otp-26
+erlang 26.0
 #
 # current pair
 elixir 1.20.3-otp-29

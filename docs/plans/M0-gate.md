@@ -31,8 +31,8 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `5d39f6ab0e684a84bed8390bb80e4188790a70b5aa9051df337b6c0776ecf4ec` | `scripts/check-m0-gate.sh` |
-| `5b3dc69d87a8b0d1fbf518738a6d51661f6bc1eccca08192f2da3574b505e477` | `.tool-versions` |
+| `a4e6fd447cc065fc54a621246c640399c7cee1fc5e5d3e0f515535b1e08eeb5a` | `scripts/check-m0-gate.sh` |
+| `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 
 Changing either file changes its digest, which changes this document, which
 changes the accepted gate digest. After acceptance that requires the authority
@@ -45,7 +45,7 @@ that accepted it.
 | 1 | `mix format --check-formatted` | Formatting is clean across every application |
 | 2 | `mix compile --warnings-as-errors` | The checkpoint is warning-free across every application |
 | 3 | `mix loopex.deps_budget` | Outcome 1: dependency budget and one-way direction |
-| 4 | `mix loopex.version_train` | Outcome 1: both applications carry one version |
+| 4 | `mix loopex.version_train` | Outcome 1: every application carries one version |
 | 5 | `mix test apps/loopex/test/deps_budget_test.exs` | Outcome 2: forbidden dependency, reverse edge, dynamic reference |
 | 5a | `mix loopex.core_only` and `mix test apps/loopex/test/core_only_test.exs` | Outcome 9: fakes-only lane, no adapter started, no per-runtime application environment |
 | 5b | `mix loopex.docs_check` | Outcome 10: compiled dual-depth documentation, as the development contract requires |
@@ -99,14 +99,16 @@ fails, and a claim of both lanes without two recorded runs fails. The exact pair
 `.tool-versions` bytes bound above:
 
 ```text
-floor pair    Elixir 1.17.3 with OTP 26.2.5
+floor pair    Elixir 1.17.0 with OTP 26.0
 current pair  Elixir 1.20.3 with OTP 29.0.5
 ```
 
-The current pair is Homebrew stable, so ordinary `brew upgrade elixir erlang`
-puts the maintainer on it. The floor pair predates what brew carries and runs
-through a version manager or CI. The gate requires both lanes recorded, not both
-run locally on every invocation.
+Both pins are derived from accepted ADR 0002 rather than chosen: the floor is
+the lowest supported pair in the 1.17 family, and the compatibility table offers
+no patch selector, so the lowest patch of each is taken. The current pair is the
+newest supported release, which today is also what Homebrew ships. The floor
+lane predates what brew carries and runs through a version manager or CI; the
+gate requires both lanes recorded, not both run locally on every invocation.
 
 Changing a version changes those bytes and requires an amendment to ADR 0002,
 not a gate edit. A green run on one pair is not evidence for the other, and a

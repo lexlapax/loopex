@@ -160,7 +160,13 @@ for outcome in 4 5 6; do
     capture { print }
   ' "$negatives")"
   for field in "mechanism disabled" "observed failure" "demonstrated at"; do
-    printf '%s\n' "$section" | grep -qiE "^- ${field}: *[^ —]" \
+    # Exactly one occurrence, and it must be populated. Requiring "at least one
+    # populated" lets a real value sit beside a placeholder and pass.
+    total="$(printf '%s\n' "$section" | grep -ciE "^- ${field}:" || true)"
+    filled="$(printf '%s\n' "$section" | grep -ciE "^- ${field}: *[^ —]" || true)"
+    [ "${total:-0}" -eq 1 ] \
+      || fail "$negatives outcome ${outcome} has ${total:-0} \"${field}\" entries; exactly one is required"
+    [ "${filled:-0}" -eq 1 ] \
       || fail "$negatives outcome ${outcome} does not record \"${field}\""
   done
 done
