@@ -154,12 +154,24 @@ if ! commits="$(git rev-list "$range")"; then
   exit 1
 fi
 
-for sha in $commits; do
-  if ! title="$(git log -1 --format=%s "$sha")"; then
-    echo "$sha: commit message unavailable" >&2
-    status=1
-    continue
-  fi
+expected=0
+for _ in $commits; do
+  expected=$((expected + 1))
+done
+seen=0
+
+# One `git log` for the whole range instead of two per commit. Every git call is
+# a process spawn, and under a restricted sandbox each one also emits a platform
+# warning, so a per-commit loop buries the real output a reviewer needs to read.
+# Records are NUL-separated and fields use unit separator. The stream is read
+# directly rather than captured, because command substitution cannot carry NUL.
+while IFS= read -r -d '' record; do
+  seen=$((seen + 1))
+  sha="${record%%$'\x1f'*}"
+  rest="${record#*$'\x1f'}"
+  title="${rest%%$'\x1f'*}"
+  body="${rest#*$'\x1f'}"
+
   if ! valid_title "$title"; then
     echo "$sha: title must be 'area(marker): summary' with marker planning, seed, or a milestone" >&2
     echo "  got: $title" >&2
@@ -171,11 +183,6 @@ for sha in $commits; do
     status=1
   fi
 
-  if ! body="$(git log -1 --format=%B "$sha")"; then
-    echo "$sha: commit body unavailable" >&2
-    status=1
-    continue
-  fi
   if scan_attribution "$body"; then
     echo "$sha: no content-origin attribution or generated-by claims in commit messages" >&2
     status=1
@@ -186,7 +193,14 @@ for sha in $commits; do
       status=1
     fi
   fi
-done
+done < <(git log -z --format="%H%x1f%s%x1f%B" "$range")
+
+# A short stream means the log call failed or was truncated. Fail closed rather
+# than silently checking fewer commits than the range contains.
+if [ "$seen" -ne "$expected" ]; then
+  echo "commit message check unavailable: read ${seen} of ${expected} commits in ${range}" >&2
+  exit 1
+fi
 
 if [ "$status" -ne 0 ]; then
   exit 1

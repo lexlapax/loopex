@@ -158,6 +158,14 @@ the exact document set its milestone must update.
   does not transfer, and a single-commit amendment cannot record its own SHA.
   Parked rather than withdrawn because its correction granularity remains better
   than supersession's.
+- `scripts/check-bootstrap.sh` drops the benign macOS `DARWIN_USER_TEMP_DIR`
+  git warning that a restricted sandbox emits once per git process. It appeared
+  132 times in a review run and buried the output a reviewer must read. Only
+  that exact line is filtered; every other stderr line and each check's exit
+  status are preserved, verified against both a green run and a forced failure.
+- `scripts/check-commit-messages.sh` reads the whole range in one `git log`
+  instead of two calls per commit, cutting its git process count from 76 to 6,
+  with a completeness guard that fails closed if the stream is short.
 - Read-only review-lane evidence in `docs/developer/agent-adapter-smoke.md`.
   Four consecutive reviews had run workspace-write and were advisory rather than
   formal evidence; the enforced lane is now proven with a positive smoke and a
