@@ -55,11 +55,14 @@ Technical depth: [What the anchor guarantees and forbids](0004-plan-amendment-su
   statement examined by review, not verified by the repository.
 - The effective binding is the last complete amendment; with no amendments it is
   the Acceptance row. Closure binds whatever is effective.
-- The sequence is verified **by content, not by graph position**: each row
-  supersedes the previous binding's exact digests, every earlier row is carried
-  unchanged, and exactly one row is added per introducing revision. Nothing
-  depends on which commit or branch introduced a row, because commits can be
-  re-parented and merged while the governed bytes stay identical.
+- Every reachable revision must stand on its own: the binding effective at that
+  revision equals that revision's governed bytes. Validity is not inherited from
+  a sibling or restored by returning to earlier bytes.
+- Acceptance and amendment never share a revision, so an accepted commitment is
+  always effective somewhere before it can be superseded.
+- A row's identity is the complete row within its exact table prefix, not its
+  commit. Identical governed records on sibling commits are the same commitment;
+  reusing a disposition pointer across rows does not merge them.
 - Closure binds the amendment chain. The Closure candidate must carry the exact
   amendment table present at closure, so a closure prepared against an older
   commitment cannot be merged in afterwards.
@@ -104,9 +107,10 @@ commit, carried intact into closure, and marked as a maintainer decision.
 Three things it does not guarantee. It does not decide whether an amendment
 weakens the commitment; no structural rule distinguishes a genuine correction
 from a narrowed outcome or a trivially passing command. It does not identify a
-unique commit for an amendment: identity is the governed bytes plus the
-disposition pointer, because the same bytes can legitimately exist on more than
-one commit. And it does not verify who signed anything — the check reads the
+unique commit for an amendment: identity is the complete row within its table
+prefix, because the same governed bytes can legitimately exist on more than one
+commit. Nor is it graph-independent — squashing amendments and rebasing a bound
+closure candidate both break it. And it does not verify who signed anything — the check reads the
 literal text `Maintainer` and the link syntax, not the signer or whether the
 pointer records a real disposition.
 

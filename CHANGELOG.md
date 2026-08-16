@@ -145,11 +145,14 @@ the exact document set its milestone must update.
   and independent review demonstrated passing sequences that reduced coverage
   both times. The mechanism guarantees the record is append-only, chained,
   ordered, carried intact into closure, and textually marked as a maintainer
-  decision. It states plainly what it does not guarantee: whether an amendment
-  weakens the commitment, which commit an amendment belongs to, or who signed
-  it. Identity is content rather than graph position, because commits can be
-  re-parented and merged while governed bytes stay identical, and closure must
-  carry the exact amendment table so a stale closure cannot be merged in.
+  decision. Every reachable revision must stand on its own — the binding
+  effective there equals that revision's governed bytes — so validity is never
+  inherited from a sibling or restored by returning to earlier bytes. Acceptance
+  and amendment never share a revision. A row's identity is the complete row
+  within its table prefix, not its commit. It states plainly what it does not
+  guarantee: whether an amendment weakens the commitment, who signed it, and
+  that it is not graph-independent, since squashing amendments or rebasing a
+  bound closure candidate breaks it.
 - The ADR index recorded 0001 through 0003 as Proposed after they were accepted.
   The acceptance transition may change only governance rows and marked status
   blocks, so the index correction lands separately here. The index also claimed

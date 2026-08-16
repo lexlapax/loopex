@@ -57,48 +57,73 @@ Field rules:
 
 ### Checker obligations
 
-1. The effective binding is the highest-numbered complete amendment, otherwise
-   the Acceptance row. Only the effective binding is verified against current
-   envelope and gate digests.
-2. Every amendment row is exactly empty or structurally complete, and every
+1. The effective binding **at a revision** is that revision's highest-numbered
+   complete amendment, otherwise its Acceptance row.
+2. **At every reachable revision, the effective binding equals that revision's
+   concept envelope, technical envelope, and gate digests.** This is universal,
+   not existential: it is not enough that some revision introducing a row
+   matched. Every reachable revision stands on its own, so a sibling cannot
+   witness for an invalid one and a temporary excursion to other bytes and back
+   cannot pass unnoticed.
+3. Every amendment row is exactly empty or structurally complete, and every
    complete row's `Authority` is the literal `Maintainer`.
-3. Each row's `Bound bytes` equals the concept envelope, technical envelope, and
-   gate digests **at a revision that introduced that row**, not at current
-   `HEAD`. A superseded row keeps describing the bytes it bound.
 4. `Supersedes` equals the previous binding's exact triple, so the chain is
    verifiable end to end and cannot skip a link.
 5. At any revision introducing row N, rows 1 through N−1 are present and
    byte-identical to their anchors, and exactly one new complete row appears.
-6. A completed amendment row is anchored across reachable history exactly like a
+6. **No revision both completes Acceptance and introduces an amendment row.**
+   Acceptance is a transition that changes governance and status bytes only, so
+   a revision that accepted bytes and amended them at once would mean the
+   accepted commitment was never effective anywhere.
+7. A completed amendment row is anchored across reachable history exactly like a
    completed governance row.
-7. The Closure candidate carries the exact amendment table present at closure,
-   byte-identical. A closure prepared against an earlier commitment therefore
-   cannot be merged in afterwards, even when its digest triple coincides with
-   the current one.
-8. No amendment may be recorded once Closure is complete.
+8. The Closure candidate carries the exact amendment table present in the Closed
+   plan. This is an **ongoing invariant**, re-verified on every validation, not a
+   check performed once at the closure transition; otherwise a later merge or
+   table edit could stale a closure that was valid when recorded.
+9. No amendment may be recorded once Closure is complete.
 
-### Why identity is content, not a commit
+Obligation 2 does most of the work and replaces several narrower rules. Because
+it quantifies over every reachable revision rather than over introductions, it
+closes drift, sibling witnesses, and any future variant of the same shape
+without naming them.
 
-An earlier revision tried to make a row's candidate the unique revision
-introducing it on first-parent history. Review demonstrated the defeat: two
-siblings introduce identical rows and identical governed bytes, then a merge
-taking the unreviewed sibling as first parent fast-forwards the reviewed ref and
-silently changes the selected candidate. Every obligation still passed. The same
-ambiguity applies to the revision completing Acceptance, which can also occur on
-siblings whose equal values the anchor collapses.
+### What identity is, exactly
 
-Graph position is not durable: commits can be re-parented, merged, and
-fast-forwarded while governed bytes stay identical. So no obligation depends on
-it. A row's identity is its bound digests plus its disposition pointer, and two
-commits carrying identical governed bytes represent the same commitment because
-they promise the same thing.
+A row's identity is **the complete anchored row within its exact table prefix**
+— its number, authority, disposition pointer, `Supersedes`, `Bound bytes`, and
+`Reason`, together with every row before it. It is not the bound digests plus
+the pointer: a legitimate A→B→C→B chain may reuse one disposition pointer for
+rows 1 and 3, and those remain distinct governance events.
 
-Obligation 7 exists because that reasoning fails for closure. Digest equality
-alone permits an A→B→A amendment sequence on one branch and a closure prepared
-against the original A on another, merging to a Closed milestone whose digests
-match but whose closure candidate never contained or reviewed the amendments.
-Requiring the closure candidate to carry the exact amendment table closes it by
-content rather than by ancestry.
+That identity is content, not graph position. An earlier revision tried to make
+a row's candidate the unique revision introducing it on first-parent history.
+Review showed the defeat: two siblings introduce identical rows and identical
+governed bytes, then a merge taking the unreviewed sibling as first parent
+silently changes the selected candidate while every obligation passes. The same
+ambiguity applied to the revision completing Acceptance.
+
+### Where graph structure still matters
+
+These obligations are not graph-independent, and this document previously
+claimed otherwise. Obligations 5 and 6 identify introductions relative to
+parents, obligation 7 walks reachable history and merges, obligation 8 resolves
+an exact Closure candidate, and obligation 9 requires ordering around closure.
+
+What follows in practice:
+
+- Squashing two amendments into one commit violates obligation 5, which requires
+  exactly one new row per introducing revision.
+- Rebasing after a Closure candidate is bound can make that candidate
+  unreachable and invalidate the record.
+- A fast-forward can expose reachable revisions that were never validated, which
+  obligation 2 now catches rather than admits.
+
+The narrow property that does hold is that identical governed records no longer
+require choosing among identical sibling commits. Nothing broader is claimed,
+and the inherited contract stands: relevant byte changes invalidate exact-SHA
+review, and content equivalence does not make a review of a different commit
+transferable.
 
 ### What these obligations do not decide
 
@@ -168,12 +193,15 @@ Concept: [Consequences](0004-plan-amendment-supersession.md#concept-adr-0004-con
   envelope changes what the gate must prove.
 - Every amendment is a maintainer bottleneck by design. If that becomes painful,
   the correct response is fewer defects reaching acceptance, not delegation.
-- No obligation depends on branch shape, so rebase, merge, and fast-forward
-  integration are all safe. That is the point of content-based identity: a
-  workflow cannot break the record by re-parenting it.
-- Two commits may legitimately carry the same amendment. Attribution to a person
-  runs through the disposition pointer, not the commit SHA, and a reviewer
-  checking attribution should follow the pointer rather than the graph.
+- Workflow constraints are real and narrow: do not squash amendments, and do not
+  rebase after a Closure candidate is bound. Ordinary merges and fast-forwards
+  are fine because obligation 2 validates every reachable revision rather than
+  trusting a selected one.
+- Two commits may legitimately carry the same amendment row. Attribution to a
+  person runs through the disposition pointer rather than a commit SHA, but a
+  review of a different commit is still not transferable: exact-SHA review is
+  invalidated by relevant byte changes, and content equivalence does not
+  substitute for it.
 - This mechanism is Python inside the seed bridge and is in scope for the `M0`
   self-hosting migration's equivalence evidence.
 
