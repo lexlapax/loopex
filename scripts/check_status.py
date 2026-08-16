@@ -894,6 +894,66 @@ def _blocked_m0_values(statuses: Mapping[str, str]) -> dict[str, str]:
     return values
 
 
+def _open_values(name: str) -> dict[str, str]:
+    """Derived capsule for an opened milestone that is not yet accepted.
+
+    Opening a gate authorises no implementation, so the authorized-work boundary
+    is inherited unchanged from the blocked capsule.
+    """
+    values = dict(SEED_BLOCKED_VALUES)
+    values["Blockers"] = (
+        f"`{name}` is open and not accepted; the recorded acceptance authority must "
+        "accept both normative envelopes and the gate"
+    )
+    values["Next maintainer decision"] = f"Accept or reject the `{name}` plan pair and gate"
+    values["Next transition"] = (
+        f"Record the acceptance governance row and move `{name}` to Accepted"
+    )
+    return values
+
+
+def _accepted_values(name: str) -> dict[str, str]:
+    """Derived capsule for an accepted milestone.
+
+    Acceptance is the only transition that widens the authorized-work boundary,
+    and it widens it to the accepted envelopes and locked gate, no further.
+    """
+    values = dict(SEED_BLOCKED_VALUES)
+    values["Blockers"] = f"None; `{name}` is accepted and implementation may proceed"
+    values["Authorized work"] = (
+        f"Implementation inside the accepted `{name}` envelopes and its locked gate; "
+        "no other product implementation"
+    )
+    values["Next maintainer decision"] = f"None until `{name}` is ready for independent review"
+    values["Next transition"] = (
+        f"Turn the locked gate green, then move `{name}` to In progress and In review"
+    )
+    return values
+
+
+def _bound_artifacts(gate_text: str, gate_path: str) -> tuple[tuple[str, str], ...]:
+    """Digest and path pairs a gate binds outside its own bytes.
+
+    A gate document governs nothing executable on its own: its runner could be
+    replaced with a command that exits zero while the document's digest stays
+    valid. Binding the runner by content closes that.
+    """
+    body, _ = _section_body(gate_text, gate_path, "## Bound Artifacts")
+    rows = _table(
+        [line for line in body if line.startswith("|")],
+        ("SHA-256", "Path"),
+        f"{gate_path} Bound Artifacts",
+    )
+    artifacts: list[tuple[str, str]] = []
+    for digest, path in rows:
+        match = re.fullmatch(r"`([0-9a-f]{64})`", digest)
+        target = re.fullmatch(r"`([^`]+)`", path)
+        if not match or not target:
+            raise Invalid(f"{gate_path}: malformed bound-artifact row")
+        artifacts.append((match.group(1), target.group(1)))
+    return tuple(artifacts)
+
+
 def _gate_digest(text: str, path: str) -> str:
     if any(separator in text for separator in "\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"):
         raise Invalid(f"{path}: gate text must use canonical UTF-8/LF bytes")
@@ -1535,6 +1595,7 @@ def validate(
         | None,
     ]
     | None = None,
+    read_artifact: Callable[[str], bytes | None] | None = None,
 ) -> list[str]:
     errors: list[str] = []
     try:
@@ -1632,20 +1693,54 @@ def validate(
             )
             for path in adr_paths
         }
-        if parsed_rows != [("M0", "Blocked", "—", "—", "—")]:
+        # Lifecycle enforcement. Every representable register state derives its
+        # exact status capsule, and a state without a derivation fails closed so
+        # the transition that first records it must add one.
+        if len(parsed_rows) != 1:
             raise Invalid(
-                "docs/plans/README.md: bootstrap permits only Blocked M0; its opening "
-                "branch must replace this seed guard with lifecycle-specific enforcement"
+                "docs/plans/README.md: lifecycle enforcement covers exactly one registered "
+                "milestone; extend it before registering another"
             )
-        if values != _blocked_m0_values(adr_statuses):
+        registered_name, registered_state = parsed_rows[0][0], parsed_rows[0][1]
+        if registered_state == "Blocked":
+            if registered_name != "M0":
+                raise Invalid(
+                    "docs/plans/README.md: the blocked-candidate capsule is derived from the "
+                    "founding ADR records and applies only to M0"
+                )
+            expected_values = _blocked_m0_values(adr_statuses)
+        elif registered_state == "Open":
+            expected_values = _open_values(registered_name)
+        elif registered_state == "Accepted":
+            expected_values = _accepted_values(registered_name)
+        else:
             raise Invalid(
-                "docs/plans/README.md: ADR disposition requires the exact blocked-M0 status capsule"
+                f"docs/plans/README.md: milestone state {registered_state!r} has no derived "
+                "status capsule; the transition that first records it must add lifecycle "
+                "enforcement rather than relax this check"
+            )
+        if values != expected_values:
+            raise Invalid(
+                "docs/plans/README.md: the register state requires its exact derived status capsule"
             )
 
         represented = {name for name, state, _, _, _ in parsed_rows if state != "Blocked"}
         if set(plan_names) != represented:
             raise Invalid("docs/plans: paired plan triples and non-Blocked register rows must match exactly")
         state_by_name = {name: state for name, state, _, _, _ in parsed_rows}
+        # A gate binds artifacts outside its own bytes. Verify each against the
+        # file it names, so swapping the runner for a no-op fails immediately.
+        if read_artifact is not None:
+            for name in plan_names:
+                gate_path = f"docs/plans/{name}-gate.md"
+                for digest, target in _bound_artifacts(documents[gate_path], gate_path):
+                    content = read_artifact(target)
+                    if content is None:
+                        raise Invalid(f"{gate_path}: bound artifact {target} is missing")
+                    if hashlib.sha256(content).hexdigest() != digest:
+                        raise Invalid(
+                            f"{gate_path}: bound artifact {target} does not match its locked digest"
+                        )
         for name in plan_names:
             _governance(
                 documents[f"docs/plans/{name}.md"],
@@ -1881,7 +1976,18 @@ def main() -> int:
     except Invalid as error:
         print(error, file=sys.stderr)
         return 1
-    errors = validate(documents, _git_resolver(root), _git_plan_history(root))
+    def read_artifact(relative: str) -> bytes | None:
+        target = (root / relative).resolve()
+        if root not in target.parents and target != root:
+            return None
+        return target.read_bytes() if target.is_file() else None
+
+    errors = validate(
+        documents,
+        _git_resolver(root),
+        _git_plan_history(root),
+        read_artifact=read_artifact,
+    )
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

@@ -402,6 +402,7 @@ def checked(
     docs: dict[str, str],
     historical_gate: str = GATE,
     plan_history: tuple[tuple[str, dict[str, str]], ...] = (),
+    read_artifact=None,
 ) -> list[str]:
     snapshots: list[tuple[str, tuple[str, ...], dict[str, str]]] = [
         ("fixture-root", (), {})
@@ -434,6 +435,7 @@ def checked(
         docs,
         resolve,
         lambda: (parent, tuple(snapshots)),
+        read_artifact=read_artifact,
     )
 
 
@@ -468,6 +470,31 @@ def accepted_adr_documents(*accepted: int) -> dict[str, str]:
             "install lifecycle-specific status checks; and move M0 to Open",
         )
     return docs
+
+
+OPEN_SUMMARY = (
+    "**Revision status:** Pre-implementation planning; active milestone "
+    "`M0` is open; no next candidate is recorded."
+)
+
+
+def _open_capsule(text: str) -> str:
+    """Rewrite the blocked capsule into its derived Open form."""
+    return (
+        text.replace(
+            "| Blockers | [ADR 0001](../adr/0001-repository-and-application-layout.md#concept) and [ADR 0002](../adr/0002-bootstrap-runtime-floor.md#concept) must be accepted before M0 opens; a replacement requires a governed guard change |",
+            "| Blockers | `M0` is open and not accepted; the recorded acceptance "
+            "authority must accept both normative envelopes and the gate |",
+        )
+        .replace(
+            "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |",
+            "| Next maintainer decision | Accept or reject the `M0` plan pair and gate |",
+        )
+        .replace(
+            "| Next transition | After the prerequisites are accepted, the maintainer explicitly opens `M0` gate-first |",
+            "| Next transition | Record the acceptance governance row and move `M0` to Accepted |",
+        )
+    )
 
 
 class StatusTest(unittest.TestCase):
@@ -1418,7 +1445,52 @@ class StatusTest(unittest.TestCase):
             docs["docs/plans/M0.md"] = plan(governed, closed)
             docs["docs/plans/M0-technical.md"] = TECHNICAL_PLAN
             docs["docs/plans/M0-gate.md"] = GATE
-            self.assert_invalid(docs, "must replace this seed guard")
+            if state == "Open":
+                docs["docs/plans/README.md"] = _open_capsule(
+                    docs["docs/plans/README.md"]
+                )
+                self.assertEqual([], checked(docs))
+                stale = dict(docs)
+                stale["docs/plans/README.md"] = stale["docs/plans/README.md"].replace(
+                    "| Next maintainer decision | Accept or reject the `M0` plan pair and gate |",
+                    "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |",
+                )
+                self.assert_invalid(stale, "exact derived status capsule")
+            else:
+                self.assert_invalid(docs, "no derived status capsule")
+
+    def test_gate_bound_artifacts_are_verified(self) -> None:
+        """A gate governs nothing executable unless its runner is bound."""
+        runner = b"#!/usr/bin/env bash\nexit 1\n"
+        digest = hashlib.sha256(runner).hexdigest()
+        gate = (
+            "# Gate\n\n## Bound Artifacts\n\n"
+            "| SHA-256 | Path |\n| --- | --- |\n"
+            f"| `{digest}` | `scripts/run-gate.sh` |\n"
+        )
+        docs = documents()
+        docs["docs/plans/README.md"] = _open_capsule(
+            docs["docs/plans/README.md"]
+            .replace(
+                "| `M0` | Blocked | — | — | — |",
+                "| `M0` | Open | [concept](M0.md) | "
+                "[technical depth](M0-technical.md) | [gate](M0-gate.md) |",
+            )
+            .replace(SUMMARY, OPEN_SUMMARY)
+        )
+        docs["README.md"] = docs["README.md"].replace(SUMMARY, OPEN_SUMMARY)
+        docs["docs/plans/M0.md"] = plan(False)
+        docs["docs/plans/M0-technical.md"] = TECHNICAL_PLAN
+        docs["docs/plans/M0-gate.md"] = gate
+
+        self.assertEqual(
+            [], checked(docs, historical_gate=gate, read_artifact=lambda _: runner)
+        )
+        swapped = b"#!/usr/bin/env bash\nexit 0\n"
+        errors = checked(docs, historical_gate=gate, read_artifact=lambda _: swapped)
+        self.assertTrue(errors and "does not match its locked digest" in errors[0], errors)
+        errors = checked(docs, historical_gate=gate, read_artifact=lambda _: None)
+        self.assertTrue(errors and "is missing" in errors[0], errors)
 
     def test_status_shape_mutations_fail(self) -> None:
         cases = (
@@ -1459,7 +1531,7 @@ class StatusTest(unittest.TestCase):
         for label, old, new in authority_cases:
             with self.subTest(label):
                 docs = {path: text.replace(old, new) for path, text in documents().items()}
-                self.assert_invalid(docs, "exact blocked-M0 status capsule")
+                self.assert_invalid(docs, "exact derived status capsule")
 
         for label, row, summary in (
             (
@@ -1482,7 +1554,12 @@ class StatusTest(unittest.TestCase):
                         replacement.replace(SUMMARY, summary)
                         .replace("no product implementation", "product implementation is authorized")
                     )
-                self.assert_invalid(docs, "bootstrap permits only Blocked M0")
+                expected = (
+                    "applies only to M0"
+                    if label == "renamed M0"
+                    else "exactly one registered milestone"
+                )
+                self.assert_invalid(docs, expected)
 
     def test_hidden_or_duplicated_markers_fail(self) -> None:
         wrappers = (

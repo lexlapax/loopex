@@ -1,0 +1,12 @@
+# Locked M0 toolchain matrix. These exact bytes are digested in
+# docs/plans/M0-gate.md and verified against this file by the status check.
+# Two pairs are validated individually; no cross-product is constructed.
+# Changing any version requires an amendment to ADR 0002, not a gate edit.
+#
+# floor pair
+elixir 1.17.3-otp-26
+erlang 26.2.5
+#
+# current pair
+elixir 1.19.5-otp-28
+erlang 28.1

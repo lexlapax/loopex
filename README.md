@@ -25,7 +25,7 @@ while the session lives; a session "brain" can coordinate local or remote
 <!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-**Revision status:** Pre-implementation planning; no milestone is active; next candidate `M0` is blocked.
+**Revision status:** Pre-implementation planning; active milestone `M0` is open; no next candidate is recorded.
 
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->

@@ -80,6 +80,26 @@ the exact document set its milestone must update.
   status, register, and rejoin blocks; plan/gate/governance correspondence; and
   the derived README summary, with in-memory adversarial controls rather than a
   general Markdown parser. M0 replaces the bridge with Elixir/Mix.
+- Milestone `M0` is **Open** on its branch, with the plan pair and locked gate
+  in `docs/plans/` and `scripts/check-m0-gate.sh` as its runner. Nine outcomes
+  cover the scaffold, the toolchain matrix, journal replay, `commit_unknown`
+  fencing and reconciliation across a restart, the isolated VM code-load and
+  rollback spike, one real-provider slice, the self-hosting migration, and the
+  compiled-documentation check.
+- Every gate command form was executed against a disposable umbrella scaffold
+  before the gate was written. That check exists because an earlier version
+  locked repository-root test paths: an umbrella root runs no tests of its own,
+  so `mix test test/x_test.exs` produced no output and exited zero, leaving four
+  outcomes permanently unprovable. Selectors are now application-relative, and
+  the tagged provider lane is path-scoped because `mix test --only <tag>` at the
+  root recurses into applications with no tagged tests and exits zero having run
+  nothing.
+- The gate binds its own runner and `.tool-versions` by SHA-256, verified by the
+  status check at every validation, so replacing the runner with a command that
+  exits zero fails immediately. Verified by tampering with both.
+- The seed-specific status guard is replaced by lifecycle enforcement: every
+  registered state derives its exact status capsule, and a state without a
+  derivation fails closed.
 - A `## Where Things Stand` block at the top of `README.md`, so the GitHub
   landing page answers what is happening and what is next.
 - `docs/developer/README.md` — the directory index and the start-here reading
