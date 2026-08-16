@@ -15,6 +15,7 @@ order. This file is the index of what exists.
 | [developer/](developer/README.md) | Development method, routing, and retained client evidence. |
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
+| [evidence/](evidence/README.md) | Retained gate run evidence. |
 | [archive/](archive/README.md) | Non-normative historical inputs, retained for provenance. |
 
 Every directory under `docs/` carries a `README.md` describing its contents and

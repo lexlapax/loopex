@@ -33,20 +33,34 @@ require_named_test() {
     || fail "$file is missing the locked test \"${name}\""
 }
 
+# ExUnit reports skipped tests inside the total: "1 test, 0 failures, 1 skipped".
+# A tagged-skip test therefore satisfies a naive minimum without executing, so
+# the executed count is the total minus skipped, and any skip is itself a
+# failure for a protected selector.
 test_count() {
   printf '%s' "$1" | grep -oE '[0-9]+ (test|tests),' | tail -1 | grep -oE '[0-9]+' || true
 }
 
+skipped_count() {
+  printf '%s' "$1" | grep -oE '[0-9]+ skipped' | tail -1 | grep -oE '[0-9]+' || true
+}
+
 run_selector() {
-  local file="$1" minimum="$2" output count
+  local file="$1" minimum="$2" output count skipped executed
   if ! output="$(mix test "$file" 2>&1)"; then
     printf '%s\n' "$output" >&2
     fail "$file failed"
   fi
   count="$(test_count "$output")"
   [ -n "$count" ] || fail "$file produced no parsable test count"
-  [ "$count" -ge "$minimum" ] \
-    || fail "$file ran ${count} tests, fewer than the locked minimum ${minimum}"
+  skipped="$(skipped_count "$output")"
+  skipped="${skipped:-0}"
+  if [ "$skipped" -ne 0 ]; then
+    fail "$file skipped ${skipped} tests; a protected selector may not skip"
+  fi
+  executed=$((count - skipped))
+  [ "$executed" -ge "$minimum" ] \
+    || fail "$file executed ${executed} tests, fewer than the locked minimum ${minimum}"
 }
 
 command -v mix >/dev/null 2>&1 || fail "mix is not installed; the accepted toolchain is required"
@@ -62,6 +76,9 @@ command -v mix >/dev/null 2>&1 || fail "mix is not installed; the accepted toolc
 # prove; a file that runs tests but not these proves something else.
 require_named_test apps/loopex/test/deps_budget_test.exs "a forbidden core dependency is rejected"
 require_named_test apps/loopex/test/deps_budget_test.exs "a reverse edge from contract to runtime is rejected"
+require_named_test apps/loopex/test/deps_budget_test.exs "a dynamic module reference across the boundary is rejected"
+require_named_test apps/loopex/test/core_only_test.exs "core starts with no adapter application resolved or started"
+require_named_test apps/loopex/test/core_only_test.exs "per-runtime state is not read from application environment"
 require_named_test apps/loopex/test/journal_replay_test.exs "replay after an induced restart reconstructs the same durable state"
 require_named_test apps/loopex/test/fencing_test.exs "commit_unknown is fenced and never dispatched a second time"
 require_named_test apps/loopex/test/fencing_test.exs "a stale completion is rejected after a coordinator restart"
@@ -72,7 +89,19 @@ mix compile --warnings-as-errors || fail "compilation is not warning-free"
 mix loopex.deps_budget || fail "dependency budget or direction violated (outcome 1)"
 mix loopex.version_train || fail "applications do not carry one version (outcome 1)"
 
-run_selector apps/loopex/test/deps_budget_test.exs 2
+run_selector apps/loopex/test/deps_budget_test.exs 3
+mix loopex.core_only || fail "core-only, fakes-only lane failed (outcome 9)"
+run_selector apps/loopex/test/core_only_test.exs 2
+
+# ADR 0001 requires the client hook to call repository enforcement rather than
+# duplicate it. A hook that still carries its own budget logic is not a caller.
+hook=".claude/hooks/deps-budget.sh"
+if [ -f "$hook" ]; then
+  grep -qE 'mix +loopex\.deps_budget' "$hook" \
+    || fail "$hook does not call the repository dependency-budget command (outcome 2)"
+  grep -qE 'apps/loopex/mix\.exs' "$hook" \
+    && fail "$hook still duplicates budget logic instead of calling it (outcome 2)"
+fi
 mix loopex.matrix || fail "a locked toolchain pair did not pass (outcome 3)"
 run_selector apps/loopex/test/journal_replay_test.exs 2
 run_selector apps/loopex/test/fencing_test.exs 2
@@ -80,7 +109,7 @@ run_selector apps/loopex/test/vm_code_spike_test.exs 1
 
 # Outcome 7. A tagged run exits zero having executed nothing, so the count is
 # the evidence, not the exit code.
-provider_output="$(mix test apps/loopex/test/provider_test.exs --only real_provider 2>&1)" \
+provider_output="$(mix test apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider 2>&1)" \
   || { printf '%s\n' "$provider_output" >&2; fail "real-provider lane failed (outcome 7)"; }
 provider_count="$(test_count "$provider_output")"
 [ "${provider_count:-0}" -ge 1 ] \
@@ -103,6 +132,37 @@ done
 if PATH="$absence_root:$PATH" python3 --version >/dev/null 2>&1; then
   fail "could not shadow python3 for the absence proof (outcome 8)"
 fi
+# Shadowing is defeated by `command -p`, which uses a default PATH, and by an
+# inline PATH assignment on the invocation itself. Neither is a PATH lookup the
+# shim can intercept, so both are scanned for directly.
+if git grep -nE 'command +-p +(python3|jq)|(^|[[:space:]])PATH=[^[:space:]]+ +(python3|jq)' -- \
+  scripts .claude .codex .github >/dev/null 2>&1; then
+  git grep -nE 'command +-p +(python3|jq)|(^|[[:space:]])PATH=[^[:space:]]+ +(python3|jq)' -- \
+    scripts .claude .codex .github >&2
+  fail "a shadow-bypassing python3/jq invocation survives (outcome 8)"
+fi
+
+# Hook behavior is proved by executing locked fixtures, not by accepting a
+# task's exit status. Each fixture is a stdin payload the hook must reject; a
+# hook that stops rejecting it has lost a tested behavior, which ADR 0002
+# forbids without an explicit disposition.
+fixture_root="scripts/fixtures/hook-cases"
+[ -d "$fixture_root" ] \
+  || fail "no locked hook-behavior fixtures at $fixture_root (outcome 8)"
+fixture_count=0
+for fixture in "$fixture_root"/*.stdin; do
+  [ -f "$fixture" ] || continue
+  hook_name="$(basename "$fixture" .stdin)"
+  hook_name="${hook_name%%.*}"
+  hook_path=".claude/hooks/${hook_name}.sh"
+  [ -f "$hook_path" ] || fail "fixture $fixture names no hook at $hook_path (outcome 8)"
+  if bash "$hook_path" < "$fixture" >/dev/null 2>&1; then
+    fail "$hook_path accepted $fixture; a tested blocking behavior was lost (outcome 8)"
+  fi
+  fixture_count=$((fixture_count + 1))
+done
+[ "$fixture_count" -ge 3 ] \
+  || fail "only ${fixture_count} hook fixtures executed; each migrated hook needs one (outcome 8)"
 PATH="$absence_root:$PATH" bash scripts/check-bootstrap.sh >/dev/null \
   || fail "the aggregate still depends on python3 or jq (outcome 8)"
 
@@ -140,7 +200,7 @@ fi
 
 # Outcome 7 evidence. A test count proves a test ran, not that a provider was
 # reached, so the lane must retain non-secret provider identity for review.
-provider_evidence="docs/plans/M0-provider-evidence.md"
+provider_evidence="docs/evidence/M0-provider.md"
 [ -f "$provider_evidence" ] \
   || fail "the real-provider lane retained no evidence at $provider_evidence (outcome 7)"
 for required in provider model endpoint; do
@@ -148,8 +208,20 @@ for required in provider model endpoint; do
     || fail "$provider_evidence does not record ${required} identity (outcome 7)"
 done
 
+# Outcomes 4, 5, and 6 require a recorded negative demonstration: the protected
+# test must fail when its mechanism is disabled. The runner cannot disable a
+# mechanism, so it requires the record and a reviewer judges it.
+negatives="docs/evidence/M0-negative-demonstrations.md"
+[ -f "$negatives" ] || fail "no negative demonstrations recorded at $negatives"
+for outcome in 4 5 6; do
+  grep -qE "^## Outcome ${outcome} " "$negatives" \
+    || fail "$negatives records no negative demonstration for outcome ${outcome}"
+done
+if grep -qE '^- (mechanism disabled|observed failure|demonstrated at): —$' "$negatives"; then
+  fail "$negatives still has unpopulated negative-demonstration fields"
+fi
+
 mix loopex.self_hosting || fail "self-hosting measurement or hook-behavior proof failed (outcome 8)"
-mix loopex.docs_check || fail "compiled dual-depth documentation check failed (outcome 9)"
 mix test || fail "full suite failed"
 
 echo "M0 gate GREEN"

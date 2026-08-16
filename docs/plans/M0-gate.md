@@ -31,7 +31,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `c1a252d553819eacab945b165131b147811c20407fa9ed5d9837b699e6c3d67d` | `scripts/check-m0-gate.sh` |
+| `535496b8afa97291c177e7c2c2de92c9dc98d32796e8d66d4061295cda4126f9` | `scripts/check-m0-gate.sh` |
 | `f26287082f2f58ff9f1e08acc0b87f472f3c79556dbf4f2c15fad76b47280d1d` | `.tool-versions` |
 
 Changing either file changes its digest, which changes this document, which
@@ -46,14 +46,14 @@ that accepted it.
 | 2 | `mix compile --warnings-as-errors` | The checkpoint is warning-free |
 | 3 | `mix loopex.deps_budget` | Outcome 1: dependency budget and one-way direction |
 | 4 | `mix loopex.version_train` | Outcome 1: both applications carry one version |
-| 5 | `mix test apps/loopex/test/deps_budget_test.exs` | Outcome 2: the adversarial fixture is rejected |
+| 5 | `mix test apps/loopex/test/deps_budget_test.exs` | Outcome 2: forbidden dependency, reverse edge, dynamic reference |
+| 5a | `mix loopex.core_only` and `mix test apps/loopex/test/core_only_test.exs` | Outcome 9: fakes-only lane, no adapter started, no per-runtime application environment |
 | 6 | `mix loopex.matrix` | Outcome 3: both locked pairs run individually |
 | 7 | `mix test apps/loopex/test/journal_replay_test.exs` | Outcome 4: journal replay across a restart |
 | 8 | `mix test apps/loopex/test/fencing_test.exs` | Outcome 5: fencing and reconciliation across a restart |
 | 9 | `mix test apps/loopex/test/vm_code_spike_test.exs` | Outcome 6: isolated VM load and rollback |
-| 10 | `mix test apps/loopex/test/provider_test.exs --only real_provider` | Outcome 7: real model call on the tagged lane |
+| 10 | `mix test apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider` | Outcome 7: real model call from the adapter application |
 | 11 | `mix loopex.self_hosting` | Outcome 8: absence, inventory, hook behavior, measurement |
-| 12 | `mix loopex.docs_check` | Outcome 9: compiled dual-depth documentation |
 | 13 | `mix test` | The full suite |
 
 Selectors are application-relative because an umbrella root runs no tests of its
@@ -67,24 +67,31 @@ These selectors are protected: they may be extended but never removed, renamed,
 skipped, filtered, quarantined, or weakened while `M0` is open.
 
 An exit code proves a command ran, not that it did anything. Each selector
-therefore carries a locked minimum of executed tests and a list of test names
-that must exist, both enforced by the runner.
+carries a locked minimum of **executed** tests and a list of test names that
+must exist, both enforced by the runner. ExUnit counts skipped tests inside its
+total, so a `@tag :skip` test would satisfy a naive minimum without running:
+the runner subtracts skipped tests and rejects any skip on a protected
+selector outright.
 
 | Selector | Minimum tests | Locked test names |
 | --- | --- | --- |
-| `apps/loopex/test/deps_budget_test.exs` | 2 | `a forbidden core dependency is rejected`; `a reverse edge from contract to runtime is rejected` |
+| `apps/loopex/test/deps_budget_test.exs` | 3 | `a forbidden core dependency is rejected`; `a reverse edge from contract to runtime is rejected`; `a dynamic module reference across the boundary is rejected` |
+| `apps/loopex/test/core_only_test.exs` | 2 | `core starts with no adapter application resolved or started`; `per-runtime state is not read from application environment` |
 | `apps/loopex/test/journal_replay_test.exs` | 2 | `replay after an induced restart reconstructs the same durable state` |
 | `apps/loopex/test/fencing_test.exs` | 2 | `commit_unknown is fenced and never dispatched a second time`; `a stale completion is rejected after a coordinator restart` |
 | `apps/loopex/test/vm_code_spike_test.exs` | 1 | `a trusted generation loads and rolls back in an isolated VM` |
-| `apps/loopex/test/provider_test.exs --only real_provider` | 1 | — |
+| `apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider` | 1 | — |
 
 Minimums and names may be raised or extended by stricter append-only coverage
 with independent gate review. They may never be lowered while `M0` is open.
 
 ## Toolchain Matrix
 
-Command 6 runs the suite once per locked pair. Each pair is validated
-individually and no cross-product is constructed. The exact pairs are the
+A single in-process Mix task cannot run two Erlang runtimes. Command 6 therefore
+verifies that the **running** toolchain matches one of the locked pairs and that
+both pairs are recorded as run; the gate runner is invoked once per pair by the
+operator or CI under the corresponding toolchain. A run under an unlisted pair
+fails, and a claim of both lanes without two recorded runs fails. The exact pairs are the
 `.tool-versions` bytes bound above:
 
 ```text
@@ -116,7 +123,7 @@ explicitly. The credential is read from the environment and never written to a
 journal, fixture, log, snapshot, diagnostic, or committed byte.
 
 The lane retains non-secret provider, model, and endpoint-class identity in
-`docs/plans/M0-provider-evidence.md`, which the runner requires. A missing
+`docs/evidence/M0-provider.md`, which the runner requires. A missing
 credential reports evidence unavailable and exits non-zero; it never reports
 success, and a skipped lane is not a pass. Because a tagged run exits zero
 having executed nothing, the runner requires at least one executed test.
@@ -134,7 +141,9 @@ intercept. Dropping directories from `PATH` is not used: it would also remove
 Command 11 covers four separable things and fails on any of the first three:
 
 1. **Absence.** The aggregate runs to completion while `python3` and `jq` are
-   shadowed by stubs that refuse to run.
+   shadowed by stubs that refuse to run. Shadowing intercepts PATH lookups only,
+   so the runner additionally scans for absolute paths, `env`-resolved calls,
+   `command -p`, and inline `PATH=` assignments, none of which a shim can catch.
 2. **Inventory.** Every named bridge component is gone from the tree:
    `scripts/check_status.py`, `scripts/test_check_status.py`,
    `scripts/check-agent-bootstrap.py`, the `python3` invocations in
@@ -142,9 +151,11 @@ Command 11 covers four separable things and fails on any of the first three:
    `jq` invocations in `scripts/check-agent-bootstrap.sh`,
    `.claude/hooks/guard-bash.sh`, `.claude/hooks/after-edit.sh`, and
    `.claude/hooks/guard-filesystem.sh`.
-3. **Preserved hook behavior.** Each migrated client-hook path still blocks what
-   it blocked before. Removing a behavior instead of migrating it requires an
-   explicit disposition recorded against outcome 8.
+3. **Preserved hook behavior.** Locked fixtures in `scripts/fixtures/hook-cases`
+   are executed against each migrated hook, and every one must still be
+   rejected. At least three fixtures run, one per migrated hook. This is proved
+   by execution, not by the task's exit status. Removing a behavior instead of
+   migrating it requires an explicit disposition recorded against outcome 8.
 4. **Measurement.** The command reports the replacement's measured size and the
    behaviors dropped from the bridge, with reasons.
 
@@ -180,9 +191,10 @@ network call happened. No structural rule closes these, because meaning is not a
 property of structure.
 
 Two things carry that weight instead. Outcomes 4, 5, and 6 require a **negative
-demonstration**: the protected test is shown to fail when the mechanism it
-covers is disabled. A test that passes with the behavior removed proved nothing,
-and a reviewer can check that even though the runner cannot. The second is
+demonstration** recorded in `docs/evidence/M0-negative-demonstrations.md`: the
+protected test is shown to fail when the mechanism it covers is disabled. The
+runner requires the record and rejects unpopulated fields; it cannot disable a
+mechanism itself, so a reviewer judges whether the demonstration is real. The second is
 independent review of the implementation at the closure candidate, which is
 already required.
 

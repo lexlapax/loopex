@@ -90,9 +90,21 @@ reports evidence unavailable and fails the closure claim; it never reports
 success, and a skipped lane is not a pass. The lane retains non-secret provider,
 model, and endpoint-class identity for review.
 
+Outcome 9 is the ADR 0001 isolation lane: core builds and passes against fakes
+only, with no adapter application resolved or started, and no per-runtime state
+read from application environment. Outcome 2 additionally proves the client hook
+calls repository enforcement rather than duplicating it, and that the dependency
+command rejects a dynamic cross-boundary reference, not only a declared one.
+
+Outcome 3 cannot be proved by one in-process task, because a single Mix run has
+one Erlang runtime. The task verifies that the running toolchain matches a
+locked pair; the gate runner is invoked once per pair under that toolchain, and
+both runs are recorded.
+
 Outcome 8 requires four separable proofs: the aggregate runs to completion with
 Python and `jq` shadowed; every named bridge component is gone from the tree;
-the tested client-hook behaviors still block what they blocked before; and the
+the tested client-hook behaviors still block what they blocked before, proved by
+executing locked fixtures rather than by a task's exit status; and the
 replacement's size is measured and reported. The size figure is audit and review
 material, not a pass condition.
 

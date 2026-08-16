@@ -80,6 +80,17 @@ the exact document set its milestone must update.
   status, register, and rejoin blocks; plan/gate/governance correspondence; and
   the derived README summary, with in-memory adversarial controls rather than a
   general Markdown parser. M0 replaces the bridge with Elixir/Mix.
+- The M0 gate was rejected and hardened again: provider evidence moved to
+  `docs/evidence/` because any `docs/plans/*.md` is read as another milestone and
+  broke the aggregate; outcome 1 now says "no external dependencies" and
+  preserves the `:loopex_protocol` edge that ADR 0001 requires; ADR 0001's
+  mandatory proofs are locked as outcome 9 and additional named tests; skipped
+  tests no longer satisfy an executed-test minimum, since ExUnit counts them in
+  its total; `command -p` and inline-`PATH` bypasses of the absence proof are
+  scanned for; hook behavior is proved by executing locked fixtures rather than
+  by a task exit code; negative demonstrations are a required record; and the
+  provider lane moved to the adapter application, since `apps/loopex` may carry
+  no external dependency.
 - Milestone `M0` is **Open** on its branch, with the plan pair and locked gate
   in `docs/plans/` and `scripts/check-m0-gate.sh` as its runner. Nine outcomes
   cover the scaffold, the toolchain matrix, journal replay, `commit_unknown`
