@@ -140,6 +140,12 @@ the exact document set its milestone must update.
   at its exact candidate SHA, and accepted binding it. No new binding, identity,
   or chain semantics are introduced, because the existing two-phase acceptance
   path already has the properties an amendment chain could not obtain.
+  Supersession is not a standalone act: a milestone becomes `Superseded` only in
+  the revision that opens its successor, so it can never be abandoned without
+  one. Only a milestone with a completed acceptance record may be superseded,
+  and never one that has closed. The successor's anchored `## Supersedes` row
+  carries the maintainer authority, its durable evidence, and the reason, so the
+  relationship cannot be retargeted or reworded afterwards.
 - `docs/adr/0004-plan-amendment-supersession.md` (Proposed, parked) and its
   companion — the in-place amendment approach, retained as the record of a
   rejected design. Five revisions were rejected in independent review, which

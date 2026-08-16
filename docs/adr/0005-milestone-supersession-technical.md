@@ -35,45 +35,68 @@ Concept: [Decision](0005-milestone-supersession.md#concept-adr-0005-decision).
 Concept, Technical depth, and Gate links, because the files it names remain in
 the tree exactly as accepted.
 
-The successor's Concept plan carries a single line outside both normative
+The successor's Concept plan carries this section outside both normative
 envelopes:
 
 ```markdown
 ## Supersedes
 
-`<superseded milestone name>` — <reason the predecessor was replaced>
+| Milestone | Authority | Authority evidence | Reason |
+| --- | --- | --- | --- |
+| `<superseded name>` | Maintainer | [disposition](<durable-pointer>) | <why it was replaced> |
 ```
 
 ### Checker obligations
 
 1. `Superseded` is terminal. A milestone recorded as `Superseded` at any
-   reachable revision is `Superseded` at every later reachable revision.
-2. A milestone may only become `Superseded` from a state that has a plan pair
-   and gate. A `Blocked` candidate is withdrawn by removing its row, not by
-   superseding it.
+   reachable revision is `Superseded` at every later reachable revision,
+   including across merges.
+2. A milestone may become `Superseded` only from `Accepted`, `In progress`, or
+   `In review`, and only when its Acceptance governance row is complete. An
+   `Open` milestone has no accepted binding to preserve and is withdrawn by
+   removing its row. A `Closed` milestone proved its outcomes and is never
+   superseded, so the last-closed derivation can never move backwards.
 3. A superseded milestone's plan pair and gate remain present and byte-identical
    to their accepted bindings. Supersession preserves the record; it does not
    release the bytes.
 4. A superseded row is excluded from the active, next-candidate, and last-closed
    derivations. It never contributes to the derived status summary.
-5. At most one milestone in the register names a given milestone in its
-   `## Supersedes` section, so a superseded milestone has exactly one successor.
-6. A `## Supersedes` section names a milestone that exists in the register with
-   state `Superseded`, and no milestone supersedes itself.
-7. The transition to `Superseded` changes only the register state and the
-   derived status blocks. No plan, gate, envelope, or governance byte changes in
-   that commit.
+5. **A milestone becomes `Superseded` only in the revision that opens its
+   successor.** That revision registers the successor, adds its plan pair and
+   gate, and completes the successor's `## Supersedes` row naming the milestone
+   being superseded. There is no standalone supersession transition, so a
+   superseded milestone can never exist without exactly one successor.
+6. Exactly one milestone names a given milestone in its `## Supersedes` row, the
+   named milestone exists in the register with state `Superseded`, and no
+   milestone supersedes itself.
+7. A completed `## Supersedes` row is anchored across reachable history exactly
+   like a completed governance record. Its milestone, authority, evidence
+   pointer, and reason are immutable once written, so the repository cannot
+   later retarget or reword which replacement was reviewed.
+8. The superseding revision changes only the register, the derived status
+   blocks, and the successor's new plan pair and gate. No superseded plan, gate,
+   envelope, or governance byte changes in it.
 
 Obligation 3 is what distinguishes supersession from abandonment: the
 superseded plan stays readable and its acceptance stays provable, so the record
 shows what was agreed and that it was replaced rather than erased.
+
+Obligations 5 and 7 together carry the authority requirement. Supersession has
+no transition of its own to attach a disposition to, so the authority and its
+durable evidence live in the successor's anchored `## Supersedes` row. Git
+authorship is not governance evidence and is not consulted.
 
 ### What these obligations do not decide
 
 They do not decide whether a successor repairs the defect that caused
 supersession, whether its scope matches its predecessor's, or whether the reason
 given is truthful. A successor is reviewed and accepted on its own merits like
-any milestone, and that review is the only control over adequacy.
+any milestone.
+
+They do not verify who signed anything. `Authority` is matched as the literal
+text `Maintainer` and `Authority evidence` as link syntax; neither the signer
+nor the content of the pointer is checked, exactly as for every other governance
+record. What obligation 7 adds is that the claim cannot be altered afterwards.
 
 They also do not prevent a milestone from being superseded repeatedly through a
 chain of successors. Each link is an ordinary acceptance, so the chain carries no

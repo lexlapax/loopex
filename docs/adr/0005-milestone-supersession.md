@@ -47,13 +47,20 @@ Technical depth: [Why the existing mechanism escapes the tension](0005-milestone
 - `Superseded` is terminal. A superseded milestone never moves to any other
   state, and its outcomes are neither proved nor waived — they are abandoned
   with the plan that declared them.
-- Correction is a **successor milestone**: an ordinary milestone opened
-  gate-first, reviewed at its exact candidate SHA, and accepted binding that
-  candidate. No new binding, identity, or chain semantics are introduced.
-- The successor's Concept plan names the milestone it replaces. The register
-  records the superseded state; the plan records the relationship.
-- Only the maintainer supersedes a milestone, and the transition is
-  administrative: register state and derived status only.
+- **Supersession is not a standalone act.** A milestone becomes `Superseded`
+  only in the commit that opens its successor, so a superseded milestone always
+  has exactly one successor and can never be left abandoned by a register edit.
+- Correction is therefore a **successor milestone**: an ordinary milestone
+  opened gate-first, reviewed at its exact candidate SHA, and accepted binding
+  that candidate. No new binding, identity, or chain semantics are introduced.
+- Only a milestone with a **completed acceptance record** may be superseded, and
+  only from `Accepted`, `In progress`, or `In review`. A milestone that is
+  merely `Open` is withdrawn by removing its row, and a `Closed` milestone is
+  history that proved its outcomes and is never replaced.
+- The successor's Concept plan records the relationship: which milestone it
+  replaces, why, the maintainer authority, and durable evidence of that
+  disposition. Once complete that record is anchored and immutable, like any
+  governance record.
 - A superseded milestone is not the active milestone, the next candidate, or the
   last integrated checkpoint. It is history.
 
