@@ -10,6 +10,34 @@ in the [context map](agent-context-map.md), and the capability classes are
 defined by the [Concept rule](development-charter.md#concept-capability-follows-consequence)
 and [Technical depth](development-charter-technical.md#technical-capability-follows-consequence).
 
+## 2026-08-16 — read-only review lane, positive and negative smoke
+
+Four consecutive independent reviews reported `workspace-write` and were
+therefore advisory rather than formal evidence under the review-environment
+rule. The enforced lane was re-verified.
+
+Invocation:
+
+```sh
+RUST_LOG=error codex exec -C . --sandbox read-only --ignore-user-config "<prompt>"
+```
+
+| Observation | Result |
+| --- | --- |
+| Reports effective filesystem profile as read-only | PASS |
+| Negative: an attempted write is rejected by the sandbox, not declined by the agent (`patch rejected: writing is blocked by read-only sandbox`) | PASS |
+| Positive: reads the checkout, resolves an exact SHA, and runs `bash scripts/check-bootstrap.sh` | PASS |
+| Worktree unchanged after the run | PASS |
+
+The write rejection is the fail-closed evidence the context map requires: the
+refusal comes from the sandbox rather than from agent compliance. A review that
+reports `workspace-write` must stop and report evidence unavailable.
+
+Environment note: under this sandbox `git` emits
+`confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR` on
+macOS, once per invocation. It is noise from the restricted temporary directory
+and does not affect exit status.
+
 ## 2026-08-15 — exact source `fd918ca7db463e86261fc37c1a61b7f27a8d212a`
 
 This is the final source candidate over repository baseline
