@@ -56,7 +56,12 @@ Technical depth: [Why the existing mechanism escapes the tension](0005-milestone
 - Only a milestone with a **completed acceptance record** may be superseded, and
   only from `Accepted`, `In progress`, or `In review`. A milestone that is
   merely `Open` is withdrawn by removing its row, and a `Closed` milestone is
-  history that proved its outcomes and is never replaced.
+  history that proved its outcomes and is never replaced. Eligibility is judged
+  against every parent of the superseding revision, so a merge cannot launder an
+  ineligible state by pairing it with an eligible one.
+- A successor that has superseded something can never be withdrawn from the
+  register. It may advance, and it may itself be superseded later, but removing
+  it would strand its predecessor with no successor.
 - The successor's Concept plan records the relationship: which milestone it
   replaces, why, the maintainer authority, and durable evidence of that
   disposition. Once complete that record is anchored and immutable, like any

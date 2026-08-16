@@ -56,6 +56,11 @@ envelopes:
    `Open` milestone has no accepted binding to preserve and is withdrawn by
    removing its row. A `Closed` milestone proved its outcomes and is never
    superseded, so the last-closed derivation can never move backwards.
+   **Eligibility is evaluated against every parent of the superseding revision,
+   not one of them.** If any parent records the milestone as absent, `Open`,
+   `Closed`, or in a state disagreeing with another parent, the transition is
+   rejected. A merge cannot launder an ineligible state by pairing it with an
+   eligible one, and no parent is privileged.
 3. A superseded milestone's plan pair and gate remain present and byte-identical
    to their accepted bindings. Supersession preserves the record; it does not
    release the bytes.
@@ -73,7 +78,14 @@ envelopes:
    like a completed governance record. Its milestone, authority, evidence
    pointer, and reason are immutable once written, so the repository cannot
    later retarget or reword which replacement was reviewed.
-8. The superseding revision changes only the register, the derived status
+8. **A successor's register row is permanent once it supersedes.** From the
+   revision completing its `## Supersedes` row onward, the successor's name is
+   present in the register at every reachable revision. It advances through the
+   ordinary lifecycle and may itself later be superseded, but it can never be
+   withdrawn, because withdrawing it would leave its predecessor terminally
+   superseded with no successor. Anchoring the relationship row alone is not
+   enough: membership carries the obligation too.
+9. The superseding revision changes only the register, the derived status
    blocks, and the successor's new plan pair and gate. No superseded plan, gate,
    envelope, or governance byte changes in it.
 
@@ -81,7 +93,9 @@ Obligation 3 is what distinguishes supersession from abandonment: the
 superseded plan stays readable and its acceptance stays provable, so the record
 shows what was agreed and that it was replaced rather than erased.
 
-Obligations 5 and 7 together carry the authority requirement. Supersession has
+Obligations 5, 7, and 8 together make the relationship durable: it is created
+atomically, its terms cannot be reworded, and its successor cannot be withdrawn.
+Obligations 5 and 7 also carry the authority requirement. Supersession has
 no transition of its own to attach a disposition to, so the authority and its
 durable evidence live in the successor's anchored `## Supersedes` row. Git
 authorship is not governance evidence and is not consulted.

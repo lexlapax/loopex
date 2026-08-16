@@ -141,8 +141,11 @@ the exact document set its milestone must update.
   or chain semantics are introduced, because the existing two-phase acceptance
   path already has the properties an amendment chain could not obtain.
   Supersession is not a standalone act: a milestone becomes `Superseded` only in
-  the revision that opens its successor, so it can never be abandoned without
-  one. Only a milestone with a completed acceptance record may be superseded,
+  the revision that opens its successor, and that successor can never be
+  withdrawn from the register afterwards, so a superseded milestone can never be
+  stranded without one. Eligibility is judged against every parent of the
+  superseding revision, so a merge cannot launder a `Closed` or `Open` state by
+  pairing it with an eligible one. Only a milestone with a completed acceptance record may be superseded,
   and never one that has closed. The successor's anchored `## Supersedes` row
   carries the maintainer authority, its durable evidence, and the reason, so the
   relationship cannot be retargeted or reworded afterwards.
