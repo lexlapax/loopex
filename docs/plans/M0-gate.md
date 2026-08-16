@@ -196,6 +196,31 @@ reports; it does not threshold. A line ceiling would reward compressed code,
 hidden complexity, and deleted coverage, so an independent reviewer weighs the
 measurement against the dropped-behavior list instead.
 
+## Negative Demonstrations
+
+Outcomes 4, 5, and 6 each require a demonstration that the protected test fails
+when the mechanism it covers is disabled. A test that still passes with the
+behavior removed proved nothing, and no locked name or minimum count detects
+that.
+
+The record is `docs/evidence/M0-negative-demonstrations.md`. The runner requires
+**exactly one** `## Outcome N` section for each of 4, 5, and 6, and within each
+section **exactly one** populated entry for every field:
+
+```text
+- mechanism disabled: <what was turned off>
+- observed failure:   <how the protected test failed>
+- demonstrated at:    <commit>
+```
+
+Both counts are exact rather than minimums. Duplicate sections would let a
+populated one cover a placeholder one, and a duplicate field would let a real
+value sit beside an unfilled dash while still satisfying "at least one
+populated". Neither is semantic dishonesty; both are the unpopulated-field drift
+this runner is responsible for.
+
+Whether a demonstration is real remains a review judgment.
+
 ## What the Runner Is For, and What Review Owns
 
 The runner defends against **accident and drift**: a command that stops passing,
