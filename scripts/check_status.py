@@ -944,23 +944,23 @@ def _artifact_history(
     if history is None:
         return
     _, snapshots = history
-    # Once a gate has declared bound artifacts, every later revision must keep
-    # declaring them. Skipping a malformed or removed section would let a commit
-    # mutate an artifact behind a broken declaration and a later commit restore
-    # it, which is exactly the mutate-then-restore this walk exists to catch.
-    introduced: set[str] = set()
-    for revision, _parents, files in snapshots:
+    # Binding state propagates along parent edges and is reconciled at merges,
+    # so the result does not depend on traversal order. Once a gate binds a
+    # target, every descendant must keep binding it: dropping the gate, dropping
+    # the declaration, or dropping a single row would each let a commit mutate
+    # that artifact behind the gap and a later commit restore it.
+    state: dict[str, dict[str, set[str]]] = {}
+    for revision, parents, files in snapshots:
+        inherited: dict[str, set[str]] = {}
+        for parent in parents:
+            for gate_path, targets in state.get(parent, {}).items():
+                inherited.setdefault(gate_path, set()).update(targets)
+
+        declared: dict[str, set[str]] = {}
         for path, text in files.items():
             if not path.startswith("docs/plans/") or not path.endswith("-gate.md"):
                 continue
-            declared = any(
-                line.strip() == "## Bound Artifacts" for line in text.splitlines()
-            )
-            if not declared:
-                if path in introduced:
-                    raise Invalid(
-                        f"{path} at {revision}: bound-artifact declaration disappeared"
-                    )
+            if not any(line.strip() == "## Bound Artifacts" for line in text.splitlines()):
                 continue
             try:
                 artifacts = _bound_artifacts(text, path)
@@ -968,7 +968,7 @@ def _artifact_history(
                 raise Invalid(
                     f"{path} at {revision}: bound-artifact declaration is malformed ({error})"
                 ) from error
-            introduced.add(path)
+            declared[path] = {target for _, target in artifacts}
             for digest, target in artifacts:
                 content = files.get(target)
                 if content is None:
@@ -980,6 +980,27 @@ def _artifact_history(
                         f"{path} at {revision}: bound artifact {target} "
                         "does not match its locked digest"
                     )
+
+        for gate_path, targets in inherited.items():
+            if gate_path not in files:
+                raise Invalid(
+                    f"{gate_path} at {revision}: gate disappeared after binding artifacts"
+                )
+            if gate_path not in declared:
+                raise Invalid(
+                    f"{gate_path} at {revision}: bound-artifact declaration disappeared"
+                )
+            dropped = sorted(targets - declared[gate_path])
+            if dropped:
+                raise Invalid(
+                    f"{gate_path} at {revision}: bound artifact "
+                    f"{dropped[0]} is no longer declared"
+                )
+
+        merged = {path: set(targets) for path, targets in inherited.items()}
+        for path, targets in declared.items():
+            merged.setdefault(path, set()).update(targets)
+        state[revision] = merged
 
 
 def _bound_artifacts(gate_text: str, gate_path: str) -> tuple[tuple[str, str], ...]:

@@ -90,6 +90,32 @@ the exact document set its milestone must update.
 - Negative-demonstration sections must be unique per outcome. Scoping fields by
   section fixed the global-count defect, but duplicate sections concatenated, so
   a populated one could cover a placeholder one.
+- The isolation fix from the previous round broke the mandatory read-only review
+  lane: the runner created its temporary root before the non-writing scaffold
+  check, so an enforced read-only reviewer failed on unavailable temporary
+  storage instead of reaching the declared red condition. Every check that only
+  reads the checkout now runs first, verified by running the gate in that lane.
+- Artifact binding now propagates along parent edges and is reconciled at merges
+  rather than tracked in one global set, and persistence covers the gate file,
+  the declaration, and each individual bound row. Deleting the gate, removing
+  the section, or dropping a single row while mutating that artifact are each
+  rejected, including through a merge whose other parent is clean.
+- The provider exclusion proof requires the provider file to execute no tests
+  unfiltered, rather than merely reporting some exclusion, which an unrelated
+  tag could have supplied while the provider test still ran.
+- Hooks are executed as configured executables rather than through `bash`, so a
+  lost execute bit or broken shebang is caught, and must exit exactly 2, which
+  is the only status the client treats as blocking.
+- The absolute-invocation scan covers any absolute path, `env` with flags and
+  assignments, `command -p` and `-pv`, and assignment-prefixed runs.
+- `HOME` stays real so Mix keeps its caches, and the real user state directory is
+  fingerprinted before and after, failing the run if it changed.
+- `AGENTS.md` joins the closure document set, since outcome 8 makes its
+  bootstrap-prerequisite text stale.
+- Formatter coverage must appear outside a comment; evidence fields reject
+  whitespace-only content; bare outcome headings are counted consistently; and
+  the gate now states the evidence field names, hook exit semantics, and
+  dependency-hook requirements the runner enforces.
 - Six bounded corrections inside that boundary: a named hook that disappears now
   fails rather than skipping its check, since removing a tested hook is
   behaviour loss ADR 0002 permits only by disposition; retained inline budget

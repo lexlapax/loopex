@@ -1529,6 +1529,69 @@ class StatusTest(unittest.TestCase):
         errors = run(absent)
         self.assertTrue(errors and "is missing" in errors[0], errors)
 
+    def test_artifact_binding_persists_along_every_parent(self) -> None:
+        """Dropping the gate, the section, or one row must all fail."""
+        good = "#!/usr/bin/env bash\nexit 1\n"
+        bad = "#!/usr/bin/env bash\nexit 0\n"
+        other = "x = 1\n"
+        d_good = hashlib.sha256(good.encode("utf-8")).hexdigest()
+        d_other = hashlib.sha256(other.encode("utf-8")).hexdigest()
+        two = (
+            "# Gate\n\n## Bound Artifacts\n\n| SHA-256 | Path |\n| --- | --- |\n"
+            f"| `{d_good}` | `scripts/run-gate.sh` |\n| `{d_other}` | `cfg.exs` |\n"
+        )
+        one = (
+            "# Gate\n\n## Bound Artifacts\n\n| SHA-256 | Path |\n| --- | --- |\n"
+            f"| `{d_other}` | `cfg.exs` |\n"
+        )
+        docs = documents()
+        docs["docs/plans/README.md"] = _open_capsule(
+            docs["docs/plans/README.md"]
+            .replace(
+                "| `M0` | Blocked | — | — | — |",
+                "| `M0` | Open | [concept](M0.md) | "
+                "[technical depth](M0-technical.md) | [gate](M0-gate.md) |",
+            )
+            .replace(SUMMARY, OPEN_SUMMARY)
+        )
+        docs["README.md"] = docs["README.md"].replace(SUMMARY, OPEN_SUMMARY)
+        docs["docs/plans/M0.md"] = plan(False)
+        docs["docs/plans/M0-technical.md"] = TECHNICAL_PLAN
+        docs["docs/plans/M0-gate.md"] = two
+
+        def run(snapshots):
+            return validate(
+                docs, None, lambda: (snapshots[-1][0], tuple(snapshots)),
+                read_artifact=lambda t: (other if t == "cfg.exs" else good).encode("utf-8"),
+            )
+
+        base = {"docs/plans/M0-gate.md": two, "scripts/run-gate.sh": good, "cfg.exs": other}
+
+        # The gate file itself is deleted, then restored.
+        errors = run([
+            ("a" * 40, (), dict(base)),
+            ("b" * 40, ("a" * 40,), {"scripts/run-gate.sh": bad, "cfg.exs": other}),
+            ("c" * 40, ("b" * 40,), dict(base)),
+        ])
+        self.assertTrue(errors and "gate disappeared" in errors[0], errors)
+
+        # One row is removed from an otherwise valid table, then restored.
+        errors = run([
+            ("a" * 40, (), dict(base)),
+            ("b" * 40, ("a" * 40,), {"docs/plans/M0-gate.md": one, "scripts/run-gate.sh": bad, "cfg.exs": other}),
+            ("c" * 40, ("b" * 40,), dict(base)),
+        ])
+        self.assertTrue(errors and "no longer declared" in errors[0], errors)
+
+        # A merge whose other parent dropped the gate is still caught.
+        errors = run([
+            ("a" * 40, (), dict(base)),
+            ("b" * 40, ("a" * 40,), {"scripts/run-gate.sh": bad, "cfg.exs": other}),
+            ("c" * 40, ("a" * 40,), dict(base)),
+            ("d" * 40, ("c" * 40, "b" * 40), dict(base)),
+        ])
+        self.assertTrue(errors and "gate disappeared" in errors[0], errors)
+
     def test_malformed_or_removed_artifact_declaration_fails(self) -> None:
         """A broken declaration must not read as predating the convention."""
         good = "#!/usr/bin/env bash\nexit 1\n"

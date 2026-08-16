@@ -76,23 +76,12 @@ run_selector() {
 # accident this catches; whether the content is truthful is a review judgment.
 require_populated() {
   local file="$1" label="$2"
-  grep -qiE "^- ${label}: *[^ ]" "$file" \
-    && ! grep -qiE "^- ${label}: *—" "$file" \
+  grep -qiE "^- ${label}:[[:space:]]*[^[:space:]—]" "$file" \
     || fail "$file does not record ${label}"
 }
 
 command -v mix >/dev/null 2>&1 || fail "mix is not installed; the accepted toolchain is required"
 
-# Every Mix invocation below runs against a temporary LOOPEX_HOME and workspace.
-# A helper that fell back to the real user home would otherwise modify user
-# state and still let this gate pass.
-isolated_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m0-home.XXXXXX")" \
-  || fail "could not create an isolated LOOPEX_HOME for the run"
-export LOOPEX_HOME="$isolated_root/home"
-export LOOPEX_WORKSPACE="$isolated_root/workspace"
-mkdir -p "$LOOPEX_HOME" "$LOOPEX_WORKSPACE"
-absence_root=""
-trap 'rm -rf "$isolated_root" ${absence_root:+"$absence_root"}' EXIT
 
 [ -f mix.exs ] || fail "no umbrella project at mix.exs (outcome 1)"
 [ -f apps/loopex_protocol/mix.exs ] || fail "no contract application at apps/loopex_protocol (outcome 1)"
@@ -109,9 +98,35 @@ require_named_test apps/loopex/test/fencing_test.exs "commit_unknown is fenced a
 require_named_test apps/loopex/test/fencing_test.exs "a stale completion is rejected after a coordinator restart"
 require_named_test apps/loopex/test/vm_code_spike_test.exs "a trusted generation loads and rolls back in an isolated VM"
 
+# Everything above this line only reads the checkout, so an enforced read-only
+# reviewer reaches the declared red condition instead of failing on temporary
+# storage. Everything below runs Mix or writes, and needs isolation first.
+#
+# Mix runs against a temporary LOOPEX_HOME and workspace. HOME stays real,
+# because Mix needs its own caches, so real user state is fingerprinted instead
+# and any change to it fails the run.
+isolated_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m0-home.XXXXXX")" \
+  || fail "could not create an isolated LOOPEX_HOME for the run"
+absence_root=""
+trap 'rm -rf "$isolated_root" ${absence_root:+"$absence_root"}' EXIT
+export LOOPEX_HOME="$isolated_root/home"
+export LOOPEX_WORKSPACE="$isolated_root/workspace"
+mkdir -p "$LOOPEX_HOME" "$LOOPEX_WORKSPACE"
+
+user_state_dirname=".loopex"
+real_user_state() {
+  local target="${HOME%/}/$user_state_dirname"
+  if [ -e "$target" ]; then
+    find "$target" -exec stat -f '%N %m %z' {} + 2>/dev/null | sort | shasum -a 256
+  else
+    echo absent
+  fi
+}
+user_state_before="$(real_user_state)"
+
 [ -f .formatter.exs ] || fail "no .formatter.exs; formatting scope would be unbound (outcome 1)"
-grep -qE 'apps/\*' .formatter.exs \
-  || fail ".formatter.exs does not cover apps/**; formatting could pass with applications unformatted (outcome 1)"
+grep -vE '^[[:space:]]*#' .formatter.exs | grep -qE 'apps/\*' \
+  || fail ".formatter.exs does not cover apps/** outside a comment; formatting could pass with applications unformatted (outcome 1)"
 mix format --check-formatted || fail "formatting is not clean"
 mix compile --warnings-as-errors || fail "compilation is not warning-free"
 mix loopex.deps_budget || fail "dependency budget or direction violated (outcome 1)"
@@ -154,8 +169,15 @@ provider_executed="$(executed_tests "$provider_output")" \
 default_output="$(mix test apps/loopex_llm_reqllm/test/provider_test.exs 2>&1)" \
   || { printf '%s\n' "$default_output" >&2; fail "the provider file fails in the default suite (outcome 7)"; }
 default_excluded="$(summary_field "$default_output" excluded)"
+default_executed="$(executed_tests "$default_output")" \
+  || fail "the provider file produced no parsable test count in the default suite (outcome 7)"
+# The file holds only real_provider-tagged tests, so an unfiltered run must
+# execute none of them. Requiring "something was excluded" would pass while an
+# unrelated tag supplied the exclusion and the provider test still ran.
+[ "$default_executed" -eq 0 ] \
+  || fail "the provider file executed ${default_executed} tests unfiltered; real_provider is not excluded by default (outcome 7)"
 [ "${default_excluded:-0}" -ge 1 ] \
-  || fail "the real_provider tag is not excluded by default; the full suite would call a provider (outcome 7)"
+  || fail "the provider file declares no excluded tests; it must hold only real_provider-tagged tests (outcome 7)"
 
 provider_evidence="docs/evidence/M0-provider.md"
 [ -f "$provider_evidence" ] || fail "the real-provider lane retained no evidence at $provider_evidence (outcome 7)"
@@ -166,7 +188,7 @@ done
 negatives="docs/evidence/M0-negative-demonstrations.md"
 [ -f "$negatives" ] || fail "no negative demonstrations recorded at $negatives"
 for outcome in 4 5 6; do
-  grep -qE "^## Outcome ${outcome} " "$negatives" \
+  grep -qE "^## Outcome ${outcome}([[:space:]]|$)" "$negatives" \
     || fail "$negatives records no negative demonstration for outcome ${outcome}"
 done
 # Fields are validated inside each outcome section. A global count would let
@@ -186,7 +208,7 @@ for outcome in 4 5 6; do
     # Exactly one occurrence, and it must be populated. Requiring "at least one
     # populated" lets a real value sit beside a placeholder and pass.
     total="$(printf '%s\n' "$section" | grep -ciE "^- ${field}:" || true)"
-    filled="$(printf '%s\n' "$section" | grep -ciE "^- ${field}: *[^ —]" || true)"
+    filled="$(printf '%s\n' "$section" | grep -ciE "^- ${field}:[[:space:]]*[^[:space:]—]" || true)"
     [ "${total:-0}" -eq 1 ] \
       || fail "$negatives outcome ${outcome} has ${total:-0} \"${field}\" entries; exactly one is required"
     [ "${filled:-0}" -eq 1 ] \
@@ -219,7 +241,9 @@ done
 
 # The scan covers apps/** too, because the replacement lives there and an
 # absolute invocation would bypass both the stubs and a scripts-only scan.
-bypass='(/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/|env +|command +-p +|(^|[[:space:]])PATH=[^[:space:]]+ +)(python3|jq)([^[:alnum:]_]|$)'
+# Any absolute path, any env invocation with or without flags, any command -p
+# or -pv, and any run prefixed by one or more assignments.
+bypass='((^|[[:space:]])/[^[:space:]]*/|(^|[[:space:]])env([[:space:]]+-[^[:space:]]+)*[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*|command[[:space:]]+-[pv]+[[:space:]]+|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+)(python3|jq)([^[:alnum:]_]|$)'
 scan_paths="scripts apps config .claude .codex .github mix.exs .formatter.exs"
 if git grep -nE "$bypass" -- $scan_paths >/dev/null 2>&1; then
   git grep -nE "$bypass" -- $scan_paths >&2
@@ -248,9 +272,16 @@ for hook_name in guard-bash guard-filesystem after-edit; do
     || fail "$hook_path is missing; removing a tested hook needs a recorded disposition (outcome 8)"
   fixture="$fixture_root/${hook_name}.stdin"
   [ -f "$fixture" ] || fail "no fixture at $fixture for $hook_path (outcome 8)"
-  if bash "$hook_path" < "$fixture" >/dev/null 2>&1; then
-    fail "$hook_path accepted $fixture; a tested blocking behavior was lost (outcome 8)"
-  fi
+  # Invoked as the configured executable, not through bash, so a lost execute
+  # bit or broken shebang is caught. Claude Code treats exit 2 as blocking and
+  # other nonzero statuses as non-blocking errors, so only 2 counts as a block.
+  [ -x "$hook_path" ] || fail "$hook_path is not executable; the client would not run it (outcome 8)"
+  set +e
+  "$hook_path" < "$fixture" >/dev/null 2>&1
+  hook_status=$?
+  set -e
+  [ "$hook_status" -eq 2 ] \
+    || fail "$hook_path exited ${hook_status} on $fixture; only 2 blocks in the client (outcome 8)"
 done
 
 # The replacement must preserve the history guarantees the retired checker had.
@@ -270,5 +301,8 @@ require_populated "$self_hosting_report" "dropped behaviors"
 require_populated "$self_hosting_report" "recorded"
 
 mix test || fail "full suite failed"
+
+[ "$(real_user_state)" = "$user_state_before" ] \
+  || fail "the run modified real user state outside the isolated LOOPEX_HOME"
 
 echo "M0 gate GREEN"

@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `db7f74a116ff9524b2c57a7c148ddbcafa49c4092ad4e411185e161380e8cbba` | `scripts/check-m0-gate.sh` |
+| `651788aec507c4e2b6142c2024f53d63e6b2f3004fc031abf8734afb9b84821d` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -55,6 +55,7 @@ that accepted it.
 | 1 | `mix format --check-formatted` | Formatting is clean across every application, with `.formatter.exs` proven to cover `apps/**` |
 | 2 | `mix compile --warnings-as-errors` | The checkpoint is warning-free across every application |
 | 3 | `mix loopex.deps_budget` | Outcome 1: dependency budget and one-way direction |
+| 3a | `.claude/hooks/deps-budget.sh` | Outcome 2: exists, calls `mix loopex.deps_budget`, and carries no inline budget logic — no `apps/loopex/mix.exs` path handling and no `deps` definition of its own |
 | 4 | `mix loopex.version_train` | Outcome 1: every application carries one version |
 | 5 | `mix test apps/loopex/test/deps_budget_test.exs` | Outcome 2: forbidden dependency, reverse edge, dynamic reference |
 | 5a | `mix loopex.core_only` and `mix test apps/loopex/test/core_only_test.exs` | Outcome 9: fakes-only lane, no adapter started, no per-runtime application environment |
@@ -105,6 +106,7 @@ The development contract requires each gate to name the documents its milestone
 must update before closure. For `M0` that set is exact:
 
 ```text
+AGENTS.md                              (bootstrap prerequisites, once Python and jq go)
 CHANGELOG.md
 README.md                              (derived status summary)
 docs/plans/README.md                   (register row and status capsule)
@@ -163,9 +165,13 @@ green run on an unlisted pair satisfies neither lane.
 ## User-State Isolation
 
 Every Mix invocation runs with `LOOPEX_HOME` and `LOOPEX_WORKSPACE` pointed at a
-temporary root the runner creates and removes. The development contract forbids
-tests touching real user state, and a helper that silently fell back to the real
-home would otherwise mutate it while the gate still passed.
+temporary root the runner creates and removes. `HOME` stays real, because Mix
+needs its own caches, so the runner fingerprints the real user state directory
+before and after and fails if the run changed it.
+
+Every check that only reads the checkout runs **before** any temporary storage
+is created, so the mandatory read-only review reaches the declared red condition
+instead of failing on unavailable temporary storage.
 
 ## Real-Provider Lane
 
@@ -173,8 +179,13 @@ Command 10 is excluded from the default suite and runs only when invoked
 explicitly. The credential is read from the environment and never written to a
 journal, fixture, log, snapshot, diagnostic, or committed byte.
 
-The lane retains non-secret provider, model, and endpoint-class identity in
-`docs/evidence/M0-provider.md`, which the runner requires. A missing
+The lane retains non-secret identity in `docs/evidence/M0-provider.md`. The
+runner requires four populated fields, named exactly: `provider`, `model`,
+`endpoint`, and `recorded`.
+
+The file holds only `real_provider`-tagged tests, so an unfiltered run of it must
+execute none. Requiring merely that something was excluded would pass while an
+unrelated tag supplied the exclusion and the provider test still ran. A missing
 credential reports evidence unavailable and exits non-zero; it never reports
 success, and a skipped lane is not a pass. Because a tagged run exits zero having executed nothing, the runner requires at
 least one executed test.
@@ -209,8 +220,12 @@ Command 11 covers four separable things and fails on any of the first three:
    `.claude/hooks/guard-filesystem.sh`.
 3. **Preserved hook behavior.** Each named hook must exist — a hook that simply
    disappears is behaviour loss, which ADR 0002 permits only through a recorded
-   disposition — and is executed against its own fixture at
-   `scripts/fixtures/hook-cases/<hook>.stdin`, which it must still reject. The
+   disposition — must be executable, and is run **as the configured executable**
+   rather than through `bash`, so a lost execute bit or broken shebang is caught.
+   It must exit exactly `2` on its fixture at
+   `scripts/fixtures/hook-cases/<hook>.stdin`: the client treats 2 as blocking
+   and any other nonzero status as a non-blocking error, so only 2 proves the
+   behavior survived. The
    replacement additionally runs
    `apps/loopex/test/history_anchoring_test.exs`, whose three locked cases prove
    it still anchors bound artifacts across history; retiring the current checker
@@ -218,8 +233,9 @@ Command 11 covers four separable things and fails on any of the first three:
    by execution, not by the task's exit status. Removing a behavior instead of
    migrating it requires an explicit disposition recorded against outcome 8.
 4. **Measurement.** `docs/evidence/M0-self-hosting.md` records the replacement's
-   measured size and the behaviors dropped from the bridge. The runner requires
-   the record to be populated; review judges whether it is truthful.
+   size and what it dropped. The runner requires three populated fields, named
+   exactly: `measured size`, `dropped behaviors`, and `recorded`. Review judges
+   whether the content is truthful.
 
 Shell is not retired. The enduring baseline is Git, shell and POSIX tools, and
 the accepted Elixir/OTP toolchain, so a check may remain a shell entrypoint that
