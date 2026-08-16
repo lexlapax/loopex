@@ -80,6 +80,16 @@ the exact document set its milestone must update.
   status, register, and rejoin blocks; plan/gate/governance correspondence; and
   the derived README summary, with in-memory adversarial controls rather than a
   general Markdown parser. M0 replaces the bridge with Elixir/Mix.
+- Six bounded corrections inside that boundary: a named hook that disappears now
+  fails rather than skipping its check, since removing a tested hook is
+  behaviour loss ADR 0002 permits only by disposition; retained inline budget
+  logic is rejected again; the history-preservation cases are executed tests
+  with locked names rather than files that merely exist; negative-demonstration
+  fields are counted inside each outcome section instead of globally; the
+  self-hosting baseline is corrected from a stale 3,990 to the measured 4,313
+  lines; and the executed-test arithmetic no longer subtracts excluded tests,
+  which ExUnit already reports outside its total and which would have falsely
+  rejected a file holding both tagged and ordinary tests.
 - The M0 gate stopped trying to defeat a dishonest implementer. Five review
   rounds found a bypass for every mechanical anti-faking control, because a
   script cannot tell whether a test asserts anything, whether a fixture is real,

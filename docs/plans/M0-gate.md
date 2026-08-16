@@ -31,7 +31,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `0e17a5e6526545beef00f1d82e5f8213232a71449d6f0177a355fce1b9ee7dba` | `scripts/check-m0-gate.sh` |
+| `6eee2438aa0a80e4c1d632c5fa8263dfcc2c13d2a09d467743d2631b999a4e58` | `scripts/check-m0-gate.sh` |
 | `f26287082f2f58ff9f1e08acc0b87f472f3c79556dbf4f2c15fad76b47280d1d` | `.tool-versions` |
 
 Changing either file changes its digest, which changes this document, which
@@ -49,6 +49,7 @@ that accepted it.
 | 5 | `mix test apps/loopex/test/deps_budget_test.exs` | Outcome 2: forbidden dependency, reverse edge, dynamic reference |
 | 5a | `mix loopex.core_only` and `mix test apps/loopex/test/core_only_test.exs` | Outcome 9: fakes-only lane, no adapter started, no per-runtime application environment |
 | 5b | `mix loopex.docs_check` | Outcome 10: compiled dual-depth documentation, as the development contract requires |
+| 5c | `mix test apps/loopex/test/history_anchoring_test.exs` | Outcome 8: the replacement still anchors bound artifacts across history |
 | 6 | `mix loopex.matrix` | Outcome 3: both locked pairs run individually |
 | 7 | `mix test apps/loopex/test/journal_replay_test.exs` | Outcome 4: journal replay across a restart |
 | 8 | `mix test apps/loopex/test/fencing_test.exs` | Outcome 5: fencing and reconciliation across a restart |
@@ -81,6 +82,7 @@ or renamed. It does not prove the test asserts anything, and review owns that.
 | `apps/loopex/test/journal_replay_test.exs` | 2 | `replay after an induced restart reconstructs the same durable state` |
 | `apps/loopex/test/fencing_test.exs` | 2 | `commit_unknown is fenced and never dispatched a second time`; `a stale completion is rejected after a coordinator restart` |
 | `apps/loopex/test/vm_code_spike_test.exs` | 1 | `a trusted generation loads and rolls back in an isolated VM` |
+| `apps/loopex/test/history_anchoring_test.exs` | 3 | `a mutated then restored artifact is rejected`; `a merge parent carrying a mutated artifact is rejected`; `an artifact missing from history is rejected` |
 | `apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider` | 1 | — |
 
 Minimums and names may be raised or extended by stricter append-only coverage
@@ -153,12 +155,14 @@ Command 11 covers four separable things and fails on any of the first three:
    `jq` invocations in `scripts/check-agent-bootstrap.sh`,
    `.claude/hooks/guard-bash.sh`, `.claude/hooks/after-edit.sh`, and
    `.claude/hooks/guard-filesystem.sh`.
-3. **Preserved hook behavior.** Each named hook is executed against its own
-   fixture at `scripts/fixtures/hook-cases/<hook>.stdin`, and must still reject
-   it. The replacement must additionally carry mutation-restore,
-   merge-divergence, and missing-artifact fixtures proving it still anchors
-   bound artifacts across history, because retiring the current checker would
-   otherwise drop that guarantee. This is proved
+3. **Preserved hook behavior.** Each named hook must exist — a hook that simply
+   disappears is behaviour loss, which ADR 0002 permits only through a recorded
+   disposition — and is executed against its own fixture at
+   `scripts/fixtures/hook-cases/<hook>.stdin`, which it must still reject. The
+   replacement additionally runs
+   `apps/loopex/test/history_anchoring_test.exs`, whose three locked cases prove
+   it still anchors bound artifacts across history; retiring the current checker
+   would otherwise drop that guarantee silently. This is proved
    by execution, not by the task's exit status. Removing a behavior instead of
    migrating it requires an explicit disposition recorded against outcome 8.
 4. **Measurement.** `docs/evidence/M0-self-hosting.md` records the replacement's
@@ -169,14 +173,14 @@ Shell is not retired. The enduring baseline is Git, shell and POSIX tools, and
 the accepted Elixir/OTP toolchain, so a check may remain a shell entrypoint that
 calls Mix.
 
-The retiring bridge measures 3,990 lines at the gate commit:
+The retiring bridge measures 4,313 lines at the gate commit:
 
 ```text
-1893  scripts/check_status.py
-1858  scripts/test_check_status.py
+2069  scripts/check_status.py
+2005  scripts/test_check_status.py
    8  scripts/check-status.sh
  231  scripts/check-agent-bootstrap.py
-3990  total
+4313  total
 ```
 
 **That figure is audit and review material, not a pass condition.** Requirement 4
@@ -206,8 +210,10 @@ whether the self-hosting report and negative demonstrations are truthful.
 Stated plainly so the closure reviewer knows where to look, rather than implying
 the runner covers it.
 
-A locked test name and a minimum count prove that a test with that name ran.
-They cannot prove it asserts anything: `assert true` satisfies both. A custom
+A locked test name is a source-text check: it proves the name is still present,
+which catches a protected test that was deleted or renamed. It does not prove
+that test ran, and a minimum executed count does not prove the counted tests
+were the named ones. A custom
 Mix task's exit code proves it ran, not that it inspected anything. The
 real-provider lane's retained identity record proves a record exists, not that a
 network call happened. No structural rule closes these, because meaning is not a

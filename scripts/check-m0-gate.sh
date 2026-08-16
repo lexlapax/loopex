@@ -40,19 +40,20 @@ require_named_test() {
     || fail "$file no longer contains the locked test \"${name}\""
 }
 
-# ExUnit counts skipped and excluded tests inside its total, so a tagged skip
-# satisfies a naive minimum without running. Executed is total minus both.
+# ExUnit counts skipped tests inside its total but reports excluded ones
+# separately: "1 test, 0 failures (1 excluded)". Executed is total minus
+# skipped only; subtracting excluded as well would reject a valid file that
+# holds both tagged and ordinary tests.
 summary_field() {
   printf '%s' "$1" | grep -oE "[0-9]+ $2" | tail -1 | grep -oE '[0-9]+' || true
 }
 
 executed_tests() {
-  local output="$1" total skipped excluded
+  local output="$1" total skipped
   total="$(printf '%s' "$output" | grep -oE '[0-9]+ (test|tests),' | tail -1 | grep -oE '[0-9]+' || true)"
   [ -n "$total" ] || return 1
   skipped="$(summary_field "$output" skipped)"
-  excluded="$(summary_field "$output" excluded)"
-  echo $((total - ${skipped:-0} - ${excluded:-0}))
+  echo $((total - ${skipped:-0}))
 }
 
 run_selector() {
@@ -111,14 +112,23 @@ run_selector apps/loopex/test/journal_replay_test.exs 2
 run_selector apps/loopex/test/fencing_test.exs 2
 run_selector apps/loopex/test/vm_code_spike_test.exs 1
 
+# A named hook that simply disappears is behaviour loss, which ADR 0002 allows
+# only through an explicit disposition. Absence therefore fails here rather than
+# skipping the check.
 hook=".claude/hooks/deps-budget.sh"
-if [ -f "$hook" ]; then
-  grep -qE 'mix +loopex\.deps_budget' "$hook" \
-    || fail "$hook does not call the repository dependency-budget command (outcome 2)"
+[ -f "$hook" ] || fail "$hook is missing; removing a tested hook needs a recorded disposition (outcome 2)"
+grep -qE 'mix +loopex\.deps_budget' "$hook" \
+  || fail "$hook does not call the repository dependency-budget command (outcome 2)"
+if grep -qE 'apps/loopex/mix\.exs|defp? deps' "$hook"; then
+  fail "$hook still carries inline budget logic instead of calling the command (outcome 2)"
 fi
 
 provider_output="$(mix test apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider 2>&1)" \
   || { printf '%s\n' "$provider_output" >&2; fail "real-provider lane failed (outcome 7)"; }
+provider_skipped="$(summary_field "$provider_output" skipped)"
+if [ "${provider_skipped:-0}" -ne 0 ]; then
+  fail "real-provider lane skipped ${provider_skipped} tests; a protected selector may not skip (outcome 7)"
+fi
 provider_executed="$(executed_tests "$provider_output")" \
   || fail "real-provider lane produced no parsable test count (outcome 7)"
 [ "$provider_executed" -ge 1 ] \
@@ -126,7 +136,7 @@ provider_executed="$(executed_tests "$provider_output")" \
 
 provider_evidence="docs/evidence/M0-provider.md"
 [ -f "$provider_evidence" ] || fail "the real-provider lane retained no evidence at $provider_evidence (outcome 7)"
-for field in provider model endpoint; do
+for field in provider model endpoint recorded; do
   require_populated "$provider_evidence" "$field"
 done
 
@@ -136,10 +146,18 @@ for outcome in 4 5 6; do
   grep -qE "^## Outcome ${outcome} " "$negatives" \
     || fail "$negatives records no negative demonstration for outcome ${outcome}"
 done
-for field in "mechanism disabled" "observed failure" "demonstrated at"; do
-  populated="$(grep -ciE "^- ${field}: *[^ —]" "$negatives" || true)"
-  [ "${populated:-0}" -ge 3 ] \
-    || fail "$negatives has fewer than three populated \"${field}\" entries"
+# Fields are counted inside each outcome section. A global count would let three
+# duplicate entries under one outcome satisfy all three.
+for outcome in 4 5 6; do
+  section="$(awk -v n="$outcome" '
+    $0 ~ "^## Outcome " n " " { capture = 1; next }
+    /^## / { capture = 0 }
+    capture { print }
+  ' "$negatives")"
+  for field in "mechanism disabled" "observed failure" "demonstrated at"; do
+    printf '%s\n' "$section" | grep -qiE "^- ${field}: *[^ —]" \
+      || fail "$negatives outcome ${outcome} does not record \"${field}\""
+  done
 done
 
 absence_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m0-absence.XXXXXX")" \
@@ -192,7 +210,8 @@ fixture_root="scripts/fixtures/hook-cases"
 [ -d "$fixture_root" ] || fail "no hook-behavior fixtures at $fixture_root (outcome 8)"
 for hook_name in guard-bash guard-filesystem after-edit; do
   hook_path=".claude/hooks/${hook_name}.sh"
-  [ -f "$hook_path" ] || continue
+  [ -f "$hook_path" ] \
+    || fail "$hook_path is missing; removing a tested hook needs a recorded disposition (outcome 8)"
   fixture="$fixture_root/${hook_name}.stdin"
   [ -f "$fixture" ] || fail "no fixture at $fixture for $hook_path (outcome 8)"
   if bash "$hook_path" < "$fixture" >/dev/null 2>&1; then
@@ -201,10 +220,12 @@ for hook_name in guard-bash guard-filesystem after-edit; do
 done
 
 # The replacement must preserve the history guarantees the retired checker had.
-for required_case in mutation-restore merge-divergence missing-artifact; do
-  [ -f "scripts/fixtures/history-cases/${required_case}.exs" ] \
-    || fail "no ${required_case} fixture proving the replacement still anchors artifact history (outcome 8)"
-done
+# Whether a case is meaningful is a review judgment; whether it ran is not, so
+# these are executed tests with locked names rather than files that merely exist.
+require_named_test apps/loopex/test/history_anchoring_test.exs "a mutated then restored artifact is rejected"
+require_named_test apps/loopex/test/history_anchoring_test.exs "a merge parent carrying a mutated artifact is rejected"
+require_named_test apps/loopex/test/history_anchoring_test.exs "an artifact missing from history is rejected"
+run_selector apps/loopex/test/history_anchoring_test.exs 3
 
 mix loopex.self_hosting || fail "self-hosting measurement or report failed (outcome 8)"
 
@@ -212,6 +233,7 @@ self_hosting_report="docs/evidence/M0-self-hosting.md"
 [ -f "$self_hosting_report" ] || fail "no self-hosting report at $self_hosting_report (outcome 8)"
 require_populated "$self_hosting_report" "measured size"
 require_populated "$self_hosting_report" "dropped behaviors"
+require_populated "$self_hosting_report" "recorded"
 
 mix test || fail "full suite failed"
 
