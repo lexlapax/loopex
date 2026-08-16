@@ -8,7 +8,17 @@ Technical depth: [Amendment mechanics](0004-plan-amendment-supersession-technica
 - **Status:** Proposed
 - **Date:** 2026-08-15
 - **Decision owner:** Maintainer
-- **Prerequisite for:** correcting an accepted plan or gate before closure
+- **Prerequisite for:** nothing; parked
+- **Parked 2026-08-16.** Five revisions were rejected in independent review. The
+  final formal review identified the remaining defect as structural rather than
+  incidental: content identity is required because commit identity is defeated
+  by re-parenting, commit identity is required because exact-SHA review does not
+  transfer, and a single-commit amendment cannot record its own SHA. Correction
+  is handled instead by
+  [ADR 0005](0005-milestone-supersession.md#concept). This pair is retained
+  because its correction granularity remains better than supersession's and the
+  rejected attempts are the evidence for that trade-off. Revisit only with
+  evidence that supersession is too coarse in practice.
 
 ## Governance Record
 

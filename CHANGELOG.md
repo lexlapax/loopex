@@ -133,26 +133,30 @@ the exact document set its milestone must update.
   reordered, or changed commitments and history rewrites while leaving
   conforming workstream, progress, outcome-state, and evidence-link updates
   outside the locks.
-- `docs/adr/0004-plan-amendment-supersession.md` (Proposed) and its technical
-  companion — an append-only `## Amendments` table lets a defect found in an
-  accepted plan or gate be corrected without editing or erasing the acceptance
-  record. Corrected bytes and their amendment row land in one commit; each row
-  binds digests, supersedes the previous binding's exact triple, and is
-  validated against the bytes at its own introducing revision. Every amendment
-  requires the maintainer directly and re-opens independent review. There is no
-  classification: two earlier proposals tried to derive whether an amendment
-  weakened a commitment from outcome identifiers, selectors, and command counts,
-  and independent review demonstrated passing sequences that reduced coverage
-  both times. The mechanism guarantees the record is append-only, chained,
-  ordered, carried intact into closure, and textually marked as a maintainer
-  decision. Every reachable revision must stand on its own — the binding
-  effective there equals that revision's governed bytes — so validity is never
-  inherited from a sibling or restored by returning to earlier bytes. Acceptance
-  and amendment never share a revision. A row's identity is the complete row
-  within its table prefix, not its commit. It states plainly what it does not
-  guarantee: whether an amendment weakens the commitment, who signed it, and
-  that it is not graph-independent, since squashing amendments or rebasing a
-  bound closure candidate breaks it.
+- `docs/adr/0005-milestone-supersession.md` (Proposed) and its technical
+  companion — a `Superseded` terminal lifecycle state. An accepted milestone
+  found defective keeps its plan pair, gate, and governance rows exactly as
+  accepted, and correction is a successor milestone opened gate-first, reviewed
+  at its exact candidate SHA, and accepted binding it. No new binding, identity,
+  or chain semantics are introduced, because the existing two-phase acceptance
+  path already has the properties an amendment chain could not obtain.
+- `docs/adr/0004-plan-amendment-supersession.md` (Proposed, parked) and its
+  companion — the in-place amendment approach, retained as the record of a
+  rejected design. Five revisions were rejected in independent review, which
+  successively removed a derived classifier that could disguise a weakening,
+  fixed a transition that could execute only once, replaced graph-derived
+  identity a merge could switch, and universally quantified a binding rule that
+  had been existential. The final formal review identified the remaining defect
+  as structural: content identity is required because commit identity is
+  defeated by re-parenting, commit identity is required because exact-SHA review
+  does not transfer, and a single-commit amendment cannot record its own SHA.
+  Parked rather than withdrawn because its correction granularity remains better
+  than supersession's.
+- Read-only review-lane evidence in `docs/developer/agent-adapter-smoke.md`.
+  Four consecutive reviews had run workspace-write and were advisory rather than
+  formal evidence; the enforced lane is now proven with a positive smoke and a
+  negative smoke in which a write is rejected by the sandbox rather than
+  declined by the agent.
 - The ADR index recorded 0001 through 0003 as Proposed after they were accepted.
   The acceptance transition may change only governance rows and marked status
   blocks, so the index correction lands separately here. The index also claimed
