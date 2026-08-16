@@ -931,6 +931,43 @@ def _accepted_values(name: str) -> dict[str, str]:
     return values
 
 
+def _artifact_history(
+    history: tuple[str, tuple[tuple[str, tuple[str, ...], Mapping[str, str]], ...]] | None,
+) -> None:
+    """A bound artifact must match at every revision where its gate declares it.
+
+    Verifying only the current tree leaves a mutate-then-restore hole: a commit
+    changes the runner, a later commit restores it, and final validation passes.
+    Merge divergence has the same shape, so every reachable revision is checked
+    rather than a selected one.
+    """
+    if history is None:
+        return
+    _, snapshots = history
+    for revision, _parents, files in snapshots:
+        for path, text in files.items():
+            if not path.startswith("docs/plans/") or not path.endswith("-gate.md"):
+                continue
+            try:
+                artifacts = _bound_artifacts(text, path)
+            except Invalid:
+                # A revision whose gate predates the convention declares nothing.
+                # Removing the section changes the gate bytes, which an accepted
+                # gate digest already refuses.
+                continue
+            for digest, target in artifacts:
+                content = files.get(target)
+                if content is None:
+                    raise Invalid(
+                        f"{path} at {revision}: bound artifact {target} is missing"
+                    )
+                if hashlib.sha256(content.encode("utf-8")).hexdigest() != digest:
+                    raise Invalid(
+                        f"{path} at {revision}: bound artifact {target} "
+                        "does not match its locked digest"
+                    )
+
+
 def _bound_artifacts(gate_text: str, gate_path: str) -> tuple[tuple[str, str], ...]:
     """Digest and path pairs a gate binds outside its own bytes.
 
@@ -1762,10 +1799,30 @@ def validate(
                 and path.endswith(".md")
             )
         }
-        _governance_history(
-            current_governed,
-            first_parent_plans() if first_parent_plans else None,
+        plan_history = first_parent_plans() if first_parent_plans else None
+        # The governance walk owns documents; the artifact walk owns bound
+        # executables and configuration. Give each only what it governs.
+        governance_history = (
+            None
+            if plan_history is None
+            else (
+                plan_history[0],
+                tuple(
+                    (
+                        revision,
+                        parents,
+                        {
+                            path: text
+                            for path, text in files.items()
+                            if path.startswith("docs/")
+                        },
+                    )
+                    for revision, parents, files in plan_history[1]
+                ),
+            )
         )
+        _governance_history(current_governed, governance_history)
+        _artifact_history(plan_history)
 
         source = _block(
             documents["docs/vision-technical.md"],
@@ -1865,6 +1922,7 @@ def _git_resolver(
 
 def _git_plan_history(
     root: Path,
+    artifact_paths: tuple[str, ...] = (),
 ) -> Callable[
     [],
     tuple[
@@ -1920,6 +1978,7 @@ def _git_plan_history(
                 "--",
                 "docs/plans",
                 "docs/adr",
+                *artifact_paths,
             )
             if tree.returncode:
                 return None
@@ -1949,10 +2008,13 @@ def _git_plan_history(
                         and ADR_CONCEPT_PATH.fullmatch(_concept_path(path))
                     )
                 )
-                if not adr and not plan:
+                artifact = path in artifact_paths
+                if not adr and not plan and not artifact:
                     continue
                 mode, object_type, object_id = fields
-                if mode != b"100644" or object_type != b"blob":
+                # A bound runner is executable, so artifacts allow mode 100755.
+                allowed = (b"100644", b"100755") if artifact else (b"100644",)
+                if mode not in allowed or object_type != b"blob":
                     return None
                 blob = _git_run(root, "cat-file", "blob", object_id.decode("ascii"))
                 if blob.returncode:
@@ -1982,10 +2044,18 @@ def main() -> int:
             return None
         return target.read_bytes() if target.is_file() else None
 
+    declared: set[str] = set()
+    for path, text in documents.items():
+        if path.startswith("docs/plans/") and path.endswith("-gate.md"):
+            try:
+                declared.update(target for _, target in _bound_artifacts(text, path))
+            except Invalid:
+                pass
+
     errors = validate(
         documents,
         _git_resolver(root),
-        _git_plan_history(root),
+        _git_plan_history(root, tuple(sorted(declared))),
         read_artifact=read_artifact,
     )
     if errors:

@@ -1459,6 +1459,76 @@ class StatusTest(unittest.TestCase):
             else:
                 self.assert_invalid(docs, "no derived status capsule")
 
+    def test_bound_artifacts_are_anchored_across_history(self) -> None:
+        """Mutate-then-restore and merge divergence must both be caught."""
+        good = "#!/usr/bin/env bash\nexit 1\n"
+        bad = "#!/usr/bin/env bash\nexit 0\n"
+        digest = hashlib.sha256(good.encode("utf-8")).hexdigest()
+        gate = (
+            "# Gate\n\n## Bound Artifacts\n\n"
+            "| SHA-256 | Path |\n| --- | --- |\n"
+            f"| `{digest}` | `scripts/run-gate.sh` |\n"
+        )
+        docs = documents()
+        docs["docs/plans/README.md"] = _open_capsule(
+            docs["docs/plans/README.md"]
+            .replace(
+                "| `M0` | Blocked | — | — | — |",
+                "| `M0` | Open | [concept](M0.md) | "
+                "[technical depth](M0-technical.md) | [gate](M0-gate.md) |",
+            )
+            .replace(SUMMARY, OPEN_SUMMARY)
+        )
+        docs["README.md"] = docs["README.md"].replace(SUMMARY, OPEN_SUMMARY)
+        docs["docs/plans/M0.md"] = plan(False)
+        docs["docs/plans/M0-technical.md"] = TECHNICAL_PLAN
+        docs["docs/plans/M0-gate.md"] = gate
+
+        def run(snapshots):
+            return validate(
+                docs,
+                None,
+                lambda: (snapshots[-1][0], tuple(snapshots)),
+                read_artifact=lambda _: good.encode("utf-8"),
+            )
+
+        clean = [
+            ("a" * 40, (), {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": good}),
+            ("b" * 40, ("a" * 40,), {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": good}),
+        ]
+        self.assertEqual([], run(clean))
+
+        # Mutate at one revision and restore at the next. The current tree is
+        # clean, so only history can catch it.
+        restored = [
+            ("a" * 40, (), {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": good}),
+            ("b" * 40, ("a" * 40,), {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": bad}),
+            ("c" * 40, ("b" * 40,), {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": good}),
+        ]
+        errors = run(restored)
+        self.assertTrue(errors and "does not match its locked digest" in errors[0], errors)
+
+        # Merge divergence: one parent carried the mutated artifact.
+        merged = [
+            ("a" * 40, (), {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": good}),
+            ("b" * 40, ("a" * 40,), {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": bad}),
+            ("c" * 40, ("a" * 40,), {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": good}),
+            (
+                "d" * 40,
+                ("c" * 40, "b" * 40),
+                {"docs/plans/M0-gate.md": gate, "scripts/run-gate.sh": good},
+            ),
+        ]
+        errors = run(merged)
+        self.assertTrue(errors and "does not match its locked digest" in errors[0], errors)
+
+        # A missing artifact in history fails too.
+        absent = [
+            ("a" * 40, (), {"docs/plans/M0-gate.md": gate}),
+        ]
+        errors = run(absent)
+        self.assertTrue(errors and "is missing" in errors[0], errors)
+
     def test_gate_bound_artifacts_are_verified(self) -> None:
         """A gate governs nothing executable unless its runner is bound."""
         runner = b"#!/usr/bin/env bash\nexit 1\n"
