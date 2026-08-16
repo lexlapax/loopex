@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `651788aec507c4e2b6142c2024f53d63e6b2f3004fc031abf8734afb9b84821d` | `scripts/check-m0-gate.sh` |
+| `f0a589aea4b5de18bc24194928d22421920e40f5688891b73584ace388bfe989` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -52,7 +52,7 @@ that accepted it.
 
 | # | Command | Proves |
 | --- | --- | --- |
-| 1 | `mix format --check-formatted` | Formatting is clean across every application, with `.formatter.exs` proven to cover `apps/**` |
+| 1 | `mix format --check-formatted` | Formatting is clean across every application, with an `apps/**` glob proven to sit inside `.formatter.exs` `inputs` rather than merely appearing in the file |
 | 2 | `mix compile --warnings-as-errors` | The checkpoint is warning-free across every application |
 | 3 | `mix loopex.deps_budget` | Outcome 1: dependency budget and one-way direction |
 | 3a | `.claude/hooks/deps-budget.sh` | Outcome 2: exists, calls `mix loopex.deps_budget`, and carries no inline budget logic — no `apps/loopex/mix.exs` path handling and no `deps` definition of its own |
@@ -67,7 +67,7 @@ that accepted it.
 | 9 | `mix test apps/loopex/test/vm_code_spike_test.exs` | Outcome 6: isolated VM load and rollback |
 | 10 | `mix test apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider` | Outcome 7: real model call from the adapter application |
 | 11 | `mix loopex.self_hosting` | Outcome 8: absence, inventory, hook behavior, measurement |
-| 13 | `mix test` | The full suite |
+| 13 | `env -u LOOPEX_PROVIDER_API_KEY mix test` | The full suite, with the provider credential unset so no test anywhere can reach a provider |
 
 Selectors are application-relative because an umbrella root runs no tests of its
 own. Command 10 is path-scoped for the same reason: `mix test --only <tag>` at
@@ -165,9 +165,15 @@ green run on an unlisted pair satisfies neither lane.
 ## User-State Isolation
 
 Every Mix invocation runs with `LOOPEX_HOME` and `LOOPEX_WORKSPACE` pointed at a
-temporary root the runner creates and removes. `HOME` stays real, because Mix
-needs its own caches, so the runner fingerprints the real user state directory
-before and after and fails if the run changed it.
+temporary root the runner creates and removes.
+
+`HOME` stays real, because Mix needs `~/.mix` and `~/.hex`. The runner therefore
+**detects** rather than **prevents** changes to real user state: it fingerprints
+the state directory before and after and fails if it changed. That is weaker
+than the development contract's fail-before-touch requirement, and it is
+recorded here as a known weakening rather than presented as containment. Closing
+it means relocating `HOME` and accepting that Mix refetches its caches on every
+gate run, which is a maintainer decision this gate does not take on its own.
 
 Every check that only reads the checkout runs **before** any temporary storage
 is created, so the mandatory read-only review reaches the declared red condition
@@ -180,8 +186,9 @@ explicitly. The credential is read from the environment and never written to a
 journal, fixture, log, snapshot, diagnostic, or committed byte.
 
 The lane retains non-secret identity in `docs/evidence/M0-provider.md`. The
-runner requires four populated fields, named exactly: `provider`, `model`,
-`endpoint`, and `recorded`.
+runner requires four fields, named exactly: `provider`, `model`, `endpoint`, and
+`recorded`. Each must appear exactly once and be populated, so a real value
+cannot sit beside a placeholder.
 
 The file holds only `real_provider`-tagged tests, so an unfiltered run of it must
 execute none. Requiring merely that something was excluded would pass while an
@@ -189,6 +196,11 @@ unrelated tag supplied the exclusion and the provider test still ran. A missing
 credential reports evidence unavailable and exits non-zero; it never reports
 success, and a skipped lane is not a pass. Because a tagged run exits zero having executed nothing, the runner requires at
 least one executed test.
+
+The credential is named `LOOPEX_PROVIDER_API_KEY` so the runner can unset it
+deterministically for the full suite. That is containment rather than detection:
+an untagged provider-calling test added anywhere else cannot reach a provider,
+where scanning for such a test would never be complete.
 
 The runner also proves the tag is excluded by default, by running the same file
 unfiltered and requiring it to execute none of its tagged tests. Without that,
@@ -222,7 +234,9 @@ Command 11 covers four separable things and fails on any of the first three:
    disappears is behaviour loss, which ADR 0002 permits only through a recorded
    disposition — must be executable, and is run **as the configured executable**
    rather than through `bash`, so a lost execute bit or broken shebang is caught.
-   It must exit exactly `2` on its fixture at
+   Its registration in `.claude/settings.json` is checked too, because a hook
+   that still blocks is worthless if the client no longer invokes it. It must
+   exit exactly `2` on its fixture at
    `scripts/fixtures/hook-cases/<hook>.stdin`: the client treats 2 as blocking
    and any other nonzero status as a non-blocking error, so only 2 proves the
    behavior survived. The
@@ -234,7 +248,8 @@ Command 11 covers four separable things and fails on any of the first three:
    migrating it requires an explicit disposition recorded against outcome 8.
 4. **Measurement.** `docs/evidence/M0-self-hosting.md` records the replacement's
    size and what it dropped. The runner requires three populated fields, named
-   exactly: `measured size`, `dropped behaviors`, and `recorded`. Review judges
+   exactly: `measured size`, `dropped behaviors`, and `recorded`, each appearing
+   exactly once and populated. Review judges
    whether the content is truthful.
 
 Shell is not retired. The enduring baseline is Git, shell and POSIX tools, and

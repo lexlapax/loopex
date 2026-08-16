@@ -75,8 +75,12 @@ run_selector() {
 # An evidence record must exist and be filled in. An unpopulated field is the
 # accident this catches; whether the content is truthful is a review judgment.
 require_populated() {
-  local file="$1" label="$2"
-  grep -qiE "^- ${label}:[[:space:]]*[^[:space:]—]" "$file" \
+  local file="$1" label="$2" total filled
+  total="$(grep -ciE "^- ${label}:" "$file" || true)"
+  filled="$(grep -ciE "^- ${label}:[[:space:]]*[^[:space:]—]" "$file" || true)"
+  [ "${total:-0}" -eq 1 ] \
+    || fail "$file has ${total:-0} \"${label}\" entries; exactly one is required"
+  [ "${filled:-0}" -eq 1 ] \
     || fail "$file does not record ${label}"
 }
 
@@ -125,8 +129,12 @@ real_user_state() {
 user_state_before="$(real_user_state)"
 
 [ -f .formatter.exs ] || fail "no .formatter.exs; formatting scope would be unbound (outcome 1)"
-grep -vE '^[[:space:]]*#' .formatter.exs | grep -qE 'apps/\*' \
-  || fail ".formatter.exs does not cover apps/** outside a comment; formatting could pass with applications unformatted (outcome 1)"
+# The glob must sit inside the inputs list, not merely appear in the file: a
+# comment or an unrelated binding would otherwise satisfy a presence check.
+grep -vE '^[[:space:]]*#' .formatter.exs \
+  | tr -d '\n' \
+  | grep -qE 'inputs:[[:space:]]*\[[^]]*apps/\*' \
+  || fail ".formatter.exs inputs do not cover apps/**; formatting could pass with applications unformatted (outcome 1)"
 mix format --check-formatted || fail "formatting is not clean"
 mix compile --warnings-as-errors || fail "compilation is not warning-free"
 mix loopex.deps_budget || fail "dependency budget or direction violated (outcome 1)"
@@ -243,8 +251,16 @@ done
 # absolute invocation would bypass both the stubs and a scripts-only scan.
 # Any absolute path, any env invocation with or without flags, any command -p
 # or -pv, and any run prefixed by one or more assignments.
-bypass='((^|[[:space:]])/[^[:space:]]*/|(^|[[:space:]])env([[:space:]]+-[^[:space:]]+)*[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*|command[[:space:]]+-[pv]+[[:space:]]+|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+)(python3|jq)([^[:alnum:]_]|$)'
-scan_paths="scripts apps config .claude .codex .github mix.exs .formatter.exs"
+# Any path segment ending in the interpreter, however it is quoted or prefixed:
+# absolute paths, exec, env with flags or assignments, command -p/-pv, and
+# assignment-prefixed runs. Deliberate obfuscation beyond this is a dishonest
+# implementer, which the stated boundary assigns to closure review.
+bypass='(/|(^|[[:space:]])(command|exec)[[:space:]]+(-[pv]+[[:space:]]+)?["'"'"']?|env([[:space:]]+-[^[:space:]]+)*[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*["'"'"']?|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+["'"'"']?)(python3|jq)([^[:alnum:]_]|$)'
+# This runner is excluded from its own scan: it necessarily names both
+# interpreters to shadow and report them. Drift in it is caught instead by the
+# bound-artifact digest, which the status check verifies at every revision.
+scan_paths="scripts apps config .claude .codex .github mix.exs .formatter.exs
+:(exclude)scripts/check-m0-gate.sh"
 if git grep -nE "$bypass" -- $scan_paths >/dev/null 2>&1; then
   git grep -nE "$bypass" -- $scan_paths >&2
   fail "a shadow-bypassing python3/jq invocation survives (outcome 8)"
@@ -264,6 +280,23 @@ done
 
 # Each named hook is executed against its own fixture. Whether a fixture is
 # meaningful is a review judgment; that the hook still rejects it is not.
+# A hook file that still blocks is worthless if the client no longer invokes it,
+# so the registration is checked too.
+settings=".claude/settings.json"
+[ -f "$settings" ] || fail "no $settings; hook registration is unverifiable (outcome 8)"
+for registration in \
+  "PreToolUse:guard-bash" \
+  "PreToolUse:guard-filesystem" \
+  "PostToolUse:after-edit"
+do
+  event="${registration%%:*}"
+  script="${registration##*:}"
+  grep -qE "\"${event}\"" "$settings" \
+    || fail "$settings no longer registers ${event} (outcome 8)"
+  grep -qE "hooks/${script}\.sh" "$settings" \
+    || fail "$settings no longer registers ${script}.sh (outcome 8)"
+done
+
 fixture_root="scripts/fixtures/hook-cases"
 [ -d "$fixture_root" ] || fail "no hook-behavior fixtures at $fixture_root (outcome 8)"
 for hook_name in guard-bash guard-filesystem after-edit; do
@@ -300,7 +333,11 @@ require_populated "$self_hosting_report" "measured size"
 require_populated "$self_hosting_report" "dropped behaviors"
 require_populated "$self_hosting_report" "recorded"
 
-mix test || fail "full suite failed"
+# Containment rather than detection: the full suite runs with the provider
+# credential unset, so an untagged provider-calling test added anywhere cannot
+# reach a provider. Scanning for such a test would never be complete.
+env -u LOOPEX_PROVIDER_API_KEY mix test \
+  || fail "full suite failed with the provider credential unset"
 
 [ "$(real_user_state)" = "$user_state_before" ] \
   || fail "the run modified real user state outside the isolated LOOPEX_HOME"

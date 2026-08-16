@@ -90,6 +90,20 @@ the exact document set its milestone must update.
 - Negative-demonstration sections must be unique per outcome. Scoping fields by
   section fixed the global-count defect, but duplicate sections concatenated, so
   a populated one could cover a placeholder one.
+- Detection replaced by containment where it was available: the full suite runs
+  with `LOOPEX_PROVIDER_API_KEY` unset, so an untagged provider-calling test
+  added anywhere cannot reach a provider, and hook registrations in
+  `.claude/settings.json` are checked because a hook that still blocks is
+  worthless if the client no longer invokes it. Formatter coverage must sit
+  inside the `inputs` list, evidence fields must appear exactly once, and the
+  bypass scan covers quoted, `exec`-, `command`-, and assignment-prefixed
+  absolute invocations, with the runner excluded from its own scan since its
+  digest catches drift there.
+- Real user state remains detected rather than prevented, and the gate now says
+  so plainly: `HOME` stays real because Mix needs its caches, so the runner
+  fingerprints the state directory instead of relocating it. That is weaker than
+  the contract's fail-before-touch rule and is recorded as a known weakening
+  awaiting a maintainer decision.
 - The isolation fix from the previous round broke the mandatory read-only review
   lane: the runner created its temporary root before the non-writing scaffold
   check, so an enforced read-only reviewer failed on unavailable temporary

@@ -86,6 +86,16 @@ Outcome 3 requires each locked pair to run individually. A green run on one pair
 is not evidence for the other, and a green run on an unlisted pair satisfies
 neither lane.
 
+The provider credential is named `LOOPEX_PROVIDER_API_KEY`. The full suite runs
+with it unset, so no test outside the tagged lane can reach a provider by
+accident.
+
+Real user state is detected rather than contained: `HOME` stays real because Mix
+needs its caches, so the runner fingerprints the state directory and fails if it
+changed. That is weaker than the fail-before-touch requirement and is recorded
+as a known weakening; closing it means relocating `HOME` and accepting cache
+refetch on every run.
+
 Outcome 7 runs on an explicitly invoked lane excluded from the default suite.
 The credential arrives only through the environment and never enters a journal,
 fixture, log, snapshot, diagnostic, or committed byte. A missing credential
