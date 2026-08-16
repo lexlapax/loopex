@@ -14,15 +14,16 @@ a decision adds a new record rather than rewriting the old one.
 | 0002 | Bootstrap runtime floor and version matrix | Accepted | [Decision](0002-bootstrap-runtime-floor.md#concept) | [Technical depth](0002-bootstrap-runtime-floor-technical.md#technical-depth) |
 | 0003 | Extension contract boundary and distribution constraints | Accepted | [Decision](0003-extension-contract-boundary.md#concept) | [Technical depth](0003-extension-contract-boundary-technical.md#technical-depth) |
 | 0004 | Plan amendment and supersession | Proposed (parked) | [Decision](0004-plan-amendment-supersession.md#concept) | [Technical depth](0004-plan-amendment-supersession-technical.md#technical-depth) |
-| 0005 | Milestone supersession | Proposed | [Decision](0005-milestone-supersession.md#concept) | [Technical depth](0005-milestone-supersession-technical.md#technical-depth) |
+| 0005 | Milestone supersession | Proposed (parked) | [Decision](0005-milestone-supersession.md#concept) | [Technical depth](0005-milestone-supersession-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
 0003 blocks nothing — it settles the questions a first publication would
 foreclose, so that they stay open until there is evidence to decide them.
-0004 is parked after five review rejections; its identity tension is recorded
-in the pair itself. 0005 replaces it and gives a defect found in an accepted
-plan or gate a governed path other than erasing the record.
+0004 and 0005 are both parked. They designed correction paths for a defect
+found in an accepted plan, then the defect that prompted them turned out to be
+on an unmerged branch that could simply be abandoned. They become relevant the
+first time such a defect is found after integration.
 
 ## How a Decision Is Recorded
 

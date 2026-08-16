@@ -8,7 +8,13 @@ Technical depth: [Supersession mechanics](0005-milestone-supersession-technical.
 - **Status:** Proposed
 - **Date:** 2026-08-16
 - **Decision owner:** Maintainer
-- **Prerequisite for:** correcting an accepted plan or gate before implementation
+- **Prerequisite for:** nothing; parked
+- **Parked 2026-08-16.** The defect that motivated this decision was an
+  acceptance recorded on an unmerged branch. Nothing was ever integrated, so no
+  correction mechanism was required: the branch was abandoned and the milestone
+  reopened from `main`. This pair is retained because it becomes necessary the
+  first time a defect is found in a milestone that has actually been integrated,
+  and because two review rounds already hardened it. Revisit then, not before.
 
 ## Governance Record
 

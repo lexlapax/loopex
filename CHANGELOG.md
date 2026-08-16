@@ -133,7 +133,7 @@ the exact document set its milestone must update.
   reordered, or changed commitments and history rewrites while leaving
   conforming workstream, progress, outcome-state, and evidence-link updates
   outside the locks.
-- `docs/adr/0005-milestone-supersession.md` (Proposed) and its technical
+- `docs/adr/0005-milestone-supersession.md` (Proposed, parked) and its technical
   companion — a `Superseded` terminal lifecycle state. An accepted milestone
   found defective keeps its plan pair, gate, and governance rows exactly as
   accepted, and correction is a successor milestone opened gate-first, reviewed
@@ -148,7 +148,12 @@ the exact document set its milestone must update.
   pairing it with an eligible one. Only a milestone with a completed acceptance record may be superseded,
   and never one that has closed. The successor's anchored `## Supersedes` row
   carries the maintainer authority, its durable evidence, and the reason, so the
-  relationship cannot be retargeted or reworded afterwards.
+  relationship cannot be retargeted or reworded afterwards. Parked before
+  acceptance: the defect that motivated it was an acceptance recorded on an
+  unmerged branch, so nothing was integrated and no correction mechanism was
+  needed — the branch was abandoned and the milestone reopened from `main`. Both
+  0004 and 0005 become relevant the first time such a defect is found after
+  integration.
 - `docs/adr/0004-plan-amendment-supersession.md` (Proposed, parked) and its
   companion — the in-place amendment approach, retained as the record of a
   rejected design. Five revisions were rejected in independent review, which
