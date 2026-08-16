@@ -15,19 +15,20 @@ completed governance row appears it becomes an anchor, and any later revision
 whose row differs or is absent fails with
 `completed Acceptance governance record changed at <revision>`.
 
-Two consequences bound this design:
+Three consequences bound this design:
 
 1. A recorded acceptance cannot be edited, reverted, or removed by any operation
    that leaves the commit reachable. Correction must be additive.
-2. **The anchor also validates intermediate revisions.** Current envelope and
-   gate digests are checked against the effective binding at every revision, so
-   a commit that changes plan bytes without simultaneously changing the
-   effective binding is invalid — and stays invalid forever, because history is
-   re-walked. This is what made a two-phase amendment unrealizable, and it is
-   why corrected bytes and their amendment row must be one commit.
+2. The anchor validates intermediate revisions. A commit that changes plan bytes
+   without simultaneously establishing the matching binding is invalid, and
+   stays invalid because history is re-walked. Corrected bytes and their row are
+   therefore one commit.
+3. A binding that must equal *current* bytes can only ever describe the latest
+   state. Historical rows must therefore be validated against the bytes at their
+   own introducing revision, or the second amendment invalidates the first.
 
 <a id="technical-adr-0004-decision"></a>
-## Exact Record, Derivation, and Checker Obligations
+## Exact Record and Checker Obligations
 
 Concept: [Decision](0004-plan-amendment-supersession.md#concept-adr-0004-decision).
 
@@ -37,117 +38,112 @@ normative envelopes:
 ```markdown
 ## Amendments
 
-| # | Class | Authority | Authority evidence | Supersedes | Bound bytes | Reason |
-| --- | --- | --- | --- | --- | --- | --- |
+| # | Authority | Authority evidence | Supersedes | Bound bytes | Reason |
+| --- | --- | --- | --- | --- | --- |
 ```
 
 Field rules:
 
 - `#` is consecutive from 1, with no gaps or reordering.
-- `Class` is exactly `Correction`, `Strengthening`, or `Weakening`.
-- `Authority` is `Maintainer`, or `Delegate: <recorded identity>` only when the
-  derived class is not `Weakening`.
+- `Authority` is exactly `Maintainer`. No delegate value exists, so the field is
+  a constant that the check enforces rather than an authority decision it
+  evaluates.
 - `Authority evidence` is `[disposition](<durable-pointer>)`.
 - `Supersedes` carries the exact digest triple of the binding being replaced:
   `concept sha256:<64-hex>; technical sha256:<64-hex>; gate sha256:<64-hex>`.
   For row 1 that is the Acceptance row's triple.
-- `Bound bytes` carries the new triple in the same form. It has **no candidate
-  SHA**: the revision where the row first appears is its candidate, discovered
-  by the history walk rather than declared.
-- `Reason` is non-empty. For `Weakening` it names the protection given up.
-
-### Derived minimum class
-
-Comparing the superseded commitment against the new one yields a floor. A
-declared class weaker than the floor is rejected; a stronger one is permitted,
-because over-declaring is never the abuse.
-
-| Observed difference | Derived floor |
-| --- | --- |
-| An outcome ID present before is absent after | `Weakening` |
-| A protected selector present before is absent after | `Weakening` |
-| The count of locked gate commands decreases | `Weakening` |
-| An outcome's evidence class cell changes | `Strengthening` |
-| Only additions | `Strengthening` |
-| Byte changes with none of the above | `Correction` |
-
-Ordering is `Correction` < `Strengthening` < `Weakening`. The evidence-class row
-resolves to `Strengthening` rather than `Weakening` because a changed class may
-strengthen or weaken and the check cannot tell; forcing it above `Correction`
-denies the quiet path while leaving the judgment to review.
+- `Bound bytes` carries the new triple in the same form, with no candidate SHA.
+- `Reason` is non-empty, and names any protection given up.
 
 ### Checker obligations
 
 1. The effective binding is the highest-numbered complete amendment, otherwise
-   the Acceptance row. Current digests verify against the effective binding.
-2. Every amendment row is exactly empty or structurally complete.
-3. `Bound bytes` equals the current concept envelope, technical envelope, and
-   gate digests at every revision where the row is present.
+   the Acceptance row. Only the effective binding is verified against current
+   envelope and gate digests.
+2. Every amendment row is exactly empty or structurally complete, and every
+   complete row's `Authority` is `Maintainer`.
+3. Each row's `Bound bytes` equals the concept envelope, technical envelope, and
+   gate digests **at the revision that introduced that row**, not at current
+   `HEAD`. A superseded row keeps describing the bytes it bound.
 4. `Supersedes` equals the previous binding's exact triple, so the chain is
    verifiable end to end and cannot skip a link.
-5. At the revision where row N first appears, rows 1 through N−1 are present and
-   byte-identical to their anchors, and exactly one new complete row appears.
-6. The revision anchoring row N descends from the revision anchoring row N−1,
-   and is distinct from it.
-7. A completed amendment row is anchored across reachable history exactly like a
+5. Row N is introduced by exactly one revision on the first-parent history from
+   `HEAD`. That revision is row N's candidate, and candidate identity is
+   therefore unique even when a sibling branch introduces identical bytes.
+6. Row N's candidate descends from row N−1's candidate and is distinct from it.
+   Row 1's candidate descends from the revision that completed Acceptance.
+7. At row N's candidate, rows 1 through N−1 are present and byte-identical to
+   their anchors, and exactly one new complete row appears.
+8. A completed amendment row is anchored across reachable history exactly like a
    completed governance row.
-8. No amendment may be recorded once Closure is complete.
+9. No amendment may be recorded once Closure is complete.
 
-Obligations 4, 5, and 6 together defeat a verified rewind: re-binding older
-bytes is representable, but it is a new row whose derived floor is `Weakening`
-because the corrections it removes are missing outcomes, selectors, or commands.
+### What these obligations do not decide
+
+They verify that the record is append-only, single-commit, uniquely
+attributable, digest-chained, chronologically ordered, and maintainer-signed.
+
+They decide nothing about content. Narrowing an outcome's text, deleting a
+technical constraint, removing a fixture or vector, downgrading an evidence
+class, or substituting a trivially passing command all satisfy every obligation.
+No structural rule distinguishes them from a genuine correction, which is why
+this design does not attempt one and why authority is not delegable. The
+independent review of the corrected commitment is the only control over content,
+and it is not a formality.
 
 ### Additive ADR supersession
 
 `check_status.py` accepts only `Proposed` and `Accepted`, and an accepted ADR
 pair is anchored, so marking a predecessor `Superseded` fails both parsing and
-history validation. A successor therefore declares `Supersedes: NNNN` in its own
-Concept file and the predecessor's bytes are never touched. Its status stays
-`Accepted`, which remains true: it was accepted, and a later decision replaced
-it.
+history validation. A successor declares `Supersedes: NNNN` in its own Concept
+file and the predecessor is never touched. Its status stays `Accepted`, which
+remains true: it was accepted, and a later decision replaced it. Validating that
+the target exists and that no cycle forms is not yet implemented and is named
+here as a known gap rather than an implied guarantee.
 
 <a id="technical-adr-0004-alternatives"></a>
 ## Alternative Analysis
 
 Concept: [Alternatives](0004-plan-amendment-supersession.md#concept-adr-0004-alternatives).
 
-**Milestone supersession.** A `Superseded` lifecycle state, the defective
-milestone left anchored, and a successor plan accepted fresh. Equally additive,
-and roughly one state plus its derived capsule against a class taxonomy, a
-derivation table, and eight obligations. Rejected because the unit of correction
-is the whole plan: a one-line gate defect costs a full re-cut, re-review, and
-re-acceptance, which prices the cheap fix out and encourages living with
-defects. Worth revisiting if amendments prove rarer than expected.
+**Derived classification.** Two rejected attempts. The second compared outcome
+identifiers, protected selectors, locked-command counts, and evidence-class
+cells. Review demonstrated passing sequences that reduced coverage anyway: an
+outcome kept by identifier while narrowed in text, a constraint deleted from the
+technical envelope, an equal-count substitution of a real command by a trivial
+one, and a two-step replace-then-restore whose steps each classified as benign.
+The approach was abandoned because its only beneficiary was delegated
+amendments, and delegation is not needed.
 
-**History rewrite.** Simplest before integration and genuinely available while a
-branch is private. Rejected as a policy because it is only disruptive and
-detectable after publication rather than impossible, cannot recall copies
-already fetched, and normalises deleting an uncomfortable record.
+**Milestone supersession.** A `Superseded` lifecycle state with the defective
+milestone left anchored and a successor accepted fresh. Equally additive and far
+smaller. Rejected because the unit of correction is the whole plan, so the cheap
+fix becomes expensive and defects get tolerated instead. Worth revisiting with
+evidence about amendment frequency.
 
-**In-place edit of the accepted row.** Requires removing the anchor that proves
-an acceptance was not re-cut.
+**History rewrite.** Simplest before integration, genuinely available while a
+branch is private. Rejected as policy: after publication it is disruptive and
+detectable rather than impossible, cannot recall fetched copies, and normalises
+deleting an uncomfortable record.
 
-**Close and reopen.** Closure requires every outcome resolved, so a defective
-milestone cannot legitimately close, and reopening discards proved evidence.
-
-**A second Acceptance row.** Leaves the effective binding ambiguous and requires
-the anchor to permit a shape it forbids.
+**In-place edit** removes the anchor. **Close and reopen** cannot apply, since
+closure requires every outcome resolved. **A second Acceptance row** leaves the
+effective binding ambiguous.
 
 <a id="technical-adr-0004-consequences"></a>
 ## Operational Consequences
 
 Concept: [Consequences](0004-plan-amendment-supersession.md#concept-adr-0004-consequences).
 
-- The derived class is a structural floor. Equal-count substitution of real
-  commands with trivially passing ones satisfies every obligation, so review
-  still owns semantic adequacy. The derivation removes the easy abuse; it does
-  not remove the need for a reviewer who reads the commands.
 - Reading the current commitment means following the chain to the effective
   binding, not reading the Acceptance row.
-- Review obligation attaches to the whole corrected commitment, not the diff: a
-  corrected envelope changes what the gate must prove.
-- One commit carries both corrected bytes and the row, so an amendment is not a
-  two-step transition and cannot be half-applied.
+- Review attaches to the whole corrected commitment, not the diff: a corrected
+  envelope changes what the gate must prove.
+- Every amendment is a maintainer bottleneck by design. If that becomes painful,
+  the correct response is fewer defects reaching acceptance, not delegation.
+- Obligation 5 makes first-parent history load-bearing. A workflow that
+  integrates amendments by rebase or fast-forward is fine; one that buries an
+  amendment on a non-first-parent side of a merge breaks candidate identity.
 - This mechanism is Python inside the seed bridge and is in scope for the `M0`
   self-hosting migration's equivalence evidence.
 
@@ -163,6 +159,6 @@ Rollback is removing the table and its enforcement while no amendment row is
 complete anywhere in reachable history. Once one is complete it is anchored, and
 removing it would fail the check that motivated this decision.
 
-Changing the class vocabulary, the derivation table, the chain obligations, the
-non-delegable status of `Weakening`, or the re-review obligation requires a
-successor ADR declaring `Supersedes: 0004`.
+Changing the maintainer-only rule, the chain obligations, the re-review
+obligation, or the single-commit rule requires a successor ADR declaring
+`Supersedes: 0004`.

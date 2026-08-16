@@ -136,21 +136,16 @@ the exact document set its milestone must update.
 - `docs/adr/0004-plan-amendment-supersession.md` (Proposed) and its technical
   companion — an append-only `## Amendments` table lets a defect found in an
   accepted plan or gate be corrected without editing or erasing the acceptance
-  record. Each amendment records its class (`Correction`, `Strengthening`, or
-  `Weakening`), authority, disposition pointer, superseded candidate, new bound
-  bytes, and reason; the effective binding is the last complete amendment.
-  The check **derives a minimum class** by comparing commitments, so a removed
-  outcome, removed protected selector, reduced locked-command count, or changed
-  evidence class can never be recorded as a correction. Corrected bytes and
-  their amendment row land in one commit, because the anchor validates every
-  intermediate revision and a two-phase transition is unrealizable. Sequence is
-  verified rather than declared: each row supersedes the previous binding's
-  exact digests, descends from the revision anchoring its predecessor, carries
-  every earlier row unchanged, and adds exactly one row. Written because `M0`
-  was accepted with an outcome its gate could not prove, and the anchor that
-  makes acceptance tamper-evident also makes a revert impossible. A first
-  proposal was rejected in independent review for permitting a disguised
-  weakening and for a transition that could not execute.
+  record. Corrected bytes and their amendment row land in one commit; each row
+  binds digests, supersedes the previous binding's exact triple, and is
+  validated against the bytes at its own introducing revision. Every amendment
+  requires the maintainer directly and re-opens independent review. There is no
+  classification: two earlier proposals tried to derive whether an amendment
+  weakened a commitment from outcome identifiers, selectors, and command counts,
+  and independent review demonstrated passing sequences that reduced coverage
+  both times. The mechanism guarantees the record is append-only, chained,
+  uniquely attributable, and maintainer-signed, and explicitly guarantees
+  nothing about content — that judgment is the reviewer's.
 - The ADR index recorded 0001 through 0003 as Proposed after they were accepted.
   The acceptance transition may change only governance rows and marked status
   blocks, so the index correction lands separately here. The index also claimed
