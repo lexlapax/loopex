@@ -33,7 +33,9 @@ expected to arise, and each stops work at the point named:
   in the vision is a dependency decision. Stop before adding any dependency to
   a new application.
 - Any change to the accepted toolchain pairs stops for an amendment to ADR 0002
-  rather than a gate edit.
+  rather than a gate edit. The pairs were verified against the official Elixir
+  compatibility table when this gate was written, not chosen from what happened
+  to be installed.
 
 <a id="technical-plan-ownership"></a>
 ### Ownership, Decision Owners, and Rejoin Barriers

@@ -3,10 +3,13 @@
 # Two pairs are validated individually; no cross-product is constructed.
 # Changing any version requires an amendment to ADR 0002, not a gate edit.
 #
+# Verified against the official Elixir compatibility table on 2026-08-16:
+# 1.20 supports OTP 27-29, and 1.17 supports OTP 25-27.
+#
 # floor pair
 elixir 1.17.3-otp-26
 erlang 26.2.5
 #
 # current pair
-elixir 1.19.5-otp-28
-erlang 28.1
+elixir 1.20.3-otp-29
+erlang 29.0.1

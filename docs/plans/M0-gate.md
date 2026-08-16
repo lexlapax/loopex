@@ -31,8 +31,8 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `6eee2438aa0a80e4c1d632c5fa8263dfcc2c13d2a09d467743d2631b999a4e58` | `scripts/check-m0-gate.sh` |
-| `f26287082f2f58ff9f1e08acc0b87f472f3c79556dbf4f2c15fad76b47280d1d` | `.tool-versions` |
+| `5d39f6ab0e684a84bed8390bb80e4188790a70b5aa9051df337b6c0776ecf4ec` | `scripts/check-m0-gate.sh` |
+| `d5766c4d940a1d982f047125bc426f6a1e4db605b85cff251d74972e6f055678` | `.tool-versions` |
 
 Changing either file changes its digest, which changes this document, which
 changes the accepted gate digest. After acceptance that requires the authority
@@ -42,8 +42,8 @@ that accepted it.
 
 | # | Command | Proves |
 | --- | --- | --- |
-| 1 | `mix format --check-formatted` | Formatting is clean across both applications |
-| 2 | `mix compile --warnings-as-errors` | The checkpoint is warning-free |
+| 1 | `mix format --check-formatted` | Formatting is clean across every application |
+| 2 | `mix compile --warnings-as-errors` | The checkpoint is warning-free across every application |
 | 3 | `mix loopex.deps_budget` | Outcome 1: dependency budget and one-way direction |
 | 4 | `mix loopex.version_train` | Outcome 1: both applications carry one version |
 | 5 | `mix test apps/loopex/test/deps_budget_test.exs` | Outcome 2: forbidden dependency, reverse edge, dynamic reference |
@@ -70,8 +70,9 @@ skipped, filtered, quarantined, or weakened while `M0` is open.
 
 An exit code proves a command ran, not that it did anything. Each selector
 carries a locked minimum of **executed** tests and a list of test names that
-must exist. ExUnit counts skipped and excluded tests inside its total, so the
-runner subtracts both and rejects any skip on a protected selector outright.
+must exist. ExUnit counts skipped tests inside its total but reports excluded
+ones outside it — `1 test, 0 failures (1 excluded)` — so the runner subtracts
+skipped only, and rejects any skip on a protected selector outright.
 The name check is drift protection: it catches a protected test that is deleted
 or renamed. It does not prove the test asserts anything, and review owns that.
 
@@ -99,7 +100,7 @@ fails, and a claim of both lanes without two recorded runs fails. The exact pair
 
 ```text
 floor pair    Elixir 1.17.3 with OTP 26.2.5
-current pair  Elixir 1.19.5 with OTP 28.1
+current pair  Elixir 1.20.3 with OTP 29.0.1
 ```
 
 Changing a version changes those bytes and requires an amendment to ADR 0002,

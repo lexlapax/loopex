@@ -146,9 +146,14 @@ for outcome in 4 5 6; do
   grep -qE "^## Outcome ${outcome} " "$negatives" \
     || fail "$negatives records no negative demonstration for outcome ${outcome}"
 done
-# Fields are counted inside each outcome section. A global count would let three
-# duplicate entries under one outcome satisfy all three.
+# Fields are validated inside each outcome section. A global count would let
+# three entries under one outcome satisfy all three, and concatenating duplicate
+# sections would let a populated one cover a placeholder one, so exactly one
+# section per outcome is required.
 for outcome in 4 5 6; do
+  sections="$(grep -cE "^## Outcome ${outcome} " "$negatives" || true)"
+  [ "${sections:-0}" -eq 1 ] \
+    || fail "$negatives has ${sections:-0} sections for outcome ${outcome}; exactly one is required"
   section="$(awk -v n="$outcome" '
     $0 ~ "^## Outcome " n " " { capture = 1; next }
     /^## / { capture = 0 }

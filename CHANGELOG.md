@@ -80,6 +80,15 @@ the exact document set its milestone must update.
   status, register, and rejoin blocks; plan/gate/governance correspondence; and
   the derived README summary, with in-memory adversarial controls rather than a
   general Markdown parser. M0 replaces the bridge with Elixir/Mix.
+- The locked current toolchain pair was wrong. ADR 0002 requires the newest
+  released Elixir with its newest supported OTP; the gate had locked Elixir
+  1.19.5 with OTP 28.1, which is what happened to be installed. Verified against
+  the official compatibility table: Elixir 1.20.3 is current and 1.20 supports
+  OTP 27-29, so the pair is now Elixir 1.20.3 with OTP 29.0.1. The floor pair is
+  unchanged and valid, since 1.17 supports OTP 25-27.
+- Negative-demonstration sections must be unique per outcome. Scoping fields by
+  section fixed the global-count defect, but duplicate sections concatenated, so
+  a populated one could cover a placeholder one.
 - Six bounded corrections inside that boundary: a named hook that disappears now
   fails rather than skipping its check, since removing a tested hook is
   behaviour loss ADR 0002 permits only by disposition; retained inline budget
@@ -87,9 +96,9 @@ the exact document set its milestone must update.
   with locked names rather than files that merely exist; negative-demonstration
   fields are counted inside each outcome section instead of globally; the
   self-hosting baseline is corrected from a stale 3,990 to the measured 4,313
-  lines; and the executed-test arithmetic no longer subtracts excluded tests,
-  which ExUnit already reports outside its total and which would have falsely
-  rejected a file holding both tagged and ordinary tests.
+  lines; and the executed-test arithmetic subtracts skipped tests only, since
+  ExUnit reports excluded ones outside its total and subtracting them again
+  would have falsely rejected a file holding both tagged and ordinary tests.
 - The M0 gate stopped trying to defeat a dishonest implementer. Five review
   rounds found a bypass for every mechanical anti-faking control, because a
   script cannot tell whether a test asserts anything, whether a fixture is real,
@@ -125,7 +134,7 @@ the exact document set its milestone must update.
   provider lane moved to the adapter application, since `apps/loopex` may carry
   no external dependency.
 - Milestone `M0` is **Open** on its branch, with the plan pair and locked gate
-  in `docs/plans/` and `scripts/check-m0-gate.sh` as its runner. Nine outcomes
+  in `docs/plans/` and `scripts/check-m0-gate.sh` as its runner. Ten outcomes
   cover the scaffold, the toolchain matrix, journal replay, `commit_unknown`
   fencing and reconciliation across a restart, the isolated VM code-load and
   rollback spike, one real-provider slice, the self-hosting migration, and the
