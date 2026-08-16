@@ -144,8 +144,12 @@ the exact document set its milestone must update.
   weakened a commitment from outcome identifiers, selectors, and command counts,
   and independent review demonstrated passing sequences that reduced coverage
   both times. The mechanism guarantees the record is append-only, chained,
-  uniquely attributable, and maintainer-signed, and explicitly guarantees
-  nothing about content — that judgment is the reviewer's.
+  ordered, carried intact into closure, and textually marked as a maintainer
+  decision. It states plainly what it does not guarantee: whether an amendment
+  weakens the commitment, which commit an amendment belongs to, or who signed
+  it. Identity is content rather than graph position, because commits can be
+  re-parented and merged while governed bytes stay identical, and closure must
+  carry the exact amendment table so a stale closure cannot be merged in.
 - The ADR index recorded 0001 through 0003 as Proposed after they were accepted.
   The acceptance transition may change only governance rows and marked status
   blocks, so the index correction lands separately here. The index also claimed

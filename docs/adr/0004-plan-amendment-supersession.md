@@ -52,13 +52,17 @@ Technical depth: [What the anchor guarantees and forbids](0004-plan-amendment-su
   commitment. A prior review never carries forward.
 - The `Reason` states what changed and, when anything is narrowed, removed, or
   relaxed, names the protection given up. That disclosure is a maintainer
-  statement checked by review, not by the repository.
+  statement examined by review, not verified by the repository.
 - The effective binding is the last complete amendment; with no amendments it is
   the Acceptance row. Closure binds whatever is effective.
-- The sequence is verified: each row supersedes the previous binding's exact
-  digests, is introduced by exactly one revision on the first-parent history,
-  descends from the revision anchoring its predecessor, carries every earlier
-  row unchanged, and adds exactly one row.
+- The sequence is verified **by content, not by graph position**: each row
+  supersedes the previous binding's exact digests, every earlier row is carried
+  unchanged, and exactly one row is added per introducing revision. Nothing
+  depends on which commit or branch introduced a row, because commits can be
+  re-parented and merged while the governed bytes stay identical.
+- Closure binds the amendment chain. The Closure candidate must carry the exact
+  amendment table present at closure, so a closure prepared against an older
+  commitment cannot be merged in afterwards.
 - Amendments are available only while the milestone is not Closed.
 - An architecture decision is superseded **additively**: the successor declares
   `Supersedes: NNNN` and the predecessor's accepted bytes are never edited.
@@ -95,12 +99,20 @@ Technical depth: [Alternative analysis](0004-plan-amendment-supersession-technic
 
 What this mechanism guarantees is narrow and worth stating exactly: the record
 is append-only, chained by digests, anchored across history, applied in a single
-commit, and authorised by the maintainer.
+commit, carried intact into closure, and marked as a maintainer decision.
 
-It guarantees **nothing** about whether an amendment weakens the commitment.
-That judgment is entirely the independent reviewer's, and the repository makes
-no claim to assist it. The mechanism's protection is that the change is visible,
-attributed, and re-reviewed — not that it is safe.
+Three things it does not guarantee. It does not decide whether an amendment
+weakens the commitment; no structural rule distinguishes a genuine correction
+from a narrowed outcome or a trivially passing command. It does not identify a
+unique commit for an amendment: identity is the governed bytes plus the
+disposition pointer, because the same bytes can legitimately exist on more than
+one commit. And it does not verify who signed anything — the check reads the
+literal text `Maintainer` and the link syntax, not the signer or whether the
+pointer records a real disposition.
+
+Those judgments belong to governance, not to the checker. The maintainer's
+disposition is one control and independent review is another; reviewers produce
+findings, and the maintainer accepts or rejects.
 
 Every correction costs a maintainer disposition and a fresh review, which keeps
 careful review before acceptance cheaper than amendment afterwards. Nobody but
