@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `c3f02f842049aab49b3a1ae236ed66bb3816d2b9c30de221659f61541edb6e19` | `scripts/check-m0-gate.sh` |
+| `03082699a5ad4e88c2cac2ad196013c4b146a5098675cb94c8e8af7713c98b91` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -89,11 +89,12 @@ must exist. Executed means ran to a verdict — passed or failed — never skipp
 or excluded, and any skip on a protected selector is rejected outright.
 
 The two locked pairs report that differently, and the runner parses both. Elixir
-1.17 prints a counted total with skipped inside it and excluded outside it
-(`1 test, 0 failures (1 excluded)`), so executed is the total minus skipped.
-Elixir 1.20 prints named counts and no total (`2 passed, 1 skipped, 1 excluded`),
-so passed is read directly; its failure form `1/2 passed` reports 2, because both
-ran. See [Amendment 1](#amendment-1).
+1.17 prints a counted total with **both** skipped and excluded inside it
+(`4 tests, 0 failures, 1 excluded, 1 skipped` for two executed), so executed is
+the total minus both. Elixir 1.20 prints named counts and no total
+(`2 passed, 1 skipped, 1 excluded`), so passed is read directly; its failure form
+`1/2 passed` reports 2, because both ran. See [Amendment 1](#amendment-1) and
+[Amendment 2](#amendment-2).
 
 The name check is drift protection: it catches a protected test that is deleted
 or renamed. It does not prove the test asserts anything, and review owns that.
@@ -532,3 +533,37 @@ Fixing it required changing the bound runner, whose digest is part of the
 accepted gate digest, so this amendment rebinds the acceptance record to a new
 candidate carrying the amended bytes. The original acceptance remains in the
 Git history and in the disposition record it points at.
+
+<a id="amendment-2"></a>
+## Amendment 2 — excluded tests are inside the floor pair's total
+
+**Accepted:** 2026-08-17 by the maintainer, under a standing instruction to
+proceed. **Scope:** the executed-count arithmetic for the counted summary form in
+the bound runner, and the Protected Tests description above. **Not changed:**
+every locked command, selector, minimum executed count, locked test name, fixture,
+toolchain pair, evidence class, and closure document.
+
+Amendment 1 subtracted only skipped tests from the counted total, on the stated
+belief that Elixir 1.17 reports excluded tests outside it. **The floor lane
+disproved that.** On Elixir 1.17.0 a file with two passing, one skipped and one
+excluded test reports `4 tests, 0 failures, 1 excluded, 1 skipped`: both sit
+inside the total, so executed is the total minus both.
+
+The consequence was not cosmetic. The real-provider file holds one tagged test, so
+an unfiltered run reports `1 test, 0 failures, 1 excluded`. Amendment 1's
+arithmetic read that as one executed test and the gate declared that
+`real_provider` was not excluded by default — failing outcome 7 on the floor pair
+for a reason that was purely a parsing error, while the exclusion was working
+correctly.
+
+The original gate text worried that subtracting excluded "would reject a valid
+file that holds both tagged and ordinary tests". That worry was mistaken. When
+such a file runs with the tag excluded, the total counts the excluded tests, so
+subtracting them yields exactly the ordinary count.
+
+This is the second amendment in one milestone, and both were the same class of
+defect: the runner could not read the output of a toolchain it locks. Amendment 1
+was found only because implementation produced a passing test; Amendment 2 only
+because the floor lane finally ran. Neither was reachable by inspecting the gate.
+That is the argument for ADR 0002's two validated pairs, and it is also the
+argument against writing a measurement before there is anything to measure.

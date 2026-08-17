@@ -102,7 +102,7 @@ summary_field() {
 # On 1.20 the counts are already separate, so passed is read directly and the
 # "X/N passed" failure form reports N, since all N ran.
 executed_tests() {
-  local output="$1" line total skipped
+  local output="$1" line total skipped excluded
   line="$(printf '%s' "$output" \
     | grep -E '^Result:|[0-9]+ (test|tests), [0-9]+ (failure|failures)' \
     | tail -1)"
@@ -118,10 +118,16 @@ executed_tests() {
       printf '%s\n' "$line" | sed -E 's|^Result: ([0-9]+) tests?.*|\1|'
       ;;
     *)
+      # AMENDMENT 2. Excluded is subtracted as well. Amendment 1 subtracted only
+      # skipped, on the belief that 1.17 reports excluded outside its total. The
+      # floor lane disproved that: on Elixir 1.17.0 a file with two passing, one
+      # skipped and one excluded test reports "4 tests, 0 failures, 1 excluded,
+      # 1 skipped", so both sit inside the total and executed is total minus both.
       total="$(printf '%s' "$line" | grep -oE '[0-9]+ (test|tests),' | grep -oE '[0-9]+')"
       [ -n "$total" ] || return 1
       skipped="$(printf '%s' "$line" | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+' || true)"
-      echo $((total - ${skipped:-0}))
+      excluded="$(printf '%s' "$line" | grep -oE '[0-9]+ excluded' | grep -oE '[0-9]+' || true)"
+      echo $((total - ${skipped:-0} - ${excluded:-0}))
       ;;
   esac
 }

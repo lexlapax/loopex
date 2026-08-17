@@ -136,11 +136,11 @@ defmodule Mix.Tasks.Loopex.DocsCheck do
 
   defp inspect_entry(
          module,
-         {{kind, name, arity}, _anno, _signature, doc, metadata},
+         {{kind, name, arity}, anno, _signature, doc, metadata},
          {reasons, covered, hidden}
        ) do
     cond do
-      generated?(metadata) -> {reasons, covered, hidden + 1}
+      generated?(anno, metadata) -> {reasons, covered, hidden + 1}
       true -> entry_outcome(module, kind, name, arity, doc, {reasons, covered, hidden})
     end
   end
@@ -154,11 +154,27 @@ defmodule Mix.Tasks.Loopex.DocsCheck do
   # carry `source_annos` as a list of location tuples; an injected one has no
   # location at all, which is the discriminator used here rather than a list of
   # known callback names that would need editing for every new behaviour.
-  defp generated?(%{source_annos: annos}) when is_list(annos) do
+  # Both locked pairs report this differently, and the floor lane is what caught it.
+  # Elixir 1.17 carries the fact in the Erlang annotation as `generated: true` and
+  # leaves the metadata empty; Elixir 1.20 gives a bare line annotation and records
+  # the absence of a source location in `source_annos`. Reading only one of them
+  # passes on one pair and fails on the other, which is the whole reason ADR 0002
+  # validates two pairs rather than one.
+  defp generated?(anno, metadata) do
+    generated_annotation?(anno) or unsourced_metadata?(metadata)
+  end
+
+  defp generated_annotation?(anno) when is_list(anno) do
+    Keyword.get(anno, :generated, false) == true
+  end
+
+  defp generated_annotation?(_anno), do: false
+
+  defp unsourced_metadata?(%{source_annos: annos}) when is_list(annos) do
     not Enum.all?(annos, &is_tuple/1)
   end
 
-  defp generated?(_metadata), do: false
+  defp unsourced_metadata?(_metadata), do: false
 
   defp entry_outcome(module, kind, name, arity, doc, {reasons, covered, hidden}) do
     case classify(doc) do
