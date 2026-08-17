@@ -20,6 +20,7 @@ defmodule Loopex.StatusCheckTest do
 
   alias Loopex.Checks.Git
   alias Loopex.Checks.Invalid
+  alias Loopex.Checks.History
   alias Loopex.Checks.Plan
   alias Loopex.Checks.Register
   alias Loopex.StatusFixtures, as: Fixture
@@ -39,6 +40,30 @@ defmodule Loopex.StatusCheckTest do
 
   test "the fixture repository passes every check" do
     assert [] == Fixture.checked(Fixture.documents())
+  end
+
+  test "a merge reconciles parents only when one supersedes the rest" do
+    # Landing an accepted amendment is a merge whose parents disagree: one carries
+    # the amended gate, one does not. Raising on every divergence made that shape
+    # unrepresentable. The rule is the same strictly-increasing generation rule.
+    reconcile = fn values ->
+      History.reconcile_for_test(values, "docs/plans/M0-gate.md", "rev", "accepted gate", [])
+    end
+
+    # A later generation wins over an earlier one.
+    assert reconcile.(["1\0a", "2\0b"]) == "2\0b"
+    assert reconcile.(["2\0b", "1\0a"]) == "2\0b"
+    # Three-way, one clear winner.
+    assert reconcile.(["0\0a", "1\0b", "2\0c"]) == "2\0c"
+
+    # Same generation, different bytes: still a conflict, which is the case that
+    # matters -- two sides amended independently and neither supersedes.
+    assert_raise Invalid, ~r/conflicting completed/, fn -> reconcile.(["1\0a", "1\0b"]) end
+
+    # A label that is not amendable never reconciles.
+    assert_raise Invalid, ~r/conflicting completed/, fn ->
+      History.reconcile_for_test(["1\0a", "2\0b"], "docs/plans/M0.md", "rev", "Closure", [])
+    end
   end
 
   test "the in-review capsule does not widen authority either" do

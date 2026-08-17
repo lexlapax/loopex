@@ -262,43 +262,50 @@ original acceptance of candidate `9418ac8011528da39730a577874f300b8075dbcc`
 remains in the Git history and in the record above; the amendment supersedes its
 bound bytes only, not its authority or its scope.
 
-<a id="disposition-m0-amendment-2-outstanding"></a>
-#### Amendment 2 — acceptance OUTSTANDING
+<a id="disposition-m0-amendments-2-and-3-2026-08-17"></a>
+#### Amendments 2 and 3 — accepted 2026-08-17
 
-[Amendment 2](../plans/M0-gate.md#amendment-2) corrects the executed-count
-arithmetic for the floor toolchain pair. **It does not yet carry a maintainer
-disposition, and this record exists to say so rather than to supply one.**
+The maintainer accepted [Amendment 2](../plans/M0-gate.md#amendment-2) and
+[Amendment 3](../plans/M0-gate.md#amendment-3) together, in a direct instruction
+naming both after being shown what each contains, what it changes, and what
+happens if either is rejected.
 
-What was actually relied on: the maintainer had said "go" to installing the floor
-toolchain and closing outcome 3, and then "proceed without waiting". Running the
-floor lane is what exposed the defect. Neither instruction named this amendment,
-because it did not exist when they were given. The amendment's own text initially
-described itself as accepted under a standing instruction; an independent review
-found that an amended artifact cannot be its own authority evidence, and it was
-right.
+**Amendment 2** corrects the executed-count arithmetic for the floor toolchain
+pair. It is load-bearing: without it, an unfiltered run of the real-provider file
+reads as one executed test and outcome 7 fails on the floor lane for a parsing
+error that does not exist. It makes the gate stricter.
 
-The amendment is a correctness fix that makes the gate stricter — it corrected a
-parser that read an unfiltered run of the real-provider file as one executed test
-and therefore failed outcome 7 for a reason that did not exist. It weakens
-nothing, waives nothing, and changes no locked command, selector, minimum, test
-name, fixture, toolchain pair, evidence class, or closure document. That is an
-argument for accepting it; it is not an acceptance.
+**Amendment 3** changes no executable byte — 423 executable runner lines before
+and after, identical with comments stripped. It corrects Amendment 1's disproved
+explanation, which survived in two runner comment blocks above code that
+contradicts it, and replaces Amendment 2's acceptance heading, which had claimed a
+disposition that was never given.
 
-The gate's own Amendment 2 heading still reads "Accepted: 2026-08-17 by the
-maintainer, under a standing instruction to proceed." **That line overstates and
-this register overrides it.** It was not corrected in place for a reason worth
-recording: the gate is a digest-bound artifact, and the hardened machinery admits
-a change to its bytes only when a numbered amendment generation increases. Editing
-it to remove a false acceptance claim is still an amendment operation, and granting
-myself one to fix a line about not having authority would repeat the original
-error. The correct text therefore arrives with the maintainer's disposition, under
-the maintainer's authority.
+Neither weakens anything, waives anything, or changes a locked command, selector,
+minimum executed count, locked test name, fixture, toolchain pair, evidence class,
+or closure document.
 
-**Consequence: M0 cannot close until the maintainer explicitly accepts or rejects
-Amendment 2.** If accepted, this record is replaced by a dated disposition naming
-the authority and the instruction. If rejected, the amendment and the acceptance
-rebind must be reverted, and outcome 7 then fails on the floor lane until the
-arithmetic is corrected some other way.
+**Why this record reads the way it does.** Amendment 2 was first written claiming
+acceptance under a standing instruction to proceed. That instruction predated the
+amendment and did not name it, and an independent review was right to reject it:
+an amended artifact cannot be its own authority evidence. The heading was then
+left uncorrected on purpose, because correcting a digest-bound gate is itself an
+amendment operation, and granting a generation to fix a line about lacking
+authority would have repeated the error. Both corrections therefore arrive here,
+under an instruction that names them.
+
+The acceptance record rebinds to candidate
+`cc88d0aab0e63446aabfdbc6ef6b7adf427bafca`, whose gate carries amendment
+generation 3. The chain from it reaches
+`45994729ea50c8e388f681dacc4d3383926ec2d6` at generation 2, then
+`9418ac8011528da39730a577874f300b8075dbcc`, whose governance is empty and whose
+gate is generation 0 — the original acceptance.
+
+One defect in the locked runner is knowingly left in place: its absence proof
+reports any aggregate failure as `the aggregate still depends on python3 or jq`,
+so an unrelated failure is misattributed to outcome 8. It was named to the
+maintainer and not included in either amendment, so it stands until a future
+disposition covers it.
 
 ## Retained Seed Bootstrap Evidence
 

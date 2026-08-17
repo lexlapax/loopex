@@ -175,8 +175,8 @@ defmodule Loopex.Checks.History do
           [single] ->
             single
 
-          _conflict ->
-            raise Invalid, "#{path}: conflicting completed #{label} records meet at #{revision}"
+          conflict ->
+            reconcile!(conflict, path, revision, label, adr_concepts)
         end
       end)
 
@@ -200,6 +200,57 @@ defmodule Loopex.Checks.History do
             adr_concepts
           )
         end)
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Reconciles differing parent records at a merge, exposed so the property can be
+  tested directly.
+
+  ## Technical depth
+
+  The reconciliation rule is small but it decides whether an accepted amendment can
+  ever land, so it is tested against its own inputs rather than only through a
+  constructed repository history.
+  """
+  @spec reconcile_for_test([String.t()], String.t(), String.t(), String.t(), [String.t()]) ::
+          String.t()
+  def reconcile_for_test(values, path, revision, label, adr_concepts) do
+    reconcile!(values, path, revision, label, adr_concepts)
+  end
+
+  # Concept: parents may legitimately disagree when one of them amended the gate.
+  # Technical depth: raising on every divergence made a merge that brings in an
+  # accepted amendment unrepresentable -- the branch carrying it and the branch
+  # without it meet with different anchors, which is the normal shape of landing
+  # one. The rule here is the same strictly-increasing generation rule used for a
+  # sequential change: exactly one candidate must supersede every other, and
+  # anything else is still a conflict. Two sides at the same generation with
+  # different bytes remain irreconcilable, which is the case worth refusing.
+  defp reconcile!(values, path, revision, label, adr_concepts) do
+    amendable = label in ["accepted gate", "Acceptance"] and path not in adr_concepts
+
+    latest =
+      case amendable do
+        false ->
+          nil
+
+        true ->
+          Enum.find(values, fn candidate ->
+            Enum.all?(values, fn other ->
+              other == candidate or Plan.supersedes?(label, other, candidate)
+            end)
+          end)
+      end
+
+    case latest do
+      nil ->
+        raise Invalid, "#{path}: conflicting completed #{label} records meet at #{revision}"
+
+      winner ->
+        winner
     end
   end
 
