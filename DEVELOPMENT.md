@@ -147,3 +147,21 @@ accepts the first milestone plan and branch-only red gate.
 
 When product tests arrive, they must use a temporary `LOOPEX_HOME` and temporary
 workspaces. Never point development or test commands at a real `~/.loopex`.
+
+## Toolchain pairs
+
+ADR 0002 locks two validated pairs, recorded in `.tool-versions`. Homebrew carries
+only the current one, and it pairs Elixir against whatever OTP it ships, so the
+floor pair needs a version manager. `mise` was used to provide both:
+
+```text
+mise install erlang@26.0
+mise install elixir@1.17.0-otp-26
+mise exec erlang@26.0 elixir@1.17.0-otp-26 -- bash scripts/check-m0-gate.sh
+```
+
+Do not activate a version manager inside the checkout. `.tool-versions` is a
+digest-bound gate artifact listing both pairs, so a tool that reads it would pick
+one arbitrarily; invoke the pair explicitly instead. The floor pair also needs its
+own Hex and rebar archives (`mix local.hex --force`, `mix local.rebar --force`),
+which are per-Elixir-version and live outside the checkout.
