@@ -136,9 +136,31 @@ defmodule Mix.Tasks.Loopex.DocsCheck do
 
   defp inspect_entry(
          module,
-         {{kind, name, arity}, _anno, _signature, doc, _metadata},
+         {{kind, name, arity}, _anno, _signature, doc, metadata},
          {reasons, covered, hidden}
        ) do
+    cond do
+      generated?(metadata) -> {reasons, covered, hidden + 1}
+      true -> entry_outcome(module, kind, name, arity, doc, {reasons, covered, hidden})
+    end
+  end
+
+  # Concept: the documentation contract applies to code written in this
+  # repository, not to functions a macro injects.
+  # Technical depth: `use GenServer` injects `child_spec/1` carrying OTP's own
+  # docstring, which of course does not use this project's section headings. There
+  # is no authored site to document, so demanding a heading there would force a
+  # module to restate someone else's function or to hide it. Authored entries
+  # carry `source_annos` as a list of location tuples; an injected one has no
+  # location at all, which is the discriminator used here rather than a list of
+  # known callback names that would need editing for every new behaviour.
+  defp generated?(%{source_annos: annos}) when is_list(annos) do
+    not Enum.all?(annos, &is_tuple/1)
+  end
+
+  defp generated?(_metadata), do: false
+
+  defp entry_outcome(module, kind, name, arity, doc, {reasons, covered, hidden}) do
     case classify(doc) do
       :hidden ->
         {reasons, covered, hidden + 1}
