@@ -321,18 +321,17 @@ tested client-local behavior. Hooks and CI never waive repository checks, which
 fail closed when missing or silently ineffective.
 
 Every required check runs locally from a clean checkout with the documented
-portable toolchain in [DEVELOPMENT.md](DEVELOPMENT.md). Bootstrap currently
-requires Bash, Git, the documented POSIX userland, Python 3.11+ and `jq`;
-product checks move to the declared Elixir/OTP toolchain when it exists.
-Python and `jq` are seed/M0 bridge dependencies only. Before M0 closes,
-repository checks migrate to Elixir standard-library or Mix entrypoints, and
-tested client hooks migrate to those entrypoints. Removing a tested hook instead
-requires the M0 plan's explicit accepted behavior disposition, with equivalent
-repository/client protection or an explicitly accepted loss; the no-`jq`
-adapter path is proved rather than silently disabling feedback. Both
-prerequisites then disappear. The enduring development baseline is Git,
-shell/POSIX tools, and the accepted Elixir/OTP toolchain; adding another
-development dependency requires the ordinary dependency decision.
+portable toolchain in [DEVELOPMENT.md](DEVELOPMENT.md). The development baseline
+is Git, shell and POSIX tools, and the accepted Elixir/OTP toolchain. Adding
+another development dependency requires the ordinary dependency decision.
+
+Python and `jq` were seed and M0 bridge dependencies and are gone. Repository
+checks run on Elixir standard-library and Mix entrypoints, and the tested client
+hooks call them; the no-`jq` adapter path was proved rather than silently
+disabling feedback, and the behaviours the replacement dropped are recorded with
+the milestone's evidence rather than left implicit. Removing a tested hook still
+requires an explicit accepted behavior disposition with equivalent protection or
+an accepted loss.
 The M0 gate also installs a repository-owned Elixir/Mix documentation check over
 compiled docs. It enforces the ordered Concept and Technical depth sections on
 covered public code; the accepted plan pair names any additional important

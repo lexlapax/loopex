@@ -84,8 +84,15 @@ lane — never part of the default suite.
   useful supplementary signal. Existing GitHub automation therefore stays
   replaceable, forks need no GitHub tooling to develop, and a later material
   change requires a new option-and-implication packet and maintainer approval.
-- Maintainer decision (2026-08-15): Python 3.11 and `jq` are temporary seed/M0
-  bridges. Before M0 closes, repository checks migrate to Elixir
+- Maintainer decision (2026-08-15), **carried out 2026-08-17**: Python 3.11 and
+  `jq` were temporary seed/M0 bridges. They are now gone — repository checks run
+  on Elixir standard-library and Mix entrypoints, the tested client hooks call
+  them, and the aggregate completes with every interpreter shadowed. What the
+  replacement dropped is recorded in
+  [the self-hosting evidence](../evidence/M0-self-hosting.md) rather than left
+  implicit, and two of those eight items change what the repository can detect or
+  where it can run, so a reader should weigh them there. The decision as
+  originally recorded read: repository checks migrate to Elixir
   standard-library or Mix entrypoints and tested client hooks migrate to them.
   Removing a tested hook instead requires the accepted M0 plan to disposition
   that behavior explicitly with equivalent protection or an explicitly
