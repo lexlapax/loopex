@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `03082699a5ad4e88c2cac2ad196013c4b146a5098675cb94c8e8af7713c98b91` | `scripts/check-m0-gate.sh` |
+| `26fa0e5db41cab042a0c0e8343acf35891b99778a9b3bddaa43ff36414b25307` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -537,8 +537,9 @@ Git history and in the disposition record it points at.
 <a id="amendment-2"></a>
 ## Amendment 2 — excluded tests are inside the floor pair's total
 
-**Accepted:** 2026-08-17 by the maintainer, under a standing instruction to
-proceed. **Scope:** the executed-count arithmetic for the counted summary form in
+**Accepted:** see [Amendment 3](#amendment-3), which corrects this heading. The
+line originally here claimed acceptance under a standing instruction to proceed;
+that instruction predated this amendment and did not name it. **Scope:** the executed-count arithmetic for the counted summary form in
 the bound runner, and the Protected Tests description above. **Not changed:**
 every locked command, selector, minimum executed count, locked test name, fixture,
 toolchain pair, evidence class, and closure document.
@@ -567,3 +568,43 @@ was found only because implementation produced a passing test; Amendment 2 only
 because the floor lane finally ran. Neither was reachable by inspecting the gate.
 That is the argument for ADR 0002's two validated pairs, and it is also the
 argument against writing a measurement before there is anything to measure.
+
+<a id="amendment-3"></a>
+## Amendment 3 — corrections of record, no behaviour change
+
+**Acceptance: OUTSTANDING.** This amendment exists to be disposed of together with
+[Amendment 2](#amendment-2), which also has no disposition. **Scope:** two comment
+blocks in the bound runner and the acceptance heading of Amendment 2. **Not
+changed:** no behaviour whatsoever — no locked command, selector, minimum executed
+count, locked test name, fixture, toolchain pair, evidence class, or closure
+document, and no executable logic. The runner's exit codes are identical before and
+after.
+
+Three things are corrected.
+
+**One.** Amendment 1's explanation survived inside the runner after Amendment 2
+disproved it. Two comment blocks still told a reader that Elixir 1.17 reports
+excluded tests outside its counted total and that executed is the total minus
+skipped, immediately above code that subtracts both. The example shapes were also
+not the ones 1.17.0 emits. A governed artifact carrying a disproved explanation is
+a defect even when the code below it is right, because the comment is what the next
+reader believes.
+
+**Two.** Amendment 2's own acceptance heading claimed acceptance under a standing
+instruction. It had none. An amended artifact cannot be its own authority evidence,
+and the heading now points here rather than asserting a disposition that was never
+given.
+
+**Three.** A review found that command 2's warning check might be a cached no-op,
+because project tasks above it compile the same code without the flag. **That was
+checked and it does not hold.** Mix persists diagnostics and replays them, so the
+command fails on a stored warning even with nothing stale to recompile — verified
+on both locked pairs by compiling without the flag, which exits 0 with the warning
+present, then running the command, which exits non-zero having compiled nothing. No
+change was made, and the runner now records the verified reasoning where the doubt
+would otherwise recur. Adding `--force` would have cost a full rebuild on every
+lane for no additional guarantee.
+
+That third item is why this amendment is small. Two of the three review findings in
+this area were real and are corrected as text; the one that proposed a behaviour
+change was not confirmed, and behaviour was left alone.

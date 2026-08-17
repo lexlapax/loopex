@@ -74,12 +74,16 @@ require_named_test() {
     || fail "$file no longer contains the locked test \"${name}\""
 }
 
-# AMENDMENT 1. ExUnit's summary format differs between the two locked pairs, so
-# both are parsed. Elixir 1.17 (the floor lane) prints a counted total with
-# skipped inside it and excluded outside it:
+# AMENDMENTS 1 AND 2. ExUnit's summary format differs between the two locked pairs,
+# so both are parsed. Elixir 1.17 (the floor lane) prints a counted total with
+# BOTH skipped and excluded inside it. Amendment 1 asserted excluded sat outside
+# the total; the floor lane disproved that, and Amendment 2 corrected the
+# arithmetic. The shapes are:
 #
-#   2 tests, 0 failures
-#   1 test, 0 failures (1 excluded)
+#   2 tests, 0 failures                          <- executed 2
+#   1 test, 0 failures, 1 excluded                <- executed 0
+#   4 tests, 0 failures, 1 excluded, 1 skipped    <- executed 2
+#   3 tests, 1 failure, 1 excluded                <- executed 2
 #
 # Elixir 1.20 (the current lane) prints named counts and no total at all:
 #
@@ -98,7 +102,7 @@ summary_field() {
 }
 
 # Executed means ran to a verdict: passed or failed, never skipped or excluded.
-# On 1.17 that is the total minus skipped, because skipped sits inside the total.
+# On 1.17 that is the total minus skipped AND excluded, because both sit inside it.
 # On 1.20 the counts are already separate, so passed is read directly and the
 # "X/N passed" failure form reports N, since all N ran.
 executed_tests() {
@@ -385,6 +389,13 @@ user_state_before="$(real_user_state)"
 mix loopex.format_scope \
   || fail "the effective formatter configuration does not cover application sources (outcome 1)"
 mix format --check-formatted || fail "formatting is not clean"
+# A review suspected this could be a cached no-op, because project tasks above
+# already compiled the same code without the flag. It is not: Mix persists
+# diagnostics and replays them, so this fails on a stored warning even when nothing
+# is stale to recompile. Verified on both locked pairs -- compile without the flag
+# exits 0 with the warning, and this command then exits non-zero having compiled
+# nothing. No --force is needed, and adding one would cost a full rebuild per lane
+# for no additional guarantee.
 mix compile --warnings-as-errors || fail "compilation is not warning-free"
 mix loopex.deps_budget || fail "dependency budget or direction violated (outcome 1)"
 mix loopex.version_train || fail "applications do not carry one version (outcome 1)"
