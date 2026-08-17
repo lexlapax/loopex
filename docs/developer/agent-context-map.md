@@ -200,6 +200,41 @@ pointer resolves to already-integrated bytes. It is the maintainer's disposition
 evidence, not an independent review: the transition itself still requires the
 read-only exact-diff review the plans register mandates.
 
+<a id="disposition-m0-acceptance-2026-08-17"></a>
+### M0 plan pair and gate acceptance — 2026-08-17
+
+The maintainer explicitly accepted the `M0` plan pair and its locked gate as they
+exist at candidate `9418ac8011528da39730a577874f300b8075dbcc`, in a direct
+one-word instruction to accept. Acceptance binds the marked Concept envelope, the
+marked Technical depth envelope, and the gate file's canonical text; the digests
+are recorded in the Concept plan's governance record. Conforming workstream
+decomposition, progress rows, resolved outcome state, and evidence links sit
+outside both envelopes and may change without amendment.
+
+The prerequisite guard was satisfied before this disposition:
+[ADR 0001](../adr/0001-repository-and-application-layout.md#concept) and
+[ADR 0002](../adr/0002-bootstrap-runtime-floor.md#concept) carry recorded
+acceptance, as does [ADR 0003](../adr/0003-extension-contract-boundary.md#concept),
+which the plan also names as a prerequisite.
+
+**Review state at acceptance, recorded because it is not the ordinary case.** The
+gate candidate went through five independent read-only review rounds. The last
+recorded verdict is REJECT, issued against candidate
+`5f4811cac90adf76615df4d2fd2782b58458c589`, the parent of the accepted candidate.
+The accepted candidate `9418ac8` fixes the five findings from that verdict and
+carries no independent review verdict of its own. The maintainer accepted with
+that state known, which is the governing authority; this record exists so the
+gap is durable rather than inferred from commit order. Two consequences follow
+and neither is waived: the pre-integration read-only exact-diff review of the
+acceptance transition against the bound candidate is still required before
+`m0` reaches `main`, and closure still requires independent review of the closure
+candidate, which no earlier round can supply.
+
+The accepted gate names its own residual limits rather than claiming coverage it
+does not have — search-path mutation through indirection, and interpreter
+launchers outside its enumerable set. Those limits are part of what was accepted,
+and closure review owns them.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
