@@ -9,15 +9,21 @@ Populated as outcomes 4, 5, and 6 are proved.
 
 ## Outcome 4 — journal replay
 
-- mechanism disabled: —
-- observed failure: —
-- demonstrated at: —
+- mechanism disabled: the durable write in `Loopex.Journal.append/2`, returning `:ok` after validation and framing so nothing reaches the file
+- observed failure: `journal_replay_test.exs` fell to 4/7 passed; the locked test failed on `assert Session.facts(recovered) == Session.facts(before)` with `left: []` and `right: ["workspace opened", "wrote a", "workspace closed"]`
+- demonstrated at: `8047a7a`, reverted before commit and confirmed byte-identical
 
 ## Outcome 5 — fencing and reconciliation
 
-- mechanism disabled: —
-- observed failure: —
-- demonstrated at: —
+- mechanism disabled: `Loopex.Session.fence/2`, made to always return `:open`
+- observed failure: `fencing_test.exs` fell to 4/7 passed; the locked test failed on the fence assertion with `left: :open` against the expected `{:fenced, "b992e523…"}`
+- demonstrated at: `8047a7a`, reverted before commit and confirmed byte-identical
+
+The fence assertion is the earliest to trip, so that run halted before reaching
+the dispatch-count assertion in the same test. The count would also have failed —
+with the fence disabled, op-2 and op-3 dispatch, making four dispatches rather
+than two — but this record states the failure that was actually observed rather
+than the one that would have followed.
 
 ## Outcome 6 — isolated VM load and rollback
 
