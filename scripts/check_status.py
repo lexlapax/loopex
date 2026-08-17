@@ -931,6 +931,19 @@ def _accepted_values(name: str) -> dict[str, str]:
     return values
 
 
+def _in_progress_values(name: str) -> dict[str, str]:
+    """Derived capsule for a milestone whose implementation has started.
+
+    Implementation does not widen authority beyond acceptance, so the
+    authorized-work boundary is inherited from the accepted capsule unchanged.
+    Only the blocker and the next transition move.
+    """
+    values = dict(_accepted_values(name))
+    values["Blockers"] = f"None; `{name}` is in progress against its locked gate"
+    values["Next transition"] = f"Turn the locked gate green, then move `{name}` to In review"
+    return values
+
+
 def _artifact_history(
     history: tuple[str, tuple[tuple[str, tuple[str, ...], Mapping[str, str]], ...]] | None,
 ) -> None:
@@ -1785,6 +1798,8 @@ def validate(
             expected_values = _open_values(registered_name)
         elif registered_state == "Accepted":
             expected_values = _accepted_values(registered_name)
+        elif registered_state == "In progress":
+            expected_values = _in_progress_values(registered_name)
         else:
             raise Invalid(
                 f"docs/plans/README.md: milestone state {registered_state!r} has no derived "

@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
-# The mechanical form of vision §7.2: the loopex core application depends on
-# the Elixir/Erlang standard runtime only.
+# Early feedback only (AGENTS.md). The repository command is the enforcement;
+# this hook calls it and never reimplements it. An earlier version parsed the
+# core mix.exs with awk, which meant two definitions of the budget that could
+# disagree -- and the hook's copy was the one nobody tested.
+#
+# An optional argument is forwarded to the command, which decides scope from the
+# application the file declares. This hook makes no path decisions of its own.
 set -euo pipefail
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
-MIX_EXS="apps/loopex/mix.exs"
-[ -f "$MIX_EXS" ] || exit 0
-# Any {:dep, ...} tuple in the core deps list violates the budget.
-if awk '/defp? deps/,/end/' "$MIX_EXS" | grep -qE '\{:\w+'; then
-  echo "Blocked: apps/loopex may depend on stdlib+OTP only (vision §7.2)." >&2
-  echo "Provider/store/terminal/JSON deps belong in adapter apps." >&2
+
+# No toolchain means no feedback, not a block: enforcement lives in the gate.
+command -v mix >/dev/null 2>&1 || exit 0
+[ -f mix.exs ] || exit 0
+
+if ! mix loopex.deps_budget "$@" >/dev/null 2>&1; then
+  mix loopex.deps_budget "$@" >&2 || true
+  echo "Blocked: the dependency budget rejects this change (ADR 0001)." >&2
   exit 2
 fi
 exit 0

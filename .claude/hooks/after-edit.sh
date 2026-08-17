@@ -13,9 +13,12 @@ case "$file" in
   *.ex|*.exs) mix format "$file" >/dev/null 2>&1 || true ;;
 esac
 
+# Any mix.exs is routed, including a fixture: the command decides scope from the
+# application the file declares, so routing needs no list of paths to keep in
+# sync. Scoping this to one path meant an adversarial fixture was never checked.
 case "$file" in
-  */apps/loopex/mix.exs|apps/loopex/mix.exs)
-    .claude/hooks/deps-budget.sh || exit 2
+  *mix.exs)
+    .claude/hooks/deps-budget.sh "$file" || exit 2
     ;;
 esac
 exit 0

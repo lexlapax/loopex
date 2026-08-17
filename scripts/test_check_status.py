@@ -18,11 +18,15 @@ import unittest
 from pathlib import Path
 
 from check_status import (
+    ACTIVE_STATES,
+    STATES,
+    _accepted_values,
     _git_plan_history,
     _git_resolver,
     _governance,
     _governance_history,
     _plan_concept_envelope,
+    _in_progress_values,
     _plan_technical_envelope,
     _validate_pair,
     validate,
@@ -503,6 +507,36 @@ class StatusTest(unittest.TestCase):
         self.assertTrue(errors, "mutation unexpectedly passed")
         if fragment:
             self.assertIn(fragment, errors[0])
+
+    def test_in_progress_capsule_does_not_widen_authority(self) -> None:
+        """Starting implementation moves the blocker, never the authority boundary.
+
+        Acceptance is the only transition that widens authorized work. If
+        In progress ever derived a broader boundary, implementation would quietly
+        authorise itself beyond the accepted envelopes.
+        """
+        accepted = _accepted_values("M0")
+        in_progress = _in_progress_values("M0")
+
+        self.assertEqual(accepted["Authorized work"], in_progress["Authorized work"])
+        self.assertEqual(accepted["Integrated phase"], in_progress["Integrated phase"])
+        self.assertEqual(
+            accepted["Next maintainer decision"], in_progress["Next maintainer decision"]
+        )
+        self.assertEqual(
+            {"Blockers", "Next transition"},
+            {key for key in accepted if accepted[key] != in_progress[key]},
+        )
+        self.assertIn("In review", in_progress["Next transition"])
+
+    def test_unknown_milestone_state_has_no_derived_capsule(self) -> None:
+        """A state nobody added enforcement for must fail, not fall through."""
+        self.assertNotIn("In review", STATES - ACTIVE_STATES)
+        for state in STATES:
+            if state in {"Blocked", "Open", "Accepted", "In progress"}:
+                continue
+            with self.assertRaises(AttributeError):
+                getattr(__import__("check_status"), f"_{state.replace(chr(32), chr(95)).lower()}_values")
 
     def test_current_fixture_and_input_are_unchanged(self) -> None:
         docs = documents()
