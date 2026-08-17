@@ -1,0 +1,827 @@
+defmodule Loopex.Checks.Plan do
+  @moduledoc """
+  ## Concept
+
+  Validates a milestone plan pair against its locked gate and its recorded
+  governance. The accepted normative envelopes and the gate bytes are immutable
+  for the milestone; progress, workstream decomposition, and evidence links are
+  not. This module draws that line mechanically, so mutable prose can be updated
+  freely while an accepted commitment cannot be edited without the authority that
+  accepted it.
+
+  ## Technical depth
+
+  The envelope is delimited by exact markers, must carry its governed heading
+  sequence in order with its exact section anchors, and every section must hold a
+  concrete commitment rather than only relationship links. The accepted digests
+  must equal both the current envelope bytes and the envelope bytes at the
+  candidate revision the row binds, and the gate digest must equal both the
+  current gate and the gate at that revision — so neither the plan nor the gate
+  can move while the record stays valid.
+
+  A gate's bytes may change only when the document records one more numbered
+  amendment than the bytes being replaced, which is the mechanical form of "the
+  accepted gate is immutable, and an amendment is the only exception".
+  """
+
+  alias Loopex.Checks.Documents
+  alias Loopex.Checks.Invalid
+  alias Loopex.Checks.Markdown
+  alias Loopex.Checks.Records
+
+  @concept_sections ["### Purpose", "### Outcomes", "### Scope", "### Non-Goals"]
+  @concept_anchors [
+    "concept-plan-purpose",
+    "concept-plan-outcomes",
+    "concept-plan-scope",
+    "concept-plan-non-goals"
+  ]
+  @concept_trailing ["## Workstreams", "## Progress and Evidence", "## Governance Records"]
+
+  @technical_sections [
+    "### Prerequisites and Acceptance Points",
+    "### Ownership, Decision Owners, and Rejoin Barriers",
+    "### Evidence Obligations and Mapping",
+    "### Compatibility",
+    "### Migration and Rollback",
+    "### Packaging",
+    "### Proportional Minimalism Budget"
+  ]
+  @technical_anchors [
+    "technical-plan-prerequisites",
+    "technical-plan-ownership",
+    "technical-plan-evidence",
+    "technical-plan-compatibility",
+    "technical-plan-migration",
+    "technical-plan-packaging",
+    "technical-plan-minimalism"
+  ]
+
+  @relationships MapSet.new([
+                   {"concept", "technical-depth"},
+                   {"concept-plan-outcomes", "technical-plan-evidence"},
+                   {"concept-plan-scope", "technical-plan-prerequisites"},
+                   {"concept-plan-scope", "technical-plan-ownership"},
+                   {"concept-plan-scope", "technical-plan-compatibility"},
+                   {"concept-plan-scope", "technical-plan-migration"},
+                   {"concept-plan-scope", "technical-plan-packaging"},
+                   {"concept-plan-scope", "technical-plan-minimalism"},
+                   {"concept-plan-non-goals", "technical-plan-prerequisites"}
+                 ])
+
+  @outcomes_header "| # | Outcome | Evidence class | Gate selector |"
+  @outcome_columns ["#", "Outcome", "Evidence class", "Gate selector"]
+  @progress_states ["Open", "Proved", "Accepted limitation", "Accepted deferral"]
+
+  @amendment_anchor ~r/\A<a id="amendment-([0-9]+)"><\/a>\z/u
+
+  @doc """
+  ## Concept
+
+  The digest of a gate document, after proving its bytes are canonical.
+
+  ## Technical depth
+
+  Canonical bytes are checked before hashing rather than normalised, because a
+  digest over normalised text would describe bytes that are not in the file and
+  the binding would no longer identify what a reader opens.
+  """
+  @spec gate_digest(String.t(), String.t()) :: String.t()
+  def gate_digest(text, path) do
+    Markdown.require_canonical!(text, path, "gate text")
+    Markdown.digest(text)
+  end
+
+  @doc """
+  ## Concept
+
+  How many numbered amendments a gate document records.
+
+  ## Technical depth
+
+  A locked gate's bytes are immutable for its milestone, so the only legitimate
+  reason for them to change is a governed amendment. Counting declared amendments
+  makes that checkable: bytes may change when the generation increases and never
+  otherwise. Numbering must be consecutive from one, because a gap or a repeat
+  would let two different byte sets claim the same generation.
+  """
+  @spec gate_generation(String.t(), String.t()) :: non_neg_integer()
+  def gate_generation(text, path) do
+    found =
+      text
+      |> String.split("\n")
+      |> Enum.flat_map(fn line ->
+        case Regex.run(@amendment_anchor, line) do
+          [_all, number] -> [String.to_integer(number)]
+          nil -> []
+        end
+      end)
+      |> Enum.sort()
+
+    if found != Enum.to_list(1..length(found)//1) do
+      raise Invalid, "#{path}: amendment anchors must be numbered consecutively from 1"
+    end
+
+    length(found)
+  end
+
+  @doc """
+  ## Concept
+
+  The digest of one normative envelope's body lines.
+
+  ## Technical depth
+
+  Hashes the envelope body only, joined with newlines, so a governance row binds
+  the accepted commitment rather than the whole document. That is what lets
+  progress rows and workstream prose change under an accepted plan without
+  invalidating the record.
+  """
+  @spec envelope_digest([String.t()]) :: String.t()
+  def envelope_digest(envelope), do: Markdown.digest(Enum.join(envelope, "\n"))
+
+  @doc """
+  ## Concept
+
+  The concept plan's normative envelope and the outcome identifiers it commits to.
+
+  ## Technical depth
+
+  The outcomes table must appear exactly once inside the Outcomes section and its
+  identifiers must be consecutive from one, so every outcome has a stable name
+  that the progress table and the gate can both refer to without ambiguity.
+  """
+  @spec concept_envelope(String.t(), String.t()) :: {[String.t()], [String.t()]}
+  def concept_envelope(text, path) do
+    {envelope, sections} =
+      envelope(text, path,
+        key: :plan_concept_envelope,
+        title: "## Normative Concept Envelope",
+        sections: @concept_sections,
+        anchors: @concept_anchors,
+        depth_heading: "## Concept",
+        trailing: @concept_trailing
+      )
+
+    {outcomes_start, _heading} = Enum.at(sections, 2)
+    {outcomes_end, _scope} = Enum.at(sections, 3)
+    outcomes = Enum.slice(envelope, (outcomes_start + 1)..(outcomes_end - 1)//1)
+
+    unless Enum.count(outcomes, &(&1 == @outcomes_header)) == 1 do
+      raise Invalid, "#{path}: Outcomes must contain one exact normative outcomes table"
+    end
+
+    table_start = Enum.find_index(outcomes, &(&1 == @outcomes_header))
+
+    table_lines =
+      outcomes |> Enum.drop(table_start) |> Enum.take_while(&String.starts_with?(&1, "|"))
+
+    rows = Markdown.table(table_lines, @outcome_columns, "#{path} Outcomes")
+    ids = Enum.map(rows, &hd/1)
+
+    if ids == [] or ids != Enum.map(1..length(ids)//1, &Integer.to_string/1) do
+      raise Invalid, "#{path}: Outcomes must contain consecutively numbered commitments"
+    end
+
+    {envelope, ids}
+  end
+
+  @doc """
+  ## Concept
+
+  The technical plan's normative envelope.
+
+  ## Technical depth
+
+  The technical half carries nothing outside its envelope: every obligation it
+  states is normative, so there is no mutable region to separate.
+  """
+  @spec technical_envelope(String.t(), String.t()) :: [String.t()]
+  def technical_envelope(text, path) do
+    {envelope, _sections} =
+      envelope(text, path,
+        key: :plan_technical_envelope,
+        title: "## Normative Technical Envelope",
+        sections: @technical_sections,
+        anchors: @technical_anchors,
+        depth_heading: "## Technical depth",
+        trailing: []
+      )
+
+    envelope
+  end
+
+  defp envelope(text, path, options) do
+    key = Keyword.fetch!(options, :key)
+    title = Keyword.fetch!(options, :title)
+    sections_expected = Keyword.fetch!(options, :sections)
+    section_anchors = Keyword.fetch!(options, :anchors)
+    depth_heading = Keyword.fetch!(options, :depth_heading)
+    trailing = Keyword.fetch!(options, :trailing)
+
+    if String.contains?(text, "\r") do
+      raise Invalid, "#{path}: plan text must use canonical UTF-8/LF bytes"
+    end
+
+    body = Markdown.block(text, path, key)
+    lines = Markdown.lines(text, path)
+
+    require_leading_anchor!(lines, depth_heading, path)
+    require_envelope_placement!(lines, key, depth_heading, trailing, path)
+
+    require_document_headings!(
+      lines,
+      text,
+      [depth_heading, title] ++ sections_expected ++ trailing,
+      path
+    )
+
+    sections = envelope_sections!(body, title, sections_expected, path)
+    require_section_anchors!(body, sections, section_anchors, sections_expected, path)
+    require_commitments!(body, sections, path)
+
+    {body, sections}
+  end
+
+  defp require_leading_anchor!(lines, depth_heading, path) do
+    expected = if depth_heading == "## Concept", do: "concept", else: "technical-depth"
+    first = Enum.find(lines, &(String.trim(&1) != ""))
+
+    if Markdown.anchor_only(first || "") != expected do
+      raise Invalid, "#{path}: plan document must start with its semantic anchor"
+    end
+
+    :ok
+  end
+
+  defp require_envelope_placement!(lines, key, depth_heading, trailing, path) do
+    {start_marker, end_marker} = Markdown.markers(key)
+    marker_start = Enum.find_index(lines, &(&1 == start_marker))
+    marker_end = Enum.find_index(lines, &(&1 == end_marker))
+
+    expected_label = if depth_heading == "## Concept", do: "Technical depth: ", else: "Concept: "
+
+    before =
+      lines
+      |> Enum.take(marker_start)
+      |> Enum.reverse()
+      |> Enum.find(&(String.trim(&1) != ""))
+
+    if before == nil or not String.starts_with?(before, expected_label) do
+      raise Invalid, "#{path}: normative envelope must directly follow its relationship link"
+    end
+
+    after_marker =
+      lines |> Enum.drop(marker_end + 1) |> Enum.find(&(String.trim(&1) != ""))
+
+    case trailing do
+      [first | _rest] ->
+        if after_marker != first do
+          raise Invalid, "#{path}: envelope end must be followed directly by #{first}"
+        end
+
+      [] ->
+        if after_marker != nil do
+          raise Invalid, "#{path}: technical plan contains content outside its normative envelope"
+        end
+    end
+
+    :ok
+  end
+
+  defp require_document_headings!(lines, text, expected, path) do
+    visible = Markdown.visible_line_numbers(text, path)
+    found = headings(lines, visible, path, "a plan document")
+
+    if found != expected do
+      raise Invalid, "#{path}: plan document headings must be exactly the governed plan sequence"
+    end
+
+    :ok
+  end
+
+  defp envelope_sections!(body, title, sections_expected, path) do
+    visible = Markdown.visible_line_numbers(Enum.join(body, "\n"), path)
+
+    if body == [] or hd(body) != title do
+      raise Invalid, "#{path}: normative plan envelope must start with #{title}"
+    end
+
+    sections = indexed_headings(body, visible, path, "the normative envelope")
+
+    if Enum.map(sections, fn {_index, line} -> line end) != [title | sections_expected] do
+      raise Invalid,
+            "#{path}: normative plan-envelope headings are missing, duplicated, or reordered"
+    end
+
+    sections
+  end
+
+  # Concept: a setext heading in a plan is rejected outright, because the same
+  # bytes read as a heading to a renderer and as prose to a line-oriented check.
+  defp headings(lines, visible, path, subject) do
+    lines |> indexed_headings(visible, path, subject) |> Enum.map(fn {_index, line} -> line end)
+  end
+
+  defp indexed_headings(lines, visible, path, subject) do
+    lines
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {line, index} ->
+      case MapSet.member?(visible, index) do
+        false ->
+          []
+
+        true ->
+          if Markdown.setext_heading?(lines, visible, index) do
+            raise Invalid, "#{path}: setext headings are not allowed in #{subject}"
+          end
+
+          case Markdown.atx(line) do
+            nil -> []
+            {_level, _text} -> [{index, line}]
+          end
+      end
+    end)
+  end
+
+  defp require_section_anchors!(body, sections, section_anchors, sections_expected, path) do
+    if length(section_anchors) != length(sections_expected) do
+      raise Invalid, "#{path}: plan section-anchor contract is misconfigured"
+    end
+
+    sections
+    |> Enum.drop(1)
+    |> Enum.zip(section_anchors)
+    |> Enum.each(fn {{start, heading}, anchor} ->
+      if start < 1 or Enum.at(body, start - 1) != ~s(<a id="#{anchor}"></a>) do
+        raise Invalid, "#{path}: #{heading} needs its exact semantic anchor #{inspect(anchor)}"
+      end
+    end)
+
+    :ok
+  end
+
+  # Concept: a section that carries only relationship links states no commitment.
+  # Technical depth: anchors and labelled links are subtracted before deciding,
+  # so a section whose whole content is navigation fails rather than passing on
+  # the strength of its pointers.
+  defp require_commitments!(body, sections, path) do
+    visible = Markdown.visible_line_numbers(Enum.join(body, "\n"), path)
+    starts = Enum.map(sections, fn {index, _line} -> index end)
+
+    sections
+    |> Enum.drop(1)
+    |> Enum.with_index(1)
+    |> Enum.each(fn {{start, heading}, position} ->
+      stop = Enum.at(starts, position + 1) || length(body)
+
+      content =
+        Enum.filter((start + 1)..(stop - 1)//1, fn index ->
+          MapSet.member?(visible, index) and substantive?(String.trim(Enum.at(body, index)))
+        end)
+
+      if content == [] do
+        raise Invalid, "#{path}: #{heading} must contain a concrete commitment"
+      end
+    end)
+
+    :ok
+  end
+
+  defp substantive?(""), do: false
+
+  defp substantive?(line) do
+    cond do
+      Markdown.anchor_only(line) != nil ->
+        false
+
+      true ->
+        relationship =
+          line
+          |> strip_prefix_once("Concept: ")
+          |> strip_prefix_once("Technical depth: ")
+          |> strip_period()
+
+        not (relationship != line and Markdown.link_only(relationship) != nil)
+    end
+  end
+
+  defp strip_prefix_once(value, prefix) do
+    case String.starts_with?(value, prefix) do
+      true -> binary_part(value, byte_size(prefix), byte_size(value) - byte_size(prefix))
+      false -> value
+    end
+  end
+
+  defp strip_period(value) do
+    case String.ends_with?(value, ".") do
+      true -> binary_part(value, 0, byte_size(value) - 1)
+      false -> value
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  The progress table must carry exactly one row per outcome, with a known state,
+  and a closed milestone may leave no outcome open.
+
+  ## Technical depth
+
+  Totality is the property: a missing row hides an unproved outcome and an extra
+  row claims one that was never committed to. An accepted limitation or deferral
+  requires disposition evidence, because those two states are the only way an
+  outcome reaches closure without being proved.
+  """
+  @spec progress(String.t(), String.t(), [String.t()], String.t()) :: :ok
+  def progress(text, path, outcome_ids, lifecycle_state) do
+    {body, _start} = Markdown.section_body(text, path, "## Progress and Evidence")
+    rows = Markdown.table(body, ["#", "State", "Evidence"], "#{path} Progress and Evidence")
+
+    if Enum.map(rows, &hd/1) != outcome_ids do
+      raise Invalid,
+            "#{path}: Progress and Evidence must contain exactly one row for every Outcome ID"
+    end
+
+    if Enum.any?(rows, &(Enum.at(&1, 1) not in @progress_states)) do
+      raise Invalid, "#{path}: Progress and Evidence contains an unknown State"
+    end
+
+    if lifecycle_state == "Closed" and Enum.any?(rows, &(Enum.at(&1, 1) == "Open")) do
+      raise Invalid, "#{path}: Closed progress permits no Open outcomes"
+    end
+
+    if Enum.any?(rows, fn row ->
+         Enum.at(row, 1) in ["Accepted limitation", "Accepted deferral"] and
+           not Records.evidence?(Enum.at(row, 2))
+       end) do
+      raise Invalid, "#{path}: an accepted limitation or deferral requires disposition evidence"
+    end
+
+    :ok
+  end
+
+  @doc """
+  ## Concept
+
+  Whether a changed governance value is a declared amendment rather than drift.
+
+  ## Technical depth
+
+  Gate bytes are strict: they may differ only when the document records one more
+  numbered amendment than the bytes being replaced, so a silent edit keeps the
+  same generation and is rejected.
+
+  An acceptance row is deliberately weaker, because an amendment cannot be one
+  commit: its rebind must name a candidate carrying the amended gate, and no
+  commit can name its own hash, so the amended gate lands first and the row
+  follows, sharing a generation. What makes the looser rule safe is that the row
+  is not trusted on its own — its digests must equal the current envelopes, its
+  gate digest must equal both the current gate and the gate at the candidate it
+  binds, and its candidate chain must terminate at an empty-governance original.
+  All this rule adds is that a rebind is impossible until an amendment is on
+  record.
+  """
+  @spec supersedes?(String.t(), String.t() | nil, String.t() | nil) :: boolean()
+  def supersedes?(label, anchor, value) do
+    with generation when is_integer(generation) <- generation_of(value),
+         prior when is_integer(prior) <- generation_of(anchor) do
+      case label do
+        "accepted gate" -> generation > prior
+        _other -> generation >= 1
+      end
+    else
+      _other -> false
+    end
+  end
+
+  defp generation_of(nil), do: nil
+
+  defp generation_of(value) do
+    case value |> String.split("\0", parts: 2) |> hd() |> Integer.parse() do
+      {number, ""} -> number
+      _other -> nil
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  An acceptance candidate is either an original snapshot carrying empty
+  governance, or an amended one that binds an earlier candidate — recursively,
+  until an original is reached.
+
+  ## Technical depth
+
+  Requiring the chain is stricter than requiring emptiness, and requiring
+  emptiness outright would make the amendment path the contract allows
+  unrecordable. A fabricated candidate with an invented row cannot satisfy the
+  chain, an unresolvable prior fails, and a cycle is rejected rather than
+  followed.
+  """
+  @spec acceptance_chain(
+          String.t(),
+          String.t(),
+          String.t(),
+          (String.t(), String.t() -> String.t() | nil) | nil,
+          MapSet.t(String.t())
+        ) ::
+          :ok
+  def acceptance_chain(candidate_text, path, revision, resolve_file, seen) do
+    {_rows, bound, complete} =
+      Records.governance_records(candidate_text, "#{path} at candidate #{revision}")
+
+    cond do
+      complete == [false, false] ->
+        :ok
+
+      not Enum.at(complete, 0) or Enum.at(bound, 0) == nil ->
+        raise Invalid,
+              "#{path}: acceptance candidate #{revision} has governance that is neither empty " <>
+                "nor a complete acceptance record, so it supersedes nothing"
+
+      true ->
+        {prior, _concept, _technical, _gate} = Enum.at(bound, 0)
+
+        if prior == revision or MapSet.member?(seen, prior) do
+          raise Invalid, "#{path}: acceptance candidate chain at #{revision} does not terminate"
+        end
+
+        prior_text = resolve_file && resolve_file.(prior, path)
+
+        if prior_text == nil do
+          raise Invalid,
+                "#{path}: acceptance candidate #{revision} binds prior candidate #{prior}, " <>
+                  "which is unavailable"
+        end
+
+        acceptance_chain(prior_text, path, prior, resolve_file, MapSet.put(seen, revision))
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Validates one milestone's plan pair, gate, and governance records against the
+  lifecycle state the canonical register declares.
+
+  ## Technical depth
+
+  Checks the exact Concept-to-Technical-depth section mapping, both envelopes,
+  the progress table, and the governance rows; then resolves every bound
+  candidate and compares its envelope and gate bytes with the current ones. The
+  acceptance candidate must itself be an Open plan, and the closure candidate must
+  retain the identical acceptance row while leaving Closure empty — so closure
+  cannot quietly restate what was accepted.
+  """
+  @spec governance(
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          (String.t(), String.t() -> String.t() | nil) | nil
+        ) :: :ok
+  def governance(text, technical_text, gate_text, name, state, resolve_file) do
+    path = "docs/plans/#{name}.md"
+    technical_path = "docs/plans/#{name}-technical.md"
+    gate_path = "docs/plans/#{name}-gate.md"
+
+    mapping =
+      text
+      |> Documents.labelled_links(path, label: "Technical depth", own_prefix: "concept")
+      |> MapSet.new(fn {anchor, _target, fragment} -> {anchor, fragment} end)
+
+    if mapping != @relationships do
+      raise Invalid, "#{path}: plan sections need the exact Concept-to-Technical-depth mapping"
+    end
+
+    {envelope, outcome_ids} = concept_envelope(text, path)
+    technical = technical_envelope(technical_text, technical_path)
+    progress(text, path, outcome_ids, state)
+    {rows, bound, complete} = Records.governance_records(text, path)
+
+    expected =
+      case state do
+        "Open" -> [false, false]
+        "Closed" -> [true, true]
+        _other -> [true, false]
+      end
+
+    if complete != expected do
+      raise Invalid, "#{path}: governance records do not match #{state} lifecycle state"
+    end
+
+    candidates =
+      resolve_candidates!(
+        bound,
+        %{
+          path: path,
+          technical_path: technical_path,
+          gate_path: gate_path,
+          gate_digest: gate_digest(gate_text, gate_path),
+          concept_digest: envelope_digest(envelope),
+          technical_digest: envelope_digest(technical)
+        },
+        resolve_file
+      )
+
+    verify_acceptance!(
+      Enum.at(bound, 0),
+      candidates,
+      envelope,
+      technical,
+      path,
+      technical_path,
+      resolve_file
+    )
+
+    verify_closure!(
+      Enum.at(bound, 1),
+      candidates,
+      envelope,
+      technical,
+      rows,
+      path,
+      technical_path
+    )
+
+    reject_second_status_surface!(text, path)
+  end
+
+  defp resolve_candidates!(bound, context, resolve_file) do
+    bound
+    |> Enum.reject(&is_nil/1)
+    |> Map.new(fn {revision, bound_concept, bound_technical, bound_gate} ->
+      historical_concept = resolve_file && resolve_file.(revision, context.path)
+      historical_technical = resolve_file && resolve_file.(revision, context.technical_path)
+      historical_gate = resolve_file && resolve_file.(revision, context.gate_path)
+
+      if Enum.any?([historical_concept, historical_technical, historical_gate], &is_nil/1) do
+        raise Invalid,
+              "#{context.path}: governance candidate or one of its bound files is unavailable"
+      end
+
+      {historical_envelope, _ids} =
+        concept_envelope(historical_concept, "#{context.path} at #{revision}")
+
+      historical_technical_envelope =
+        technical_envelope(historical_technical, "#{context.technical_path} at #{revision}")
+
+      if bound_concept != envelope_digest(historical_envelope) or
+           bound_concept != context.concept_digest do
+        raise Invalid,
+              "#{context.path}: governance concept digest does not match current and candidate envelopes"
+      end
+
+      if bound_technical != envelope_digest(historical_technical_envelope) or
+           bound_technical != context.technical_digest do
+        raise Invalid,
+              "#{context.path}: governance technical digest does not match current and candidate envelopes"
+      end
+
+      historical_gate_digest =
+        gate_digest(historical_gate, "#{context.gate_path} at #{revision}")
+
+      if bound_gate != context.gate_digest or bound_gate != historical_gate_digest do
+        raise Invalid,
+              "#{context.path}: governance gate digest does not match current and historical gate text"
+      end
+
+      {revision, {historical_concept, historical_technical, historical_gate}}
+    end)
+  end
+
+  defp verify_acceptance!(
+         nil,
+         _candidates,
+         _envelope,
+         _technical,
+         _path,
+         _technical_path,
+         _resolve
+       ) do
+    :ok
+  end
+
+  defp verify_acceptance!(
+         {revision, _concept, _technical_digest, _gate},
+         candidates,
+         envelope,
+         technical,
+         path,
+         technical_path,
+         resolve_file
+       ) do
+    {candidate, technical_candidate, _gate} = Map.fetch!(candidates, revision)
+
+    {candidate_envelope, candidate_outcomes} =
+      concept_envelope(candidate, "#{path} at #{revision}")
+
+    candidate_technical =
+      technical_envelope(technical_candidate, "#{technical_path} at #{revision}")
+
+    progress(candidate, "#{path} at acceptance candidate #{revision}", candidate_outcomes, "Open")
+    acceptance_chain(candidate, path, revision, resolve_file, MapSet.new())
+
+    if envelope != candidate_envelope do
+      raise Invalid, "#{path}: accepted normative concept envelope differs from its candidate"
+    end
+
+    if technical != candidate_technical do
+      raise Invalid,
+            "#{technical_path}: accepted normative technical envelope differs from its candidate"
+    end
+
+    :ok
+  end
+
+  defp verify_closure!(nil, _candidates, _envelope, _technical, _rows, _path, _technical_path) do
+    :ok
+  end
+
+  defp verify_closure!(
+         {revision, _concept, _technical_digest, _gate},
+         candidates,
+         envelope,
+         technical,
+         rows,
+         path,
+         technical_path
+       ) do
+    {candidate, technical_candidate, _gate} = Map.fetch!(candidates, revision)
+
+    {closure_envelope, closure_outcomes} =
+      concept_envelope(candidate, "#{path} at closure candidate #{revision}")
+
+    closure_technical =
+      technical_envelope(
+        technical_candidate,
+        "#{technical_path} at closure candidate #{revision}"
+      )
+
+    progress(candidate, "#{path} at closure candidate #{revision}", closure_outcomes, "Closed")
+
+    {closure_rows, _bound, closure_complete} =
+      Records.governance_records(candidate, "#{path} at closure candidate #{revision}")
+
+    if closure_complete != [true, false] or Enum.at(closure_rows, 0) != Enum.at(rows, 0) do
+      raise Invalid, "#{path}: closure candidate must retain Acceptance and leave Closure empty"
+    end
+
+    if closure_envelope != envelope do
+      raise Invalid, "#{path}: closure candidate changed the accepted normative concept envelope"
+    end
+
+    if closure_technical != technical do
+      raise Invalid,
+            "#{technical_path}: closure candidate changed the accepted normative technical envelope"
+    end
+
+    :ok
+  end
+
+  # Concept: lifecycle state lives in the canonical register and nowhere else.
+  # Technical depth: a plan-local status heading would be a second place a reader
+  # could read the milestone's state from, and the two would eventually disagree.
+  defp reject_second_status_surface!(text, path) do
+    lines = Markdown.lines(text, path)
+    visible = Markdown.visible_line_numbers(text, path)
+
+    if Markdown.matching_indices(lines, visible, "## Milestone Status") != [] do
+      raise Invalid, "#{path}: lifecycle state belongs only in the canonical register"
+    end
+
+    :ok
+  end
+
+  @doc """
+  ## Concept
+
+  The digest and path pairs a gate binds outside its own bytes.
+
+  ## Technical depth
+
+  A gate document governs nothing executable on its own: its runner could be
+  replaced with a command that exits zero while the document's digest stayed
+  valid. Binding the runner and its fixtures by content closes that, and a
+  malformed declaration fails rather than reading as a gate that predates the
+  convention.
+  """
+  @spec bound_artifacts(String.t(), String.t()) :: [{String.t(), String.t()}]
+  def bound_artifacts(gate_text, gate_path) do
+    {body, _start} = Markdown.section_body(gate_text, gate_path, "## Bound Artifacts")
+
+    body
+    |> Enum.filter(&String.starts_with?(&1, "|"))
+    |> Markdown.table(["SHA-256", "Path"], "#{gate_path} Bound Artifacts")
+    |> Enum.map(fn [digest, path] ->
+      with [_all, hash] <- Regex.run(~r/\A`([0-9a-f]{64})`\z/u, digest),
+           [_match, target] <- Regex.run(~r/\A`([^`]+)`\z/u, path) do
+        {hash, target}
+      else
+        _other -> raise Invalid, "#{gate_path}: malformed bound-artifact row"
+      end
+    end)
+  end
+end

@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
-# Temporary Python bridge for structural status validation. M0 migrates this
-# lane to the accepted Elixir/OTP toolchain and removes the Python prerequisite.
+# Structural status validation on the accepted Elixir/OTP toolchain.
+#
+# Shell is not retired: the enduring development baseline is Git, shell and POSIX
+# tools, and the accepted Elixir/OTP toolchain, so this stays a shell entrypoint
+# that calls repository-owned Mix commands.
+#
+# Two commands, for the two things the retired bridge did. The adversarial suite
+# proves the checks reject the mutations they exist to reject; the validation
+# command applies them to this checkout and its reachable history. Running only
+# the second would leave a check that passes because it inspects nothing.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
-python3 -B scripts/test_check_status.py --quiet
-exec python3 -B scripts/check_status.py --root .
+
+mix test apps/loopex/test/status_check_test.exs apps/loopex/test/history_anchoring_test.exs
+exec mix loopex.status

@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# Portable seed check for project instructions, skills, and client adapters.
+# Portable check for project instructions, skills, and client adapters.
+#
+# The structural half -- adapter pointers, role profiles, key sets, hook
+# registration, and the hosted wrapper -- runs on the accepted Elixir/OTP
+# toolchain through `mix loopex.agent_bootstrap`. What stays here is what is
+# genuinely about the shell and the filesystem: which commands exist, which files
+# are executable, whether every script parses, and whether each guard still
+# rejects its fixture when run as the client would run it.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -9,11 +16,11 @@ fail() {
   exit 1
 }
 
-for command in bash git cat grep jq python3 readlink sed tr; do
-  command -v "$command" >/dev/null 2>&1 || fail "missing $command"
+for required_command in bash git awk cat grep readlink sed tr mix; do
+  command -v "$required_command" >/dev/null 2>&1 || fail "missing $required_command"
 done
 
-python3 scripts/check-agent-bootstrap.py
+mix loopex.agent_bootstrap
 
 [ "$(tr -d '\r\n' < CLAUDE.md)" = "@AGENTS.md" ] ||
   fail "CLAUDE.md must contain only @AGENTS.md"
@@ -36,7 +43,6 @@ for skill in adr gate close-milestone; do
     fail "Claude cannot resolve $skill"
 done
 
-jq empty .claude/settings.json
 bash -n .claude/hooks/*.sh scripts/*.sh
 
 for hook in .claude/hooks/*.sh; do
@@ -46,6 +52,11 @@ done
 for repository_check in scripts/check*.sh; do
   [ -x "$repository_check" ] || fail "$repository_check is not executable"
 done
+
+# The guards read one field of the tool call through this command. A hook that
+# cannot run it fails open, so an unexecutable reader would silently remove every
+# guard rather than reporting anything.
+[ -x scripts/json-field.sh ] || fail "scripts/json-field.sh is not executable"
 
 if grep -nE 'Bash\(git (add|commit|worktree)' .claude/settings.json >/dev/null; then
   fail "Claude settings auto-allow mutating Git commands"
@@ -82,16 +93,23 @@ for duplicate in \
   [ ! -e "$duplicate" ] || fail "redundant archive snapshot remains: $duplicate"
 done
 
+# A tool-call document is built with printf rather than by an external
+# processor. Only a backslash and a double quote need escaping for the values
+# below, and both are handled before the value reaches the format string.
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "$value"
+}
+
 guard() {
-  jq -nc --arg command "$1" '{tool_input:{command:$command}}' |
+  printf '{"tool_input":{"command":"%s"}}' "$(json_escape "$1")" |
     .claude/hooks/guard-bash.sh >/dev/null 2>&1
 }
 
 file_guard() {
-  local field="$1"
-  local path_value="$2"
-  jq -nc --arg field "$field" --arg path_value "$path_value" \
-    '{tool_input:{($field):$path_value}}' |
+  printf '{"tool_input":{"%s":"%s"}}' "$1" "$(json_escape "$2")" |
     .claude/hooks/guard-filesystem.sh >/dev/null 2>&1
 }
 
