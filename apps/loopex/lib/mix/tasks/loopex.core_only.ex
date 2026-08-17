@@ -124,11 +124,29 @@ defmodule Mix.Tasks.Loopex.CoreOnly do
   end
 
   defp run_lane(core) do
+    build = Path.join(System.tmp_dir!(), "loopex-core-only-#{System.unique_integer([:positive])}")
+
+    try do
+      run_lane(core, build)
+    after
+      File.rm_rf(build)
+    end
+  end
+
+  # Concept: the lane owns its build directory as well as its VM.
+  # Technical depth: sharing the umbrella's `_build` made the lane depend on which
+  # toolchain compiled last. Running the floor pair after the current pair loaded
+  # beams built by the other Elixir and the VM died with "corrupt atom table", so
+  # the lane failed on a docs-only commit that had passed minutes earlier. A gate
+  # that passes only in a particular order is not a gate. An isolated build path
+  # costs one compile of core and its contract, which have no external
+  # dependencies, and removes the ordering entirely.
+  defp run_lane(core, build) do
     {output, status} =
       System.cmd("mix", ["run", "-e", @lane_script],
         cd: core,
         stderr_to_stdout: true,
-        env: [{"MIX_ENV", "dev"}]
+        env: [{"MIX_ENV", "dev"}, {"MIX_BUILD_PATH", build}]
       )
 
     cond do
