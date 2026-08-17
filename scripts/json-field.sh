@@ -66,16 +66,72 @@ function unescape(text,   out, index_, char_, next_) {
       continue
     }
     next_ = substr(text, index_ + 1, 1)
+    if (next_ == "u") {
+      # A \uXXXX escape is decoded, not passed through. Leaving it escaped was a
+      # real detection loss: a hook matching on a command never saw \u0024HOME as
+      # $HOME, so an ordinary JSON spelling of a protected path walked past the
+      # filesystem guard. That is a representation the client may legitimately
+      # send, not source obfuscation a reviewer could be asked to judge.
+      code_ = hexval(substr(text, index_ + 2, 4))
+      if (code_ < 0) {
+        out = out "\\u"
+        index_ = index_ + 2
+        continue
+      }
+      # A high surrogate followed by a low surrogate is one code point.
+      if (code_ >= 55296 && code_ <= 56319 && substr(text, index_ + 6, 2) == "\\u") {
+        low_ = hexval(substr(text, index_ + 8, 4))
+        if (low_ >= 56320 && low_ <= 57343) {
+          out = out utf8(65536 + (code_ - 55296) * 1024 + (low_ - 56320))
+          index_ = index_ + 12
+          continue
+        }
+      }
+      out = out utf8(code_)
+      index_ = index_ + 6
+      continue
+    }
     if (next_ == "n") { out = out "\n" }
     else if (next_ == "t") { out = out "\t" }
     else if (next_ == "r") { out = out "\r" }
     else if (next_ == "b") { out = out "\b" }
     else if (next_ == "f") { out = out "\f" }
-    else if (next_ == "u") { out = out "\\u" }
     else { out = out next_ }
     index_ = index_ + 2
   }
   return out
+}
+
+# Concept: four hex digits to a number, or -1 when they are not hex.
+function hexval(digits_,   i_, char_, value_, total_) {
+  if (length(digits_) != 4) { return -1 }
+  total_ = 0
+  for (i_ = 1; i_ <= 4; i_++) {
+    char_ = tolower(substr(digits_, i_, 1))
+    value_ = index("0123456789abcdef", char_) - 1
+    if (value_ < 0) { return -1 }
+    total_ = total_ * 16 + value_
+  }
+  return total_
+}
+
+# Concept: a code point as UTF-8 bytes.
+# Technical depth: encoded by arithmetic rather than by sprintf("%c") above the
+# ASCII range, because awk implementations disagree about what %c does with a
+# value over 127. A NUL is dropped rather than emitted, since writing one would
+# truncate the field for every consumer and hide whatever followed it.
+function utf8(code_) {
+  if (code_ <= 0) { return "" }
+  if (code_ < 128) { return sprintf("%c", code_) }
+  if (code_ < 2048) {
+    return sprintf("%c%c", 192 + int(code_ / 64), 128 + (code_ % 64))
+  }
+  if (code_ < 65536) {
+    return sprintf("%c%c%c", 224 + int(code_ / 4096), \
+      128 + int((code_ % 4096) / 64), 128 + (code_ % 64))
+  }
+  return sprintf("%c%c%c%c", 240 + int(code_ / 262144), \
+    128 + int((code_ % 262144) / 4096), 128 + int((code_ % 4096) / 64), 128 + (code_ % 64))
 }
 
 BEGIN {

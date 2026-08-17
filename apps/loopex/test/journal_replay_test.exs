@@ -94,10 +94,18 @@ defmodule Loopex.JournalReplayTest do
 
         assert state.seq == model.seq, "seed #{seed}: sequence"
         assert state.epoch == model.epoch, "seed #{seed}: epoch"
-        assert length(Session.facts(state)) == model.facts, "seed #{seed}: fact count"
+        # Values, not sizes. Comparing counts let a reducer that stored the wrong
+        # resolution for every effect agree with the model exactly, turning failed
+        # effects into committed durable truth invisibly.
+        assert Session.facts(state) == model.facts, "seed #{seed}: facts in order"
         assert Session.pending_txs(state) == Enum.sort(model.pending), "seed #{seed}: pending"
         assert Session.unknown_txs(state) == Enum.sort(model.unknown), "seed #{seed}: unknown"
-        assert map_size(state.resolved) == model.resolved, "seed #{seed}: resolved"
+        assert state.resolved == model.resolved, "seed #{seed}: each resolution"
+
+        for {{operation_id, attempt}, tx_id} <- model.operations do
+          assert Session.tx_for_operation(state, operation_id, attempt) == {:ok, tx_id},
+                 "seed #{seed}: operation #{operation_id}/#{attempt} maps to the wrong transaction"
+        end
 
         MapSet.union(seen, MapSet.new(records, &Map.fetch!(&1, :kind)))
       end)
@@ -142,6 +150,79 @@ defmodule Loopex.JournalReplayTest do
         assert folded == whole, "seed #{seed}: split at #{split} diverged"
       end
     end
+  end
+
+  test "a fact acknowledged after torn-tail recovery survives the next restart" do
+    # This is the case the truncation test above does not reach. That test proves a
+    # torn journal reads back an intact prefix; it never continues past recovery.
+    # Continuing is where durability was actually broken: append/2 writes at the
+    # end of the file and read/1 stops at the first bad frame, so a tear left in
+    # place made every later record unreachable. Recovery replayed the prefix, the
+    # coordinator acknowledged and published a new fact, and that fact vanished on
+    # the next restart -- durable truth that was not durable.
+    collector = DurableTruth.start_collector()
+    journal = DurableTruth.journal_path("torn-continuation")
+
+    {:ok, first} = DurableTruth.start(journal, "session-torn", collector)
+    assert :ok = Coordinator.commit_fact(first, :workspace, "before the tear")
+    {:ok, before_records, :complete} = Journal.read(journal)
+    DurableTruth.kill(first)
+
+    # A partial frame, exactly as a process killed mid-append would leave.
+    File.open!(journal, [:append, :binary], fn io -> IO.binwrite(io, <<255, 255, 255>>) end)
+
+    intact_size =
+      Enum.reduce(before_records, 0, fn record, size ->
+        size + 8 + byte_size(:erlang.term_to_binary(record, [:deterministic]))
+      end)
+
+    assert {:ok, ^before_records, {:torn, ^intact_size}} = Journal.read(journal)
+
+    {:ok, second} = DurableTruth.start(journal, "session-torn", collector)
+
+    # Recovery discarded the tear and nothing else: the prefix is byte-identical.
+    assert {:ok, recovered_records, :complete} = Journal.read(journal)
+    assert Enum.take(recovered_records, length(before_records)) == before_records
+
+    assert :ok = Coordinator.commit_fact(second, :workspace, "after the tear")
+    live = Session.facts(Coordinator.durable_state(second))
+    assert "after the tear" in live
+    DurableTruth.kill(second)
+
+    {:ok, third} = DurableTruth.start(journal, "session-torn", collector)
+    survived = Session.facts(Coordinator.durable_state(third))
+
+    assert "before the tear" in survived
+
+    assert "after the tear" in survived,
+           "a fact acknowledged and published after recovery was lost across restart"
+
+    assert Session.facts(Coordinator.durable_state(third)) == live
+  end
+
+  test "discarding a torn tail refuses anything it cannot prove is torn" do
+    journal = DurableTruth.journal_path("torn-refusal")
+    {records, _model} = DurableTruth.history(11, 6, "session-torn-refusal")
+    Enum.each(records, fn record -> assert :ok = Journal.append(journal, record) end)
+
+    # A complete journal is never truncated, whatever offset is offered.
+    assert {:error, {:not_torn, ^journal}} = Journal.discard_torn_tail(journal, 0)
+    size = File.stat!(journal).size
+    assert {:error, {:not_torn, ^journal}} = Journal.discard_torn_tail(journal, size)
+    assert File.stat!(journal).size == size
+
+    File.open!(journal, [:append, :binary], fn io -> IO.binwrite(io, <<0, 1, 2>>) end)
+    torn_size = File.stat!(journal).size
+
+    # An offset that is not the one read/1 reports is refused, so a caller cannot
+    # cut a journal at a place of its own choosing.
+    assert {:error, {:torn_offset_moved, ^journal, _tail, 0}} =
+             Journal.discard_torn_tail(journal, 0)
+
+    assert File.stat!(journal).size == torn_size
+
+    assert :ok = Journal.discard_torn_tail(journal, size)
+    assert {:ok, ^records, :complete} = Journal.read(journal)
   end
 
   test "a journal truncated at any byte replays to an intact prefix" do

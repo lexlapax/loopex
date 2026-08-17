@@ -127,6 +127,74 @@ defmodule Loopex.Journal do
   @doc """
   ## Concept
 
+  Discards a torn tail, so the journal ends at its last intact record and the
+  next append is reachable.
+
+  ## Technical depth
+
+  This exists because a torn tail is otherwise permanent. `append/2` writes at the
+  end of the file and `read/1` stops decoding at the first bad frame, so every
+  record written after a tear is unreachable forever. Recovery that replayed the
+  intact prefix and then carried on would acknowledge and publish facts that
+  vanish on the next restart — durable truth that is not durable.
+
+  Only bytes at or after `offset` are removed, and `offset` must come from a
+  `{:torn, offset}` tail, which `read/1` defines as just past the last intact
+  record. Nothing acknowledged is therefore discarded: a torn frame was never a
+  complete record, so no caller was ever told it committed.
+
+  The offset is re-verified against the current file before truncating, and a
+  journal that has since grown a valid record at that offset is refused rather
+  than cut. Truncation is the one destructive operation in this module, so it
+  refuses anything it cannot prove is a torn tail.
+  """
+  @spec discard_torn_tail(Path.t(), non_neg_integer()) :: :ok | {:error, term()}
+  def discard_torn_tail(path, offset) when is_integer(offset) and offset >= 0 do
+    with {:ok, records, tail} <- read(path) do
+      cond do
+        tail == :complete ->
+          {:error, {:not_torn, path}}
+
+        tail != {:torn, offset} ->
+          {:error, {:torn_offset_moved, path, tail, offset}}
+
+        true ->
+          truncate_at(path, offset, length(records))
+      end
+    end
+  end
+
+  defp truncate_at(path, offset, expected_records) do
+    case File.open(path, [:read, :write, :binary]) do
+      {:error, posix} ->
+        {:error, {:journal_unavailable, path, posix}}
+
+      {:ok, io} ->
+        result =
+          with {:ok, _position} <- :file.position(io, offset) do
+            :file.truncate(io)
+          end
+
+        :file.close(io)
+
+        # The prefix must survive exactly. A truncation that changed the intact
+        # record count would mean the offset did not mean what read/1 said.
+        with :ok <- posix(result, path),
+             {:ok, records, :complete} <- read(path) do
+          case length(records) == expected_records do
+            true -> :ok
+            false -> {:error, {:truncation_changed_prefix, path}}
+          end
+        else
+          {:ok, _records, tail} -> {:error, {:still_torn_after_truncation, path, tail}}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  @doc """
+  ## Concept
+
   Whether a term may appear inside a durable record.
 
   ## Technical depth

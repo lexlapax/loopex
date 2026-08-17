@@ -333,9 +333,14 @@ defmodule LoopexTest.DurableTruth do
   and an unknown outcome only when something is pending — so a run exercises
   every transition without ever producing a history no session could have had.
 
-  The model counts facts and settled effects rather than reproducing the
-  reducer's data structures. Counting is a genuinely independent calculation;
-  mirroring the reducer's maps would only restate its implementation.
+  The model computes the observable *values* a session should hold, not the sizes
+  of the reducer's collections. Counting alone was not enough and a review proved
+  it: storing `:committed` for every resolution while leaving fact handling
+  correct turns failed effects into committed durable truth, and every count still
+  agreed. Facts are therefore compared in order and by content, each transaction's
+  resolution is compared individually, and the operation-to-transaction mapping is
+  compared as a whole. The model still derives these from the emitted history
+  rather than by calling the reducer, so it remains an independent calculation.
   """
   def history(seed_integer, count, session_id) do
     Enum.reduce(1..count, {seed(seed_integer), new_model(session_id), []}, fn _step,
@@ -354,9 +359,10 @@ defmodule LoopexTest.DurableTruth do
       epoch: 0,
       pending: [],
       unknown: [],
-      resolved: 0,
-      facts: 0,
-      operations: 0
+      resolved: %{},
+      facts: [],
+      operations: %{},
+      operation_count: 0
     }
   end
 
@@ -384,13 +390,14 @@ defmodule LoopexTest.DurableTruth do
 
   defp emit(:fact_committed, model, rng) do
     seq = model.seq + 1
-    record = %{kind: :fact_committed, seq: seq, fact: "fact-#{seq}"}
-    {record, %{model | seq: seq, facts: model.facts + 1}, rng}
+    fact = "fact-#{seq}"
+    record = %{kind: :fact_committed, seq: seq, fact: fact}
+    {record, %{model | seq: seq, facts: model.facts ++ [fact]}, rng}
   end
 
   defp emit(:effect_intent, model, rng) do
     {domain, rng} = pick(rng, [:workspace, :network])
-    operations = model.operations + 1
+    operations = model.operation_count + 1
     seq = model.seq + 1
 
     intent =
@@ -398,11 +405,14 @@ defmodule LoopexTest.DurableTruth do
       |> Effect.intent(model.epoch, executor())
       |> Map.put(:seq, seq)
 
+    tx_id = Map.fetch!(intent, :tx_id)
+
     model = %{
       model
       | seq: seq,
-        operations: operations,
-        pending: model.pending ++ [Map.fetch!(intent, :tx_id)]
+        operation_count: operations,
+        operations: Map.put(model.operations, {"op-#{operations}", 1}, tx_id),
+        pending: model.pending ++ [tx_id]
     }
 
     {intent, model, rng}
@@ -430,14 +440,14 @@ defmodule LoopexTest.DurableTruth do
     fact = "effect-#{seq}"
     record = %{kind: :effect_resolved, seq: seq, tx_id: tx_id, resolution: resolution, fact: fact}
 
-    facts = if resolution == :committed, do: model.facts + 1, else: model.facts
+    facts = if resolution == :committed, do: model.facts ++ [fact], else: model.facts
 
     model = %{
       model
       | seq: seq,
         pending: List.delete(model.pending, tx_id),
         unknown: List.delete(model.unknown, tx_id),
-        resolved: model.resolved + 1,
+        resolved: Map.put(model.resolved, tx_id, resolution),
         facts: facts
     }
 

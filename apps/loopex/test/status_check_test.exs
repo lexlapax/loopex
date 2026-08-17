@@ -41,6 +41,49 @@ defmodule Loopex.StatusCheckTest do
     assert [] == Fixture.checked(Fixture.documents())
   end
 
+  test "the JSON reader decodes unicode escapes so hooks still match" do
+    # A hook matching on a command never saw a \\u0024HOME spelling as $HOME, so an
+    # ordinary JSON encoding of a protected path walked past the filesystem guard.
+    # That is a representation a client may legitimately send, not obfuscation.
+    root = LoopexTest.Repo.root()
+    protected = ".loo" <> "pex"
+
+    # The reader takes the document on stdin, so it is written to a file and
+    # redirected; System.cmd/3 cannot feed stdin directly.
+    feed = fn document, command ->
+      path = Path.join(System.tmp_dir!(), "jf-#{System.unique_integer([:positive])}.json")
+      File.write!(path, document)
+      on_exit_path = path
+
+      {output, status} =
+        System.cmd("sh", ["-c", "#{command} < #{on_exit_path}"], cd: root, stderr_to_stdout: true)
+
+      File.rm(path)
+      {String.trim_trailing(output, "\n"), status}
+    end
+
+    read = fn document ->
+      {output, 0} = feed.(document, "bash scripts/json-field.sh tool_input command")
+      output
+    end
+
+    escaped = ~s({"tool_input":{"command":"cat \\u0024HOME/#{protected}/x"}})
+    assert read.(escaped) == "cat $HOME/#{protected}/x"
+
+    # A literal backslash followed by "u" is not an escape and must survive.
+    literal = ~s({"tool_input":{"command":"keep \\\\u0024 intact"}})
+    assert read.(literal) == "keep \\u0024 intact"
+
+    # Surrogate pairs combine into one code point.
+    assert read.(~s({"tool_input":{"command":"e \\ud83d\\ude00"}})) == "e 😀"
+
+    # And the guard actually blocks the escaped spelling now.
+    for document <- [escaped, ~s({"tool_input":{"command":"cat $HOME/#{protected}/x"}})] do
+      {_out, status} = feed.(document, "bash .claude/hooks/guard-bash.sh")
+      assert status == 2, "the guard must block this spelling with exit 2, got #{status}"
+    end
+  end
+
   test "only a declared amendment may change gate bytes" do
     gate = Fixture.gate()
     assert 0 == Plan.gate_generation(gate, "gate")
@@ -57,14 +100,38 @@ defmodule Loopex.StatusCheckTest do
     # Rolling back to an earlier generation is not a supersession.
     refute Plan.supersedes?("accepted gate", "1\0bbb", "0\0aaa")
 
-    # An acceptance row may rebind only once an amendment exists, because the
-    # amended gate and the row that binds it cannot share a commit.
+    # An acceptance row is judged on the amendment generation of the gate carried
+    # by the candidate it binds, and the rule is the same strictly-increasing one.
+    # Requiring merely that some amendment existed left the row freely rewritable
+    # once the first amendment landed: a generation-2 acceptance could be rebound
+    # repeatedly with no Amendment 3.
+    assert Plan.supersedes?("Acceptance", "0\0row", "1\0other")
+    # A rewrite at the same generation is not a supersession.
+    refute Plan.supersedes?("Acceptance", "1\0row", "1\0other")
     refute Plan.supersedes?("Acceptance", "0\0row", "0\0other")
-    assert Plan.supersedes?("Acceptance", "1\0row", "1\0other")
+    # Going backwards is not a supersession either.
+    refute Plan.supersedes?("Acceptance", "2\0row", "1\0other")
+    # An unresolvable candidate cannot be used to claim one.
+    refute Plan.supersedes?("Acceptance", "\0row", "\0other")
 
+    # An anchor inside a fenced code block is illustration, not a declaration.
+    fenced =
+      String.trim_trailing(gate, "\n") <>
+        "\n\n```text\n<a id=\"amendment-1\"></a>\n## Amendment 1\n```\n"
+
+    assert 0 == Plan.gate_generation(fenced, "gate"),
+           "an anchor inside a code fence must not mint a generation"
+
+    # A bare anchor with no visible amendment heading mints nothing either.
+    bare = String.trim_trailing(gate, "\n") <> "\n\n<a id=\"amendment-1\"></a>\n\nprose\n"
+    assert 0 == Plan.gate_generation(bare, "gate")
+
+    # Each fixture carries a real heading, because a bare anchor now mints nothing
+    # and would pass the numbering check by counting zero.
     for bad <- [
-          "<a id=\"amendment-2\"></a>",
-          "<a id=\"amendment-1\"></a>\n<a id=\"amendment-1\"></a>"
+          "<a id=\"amendment-2\"></a>\n## Amendment 2",
+          "<a id=\"amendment-1\"></a>\n## Amendment 1\n\n" <>
+            "<a id=\"amendment-1\"></a>\n## Amendment 1"
         ] do
       assert_raise Invalid, ~r/consecutively/, fn ->
         Plan.gate_generation(gate <> "\n" <> bad <> "\n", "gate")

@@ -83,6 +83,11 @@ defmodule Loopex.Checks.History do
 
     walk = snapshots ++ [{"working tree", [head], current}]
 
+    # Every revision's files, so an acceptance row can be judged against the gate
+    # carried by the candidate it binds rather than only the ambient one.
+    by_revision =
+      Map.new(snapshots, fn {revision, _parents, governed} -> {revision, governed} end)
+
     Enum.reduce(walk, %{}, fn {revision, parents, governed}, inherited ->
       if Map.has_key?(inherited, revision) or
            Enum.any?(parents, &(not Map.has_key?(inherited, &1))) do
@@ -91,7 +96,16 @@ defmodule Loopex.Checks.History do
 
       anchors =
         Map.new(primary, fn path ->
-          {path, resolve_anchors!(path, revision, parents, governed, inherited, adr_concepts)}
+          {path,
+           resolve_anchors!(
+             path,
+             revision,
+             parents,
+             governed,
+             inherited,
+             adr_concepts,
+             by_revision
+           )}
         end)
 
       Map.put(inherited, revision, anchors)
@@ -135,7 +149,15 @@ defmodule Loopex.Checks.History do
     end)
   end
 
-  defp resolve_anchors!(path, revision, parents, governed, inherited, adr_concepts) do
+  defp resolve_anchors!(
+         path,
+         revision,
+         parents,
+         governed,
+         inherited,
+         adr_concepts,
+         by_revision
+       ) do
     labels = labels(path, adr_concepts)
 
     from_parents =
@@ -164,7 +186,7 @@ defmodule Loopex.Checks.History do
         from_parents
 
       text ->
-        current = values(text, path, revision, governed, adr_concepts)
+        current = values(text, path, revision, governed, adr_concepts, by_revision)
 
         labels
         |> Enum.with_index()
@@ -230,7 +252,7 @@ defmodule Loopex.Checks.History do
   # complete it; a non-nil value is pinned for every descendant. Values are joined
   # with NUL because no governance cell can contain one, which makes equality a
   # single comparison and lets the amendment generation ride in the same string.
-  defp values(text, path, revision, governed, adr_concepts) do
+  defp values(text, path, revision, governed, adr_concepts, by_revision) do
     historical_path = "#{path} at #{revision}"
 
     cond do
@@ -241,7 +263,7 @@ defmodule Loopex.Checks.History do
         gate_values(text, path, historical_path, governed, revision)
 
       true ->
-        plan_values(text, path, historical_path, governed, revision)
+        plan_values(text, path, historical_path, governed, revision, by_revision)
     end
   end
 
@@ -267,6 +289,23 @@ defmodule Loopex.Checks.History do
     end
   end
 
+  # Concept: the amendment generation of the gate at the candidate a row binds.
+  # Technical depth: an unresolvable candidate yields nil, and Plan.supersedes?/3
+  # treats a missing value as "not a supersession", so an unreachable candidate
+  # cannot be used to claim one.
+  defp bound_candidate_generation(row, path, by_revision) do
+    gate_path = Paths.strip_suffix(path, ".md") <> "-gate.md"
+
+    with [_decision, _authority, _evidence, bound] <- row,
+         [_all, candidate] <- Regex.run(~r/candidate `([0-9a-f]{40})`/, bound),
+         files when is_map(files) <- Map.get(by_revision, candidate),
+         text when is_binary(text) <- Map.get(files, gate_path) do
+      Plan.gate_generation(text, "#{gate_path} at #{candidate}")
+    else
+      _other -> nil
+    end
+  end
+
   defp gate_values(text, path, historical_path, governed, revision) do
     plan_path = Paths.strip_suffix(path, "-gate.md") <> ".md"
 
@@ -281,7 +320,7 @@ defmodule Loopex.Checks.History do
     end
   end
 
-  defp plan_values(text, path, historical_path, governed, revision) do
+  defp plan_values(text, path, historical_path, governed, revision, by_revision) do
     {rows, _bound, complete} = Records.governance_records(text, historical_path)
 
     case Enum.at(complete, 0) do
@@ -306,16 +345,19 @@ defmodule Loopex.Checks.History do
         technical_envelope =
           Plan.technical_envelope(technical, "#{technical_path} at #{revision}")
 
-        gate_text = Map.get(governed, Paths.strip_suffix(path, ".md") <> "-gate.md")
-
-        generation =
-          case gate_text do
-            nil -> 0
-            found -> Plan.gate_generation(found, "#{path} gate at #{revision}")
-          end
+        # The leading field is the amendment generation of the gate carried by the
+        # candidate this row binds -- deliberately NOT the ambient generation of
+        # the gate at this revision. Using the ambient one made the anchor change
+        # at the amendment commit itself, where the row had not moved at all, and
+        # tying a rebind to the ambient value also left the row freely rewritable
+        # once any amendment existed. Comparing the bound candidates instead means
+        # a rebind is admitted only when it moves to a genuinely later-amended
+        # candidate, which is the same strictly-increasing rule the gate label uses.
+        candidate_generation =
+          bound_candidate_generation(Enum.at(rows, 0), path, by_revision)
 
         [
-          "#{generation}\0" <> Enum.join(Enum.at(rows, 0), "\0"),
+          "#{candidate_generation}\0" <> Enum.join(Enum.at(rows, 0), "\0"),
           if(Enum.at(complete, 1), do: Enum.join(Enum.at(rows, 1), "\0")),
           Enum.join(concept_envelope, "\n"),
           Enum.join(technical_envelope, "\n")

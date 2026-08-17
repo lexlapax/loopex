@@ -220,7 +220,16 @@ defmodule Loopex.Coordinator do
     # records before the tear are the state that was acknowledged, so recovery
     # replays them and continues; refusing to start would turn every crash
     # mid-append into a session that can never be recovered.
-    with {:ok, records, _tail} <- Journal.read(journal),
+    #
+    # The tear must be discarded before anything else is written, and this is not
+    # housekeeping. append/2 writes at the end of the file and read/1 stops at the
+    # first bad frame, so a tear left in place makes every later record
+    # unreachable: recovery would replay the prefix, then acknowledge and publish
+    # facts that disappear on the next restart. The tail is therefore resolved
+    # first, and a failure to resolve it stops the coordinator rather than letting
+    # it run on a journal it cannot durably extend.
+    with {:ok, records, tail} <- Journal.read(journal),
+         :ok <- resolve_tail(journal, tail),
          {:ok, session} <- Session.replay(session_id, records) do
       state = %{
         journal: journal,
@@ -238,6 +247,12 @@ defmodule Loopex.Coordinator do
       {:error, reason} -> {:stop, {:recovery_failed, reason}}
     end
   end
+
+  # Concept: a journal must end where its durable truth ends.
+  # Technical depth: nothing acknowledged is discarded — a torn frame was never a
+  # complete record, so no caller was told it committed.
+  defp resolve_tail(_journal, :complete), do: :ok
+  defp resolve_tail(journal, {:torn, offset}), do: Journal.discard_torn_tail(journal, offset)
 
   # Concept: a restart takes a new epoch, then fences every effect whose outcome
   # it cannot know.

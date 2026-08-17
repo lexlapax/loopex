@@ -107,16 +107,38 @@ defmodule Loopex.Checks.Plan do
   """
   @spec gate_generation(String.t(), String.t()) :: non_neg_integer()
   def gate_generation(text, path) do
+    # An anchor inside a fenced code block is illustration, not a declaration, and
+    # counting one let a gate mint a generation with no visible amendment, scope,
+    # authority, or disposition behind it. Each anchor must also be followed by a
+    # visible amendment heading, so a bare anchor cannot mint a generation either.
     found =
       text
       |> String.split("\n")
-      |> Enum.flat_map(fn line ->
-        case Regex.run(@amendment_anchor, line) do
-          [_all, number] -> [String.to_integer(number)]
-          nil -> []
+      |> Enum.reduce({[], false, nil}, fn line, {numbers, fenced, pending} ->
+        cond do
+          String.starts_with?(String.trim_leading(line), "```") ->
+            {numbers, not fenced, pending}
+
+          fenced ->
+            {numbers, fenced, pending}
+
+          match?([_all, _number], Regex.run(@amendment_anchor, line)) ->
+            [_all, number] = Regex.run(@amendment_anchor, line)
+            {numbers, fenced, {String.to_integer(number), line}}
+
+          pending != nil ->
+            {number, _anchor} = pending
+
+            case Regex.match?(~r/^##+\s+Amendment\s/, line) do
+              true -> {[number | numbers], fenced, nil}
+              false -> {numbers, fenced, if(String.trim(line) == "", do: pending, else: nil)}
+            end
+
+          true ->
+            {numbers, fenced, pending}
         end
       end)
-      |> Enum.sort()
+      |> then(fn {numbers, _fenced, _pending} -> Enum.sort(numbers) end)
 
     if found != Enum.to_list(1..length(found)//1) do
       raise Invalid, "#{path}: amendment anchors must be numbered consecutively from 1"
@@ -483,13 +505,15 @@ defmodule Loopex.Checks.Plan do
   record.
   """
   @spec supersedes?(String.t(), String.t() | nil, String.t() | nil) :: boolean()
-  def supersedes?(label, anchor, value) do
+  def supersedes?(_label, anchor, value) do
     with generation when is_integer(generation) <- generation_of(value),
          prior when is_integer(prior) <- generation_of(anchor) do
-      case label do
-        "accepted gate" -> generation > prior
-        _other -> generation >= 1
-      end
+      # One rule for both labels: strictly increasing. For a gate that is its own
+      # amendment generation; for an acceptance row it is the generation of the
+      # gate carried by the candidate the row binds. Either way a change is
+      # admitted only when it moves forward, so a silent edit, a rewrite at the
+      # same generation, and a rollback are all rejected.
+      generation > prior
     else
       _other -> false
     end
@@ -533,7 +557,11 @@ defmodule Loopex.Checks.Plan do
 
     cond do
       complete == [false, false] ->
-        :ok
+        # An original snapshot predates any amendment, so its gate carries
+        # generation zero. Accepting an empty-governance candidate at a later
+        # generation let a reachable side commit terminate the chain while carrying
+        # gate bytes nobody amended into it.
+        terminal_generation_zero!(path, revision, resolve_file)
 
       not Enum.at(complete, 0) or Enum.at(bound, 0) == nil ->
         raise Invalid,
@@ -557,6 +585,25 @@ defmodule Loopex.Checks.Plan do
 
         acceptance_chain(prior_text, path, prior, resolve_file, MapSet.put(seen, revision))
     end
+  end
+
+  defp terminal_generation_zero!(path, revision, resolve_file) do
+    gate_path = String.replace_suffix(path, ".md", "-gate.md")
+    gate_text = resolve_file && resolve_file.(revision, gate_path)
+
+    generation =
+      case gate_text do
+        nil -> 0
+        text -> gate_generation(text, "#{gate_path} at #{revision}")
+      end
+
+    if generation != 0 do
+      raise Invalid,
+            "#{path}: acceptance candidate chain terminates at #{revision}, whose gate is " <>
+              "already at amendment generation #{generation}; an original carries generation 0"
+    end
+
+    :ok
   end
 
   @doc """
