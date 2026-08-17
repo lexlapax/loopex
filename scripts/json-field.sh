@@ -87,6 +87,15 @@ function unescape(text,   out, index_, char_, next_) {
           continue
         }
       }
+      # A lone surrogate is not a code point, and encoding one yields invalid UTF-8
+      # that a real parser rejects outright. It becomes U+FFFD so the field stays
+      # well formed and the surrounding text is still matchable, instead of
+      # emitting bytes no consumer can decode.
+      if (code_ >= 55296 && code_ <= 57343) {
+        out = out utf8(65533)
+        index_ = index_ + 6
+        continue
+      }
       out = out utf8(code_)
       index_ = index_ + 6
       continue
@@ -118,10 +127,13 @@ function hexval(digits_,   i_, char_, value_, total_) {
 # Concept: a code point as UTF-8 bytes.
 # Technical depth: encoded by arithmetic rather than by sprintf("%c") above the
 # ASCII range, because awk implementations disagree about what %c does with a
-# value over 127. A NUL is dropped rather than emitted, since writing one would
-# truncate the field for every consumer and hide whatever followed it.
+# value over 127. A NUL becomes U+FFFD rather than being dropped: dropping it
+# silently shortened the field, which no real parser does and which hid that the
+# input contained one at all. Emitting a real NUL is not an option either, since
+# it truncates the field for every downstream consumer.
 function utf8(code_) {
-  if (code_ <= 0) { return "" }
+  if (code_ < 0) { return "" }
+  if (code_ == 0) { return sprintf("%c%c%c", 239, 191, 189) }
   if (code_ < 128) { return sprintf("%c", code_) }
   if (code_ < 2048) {
     return sprintf("%c%c", 192 + int(code_ / 64), 128 + (code_ % 64))
@@ -156,10 +168,16 @@ END {
     position = position + RSTART + RLENGTH - 1
     following = substr(buffer, position)
     if (match(following, /^[ \t\r\n]*:/) != 0) {
-      key[depth] = token
+      # Keys are decoded like values. Storing them raw meant an ordinary escaped
+      # spelling -- "comm\u0061nd" -- did not match the requested name, so a hook
+      # read nothing and passed a command it would otherwise have blocked.
+      key[depth] = unescape(token)
       continue
     }
-    if (depth == 2 && key[1] == object && (key[2] in requested) && !(key[2] in found)) {
+    if (depth == 2 && key[1] == object && (key[2] in requested)) {
+      # A duplicate key takes the LAST occurrence, which is what a real parser
+      # does. Keeping the first let a document put a harmless value ahead of the
+      # real one and have the guard judge the decoy.
       found[key[2]] = unescape(token)
     }
   }

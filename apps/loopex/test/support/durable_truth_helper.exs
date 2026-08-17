@@ -362,6 +362,7 @@ defmodule LoopexTest.DurableTruth do
       resolved: %{},
       facts: [],
       operations: %{},
+      intents: %{},
       operation_count: 0
     }
   end
@@ -412,6 +413,7 @@ defmodule LoopexTest.DurableTruth do
       | seq: seq,
         operation_count: operations,
         operations: Map.put(model.operations, {"op-#{operations}", 1}, tx_id),
+        intents: Map.put(model.intents, tx_id, intent),
         pending: model.pending ++ [tx_id]
     }
 

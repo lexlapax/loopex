@@ -42,6 +42,34 @@ defmodule Loopex.StatusCheckTest do
     assert [] == Fixture.checked(Fixture.documents())
   end
 
+  test "an acceptance chain edge must run backwards along history" do
+    # Resolving proves only that a commit is reachable from HEAD, and two unrelated
+    # branches both become reachable once anything merges them. Without an ancestry
+    # requirement a candidate could name a prior it does not descend from, and
+    # combined with a fabricated generation that lands an unaccepted gate.
+    original = Fixture.plan()
+    amended = Fixture.plan(governed: true)
+    resolve = fn _sha, _path -> original end
+
+    # An ancestral edge is admitted.
+    assert :ok =
+             Plan.acceptance_chain(
+               amended,
+               "docs/plans/M0.md",
+               "bbbb",
+               resolve,
+               MapSet.new(),
+               fn _prior, _revision -> true end
+             )
+
+    # A non-ancestral edge is refused, however reachable both commits are.
+    assert_raise Invalid, ~r/not an ancestor/, fn ->
+      Plan.acceptance_chain(amended, "docs/plans/M0.md", "bbbb", resolve, MapSet.new(), fn
+        _prior, _revision -> false
+      end)
+    end
+  end
+
   test "a merge reconciles parents only when one supersedes the rest" do
     # Landing an accepted amendment is a merge whose parents disagree: one carries
     # the amended gate, one does not. Raising on every divergence made that shape
@@ -127,8 +155,32 @@ defmodule Loopex.StatusCheckTest do
     # Surrogate pairs combine into one code point.
     assert read.(~s({"tool_input":{"command":"e \\ud83d\\ude00"}})) == "e 😀"
 
+    # KEYS are decoded too. Storing them raw meant an ordinary escaped spelling did
+    # not match the requested name, so the hook read nothing and passed a command it
+    # would otherwise have blocked.
+    assert read.(~s({"tool_input":{"comm\\u0061nd":"X"}})) == "X"
+    assert read.(~s({"tool_\\u0069nput":{"command":"Y"}})) == "Y"
+
+    # A duplicate key takes the LAST occurrence, as a real parser does. Keeping the
+    # first let a document put a decoy ahead of the real value.
+    assert read.(~s({"tool_input":{"command":"first","command":"last"}})) == "last"
+
+    # A lone surrogate is not a code point; emitting one produced invalid UTF-8.
+    assert read.(~s({"tool_input":{"command":"lone \\ud83d end"}})) == "lone \uFFFD end"
+
+    # A NUL is not silently dropped, which would shorten the field invisibly.
+    assert read.(~s({"tool_input":{"command":"a \\u0000 b"}})) == "a \uFFFD b"
+
     # And the guard actually blocks the escaped spelling now.
-    for document <- [escaped, ~s({"tool_input":{"command":"cat $HOME/#{protected}/x"}})] do
+    bypasses = [
+      escaped,
+      ~s({"tool_input":{"command":"cat $HOME/#{protected}/x"}}),
+      ~s({"tool_input":{"comm\\u0061nd":"rm -rf $HOME/#{protected}"}}),
+      ~s({"tool_\\u0069nput":{"command":"rm -rf $HOME/#{protected}"}}),
+      ~s({"tool_input":{"command":"echo safe","command":"rm -rf $HOME/#{protected}"}})
+    ]
+
+    for document <- bypasses do
       {_out, status} = feed.(document, "bash .claude/hooks/guard-bash.sh")
       assert status == 2, "the guard must block this spelling with exit 2, got #{status}"
     end

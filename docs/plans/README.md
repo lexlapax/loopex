@@ -68,9 +68,15 @@ pairs. Self-hosting the checks is evidence about the accepted decisions, not
 incidental tooling. Two constraints keep it from displacing the durability,
 effect-truth, and code-evolution questions M0 exists to answer: the plan carries
 it as its own workstream with a declared rejoin barrier, and its minimalism
-budget requires the replacement to be materially smaller than the bridge it
-retires and to name what it drops and why. A line-for-line port would make the
-bridge's size permanent, which is the opposite of retiring it.
+budget requires the replacement to measure and report its own size against the
+bridge it retires and to name what it drops and why.
+
+That budget sets no threshold, and this index previously said the replacement must
+be "materially smaller", which contradicted the accepted technical envelope. The
+envelope governs: size is a review signal weighed against the dropped-behaviour
+list, never a pass condition, because a ceiling rewards compressed code, hidden
+complexity, and deleted coverage. The replacement is in fact larger, and whether
+that is proportionate is a judgment recorded with the evidence.
 Each founding ADR's Acceptance row uses the same authority and disposition
 syntax as a plan, with Bound bytes in this exact form:
 

@@ -63,7 +63,7 @@ defmodule Loopex.Journal do
   which is where a crashed append began. It is diagnostic: the records returned
   alongside it are the complete prefix and are safe to replay.
   """
-  @type tail :: :complete | {:torn, non_neg_integer()}
+  @type tail :: :complete | {:torn, non_neg_integer()} | {:corrupt, non_neg_integer()}
 
   # Technical depth: a durable record is bounded so one malformed write cannot
   # make recovery allocate without limit. Both ceilings are far above anything
@@ -143,52 +143,171 @@ defmodule Loopex.Journal do
   record. Nothing acknowledged is therefore discarded: a torn frame was never a
   complete record, so no caller was ever told it committed.
 
-  The offset is re-verified against the current file before truncating, and a
-  journal that has since grown a valid record at that offset is refused rather
-  than cut. Truncation is the one destructive operation in this module, so it
-  refuses anything it cannot prove is a torn tail.
+  Truncation is the one destructive operation in this module, so it refuses
+  everything it cannot prove is a torn append. Three separate refusals apply, and
+  each exists because a review found data being destroyed without it:
+
+  * A complete frame that fails its checksum is corruption, not a tear. A killed
+    writer leaves a strict prefix of one frame; it cannot leave a whole frame with
+    changed bytes, and records beyond such a frame may be perfectly intact.
+  * A tail that reads as a strict prefix is still scanned for any frame that
+    decodes and passes its checksum, because a corrupted length prefix can claim
+    more bytes than remain while intact records sit past it.
+  * Verification and truncation happen through one handle, under a lock file
+    created exclusively, so a second writer cannot repair and append between the
+    two steps and have its records deleted.
   """
   @spec discard_torn_tail(Path.t(), non_neg_integer()) :: :ok | {:error, term()}
   def discard_torn_tail(path, offset) when is_integer(offset) and offset >= 0 do
-    with {:ok, records, tail} <- read(path) do
-      cond do
-        tail == :complete ->
-          {:error, {:not_torn, path}}
+    # One handle for the whole operation. Re-reading the path and then separately
+    # opening it to truncate left a window in which another writer could repair the
+    # tear and append records that this truncation would then delete. Verifying and
+    # cutting through the same descriptor closes that window for this process; the
+    # one-serial-owner invariant is what excludes a second writer, and the
+    # coordinator enforces it per journal.
+    with :ok <- acquire_lock(path) do
+      result =
+        case File.open(path, [:read, :write, :binary]) do
+          {:error, posix} ->
+            {:error, {:journal_unavailable, path, posix}}
 
-        tail != {:torn, offset} ->
-          {:error, {:torn_offset_moved, path, tail, offset}}
+          {:ok, io} ->
+            outcome = verify_and_truncate(io, path, offset)
+            :file.close(io)
+            outcome
+        end
 
-        true ->
-          truncate_at(path, offset, length(records))
-      end
+      release_lock(path)
+      result
     end
   end
 
-  defp truncate_at(path, offset, expected_records) do
-    case File.open(path, [:read, :write, :binary]) do
-      {:error, posix} ->
-        {:error, {:journal_unavailable, path, posix}}
+  # Concept: only one writer may repair a journal, and the exclusion is real rather
+  # than a narrow window.
+  # Technical depth: verifying through one handle removes the gap between checking
+  # and cutting *within* a process, but two coordinators could still interleave —
+  # one verifies a tear, the other repairs and appends, the first truncates and
+  # deletes the new records. Post-hoc record counting cannot detect that, because
+  # the surviving prefix count is unchanged. A lock file created with `:exclusive`
+  # is an atomic create-or-fail at the filesystem, so exclusion holds across
+  # processes and across VMs, which a VM-global registry would not.
+  #
+  # A stale lock left by a killed process fails the next repair closed. That is the
+  # correct direction for durable truth: a human decides whether the previous owner
+  # is really gone, and the lock records who claimed it so they can tell.
+  defp acquire_lock(path) do
+    lock = path <> ".repair-lock"
 
+    case File.open(lock, [:write, :exclusive]) do
       {:ok, io} ->
-        result =
-          with {:ok, _position} <- :file.position(io, offset) do
-            :file.truncate(io)
-          end
+        IO.write(io, "node=#{node()} os_pid=#{System.pid()} at=#{System.system_time(:second)}\n")
+        File.close(io)
+        :ok
 
-        :file.close(io)
+      {:error, :eexist} ->
+        {:error, {:repair_already_held, lock, File.read(lock)}}
 
-        # The prefix must survive exactly. A truncation that changed the intact
-        # record count would mean the offset did not mean what read/1 said.
-        with :ok <- posix(result, path),
-             {:ok, records, :complete} <- read(path) do
-          case length(records) == expected_records do
-            true -> :ok
-            false -> {:error, {:truncation_changed_prefix, path}}
-          end
-        else
-          {:ok, _records, tail} -> {:error, {:still_torn_after_truncation, path, tail}}
-          {:error, reason} -> {:error, reason}
-        end
+      {:error, posix} ->
+        {:error, {:journal_unavailable, lock, posix}}
+    end
+  end
+
+  defp release_lock(path), do: File.rm(path <> ".repair-lock")
+
+  defp verify_and_truncate(io, path, offset) do
+    with {:ok, bytes} <- read_all(io, path),
+         {:ok, records} <- expect_torn_at(bytes, path, offset),
+         :ok <- refuse_intact_tail(bytes, path, offset),
+         :ok <- truncate_to(io, path, offset) do
+      confirm_prefix(io, path, records)
+    end
+  end
+
+  defp read_all(io, path) do
+    with {:ok, _position} <- :file.position(io, 0) do
+      case IO.binread(io, :eof) do
+        :eof -> {:ok, <<>>}
+        {:error, posix} -> {:error, {:journal_unavailable, path, posix}}
+        bytes when is_binary(bytes) -> {:ok, bytes}
+      end
+    else
+      {:error, posix} -> {:error, {:journal_unavailable, path, posix}}
+    end
+  end
+
+  # The tail must be exactly the tear this offset describes, read through the same
+  # handle that will cut it — not through a separate read that may since have gone
+  # stale.
+  defp expect_torn_at(bytes, path, offset) do
+    case decode(bytes, 0, []) do
+      {:ok, records, {:torn, ^offset}} ->
+        {:ok, records}
+
+      {:ok, _records, :complete} ->
+        {:error, {:not_torn, path}}
+
+      {:ok, _records, {:corrupt, at}} ->
+        {:error, {:corrupt_not_torn, path, at}}
+
+      {:ok, _records, other} ->
+        {:error, {:torn_offset_moved, path, other, offset}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Concept: never delete an intact record.
+  # Technical depth: a corrupted length prefix can claim more bytes than remain, so
+  # the tail reads as a strict prefix while whole, checksum-valid records sit beyond
+  # it. Truncating then destroys acknowledged durable truth, which is exactly the
+  # defect this guard exists for. Every byte position in the tail is tried, and any
+  # frame that decodes and passes its checksum makes this corruption rather than a
+  # torn append — corruption is refused and left for an operator.
+  defp refuse_intact_tail(bytes, path, offset) do
+    tail = binary_part(bytes, offset, byte_size(bytes) - offset)
+
+    case scan_for_intact(tail) do
+      false -> :ok
+      true -> {:error, {:intact_record_beyond_tear, path, offset}}
+    end
+  end
+
+  defp scan_for_intact(<<>>), do: false
+
+  defp scan_for_intact(<<size::unsigned-big-32, crc::unsigned-big-32, rest::binary>> = candidate)
+       when byte_size(rest) >= size do
+    <<payload::binary-size(^size), _remaining::binary>> = rest
+
+    case intact(payload, crc) do
+      {:ok, _record} -> true
+      :error -> scan_next(candidate)
+    end
+  end
+
+  defp scan_for_intact(candidate), do: scan_next(candidate)
+
+  defp scan_next(<<_skipped, rest::binary>>), do: scan_for_intact(rest)
+  defp scan_next(<<>>), do: false
+
+  defp truncate_to(io, path, offset) do
+    with {:ok, _position} <- :file.position(io, offset),
+         :ok <- :file.truncate(io) do
+      :ok
+    else
+      {:error, posix} -> {:error, {:journal_unavailable, path, posix}}
+    end
+  end
+
+  # The prefix must survive exactly, compared through the same handle.
+  defp confirm_prefix(io, path, expected) do
+    with {:ok, bytes} <- read_all(io, path) do
+      case decode(bytes, 0, []) do
+        {:ok, ^expected, :complete} -> :ok
+        {:ok, _records, :complete} -> {:error, {:truncation_changed_prefix, path}}
+        {:ok, _records, tail} -> {:error, {:still_torn_after_truncation, path, tail}}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
@@ -291,11 +410,22 @@ defmodule Loopex.Journal do
     <<payload::binary-size(^size), remaining::binary>> = rest
 
     case intact(payload, crc) do
-      {:ok, record} -> decode(remaining, offset + @header_bytes + size, [record | read])
-      :error -> {:ok, Enum.reverse(read), {:torn, offset}}
+      {:ok, record} ->
+        decode(remaining, offset + @header_bytes + size, [record | read])
+
+      # A COMPLETE frame that fails its checksum is corruption, not a torn append.
+      # A torn append leaves a strict prefix of one frame; it cannot leave a whole
+      # frame with bad bytes inside it. The distinction decides whether the tail
+      # may be discarded, so it is made here rather than by the caller guessing.
+      :error ->
+        {:ok, Enum.reverse(read), {:corrupt, offset}}
     end
   end
 
+  # Fewer bytes remain than the frame claims, so the tail is a strict prefix. That
+  # is the shape a killed writer leaves. It is still only provisionally torn: a
+  # corrupted length prefix can claim more bytes than exist while intact records
+  # sit beyond it, which `discard_torn_tail/2` checks before removing anything.
   defp decode(_short, offset, read), do: {:ok, Enum.reverse(read), {:torn, offset}}
 
   # Technical depth: a torn append can leave any bytes at all, so the checksum is

@@ -25,6 +25,29 @@ with the fence disabled, op-2 and op-3 dispatch, making four dispatches rather
 than two — but this record states the failure that was actually observed rather
 than the one that would have followed.
 
+## Outcome 4 — torn-tail recovery, a second demonstration
+
+The demonstration above disables all appends, which is a blunt instrument: it
+would fail almost any journal test. It does not exercise the mechanism added after
+a review found that a fact acknowledged following recovery disappeared on the next
+restart. This one does.
+
+- mechanism disabled: `resolve_tail/2` in `Loopex.Coordinator`, made to return
+  `:ok` for a torn tail instead of discarding it, so recovery extends a journal
+  whose reader still stops at the tear
+- observed failure: `a fact acknowledged after torn-tail recovery survives the next
+  restart` failed on `assert "after the tear" in survived` — the fact was present
+  while the coordinator ran and absent after the restart, which is precisely the
+  defect
+- demonstrated at: the commit adding the repair, reverted before commit and
+  confirmed byte-identical by SHA-256
+
+A third property has no negative demonstration because it is proved by refusal
+rather than by a passing path: interior corruption and a corrupted length prefix
+must *not* be repaired. Those are asserted directly — the journal's byte size is
+unchanged after a refused repair — since a demonstration that removes the refusal
+destroys data rather than failing a test.
+
 ## Outcome 6 — isolated VM load and rollback
 
 - mechanism disabled: `load_generation/2` loaded the generation into the test VM as well as the isolated VM, which is the same-VM reload the gate names as the rejected anti-pattern

@@ -296,10 +296,21 @@ under an instruction that names them.
 
 The acceptance record rebinds to candidate
 `cc88d0aab0e63446aabfdbc6ef6b7adf427bafca`, whose gate carries amendment
-generation 3. The chain from it reaches
-`45994729ea50c8e388f681dacc4d3383926ec2d6` at generation 2, then
-`9418ac8011528da39730a577874f300b8075dbcc`, whose governance is empty and whose
-gate is generation 0 — the original acceptance.
+generation 3. The full chain, computed from the repository rather than recalled:
+
+```text
+cc88d0a  gen 3  binds 19a1a93
+19a1a93  gen 2  binds 4599472
+4599472  gen 1  binds 9418ac8
+9418ac8  gen 0  empty governance — the original acceptance
+```
+
+An earlier version of this record omitted `19a1a93` entirely and assigned
+`4599472` generation 2 instead of 1. An independent review caught it. The lesson
+is narrow and worth keeping: a chain written from memory drifts from the chain the
+checker walks, and only one of them is authoritative. Recompute it by walking
+`| Acceptance |` and the gate's amendment anchors backwards from the bound
+candidate; do not transcribe it from an earlier record.
 
 One defect in the locked runner is knowingly left in place: its absence proof
 reports any aggregate failure as `the aggregate still depends on python3 or jq`,

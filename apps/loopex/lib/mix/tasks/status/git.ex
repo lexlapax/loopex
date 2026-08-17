@@ -107,6 +107,26 @@ defmodule Loopex.Checks.Git do
   @doc """
   ## Concept
 
+  Whether one commit is an ancestor of another.
+
+  ## Technical depth
+
+  The acceptance chain needs this and reachability from `HEAD` is not enough. Two
+  unrelated branches both become reachable once anything merges them, so a
+  candidate could name a prior candidate it does not descend from and the edge
+  would still resolve. A chain is only a lineage if every edge runs backwards along
+  actual history.
+  """
+  @spec ancestor?(Path.t(), String.t(), String.t(), (Path.t(), [String.t()] ->
+                                                       {binary(), non_neg_integer()})) ::
+          boolean()
+  def ancestor?(root, ancestor, descendant, runner \\ &__MODULE__.run/2) do
+    match?({_output, 0}, runner.(root, ["merge-base", "--is-ancestor", ancestor, descendant]))
+  end
+
+  @doc """
+  ## Concept
+
   A resolver that returns one file's text at one revision, or `nil` when the
   revision is not a reachable commit or the path is absent from it.
 

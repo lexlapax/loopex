@@ -47,10 +47,10 @@ the exact document set its milestone must update.
   absent.
 - Repository validation now runs on Elixir. `check_status.py`,
   `test_check_status.py`, and `check-agent-bootstrap.py` are retired and no hook
-  invokes `jq`, so the seed's two bridge prerequisites disappear. The replacement
-  measures 9,324 lines against the 4,462-line gate-commit baseline, and names the
-  eight behaviours it dropped; both are recorded as audit material, not as a pass
-  condition.
+  invokes `jq`, so the seed's two bridge prerequisites disappear. The replacement is
+  larger than the bridge and names the eight behaviours it dropped; both the
+  measurement and the list are produced by `mix loopex.self_hosting` and recorded
+  with the milestone's evidence as audit material, not as a pass condition.
 
 ### Fixed
 

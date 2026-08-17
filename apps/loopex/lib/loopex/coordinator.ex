@@ -254,6 +254,14 @@ defmodule Loopex.Coordinator do
   defp resolve_tail(_journal, :complete), do: :ok
   defp resolve_tail(journal, {:torn, offset}), do: Journal.discard_torn_tail(journal, offset)
 
+  # Corruption is not a torn append and is never repaired automatically. A complete
+  # frame that fails its checksum means bytes changed under an acknowledged record,
+  # and the records beyond it may be perfectly intact. Discarding from there would
+  # destroy durable truth to make startup succeed, so the coordinator refuses and
+  # leaves the journal for an operator.
+  defp resolve_tail(journal, {:corrupt, offset}),
+    do: {:error, {:journal_corrupt, journal, offset}}
+
   # Concept: a restart takes a new epoch, then fences every effect whose outcome
   # it cannot know.
   # Technical depth: the epoch is committed first so that a crash partway through

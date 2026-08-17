@@ -24,6 +24,7 @@ defmodule Loopex.Checks.Plan do
   accepted gate is immutable, and an amendment is the only exception".
   """
 
+  alias Loopex.Checks.Git
   alias Loopex.Checks.Documents
   alias Loopex.Checks.Invalid
   alias Loopex.Checks.Markdown
@@ -114,12 +115,21 @@ defmodule Loopex.Checks.Plan do
     found =
       text
       |> String.split("\n")
-      |> Enum.reduce({[], false, nil}, fn line, {numbers, fenced, pending} ->
+      |> Enum.reduce({[], nil, nil}, fn line, {numbers, fenced, pending} ->
         cond do
-          String.starts_with?(String.trim_leading(line), "```") ->
-            {numbers, not fenced, pending}
+          # CommonMark fences: a run of at least three backticks or tildes. A
+          # closing fence must use the SAME character and be at least as long as
+          # the opener, so a four-backtick block containing a three-backtick line
+          # stays open. Toggling one boolean on any "```" prefix got both wrong:
+          # a tilde fence was invisible, and an inner shorter run closed an outer
+          # longer one, letting a hidden anchor mint a generation.
+          fence_run(line) != nil and fence_closes?(fenced, fence_run(line)) ->
+            {numbers, nil, pending}
 
-          fenced ->
+          fenced == nil and fence_run(line) != nil ->
+            {numbers, fence_run(line), pending}
+
+          fenced != nil ->
             {numbers, fenced, pending}
 
           match?([_all, _number], Regex.run(@amendment_anchor, line)) ->
@@ -145,6 +155,39 @@ defmodule Loopex.Checks.Plan do
     end
 
     length(found)
+  end
+
+  # Concept: the fence a line opens or closes, as {character, length}, or nil.
+  # Technical depth: leading indentation of up to three spaces is allowed, matching
+  # CommonMark; four or more would be an indented code block, which cannot contain
+  # a fence at all.
+  defp fence_run(line) do
+    trimmed = String.trim_leading(line, " ")
+
+    cond do
+      String.length(line) - String.length(trimmed) > 3 -> nil
+      true -> leading_run(trimmed)
+    end
+  end
+
+  defp leading_run("`" <> _rest = text), do: run_of(text, "`")
+  defp leading_run("~" <> _rest = text), do: run_of(text, "~")
+  defp leading_run(_text), do: nil
+
+  defp run_of(text, character) do
+    length =
+      text
+      |> String.graphemes()
+      |> Enum.take_while(&(&1 == character))
+      |> length()
+
+    if length >= 3, do: {character, length}, else: nil
+  end
+
+  defp fence_closes?(nil, _run), do: false
+
+  defp fence_closes?({open_character, open_length}, {character, length}) do
+    character == open_character and length >= open_length
   end
 
   @doc """
@@ -548,10 +591,18 @@ defmodule Loopex.Checks.Plan do
           String.t(),
           String.t(),
           (String.t(), String.t() -> String.t() | nil) | nil,
-          MapSet.t(String.t())
+          MapSet.t(String.t()),
+          (String.t(), String.t() -> boolean())
         ) ::
           :ok
-  def acceptance_chain(candidate_text, path, revision, resolve_file, seen) do
+  def acceptance_chain(
+        candidate_text,
+        path,
+        revision,
+        resolve_file,
+        seen,
+        ancestor? \\ fn _p, _r -> true end
+      ) do
     {_rows, bound, complete} =
       Records.governance_records(candidate_text, "#{path} at candidate #{revision}")
 
@@ -583,7 +634,26 @@ defmodule Loopex.Checks.Plan do
                   "which is unavailable"
         end
 
-        acceptance_chain(prior_text, path, prior, resolve_file, MapSet.put(seen, revision))
+        # Every edge must run backwards along real history. Resolving proves only
+        # that a commit is reachable from HEAD, and two unrelated branches both
+        # become reachable the moment anything merges them -- so a candidate could
+        # name a prior it does not descend from and the edge would still resolve.
+        # Requiring ancestry is what makes the chain a lineage rather than a set of
+        # commits that happen to exist.
+        unless revision == "working tree" or ancestor?.(prior, revision) do
+          raise Invalid,
+                "#{path}: acceptance candidate #{revision} binds prior candidate #{prior}, " <>
+                  "which is not an ancestor of it; a chain edge must run backwards along history"
+        end
+
+        acceptance_chain(
+          prior_text,
+          path,
+          prior,
+          resolve_file,
+          MapSet.put(seen, revision),
+          ancestor?
+        )
     end
   end
 
@@ -604,6 +674,14 @@ defmodule Loopex.Checks.Plan do
     end
 
     :ok
+  end
+
+  # Concept: the ancestry test used in production.
+  # Technical depth: injected rather than called ambiently so a unit test can drive
+  # both outcomes with fabricated revisions, which no real repository could supply.
+  defp ancestor_check do
+    root = File.cwd!()
+    fn prior, revision -> Git.ancestor?(root, prior, revision) end
   end
 
   @doc """
@@ -769,7 +847,7 @@ defmodule Loopex.Checks.Plan do
       technical_envelope(technical_candidate, "#{technical_path} at #{revision}")
 
     progress(candidate, "#{path} at acceptance candidate #{revision}", candidate_outcomes, "Open")
-    acceptance_chain(candidate, path, revision, resolve_file, MapSet.new())
+    acceptance_chain(candidate, path, revision, resolve_file, MapSet.new(), ancestor_check())
 
     if envelope != candidate_envelope do
       raise Invalid, "#{path}: accepted normative concept envelope differs from its candidate"

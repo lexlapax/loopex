@@ -118,9 +118,11 @@ defmodule Loopex.VmGeneration do
 
   Starts a separate `erl` OS process via `:peer` with a standard-io control
   channel, so no distribution, node name, or `epmd` registration is involved.
-  The VM is unlinked, so the caller must stop it with `stop_isolated_vm/1`;
-  should the caller die without doing so, the VM halts on its own when the
-  control pipe closes.
+  The VM is unlinked, so the caller must stop it with `stop_isolated_vm/1`. If the
+  caller dies without doing so the VM keeps running, because `:peer.start/1` does
+  not link and the control process outlives that caller. What is guaranteed is
+  narrower: when the whole manager VM exits, the control process dies with it, the
+  pipe closes and the peer halts, so a test run cannot leave one behind.
   """
   @spec start_isolated_vm() :: {:ok, t()} | {:error, term()}
   def start_isolated_vm do

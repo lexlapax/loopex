@@ -102,9 +102,25 @@ defmodule Loopex.JournalReplayTest do
         assert Session.unknown_txs(state) == Enum.sort(model.unknown), "seed #{seed}: unknown"
         assert state.resolved == model.resolved, "seed #{seed}: each resolution"
 
-        for {{operation_id, attempt}, tx_id} <- model.operations do
-          assert Session.tx_for_operation(state, operation_id, attempt) == {:ok, tx_id},
-                 "seed #{seed}: operation #{operation_id}/#{attempt} maps to the wrong transaction"
+        # The whole map, not a lookup per expected key. Iterating expected keys only
+        # let a reducer ADD an entry beside the legitimate one and still satisfy
+        # every lookup, so the mapping was never actually compared as a whole.
+        assert state.operations == model.operations, "seed #{seed}: operation mapping"
+
+        # Retained intent fields, not just which transactions are open. Comparing
+        # transaction IDs alone left domain, epochs, attempt and fencing token
+        # unchecked, and those are what a dispatch and a fence are decided on.
+        for tx_id <- Map.keys(state.pending) ++ Map.keys(state.unknown) do
+          assert {:ok, intent} = Session.intent(state, tx_id)
+          expected = Map.fetch!(model.intents, tx_id)
+
+          for field <- [:domain, :session_epoch, :attempt, :operation_id] do
+            assert Map.get(intent, field) == Map.get(expected, field),
+                   "seed #{seed}: #{tx_id} #{field}"
+          end
+
+          assert Map.get(intent, :executor) == Map.get(expected, :executor),
+                 "seed #{seed}: #{tx_id} executor identity, epoch and fencing token"
         end
 
         MapSet.union(seen, MapSet.new(records, &Map.fetch!(&1, :kind)))
@@ -180,7 +196,9 @@ defmodule Loopex.JournalReplayTest do
 
     {:ok, second} = DurableTruth.start(journal, "session-torn", collector)
 
-    # Recovery discarded the tear and nothing else: the prefix is byte-identical.
+    # Recovery discarded the tear and nothing else. This compares decoded records
+    # rather than bytes; the byte-level guarantee is asserted by the repair itself,
+    # which refuses when the surviving prefix would change.
     assert {:ok, recovered_records, :complete} = Journal.read(journal)
     assert Enum.take(recovered_records, length(before_records)) == before_records
 
@@ -198,6 +216,122 @@ defmodule Loopex.JournalReplayTest do
            "a fact acknowledged and published after recovery was lost across restart"
 
     assert Session.facts(Coordinator.durable_state(third)) == live
+  end
+
+  test "repair never deletes an intact record beyond the damage" do
+    # The first version of this repair assumed every tear was trailing. Interior
+    # damage leaves intact records AFTER the bad point, and truncating from there
+    # destroyed acknowledged durable truth -- a worse defect than the one the
+    # repair was written to fix. Two shapes reach that state and both must refuse.
+    build = fn name, count ->
+      journal = DurableTruth.journal_path(name)
+
+      for seq <- 1..count do
+        assert :ok = Journal.append(journal, %{kind: :fact_committed, seq: seq, fact: "f#{seq}"})
+      end
+
+      journal
+    end
+
+    # A complete frame whose payload changed under it. That is corruption, never a
+    # torn append, because a killed writer cannot leave a whole frame with bad bytes.
+    interior = build.("interior-corruption", 3)
+    size = File.stat!(interior).size
+    bytes = File.read!(interior)
+    at = 60
+
+    File.write!(
+      interior,
+      binary_part(bytes, 0, at) <>
+        <<:binary.at(bytes, at) + 1>> <>
+        binary_part(bytes, at + 1, byte_size(bytes) - at - 1)
+    )
+
+    assert {:ok, [_first], {:corrupt, offset}} = Journal.read(interior)
+
+    assert {:error, {:corrupt_not_torn, ^interior, ^offset}} =
+             Journal.discard_torn_tail(interior, offset)
+
+    assert File.stat!(interior).size == size, "corruption must not cost a single byte"
+
+    # A corrupted length prefix claims more bytes than remain, so the tail reads as
+    # a strict prefix while whole records sit beyond it. The short shape alone is
+    # not proof of a torn append.
+    inflated = build.("inflated-length", 3)
+    size = File.stat!(inflated).size
+    bytes = File.read!(inflated)
+    <<first_size::unsigned-big-32, _crc::unsigned-big-32, _rest::binary>> = bytes
+    second = 8 + first_size
+
+    File.write!(
+      inflated,
+      binary_part(bytes, 0, second) <>
+        <<0xFFFFFF00::unsigned-big-32>> <>
+        binary_part(bytes, second + 4, byte_size(bytes) - second - 4)
+    )
+
+    assert {:ok, [_kept], {:torn, torn_at}} = Journal.read(inflated)
+
+    assert {:error, {:intact_record_beyond_tear, ^inflated, ^torn_at}} =
+             Journal.discard_torn_tail(inflated, torn_at)
+
+    assert File.stat!(inflated).size == size, "an intact record beyond the tear must survive"
+  end
+
+  test "a held repair lock excludes a second writer" do
+    journal = DurableTruth.journal_path("repair-lock")
+
+    for seq <- 1..2 do
+      assert :ok = Journal.append(journal, %{kind: :fact_committed, seq: seq, fact: "f#{seq}"})
+    end
+
+    File.open!(journal, [:append, :binary], fn io -> IO.binwrite(io, <<0, 0, 0, 90, 1>>) end)
+    assert {:ok, kept, {:torn, offset}} = Journal.read(journal)
+    size = File.stat!(journal).size
+
+    # A lock left by another writer fails the repair closed rather than racing it.
+    lock = journal <> ".repair-lock"
+    File.write!(lock, "node=someone-else\n")
+
+    assert {:error, {:repair_already_held, ^lock, _who}} =
+             Journal.discard_torn_tail(journal, offset)
+
+    assert File.stat!(journal).size == size, "a refused repair must not alter the journal"
+
+    File.rm!(lock)
+    assert :ok = Journal.discard_torn_tail(journal, offset)
+    assert {:ok, ^kept, :complete} = Journal.read(journal)
+    refute File.exists?(lock), "the lock must be released after a successful repair"
+  end
+
+  test "a coordinator refuses to start on a corrupt journal rather than repairing it" do
+    collector = DurableTruth.start_collector()
+    journal = DurableTruth.journal_path("corrupt-refusal")
+
+    {:ok, first} = DurableTruth.start(journal, "session-corrupt", collector)
+    assert :ok = Coordinator.commit_fact(first, :workspace, "one")
+    assert :ok = Coordinator.commit_fact(first, :workspace, "two")
+    DurableTruth.kill(first)
+
+    bytes = File.read!(journal)
+    size = byte_size(bytes)
+    at = div(size, 2)
+
+    File.write!(
+      journal,
+      binary_part(bytes, 0, at) <>
+        <<:binary.at(bytes, at) + 1>> <>
+        binary_part(bytes, at + 1, size - at - 1)
+    )
+
+    assert {:ok, _records, {:corrupt, _offset}} = Journal.read(journal)
+
+    Process.flag(:trap_exit, true)
+
+    assert {:error, {:recovery_failed, {:journal_corrupt, ^journal, _}}} =
+             DurableTruth.start(journal, "session-corrupt", collector)
+
+    assert File.stat!(journal).size == size, "a refused start must not alter the journal"
   end
 
   test "discarding a torn tail refuses anything it cannot prove is torn" do
