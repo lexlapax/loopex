@@ -48,8 +48,9 @@ the exact document set its milestone must update.
 - Repository validation now runs on Elixir. `check_status.py`,
   `test_check_status.py`, and `check-agent-bootstrap.py` are retired and no hook
   invokes `jq`, so the seed's two bridge prerequisites disappear. The replacement
-  measures 9,096 lines against the retired 4,462 and names the eight behaviours it
-  dropped; both are recorded as audit material, not as a pass condition.
+  measures 9,324 lines against the 4,462-line gate-commit baseline, and names the
+  eight behaviours it dropped; both are recorded as audit material, not as a pass
+  condition.
 
 ### Fixed
 

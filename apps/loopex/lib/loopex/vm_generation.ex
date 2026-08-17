@@ -63,10 +63,15 @@ defmodule Loopex.VmGeneration do
   correctly — and the failure lands in cleanup, after the assertions, where it
   reads as a defect in the mechanism rather than in the teardown.
 
-  Being unlinked does not risk a stray VM. The control channel is a pipe from the
-  manager process, so if the manager exits without stopping the VM the peer reads
-  end-of-file on its standard input and halts itself. The guarantee holds even
-  when the manager is killed outright and no cleanup runs at all.
+  Being unlinked bounds the risk of a stray VM but does not remove it, and the
+  earlier wording here overstated that. The control channel is a pipe held by
+  `:peer`'s own control process. When the manager VM exits, that process dies with
+  it, the peer reads end-of-file on its standard input and halts, so a whole test
+  run can never leave a peer behind. What is *not* guaranteed is the case of one
+  process being killed while the VM lives on: because `:peer.start/1` does not
+  link, the control process outlives that caller and the peer keeps running until
+  something stops it. Callers are therefore responsible for an explicit
+  `stop_isolated_vm/1`, which is what the tests do from `on_exit`.
   """
 
   @enforce_keys [:peer]

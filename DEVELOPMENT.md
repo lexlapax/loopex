@@ -160,6 +160,16 @@ mise install elixir@1.17.0-otp-26
 mise exec erlang@26.0 elixir@1.17.0-otp-26 -- bash scripts/check-m0-gate.sh
 ```
 
+Alternating pairs also shares mutable dependency state. `MIX_BUILD_PATH` alone
+leaves `deps/` and the Rebar cache common to both, which produces cache
+restore/discard diagnostics and, once observed, a self-healing corrupt-beam
+warning. Neither changed an exit status, but a genuinely isolated task root sets
+`MIX_DEPS_PATH` as well:
+
+```text
+env MIX_BUILD_PATH=<root>/build MIX_DEPS_PATH=<root>/deps mix <task>
+```
+
 Do not activate a version manager inside the checkout. `.tool-versions` is a
 digest-bound gate artifact listing both pairs, so a tool that reads it would pick
 one arbitrarily; invoke the pair explicitly instead. The floor pair also needs its

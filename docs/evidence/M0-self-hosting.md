@@ -6,7 +6,7 @@ reviewer can judge whether the result is proportionate.
 
 The size figure is audit material. No run passes or fails on it.
 
-- measured size: 9,096 lines against the retired 4,462, a factor of 2.04 — 1,694 documentation, 230 comment, 1,326 blank, 5,846 code
+- measured size: 9,324 lines — 1,694 documentation, 293 comment, 1,354 blank, 5,983 code. Against the 4,462-line gate-commit baseline that is 2.09x; against the 4,688 lines those files actually held at the revision they were retired it is 1.99x. The plan binds the gate-commit baseline, and both are stated because they are different numbers and a reader comparing to the deleted files will compute the second one
 - dropped behaviors: eight, listed below and printed in full by `mix loopex.self_hosting` so the list cannot drift from the figure
 - recorded: 2026-08-17 on Elixir 1.20.3 / OTP 29.0.5
 

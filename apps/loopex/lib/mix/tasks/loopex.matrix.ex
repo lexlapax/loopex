@@ -25,6 +25,7 @@ defmodule Mix.Tasks.Loopex.Matrix do
   use Mix.Task
 
   @tool_versions ".tool-versions"
+  @matrix_evidence "docs/evidence/M0-toolchain-matrix.md"
 
   @impl Mix.Task
   def run(_args) do
@@ -60,16 +61,67 @@ defmodule Mix.Tasks.Loopex.Matrix do
          {:ok, pairs} <- pairs(contents, path) do
       running = %{elixir: System.version(), otp: System.otp_release()}
 
-      case Enum.find(pairs, &pair_matches?(&1, running)) do
+      with matched when is_map(matched) <- Enum.find(pairs, &pair_matches?(&1, running)),
+           :ok <- both_lanes_recorded(root, pairs) do
+        {:ok, matched}
+      else
         nil ->
           {:error,
            "running Elixir #{running.elixir} / OTP #{running.otp} is not a locked pair; " <>
              "#{path} records #{describe(pairs)}"}
 
-        matched ->
-          {:ok, matched}
+        {:error, reason} ->
+          {:error, reason}
       end
     end
+  end
+
+  @doc """
+  ## Concept
+
+  Confirms the retained matrix record names every locked pair as run.
+
+  ## Technical depth
+
+  One Mix run has one Erlang runtime, so this task can only prove the pair it is
+  running under. The gate nevertheless claims both pairs are recorded as run, and
+  without this check that claim rested on nothing: deleting or staling the retained
+  record would not have failed anything. This does not verify that a recorded run
+  happened — only review can judge that — but a missing or incomplete record now
+  fails rather than passing silently.
+  """
+  @spec both_lanes_recorded(Path.t(), [%{elixir: String.t(), otp: String.t()}]) ::
+          :ok | {:error, String.t()}
+  def both_lanes_recorded(root, pairs) do
+    record = Path.join(root, @matrix_evidence)
+
+    case File.read(record) do
+      {:error, posix} ->
+        {:error, "#{record}: #{:file.format_error(posix)}; the matrix record is unavailable"}
+
+      {:ok, contents} ->
+        case Enum.reject(pairs, &recorded?(contents, &1)) do
+          [] ->
+            :ok
+
+          missing ->
+            {:error,
+             "#{record} does not record a run for #{describe(missing)}; " <>
+               "the gate claims both locked pairs are recorded"}
+        end
+    end
+  end
+
+  # A pair counts as recorded when its exact Elixir and OTP versions appear on one
+  # line together with a green verdict, so a line naming a pair without an outcome
+  # does not satisfy it.
+  defp recorded?(contents, pair) do
+    contents
+    |> String.split("\n")
+    |> Enum.any?(fn line ->
+      String.contains?(line, pair.elixir) and String.contains?(line, pair.otp) and
+        String.contains?(line, "GREEN")
+    end)
   end
 
   defp read(path) do

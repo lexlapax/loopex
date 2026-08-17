@@ -6,7 +6,9 @@ invoked once per pair and both runs are recorded here.
 
 - floor pair: Elixir 1.17.0 / Erlang OTP 26, erts-14.0 — `M0 gate GREEN`, exit 0
 - current pair: Elixir 1.20.3 / Erlang OTP 29, erts-17.0.5 — `M0 gate GREEN`, exit 0
-- candidate: `c6af87dcb8712b91fb1d8767bf7fbb2593a81b5b`
+- candidate: recorded per run below; the current closure candidate is named in the plan's
+  governance row rather than duplicated here, so this file does not go stale when a
+  later commit changes only documents
 - recorded: 2026-08-17, macOS arm64, both pairs provided by `mise`
 
 ## What the floor lane was worth

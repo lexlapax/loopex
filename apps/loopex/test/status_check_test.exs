@@ -41,6 +41,31 @@ defmodule Loopex.StatusCheckTest do
     assert [] == Fixture.checked(Fixture.documents())
   end
 
+  test "the in-review capsule does not widen authority either" do
+    # Acceptance is the only transition that widens authorized work. If In review
+    # derived a broader boundary, a reviewer's presence would authorise work.
+    accepted = Register.expected_capsule("Accepted", "M0", %{})
+    in_progress = Register.expected_capsule("In progress", "M0", %{})
+    in_review = Register.expected_capsule("In review", "M0", %{})
+
+    for later <- [in_progress, in_review] do
+      assert Map.fetch!(later, "Authorized work") == Map.fetch!(accepted, "Authorized work")
+      assert Map.fetch!(later, "Integrated phase") == Map.fetch!(accepted, "Integrated phase")
+    end
+
+    # In review hands the next decision back to the maintainer; In progress does not.
+    assert Map.fetch!(in_progress, "Next maintainer decision") ==
+             Map.fetch!(accepted, "Next maintainer decision")
+
+    assert Map.fetch!(in_review, "Next maintainer decision") =~ "Close `M0`"
+    assert Map.fetch!(in_review, "Next transition") =~ "Closed"
+
+    # A state nobody added enforcement for must fail rather than fall through.
+    assert_raise Invalid, ~r/no derived status capsule/, fn ->
+      Register.expected_capsule("Closed", "M0", %{})
+    end
+  end
+
   test "the JSON reader decodes unicode escapes so hooks still match" do
     # A hook matching on a command never saw a \\u0024HOME spelling as $HOME, so an
     # ordinary JSON encoding of a protected path walked past the filesystem guard.
@@ -188,7 +213,8 @@ defmodule Loopex.StatusCheckTest do
   test "a milestone state with no derived capsule fails closed" do
     assert "In review" in Register.active_states()
 
-    for state <- Register.states(), state not in ["Blocked", "Open", "Accepted", "In progress"] do
+    for state <- Register.states(),
+        state not in ["Blocked", "Open", "Accepted", "In progress", "In review"] do
       assert_raise Invalid, ~r/no derived status capsule/, fn ->
         Register.expected_capsule(state, "M0", %{})
       end

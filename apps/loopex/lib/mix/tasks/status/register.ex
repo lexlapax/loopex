@@ -377,6 +377,28 @@ defmodule Loopex.Checks.Register do
     |> Map.put("Next transition", "Turn the locked gate green, then move `#{name}` to In review")
   end
 
+  # Concept: the gate is green and an independent reviewer now owns the verdict.
+  # Technical depth: authorized work does not widen here either — acceptance
+  # remains the only transition that widens it. What changes is that the next
+  # decision returns to the maintainer, because a reviewer produces findings and
+  # only an acceptance authority closes.
+  def expected_capsule("In review", name, _adr_statuses) do
+    name
+    |> accepted_values()
+    |> Map.put(
+      "Blockers",
+      "None; `#{name}` has a green gate on every locked lane and awaits independent review"
+    )
+    |> Map.put(
+      "Next maintainer decision",
+      "Close `#{name}` or reject its closure candidate on the review findings"
+    )
+    |> Map.put(
+      "Next transition",
+      "Record the closure governance row and move `#{name}` to Closed"
+    )
+  end
+
   def expected_capsule(state, _name, _adr_statuses) do
     raise Invalid,
           "#{@index}: milestone state #{inspect(state)} has no derived status capsule; " <>
