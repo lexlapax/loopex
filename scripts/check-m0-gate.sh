@@ -74,20 +74,56 @@ require_named_test() {
     || fail "$file no longer contains the locked test \"${name}\""
 }
 
-# ExUnit counts skipped tests inside its total but reports excluded ones
-# separately: "1 test, 0 failures (1 excluded)". Executed is total minus
-# skipped only; subtracting excluded as well would reject a valid file that
-# holds both tagged and ordinary tests.
+# AMENDMENT 1. ExUnit's summary format differs between the two locked pairs, so
+# both are parsed. Elixir 1.17 (the floor lane) prints a counted total with
+# skipped inside it and excluded outside it:
+#
+#   2 tests, 0 failures
+#   1 test, 0 failures (1 excluded)
+#
+# Elixir 1.20 (the current lane) prints named counts and no total at all:
+#
+#   Result: 2 passed
+#   Result: 2 passed, 1 skipped, 1 excluded
+#   Result: 1/2 passed                        <- executed 2, one of them failed
+#   Result: 0 tests, 4 excluded               <- nothing ran
+#
+# The original runner parsed only the 1.17 shape, so on the current pair every
+# protected selector reported "no parsable test count" and the gate could never
+# go green on its own locked toolchain. It failed closed, which was safe, but it
+# was unsatisfiable. Supporting one shape and not the other would move that
+# defect to the floor lane rather than remove it.
 summary_field() {
   printf '%s' "$1" | grep -oE "[0-9]+ $2" | tail -1 | grep -oE '[0-9]+' || true
 }
 
+# Executed means ran to a verdict: passed or failed, never skipped or excluded.
+# On 1.17 that is the total minus skipped, because skipped sits inside the total.
+# On 1.20 the counts are already separate, so passed is read directly and the
+# "X/N passed" failure form reports N, since all N ran.
 executed_tests() {
-  local output="$1" total skipped
-  total="$(printf '%s' "$output" | grep -oE '[0-9]+ (test|tests),' | tail -1 | grep -oE '[0-9]+' || true)"
-  [ -n "$total" ] || return 1
-  skipped="$(summary_field "$output" skipped)"
-  echo $((total - ${skipped:-0}))
+  local output="$1" line total skipped
+  line="$(printf '%s' "$output" \
+    | grep -E '^Result:|[0-9]+ (test|tests), [0-9]+ (failure|failures)' \
+    | tail -1)"
+  [ -n "$line" ] || return 1
+  case "$line" in
+    Result:*[0-9]/[0-9]*passed*)
+      printf '%s\n' "$line" | sed -E 's|^Result: [0-9]+/([0-9]+) passed.*|\1|'
+      ;;
+    Result:*passed*)
+      printf '%s\n' "$line" | sed -E 's|^Result: ([0-9]+) passed.*|\1|'
+      ;;
+    Result:*test*)
+      printf '%s\n' "$line" | sed -E 's|^Result: ([0-9]+) tests?.*|\1|'
+      ;;
+    *)
+      total="$(printf '%s' "$line" | grep -oE '[0-9]+ (test|tests),' | grep -oE '[0-9]+')"
+      [ -n "$total" ] || return 1
+      skipped="$(printf '%s' "$line" | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+' || true)"
+      echo $((total - ${skipped:-0}))
+      ;;
+  esac
 }
 
 run_selector() {

@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `ca9ecdd086b3ff3f2e4828cc8bda3bce5ff0b22f4c57c4ac9a568b533e6bf9e0` | `scripts/check-m0-gate.sh` |
+| `c3f02f842049aab49b3a1ae236ed66bb3816d2b9c30de221659f61541edb6e19` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -85,9 +85,16 @@ skipped, filtered, quarantined, or weakened while `M0` is open.
 
 An exit code proves a command ran, not that it did anything. Each selector
 carries a locked minimum of **executed** tests and a list of test names that
-must exist. ExUnit counts skipped tests inside its total but reports excluded
-ones outside it — `1 test, 0 failures (1 excluded)` — so the runner subtracts
-skipped only, and rejects any skip on a protected selector outright.
+must exist. Executed means ran to a verdict — passed or failed — never skipped
+or excluded, and any skip on a protected selector is rejected outright.
+
+The two locked pairs report that differently, and the runner parses both. Elixir
+1.17 prints a counted total with skipped inside it and excluded outside it
+(`1 test, 0 failures (1 excluded)`), so executed is the total minus skipped.
+Elixir 1.20 prints named counts and no total (`2 passed, 1 skipped, 1 excluded`),
+so passed is read directly; its failure form `1/2 passed` reports 2, because both
+ran. See [Amendment 1](#amendment-1).
+
 The name check is drift protection: it catches a protected test that is deleted
 or renamed. It does not prove the test asserts anything, and review owns that.
 
@@ -498,3 +505,30 @@ environment failure means evidence is unavailable, never PASS.
 At the gate commit no Mix project exists, so the runner stops at the first
 scaffold check. That is the declared missing behavior this gate exists to prove
 absent. `bash scripts/check-bootstrap.sh` remains green at the same commit.
+
+<a id="amendment-1"></a>
+## Amendment 1 — ExUnit summary parsing across both locked pairs
+
+**Accepted:** 2026-08-17 by the maintainer. **Scope:** parsing helpers in the
+bound runner and the Protected Tests description above. **Not changed:** every
+locked command, selector, minimum executed count, locked test name, fixture,
+toolchain pair, evidence class, and closure document.
+
+The runner as accepted parsed only Elixir 1.17's ExUnit summary. Elixir 1.20,
+the current locked pair, prints named counts and no total, so every protected
+selector reported no parsable test count and **the gate could not go green on its
+own locked toolchain.** It failed closed, which was safe, but it was
+unsatisfiable, and no amount of implementation would have changed that.
+
+The defect was not caught when the gate was written. Every command form had been
+executed against a disposable umbrella scaffold, which proved the commands ran;
+none of them ran a passing Elixir test, because no test existed yet, so the
+summary parsing was never exercised. Five independent review rounds probed the
+runner's containment logic and none reached this either. The lesson is recorded
+here rather than in a commit message: a gate must be run against a passing
+example of the thing it measures, not only against the absence it declares.
+
+Fixing it required changing the bound runner, whose digest is part of the
+accepted gate digest, so this amendment rebinds the acceptance record to a new
+candidate carrying the amended bytes. The original acceptance remains in the
+Git history and in the disposition record it points at.
