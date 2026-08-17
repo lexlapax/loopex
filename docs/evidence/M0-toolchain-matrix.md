@@ -6,7 +6,7 @@ invoked once per pair and both runs are recorded here.
 
 - floor pair: Elixir 1.17.0 / Erlang OTP 26, erts-14.0 — `M0 gate GREEN`, exit 0
 - current pair: Elixir 1.20.3 / Erlang OTP 29, erts-17.0.5 — `M0 gate GREEN`, exit 0
-- candidate: `227fc836078c962f36b29b371cf6a53c92015334`
+- candidate: `c6af87dcb8712b91fb1d8767bf7fbb2593a81b5b`
 - recorded: 2026-08-17, macOS arm64, both pairs provided by `mise`
 
 ## What the floor lane was worth
@@ -26,3 +26,12 @@ not have surfaced, both of which would have shipped:
    parsing error while the exclusion worked correctly.
 
 Neither was reachable by inspecting the gate or by running the current pair.
+
+A third defect surfaced only when both lanes ran against the same commit. The
+core-only lane shared the umbrella's build directory, so it depended on which
+toolchain had compiled last: running the floor pair after the current pair loaded
+beams built by the other Elixir and the VM died with a corrupt atom table. The gate
+failed on a docs-only commit that had passed minutes earlier. The lane now owns a
+temporary build directory. Both lanes were then run in both orders, four runs, all
+green -- which is the evidence that matters here, because a per-lane green proves
+nothing about ordering.
