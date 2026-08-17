@@ -25,6 +25,36 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     assert Enum.any?(reasons, &String.contains?(&1, "req_llm"))
   end
 
+  test "an adapter may carry external dependencies but not the runtime", %{dir: dir} do
+    # ADR 0003: an adapter compiles against the contract, never the runtime. The
+    # external dependencies it carries are the reason it exists, so the rule is
+    # about direction rather than a fixed allowance.
+    good = Path.join(dir, "good.exs")
+
+    File.write!(good, """
+    defmodule Good.MixProject do
+      use Mix.Project
+      def project, do: [app: :loopex_probe_adapter, version: "0.0.0", deps: deps()]
+      defp deps, do: [{:loopex_protocol, in_umbrella: true}, {:req_llm, "~> 1.20"}]
+    end
+    """)
+
+    assert DepsBudget.check_mix_exs(good) == :ok
+
+    bad = Path.join(dir, "bad.exs")
+
+    File.write!(bad, """
+    defmodule Bad.MixProject do
+      use Mix.Project
+      def project, do: [app: :loopex_bad_adapter, version: "0.0.0", deps: deps()]
+      defp deps, do: [{:loopex, in_umbrella: true}]
+    end
+    """)
+
+    assert {:error, reasons} = DepsBudget.check_mix_exs(bad)
+    assert Enum.any?(reasons, &String.contains?(&1, "depend inward only"))
+  end
+
   test "a reverse edge from contract to runtime is rejected", %{dir: dir} do
     lib = Path.join(dir, "lib")
     File.mkdir_p!(lib)

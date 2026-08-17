@@ -91,16 +91,45 @@ defmodule Mix.Tasks.Loopex.DepsBudget do
   ## Technical depth
 
   The declared `:app` selects the rule, so the same command judges the contract
-  application and the runtime application correctly without the caller saying
-  which it is. An unrecognised application is an error, not a skip.
+  application, the runtime application, and an adapter correctly without the caller
+  saying which it is. An adapter is checked for direction — it may not depend on
+  the runtime — rather than for a fixed allowance, because the external
+  dependencies an adapter needs are the whole reason it exists.
   """
   @spec check_mix_exs(Path.t()) :: :ok | {:error, [String.t()]}
   def check_mix_exs(path) do
     case declared_app(path) do
       {:ok, @contract_app} -> done(contract_reasons(path))
       {:ok, @runtime_app} -> done(runtime_reasons(path))
-      {:ok, other} -> done(["#{path} declares unknown application #{inspect(other)}"])
+      {:ok, other} -> done(adapter_reasons(path, other))
       {:error, reason} -> done([reason])
+    end
+  end
+
+  # Concept: an adapter compiles against the contract, never the runtime.
+  # Technical depth: ADR 0003 fixes this — a contributor depends on the published
+  # extension contract, so an adapter may carry the contract plus whatever external
+  # dependencies its own edge needs, and may not carry the runtime. Treating every
+  # other application as "unknown" and failing was wrong in both directions: it
+  # blocked legitimate adapter work through the client hook, and it never expressed
+  # the direction rule that actually matters for an adapter.
+  defp adapter_reasons(path, app) do
+    case deps(path) do
+      {:ok, found} ->
+        case Enum.filter(found, &(&1 == @runtime_app)) do
+          [] ->
+            []
+
+          _runtime ->
+            [
+              "#{path}: adapter application #{inspect(app)} depends on the runtime " <>
+                "#{inspect(@runtime_app)}; adapters compile against " <>
+                "#{inspect(@contract_app)} and depend inward only"
+            ]
+        end
+
+      {:error, reason} ->
+        [reason]
     end
   end
 
