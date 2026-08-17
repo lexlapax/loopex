@@ -51,17 +51,25 @@ if grep -nE 'Bash\(git (add|commit|worktree)' .claude/settings.json >/dev/null; 
   fail "Claude settings auto-allow mutating Git commands"
 fi
 
-if grep -rnE 'gpt-5\.6-(luna|terra|sol)|(^|[^[:alnum:]_])(Luna|Terra|Sol)([^[:alnum:]_]|$)' .codex >/dev/null; then
+# These scans use `git grep`, which reads TRACKED files only. A recursive
+# working-directory grep also reads untracked content, and a nested checkout is
+# ordinary: a Git worktree created under `.claude/worktrees/` puts a whole second
+# copy of the repository inside a scanned directory, so the scan matched archive
+# material and even its own pattern text and failed on a clean commit. Scanning
+# what the repository actually contains removes the class, rather than excluding
+# one directory name that the next tool will not use.
+if git grep -nE 'gpt-5\.6-(luna|terra|sol)|(^|[^[:alnum:]_])(Luna|Terra|Sol)([^[:alnum:]_]|$)' \
+  -- .codex >/dev/null 2>&1; then
   fail "Codex config contains an account-specific model alias"
 fi
 
-if grep -rnE 'findings inform, gates decide|Append a closure note|Status.*Proposed/Accepted' \
-  .agents/skills >/dev/null; then
+if git grep -nE 'findings inform, gates decide|Append a closure note|Status.*Proposed/Accepted' \
+  -- .agents/skills >/dev/null 2>&1; then
   fail "shared skill contains superseded authority language"
 fi
 
-if grep -rnE "CI owns enforcement|full gates are CI's job|Move to CI gates|get their own workflow" \
-  AGENTS.md .claude .github docs/developer >/dev/null; then
+if git grep -nE "CI owns enforcement|full gates are CI's job|Move to CI gates|get their own workflow" \
+  -- AGENTS.md .claude .github docs/developer >/dev/null 2>&1; then
   fail "hosted CI is described as owning repository enforcement"
 fi
 
