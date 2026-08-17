@@ -15,6 +15,8 @@ import copy
 import hashlib
 import subprocess
 import unittest
+
+import check_status
 from pathlib import Path
 
 from check_status import (
@@ -507,6 +509,63 @@ class StatusTest(unittest.TestCase):
         self.assertTrue(errors, "mutation unexpectedly passed")
         if fragment:
             self.assertIn(fragment, errors[0])
+
+    def test_only_a_declared_amendment_may_change_gate_bytes(self) -> None:
+        """Gate bytes change only when the document records one more amendment.
+
+        This is the mechanical form of "the accepted gate remains immutable for
+        the milestone": a silent edit keeps the generation and is rejected, while
+        a numbered amendment supersedes.
+        """
+        self.assertEqual(0, check_status._gate_generation(GATE, "gate"))
+        amended = GATE.rstrip("\n") + '\n\n<a id="amendment-1"></a>\n## Amendment 1\n'
+        self.assertEqual(1, check_status._gate_generation(amended, "gate"))
+
+        # Silent edit: same generation, different bytes.
+        self.assertFalse(check_status._supersedes("accepted gate", "0\0aaa", "0\0bbb"))
+        # Declared amendment: generation increases.
+        self.assertTrue(check_status._supersedes("accepted gate", "0\0aaa", "1\0bbb"))
+        # Rollback to an earlier generation is not a supersession.
+        self.assertFalse(check_status._supersedes("accepted gate", "1\0bbb", "0\0aaa"))
+
+        # An acceptance row may rebind only once an amendment exists, because the
+        # amended gate and the row that binds it cannot share a commit.
+        self.assertFalse(check_status._supersedes("Acceptance", "0\0row", "0\0other"))
+        self.assertTrue(check_status._supersedes("Acceptance", "1\0row", "1\0other"))
+
+        for bad in ('<a id="amendment-2"></a>', '<a id="amendment-1"></a>\n<a id="amendment-1"></a>'):
+            with self.assertRaisesRegex(Exception, "consecutively"):
+                check_status._gate_generation(GATE + "\n" + bad + "\n", "gate")
+
+    def test_acceptance_chain_terminates_at_an_empty_original(self) -> None:
+        """An amended candidate is admitted only through a chain to a real original.
+
+        The rule replaced "candidate governance must be empty", which made the
+        amendment path the contract allows unrecordable. It must stay strictly
+        stronger: a fabricated candidate, an unavailable prior, and a cycle all
+        still fail.
+        """
+        original = plan(False)
+        amended = plan(True)
+
+        # Base case: an original snapshot carries empty governance.
+        check_status._acceptance_chain(original, "docs/plans/M0.md", "aaaa", None, set())
+
+        # A filled row that binds an available earlier original is admitted.
+        resolve = lambda sha, path: original
+        check_status._acceptance_chain(amended, "docs/plans/M0.md", "bbbb", resolve, set())
+
+        # A filled row whose prior cannot be resolved is not admitted.
+        with self.assertRaisesRegex(Exception, "unavailable"):
+            check_status._acceptance_chain(
+                amended, "docs/plans/M0.md", "bbbb", lambda sha, path: None, set()
+            )
+
+        # A chain that never reaches an empty original is not admitted.
+        with self.assertRaisesRegex(Exception, "does not terminate"):
+            check_status._acceptance_chain(
+                amended, "docs/plans/M0.md", "bbbb", lambda sha, path: amended, set()
+            )
 
     def test_in_progress_capsule_does_not_widen_authority(self) -> None:
         """Starting implementation moves the blocker, never the authority boundary.
@@ -1011,7 +1070,11 @@ class StatusTest(unittest.TestCase):
             if path.endswith("M0-technical.md")
             else plan(True)
         )
-        with self.assertRaisesRegex(Exception, "concept digest|candidate.*governance"):
+        # A candidate whose acceptance row binds itself is a cycle, which the
+        # chain check rejects; an amendment must bind an earlier candidate.
+        with self.assertRaisesRegex(
+            Exception, "concept digest|candidate.*governance|chain.*does not terminate"
+        ):
             _governance(
                 plan(True),
                 TECHNICAL_PLAN,

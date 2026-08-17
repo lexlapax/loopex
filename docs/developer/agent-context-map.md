@@ -235,6 +235,26 @@ does not have — search-path mutation through indirection, and interpreter
 launchers outside its enumerable set. Those limits are part of what was accepted,
 and closure review owns them.
 
+<a id="disposition-m0-amendment-1-2026-08-17"></a>
+#### Amendment 1 — 2026-08-17
+
+The maintainer accepted [Amendment 1](../plans/M0-gate.md#amendment-1) to the
+locked gate, in a direct instruction to proceed after being shown the defect and
+the recommendation. The amendment fixes ExUnit summary parsing in the bound runner
+so both locked pairs are read; the gate as accepted parsed only the floor pair's
+format, which made it unsatisfiable on its own current pair.
+
+Scope is the parsing helpers and the Protected Tests description. No locked
+command, selector, minimum executed count, locked test name, fixture, toolchain
+pair, evidence class, or closure document changes.
+
+Because the runner is a bound artifact, its digest is part of the gate digest, so
+the acceptance record rebinds to candidate
+`45994729ea50c8e388f681dacc4d3383926ec2d6`, which carries the amended bytes. The
+original acceptance of candidate `9418ac8011528da39730a577874f300b8075dbcc`
+remains in the Git history and in the record above; the amendment supersedes its
+bound bytes only, not its authority or its scope.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15

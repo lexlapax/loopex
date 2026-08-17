@@ -1400,6 +1400,113 @@ def _progress(
         )
 
 
+AMENDMENT_ANCHOR = re.compile(r'^<a id="amendment-([0-9]+)"></a>$')
+
+
+def _gate_generation(text: str, path: str) -> int:
+    """How many numbered amendments a gate document records.
+
+    A locked gate's bytes are immutable for its milestone, so the only legitimate
+    reason for them to change is a governed amendment. Counting declared
+    amendments turns that into something checkable: bytes may change when the
+    generation increases and never otherwise, so a silent edit is still rejected
+    while the amendment path the contract allows stays open.
+
+    Numbering must be consecutive from 1. A gap or a repeat would let two
+    different byte sets claim the same generation.
+    """
+    found = sorted(
+        int(match.group(1))
+        for match in (AMENDMENT_ANCHOR.match(line) for line in text.split("\n"))
+        if match
+    )
+    if found != list(range(1, len(found) + 1)):
+        raise Invalid(f"{path}: amendment anchors must be numbered consecutively from 1")
+    return len(found)
+
+
+def _generation_of(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value.split("\0", 1)[0])
+    except ValueError:
+        return None
+
+
+def _supersedes(label: str, anchor: str | None, value: str | None) -> bool:
+    """Whether a changed governance record is a declared amendment, not drift.
+
+    Gate bytes are strict: they may differ only when the document records one more
+    numbered amendment than the bytes being replaced. A silent edit keeps the same
+    generation and is rejected.
+
+    An acceptance row is deliberately weaker, because an amendment cannot be one
+    commit. Its rebind must name a candidate carrying the amended gate, and no
+    commit can name its own hash, so the amended gate lands first and the row
+    follows. Both revisions therefore share a generation. What makes the looser
+    rule safe is that the row is not trusted on its own: `_governance` already
+    requires its concept and technical digests to equal the current envelopes, its
+    gate digest to equal both the current gate and the gate at the candidate it
+    binds, and its candidate chain to terminate at an empty-governance original.
+    A rebind that smuggled anything would fail one of those. All this rule adds is
+    that a rebind is impossible until an amendment is on record.
+    """
+    generation, prior = _generation_of(value), _generation_of(anchor)
+    if generation is None or prior is None:
+        return False
+    if label == "accepted gate":
+        return generation > prior
+    return generation >= 1
+
+
+def _acceptance_chain(
+    candidate_text: str,
+    path: str,
+    revision: str,
+    resolve_file: Callable[[str, str], str | None] | None,
+    seen: set[str],
+) -> None:
+    """An acceptance candidate is either an original snapshot or an amended one.
+
+    The original snapshot carries empty governance: nothing had been accepted yet
+    when those bytes existed. An amendment necessarily binds a candidate that
+    carries the previous binding, because the gate it amends was already accepted,
+    so requiring emptiness outright makes the amendment path the contract allows
+    unrecordable.
+
+    Requiring the chain instead is stricter than requiring emptiness. A candidate
+    with a filled row must bind a resolvable earlier candidate, and that one must
+    do the same, terminating at an empty-governance original. A fabricated
+    candidate with an invented row cannot satisfy that, and a cycle is rejected
+    rather than followed.
+    """
+    _, bound, complete = _governance_records(candidate_text, f"{path} at candidate {revision}")
+
+    if complete == [False, False]:
+        return
+
+    if not complete[0] or bound[0] is None:
+        raise Invalid(
+            f"{path}: acceptance candidate {revision} has governance that is neither empty "
+            "nor a complete acceptance record, so it supersedes nothing"
+        )
+
+    prior = bound[0].group(1)
+    if prior == revision or prior in seen:
+        raise Invalid(f"{path}: acceptance candidate chain at {revision} does not terminate")
+    seen.add(revision)
+
+    prior_text = resolve_file(prior, path) if resolve_file else None
+    if prior_text is None:
+        raise Invalid(
+            f"{path}: acceptance candidate {revision} binds prior candidate {prior}, "
+            "which is unavailable"
+        )
+
+    _acceptance_chain(prior_text, path, prior, resolve_file, seen)
+
+
 def _governance(
     text: str,
     technical_text: str,
@@ -1473,11 +1580,7 @@ def _governance(
             candidate_outcomes,
             "Open",
         )
-        _, _, candidate_complete = _governance_records(
-            candidate, f"{path} at acceptance candidate {bound[0].group(1)}"
-        )
-        if candidate_complete != [False, False]:
-            raise Invalid(f"{path}: acceptance candidate governance must be empty")
+        _acceptance_chain(candidate, path, bound[0].group(1), resolve_file, set())
         if envelope != candidate_envelope:
             raise Invalid(f"{path}: accepted normative concept envelope differs from its candidate")
         if technical_envelope != candidate_technical_envelope:
@@ -1585,7 +1688,8 @@ def _governance_history(
             if not plan_is_accepted(governed.get(plan_path), plan_path, revision):
                 return (None,)
             digest = _gate_digest(text, historical_path)
-            return (f"{digest}\0{text}",)
+            generation = _gate_generation(text, historical_path)
+            return (f"{generation}\0{digest}\0{text}",)
         rows, _, complete = _governance_records(text, historical_path)
         if not complete[0]:
             return (None, None, None, None)
@@ -1599,8 +1703,12 @@ def _governance_history(
         technical_envelope = "\n".join(
             _plan_technical_envelope(technical, f"{technical_path} at {revision}")
         )
+        gate_text = governed.get(path.removesuffix(".md") + "-gate.md")
+        generation = (
+            _gate_generation(gate_text, f"{path} gate at {revision}") if gate_text else 0
+        )
         return (
-            "\0".join(rows[0]),
+            f"{generation}\0" + "\0".join(rows[0]),
             "\0".join(rows[1]) if complete[1] else None,
             concept_envelope,
             technical_envelope,
@@ -1662,9 +1770,15 @@ def _governance_history(
                 if anchor is None and value is not None:
                     path_anchors[index] = value
                 elif anchor is not None and value != anchor:
-                    raise Invalid(
-                        f"{path}: completed {label} governance record changed at {revision}"
+                    amendable = label in ("accepted gate", "Acceptance") and (
+                        path not in adr_concepts
                     )
+                    if amendable and _supersedes(label, anchor, value):
+                        path_anchors[index] = value
+                    else:
+                        raise Invalid(
+                            f"{path}: completed {label} governance record changed at {revision}"
+                        )
         inherited[revision] = anchors
 
 
