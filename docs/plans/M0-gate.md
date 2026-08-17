@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `72710036bda12b07e835ffe3d5d2f4d7f8237d330c8670e376fd0814e0cf559a` | `scripts/check-m0-gate.sh` |
+| `ca9ecdd086b3ff3f2e4828cc8bda3bce5ff0b22f4c57c4ac9a568b533e6bf9e0` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -198,7 +198,12 @@ device and inode as well, across **every** prefix of the candidate rather than
 only its end, and does the textual comparison case-insensitively. When the
 protected directory does not exist yet it has no inode of its own, so the
 comparison falls back to its parent's inode plus a case-folded name match, which
-is what catches an aliased spelling of a directory not yet created. Otherwise the
+is what catches an aliased spelling of a directory not yet created.
+
+A path that does not exist legitimately has no identity and is skipped. A path
+that exists whose identity cannot be read is different: that is unavailable
+evidence, and the runner refuses rather than skipping the comparison and falling
+back to text. Otherwise the
 isolated root, or Mix's own writes, would land inside the very directory the
 relocation exists to protect.
 
@@ -229,12 +234,17 @@ Command 10 is excluded from the default suite and runs only when invoked
 explicitly. The credential is read from the environment and never written to a
 journal, fixture, log, snapshot, diagnostic, or committed byte.
 
-That claim covers the runner's own diagnostics. The lane captures stdout and
-stderr together, so a provider or test that echoes the key into an error message
-would put it directly into operator and CI output. Captured output is therefore
-redacted before it is printed, by in-process substitution rather than by piping
-through a filter, since passing the value as an argument would expose it in the
-process table.
+That claim covers the runner's own diagnostics and its own process table. The
+lane captures stdout and stderr together, so a provider or test that echoes the
+key into an error message would put it directly into operator and CI output.
+Captured output is therefore redacted before it is printed, by in-process
+substitution rather than by piping through a filter.
+
+The credential reaches the child through a shell assignment prefix, which sets
+it in the child's environment directly. Passing it to `env` as an argument --
+the earlier form -- placed it in that process's argv, where any user on the host
+could read it before `env` replaced itself with Mix. Redacting output does not
+address that exposure; it is a separate plane and needs its own containment.
 
 The lane retains non-secret identity in `docs/evidence/M0-provider.md`. The
 runner requires four fields, named exactly: `provider`, `model`, `endpoint`, and
@@ -296,10 +306,18 @@ rather than guarding it.
 The interpreter set is not just `python3` and `jq`. On an ordinary macOS host
 `python`, a versioned `python3.x`, and `xcrun` all reach a working interpreter,
 and `xcrun` resolves Xcode's Python independently of `PATH` order. The runner
-stubs a fixed core plus every python-like name actually reachable on the current
-`PATH`, proves each stub effective rather than only the first, and matches the
-same widened set in the scan. A name followed by `/` is a directory component,
-not an invocation, and does not match.
+stubs a fixed core plus every python-like name reachable on the current `PATH`,
+proves each stub effective rather than only the first, and matches the same
+widened set in the scan. A name followed by `/` is a directory component, not an
+invocation, and does not match. Entries are read with `:` as the only separator,
+so a directory containing a space is not split and an empty entry is correctly
+treated as the working directory.
+
+The fixed core also covers launchers whose own name is not python-shaped and
+which dynamic enumeration therefore cannot find: `xcrun`, `uv`, `pyenv`, `pipx`,
+`poetry`, and `conda`. That list is enumerable but not provably exhaustive --- a
+launcher nobody named reaches an interpreter it manages --- so the coverage claim
+is the fixed core plus python-shaped names, not every conceivable entrypoint.
 
 `git grep` exits 0 on a match, 1 on none, and above 1 on error. The runner
 distinguishes all three. Treating anything non-zero as clean would turn a broken
@@ -316,16 +334,26 @@ Command 11 covers four separable things and fails on any of the first three:
    none of which a shim can catch. This document does not spell those forms
    literally, because it is scanned like every other tracked file.
 
-   Reassigning the search path defeats the stubs as completely as naming an
-   absolute path, and the reassignment need not sit on the line that calls the
-   interpreter. **Any** assignment to the search-path variable outside the runner
-   is therefore rejected outright. Requiring the value to carry the old one
-   forward was a heuristic and it failed in both directions: prepending a real
-   interpreter directory ahead of the stub root preserves the variable and
-   defeats the stub, and a substring removal deletes the stub root while still
-   naming the variable. No repository script has a legitimate reason to reassign
-   it, and none does, so the rule is absolute rather than a judgment about the
-   value.
+   Mutating the search-path variable defeats the stubs as completely as naming an
+   absolute path, and the mutation need not sit on the line that calls the
+   interpreter. Every **textual** mutation outside the runner is therefore
+   rejected: plain and exported assignment, a quoted assignment handed to `env`,
+   `unset`, `printf -v`, an array-element write, and a declaration naming the
+   variable. Requiring the value to carry the old one forward was a heuristic and
+   failed in both directions -- prepending a real interpreter directory ahead of
+   the stub root preserves the variable and defeats the stub, and a substring
+   removal deletes the stub root while still naming it -- so the rule makes no
+   judgment about the value.
+
+   **This is not airtight, and no claim is made that it is.** Indirection --- a
+   nameref, `eval`, or a computed variable name --- mutates the same variable
+   with no matching token, and no text scan can see it. The containment that
+   would close it does not exist in the development baseline: an allowlist search
+   path cannot exclude the interpreter directories, because `/usr/bin` holds
+   `python3` and also `git`, `sed`, and `awk`, so removing it would break the
+   aggregate this check exists to run. Prepending the stub root is the strongest
+   portable containment available; indirection is the residual, and it reaches
+   closure review because no mechanism at this layer can reach it.
 2. **Inventory.** Every named bridge component is gone from the tree:
    `scripts/check_status.py`, `scripts/test_check_status.py`,
    `scripts/check-agent-bootstrap.py`, the `python3` invocations in

@@ -229,17 +229,29 @@ protected_resolved="$(resolve_physical "$real_user_state_path")"
 # filesystem folds case, so an uppercase spelling of the state directory names
 # the same directory. Identity is therefore compared by device and inode as well,
 # and the textual comparison is done case-insensitively.
+# Exit 1 means the path does not exist, which legitimately has no identity.
+# Exit 2 means it exists but its identity could not be read: that is unavailable
+# evidence, and the caller refuses rather than silently skipping the comparison
+# and falling back to text.
 node_id() {
   [ -e "$1" ] || return 1
-  stat -f '%d:%i' "$1" 2>/dev/null || stat -c '%d:%i' "$1" 2>/dev/null
+  stat -f '%d:%i' "$1" 2>/dev/null && return 0
+  stat -c '%d:%i' "$1" 2>/dev/null && return 0
+  return 2
 }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 protected_parent="${protected_resolved%/*}"
 [ -n "$protected_parent" ] || protected_parent=/
 protected_name="${protected_resolved##*/}"
-protected_parent_id="$(node_id "$protected_parent" || true)"
-protected_id="$(node_id "$protected_resolved" || true)"
+protected_parent_id="$(node_id "$protected_parent")" || {
+  [ "$?" -eq 1 ] || fail "the identity of $protected_parent could not be read; containment evidence is unavailable"
+  protected_parent_id=""
+}
+protected_id="$(node_id "$protected_resolved")" || {
+  [ "$?" -eq 1 ] || fail "the identity of $protected_resolved could not be read; containment evidence is unavailable"
+  protected_id=""
+}
 protected_lc="$(lower "${protected_resolved%/}")"
 protected_name_lc="$(lower "$protected_name")"
 
@@ -274,13 +286,20 @@ outside_protected_state() {
     parent="${prefix:-/}"
     prefix="$prefix/$base"
     if [ -n "$protected_id" ]; then
-      id="$(node_id "$prefix" || true)"
+      id="$(node_id "$prefix")" || {
+        # Exists but unreadable: refuse. Only a nonexistent prefix is skipped.
+        [ "$?" -eq 1 ] || return 1
+        id=""
+      }
       if [ -n "$id" ] && [ "$id" = "$protected_id" ]; then
         return 1
       fi
     fi
     if [ -n "$protected_parent_id" ] && [ "$(lower "$base")" = "$protected_name_lc" ]; then
-      id="$(node_id "$parent" || true)"
+      id="$(node_id "$parent")" || {
+        [ "$?" -eq 1 ] || return 1
+        id=""
+      }
       if [ -n "$id" ] && [ "$id" = "$protected_parent_id" ]; then
         return 1
       fi
@@ -354,9 +373,18 @@ if grep -qE 'apps/loopex/mix\.exs|defp? deps' "$hook"; then
   fail "$hook still carries inline budget logic instead of calling the command (outcome 2)"
 fi
 
-provider_output="$(env ${provider_key_value:+LOOPEX_PROVIDER_API_KEY="$provider_key_value"} \
-  mix test apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider 2>&1)" \
-  || { redacted "$provider_output" >&2; fail "real-provider lane failed (outcome 7)"; }
+# A shell assignment prefix places the value in the child's environment directly.
+# The previous form passed it to `env` as an ARGUMENT, so the credential was
+# visible in that process's argv until env replaced itself with Mix -- exactly
+# the process-table exposure the redaction helper exists to avoid.
+if [ -n "$provider_key_value" ]; then
+  provider_output="$(LOOPEX_PROVIDER_API_KEY="$provider_key_value" \
+    mix test apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider 2>&1)" \
+    || { redacted "$provider_output" >&2; fail "real-provider lane failed (outcome 7)"; }
+else
+  provider_output="$(mix test apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider 2>&1)" \
+    || { redacted "$provider_output" >&2; fail "real-provider lane failed (outcome 7)"; }
+fi
 provider_skipped="$(summary_field "$provider_output" skipped)"
 if [ "${provider_skipped:-0}" -ne 0 ]; then
   fail "real-provider lane skipped ${provider_skipped} tests; a protected selector may not skip (outcome 7)"
@@ -427,8 +455,15 @@ absence_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m0-absence.XXXXXX")" \
 # stub set is therefore a fixed core plus every python-like name actually
 # reachable on this PATH, so a version the list never anticipated is still
 # covered on the host where it exists.
-shadow_names="python python2 python3 jq xcrun"
-for path_dir in $(printf '%s' "$PATH" | tr ':' ' '); do
+# The fixed core covers direct interpreters and the launchers that reach one
+# without a python-shaped name of their own: xcrun resolves Xcode's Python, and
+# uv, pyenv, pipx, poetry, and conda each run an interpreter they manage.
+shadow_names="python python2 python3 jq xcrun uv pyenv pipx poetry conda"
+# Splitting on whitespace corrupted any PATH entry containing a space and
+# discarded empty entries, which mean the current directory. Reading the raw
+# value with ":" as the only separator preserves both.
+while IFS= read -r path_dir; do
+  [ -n "$path_dir" ] || path_dir="."
   [ -d "$path_dir" ] || continue
   for found in "$path_dir"/python*; do
     [ -x "$found" ] || continue
@@ -442,7 +477,9 @@ for path_dir in $(printf '%s' "$PATH" | tr ':' ' '); do
       *) shadow_names="$shadow_names $found" ;;
     esac
   done
-done
+done <<PATH_ENTRIES
+$(printf '%s\n' "$PATH" | tr ':' '\n')
+PATH_ENTRIES
 for shadowed in $shadow_names; do
   printf '#!/bin/sh\necho "%s is retired; outcome 8 requires its absence" >&2\nexit 127\n' \
     "$shadowed" > "$absence_root/$shadowed"
@@ -502,22 +539,32 @@ case "$scan_status" in
   *) fail "the bypass scan could not run (git grep exit $scan_status); evidence is unavailable (outcome 8)" ;;
 esac
 
-# Any assignment to PATH is rejected outright. Requiring the value to mention
-# $PATH was a heuristic and it failed: PATH=/usr/bin:$PATH moves the stub root
-# behind a real interpreter directory, and PATH=${PATH#*:} deletes the stub root
-# while still naming the variable. Both preserved the text and defeated the
-# stubs. No repository script has a legitimate reason to reassign PATH, and none
-# does today, so the rule is absolute rather than a judgment about the value.
-path_assignment='(^|[[:space:]]|;|\()(export[[:space:]]+)?PATH='
-reset_status=0
-git grep -nE "$path_assignment" -- $scan_tree >/dev/null 2>&1 || reset_status=$?
-case "$reset_status" in
+# Every textual way to mutate the search-path variable is rejected: plain and
+# exported assignment, `unset`, `printf -v`, an array-element write, and a
+# declaration that names it. No repository script has a legitimate reason to
+# touch it, and none does, so the rule needs no judgment about the value --
+# requiring the old value to be carried forward failed both by prepending a real
+# interpreter directory ahead of the stub and by deleting the stub root.
+#
+# THIS IS NOT AIRTIGHT, and the gate says so rather than claiming otherwise.
+# Indirection -- a nameref, `eval`, or a computed variable name -- mutates the
+# same variable with no PATH token to match, and no text scan can see it. The
+# containment that would close it is not available in the development baseline:
+# an allowlist search path cannot exclude the interpreter directories, because
+# /usr/bin holds python3 and also git, sed, and awk, so removing it would break
+# the aggregate this check exists to run. Prepending the stub root is the
+# strongest portable containment; indirection is the residual, and it belongs to
+# closure review because no mechanism here can reach it.
+path_mutation='(^|[[:space:]]|;|\(|\{)((export|declare|typeset|local|readonly)[[:space:]]+([^[:space:]]+[[:space:]]+)*)?["'"'"']?PATH([[:space:]]*=|\[)|(^|[[:space:]]|;)unset([[:space:]]+-[^[:space:]]*)*[[:space:]]+([^[:space:]]+[[:space:]]+)*PATH([^[:alnum:]_]|$)|printf[[:space:]]+([^[:space:]]+[[:space:]]+)*-v[[:space:]]+PATH([^[:alnum:]_]|$)'
+mutation_status=0
+git grep -nE "$path_mutation" -- $scan_tree >/dev/null 2>&1 || mutation_status=$?
+case "$mutation_status" in
   0)
-    git grep -nE "$path_assignment" -- $scan_tree >&2
-    fail "a PATH assignment outside the runner would displace the shadow root (outcome 8)"
+    git grep -nE "$path_mutation" -- $scan_tree >&2
+    fail "a search-path mutation outside the runner would displace the shadow root (outcome 8)"
     ;;
   1) ;;
-  *) fail "the PATH-assignment scan could not run (git grep exit $reset_status); evidence is unavailable (outcome 8)" ;;
+  *) fail "the search-path scan could not run (git grep exit $mutation_status); evidence is unavailable (outcome 8)" ;;
 esac
 for residue in \
   scripts/check-status.sh \

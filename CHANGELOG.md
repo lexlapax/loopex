@@ -204,6 +204,26 @@ the exact document set its milestone must update.
 - Provider-lane diagnostics are redacted before printing. The lane captures
   stdout and stderr together, so a provider or test echoing the key into an
   error would have put it straight into operator and CI output.
+- The credential reaches the provider lane through a shell assignment prefix
+  rather than as an argument to `env`. The argument form placed it in that
+  process's argv, readable by any user on the host until `env` replaced itself
+  with Mix — a separate exposure that output redaction does not address.
+- Identity lookup distinguishes a path that does not exist, which legitimately
+  has no identity, from one that exists but cannot be read, which is unavailable
+  evidence. The latter now refuses instead of skipping the comparison and
+  falling back to text.
+- The search-path scan covers every textual mutation, not only assignment:
+  `unset`, `printf -v`, an array-element write, a declaration naming the
+  variable, and a quoted assignment handed to `env`. The absoluteness claim is
+  withdrawn — indirection through a nameref or a computed name leaves no token
+  to match, and an allowlist search path cannot close it because `/usr/bin`
+  holds both the interpreter and `git`, `sed`, and `awk`. The gate states that
+  residual instead of claiming coverage it does not have.
+- Interpreter enumeration reads entries with `:` as the only separator, so a
+  directory containing a space is no longer split and an empty entry is treated
+  as the working directory. The fixed stub core adds the launchers whose names
+  are not python-shaped, and the coverage claim is narrowed to that core plus
+  python-shaped names rather than every conceivable entrypoint.
 - `AGENTS.md` joins the closure document set, since outcome 8 makes its
   bootstrap-prerequisite text stale.
 - Formatter coverage must appear outside a comment; evidence fields reject
