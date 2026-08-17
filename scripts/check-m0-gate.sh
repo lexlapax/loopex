@@ -48,6 +48,21 @@ for leaked in LOOPEX_PROVIDER_API_KEY provider_key_value; do
   fi
 done
 
+# Diagnostic output from the provider lane is redacted before it is printed. The
+# lane captures stdout and stderr together, so a provider or test that echoes the
+# key into an error message would otherwise put it straight into operator and CI
+# output -- a log is exactly one of the planes the credential may never reach.
+# Substitution is done in-process with parameter expansion rather than by piping
+# through sed, because passing the value as an argument would expose it in the
+# process table.
+redacted() {
+  if [ -n "$provider_key_value" ]; then
+    printf '%s\n' "${1//$provider_key_value/[redacted credential]}"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
 cd "$(git rev-parse --show-toplevel 2>&1 | grep -v 'DARWIN_USER_TEMP_DIR')"
 
 # Drift protection. A protected test that disappears or is renamed is caught.
@@ -157,8 +172,12 @@ resolve_physical() {
   # sees it, and an intermediate symlink is discarded along with the alias it
   # carried. Following each link as it is reached, and taking ".." from the
   # resolved prefix, gives the path the kernel would actually open.
-  while [ -n "$remaining" ] && [ "$guard" -lt 256 ]; do
-    guard=$((guard + 1))
+  # The guard counts symlink expansions only, which is the sole way this loop
+  # fails to make progress. Counting components instead let a path padded with
+  # "./" exhaust the budget: the loop returned the prefix it had resolved so far,
+  # and a partially resolved path silently compared as outside. Component
+  # consumption always terminates, so it needs no budget.
+  while [ -n "$remaining" ]; do
     remaining="${remaining#/}"
     case "$remaining" in
       */*)
@@ -180,6 +199,11 @@ resolve_physical() {
     # -L is true for a dangling link too, so a link aimed at a directory that
     # does not exist yet is still followed rather than walked past.
     if [ -L "$resolved/$comp" ]; then
+      guard=$((guard + 1))
+      # Exhaustion returns nothing rather than a partial prefix. A truncated
+      # path is not a safe answer to "is this inside protected state"; the
+      # caller treats an empty result as unresolvable and refuses.
+      [ "$guard" -le 64 ] || { printf '%s' ""; return 0; }
       link="$(readlink "$resolved/$comp")"
       case "$link" in
         /*)
@@ -197,12 +221,71 @@ resolve_physical() {
   printf '%s' "${resolved:-/}"
 }
 protected_resolved="$(resolve_physical "$real_user_state_path")"
+[ -n "$protected_resolved" ] || fail "the protected state path could not be resolved; refusing to run"
+
+# Textual comparison of resolved paths is necessary but not sufficient on a real
+# macOS host. Two ordinary aliases defeat it: /System/Volumes/Data/Users/<user>
+# is a firmlink to /Users/<user> and shares its device and inode, and the default
+# filesystem folds case, so an uppercase spelling of the state directory names
+# the same directory. Identity is therefore compared by device and inode as well,
+# and the textual comparison is done case-insensitively.
+node_id() {
+  [ -e "$1" ] || return 1
+  stat -f '%d:%i' "$1" 2>/dev/null || stat -c '%d:%i' "$1" 2>/dev/null
+}
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+protected_parent="${protected_resolved%/*}"
+[ -n "$protected_parent" ] || protected_parent=/
+protected_name="${protected_resolved##*/}"
+protected_parent_id="$(node_id "$protected_parent" || true)"
+protected_id="$(node_id "$protected_resolved" || true)"
+protected_lc="$(lower "${protected_resolved%/}")"
+protected_name_lc="$(lower "$protected_name")"
+
 outside_protected_state() {
-  local candidate
+  local candidate cand_lc prefix rest base parent id
   candidate="$(resolve_physical "$1")"
-  case "${candidate%/}/" in
-    "$protected_resolved"/*|"$protected_resolved"/) return 1 ;;
+  # An unresolvable path is not a safe answer; refuse rather than assume outside.
+  [ -n "$candidate" ] || return 1
+  cand_lc="$(lower "${candidate%/}")"
+  case "$cand_lc/" in
+    "$protected_lc"/* | "$protected_lc"/) return 1 ;;
   esac
+  # Every prefix of the candidate is compared by identity, so an alias anywhere
+  # along the path is caught, not only one at the end. When the protected
+  # directory does not exist yet it has no inode of its own, so the comparison
+  # falls back to its parent's inode plus a case-folded name match -- which is
+  # what catches an aliased spelling of a directory that has not been created.
+  prefix=""
+  rest="${candidate#/}"
+  while [ -n "$rest" ]; do
+    case "$rest" in
+      */*)
+        base="${rest%%/*}"
+        rest="${rest#*/}"
+        ;;
+      *)
+        base="$rest"
+        rest=""
+        ;;
+    esac
+    [ -n "$base" ] || continue
+    parent="${prefix:-/}"
+    prefix="$prefix/$base"
+    if [ -n "$protected_id" ]; then
+      id="$(node_id "$prefix" || true)"
+      if [ -n "$id" ] && [ "$id" = "$protected_id" ]; then
+        return 1
+      fi
+    fi
+    if [ -n "$protected_parent_id" ] && [ "$(lower "$base")" = "$protected_name_lc" ]; then
+      id="$(node_id "$parent" || true)"
+      if [ -n "$id" ] && [ "$id" = "$protected_parent_id" ]; then
+        return 1
+      fi
+    fi
+  done
   return 0
 }
 for inherited in "${TMPDIR:-/tmp}" "${MIX_HOME:-$real_home/.mix}" "${HEX_HOME:-$real_home/.hex}"; do
@@ -273,7 +356,7 @@ fi
 
 provider_output="$(env ${provider_key_value:+LOOPEX_PROVIDER_API_KEY="$provider_key_value"} \
   mix test apps/loopex_llm_reqllm/test/provider_test.exs --only real_provider 2>&1)" \
-  || { printf '%s\n' "$provider_output" >&2; fail "real-provider lane failed (outcome 7)"; }
+  || { redacted "$provider_output" >&2; fail "real-provider lane failed (outcome 7)"; }
 provider_skipped="$(summary_field "$provider_output" skipped)"
 if [ "${provider_skipped:-0}" -ne 0 ]; then
   fail "real-provider lane skipped ${provider_skipped} tests; a protected selector may not skip (outcome 7)"
@@ -338,14 +421,40 @@ done
 
 absence_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m0-absence.XXXXXX")" \
   || fail "could not create an isolated task root for the absence proof (outcome 8)"
-for shadowed in python3 jq; do
+# Shadowing only python3 and jq left every alternate entrypoint usable: python,
+# python3.12, and xcrun all resolve to a working interpreter on an ordinary
+# macOS host, and xcrun reaches Xcode's Python independently of PATH order. The
+# stub set is therefore a fixed core plus every python-like name actually
+# reachable on this PATH, so a version the list never anticipated is still
+# covered on the host where it exists.
+shadow_names="python python2 python3 jq xcrun"
+for path_dir in $(printf '%s' "$PATH" | tr ':' ' '); do
+  [ -d "$path_dir" ] || continue
+  for found in "$path_dir"/python*; do
+    [ -x "$found" ] || continue
+    found="${found##*/}"
+    case "$found" in
+      python | python[0-9] | python[0-9].[0-9] | python[0-9].[0-9][0-9]) ;;
+      *) continue ;;
+    esac
+    case " $shadow_names " in
+      *" $found "*) ;;
+      *) shadow_names="$shadow_names $found" ;;
+    esac
+  done
+done
+for shadowed in $shadow_names; do
   printf '#!/bin/sh\necho "%s is retired; outcome 8 requires its absence" >&2\nexit 127\n' \
     "$shadowed" > "$absence_root/$shadowed"
   chmod +x "$absence_root/$shadowed"
 done
-if PATH="$absence_root:$PATH" python3 --version >/dev/null 2>&1; then
-  fail "could not shadow python3 for the absence proof (outcome 8)"
-fi
+# Every stub is proved effective. Asserting only python3 left the rest unproven.
+for shadowed in $shadow_names; do
+  command -v "$shadowed" >/dev/null 2>&1 || continue
+  if PATH="$absence_root:$PATH" "$shadowed" --version >/dev/null 2>&1; then
+    fail "could not shadow $shadowed for the absence proof (outcome 8)"
+  fi
+done
 PATH="$absence_root:$PATH" bash scripts/check-bootstrap.sh >/dev/null \
   || fail "the aggregate still depends on python3 or jq (outcome 8)"
 
@@ -372,48 +481,43 @@ done
 # assignments, command -p and -pv, and assignment-prefixed runs. A bare
 # `python3 x.py` is deliberately not matched here; the stubs above already
 # intercept it, and matching it would flag the aggregate's own legitimate calls.
-bypass='(/["'"'"']*|(^|[[:space:]])(command|exec)([[:space:]]+-[^[:space:]]*)*[[:space:]]+["'"'"']?|env([[:space:]]+[^[:space:]]+)*[[:space:]]+["'"'"']?|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+["'"'"']?)(python3|jq)([^[:alnum:]_]|$)'
-# Markdown is excluded by TYPE, not by path. A directory allowlist is defeated by
-# a directory nobody thought to add; an extension exclusion is not, and prose is
-# never invoked -- the gate document and this changelog must be able to quote the
-# forms they catch. That prose stays inert only while no .md is a program, so
-# that is asserted rather than assumed.
-scan_tree=". :(exclude)scripts/check-m0-gate.sh :(exclude)*.md"
-executable_prose="$(git ls-files --stage -- '*.md' | grep -E '^100755' || true)"
-[ -z "$executable_prose" ] \
-  || fail "a tracked .md file is executable, so excluding prose from the scan is unsafe: $executable_prose (outcome 8)"
+bypass='(/["'"'"']*|(^|[[:space:]])(command|exec)([[:space:]]+-[^[:space:]]*)*[[:space:]]+["'"'"']?|env([[:space:]]+[^[:space:]]+)*[[:space:]]+["'"'"']?|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+["'"'"']?)(python[0-9.]*|jq|xcrun)([^[:alnum:]_/]|$)'
+# The scan covers every tracked file with one exclusion: this runner, which must
+# name the interpreters in order to shadow and report them, and whose drift the
+# bound-artifact digest catches instead. Markdown is NOT excluded. Excluding it
+# by file type was unsafe, because a mode-0644 file is still executable as
+# `bash docs/payload.md` or by being sourced, and the execute-bit assertion that
+# guarded the exclusion could not see that. The prose that has to describe these
+# forms avoids spelling them literally instead.
+scan_tree=". :(exclude)scripts/check-m0-gate.sh"
 
-# git grep exits 0 on a match, 1 on none, and >1 on error. Treating "not zero"
-# as clean would turn a broken invocation, an unreadable object, or a pathspec
-# typo into a silent pass. An error is unavailable evidence, which fails.
 scan_status=0
 git grep -nE "$bypass" -- $scan_tree >/dev/null 2>&1 || scan_status=$?
 case "$scan_status" in
   0)
     git grep -nE "$bypass" -- $scan_tree >&2
-    fail "a shadow-bypassing python3/jq invocation survives (outcome 8)"
+    fail "a shadow-bypassing interpreter invocation survives (outcome 8)"
     ;;
   1) ;;
   *) fail "the bypass scan could not run (git grep exit $scan_status); evidence is unavailable (outcome 8)" ;;
 esac
 
-# Shadowing is defeated just as completely by replacing PATH as by naming an
-# absolute path, and the replacement need not sit on the same line as the call:
-# a bare `PATH=/usr/bin:/bin` anywhere in a script drops the stub root for
-# everything after it. Any assignment that does not carry the existing PATH
-# forward is therefore rejected, whichever line the interpreter is called on.
-path_reset='(^|[[:space:]]|;)(export[[:space:]]+)?PATH=(("[^"]*")|('"'"'[^'"'"']*'"'"')|([^[:space:];]*))'
-path_carries='PATH=[^[:space:];]*\$(PATH|\{PATH)'
+# Any assignment to PATH is rejected outright. Requiring the value to mention
+# $PATH was a heuristic and it failed: PATH=/usr/bin:$PATH moves the stub root
+# behind a real interpreter directory, and PATH=${PATH#*:} deletes the stub root
+# while still naming the variable. Both preserved the text and defeated the
+# stubs. No repository script has a legitimate reason to reassign PATH, and none
+# does today, so the rule is absolute rather than a judgment about the value.
+path_assignment='(^|[[:space:]]|;|\()(export[[:space:]]+)?PATH='
 reset_status=0
-git grep -nE "$path_reset" -- $scan_tree >/dev/null 2>&1 || reset_status=$?
+git grep -nE "$path_assignment" -- $scan_tree >/dev/null 2>&1 || reset_status=$?
 case "$reset_status" in
   0)
-    if git grep -nE "$path_reset" -- $scan_tree | grep -vE "$path_carries" >&2; then
-      fail "a PATH assignment discards the shadow root; the stubs would not apply (outcome 8)"
-    fi
+    git grep -nE "$path_assignment" -- $scan_tree >&2
+    fail "a PATH assignment outside the runner would displace the shadow root (outcome 8)"
     ;;
   1) ;;
-  *) fail "the PATH-reset scan could not run (git grep exit $reset_status); evidence is unavailable (outcome 8)" ;;
+  *) fail "the PATH-assignment scan could not run (git grep exit $reset_status); evidence is unavailable (outcome 8)" ;;
 esac
 for residue in \
   scripts/check-status.sh \
@@ -423,7 +527,7 @@ for residue in \
   .claude/hooks/guard-filesystem.sh
 do
   [ -f "$residue" ] || continue
-  if grep -qE '(^|[^[:alnum:]_])(python3|jq)([^[:alnum:]_]|$)' "$residue"; then
+  if grep -qE '(^|[^[:alnum:]_])(python[0-9.]*|jq|xcrun)([^[:alnum:]_/]|$)' "$residue"; then
     fail "$residue still invokes python3 or jq (outcome 8)"
   fi
 done

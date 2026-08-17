@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `e78ad5cb1d845c3b93faa5dd198320a45421af39fad8020203f63b2f2ac02259` | `scripts/check-m0-gate.sh` |
+| `72710036bda12b07e835ffe3d5d2f4d7f8237d330c8670e376fd0814e0cf559a` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -181,7 +181,24 @@ because resolving the assembled string at the end does not work: `cd` without
 kernel sees it and the intermediate symlink is discarded along with the alias it
 carried. Each link is followed as it is reached, including a dangling one aimed
 at a directory that does not exist yet, and `..` is taken from the resolved
-prefix. The result is the path the kernel would actually open. Otherwise the
+prefix. The result is the path the kernel would actually open.
+
+The loop's budget counts symlink expansions only, because that is the sole way
+it can fail to make progress; component consumption always terminates. Counting
+components let a path padded with `./` exhaust the budget, and the resolver then
+returned the prefix it had managed to resolve, which compared as outside. An
+exhausted budget now yields nothing, and an unresolvable path is refused rather
+than assumed outside.
+
+Comparing resolved text is necessary but not sufficient on a real macOS host.
+Two ordinary aliases defeat it: the data volume carries a firmlink to the user's
+home that shares its device and inode, and the default filesystem folds case, so
+an uppercase spelling names the same directory. The runner therefore compares
+device and inode as well, across **every** prefix of the candidate rather than
+only its end, and does the textual comparison case-insensitively. When the
+protected directory does not exist yet it has no inode of its own, so the
+comparison falls back to its parent's inode plus a case-folded name match, which
+is what catches an aliased spelling of a directory not yet created. Otherwise the
 isolated root, or Mix's own writes, would land inside the very directory the
 relocation exists to protect.
 
@@ -211,6 +228,13 @@ outcome they belong to, and no claim is made that all of them run first.
 Command 10 is excluded from the default suite and runs only when invoked
 explicitly. The credential is read from the environment and never written to a
 journal, fixture, log, snapshot, diagnostic, or committed byte.
+
+That claim covers the runner's own diagnostics. The lane captures stdout and
+stderr together, so a provider or test that echoes the key into an error message
+would put it directly into operator and CI output. Captured output is therefore
+redacted before it is printed, by in-process substitution rather than by piping
+through a filter, since passing the value as an argument would expose it in the
+process table.
 
 The lane retains non-secret identity in `docs/evidence/M0-provider.md`. The
 runner requires four fields, named exactly: `provider`, `model`, `endpoint`, and
@@ -258,14 +282,24 @@ scans for invocations that shadowing cannot intercept. Dropping directories from
 The scan covers the **whole tracked tree**, not a list of top-level directories.
 An allowlist is defeated by a directory nobody thought to add: an absolute
 invocation in a new `tools/helper.sh` called by the aggregate would evade both
-the stub and a `scripts`-only scan. Two exclusions apply, and neither is a path
-allowlist. The runner itself is excluded because it must name both interpreters
-in order to shadow and report them; drift there is caught by its bound-artifact
-digest instead. Markdown is excluded by **file type**, because this document and
-the changelog have to be able to quote the forms they catch — an extension
-exclusion is not defeated by adding a directory. Prose is inert only while no
-`.md` is a program, so the runner asserts that no tracked `.md` carries the
-execute bit rather than assuming it.
+the stub and a `scripts`-only scan. Exactly one exclusion applies: the runner
+itself, which must name the interpreters in order to shadow and report them, and
+whose drift the bound-artifact digest catches instead.
+
+Markdown is **not** excluded. Excluding prose by file type was unsafe: a
+mode-0644 file is still executable as an argument to a shell or by being
+sourced, so the execute-bit assertion that guarded the exclusion could not
+establish that prose was inert. The documents that must describe these forms
+avoid spelling them literally instead, which removes the need for the exception
+rather than guarding it.
+
+The interpreter set is not just `python3` and `jq`. On an ordinary macOS host
+`python`, a versioned `python3.x`, and `xcrun` all reach a working interpreter,
+and `xcrun` resolves Xcode's Python independently of `PATH` order. The runner
+stubs a fixed core plus every python-like name actually reachable on the current
+`PATH`, proves each stub effective rather than only the first, and matches the
+same widened set in the scan. A name followed by `/` is a directory component,
+not an invocation, and does not match.
 
 `git grep` exits 0 on a match, 1 on none, and above 1 on error. The runner
 distinguishes all three. Treating anything non-zero as clean would turn a broken
@@ -276,17 +310,22 @@ Command 11 covers four separable things and fails on any of the first three:
 
 1. **Absence.** The aggregate runs to completion while `python3` and `jq` are
    shadowed by stubs that refuse to run. Shadowing intercepts PATH lookups only,
-   so the runner additionally scans for absolute paths — including quoted forms
-   such as `/usr/bin/"python3"` — `env`-resolved calls with or without flags,
-   `command -p` and `-pv`, `exec`, and assignment-prefixed runs, none of which a
-   shim can catch.
+   so the runner additionally scans for absolute paths — including forms that
+   quote the interpreter name inside the path — `env`-resolved calls with or
+   without flags, `command -p` and `-pv`, `exec`, and assignment-prefixed runs,
+   none of which a shim can catch. This document does not spell those forms
+   literally, because it is scanned like every other tracked file.
 
-   Replacing `PATH` defeats the stubs as completely as naming an absolute path,
-   and the replacement need not sit on the line that calls the interpreter: a
-   bare `PATH=/usr/bin:/bin` or `PATH="$(getconf PATH)"` anywhere in a script
-   drops the stub root for everything after it. Any assignment that does not
-   carry the existing `PATH` forward is therefore rejected on its own, whichever
-   line the interpreter is called on.
+   Reassigning the search path defeats the stubs as completely as naming an
+   absolute path, and the reassignment need not sit on the line that calls the
+   interpreter. **Any** assignment to the search-path variable outside the runner
+   is therefore rejected outright. Requiring the value to carry the old one
+   forward was a heuristic and it failed in both directions: prepending a real
+   interpreter directory ahead of the stub root preserves the variable and
+   defeats the stub, and a substring removal deletes the stub root while still
+   naming the variable. No repository script has a legitimate reason to reassign
+   it, and none does, so the rule is absolute rather than a judgment about the
+   value.
 2. **Inventory.** Every named bridge component is gone from the tree:
    `scripts/check_status.py`, `scripts/test_check_status.py`,
    `scripts/check-agent-bootstrap.py`, the `python3` invocations in

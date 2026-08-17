@@ -178,6 +178,32 @@ the exact document set its milestone must update.
   everything before the first allocation is checkout-only, so the review lane
   reaches the declared red condition. Checkout-only checks also appear after
   allocation, beside the outcome they belong to.
+- Path containment now compares device and inode across every prefix of a
+  candidate, and folds case, because resolved text alone is not enough on a real
+  macOS host: the data volume carries a firmlink to the user's home sharing its
+  device and inode, and the default filesystem is case-insensitive, so an
+  uppercase spelling named the same directory. The resolver's budget counts
+  symlink expansions rather than components, since a path padded with dot
+  segments exhausted it and the resolver then returned a partial prefix that
+  compared as outside; an exhausted budget and an unresolvable path are now both
+  refused.
+- Prose is no longer excluded from the interpreter scan. Excluding by file type
+  was unsafe, since a non-executable file is still executable as an argument to
+  a shell or by being sourced, and the execute-bit assertion guarding the
+  exclusion could not see that. The documents describing these forms avoid
+  spelling them literally instead.
+- The interpreter stub set covers a fixed core plus every python-like name
+  reachable on the current search path, and each stub is proved effective rather
+  than only the first. Stubbing two names left `python`, versioned interpreters,
+  and Xcode's toolchain wrapper all usable.
+- Any assignment to the search-path variable outside the runner is rejected
+  outright. Requiring the value to carry the old one forward failed in both
+  directions: prepending a real interpreter directory preserves the variable and
+  defeats the stub, and a substring removal deletes the stub root while still
+  naming it.
+- Provider-lane diagnostics are redacted before printing. The lane captures
+  stdout and stderr together, so a provider or test echoing the key into an
+  error would have put it straight into operator and CI output.
 - `AGENTS.md` joins the closure document set, since outcome 8 makes its
   bootstrap-prerequisite text stale.
 - Formatter coverage must appear outside a comment; evidence fields reject
