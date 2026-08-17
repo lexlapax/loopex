@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # PostToolUse[Edit|Write]: stdin is the tool-call JSON.
-# Early feedback only (AGENTS.md); repository checks own enforcement, so fail
-# open without jq.
+#
+# Early feedback only (AGENTS.md); repository checks own retained enforcement, so
+# this fails open when the repository-owned field reader is unavailable.
 set -euo pipefail
-command -v jq >/dev/null 2>&1 || exit 0
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
-input="$(cat)"
-file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')"
+
+reader="scripts/json-field.sh"
+[ -x "$reader" ] || exit 0
+
+file="$("./$reader" tool_input file_path)"
 [ -z "$file" ] && exit 0
 
 case "$file" in

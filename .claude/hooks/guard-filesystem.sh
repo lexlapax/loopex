@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # PreToolUse[Read|Grep|Glob|Edit|Write|NotebookEdit]: stdin is the tool-call JSON.
+#
 # Early feedback only (AGENTS.md); repository checks own retained enforcement.
+# The three path fields are tried in the order the tools use them, which the
+# repository-owned field reader resolves in one pass -- including on a Write
+# whose payload carries a whole file body.
 set -euo pipefail
-command -v jq >/dev/null 2>&1 || exit 0
 
-input="$(cat)"
-path_value="$(printf '%s' "$input" |
-  jq -r '.tool_input.file_path // .tool_input.notebook_path // .tool_input.path // empty')"
+root="${CLAUDE_PROJECT_DIR:-$(cd -- "$(dirname -- "$0")/../.." && pwd)}"
+reader="$root/scripts/json-field.sh"
+[ -x "$reader" ] || exit 0
+
+path_value="$("$reader" tool_input file_path notebook_path path)"
 [ -z "$path_value" ] && exit 0
 
 real_loopex_home="${HOME%/}/.loopex"

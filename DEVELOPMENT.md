@@ -1,9 +1,9 @@
 # Development
 
 Loopex is pre-implementation. This document describes how to validate and work
-on the repository seed before the first milestone plan and executable product
-gate are accepted. There is no Mix project, installable package, or product
-test suite yet.
+on the repository, and it owns the commands, not the milestone state. There is no
+installable package and no public product surface; the umbrella exists so the
+accepted milestone's repository checks and experiments have somewhere to live.
 
 The canonical status for the checked-out revision, including currently
 authorized work and the next maintainer decision, is in
@@ -11,7 +11,7 @@ authorized work and the next maintainer decision, is in
 owns how development is requested — the verbs and where each one stops. This
 file owns the commands those verbs run, and milestone state lives in neither.
 The split is deliberate: the verbs outlive the toolchain, so replacing the seed
-bridges with Mix entrypoints changes the commands here and nothing there. The
+bridges with Mix entrypoints changed the commands here and nothing there. The
 [development charter](docs/developer/development-charter.md#concept) explains the
 project's clarity and traceability commitments; its
 [technical companion](docs/developer/development-charter-technical.md#technical-depth) defines
@@ -23,18 +23,19 @@ The provider-neutral bootstrap check requires:
 
 - Git;
 - Bash;
-- a POSIX userland providing `cat`, `grep`, `readlink`, `sed`, and `tr`;
-- Python 3.11 or newer, including the standard-library `tomllib` module; and
-- `jq`.
+- a POSIX userland providing `awk`, `cat`, `grep`, `readlink`, `sed`, and `tr`; and
+- the accepted Elixir/OTP toolchain, which supplies `mix`.
 
-Python and `jq` are temporary seed/M0 bridges, not enduring project
-dependencies. Before M0 closes, repository checks migrate to Elixir
-standard-library or Mix entrypoints, and tested client-hook paths migrate to them.
-Removing a tested hook instead requires the accepted M0 plan to disposition the
-behavior explicitly with equivalent protection or an explicitly accepted loss.
-The M0 gate proves adapter behavior with `jq` absent, so feedback cannot silently
-disappear. These two prerequisites are then removed. The lasting development
-baseline is Git, shell/POSIX tools, and the accepted Elixir/OTP toolchain.
+That is the whole list, and it is the enduring development baseline: Git,
+shell/POSIX tools, and the accepted Elixir/OTP toolchain. The seed's two bridge
+prerequisites are gone — repository checks now run as repository-owned Mix
+commands, and the client hooks read a tool call through
+`scripts/json-field.sh`, which uses `awk` from the baseline rather than an
+added dependency. Shell is not retired: a check may remain a shell entrypoint
+that calls Mix, and several do.
+
+Adding another development dependency requires the ordinary dependency
+decision.
 
 The checkout must preserve the tracked relative `.claude/skills` symlink. On
 Windows, WSL is the straightforward path; Git Bash also requires Windows
@@ -52,10 +53,26 @@ The aggregate runs five checks: agent/client bootstrap, ignore policy, commit
 messages, branch/worktree hygiene, and status/document drift. It requires
 no GitHub account, `gh` CLI, hosted CI service, credentials, network access,
 coding-agent client, or product dependency download. Hosted CI may mirror this
-command but does not define it. The aggregate, its in-memory mutation tests, and
-its Git-history resolver controls only read the checkout and do not rely on a
-writable ambient temporary directory, so an effectively read-only reviewer can
-run the exact same command.
+command but does not define it.
+
+Every check reads the checkout and writes nothing to it. The aggregate does need
+a writable build directory, because it now runs on Mix and Mix compiles: that is
+the direct consequence of moving repository validation onto the accepted
+toolchain. A reviewer who must not write to an ambient temporary directory
+directs the build into an explicit isolated task root through the
+`MIX_BUILD_PATH` variable. The read-only inspection lane is the milestone gate
+runner's prefix, which reaches its declared condition before it allocates any
+storage.
+
+The individual repository commands can also be run directly:
+
+```bash
+mix loopex.status              # paired documents, register, governance, history
+mix loopex.agent_bootstrap     # client adapter structure and hook registration
+mix loopex.hook_registration   # each hook's required event and matcher
+mix loopex.docs_check          # compiled Concept-before-Technical-depth ordering
+mix loopex.self_hosting        # replacement measurement and dropped behaviors
+```
 
 ## Optional Development Clients
 
@@ -78,12 +95,21 @@ analysis, test, and gate commands and prove the declared outcome is still
 missing. Only after their acceptance may implementation add the scaffold and
 entrypoints that make those commands pass.
 
-The M0 gate also locks the self-hosting transition: by closure, the local
-aggregate, its structural/mutation checks, and tested client-hook paths run
-through the accepted Elixir/OTP toolchain without Python or `jq`. The same gate
-adds a Mix check over compiled documentation so covered public code carries
-Concept before Technical depth; semantic usefulness and proportional private
-comments remain review obligations.
+The M0 gate locks the self-hosting transition, and that transition has landed:
+the local aggregate, its structural and mutation checks, and the tested
+client-hook paths all run through the accepted Elixir/OTP toolchain, with the
+seed's two bridge prerequisites removed. `mix loopex.self_hosting` reports the
+replacement's measured size and names every behavior it dropped with the reason,
+which is the material an independent reviewer weighs; no run passes or fails on
+the figure.
+
+The same gate installs `mix loopex.docs_check`, a repository-owned check over
+**compiled** documentation. It reads the doc chunk of every compiled module, so it
+answers what a reader of the published documentation would see rather than what
+characters appear in a source file. Covered public code must carry `## Concept`
+before `## Technical depth`; a module with no documentation at all fails, and one
+marked `@moduledoc false` is excluded and counted in the report. Semantic
+usefulness and proportional private comments remain review obligations.
 
 Core will use only the Elixir/Erlang standard runtime. Provider, store, client,
 transport, and other integration dependencies belong in adapter applications,
