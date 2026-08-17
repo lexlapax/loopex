@@ -15,6 +15,20 @@ The size figure is audit material. No run passes or fails on it.
   the list cannot drift from the figure
 - recorded: 2026-08-17 on Elixir 1.20.3 / OTP 29.0.5
 
+## Measurement at the closure candidate
+
+Taken by running `mix loopex.self_hosting`, not transcribed:
+
+```text
+documentation 1719   comment 362   blank 1389   code 6146   total 9616
+```
+
+Against the 4,462-line gate-commit baseline the plan binds, that is
+2.16x. Against the 4,688 lines those files actually held at the
+revision they were retired, it is 2.05x. Both are stated because a
+reader comparing to the deleted files computes the second, and the two numbers are
+different.
+
 ## What the figure means
 
 The gate states plainly that this measurement is audit and review material and

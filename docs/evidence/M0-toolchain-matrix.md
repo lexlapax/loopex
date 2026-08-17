@@ -4,12 +4,33 @@ Retained by outcome 3. ADR 0002 validates two (Elixir, OTP) pairs rather than a
 cross-product, and one Mix run has one Erlang runtime, so the gate runner is
 invoked once per pair and both runs are recorded here.
 
-- floor pair: Elixir 1.17.0 / Erlang OTP 26, erts-14.0 — `M0 gate GREEN`, exit 0
-- current pair: Elixir 1.20.3 / Erlang OTP 29, erts-17.0.5 — `M0 gate GREEN`, exit 0
-- candidate: recorded per run below; the current closure candidate is named in the plan's
-  governance row rather than duplicated here, so this file does not go stale when a
-  later commit changes only documents
-- recorded: 2026-08-17, macOS arm64, both pairs provided by `mise`
+ADR 0002 validates two (Elixir, OTP) pairs rather than a cross-product, and one Mix
+run has one Erlang runtime, so the gate runner is invoked once per pair. Both
+orders are run, because a per-lane pass proves nothing about ordering — a shared
+build directory once made the second lane fail on beams the first had compiled.
+
+- candidate: `3b763baba21172bbd6ec814a621e62cfb1d7d5b5`
+- gate digest: `sha256:6ca3b88f6925c1bd5c9144d2d4fbbaf8cc0beacd086b9f6534c6d27fccfbfa63`
+- command: `bash scripts/check-m0-gate.sh`, with `LOOPEX_PROVIDER_API_KEY` set, the
+  floor pair supplied by `mise exec erlang@26.0 elixir@1.17.0-otp-26 --`
+- host: macOS arm64; both pairs provided by `mise`
+- recorded: 2026-08-17
+
+| # | Order | Toolchain | Verdict | Exit | Wall clock |
+| --- | --- | --- | --- | --- | --- |
+| 1 | first | Elixir 1.17.0 / OTP 26 erts-14.0 | `M0 gate GREEN` | 0 | 83s |
+| 2 | second | Elixir 1.20.3 / OTP 29 erts-17.0.5 | `M0 gate GREEN` | 0 | 102s |
+| 3 | third | Elixir 1.20.3 / OTP 29 erts-17.0.5 | `M0 gate GREEN` | 0 | 57s |
+| 4 | fourth | Elixir 1.17.0 / OTP 26 erts-14.0 | `M0 gate GREEN` | 0 | 87s |
+
+Runs 1 and 2 are floor-then-current; runs 3 and 4 reverse that, so each pair ran
+both immediately after itself and immediately after the other. With no
+`LOOPEX_PROVIDER_API_KEY` present the same runner stops at outcome 7 reporting
+evidence unavailable rather than skipping, which is the fail-closed direction.
+
+`mix loopex.matrix` requires this file to name every locked pair with a green
+verdict. It cannot verify that a recorded run happened, and says so; that judgment
+is review's.
 
 ## What the floor lane was worth
 
