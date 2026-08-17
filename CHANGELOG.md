@@ -153,6 +153,31 @@ the exact document set its milestone must update.
   carry protected selectors with locked names, so neither can be a successful
   no-op, and `.claude/hooks/deps-budget.sh` is checked for its execute bit —
   without it the hook exits 126 and the `|| exit 2` around it reads as a block.
+- Credential containment moved ahead of the runner's first child process, which
+  is the `git rev-parse` that locates the repository root, not the first Mix
+  command. Scrubbing after any child had already handed the value to every
+  process started before it, and the assertion that followed could not detect
+  that it had.
+- Path resolution became component-wise against an already-physical prefix.
+  Resolving the assembled string at the end could not work: `cd` without `-P`
+  collapses `..` lexically, so an existing symlink such as
+  `~/.swiftpm/cache/../../../.loopex` was reduced by text before the kernel saw
+  it, the intermediate link was discarded, and a `MIX_HOME` that really did
+  target protected state was admitted.
+- The shadow-bypass scan covers the whole tracked tree rather than a list of
+  top-level directories, since an absolute invocation in a directory nobody
+  thought to add would evade both the stub and the scan. Quoted absolute forms
+  are matched, and a `PATH` assignment that discards the existing value is
+  rejected on its own line, because replacing `PATH` defeats the stubs whether
+  or not the interpreter is named nearby.
+- The scan distinguishes `git grep` exit 1 from exit 128, so a broken
+  invocation or unreadable object is unavailable evidence rather than a pass.
+- A populated evidence field must contain an alphanumeric character. Rejecting
+  only the template's em dash left `-` and `?` reading as filled.
+- The read-only ordering claim is corrected to what the runner guarantees:
+  everything before the first allocation is checkout-only, so the review lane
+  reaches the declared red condition. Checkout-only checks also appear after
+  allocation, beside the outcome they belong to.
 - `AGENTS.md` joins the closure document set, since outcome 8 makes its
   bootstrap-prerequisite text stale.
 - Formatter coverage must appear outside a comment; evidence fields reject

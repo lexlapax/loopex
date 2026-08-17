@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `837b3bd5a34b72120bc6913f4f9f1d236acf7fa860409f061a8575f5adcdfb0b` | `scripts/check-m0-gate.sh` |
+| `e78ad5cb1d845c3b93faa5dd198320a45421af39fad8020203f63b2f2ac02259` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -173,10 +173,15 @@ green run on an unlisted pair satisfies neither lane.
 Before anything is allocated, the runner refuses to run if `TMPDIR`, `MIX_HOME`,
 or `HEX_HOME` resolves inside the protected state directory. Both sides are
 resolved physically, so `..`, relative paths, and symlinks cannot alias past the
-check. Symlinks are followed before any walk up, including one whose target does
-not exist yet: a link aimed at a protected directory that has not been created
-would otherwise be walked past and the alias lost. A path that does not exist
-resolves through its deepest existing ancestor. Otherwise the
+check.
+
+Resolution is component-wise, left to right, against an already-physical prefix,
+because resolving the assembled string at the end does not work: `cd` without
+`-P` collapses `..` lexically, so `~/link/../..` is reduced by text before the
+kernel sees it and the intermediate symlink is discarded along with the alias it
+carried. Each link is followed as it is reached, including a dangling one aimed
+at a directory that does not exist yet, and `..` is taken from the resolved
+prefix. The result is the path the kernel would actually open. Otherwise the
 isolated root, or Mix's own writes, would land inside the very directory the
 relocation exists to protect.
 
@@ -195,9 +200,11 @@ The runner also fingerprints the real state directory before and after. That is
 defense in depth against a path that escaped containment, and carries no safety
 claim of its own — containment above is the property.
 
-Every check that only reads the checkout runs **before** any temporary storage
-is created, so the mandatory read-only review reaches the declared red condition
-instead of failing on unavailable temporary storage.
+Everything the runner does before it allocates temporary storage only reads the
+checkout, so the mandatory read-only review reaches the declared red condition
+instead of failing on unavailable storage. That is the guarantee, and it is
+directional: checkout-only checks also appear after allocation, kept beside the
+outcome they belong to, and no claim is made that all of them run first.
 
 ## Real-Provider Lane
 
@@ -208,7 +215,9 @@ journal, fixture, log, snapshot, diagnostic, or committed byte.
 The lane retains non-secret identity in `docs/evidence/M0-provider.md`. The
 runner requires four fields, named exactly: `provider`, `model`, `endpoint`, and
 `recorded`. Each must appear exactly once and be populated, so a real value
-cannot sit beside a placeholder.
+cannot sit beside a placeholder. Populated means containing an alphanumeric
+character, which is what distinguishes a recorded value from `-`, `?`, or the
+template's em dash.
 
 The file holds only `real_provider`-tagged tests, so an unfiltered run of it must
 execute none. Requiring merely that something was excluded would pass while an
@@ -225,6 +234,13 @@ explicit real-provider command. Unsetting it just before the full suite would
 leave every earlier selector, task, and compile step holding it, so an
 accidentally untagged provider call earlier would still reach a provider.
 
+Containment precedes the runner's **first child process** — ahead of the
+`git rev-parse` that locates the repository root, not merely ahead of the Mix
+commands. A scrub placed after any child is a notice-afterwards check: every
+process already started has inherited the value, and an assertion made later
+cannot detect that it did. The assertion itself is the first child, and it runs
+only once both names are contained.
+
 The runner also proves the tag is excluded by default, by running the same file
 unfiltered and requiring it to execute none of its tagged tests. Without that,
 the full-suite command would reach a real provider a second time while the gate
@@ -236,16 +252,41 @@ The runner proves absence and inventory itself rather than delegating them to
 the task under test, because a task cannot be the evidence for its own
 retirement. It shadows `python3` and `jq` with stubs that refuse to run and
 requires the aggregate to complete anyway, then inspects the tree directly and
-scans for absolute or `env`-resolved invocations that shadowing cannot
-intercept. Dropping directories from `PATH` is not used: it would also remove
-`git` and fail for the wrong reason.
+scans for invocations that shadowing cannot intercept. Dropping directories from
+`PATH` is not used: it would also remove `git` and fail for the wrong reason.
+
+The scan covers the **whole tracked tree**, not a list of top-level directories.
+An allowlist is defeated by a directory nobody thought to add: an absolute
+invocation in a new `tools/helper.sh` called by the aggregate would evade both
+the stub and a `scripts`-only scan. Two exclusions apply, and neither is a path
+allowlist. The runner itself is excluded because it must name both interpreters
+in order to shadow and report them; drift there is caught by its bound-artifact
+digest instead. Markdown is excluded by **file type**, because this document and
+the changelog have to be able to quote the forms they catch — an extension
+exclusion is not defeated by adding a directory. Prose is inert only while no
+`.md` is a program, so the runner asserts that no tracked `.md` carries the
+execute bit rather than assuming it.
+
+`git grep` exits 0 on a match, 1 on none, and above 1 on error. The runner
+distinguishes all three. Treating anything non-zero as clean would turn a broken
+invocation, an unreadable object, or a pathspec typo into a silent pass, which
+inverts the unavailable-evidence rule.
 
 Command 11 covers four separable things and fails on any of the first three:
 
 1. **Absence.** The aggregate runs to completion while `python3` and `jq` are
    shadowed by stubs that refuse to run. Shadowing intercepts PATH lookups only,
-   so the runner additionally scans for absolute paths, `env`-resolved calls,
-   `command -p`, and inline `PATH=` assignments, none of which a shim can catch.
+   so the runner additionally scans for absolute paths — including quoted forms
+   such as `/usr/bin/"python3"` — `env`-resolved calls with or without flags,
+   `command -p` and `-pv`, `exec`, and assignment-prefixed runs, none of which a
+   shim can catch.
+
+   Replacing `PATH` defeats the stubs as completely as naming an absolute path,
+   and the replacement need not sit on the line that calls the interpreter: a
+   bare `PATH=/usr/bin:/bin` or `PATH="$(getconf PATH)"` anywhere in a script
+   drops the stub root for everything after it. Any assignment that does not
+   carry the existing `PATH` forward is therefore rejected on its own, whichever
+   line the interpreter is called on.
 2. **Inventory.** Every named bridge component is gone from the tree:
    `scripts/check_status.py`, `scripts/test_check_status.py`,
    `scripts/check-agent-bootstrap.py`, the `python3` invocations in
@@ -285,8 +326,10 @@ Command 11 covers four separable things and fails on any of the first three:
 4. **Measurement.** `docs/evidence/M0-self-hosting.md` records the replacement's
    size and what it dropped. The runner requires three populated fields, named
    exactly: `measured size`, `dropped behaviors`, and `recorded`, each appearing
-   exactly once and populated. Review judges
-   whether the content is truthful.
+   exactly once and populated. A populated value must contain an alphanumeric
+   character: rejecting only the template's em dash left `-`, `?`, and every
+   other punctuation placeholder reading as filled while recording nothing.
+   Review judges whether the content is truthful.
 
 Shell is not retired. The enduring baseline is Git, shell and POSIX tools, and
 the accepted Elixir/OTP toolchain, so a check may remain a shell entrypoint that

@@ -24,12 +24,31 @@
 # selectors are application-relative.
 set -euo pipefail
 
-cd "$(git rev-parse --show-toplevel 2>&1 | grep -v 'DARWIN_USER_TEMP_DIR')"
-
 fail() {
   echo "M0 gate RED: $1" >&2
   exit 1
 }
+
+# The provider credential is contained before this script starts its FIRST child
+# process. Scrubbing later would be a notice-afterwards check: every git, grep,
+# and Mix process spawned before the scrub would already have inherited the
+# value, and an assertion made after them cannot detect that. The credential is
+# removed for the entire run and handed only to the explicit real-provider
+# command; unsetting it just before the final suite would leave every earlier
+# selector, task, and compile step holding it.
+set +a  # an inherited allexport would export the holding variable too
+provider_key_value="${LOOPEX_PROVIDER_API_KEY:-}"
+export -n provider_key_value 2>/dev/null || true
+unset LOOPEX_PROVIDER_API_KEY
+# Prove neither name reaches a child process, rather than assuming it. This is
+# itself the first child, and it runs only after both are contained.
+for leaked in LOOPEX_PROVIDER_API_KEY provider_key_value; do
+  if env | grep -qE "^${leaked}="; then
+    fail "$leaked is exported; the credential would reach every child process"
+  fi
+done
+
+cd "$(git rev-parse --show-toplevel 2>&1 | grep -v 'DARWIN_USER_TEMP_DIR')"
 
 # Drift protection. A protected test that disappears or is renamed is caught.
 # This does not prove the test asserts anything; review owns that.
@@ -74,10 +93,13 @@ run_selector() {
 
 # An evidence record must exist and be filled in. An unpopulated field is the
 # accident this catches; whether the content is truthful is a review judgment.
+# A populated value must contain an alphanumeric character. Rejecting only the
+# template's em dash left every other placeholder passing: "- provider: -",
+# "?", and "TBD"-by-punctuation all read as filled while recording nothing.
 require_populated() {
   local file="$1" label="$2" total filled
   total="$(grep -ciE "^- ${label}:" "$file" || true)"
-  filled="$(grep -ciE "^- ${label}:[[:space:]]*[^[:space:]—]" "$file" || true)"
+  filled="$(grep -ciE "^- ${label}:[[:space:]]*[^[:alnum:]]*[[:alnum:]]" "$file" || true)"
   [ "${total:-0}" -eq 1 ] \
     || fail "$file has ${total:-0} \"${label}\" entries; exactly one is required"
   [ "${filled:-0}" -eq 1 ] \
@@ -108,22 +130,6 @@ require_named_test apps/loopex/test/vm_code_spike_test.exs "a trusted generation
 # Everything above this line only reads the checkout, so an enforced read-only
 # reviewer reaches the declared red condition instead of failing on temporary
 # storage. Everything below runs Mix or writes, and needs isolation first.
-# The provider credential is removed from the environment for the entire run and
-# handed only to the explicit real-provider command. Unsetting it just before the
-# final suite would leave every earlier selector, task, and compile step holding
-# it, so an accidentally untagged provider call anywhere earlier would still
-# reach a provider.
-set +a  # an inherited allexport would export the holding variable too
-provider_key_value="${LOOPEX_PROVIDER_API_KEY:-}"
-export -n provider_key_value 2>/dev/null || true
-unset LOOPEX_PROVIDER_API_KEY
-# Prove neither name reaches a child process, rather than assuming it.
-for leaked in LOOPEX_PROVIDER_API_KEY provider_key_value; do
-  if env | grep -qE "^${leaked}="; then
-    fail "$leaked is exported; the credential would reach every Mix process"
-  fi
-done
-
 # Containment. HOME is relocated into an isolated root so a helper reaching for
 # the real user state directory finds nothing; that is fail-before-touch rather
 # than notice-afterwards. Package-manager caches are excluded deliberately, so
@@ -140,30 +146,55 @@ real_user_state_path="$real_home/$user_state_dirname"
 # directory, so both sides are resolved physically first. A path that does not
 # exist yet resolves through its deepest existing ancestor.
 resolve_physical() {
-  local target="$1" suffix="" link guard=0
-  case "$target" in
+  local remaining="$1" resolved="" comp link guard=0
+  case "$remaining" in
     /*) ;;
-    *) target="$PWD/$target" ;;
+    *) remaining="$PWD/$remaining" ;;
   esac
-  # Symlinks are followed before walking up, including dangling ones: a link
-  # aimed at a protected directory that does not exist yet would otherwise be
-  # walked past and the alias lost.
-  while [ "$guard" -lt 64 ]; do
+  # Components are resolved left to right against an already-physical prefix.
+  # Resolving the whole string at the end cannot work: `cd` without -P collapses
+  # ".." lexically, so ~/link/../.. is reduced by text before the kernel ever
+  # sees it, and an intermediate symlink is discarded along with the alias it
+  # carried. Following each link as it is reached, and taking ".." from the
+  # resolved prefix, gives the path the kernel would actually open.
+  while [ -n "$remaining" ] && [ "$guard" -lt 256 ]; do
     guard=$((guard + 1))
-    if [ -L "$target" ]; then
-      link="$(readlink "$target")"
+    remaining="${remaining#/}"
+    case "$remaining" in
+      */*)
+        comp="${remaining%%/*}"
+        remaining="/${remaining#*/}"
+        ;;
+      *)
+        comp="$remaining"
+        remaining=""
+        ;;
+    esac
+    case "$comp" in
+      "" | .) continue ;;
+      ..)
+        resolved="${resolved%/*}"
+        continue
+        ;;
+    esac
+    # -L is true for a dangling link too, so a link aimed at a directory that
+    # does not exist yet is still followed rather than walked past.
+    if [ -L "$resolved/$comp" ]; then
+      link="$(readlink "$resolved/$comp")"
       case "$link" in
-        /*) target="$link" ;;
-        *) target="$(dirname "$target")/$link" ;;
+        /*)
+          resolved=""
+          remaining="$link$remaining"
+          ;;
+        *)
+          remaining="/$link$remaining"
+          ;;
       esac
-      continue
+    else
+      resolved="$resolved/$comp"
     fi
-    [ -d "$target" ] && break
-    [ "$target" = "/" ] && break
-    suffix="/$(basename "$target")$suffix"
-    target="$(dirname "$target")"
   done
-  printf '%s%s' "$(cd "$target" 2>/dev/null && pwd -P || printf '%s' "$target")" "$suffix"
+  printf '%s' "${resolved:-/}"
 }
 protected_resolved="$(resolve_physical "$real_user_state_path")"
 outside_protected_state() {
@@ -297,7 +328,7 @@ for outcome in 4 5 6; do
     # Exactly one occurrence, and it must be populated. Requiring "at least one
     # populated" lets a real value sit beside a placeholder and pass.
     total="$(printf '%s\n' "$section" | grep -ciE "^- ${field}:" || true)"
-    filled="$(printf '%s\n' "$section" | grep -ciE "^- ${field}:[[:space:]]*[^[:space:]—]" || true)"
+    filled="$(printf '%s\n' "$section" | grep -ciE "^- ${field}:[[:space:]]*[^[:alnum:]]*[[:alnum:]]" || true)"
     [ "${total:-0}" -eq 1 ] \
       || fail "$negatives outcome ${outcome} has ${total:-0} \"${field}\" entries; exactly one is required"
     [ "${filled:-0}" -eq 1 ] \
@@ -328,24 +359,62 @@ do
   fi
 done
 
-# The scan covers apps/** too, because the replacement lives there and an
-# absolute invocation would bypass both the stubs and a scripts-only scan.
-# Any absolute path, any env invocation with or without flags, any command -p
-# or -pv, and any run prefixed by one or more assignments.
-# Any path segment ending in the interpreter, however it is quoted or prefixed:
-# absolute paths, exec, env with flags or assignments, command -p/-pv, and
-# assignment-prefixed runs. Deliberate obfuscation beyond this is a dishonest
-# implementer, which the stated boundary assigns to closure review.
-bypass='(/|(^|[[:space:]])(command|exec)([[:space:]]+-[^[:space:]]*)*[[:space:]]+["'"'"']?|env([[:space:]]+[^[:space:]]+)*[[:space:]]+["'"'"']?|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+["'"'"']?)(python3|jq)([^[:alnum:]_]|$)'
-# This runner is excluded from its own scan: it necessarily names both
-# interpreters to shadow and report them. Drift in it is caught instead by the
-# bound-artifact digest, which the status check verifies at every revision.
-scan_paths="scripts apps config .claude .codex .github mix.exs .formatter.exs
-:(exclude)scripts/check-m0-gate.sh"
-if git grep -nE "$bypass" -- $scan_paths >/dev/null 2>&1; then
-  git grep -nE "$bypass" -- $scan_paths >&2
-  fail "a shadow-bypassing python3/jq invocation survives (outcome 8)"
-fi
+# The scan covers the whole tracked tree, not a list of top-level directories.
+# An allowlist is defeated by a directory nobody thought to add: an absolute
+# invocation in a new tools/helper.sh, called by the aggregate, would evade both
+# the stub and a scripts-only scan. The only exclusion is this runner, which
+# necessarily names both interpreters in order to shadow and report them; drift
+# in it is caught instead by the bound-artifact digest the status check verifies
+# at every revision.
+#
+# Matched: any path segment ending in the interpreter however it is quoted --
+# absolute paths including /usr/bin/"python3", exec, env with flags or
+# assignments, command -p and -pv, and assignment-prefixed runs. A bare
+# `python3 x.py` is deliberately not matched here; the stubs above already
+# intercept it, and matching it would flag the aggregate's own legitimate calls.
+bypass='(/["'"'"']*|(^|[[:space:]])(command|exec)([[:space:]]+-[^[:space:]]*)*[[:space:]]+["'"'"']?|env([[:space:]]+[^[:space:]]+)*[[:space:]]+["'"'"']?|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+["'"'"']?)(python3|jq)([^[:alnum:]_]|$)'
+# Markdown is excluded by TYPE, not by path. A directory allowlist is defeated by
+# a directory nobody thought to add; an extension exclusion is not, and prose is
+# never invoked -- the gate document and this changelog must be able to quote the
+# forms they catch. That prose stays inert only while no .md is a program, so
+# that is asserted rather than assumed.
+scan_tree=". :(exclude)scripts/check-m0-gate.sh :(exclude)*.md"
+executable_prose="$(git ls-files --stage -- '*.md' | grep -E '^100755' || true)"
+[ -z "$executable_prose" ] \
+  || fail "a tracked .md file is executable, so excluding prose from the scan is unsafe: $executable_prose (outcome 8)"
+
+# git grep exits 0 on a match, 1 on none, and >1 on error. Treating "not zero"
+# as clean would turn a broken invocation, an unreadable object, or a pathspec
+# typo into a silent pass. An error is unavailable evidence, which fails.
+scan_status=0
+git grep -nE "$bypass" -- $scan_tree >/dev/null 2>&1 || scan_status=$?
+case "$scan_status" in
+  0)
+    git grep -nE "$bypass" -- $scan_tree >&2
+    fail "a shadow-bypassing python3/jq invocation survives (outcome 8)"
+    ;;
+  1) ;;
+  *) fail "the bypass scan could not run (git grep exit $scan_status); evidence is unavailable (outcome 8)" ;;
+esac
+
+# Shadowing is defeated just as completely by replacing PATH as by naming an
+# absolute path, and the replacement need not sit on the same line as the call:
+# a bare `PATH=/usr/bin:/bin` anywhere in a script drops the stub root for
+# everything after it. Any assignment that does not carry the existing PATH
+# forward is therefore rejected, whichever line the interpreter is called on.
+path_reset='(^|[[:space:]]|;)(export[[:space:]]+)?PATH=(("[^"]*")|('"'"'[^'"'"']*'"'"')|([^[:space:];]*))'
+path_carries='PATH=[^[:space:];]*\$(PATH|\{PATH)'
+reset_status=0
+git grep -nE "$path_reset" -- $scan_tree >/dev/null 2>&1 || reset_status=$?
+case "$reset_status" in
+  0)
+    if git grep -nE "$path_reset" -- $scan_tree | grep -vE "$path_carries" >&2; then
+      fail "a PATH assignment discards the shadow root; the stubs would not apply (outcome 8)"
+    fi
+    ;;
+  1) ;;
+  *) fail "the PATH-reset scan could not run (git grep exit $reset_status); evidence is unavailable (outcome 8)" ;;
+esac
 for residue in \
   scripts/check-status.sh \
   scripts/check-agent-bootstrap.sh \
