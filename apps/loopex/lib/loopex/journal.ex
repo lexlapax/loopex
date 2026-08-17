@@ -166,19 +166,25 @@ defmodule Loopex.Journal do
     # one-serial-owner invariant is what excludes a second writer, and the
     # coordinator enforces it per journal.
     with :ok <- acquire_lock(path) do
-      result =
+      # Released even if something raises. Releasing only on the normal return
+      # would strand the lock after any unexpected failure, and a stranded lock
+      # fails every later repair closed -- turning a transient fault into a journal
+      # that needs a human before it can recover again.
+      try do
         case File.open(path, [:read, :write, :binary]) do
           {:error, posix} ->
             {:error, {:journal_unavailable, path, posix}}
 
           {:ok, io} ->
-            outcome = verify_and_truncate(io, path, offset)
-            :file.close(io)
-            outcome
+            try do
+              verify_and_truncate(io, path, offset)
+            after
+              :file.close(io)
+            end
         end
-
-      release_lock(path)
-      result
+      after
+        release_lock(path)
+      end
     end
   end
 
