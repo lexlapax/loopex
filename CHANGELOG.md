@@ -20,6 +20,57 @@ the exact document set its milestone must update.
 
 ### Added
 
+- First product code. An Elixir umbrella with two applications per ADR 0001:
+  `loopex_protocol` carries no dependency and `loopex` depends on it and nothing
+  else. Both read one version from the root `VERSION` file at compile time, so
+  drift is prevented by construction rather than detected.
+- Repository checks became Mix tasks: dependency budget and direction, version
+  train, formatter scope, toolchain matrix, core-only lane, compiled-documentation
+  check, hook registration, and self-hosting measurement. Each keeps its logic in
+  a function the protected tests call directly, so a selector exercises the real
+  code path.
+- Durable-truth experiments for M0's constitutional core. A session journal
+  replays across an induced restart, checked by properties over generated
+  histories against an independent model, by process kills at every durable
+  transition, and by truncation at every byte offset with the intact-record count
+  derived from the frame layout. An effect committed with an unknown outcome is
+  fenced: a counting collector proves exactly one dispatch ever carried it across
+  both coordinator incarnations, and the fence refuses dispatch, publication, and
+  acknowledgement without lifting across a restart.
+- A trusted code generation loads and rolls back in an isolated VM. Artifacts are
+  built inert with `:compile.forms/2` so nothing loads into the manager VM, and
+  absence in the test VM is proved two ways. This claims nothing about quiescent
+  activation or extension semantics.
+- The ReqLLM reference model adapter and its explicitly invoked lane. The tagged
+  lane is excluded by default so the full suite cannot reach a provider, and it
+  fails as evidence unavailable rather than skipping when the credential is
+  absent.
+- Repository validation now runs on Elixir. `check_status.py`,
+  `test_check_status.py`, and `check-agent-bootstrap.py` are retired and no hook
+  invokes `jq`, so the seed's two bridge prerequisites disappear. The replacement
+  measures 9,096 lines against the retired 4,462 and names the eight behaviours it
+  dropped; both are recorded as audit material, not as a pass condition.
+
+### Fixed
+
+- The core-only lane measured the ambient VM, which made outcomes 7 and 9 appear
+  mutually exclusive: at an umbrella root every compiled child is on the load
+  path, so any adapter failed the check by existing. That was an instance of the
+  anti-pattern the gate names, "root suite standing for core". The lane now runs
+  core's own project in a separate VM and asserts core is started, so an empty
+  lane cannot satisfy every absence vacuously.
+- The dependency budget rejected every adapter `mix.exs` as an unknown
+  application, blocking adapter work through the client hook. Per ADR 0003 an
+  adapter compiles against the contract, so it may carry the contract plus the
+  external dependencies its edge needs and may not carry the runtime.
+- The agent bootstrap check scanned the working directory recursively, so a Git
+  worktree created under `.claude/` made it read a second copy of the repository
+  and fail a commit that was clean from a fresh clone. Its scans read tracked
+  files only.
+- The documentation check flagged `child_spec/1`, which `use GenServer` injects
+  with OTP's own docstring. Entries with no authored source location are excluded;
+  an authored omission is still rejected.
+
 - Model-neutral development routing now matches capability to consequence:
   efficient profiles own objective repeatable work, balanced profiles own
   bounded implementation, and deep reasoning owns architecture, durability,
