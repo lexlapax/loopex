@@ -239,12 +239,13 @@ defmodule Loopex.Coordinator do
     # a clean stop would strand the sentinel and the next owner would need a human.
     Process.flag(:trap_exit, true)
 
-    with :ok <- Journal.claim_session(journal),
+    with {:ok, claim} <- Journal.claim_session(journal),
          {:ok, records, tail} <- Journal.read(journal),
          :ok <- resolve_tail(journal, tail),
          {:ok, session} <- Session.replay(session_id, records) do
       state = %{
         journal: journal,
+        claim: claim,
         session: session,
         dispatch_to: Keyword.fetch!(options, :dispatch_to),
         executor: Keyword.fetch!(options, :executor),
@@ -261,14 +262,15 @@ defmodule Loopex.Coordinator do
         {:stop, {:journal_claimed_by_another_owner, held}}
 
       {:error, reason} ->
-        Journal.release_session(journal)
+        # Only released when this process holds it; a claim held by someone else
+        # is not ours to remove, which is why release now needs the token.
         {:stop, {:recovery_failed, reason}}
     end
   end
 
   @impl GenServer
-  def terminate(_reason, %{journal: journal}) do
-    Journal.release_session(journal)
+  def terminate(_reason, %{journal: journal, claim: claim}) do
+    Journal.release_session(journal, claim)
     :ok
   end
 
@@ -467,7 +469,7 @@ defmodule Loopex.Coordinator do
     sequenced = Map.put(record, :seq, state.session.seq + 1)
 
     with {:ok, session} <- Session.apply_record(state.session, sequenced),
-         :ok <- Journal.append(state.journal, sequenced) do
+         :ok <- Journal.append(state.journal, sequenced, state.claim) do
       {:ok, %{state | session: session}}
     end
   end

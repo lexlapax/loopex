@@ -313,18 +313,64 @@ defmodule Loopex.JournalReplayTest do
     GenServer.stop(third)
   end
 
-  test "a claim whose owner cannot be checked is refused" do
-    # The other half of the same rule. An owner on another node or VM cannot be
-    # verified from here, so the claim is refused and a human decides. Expiry by
-    # age or pid number would be the wrong fix: it can evict a live owner.
-    journal = DurableTruth.journal_path("foreign-claim")
-    assert :ok = Journal.claim_session(journal)
+  test "a claim is a capability, not a fact about a path" do
+    # Every construction a review demonstrated against the previous design, each
+    # one an instance of the same mistake: ownership was "a sentinel exists", so
+    # anyone could delete it and anyone could write around it.
+    journal = DurableTruth.journal_path("claim-capability")
+    assert {:ok, claim} = Journal.claim_session(journal)
     assert {:ok, lock} = Journal.session_lock_path(journal)
+    on_exit(fn -> File.rm(lock) end)
 
-    File.write!(lock, "node=someone@elsewhere erl_pid=#PID<0.999.0> os_pid=1 at=0\n")
-
+    # A second claim is refused while the first holder is alive.
     assert {:error, {:repair_already_held, ^lock, _who}} = Journal.claim_session(journal)
-    assert :ok = Journal.release_session(journal)
+
+    # Releasing requires having claimed. Anyone could delete the live owner's
+    # sentinel before, and a second owner could then start.
+    assert {:error, {:not_the_claim_holder, ^lock}} = Journal.release_session(journal, "wrong")
+    assert File.exists?(lock), "a refused release must not remove the claim"
+
+    # Writing requires the token. The previous rule refused only a parseable, live,
+    # same-node pid and let every other case through, including a claim it could
+    # not read at all.
+    record = %{kind: :fact_committed, seq: 1, fact: "x"}
+    assert {:error, {:not_the_session_owner, ^journal}} = Journal.append(journal, record)
+    assert {:error, {:not_the_session_owner, ^journal}} = Journal.append(journal, record, "wrong")
+    assert :ok = Journal.append(journal, record, claim)
+
+    # An unreadable or foreign claim is refused, not waved through.
+    File.write!(lock, "garbage\n")
+
+    assert {:error, {:claim_unreadable, ^lock, :malformed}} =
+             Journal.append(journal, record, claim)
+
+    File.write!(lock, "node=elsewhere os_pid=1 erl_pid=#PID<0.9.0> token=t at=0\n")
+    assert {:error, {:not_the_session_owner, ^journal}} = Journal.append(journal, record, claim)
+
+    # An owner in another VM cannot be verified from here, so it is never evicted.
+    # Node names do not distinguish unnamed VMs, so the OS process is what makes an
+    # Erlang pid interpretable; a foreign one used to be read as dead and taken.
+    foreign = "node=#{node()} os_pid=999999 erl_pid=#PID<0.99999.0> token=t at=0\n"
+    File.write!(lock, foreign)
+    assert {:error, {:repair_already_held, ^lock, _}} = Journal.claim_session(journal)
+    assert File.read!(lock) == foreign, "an unverifiable claim must survive untouched"
+
+    # A takeover in progress excludes a second contender, so two cannot both
+    # inspect one dead claim and have one delete the other's new live claim.
+    File.write!(
+      lock,
+      "node=#{node()} os_pid=#{System.pid()} erl_pid=#PID<0.99999.0> token=t at=0\n"
+    )
+
+    File.write!(lock <> ".takeover", "held\n")
+    assert {:error, {:repair_already_held, ^lock, _}} = Journal.claim_session(journal)
+    File.rm!(lock <> ".takeover")
+
+    # With no contender, a provably dead owner in this VM is taken over.
+    assert {:ok, taken} = Journal.claim_session(journal)
+    refute taken == claim
+    assert :ok = Journal.release_session(journal, taken)
+    refute File.exists?(lock)
   end
 
   test "a record appended after a tear survives a later repair" do

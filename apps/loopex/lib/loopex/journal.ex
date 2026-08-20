@@ -91,36 +91,41 @@ defmodule Loopex.Journal do
   distinguishes an unavailable journal from a rejected record.
   """
   @spec append(Path.t(), entry()) :: :ok | {:error, term()}
-  def append(path, record) when is_map(record) do
+  def append(path, record, token \\ nil) when is_map(record) do
     with :ok <- validate(record),
-         :ok <- refuse_foreign_writer(path),
+         :ok <- refuse_foreign_writer(path, token),
          {:ok, frame} <- frame(record) do
       write(path, frame)
     end
   end
 
-  # Concept: only the session owner writes to a claimed journal.
-  # Technical depth: the claim already makes a second COORDINATOR impossible. This
-  # covers the other writer -- a process that bypasses the coordinator entirely,
-  # which a review demonstrated could append and corrupt the sequence. It is not
-  # the check-then-write that was wrong before: repair happens once, in the owner,
-  # before it serves anything, so this cannot race a truncation.
-  #
-  # An unclaimed journal is allowed, because tools and tests legitimately use one
-  # directly. A claim naming a live process on this node that is not the caller is
-  # refused. A claim whose owner cannot be checked -- another node, another VM, or
-  # a dead pid -- is allowed, because refusing would block the recovery the
-  # takeover rule exists to permit.
-  defp refuse_foreign_writer(path) do
-    with {:ok, lock} <- lock_path(path),
-         {:ok, contents} <- File.read(lock),
-         {:ok, owner} <- parse_owner(contents),
-         true <- owner.node == Atom.to_string(node()),
-         true <- pid_alive?(owner.erl_pid),
-         false <- owner.erl_pid == inspect(self()) do
-      {:error, {:not_the_session_owner, path, owner.erl_pid}}
-    else
-      _other -> :ok
+  # Concept: a claimed journal is written only by the holder of that claim.
+  # Technical depth: the previous rule refused only a parseable, live, same-node
+  # pid and let every other case through its catch-all -- foreign, malformed,
+  # unreadable, unverifiable. Each of those is a claim someone holds, and "I could
+  # not tell whose" is not a reason to write. The rule inverts: if a claim exists,
+  # the caller must present its token. An unclaimed journal is still writable
+  # directly, which is what tools and tests use.
+  defp refuse_foreign_writer(path, token) do
+    case lock_path(path) do
+      {:error, _reason} ->
+        :ok
+
+      {:ok, lock} ->
+        case File.read(lock) do
+          {:error, :enoent} ->
+            :ok
+
+          {:error, posix} ->
+            {:error, {:claim_unreadable, lock, posix}}
+
+          {:ok, contents} ->
+            case parse_owner(contents) do
+              {:ok, %{token: held}} when is_binary(token) and held == token -> :ok
+              {:ok, _owner} -> {:error, {:not_the_session_owner, path}}
+              :error -> {:error, {:claim_unreadable, lock, :malformed}}
+            end
+        end
     end
   end
 
@@ -248,31 +253,23 @@ defmodule Loopex.Journal do
   Creation is exclusive, so the claim is atomic at the filesystem and holds across
   processes and across VMs.
   """
-  @spec claim_session(Path.t()) :: :ok | {:error, term()}
+  @spec claim_session(Path.t()) :: {:ok, binary()} | {:error, term()}
   def claim_session(path) do
-    # The claim is identified by the journal's device and inode, so the file has to
-    # exist before it can be claimed. A first start creates it empty, which is
-    # already how `read/1` treats a missing journal -- an empty complete one -- so
-    # this adds no state, only the identity the claim needs.
     with :ok <- ensure_directory(path),
          :ok <- ensure_file(path),
          {:ok, lock} <- lock_path(path) do
-      claim_lock(lock)
+      claim_lock(lock, token())
     end
   end
 
-  defp ensure_file(path) do
-    case File.exists?(path) do
-      true ->
-        :ok
-
-      false ->
-        case File.open(path, [:write, :append]) do
-          {:ok, io} -> File.close(io)
-          {:error, posix} -> {:error, {:journal_unavailable, path, posix}}
-        end
-    end
-  end
+  # Concept: the claim is a capability, not a fact about a path.
+  # Technical depth: ownership used to be "a sentinel exists", which anyone could
+  # delete and anyone could work around. A token is held only by the claimer, so
+  # releasing and writing require having claimed -- the two operations that must be
+  # owner-only stop depending on inferring who the owner is. Sixteen random bytes,
+  # because the token only has to be unguessable by accident, not by an attacker
+  # with the file.
+  defp token, do: :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
 
   @doc """
   ## Concept
@@ -284,8 +281,24 @@ defmodule Loopex.Journal do
   A failed release is returned rather than swallowed, because a sentinel that
   survives its owner blocks the next one with nothing explaining why.
   """
-  @spec release_session(Path.t()) :: :ok | {:error, term()}
-  def release_session(path), do: release_lock(path)
+  @spec release_session(Path.t(), binary()) :: :ok | {:error, term()}
+  def release_session(path, token) when is_binary(token) do
+    with {:ok, lock} <- lock_path(path),
+         {:ok, contents} <- File.read(lock),
+         {:ok, owner} <- parse_owner(contents) do
+      # Deleting someone else's claim was possible from anywhere, which let a
+      # second owner start while the first was still live. Releasing now requires
+      # having claimed.
+      case owner.token == token do
+        true -> remove_lock(lock)
+        false -> {:error, {:not_the_claim_holder, lock}}
+      end
+    else
+      {:error, {:journal_unavailable, _path, :enoent}} -> :ok
+      {:error, :enoent} -> :ok
+      _other -> {:error, {:claim_unreadable, path}}
+    end
+  end
 
   @doc """
   ## Concept
@@ -322,51 +335,84 @@ defmodule Loopex.Journal do
     end
   end
 
-  defp claim_lock(lock) do
+  defp claim_lock(lock, token) do
     case File.open(lock, [:write, :exclusive]) do
       {:ok, io} ->
-        # Synced before the journal is touched, so a process killed mid-session
-        # still leaves a sentinel that says who to ask.
-        IO.write(io, owner_line())
+        IO.write(io, owner_line(token))
         :file.sync(io)
         File.close(io)
-        :ok
+        {:ok, token}
 
       {:error, :eexist} ->
-        reclaim_if_owner_is_gone(lock)
+        reclaim_if_owner_is_gone(lock, token)
 
       {:error, posix} ->
         {:error, {:journal_unavailable, lock, posix}}
     end
   end
 
-  defp owner_line do
-    "node=#{node()} erl_pid=#{inspect(self())} os_pid=#{System.pid()} " <>
-      "at=#{System.system_time(:second)}\n"
+  defp owner_line(token) do
+    "node=#{node()} os_pid=#{System.pid()} erl_pid=#{inspect(self())} " <>
+      "token=#{token} at=#{System.system_time(:second)}\n"
   end
 
-  # Concept: a sentinel whose owner is provably gone may be taken over; one whose
-  # owner cannot be checked may not.
-  # Technical depth: an owner killed outright never runs its release, and a
-  # session that could never recover from that would be worse than the race the
-  # sentinel exists to prevent. Expiry by age or pid number is the wrong fix -- it
-  # can evict a live owner. An Erlang pid on THIS node is different: if it is not
-  # alive, it is definitively gone, and that is exact rather than heuristic.
+  # Concept: a claim may be taken over only when its owner is provably gone, and
+  # the takeover itself must be exclusive.
+  # Technical depth: two defects lived here. Deleting and recreating let two
+  # contenders both see the same dead claim, and one then deleted the other's
+  # newly created LIVE claim while both reported success -- a plain ABA. And an
+  # Erlang pid was interpreted in the current VM, but two unnamed VMs are both
+  # `nonode@nohost`, so a live owner in another VM was declared dead and evicted.
   #
-  # An owner on another node or another VM cannot be checked from here, so the
-  # claim is refused and a human decides. That is the fail-closed half of the same
-  # rule, and `session_lock_path/1` is public so the file can be found.
-  defp reclaim_if_owner_is_gone(lock) do
-    with {:ok, contents} <- File.read(lock),
-         {:ok, owner} <- parse_owner(contents),
-         true <- owner.node == Atom.to_string(node()),
-         false <- pid_alive?(owner.erl_pid) do
-      case File.rm(lock) do
-        :ok -> claim_lock(lock)
-        {:error, posix} -> {:error, {:journal_unavailable, lock, posix}}
-      end
+  # Both are closed by narrowing what "provably gone" means and by serialising the
+  # takeover. The owner must be on this node AND in this OS process before its
+  # Erlang pid means anything here; anything else is unverifiable and refused. The
+  # takeover runs under its own exclusively-created file, and re-reads the claim
+  # under it, so a claim that changed between inspection and deletion aborts.
+  defp reclaim_if_owner_is_gone(lock, token) do
+    takeover = lock <> ".takeover"
+
+    case File.open(takeover, [:write, :exclusive]) do
+      {:error, :eexist} ->
+        {:error, {:repair_already_held, lock, File.read(lock)}}
+
+      {:error, posix} ->
+        {:error, {:journal_unavailable, takeover, posix}}
+
+      {:ok, io} ->
+        File.close(io)
+
+        try do
+          take_over_dead_claim(lock, token)
+        after
+          File.rm(takeover)
+        end
+    end
+  end
+
+  defp take_over_dead_claim(lock, token) do
+    with {:ok, before} <- File.read(lock),
+         {:ok, owner} <- parse_owner(before),
+         true <- verifiable_here?(owner),
+         false <- pid_alive?(owner.erl_pid),
+         {:ok, ^before} <- File.read(lock),
+         :ok <- remove_lock(lock) do
+      claim_lock(lock, token)
     else
       _other -> {:error, {:repair_already_held, lock, File.read(lock)}}
+    end
+  end
+
+  defp ensure_file(path) do
+    case File.exists?(path) do
+      true ->
+        :ok
+
+      false ->
+        case File.open(path, [:write, :append]) do
+          {:ok, io} -> File.close(io)
+          {:error, posix} -> {:error, {:journal_unavailable, path, posix}}
+        end
     end
   end
 
@@ -383,8 +429,11 @@ defmodule Loopex.Journal do
       end)
 
     case fields do
-      %{"node" => node_name, "erl_pid" => erl_pid} -> {:ok, %{node: node_name, erl_pid: erl_pid}}
-      _other -> :error
+      %{"node" => n, "os_pid" => o, "erl_pid" => e, "token" => t} ->
+        {:ok, %{node: n, os_pid: o, erl_pid: e, token: t}}
+
+      _other ->
+        :error
     end
   end
 
@@ -402,16 +451,18 @@ defmodule Loopex.Journal do
     end
   end
 
-  # A failed release is reported, not swallowed. Silently returning success while
-  # the sentinel survives leaves the next repair blocked with nothing explaining
-  # why, which is the worst of both directions.
-  defp release_lock(path) do
-    with {:ok, lock} <- lock_path(path) do
-      case File.rm(lock) do
-        :ok -> :ok
-        {:error, :enoent} -> :ok
-        {:error, posix} -> {:error, {:repair_lock_not_released, lock, posix}}
-      end
+  # An Erlang pid only means something in the VM that produced it. Node names do
+  # not distinguish unnamed VMs -- both are nonode@nohost -- so the OS process is
+  # what makes the pid interpretable here.
+  defp verifiable_here?(owner) do
+    owner.node == Atom.to_string(node()) and owner.os_pid == System.pid()
+  end
+
+  defp remove_lock(lock) do
+    case File.rm(lock) do
+      :ok -> :ok
+      {:error, :enoent} -> :ok
+      {:error, posix} -> {:error, {:claim_not_released, lock, posix}}
     end
   end
 

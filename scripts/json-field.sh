@@ -123,6 +123,17 @@ function unescape(text,   out, index_, char_, next_) {
   return out
 }
 
+# Concept: one string from its pieces, joined once.
+# Technical depth: joining once costs the length of the result; joining as pieces
+# arrive costs it again for every piece. The piece count is bounded above, so this
+# is bounded work rather than input-driven work.
+function join_pieces(n,   i_, out_) {
+  if (n <= 1) { return pieces[1] }
+  out_ = pieces[1]
+  for (i_ = 2; i_ <= n; i_++) { out_ = out_ "\"" pieces[i_] }
+  return out_
+}
+
 # Concept: did this record end with an escaped quote?
 # Technical depth: with the quote as the record separator, a trailing odd number of
 # backslashes means the separator that followed was escaped and the string has not
@@ -276,19 +287,44 @@ BEGIN {
 # backslashes means the quote that followed was escaped, so the string continues.
 {
   if (inside) {
-    if (odd_backslashes($0)) {
-      token = token $0 "\""
+    # Pieces are counted and measured, not concatenated as they arrive. Splitting
+    # on the quote made the SCAN linear, but every escaped quote still extended a
+    # growing string, so a value with half a million of them was quadratic again --
+    # about thirty seconds, past the hook timeout, where exit 124 does not block.
+    #
+    # A string that exceeds either bound is marked oversize and its pieces are
+    # dropped. That is safe because of what the bounds are for: a key that long
+    # cannot be one of the short names being looked for, and a value that long is
+    # not a command or a path. If an oversize string turns out to BE a requested
+    # value, the reader fails closed rather than returning a truncated one.
+    piece_count++
+    piece_bytes += length($0) + 1
+    if (piece_count > 4096 || piece_bytes > 65536) {
+      oversize = 1
     } else {
-      token = token $0
-      inside = 0
-      pending = 1
-      pending_token = token
+      pieces[piece_count] = $0
     }
+    if (odd_backslashes($0)) {
+      next
+    }
+    inside = 0
+    pending = 1
+    pending_oversize = oversize
+    pending_token = oversize ? "" : join_pieces(piece_count)
   } else {
     if (pending) {
       # A colon after the closed string makes it a key; anything else a value.
       if ($0 ~ /^[ \t\r\n]*:/) {
         key[depth] = decoded_key(pending_token)
+        # A repeated parent starts a fresh object, and a real parser uses the LAST
+        # one. Carrying values found under an earlier parent let a document put a
+        # harmless object first and have the guard judge that instead of the one
+        # that counts -- the same last-wins rule that already applies to duplicate
+        # fields, missed one level up.
+        if (depth == 1 && key[1] == object) { delete found }
+      } else if (depth == 2 && key[1] == object && (key[2] in requested) && pending_oversize) {
+        printf "json-field.sh: %s is too large to read safely\n", key[2] > "/dev/stderr"
+        exit 65
       } else if (depth == 2 && key[1] == object && (key[2] in requested)) {
         # The RAW token is stored; at most one is decoded, at output.
         found[key[2]] = pending_token
@@ -297,7 +333,9 @@ BEGIN {
     }
     depth = depth + depth_delta($0)
     inside = 1
-    token = ""
+    piece_count = 0
+    piece_bytes = 0
+    oversize = 0
   }
 }
 
