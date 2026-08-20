@@ -45,9 +45,12 @@ to catch is not the only way two lanes can interact. With no
 `LOOPEX_PROVIDER_API_KEY` present the same runner stops at outcome 7 reporting
 evidence unavailable rather than skipping, which is the fail-closed direction.
 
-These runs were executed on the candidate named above with the retained-evidence
-edits already present in the working tree, so the only bytes they did not observe
-are the run table itself. This file and the self-hosting evidence are then written
+These runs were executed on the code commit named above with the retained-evidence
+edits of that round already present in the working tree. They did not observe this
+file as it now stands: the run table, the header above it, the adjacency narration
+describing run 5, and the verdict-handling paragraph below were all written or
+rewritten after them. An earlier version of this sentence claimed the run table was
+the only difference, which was not true even when written. This file and the self-hosting evidence are then written
 in the commit immediately after the candidate: there is no way to record a run
 inside the commit the run observed. That residual gap is stated rather than
 papered over, and it is why the gate expects a reviewer to re-run at the closure

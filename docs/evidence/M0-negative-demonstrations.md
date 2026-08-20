@@ -11,7 +11,7 @@ Populated as outcomes 4, 5, and 6 are proved.
 
 - mechanism disabled: `resolve_tail/3` in `Loopex.Coordinator`, made to return `:ok` for a torn tail instead of discarding it, so recovery extends a journal whose reader still stops at the tear
 - observed failure: `a fact acknowledged after torn-tail recovery survives the next restart` failed — the fact was present while the coordinator ran and absent after the restart
-- demonstrated at: `676b2b3d41391a830728ea8293325c281c101351`, reverted before commit and confirmed byte-identical by SHA-256 (`18b3b7846f1c0887723c7c74f3b7752ef29110d99ea0505460ec6b91d053899b`)
+- demonstrated at: `676b2b3d41391a830728ea8293325c281c101351`, reverted before commit and confirmed byte-identical by SHA-256 of `apps/loopex/lib/loopex/coordinator.ex` (`18b3b7846f1c0887723c7c74f3b7752ef29110d99ea0505460ec6b91d053899b`)
 
 This demonstration was re-taken. It previously named `resolve_tail/2` and located
 itself at "the commit adding the repair", which is prose rather than a revision a
@@ -78,7 +78,7 @@ outside the numbered sections so the locked one-per-outcome rule still holds.
 
 - mechanism: the `Journal.release_session/2` call on the failing path of `Coordinator.init/1`, removed, so a start that claims the journal and then stops leaves the sentinel behind
 - observed failure: `a coordinator refuses to start on a corrupt journal rather than repairing it` failed on `refute File.exists?(lock)`
-- demonstrated at: `676b2b3d41391a830728ea8293325c281c101351`, reverted before commit and confirmed byte-identical by SHA-256 (`18b3b7846f1c0887723c7c74f3b7752ef29110d99ea0505460ec6b91d053899b`)
+- demonstrated at: `676b2b3d41391a830728ea8293325c281c101351`, reverted before commit and confirmed byte-identical by SHA-256 of `apps/loopex/lib/loopex/coordinator.ex` (`18b3b7846f1c0887723c7c74f3b7752ef29110d99ea0505460ec6b91d053899b`)
 
 ### The raising path
 

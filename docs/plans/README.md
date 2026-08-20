@@ -46,17 +46,24 @@ three fields change exactly as disposition advances:
 | One | The remaining linked ADR must be accepted before M0 opens; a replacement requires a governed guard change | Disposition the remaining ADR | After the prerequisites are accepted, the maintainer explicitly opens `M0` gate-first |
 | Both | M0 has not been explicitly opened gate-first | Explicitly open or defer M0 | Create the branch-only M0 Concept plan, Technical depth plan, and red gate; install lifecycle-specific status checks; and move M0 to Open |
 
-Opening `M0` must replace this seed-specific state machine with
-lifecycle-specific checks; it may not merely delete or relax the status check.
+The paragraphs below record the conditions M0's opening had to satisfy. They are
+kept in the past tense now that it has opened, because what they constrained is
+still what a reader checks the opening against; the row above is the seed-era
+transition they belonged to.
 
-`M0` cannot open until ADR 0001 and ADR 0002 each carry a structurally complete
-acceptance record. A rejection or status-word edit does not unlock it. Choosing
-a replacement requires an explicit governed change to the named prerequisite
-and this guard; the bootstrap checker does not infer a supersession graph. Its
-plan pair and gate also define the first scope-specific minimalism budget rather than
-a universal line-count target. Its closure removes the temporary Python/`jq`
-bridge by migrating repository checks and tested client-hook paths to the
-accepted Elixir/OTP toolchain and proving the adapter path with `jq` absent.
+Opening `M0` had to replace the seed-specific state machine with
+lifecycle-specific checks rather than merely deleting or relaxing the status
+check, and it did.
+
+`M0` could not open until ADR 0001 and ADR 0002 each carried a structurally
+complete acceptance record; a rejection or status-word edit would not have
+unlocked it, and choosing a replacement would have required an explicit governed
+change to the named prerequisite and that guard, because the bootstrap checker
+does not infer a supersession graph. Its plan pair and gate define the first
+scope-specific minimalism budget rather than a universal line-count target. Its
+closure removes the temporary Python/`jq` bridge by migrating repository checks
+and tested client-hook paths to the accepted Elixir/OTP toolchain and proving the
+adapter path with `jq` absent.
 
 That migration belongs to M0 rather than a later milestone because M0 is the
 first milestone to produce an accepted Elixir/OTP toolchain and application

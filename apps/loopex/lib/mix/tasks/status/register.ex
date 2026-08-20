@@ -377,18 +377,20 @@ defmodule Loopex.Checks.Register do
     |> Map.put("Next transition", "Turn the locked gate green, then move `#{name}` to In review")
   end
 
-  # Concept: the gate is green and an independent reviewer now owns the verdict.
-  # Technical depth: authorized work does not widen here either — acceptance
-  # remains the only transition that widens it. What changes is that the next
-  # decision returns to the maintainer, because a reviewer produces findings and
-  # only an acceptance authority closes.
-  # Concept: the register states lifecycle, not evidence.
+  # Concept: the milestone awaits an independent verdict, and the register states
+  # that lifecycle fact rather than any claim about a run.
   #
-  # Technical depth: this capsule asserted that the milestone "has a green gate on
-  # every locked lane". That is a claim about a run, baked into a derivation that
-  # cannot observe one -- so a canonical record asserted it for any milestone in
-  # review, green or red, and the status check enforced that it keep asserting it.
-  # A gate verdict belongs to retained evidence at a named candidate.
+  # Technical depth: authorized work does not widen here — acceptance remains the
+  # only transition that widens it. What changes is that the next decision returns
+  # to the maintainer, because a reviewer produces findings and only an acceptance
+  # authority closes. This capsule used to assert that the milestone "has a green
+  # gate on every locked lane", and the comment above it asserted "the gate is
+  # green": a claim about a run, in a derivation that cannot observe one, true by
+  # construction for any milestone in review whether green or red. The status check
+  # then enforced that a canonical record keep asserting it. A gate verdict belongs
+  # to retained evidence at a named candidate. The first correction removed the
+  # claim from the record and left it in the comment directly above -- which is the
+  # same defect, in the place the next reader looks first.
   def expected_capsule("In review", name, _adr_statuses) do
     name
     |> accepted_values()

@@ -20,7 +20,7 @@ The size figure is audit material. No run passes or fails on it.
 Taken by running `mix loopex.self_hosting`, not transcribed:
 
 ```text
-documentation 1739   comment 566   blank 1457   code 6494   total 10256
+documentation 1739   comment 575   blank 1457   code 6494   total 10265
 ```
 
 Against the 4,462-line gate-commit baseline the plan binds, that is
@@ -29,12 +29,20 @@ revision they were retired, it is 2.19x. Both are stated because a
 reader comparing to the deleted files computes the second, and the two numbers are
 different.
 
-The figure rose by 301 lines from the previous candidate, and most of that is one
-correction rather than growth: `apps/loopex/test/tool_call_reader_test.exs` is now
-measured. It tests the replacement's reader, exactly as the three test files
-already listed test the rest of the replacement, and leaving it out understated
-the figure -- which this command's own documentation calls worse than reporting
-none, because an understated number still reads as evidence.
+The figure is 10265 at this candidate. Two earlier rounds account for the shape of
+it, and the numbers belong to different candidates rather than to one delta:
+
+- +301 when `apps/loopex/test/tool_call_reader_test.exs` was added to the measured
+  set, which was a correction rather than growth.   It tests the replacement's reader, exactly as the three test files already listed
+  test the rest of the replacement, and leaving it out understated the figure --
+  which this command's own documentation calls worse than reporting none, because
+  an understated number still reads as evidence.
+- +9 at this candidate, from a comment correction in
+  `apps/loopex/lib/mix/tasks/status/register.ex`, which is in the measured set.
+
+That second delta is why 10256 was recorded here while the tree measured 10265: a
+figure headed "at the closure candidate" was carried forward from the candidate
+before it. Re-measured rather than adjusted.
 
 The previous entry credited its increase to "the reader and the two guards". That
 was wrong: `.claude/hooks/guard-bash.sh` and `guard-filesystem.sh` are not in the

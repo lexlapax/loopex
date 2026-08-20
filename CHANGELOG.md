@@ -293,9 +293,17 @@ the exact document set its milestone must update.
   lines, and later re-measured at 4,462 as the checker grew; the toolchain pins
   are derived from accepted ADR 0002 rather than
   chosen, so the floor is the lowest supported pair in the 1.17 family; and the
-  executed-test arithmetic subtracts skipped tests only, since
-  ExUnit reports excluded ones outside its total and subtracting them again
-  would have falsely rejected a file holding both tagged and ordinary tests.
+  executed-test arithmetic subtracts both skipped and excluded tests from the
+  reported total. Amendment 1 asserted the opposite -- that ExUnit reports
+  excluded tests outside its total, so subtracting them again would falsely
+  reject a file holding both tagged and ordinary tests -- and the floor lane
+  disproved it: on 1.17 the total includes both. Amendment 2 corrected the
+  arithmetic, Amendment 3 corrected Amendment 2's self-certified acceptance
+  heading, and Amendment 5 closed an absence-lane bypass where a `for` or
+  `select` loop binding the search-path variable left the lane reporting success.
+  Those three amendments had no entry here; this is it. A governed artifact
+  carrying a disproved explanation is a defect even when the code below it is
+  right, because the comment is what the next reader believes.
 - The M0 gate stopped trying to defeat a dishonest implementer. Five review
   rounds found a bypass for every mechanical anti-faking control, because a
   script cannot tell whether a test asserts anything, whether a fixture is real,
@@ -535,8 +543,11 @@ the exact document set its milestone must update.
   why that migration belongs to M0 — self-hosting the checks exercises ADR 0001
   boundaries and ADR 0002 version pairs, making it evidence rather than
   incidental tooling — and constrains it to a separate workstream whose
-  minimalism budget requires the replacement to be materially smaller than the
-  bridge it retires and to name what it drops.
+  minimalism budget requires it to name what it drops. This entry previously said
+  the budget required the replacement to be "materially smaller" than the bridge
+  it retires. That contradicted the accepted technical envelope and was retracted
+  in the plans index: size is a review signal, never a pass condition. The
+  replacement measures larger, and the report states why.
 - M0 also installs the repository-owned compiled-documentation check for the
   dual-depth public-code contract; semantic usefulness and proportional private
   comments remain review obligations.
