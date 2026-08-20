@@ -217,10 +217,29 @@ function emit_unescaped(text,   n, parts, i, seg, lead, rest, code_, low_) {
   }
 }
 
+# Concept: a key, decoded only when it could possibly be one we want.
+# Technical depth: keys must be decoded, because an escaped spelling of a field
+# name is an ordinary JSON encoding and a guard that missed it was bypassed. But
+# decoding is the quadratic path, and a document may carry an enormous key, which
+# made the same timeout bypass available through the key instead of the value.
+#
+# The bound is exact rather than a guess. The shortest escape that yields one
+# character is \uXXXX, six bytes, so a decoded key is never shorter than a sixth
+# of its raw length. A raw key longer than six times the longest name we are
+# looking for therefore cannot decode to one of them, and is rejected without
+# decoding anything.
+function decoded_key(token) {
+  if (index(token, "\\") == 0) { return token }
+  if (length(token) > 6 * longest_wanted) { return token }
+  return unescape(token)
+}
+
 BEGIN {
   count = split(fields, wanted, ",")
+  longest_wanted = length(object)
   for (i = 1; i <= count; i++) {
     requested[wanted[i]] = 1
+    if (length(wanted[i]) > longest_wanted) { longest_wanted = length(wanted[i]) }
   }
 }
 
@@ -242,7 +261,7 @@ END {
       # Keys are decoded like values. Storing them raw meant an ordinary escaped
       # spelling -- "comm\u0061nd" -- did not match the requested name, so a hook
       # read nothing and passed a command it would otherwise have blocked.
-      key[depth] = unescape(token)
+      key[depth] = decoded_key(token)
       continue
     }
     if (depth == 2 && key[1] == object && (key[2] in requested)) {
