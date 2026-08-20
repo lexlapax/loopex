@@ -455,7 +455,7 @@ defmodule Loopex.JournalReplayTest do
     refute File.exists?(lock), "a refused start must release the claim it took"
   end
 
-  test "a start that raises after claiming releases the claim too" do
+  test "a start that raises on a missing option must not leave the journal claimed" do
     collector = DurableTruth.start_collector()
     journal = DurableTruth.journal_path("raise-releases")
 

@@ -83,8 +83,8 @@ outside the numbered sections so the locked one-per-outcome rule still holds.
 ### The raising path
 
 - mechanism: `:dispatch_to` and `:executor` moved back to being fetched inside `start_claimed/5`, i.e. after the claim, so a caller omitting one raises with the sentinel already created
-- observed failure: `a start that raises after claiming releases the claim too` failed on `refute File.exists?(lock)`
-- demonstrated at: the candidate carrying this file, reverted before commit and confirmed byte-identical by SHA-256 (`578c3cf998b8188026645f154817a3576116ce1a11145da1c57c2aefa483ab80`)
+- observed failure: `a start that raises on a missing option must not leave the journal claimed` failed on `refute File.exists?(lock)`
+- demonstrated at: `61914a6`, reverted before commit and confirmed byte-identical by SHA-256 of `apps/loopex/lib/loopex/coordinator.ex` (`578c3cf998b8188026645f154817a3576116ce1a11145da1c57c2aefa483ab80`)
 
 This second path is why the first fix was incomplete. `gen_server` does not call
 `terminate/2` when `init/1` raises any more than when it returns `{:stop, _}`, and

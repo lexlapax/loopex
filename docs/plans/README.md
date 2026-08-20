@@ -20,7 +20,7 @@ integrated; `main` describes integrated project state, not every remote activity
 | --- | --- |
 | Integrated phase | Pre-implementation planning |
 | Last integrated checkpoint | Seed bootstrap — 2026-08-15 |
-| Blockers | None; `M0` has a green gate on every locked lane and awaits independent review |
+| Blockers | None; `M0` awaits independent review of its closure candidate |
 | Authorized work | Implementation inside the accepted `M0` envelopes and its locked gate; no other product implementation |
 | Next maintainer decision | Close `M0` or reject its closure candidate on the review findings |
 | Next transition | Record the closure governance row and move `M0` to Closed |

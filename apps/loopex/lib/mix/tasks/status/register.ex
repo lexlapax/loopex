@@ -382,12 +382,19 @@ defmodule Loopex.Checks.Register do
   # remains the only transition that widens it. What changes is that the next
   # decision returns to the maintainer, because a reviewer produces findings and
   # only an acceptance authority closes.
+  # Concept: the register states lifecycle, not evidence.
+  #
+  # Technical depth: this capsule asserted that the milestone "has a green gate on
+  # every locked lane". That is a claim about a run, baked into a derivation that
+  # cannot observe one -- so a canonical record asserted it for any milestone in
+  # review, green or red, and the status check enforced that it keep asserting it.
+  # A gate verdict belongs to retained evidence at a named candidate.
   def expected_capsule("In review", name, _adr_statuses) do
     name
     |> accepted_values()
     |> Map.put(
       "Blockers",
-      "None; `#{name}` has a green gate on every locked lane and awaits independent review"
+      "None; `#{name}` awaits independent review of its closure candidate"
     )
     |> Map.put(
       "Next maintainer decision",

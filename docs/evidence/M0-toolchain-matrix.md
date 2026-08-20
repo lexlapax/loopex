@@ -9,7 +9,9 @@ run has one Erlang runtime, so the gate runner is invoked once per pair. Both
 orders are run, because a per-lane pass proves nothing about ordering — a shared
 build directory once made the second lane fail on beams the first had compiled.
 
-- candidate: `801bda5c5bedfb16bfeb992978fbc80a3de78e7e`
+- runs taken at: `801bda5c5bedfb16bfeb992978fbc80a3de78e7e` (the code commit; the
+  closure candidate is a later commit carrying this file, which is why the gate
+  is re-run there rather than trusting these rows)
 - gate digest: `sha256:6e02cd424bab8e3410205ca053adce150ee9fa1a84d7b6f5b032390c4529e09f`
 - command: `bash scripts/check-m0-gate.sh`, with `LOOPEX_PROVIDER_API_KEY` set, the
   floor pair supplied by `mise exec erlang@26.0 elixir@1.17.0-otp-26 --`
@@ -51,12 +53,15 @@ inside the commit the run observed. That residual gap is stated rather than
 papered over, and it is why the gate expects a reviewer to re-run at the closure
 candidate rather than trust a retained verdict.
 
-The gate is also run once more AFTER this file is committed, and that verdict is
-recorded here: at `2edb51d06811ccfafcc97d095fc7e8b71df673b3`, which carries this
-file with the five runs above, both lanes were green -- current in 102s and floor
-in 89s, working tree clean before and after. That is the run which proves the
-retained evidence does not red the gate, and it is the one the previous candidate
-never did. An earlier candidate skipped that step on the reasoning that an
+The gate is also run on both lanes AFTER this file is committed, and that verdict
+goes to the integrator out of band rather than into this file. Writing it here
+cannot terminate: this file is an input to locked command 6, so recording a
+verdict changes the bytes the verdict describes, and the commit carrying it is
+unverified again. One candidate pasted a verdict and reproduced exactly that, one
+commit later. AGENTS.md states the rule plainly -- do not mutate tracked bytes
+merely to paste a final run link -- and what closes the gap is the gate's own
+expectation that a reviewer re-runs at the closure candidate, not a retained
+verdict. An earlier candidate skipped that step on the reasoning that an
 evidence-only commit changes no product bytes -- and the gate reads these bytes.
 The commit that recorded five green runs turned the gate red, because it put a
 second demonstration into an outcome section where the locked runner requires
