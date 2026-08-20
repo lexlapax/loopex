@@ -55,9 +55,13 @@ done
 # Substitution is done in-process with parameter expansion rather than by piping
 # through sed, because passing the value as an argument would expose it in the
 # process table.
+# AMENDMENT 4. The pattern is quoted, so the credential is matched literally.
+# Unquoted, ${var//$pattern/...} treats the credential as a glob: a key containing
+# [, ? or * matched something other than itself and was printed unredacted. The
+# gate places no alphabet restriction on a credential, so it cannot assume one.
 redacted() {
   if [ -n "$provider_key_value" ]; then
-    printf '%s\n' "${1//$provider_key_value/[redacted credential]}"
+    printf '%s\n' "${1//"$provider_key_value"/[redacted credential]}"
   else
     printf '%s\n' "$1"
   fi
@@ -97,8 +101,17 @@ require_named_test() {
 # go green on its own locked toolchain. It failed closed, which was safe, but it
 # was unsatisfiable. Supporting one shape and not the other would move that
 # defect to the floor lane rather than remove it.
+# AMENDMENT 4. grep exits 1 for no match and above 1 for an error; `|| true`
+# treated both as "zero of them". A broken extraction then read as "no skipped
+# tests" and a protected selector could pass on unavailable evidence.
 summary_field() {
-  printf '%s' "$1" | grep -oE "[0-9]+ $2" | tail -1 | grep -oE '[0-9]+' || true
+  local matched status
+  matched="$(printf '%s' "$1" | grep -oE "[0-9]+ $2")" || status=$?
+  case "${status:-0}" in
+    0) printf '%s' "$matched" | tail -1 | grep -oE '[0-9]+' ;;
+    1) : ;;
+    *) fail "could not read the \"$2\" field of a test summary (grep exit ${status}); evidence is unavailable" ;;
+  esac
 }
 
 # Executed means ran to a verdict: passed or failed, never skipped or excluded.
@@ -129,8 +142,8 @@ executed_tests() {
       # 1 skipped", so both sit inside the total and executed is total minus both.
       total="$(printf '%s' "$line" | grep -oE '[0-9]+ (test|tests),' | grep -oE '[0-9]+')"
       [ -n "$total" ] || return 1
-      skipped="$(printf '%s' "$line" | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+' || true)"
-      excluded="$(printf '%s' "$line" | grep -oE '[0-9]+ excluded' | grep -oE '[0-9]+' || true)"
+      skipped="$(summary_field "$line" skipped)"
+      excluded="$(summary_field "$line" excluded)"
       echo $((total - ${skipped:-0} - ${excluded:-0}))
       ;;
   esac
@@ -511,6 +524,12 @@ absence_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m0-absence.XXXXXX")" \
 # The fixed core covers direct interpreters and the launchers that reach one
 # without a python-shaped name of their own: xcrun resolves Xcode's Python, and
 # uv, pyenv, pipx, poetry, and conda each run an interpreter they manage.
+# AMENDMENT 4. One list drives both the stubs and the scan. They were written
+# separately: the launchers were stubbed but the scan matched only python names,
+# jq and xcrun, so /opt/homebrew/bin/uv run script.py evaded both PATH shadowing
+# and the textual scan. A stubbed name that is not scanned is a hole by
+# construction, so the alternation below is built from this list rather than
+# repeated by hand.
 shadow_names="python python2 python3 jq xcrun uv pyenv pipx poetry conda"
 # Splitting on whitespace corrupted any PATH entry containing a space and
 # discarded empty entries, which mean the current directory. Reading the raw
@@ -571,7 +590,16 @@ done
 # assignments, command -p and -pv, and assignment-prefixed runs. A bare
 # `python3 x.py` is deliberately not matched here; the stubs above already
 # intercept it, and matching it would flag the aggregate's own legitimate calls.
-bypass='(/["'"'"']*|(^|[[:space:]])(command|exec)([[:space:]]+-[^[:space:]]*)*[[:space:]]+["'"'"']?|env([[:space:]]+[^[:space:]]+)*[[:space:]]+["'"'"']?|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+["'"'"']?)(python[0-9.]*|jq|xcrun)([^[:alnum:]_/]|$)'
+# The alternation is generated from shadow_names plus the versioned python form,
+# so adding a launcher to the stub list scans it too.
+interpreter_alternation="python[0-9.]*"
+for shadowed in $shadow_names; do
+  case "$shadowed" in
+    python*) ;;
+    *) interpreter_alternation="$interpreter_alternation|$shadowed" ;;
+  esac
+done
+bypass="(/["'"'"']*|(^|[[:space:]])(command|exec)([[:space:]]+-[^[:space:]]*)*[[:space:]]+["'"'"']?|env([[:space:]]+[^[:space:]]+)*[[:space:]]+["'"'"']?|(^|[[:space:]])([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+["'"'"']?)($interpreter_alternation)([^[:alnum:]_/]|$)"
 # The scan covers every tracked file with one exclusion: this runner, which must
 # name the interpreters in order to shadow and report them, and whose drift the
 # bound-artifact digest catches instead. Markdown is NOT excluded. Excluding it
@@ -608,7 +636,13 @@ esac
 # the aggregate this check exists to run. Prepending the stub root is the
 # strongest portable containment; indirection is the residual, and it belongs to
 # closure review because no mechanism here can reach it.
-path_mutation='(^|[[:space:]]|;|\(|\{)((export|declare|typeset|local|readonly)[[:space:]]+([^[:space:]]+[[:space:]]+)*)?["'"'"']?PATH([[:space:]]*=|\[)|(^|[[:space:]]|;)unset([[:space:]]+-[^[:space:]]*)*[[:space:]]+([^[:space:]]+[[:space:]]+)*PATH([^[:alnum:]_]|$)|printf[[:space:]]+([^[:space:]]+[[:space:]]+)*-v[[:space:]]+PATH([^[:alnum:]_]|$)'
+# AMENDMENT 4. The name may be quoted, and a builtin may bind it with no equals
+# sign on the line at all. `export "PATH"=/usr/bin`, `read PATH` and `mapfile -t
+# PATH` all evaded a rule the gate described as covering every direct mutation.
+# Rather than keep adding forms, the rule is now the token PATH, quoted or not,
+# wherever a shell can bind it: an assignment, an array element write, or any of
+# the builtins that assign.
+path_mutation='(^|[[:space:]]|;|\(|\{)(export|declare|typeset|local|readonly|unset|read|mapfile|readarray)([[:space:]]+-[^[:space:]]*)*([[:space:]]+[^[:space:]]+)*[[:space:]]+["'"'"'"]?PATH["'"'"'"]?([^[:alnum:]_]|$)|(^|[[:space:]]|;|\(|\{)["'"'"'"]?PATH["'"'"'"]?([[:space:]]*=|\[)|printf[[:space:]]+([^[:space:]]+[[:space:]]+)*-v[[:space:]]+["'"'"'"]?PATH["'"'"'"]?'
 mutation_status=0
 git grep -nE "$path_mutation" -- $scan_tree >/dev/null 2>&1 || mutation_status=$?
 case "$mutation_status" in
