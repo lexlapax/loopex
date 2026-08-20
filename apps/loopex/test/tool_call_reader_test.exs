@@ -24,6 +24,8 @@ defmodule Loopex.ToolCallReaderTest do
 
   @moduletag :tool_call_reader
 
+  alias Loopex.Checks.Json
+
   setup_all do
     root = LoopexTest.Repo.root()
 
@@ -36,7 +38,36 @@ defmodule Loopex.ToolCallReaderTest do
      reader: Path.join(root, "scripts/json-field.sh"),
      bash_guard: Path.join(root, ".claude/hooks/guard-bash.sh"),
      fs_guard: Path.join(root, ".claude/hooks/guard-filesystem.sh"),
-     real_home: real_home}
+     real_home: real_home,
+     hook_timeout_ms: guard_timeout_ms(root)}
+  end
+
+  # The smallest timeout the client applies to a guard, in milliseconds.
+  #
+  # Technical depth: read from the configuration rather than restated in the test,
+  # because a budget written down twice drifts, and the copy in the test is the one
+  # that goes stale silently -- it keeps passing while the real hook is being
+  # killed. Every registered guard is considered and the tightest wins, since the
+  # reader has to fit inside whichever one runs it.
+  defp guard_timeout_ms(root) do
+    {:ok, settings} =
+      root
+      |> Path.join(".claude/settings.json")
+      |> File.read!()
+      |> Json.decode()
+
+    settings
+    |> Map.get("hooks", %{})
+    |> Map.values()
+    |> List.flatten()
+    |> Enum.flat_map(&Map.get(&1, "hooks", []))
+    |> Enum.filter(&String.contains?(Map.get(&1, "command", ""), "guard-"))
+    |> Enum.map(&Map.get(&1, "timeout"))
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] -> raise "no guard timeout found in .claude/settings.json; the budget is unknown"
+      timeouts -> Enum.min(timeouts) * 1_000
+    end
   end
 
   # Runs an executable with `document` on standard input and returns {output, status}.
@@ -128,19 +159,50 @@ defmodule Loopex.ToolCallReaderTest do
       assert output =~ "too large to read safely"
     end
 
-    test "a value built from many escaped quotes is read in linear time", %{reader: reader} do
-      # Splitting on the quote made the scan linear, but each escaped quote still
-      # extended a growing string, so this shape was quadratic again -- about
-      # thirty seconds, past the hook timeout, where the client does not block.
-      # The bound is generous: it catches a return to quadratic work without
-      # depending on the speed of the machine running the suite.
-      document = ~s({"tool_input":{"command":"#{String.duplicate("\\\"", 4_094)}"}})
+    test "a value with more pieces than the cap is refused, not assembled", %{reader: reader} do
+      # The piece cap, not the assembly strategy, is what bounds this shape. Half a
+      # million escaped quotes took about thirty seconds -- past the hook timeout,
+      # where the client does not block -- and the cap is what makes that
+      # unreachable. A value the cap rejects must fail closed like any other
+      # unreadable field.
+      document = ~s({"tool_input":{"command":"#{String.duplicate("\\\"", 5_000)}"}})
+
+      assert {output, status} = feed(reader, ["tool_input", "command"], document)
+      assert status == 65, "a value past the piece cap must be refused, not truncated"
+      assert output =~ "too large to read safely"
+    end
+
+    test "a value just under the cap is read correctly, well inside the hook budget", %{
+      reader: reader,
+      hook_timeout_ms: budget
+    } do
+      # 4,095 pieces: the largest a document can carry and still be answered.
+      #
+      # What this proves and what it does not. The exactness assertion is the
+      # load-bearing half -- it fails on a truncated or re-escaped value. The
+      # elapsed bound is coarse: with the cap in place no legal input is large
+      # enough for quadratic assembly to blow the budget, so this would still pass
+      # against repeated concatenation. The cap is what makes the historical case
+      # unreachable, and the test above is what holds the cap. Both are kept
+      # because the budget is the property the client actually enforces.
+      #
+      # The budget is read from the client configuration rather than restated, so
+      # it cannot drift from the timeout that kills the hook. A reader that
+      # outlives it is killed by the client -- the exit-124 outcome that does not
+      # block -- and no reader status then exists for a guard to translate, so the
+      # status handling does not save it.
+      quotes = 4_094
+      document = ~s({"tool_input":{"command":"#{String.duplicate("\\\"", quotes)}"}})
 
       task = Task.async(fn -> feed(reader, ["tool_input", "command"], document) end)
+      allowed = div(budget, 2)
 
-      assert {:ok, {_output, _status}} =
-               Task.yield(task, 20_000) || Task.shutdown(task, :brutal_kill),
-             "the reader did not finish within 20s; the quadratic work is back"
+      assert {:ok, {output, 0}} =
+               Task.yield(task, allowed) || Task.shutdown(task, :brutal_kill),
+             "the reader did not answer within #{allowed}ms, half the #{budget}ms hook budget"
+
+      assert String.trim_trailing(output, "\n") == String.duplicate("\"", quotes),
+             "the value must be assembled exactly, not truncated or re-escaped"
     end
   end
 
@@ -185,10 +247,20 @@ defmodule Loopex.ToolCallReaderTest do
       fs_guard: guard,
       real_home: real_home
     } do
-      # The bypass that motivated last-wins at the parent level: a harmless object
-      # first, the real one second.
+      # The bypass that motivated last-wins at the parent level, and the only shape
+      # that reaches it through a guard.
+      #
+      # Technical depth: this guard asks for `file_path notebook_path path` in
+      # priority order, so the discarded parent must bind a HIGHER-priority field
+      # than the surviving one. With both parents binding `path`, the duplicate-key
+      # rule already clears the first and the case passes with the parent reset
+      # deleted -- the same vacuity the reader's own parent test documents. Here,
+      # deleting `delete found` leaves `file_path` bound to /tmp/safe from the
+      # discarded object; it outranks the real `path`, and the guard allows a call
+      # that reads the protected journal.
       document =
-        ~s({"tool_input":{"path":"/tmp/safe"},"tool_input":{"path":"#{real_home}/journal"}})
+        ~s({"tool_input":{"file_path":"/tmp/safe"},) <>
+          ~s("tool_input":{"path":"#{real_home}/journal"}})
 
       assert {_output, 2} = feed(guard, [], document)
     end

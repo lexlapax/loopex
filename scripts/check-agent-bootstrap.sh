@@ -58,6 +58,13 @@ done
 # guard rather than reporting anything.
 [ -x scripts/json-field.sh ] || fail "scripts/json-field.sh is not executable"
 
+# The reader is a wrapper over a separate awk program. A missing or unparseable
+# program makes the reader exit non-zero, which the guards translate into a block
+# -- correct, but it blocks every tool call, so it is caught here instead.
+[ -r scripts/json-field.awk ] || fail "scripts/json-field.awk is missing or unreadable"
+awk -f scripts/json-field.awk -v object=probe -v fields=probe </dev/null >/dev/null 2>&1 \
+  || fail "scripts/json-field.awk does not parse; every guard would block"
+
 if grep -nE 'Bash\(git (add|commit|worktree)' .claude/settings.json >/dev/null; then
   fail "Claude settings auto-allow mutating Git commands"
 fi

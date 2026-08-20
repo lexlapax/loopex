@@ -45,6 +45,7 @@ for candidate_path in \
   scripts/check-bootstrap.sh \
   scripts/check-agent-bootstrap.sh \
   scripts/json-field.sh \
+  scripts/json-field.awk \
   test/fixtures/python/module.py \
   test/fixtures/protocol/session.jsonl \
   test/fixtures/extensions/compat.ez \
