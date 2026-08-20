@@ -9,7 +9,7 @@ run has one Erlang runtime, so the gate runner is invoked once per pair. Both
 orders are run, because a per-lane pass proves nothing about ordering — a shared
 build directory once made the second lane fail on beams the first had compiled.
 
-- candidate: `906644761accc41c12528ab9295cd4e7f6fa0dcd`
+- candidate: `2685e585afe5cfc32b0823e4b1c1cc676b53821e`
 - gate digest: `sha256:6ca3b88f6925c1bd5c9144d2d4fbbaf8cc0beacd086b9f6534c6d27fccfbfa63`
 - command: `bash scripts/check-m0-gate.sh`, with `LOOPEX_PROVIDER_API_KEY` set, the
   floor pair supplied by `mise exec erlang@26.0 elixir@1.17.0-otp-26 --`
@@ -18,10 +18,10 @@ build directory once made the second lane fail on beams the first had compiled.
 
 | # | Order | Toolchain | Verdict | Exit | Wall clock |
 | --- | --- | --- | --- | --- | --- |
-| 1 | first | Elixir 1.17.0 / OTP 26 erts-14.0 | `M0 gate GREEN` | 0 | 84s |
-| 2 | second | Elixir 1.20.3 / OTP 29 erts-17.0.5 | `M0 gate GREEN` | 0 | 97s |
-| 3 | third | Elixir 1.20.3 / OTP 29 erts-17.0.5 | `M0 gate GREEN` | 0 | 53s |
-| 4 | fourth | Elixir 1.17.0 / OTP 26 erts-14.0 | `M0 gate GREEN` | 0 | 83s |
+| 1 | first | Elixir 1.17.0 / OTP 26 erts-14.0 | `M0 gate GREEN` | 0 | 89s |
+| 2 | second | Elixir 1.20.3 / OTP 29 erts-17.0.5 | `M0 gate GREEN` | 0 | 101s |
+| 3 | third | Elixir 1.20.3 / OTP 29 erts-17.0.5 | `M0 gate GREEN` | 0 | 56s |
+| 4 | fourth | Elixir 1.17.0 / OTP 26 erts-14.0 | `M0 gate GREEN` | 0 | 87s |
 
 Runs 1 and 2 are floor-then-current; runs 3 and 4 reverse that, so each pair ran
 both immediately after itself and immediately after the other. With no
