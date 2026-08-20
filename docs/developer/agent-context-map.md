@@ -348,6 +348,45 @@ cc88d0a  gen 3  binds 19a1a93
 9418ac8  gen 0  empty governance — the original acceptance
 ```
 
+<a id="disposition-m0-amendment-5-2026-08-20"></a>
+#### Amendment 5 — accepted 2026-08-20
+
+The maintainer accepted [Amendment 5](../plans/M0-gate.md#amendment-5). A loop over
+the search-path variable binds it with no operator on the line, so it matched
+neither scan and the loop body reached a real interpreter while the absence lane
+reported success. `for` and `select` join the binding constructs; ten forms are
+caught and six near-misses are not, including a loop that only reads the variable.
+
+One file changed. No locked command, selector, minimum executed count, locked test
+name, fixture, toolchain pair, evidence class, or closure document moved.
+
+**Five amendments, and the pattern is worth recording rather than repeating.** Each
+one narrowed a check that had previously been described as complete: Amendment 1
+parsed one toolchain's test summary, 2 got that toolchain's arithmetic wrong, 3
+corrected a self-certified acceptance, 4 replaced four enumerations with
+derivations and structure, and 5 showed that structural rule was still one category
+short. The lesson generalises past this milestone: **a check written as an
+enumeration has an unbounded tail, and calling it complete is a claim the next
+reviewer disproves.** Where an enumeration can become a derivation or a structural
+rule it should, and what stays enumerated should say so.
+
+The gate now states its residual instead of claiming coverage: a textual scan of
+shell cannot be proved exhaustive, indirection through a nameref, `eval`, or a
+computed name leaves no token to match, and no containment available in the
+development baseline closes it.
+
+The acceptance record rebinds to candidate `3d59d001fc4526a54651e847e3e3a521881de297`, whose gate carries
+amendment generation 5. The chain, computed from the repository:
+
+```text
+3d59d00  gen 5  binds cdcf10b
+cdcf10b  gen 4  binds cc88d0a
+cc88d0a  gen 3  binds 19a1a93
+19a1a93  gen 2  binds 4599472
+4599472  gen 1  binds 9418ac8
+9418ac8  gen 0  empty governance — the original acceptance
+```
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
