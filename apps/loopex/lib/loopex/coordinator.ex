@@ -241,7 +241,7 @@ defmodule Loopex.Coordinator do
 
     with {:ok, claim} <- Journal.claim_session(journal),
          {:ok, records, tail} <- Journal.read(journal),
-         :ok <- resolve_tail(journal, tail),
+         :ok <- resolve_tail(journal, tail, claim),
          {:ok, session} <- Session.replay(session_id, records) do
       state = %{
         journal: journal,
@@ -279,15 +279,17 @@ defmodule Loopex.Coordinator do
   # Concept: a journal must end where its durable truth ends.
   # Technical depth: nothing acknowledged is discarded — a torn frame was never a
   # complete record, so no caller was told it committed.
-  defp resolve_tail(_journal, :complete), do: :ok
-  defp resolve_tail(journal, {:torn, offset}), do: Journal.discard_torn_tail(journal, offset)
+  defp resolve_tail(_journal, :complete, _claim), do: :ok
+
+  defp resolve_tail(journal, {:torn, offset}, claim),
+    do: Journal.discard_torn_tail(journal, offset, claim)
 
   # Corruption is not a torn append and is never repaired automatically. A complete
   # frame that fails its checksum means bytes changed under an acknowledged record,
   # and the records beyond it may be perfectly intact. Discarding from there would
   # destroy durable truth to make startup succeed, so the coordinator refuses and
   # leaves the journal for an operator.
-  defp resolve_tail(journal, {:corrupt, offset}),
+  defp resolve_tail(journal, {:corrupt, offset}, _claim),
     do: {:error, {:journal_corrupt, journal, offset}}
 
   # Concept: a restart takes a new epoch, then fences every effect whose outcome

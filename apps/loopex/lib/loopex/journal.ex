@@ -121,9 +121,14 @@ defmodule Loopex.Journal do
 
           {:ok, contents} ->
             case parse_owner(contents) do
-              {:ok, %{token: held}} when is_binary(token) and held == token -> :ok
-              {:ok, _owner} -> {:error, {:not_the_session_owner, path}}
-              :error -> {:error, {:claim_unreadable, lock, :malformed}}
+              {:ok, %{token_digest: held}} ->
+                case is_binary(token) and token_matches?(held, token) do
+                  true -> :ok
+                  false -> {:error, {:not_the_session_owner, path}}
+                end
+
+              :error ->
+                {:error, {:claim_unreadable, lock, :malformed}}
             end
         end
     end
@@ -213,11 +218,21 @@ defmodule Loopex.Journal do
   whether replay and fencing hold under the intended semantics.
   """
   @spec discard_torn_tail(Path.t(), non_neg_integer()) :: :ok | {:error, term()}
-  def discard_torn_tail(path, offset) when is_integer(offset) and offset >= 0 do
-    # No lock is taken here. The caller must already be the journal's session
-    # owner, which the coordinator establishes with claim_session/1 before it
-    # reads anything and holds until it stops. Taking a lock only around this
-    # operation was the defect: it left append/2 free to interleave.
+  def discard_torn_tail(path, offset, token \\ nil) when is_integer(offset) and offset >= 0 do
+    with :ok <- refuse_foreign_writer(path, token) do
+      open_and_truncate(path, offset)
+    end
+  end
+
+  # Concept: the destructive path is inside the capability, not beside it.
+  # Technical depth: this took no lock and checked no token, on the reasoning that
+  # the coordinator holds the claim for its lifetime. That reasoning covered the
+  # coordinator and nothing else: a review repaired -- and truncated -- a journal
+  # while another process held its live claim. The one operation that deletes
+  # durable bytes was the one operation outside the mechanism built to protect
+  # them. It now requires the same token as an append, so an unclaimed journal is
+  # still repairable directly by a tool, and a claimed one only by its owner.
+  defp open_and_truncate(path, offset) do
     case File.open(path, [:read, :write, :binary]) do
       {:error, posix} ->
         {:error, {:journal_unavailable, path, posix}}
@@ -271,6 +286,28 @@ defmodule Loopex.Journal do
   # with the file.
   defp token, do: :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
 
+  # Concept: the sentinel proves a token without carrying one.
+  # Technical depth: the token was written into the sentinel, which is deliberately
+  # readable so an operator can see who holds a journal. That published the bearer
+  # value to every process running as the same user, and a review used it: read the
+  # token, release the live owner, claim the journal. Randomness protects a secret,
+  # not a secret that is printed.
+  #
+  # The digest goes in the file instead. A holder presents its token and the digest
+  # of what it presents is compared; a reader of the file learns a value it cannot
+  # present. The operator-facing fields -- node, OS process, time -- are unchanged,
+  # so the recovery procedure still works.
+  defp token_digest(token), do: :crypto.hash(:sha256, token) |> Base.encode16(case: :lower)
+
+  # Constant-time comparison, so a caller cannot learn the digest by timing repeated
+  # guesses. The cost is negligible and the alternative is a subtle dependency on
+  # how the runtime compares binaries.
+  defp token_matches?(digest, token) do
+    :crypto.hash_equals(digest, token_digest(token))
+  rescue
+    _error -> digest == token_digest(token)
+  end
+
   @doc """
   ## Concept
 
@@ -289,7 +326,7 @@ defmodule Loopex.Journal do
       # Deleting someone else's claim was possible from anywhere, which let a
       # second owner start while the first was still live. Releasing now requires
       # having claimed.
-      case owner.token == token do
+      case token_matches?(owner.token_digest, token) do
         true -> remove_lock(lock)
         false -> {:error, {:not_the_claim_holder, lock}}
       end
@@ -353,7 +390,7 @@ defmodule Loopex.Journal do
 
   defp owner_line(token) do
     "node=#{node()} os_pid=#{System.pid()} erl_pid=#{inspect(self())} " <>
-      "token=#{token} at=#{System.system_time(:second)}\n"
+      "token_digest=#{token_digest(token)} at=#{System.system_time(:second)}\n"
   end
 
   # Concept: a claim may be taken over only when its owner is provably gone, and
@@ -429,8 +466,8 @@ defmodule Loopex.Journal do
       end)
 
     case fields do
-      %{"node" => n, "os_pid" => o, "erl_pid" => e, "token" => t} ->
-        {:ok, %{node: n, os_pid: o, erl_pid: e, token: t}}
+      %{"node" => n, "os_pid" => o, "erl_pid" => e, "token_digest" => d} ->
+        {:ok, %{node: n, os_pid: o, erl_pid: e, token_digest: d}}
 
       _other ->
         :error
