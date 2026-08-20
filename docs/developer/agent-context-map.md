@@ -317,6 +317,37 @@ so an unrelated failure is misattributed to outcome 8. It was named to the
 maintainer and not included in either amendment, so it stands until a future
 disposition covers it.
 
+<a id="disposition-m0-amendment-4-2026-08-20"></a>
+#### Amendment 4 — accepted 2026-08-20
+
+The maintainer accepted [Amendment 4](../plans/M0-gate.md#amendment-4) after
+reading its two-file diff. It changes the bound runner's interpreter scan,
+search-path mutation rule, credential redaction, and summary-field extraction. No
+locked command, selector, minimum executed count, locked test name, fixture,
+toolchain pair, evidence class, or closure document changes.
+
+The four gaps shared one shape, and it is the shape worth remembering: **a check
+written as an enumeration has an unbounded tail.** Five launchers were stubbed but
+not scanned because the stub list and the scan alternation were written
+separately; the search-path rule listed syntaxes and missed a quoted export and a
+reading builtin; redaction listed nothing but treated the credential as a glob;
+summary extraction treated a grep failure as an absence. Where an enumeration could
+be replaced by a derivation — the scan generated from the stub list — it was. Where
+it could be replaced by structure — a builtin makes a binding, an operator makes an
+assignment — it was. What remains enumerated is now stated as such rather than
+described as complete.
+
+The acceptance record rebinds to candidate `cdcf10b0dd3707a509769980037b9a4a06a22bba`, whose gate carries
+amendment generation 4. The chain from it is computed rather than transcribed:
+
+```text
+cdcf10b  gen 4  binds cc88d0a
+cc88d0a  gen 3  binds 19a1a93
+19a1a93  gen 2  binds 4599472
+4599472  gen 1  binds 9418ac8
+9418ac8  gen 0  empty governance — the original acceptance
+```
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
