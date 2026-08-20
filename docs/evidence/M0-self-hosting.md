@@ -20,12 +20,12 @@ The size figure is audit material. No run passes or fails on it.
 Taken by running `mix loopex.self_hosting`, not transcribed:
 
 ```text
-documentation 1719   comment 439   blank 1403   code 6276   total 9837
+documentation 1719   comment 467   blank 1414   code 6322   total 9922
 ```
 
 Against the 4,462-line gate-commit baseline the plan binds, that is
-2.20x. Against the 4,688 lines those files actually held at the
-revision they were retired, it is 2.10x. Both are stated because a
+2.22x. Against the 4,688 lines those files actually held at the
+revision they were retired, it is 2.12x. Both are stated because a
 reader comparing to the deleted files computes the second, and the two numbers are
 different.
 
