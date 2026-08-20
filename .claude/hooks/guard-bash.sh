@@ -12,7 +12,41 @@ root="${CLAUDE_PROJECT_DIR:-$(cd -- "$(dirname -- "$0")/../.." && pwd)}"
 reader="$root/scripts/json-field.sh"
 [ -x "$reader" ] || exit 0
 
-cmd="$("$reader" tool_input command)"
+# Concept: a field the reader could not read is a reason to block, not to allow.
+# Technical depth: the reader announced it could not read a field and exited
+# non-zero, and this took the empty output as "no such field" and allowed the call.
+# Exit 2 is the only status the client treats as blocking, so a failure that is not
+# translated into 2 is a failure that permits.
+#
+# A bounded view is used for matching. Stripping quotes from an unbounded string
+# is where the remaining timeout lived: the reader became linear, and the same
+# quadratic work reappeared in the shell that consumed it. Nothing legitimate this
+# guard inspects is longer than the bound, and a longer one blocks rather than
+# being scanned slowly.
+read_field() {
+  local out status
+  out="$("$reader" "$@")" || status=$?
+
+  case "${status:-0}" in
+    0) printf '%s' "$out" ;;
+    *) echo "Blocked: the tool call could not be read safely (reader exit ${status})." >&2
+       exit 2 ;;
+  esac
+}
+
+bounded_view() {
+  local text="$1"
+
+  if [ "${#text}" -gt 8192 ]; then
+    echo "Blocked: field is too long to inspect safely." >&2
+    exit 2
+  fi
+
+  text="${text//\"/}"
+  printf '%s' "${text//\'/}"
+}
+
+cmd="$(read_field tool_input command)"
 [ -z "$cmd" ] && exit 0
 
 case "$cmd" in
@@ -24,8 +58,7 @@ case "$cmd" in
     ;;
 esac
 
-path_view="${cmd//\"/}"
-path_view="${path_view//\'/}"
+path_view="$(bounded_view "${cmd}")"
 real_loopex_home="${HOME%/}/.loopex"
 case "$path_view" in
   *"~/.loopex"*|*'$HOME/.loopex'*|*'${HOME}/.loopex'*|*'${HOME%/}/.loopex'*|*"$real_loopex_home"*)

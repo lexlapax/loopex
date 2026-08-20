@@ -322,9 +322,18 @@ BEGIN {
         # that counts -- the same last-wins rule that already applies to duplicate
         # fields, missed one level up.
         if (depth == 1 && key[1] == object) { delete found }
+        # A requested key seen again starts a new binding. Only a STRING value set
+        # `found`, so a later null, number, object or array left the earlier string
+        # in place -- and a document could pin a harmless value with a non-string
+        # duplicate, which a real parser would have discarded. Clearing on the key
+        # rather than on the value makes last-wins hold for every value type.
+        if (depth == 2 && key[1] == object && (key[2] in requested)) { delete found[key[2]] }
       } else if (depth == 2 && key[1] == object && (key[2] in requested) && pending_oversize) {
+        # A flag, not `exit`. Calling exit here enters END, whose unconditional
+        # `exit 0` overrode the status -- so the reader announced it could not read
+        # the field and then reported success, and the guard allowed the call.
         printf "json-field.sh: %s is too large to read safely\n", key[2] > "/dev/stderr"
-        exit 65
+        unreadable = 1
       } else if (depth == 2 && key[1] == object && (key[2] in requested)) {
         # The RAW token is stored; at most one is decoded, at output.
         found[key[2]] = pending_token
@@ -344,6 +353,8 @@ END {
   if (pending && depth == 2 && key[1] == object && (key[2] in requested)) {
     found[key[2]] = pending_token
   }
+
+  if (unreadable) { exit 65 }
 
   for (i = 1; i <= count; i++) {
     if (wanted[i] in found) {
