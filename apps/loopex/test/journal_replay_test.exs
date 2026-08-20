@@ -455,6 +455,48 @@ defmodule Loopex.JournalReplayTest do
     refute File.exists?(lock), "a refused start must release the claim it took"
   end
 
+  test "a start that raises after claiming releases the claim too" do
+    collector = DurableTruth.start_collector()
+    journal = DurableTruth.journal_path("raise-releases")
+
+    # A real journal has to exist first: the sentinel is keyed by device and
+    # inode, so there is no lock path to assert about until there is a file.
+    {:ok, first} = DurableTruth.start(journal, "session-raise", collector)
+    assert :ok = Coordinator.commit_fact(first, :workspace, "one")
+
+    # Stopped rather than killed: a clean stop runs terminate/2 and releases, so
+    # the lock this test asserts about can only have come from the failed start.
+    :ok = GenServer.stop(first)
+
+    assert {:ok, lock} = Journal.session_lock_path(journal)
+    refute File.exists?(lock), "a clean stop must release before this starts"
+
+    # gen_server does not call terminate/2 when init/1 RAISES, exactly as it does
+    # not when init/1 returns {:stop, _}. The first version of the release fix
+    # covered only the second, and two required options were still fetched after
+    # the claim -- so a caller that omitted one stranded the sentinel through a
+    # path the {:stop, _} test could not reach.
+    #
+    # Every required option is now read before the claim is taken, which is why
+    # this raises without a lock file existing rather than raising after one was
+    # created. The assertion is on the lock, not on the raise: raising is the
+    # correct response to a missing option and was never in question.
+    Process.flag(:trap_exit, true)
+
+    # gen_server catches the raise and reports it, rather than letting it
+    # propagate out of start_link.
+    assert {:error, {%KeyError{key: :executor}, _stacktrace}} =
+             GenServer.start_link(Coordinator,
+               journal: journal,
+               session_id: "session-raise",
+               dispatch_to: self()
+               # :executor deliberately omitted
+             )
+
+    refute File.exists?(lock),
+           "a start that raised after claiming must not leave the journal claimed"
+  end
+
   test "discarding a torn tail refuses anything it cannot prove is torn" do
     journal = DurableTruth.journal_path("torn-refusal")
     {records, _model} = DurableTruth.history(11, 6, "session-torn-refusal")

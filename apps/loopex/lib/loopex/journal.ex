@@ -751,7 +751,7 @@ defmodule Loopex.Journal do
   # Fewer bytes remain than the frame claims, so the tail is a strict prefix. That
   # is the shape a killed writer leaves. It is still only provisionally torn: a
   # corrupted length prefix can claim more bytes than exist while intact records
-  # sit beyond it, which `discard_torn_tail/2` checks before removing anything.
+  # sit beyond it, which `discard_torn_tail/3` checks before removing anything.
   defp decode(_short, offset, read), do: {:ok, Enum.reverse(read), {:torn, offset}}
 
   # Technical depth: a torn append can leave any bytes at all, so the checksum is

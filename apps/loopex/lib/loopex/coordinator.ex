@@ -213,8 +213,15 @@ defmodule Loopex.Coordinator do
 
   @impl GenServer
   def init(options) do
+    # Every required option is fetched BEFORE the journal is claimed. A missing
+    # or misspelled key raises, and gen_server does not call terminate/2 when
+    # init/1 raises any more than when it returns {:stop, _} -- so a fetch after
+    # the claim stranded the sentinel exactly as the {:stop, _} path used to.
+    # Nothing between the claim and the release may raise.
     journal = Keyword.fetch!(options, :journal)
     session_id = Keyword.fetch!(options, :session_id)
+    dispatch_to = Keyword.fetch!(options, :dispatch_to)
+    executor = Keyword.fetch!(options, :executor)
 
     # Technical depth: a torn tail is deliberately not a startup failure. The
     # records before the tear are the state that was acknowledged, so recovery
@@ -253,7 +260,7 @@ defmodule Loopex.Coordinator do
         {:stop, {:recovery_failed, reason}}
 
       {:ok, claim} ->
-        case start_claimed(journal, claim, session_id, options) do
+        case start_claimed(journal, claim, session_id, dispatch_to, executor) do
           {:ok, state} ->
             {:ok, state}
 
@@ -274,7 +281,7 @@ defmodule Loopex.Coordinator do
 
   # Everything after the claim is taken. Returning {:stop, _} here is what tells
   # init/1 to release before it stops.
-  defp start_claimed(journal, claim, session_id, options) do
+  defp start_claimed(journal, claim, session_id, dispatch_to, executor) do
     with {:ok, records, tail} <- Journal.read(journal),
          :ok <- resolve_tail(journal, tail, claim),
          {:ok, session} <- Session.replay(session_id, records) do
@@ -282,8 +289,8 @@ defmodule Loopex.Coordinator do
         journal: journal,
         claim: claim,
         session: session,
-        dispatch_to: Keyword.fetch!(options, :dispatch_to),
-        executor: Keyword.fetch!(options, :executor),
+        dispatch_to: dispatch_to,
+        executor: executor,
         query: nil
       }
 
