@@ -20,7 +20,13 @@ defmodule Mix.Tasks.Loopex.DocsCheckTest do
   read compiled docs and saw something else.
   """
 
-  use ExUnit.Case, async: true
+  # Not async: `Code.put_compiler_option/2` is global VM state, and the fixtures
+  # need it because `mix test` compiles with docs off -- without the toggle every
+  # fixture beam comes back `:chunk_not_found`. Under async the window between the
+  # toggle and its restore is shared with any other test that compiles, and the
+  # restore writes back a value that could have changed meanwhile. The file runs in
+  # well under a second, so serialising it costs nothing worth a race.
+  use ExUnit.Case, async: false
 
   alias Mix.Tasks.Loopex.DocsCheck
 

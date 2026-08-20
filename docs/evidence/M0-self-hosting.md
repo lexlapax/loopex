@@ -20,7 +20,7 @@ The size figure is audit material. No run passes or fails on it.
 Taken by running `mix loopex.self_hosting`, not transcribed:
 
 ```text
-documentation 1763   comment 602   blank 1484   code 6588   total 10437
+documentation 1763   comment 608   blank 1484   code 6588   total 10443
 ```
 
 Against the 4,462-line gate-commit baseline the plan binds, that is
@@ -29,7 +29,7 @@ revision they were retired, it is 2.23x. Both are stated because a
 reader comparing to the deleted files computes the second, and the two numbers are
 different.
 
-The figure is 10437 at this candidate. Two earlier rounds account for the shape of
+The figure is 10443 at this candidate. Two earlier rounds account for the shape of
 it, and the numbers belong to different candidates rather than to one delta:
 
 - +301 when `apps/loopex/test/tool_call_reader_test.exs` was added to the measured
@@ -40,9 +40,10 @@ it, and the numbers belong to different candidates rather than to one delta:
   an understated number still reads as evidence.
 - +9 from a comment correction in `apps/loopex/lib/mix/tasks/status/register.ex`,
   which is in the measured set.
-- +172 at this candidate: `apps/loopex/test/docs_check_test.exs` is new and joins
-  the measured set beside the reader's test, and `loopex.docs_check.ex` grew by
-  separating its uncovered tally into three counts.
+- +178 at this candidate: `apps/loopex/test/docs_check_test.exs` is new and joins
+  the measured set beside the reader's test, `loopex.docs_check.ex` grew by
+  separating its uncovered tally into three counts, and the new test carries the
+  reason it does not run async.
 
 Each of those deltas was recorded only after re-running the command. A figure
 headed "at the closure candidate" was once carried forward from the candidate
