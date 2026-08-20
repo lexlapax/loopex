@@ -24,13 +24,22 @@
 #
 # That matters because the alternative -- searching for the field name anywhere --
 # would read a path out of an unrelated payload and make a guard fire on the wrong
-# input. The scan is linear in the document, and only the requested fields are
-# unescaped, so a tool call carrying a large file body costs one pass rather than
-# one pass per character of it.
+# input. The scan is linear in the document, and at most one field is decoded, so a
+# tool call carrying a large file body costs one pass rather than one pass per
+# character of it.
 #
-# Escapes are resolved except `\uXXXX`, which is left in its escaped form rather
-# than approximated: a guard comparing paths is better served by a visibly
-# unresolved escape than by a plausible wrong character.
+# Escapes are resolved, including `\uXXXX` and surrogate pairs. They were once
+# left escaped, on the reasoning that a visibly unresolved escape beats a plausible
+# wrong character. That was wrong in the direction that matters: a hook matching on
+# a command never saw `\u0024HOME` as `$HOME`, so an ordinary JSON spelling of a
+# protected path walked past the guard. Keys are decoded too, and a duplicate key
+# takes the last occurrence, both matching a real parser.
+#
+# Decoding happens once, on the value actually returned, and writes decoded pieces
+# straight out rather than building a string. Decoding every candidate and
+# accumulating by concatenation was quadratic: a few large escaped values pushed a
+# hook past its configured timeout, and a timed-out hook exits 124, which does not
+# block.
 set -euo pipefail
 
 if [ "$#" -lt 2 ]; then
@@ -57,6 +66,9 @@ function depth_delta(text,   copy, opened, closed) {
 
 function unescape(text,   out, index_, char_, next_) {
   out = ""
+  # Nothing to decode is the overwhelmingly common case, and the loop below costs a
+  # string copy per character. Returning early keeps ordinary input linear.
+  if (index(text, "\\") == 0) { return text }
   index_ = 1
   while (index_ <= length(text)) {
     char_ = substr(text, index_, 1)
@@ -146,6 +158,65 @@ function utf8(code_) {
     128 + int((code_ % 262144) / 4096), 128 + int((code_ % 4096) / 64), 128 + (code_ % 64))
 }
 
+# Concept: write the decoded bytes of a JSON string, without ever building the
+# whole decoded string.
+# Technical depth: awk string concatenation copies, so accumulating a result one
+# piece at a time is quadratic. A 3.6 MB escaped value took 22 seconds, past the
+# configured hook timeout -- and a timed-out hook exits 124, which does not
+# block. Splitting on the escape character gives whole literal runs that are
+# printed once each, so the work is linear in the input and the pieces are never
+# joined. Correctness is unchanged: the same escapes are recognised, and a
+# surrogate pair spanning two escapes is still combined.
+function emit_unescaped(text,   n, parts, i, seg, lead, rest, code_, low_) {
+  if (index(text, "\\") == 0) { printf "%s", text; return }
+  n = split(text, parts, "\\")
+  printf "%s", parts[1]
+  i = 2
+  while (i <= n) {
+    seg = parts[i]
+    if (seg == "") {
+      # Two backslashes: one literal backslash, and the next piece is literal text.
+      printf "%s", "\\"
+      i++
+      if (i <= n) { printf "%s", parts[i]; i++ }
+      continue
+    }
+    lead = substr(seg, 1, 1)
+    rest = substr(seg, 2)
+    if (lead == "u") {
+      code_ = hexval(substr(rest, 1, 4))
+      rest = substr(rest, 5)
+      if (code_ < 0) {
+        printf "%s", "\\u" rest
+        i++
+        continue
+      }
+      if (code_ >= 55296 && code_ <= 56319 && i < n && substr(parts[i + 1], 1, 1) == "u") {
+        low_ = hexval(substr(parts[i + 1], 2, 4))
+        if (low_ >= 56320 && low_ <= 57343) {
+          printf "%s", utf8(65536 + (code_ - 55296) * 1024 + (low_ - 56320))
+          printf "%s", substr(parts[i + 1], 6)
+          i = i + 2
+          continue
+        }
+      }
+      if (code_ >= 55296 && code_ <= 57343) { printf "%s", utf8(65533) }
+      else { printf "%s", utf8(code_) }
+      printf "%s", rest
+      i++
+      continue
+    }
+    if (lead == "n") { printf "%s", "\n" }
+    else if (lead == "t") { printf "%s", "\t" }
+    else if (lead == "r") { printf "%s", "\r" }
+    else if (lead == "b") { printf "%s", "\b" }
+    else if (lead == "f") { printf "%s", "\f" }
+    else { printf "%s", lead }
+    printf "%s", rest
+    i++
+  }
+}
+
 BEGIN {
   count = split(fields, wanted, ",")
   for (i = 1; i <= count; i++) {
@@ -175,15 +246,20 @@ END {
       continue
     }
     if (depth == 2 && key[1] == object && (key[2] in requested)) {
+      # The RAW token is stored and decoded only if it is the one returned.
+      # Decoding every candidate as it was scanned made a document with several
+      # large escaped values quadratic: a 1 MB input took seconds, and past the
+      # hook timeout the client sees exit 124, which does not block. Decoding at
+      # most one value removes the amplification.
+      #
       # A duplicate key takes the LAST occurrence, which is what a real parser
-      # does. Keeping the first let a document put a harmless value ahead of the
-      # real one and have the guard judge the decoy.
-      found[key[2]] = unescape(token)
+      # does. Keeping the first let a document put a decoy ahead of the real value.
+      found[key[2]] = token
     }
   }
   for (i = 1; i <= count; i++) {
     if (wanted[i] in found) {
-      printf "%s", found[wanted[i]]
+      emit_unescaped(found[wanted[i]])
       exit 0
     }
   }

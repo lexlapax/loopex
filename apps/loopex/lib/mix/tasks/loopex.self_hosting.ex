@@ -100,9 +100,14 @@ defmodule Mix.Tasks.Loopex.SelfHosting do
      "the guards resolved their field with a general query language. They now use a " <>
        "repository-owned reader that enumerates JSON string tokens and counts container depth: " <>
        "path aware for the depth-two shape every hook uses, but not a general expression " <>
-       "language, and \\uXXXX is left escaped rather than resolved. A hook runs before every " <>
-       "tool call, so a language runtime per call is not viable. The bound fixtures and the " <>
-       "deny/allow corpus in the aggregate still prove each guard blocks and allows as before."},
+       "language. A hook runs before every tool call, so a language runtime per call is not " <>
+       "viable. Escapes, including \\uXXXX and surrogate pairs, ARE resolved, in keys as well " <>
+       "as values, and a duplicate key takes the last occurrence -- all matching a real parser. " <>
+       "Leaving them escaped was a detection loss a review demonstrated: an ordinary JSON " <>
+       "spelling of a protected path walked past the guard. What remains dropped is the general " <>
+       "query language, not escape handling. Behaviour differs from a real parser only for input " <>
+       "no valid document produces: malformed escapes pass through, and NUL and lone surrogates " <>
+       "become U+FFFD rather than being emitted as bytes no consumer can decode."},
     {"The input-not-mutated assertion",
      "one retired test asserted the checker did not mutate the document set it was given. The " <>
        "property is unrepresentable here, because the data is immutable. Its positive half -- the " <>

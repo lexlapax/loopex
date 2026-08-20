@@ -54,9 +54,11 @@ reviewer should have alongside it.
 
 ## Dropped behaviours
 
-Eight, with the reason each was dropped rather than ported. Items 1 and 7 are the
-two a reviewer should look at hardest, because they are the only ones that change
-what the repository can detect or where it can run.
+Eight, with the reason each was dropped rather than ported. Items 1, 4 and 7 are
+the ones a reviewer should look at hardest, because they are the ones that change
+what the repository can detect or where it can run. Item 4 was previously described
+as not affecting detection; a review demonstrated otherwise, and that correction is
+part of why it is called out here.
 
 1. **Untracked-file enumeration in the adapter check.** The retired checker
    globbed the filesystem, so an untracked stray file failed an
@@ -72,7 +74,16 @@ what the repository can detect or where it can run.
 4. **General path queries in the client hooks.** Replaced by a token-enumerating,
    depth-counting reader that is path aware for the depth-2 shape every hook uses
    but is not a general expression language. A hook runs before every tool call,
-   so a language runtime per call is not viable.
+   so a language runtime per call is not viable. **This one is a detection change
+   and is listed below with items 1 and 7 for that reason.** Two reviews found real
+   bypasses in it: escapes left unresolved, so an ordinary JSON spelling of a
+   protected path passed a guard; then keys left raw and duplicates taking the
+   first value, which allowed an escaped key alias and a decoy. All are fixed, and
+   decoding is now done once on the returned value and written out in pieces,
+   because decoding every candidate by string concatenation was quadratic and could
+   push a hook past its configured timeout — where the client sees exit 124, which
+   does not block. What remains dropped is the general query language, not escape
+   handling.
 5. **The input-not-mutated assertion.** Unrepresentable — the data is immutable.
    Its positive half is preserved.
 6. **Introspection-based capsule assertion.** One retired test asserted by naming

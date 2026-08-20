@@ -42,6 +42,20 @@ defmodule Loopex.StatusCheckTest do
     assert [] == Fixture.checked(Fixture.documents())
   end
 
+  # A resolver must answer per path now that every chain edge recomputes the
+  # digests it records. One that returned the plan for every path made the
+  # technical envelope unparsable, which is the resolver being wrong rather than
+  # the check.
+  defp chain_resolver(plan_text) do
+    fn _sha, path ->
+      cond do
+        String.ends_with?(path, "-technical.md") -> Fixture.technical_plan()
+        String.ends_with?(path, "-gate.md") -> Fixture.gate()
+        true -> plan_text
+      end
+    end
+  end
+
   test "an acceptance chain edge must run backwards along history" do
     # Resolving proves only that a commit is reachable from HEAD, and two unrelated
     # branches both become reachable once anything merges them. Without an ancestry
@@ -49,7 +63,7 @@ defmodule Loopex.StatusCheckTest do
     # combined with a fabricated generation that lands an unaccepted gate.
     original = Fixture.plan()
     amended = Fixture.plan(governed: true)
-    resolve = fn _sha, _path -> original end
+    resolve = chain_resolver(original)
 
     # An ancestral edge is admitted.
     assert :ok =
@@ -255,7 +269,7 @@ defmodule Loopex.StatusCheckTest do
                amended,
                path,
                "bbbb",
-               fn _sha, _path -> original end,
+               chain_resolver(original),
                MapSet.new()
              )
 
@@ -264,9 +278,24 @@ defmodule Loopex.StatusCheckTest do
       Plan.acceptance_chain(amended, path, "bbbb", fn _sha, _path -> nil end, MapSet.new())
     end
 
-    # A chain that never reaches an empty original is not admitted.
+    # A chain that never reaches an empty original is not admitted. The cycle is
+    # detected before any digest work, so the resolver only needs the plan text.
     assert_raise Invalid, ~r/does not terminate/, fn ->
-      Plan.acceptance_chain(amended, path, "bbbb", fn _sha, _path -> amended end, MapSet.new())
+      Plan.acceptance_chain(amended, path, "bbbb", chain_resolver(amended), MapSet.new())
+    end
+
+    # An edge whose recorded digests do not describe the files at either end is
+    # refused. Only the outermost binding used to be checked, so every earlier link
+    # was trusted structurally and a row of sixty-four zeroes satisfied the chain.
+    fabricated =
+      String.replace(
+        amended,
+        ~r/concept `sha256:[0-9a-f]{64}`/,
+        "concept `sha256:#{String.duplicate("0", 64)}`"
+      )
+
+    assert_raise Invalid, ~r/does not match/, fn ->
+      Plan.acceptance_chain(fabricated, path, "bbbb", chain_resolver(original), MapSet.new())
     end
   end
 

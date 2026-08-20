@@ -108,86 +108,45 @@ defmodule Loopex.Checks.Plan do
   """
   @spec gate_generation(String.t(), String.t()) :: non_neg_integer()
   def gate_generation(text, path) do
-    # An anchor inside a fenced code block is illustration, not a declaration, and
-    # counting one let a gate mint a generation with no visible amendment, scope,
-    # authority, or disposition behind it. Each anchor must also be followed by a
-    # visible amendment heading, so a bare anchor cannot mint a generation either.
+    # Visibility is decided by the repository's own Markdown reader, not by a second
+    # implementation here. The hand-rolled version tracked fences but not HTML
+    # comments, and treated any long-enough delimiter as a close even with trailing
+    # text -- so an anchor inside a comment, or after a "```still-code" line, minted
+    # a generation with no visible amendment behind it. Two parsers disagreeing
+    # about what is visible is exactly how a hidden amendment gets in.
+    lines = Markdown.lines(text, path)
+    visible = Markdown.visible_line_numbers(text, path)
+
     found =
-      text
-      |> String.split("\n")
-      |> Enum.reduce({[], nil, nil}, fn line, {numbers, fenced, pending} ->
+      lines
+      |> Enum.with_index()
+      |> Enum.reduce({[], nil}, fn {line, number}, {numbers, pending} ->
+        anchor = Regex.run(@amendment_anchor, String.trim(line))
+
         cond do
-          # CommonMark fences: a run of at least three backticks or tildes. A
-          # closing fence must use the SAME character and be at least as long as
-          # the opener, so a four-backtick block containing a three-backtick line
-          # stays open. Toggling one boolean on any "```" prefix got both wrong:
-          # a tilde fence was invisible, and an inner shorter run closed an outer
-          # longer one, letting a hidden anchor mint a generation.
-          fence_run(line) != nil and fence_closes?(fenced, fence_run(line)) ->
-            {numbers, nil, pending}
+          not MapSet.member?(visible, number) ->
+            {numbers, pending}
 
-          fenced == nil and fence_run(line) != nil ->
-            {numbers, fence_run(line), pending}
-
-          fenced != nil ->
-            {numbers, fenced, pending}
-
-          match?([_all, _number], Regex.run(@amendment_anchor, line)) ->
-            [_all, number] = Regex.run(@amendment_anchor, line)
-            {numbers, fenced, {String.to_integer(number), line}}
+          anchor != nil ->
+            {numbers, String.to_integer(Enum.at(anchor, 1))}
 
           pending != nil ->
-            {number, _anchor} = pending
-
             case Regex.match?(~r/^##+\s+Amendment\s/, line) do
-              true -> {[number | numbers], fenced, nil}
-              false -> {numbers, fenced, if(String.trim(line) == "", do: pending, else: nil)}
+              true -> {[pending | numbers], nil}
+              false -> {numbers, if(String.trim(line) == "", do: pending, else: nil)}
             end
 
           true ->
-            {numbers, fenced, pending}
+            {numbers, pending}
         end
       end)
-      |> then(fn {numbers, _fenced, _pending} -> Enum.sort(numbers) end)
+      |> then(fn {numbers, _pending} -> Enum.sort(numbers) end)
 
     if found != Enum.to_list(1..length(found)//1) do
       raise Invalid, "#{path}: amendment anchors must be numbered consecutively from 1"
     end
 
     length(found)
-  end
-
-  # Concept: the fence a line opens or closes, as {character, length}, or nil.
-  # Technical depth: leading indentation of up to three spaces is allowed, matching
-  # CommonMark; four or more would be an indented code block, which cannot contain
-  # a fence at all.
-  defp fence_run(line) do
-    trimmed = String.trim_leading(line, " ")
-
-    cond do
-      String.length(line) - String.length(trimmed) > 3 -> nil
-      true -> leading_run(trimmed)
-    end
-  end
-
-  defp leading_run("`" <> _rest = text), do: run_of(text, "`")
-  defp leading_run("~" <> _rest = text), do: run_of(text, "~")
-  defp leading_run(_text), do: nil
-
-  defp run_of(text, character) do
-    length =
-      text
-      |> String.graphemes()
-      |> Enum.take_while(&(&1 == character))
-      |> length()
-
-    if length >= 3, do: {character, length}, else: nil
-  end
-
-  defp fence_closes?(nil, _run), do: false
-
-  defp fence_closes?({open_character, open_length}, {character, length}) do
-    character == open_character and length >= open_length
   end
 
   @doc """
@@ -620,7 +579,7 @@ defmodule Loopex.Checks.Plan do
                 "nor a complete acceptance record, so it supersedes nothing"
 
       true ->
-        {prior, _concept, _technical, _gate} = Enum.at(bound, 0)
+        {prior, concept, technical, gate} = Enum.at(bound, 0)
 
         if prior == revision or MapSet.member?(seen, prior) do
           raise Invalid, "#{path}: acceptance candidate chain at #{revision} does not terminate"
@@ -645,6 +604,8 @@ defmodule Loopex.Checks.Plan do
                 "#{path}: acceptance candidate #{revision} binds prior candidate #{prior}, " <>
                   "which is not an ancestor of it; a chain edge must run backwards along history"
         end
+
+        verify_edge_digests!(path, revision, prior, {concept, technical, gate}, resolve_file)
 
         acceptance_chain(
           prior_text,
@@ -671,6 +632,58 @@ defmodule Loopex.Checks.Plan do
       raise Invalid,
             "#{path}: acceptance candidate chain terminates at #{revision}, whose gate is " <>
               "already at amendment generation #{generation}; an original carries generation 0"
+    end
+
+    :ok
+  end
+
+  # Concept: an inner chain link's digests must describe real bytes.
+  # Technical depth: only the outermost binding was checked, so every earlier link
+  # was trusted structurally -- a candidate carrying sixty-four zeroes for all three
+  # digests satisfied the chain, which falsified the claim that an invented row
+  # cannot. Each edge is now recomputed from the files at both ends: the row in a
+  # candidate binds a prior, and its digests must equal the envelopes and gate at
+  # the prior AND at the candidate itself, because the candidate was the accepted
+  # state when that row was written.
+  defp verify_edge_digests!(path, revision, prior, {concept, technical, gate}, resolve_file) do
+    technical_path = String.replace_suffix(path, ".md", "-technical.md")
+    gate_path = String.replace_suffix(path, ".md", "-gate.md")
+
+    # Only against the prior. A candidate's own row legitimately lags its own gate:
+    # an amendment lands in one commit and the rebind follows in the next, because
+    # no commit can name its own hash. Requiring the row to match the gate beside it
+    # would make that structure unrepresentable. Matching the bound candidate is the
+    # invariant that matters -- it is what makes the digests describe real bytes.
+    for {label, at} <- [{"prior candidate", prior}] do
+      concept_text = resolve_file && resolve_file.(at, path)
+      technical_text = resolve_file && resolve_file.(at, technical_path)
+      gate_text = resolve_file && resolve_file.(at, gate_path)
+
+      if is_nil(concept_text) or is_nil(technical_text) or is_nil(gate_text) do
+        raise Invalid,
+              "#{path}: chain edge #{revision} -> #{prior} cannot be checked; a governed file " <>
+                "is unavailable at #{at}"
+      end
+
+      {envelope, _ids} = concept_envelope(concept_text, "#{path} at #{at}")
+      actual_concept = envelope_digest(envelope)
+
+      actual_technical =
+        envelope_digest(technical_envelope(technical_text, "#{technical_path} at #{at}"))
+
+      actual_gate = gate_digest(gate_text, "#{gate_path} at #{at}")
+
+      for {field, recorded, computed} <- [
+            {"concept", concept, actual_concept},
+            {"technical", technical, actual_technical},
+            {"gate", gate, actual_gate}
+          ] do
+        if recorded != computed do
+          raise Invalid,
+                "#{path}: chain edge #{revision} -> #{prior} records a #{field} digest that " <>
+                  "does not match the #{label} at #{at}"
+        end
+      end
     end
 
     :ok
