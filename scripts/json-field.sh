@@ -57,7 +57,7 @@ done
 
 # The program is a separate file so its apostrophes are ordinary characters and
 # `awk -f` can parse it directly; see json-field.awk.
-here="$(cd -- "$(dirname -- "$0")" && pwd)"
+here="$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)"
 program="$here/json-field.awk"
 if [ ! -r "$program" ]; then
   echo "json-field.sh: cannot read $program" >&2
