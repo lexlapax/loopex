@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `26fa0e5db41cab042a0c0e8343acf35891b99778a9b3bddaa43ff36414b25307` | `scripts/check-m0-gate.sh` |
+| `b08eb452e003ae416670910527f7f8102ada2ecbff486816e884b4a4c97f11e6` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -608,3 +608,45 @@ lane for no additional guarantee.
 That third item is why this amendment is small. Two of the three review findings in
 this area were real and are corrected as text; the one that proposed a behaviour
 change was not confirmed, and behaviour was left alone.
+
+<a id="amendment-4"></a>
+## Amendment 4 — close the runner's own enumerated gaps
+
+**Acceptance: OUTSTANDING.** Drafted for the maintainer's disposition. **Scope:**
+the interpreter scan, the search-path mutation rule, credential redaction, and
+summary-field extraction in the bound runner. **Not changed:** every locked
+command, selector, minimum executed count, locked test name, fixture, toolchain
+pair, evidence class, and closure document.
+
+A review found four gaps, and they share one shape: a rule written as a list that
+drifted from what it was meant to cover.
+
+**The scan and the stubs were two lists.** `uv`, `pyenv`, `pipx`, `poetry` and
+`conda` were stubbed but not scanned, so an absolute invocation of one of those
+launchers evaded both search-path shadowing and the textual scan. The scan alternation is now
+generated from the stub list, so a stubbed name is a scanned name by construction
+and the two cannot drift again.
+
+**The search-path rule enumerated syntaxes.** Exporting the variable with its
+name quoted, and binding it with a reading builtin, both set it without matching. The rule is now structural:
+a binding builtin followed by the token, quoted or not, or a bare token with an
+assignment operator or array write. Fourteen forms are caught and prose mentioning
+the variable is not.
+
+**Credential redaction used the value as a glob.** `${var//$key/…}` unquoted
+treats the credential as a pattern, so a key containing `[`, `?` or `*` matched
+something other than itself and printed unredacted. The pattern is quoted, and the
+gate imposes no credential alphabet so it cannot assume one.
+
+**Summary extraction swallowed errors.** `grep … || true` conflates exit 1, which
+means no match, with a failure, which means the count is unknown. A broken
+extraction read as "no skipped tests" and a protected selector could pass on
+unavailable evidence.
+
+The pattern is worth recording, because it is the same one that produced
+Amendments 1 and 2 and several findings between them: **a check written as an
+enumeration is a check with an unbounded tail.** Where the enumeration could be
+replaced by a derivation — the scan from the stub list — it was. Where it could be
+replaced by structure — a builtin makes a binding, an operator makes an assignment
+— it was. What remains enumerated is stated as such rather than described as
+complete.
