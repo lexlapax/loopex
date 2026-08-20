@@ -9,7 +9,7 @@ run has one Erlang runtime, so the gate runner is invoked once per pair. Both
 orders are run, because a per-lane pass proves nothing about ordering — a shared
 build directory once made the second lane fail on beams the first had compiled.
 
-- candidate: `2685e585afe5cfc32b0823e4b1c1cc676b53821e`
+- candidate: `2a036d95793d49145a4eeb740834eff0345579b4`
 - gate digest: `sha256:6ca3b88f6925c1bd5c9144d2d4fbbaf8cc0beacd086b9f6534c6d27fccfbfa63`
 - command: `bash scripts/check-m0-gate.sh`, with `LOOPEX_PROVIDER_API_KEY` set, the
   floor pair supplied by `mise exec erlang@26.0 elixir@1.17.0-otp-26 --`
