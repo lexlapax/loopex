@@ -434,7 +434,7 @@ diagnosis only, so ask for the fix when you want the fix. Naming a workstream or
 file bounds the work to it, which is usually faster than correcting scope
 afterward.
 
-**Today.** No milestone is accepted, so only the first three rows do anything.
+**Today.** `M0` is accepted and in review, so every row applies. The rows above it describe what to say before a milestone exists; they are kept because the next milestone starts there.
 The Current Status capsule at the top of this file names the exact next
 decision; it is not repeated here, because a second copy would drift.
 

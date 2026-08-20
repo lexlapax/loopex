@@ -20,12 +20,12 @@ The size figure is audit material. No run passes or fails on it.
 Taken by running `mix loopex.self_hosting`, not transcribed:
 
 ```text
-documentation 1719   comment 412   blank 1395   code 6232   total 9758
+documentation 1719   comment 439   blank 1403   code 6276   total 9837
 ```
 
 Against the 4,462-line gate-commit baseline the plan binds, that is
-2.19x. Against the 4,688 lines those files actually held at the
-revision they were retired, it is 2.08x. Both are stated because a
+2.20x. Against the 4,688 lines those files actually held at the
+revision they were retired, it is 2.10x. Both are stated because a
 reader comparing to the deleted files computes the second, and the two numbers are
 different.
 
@@ -38,7 +38,7 @@ against the dropped-behaviour list rather than against an expectation.
 Three things account for most of the growth, and only the third is Elixir being
 Elixir:
 
-- **Documentation is 19% of the lines.** This repository's contract requires
+- **Documentation is 17% of the lines.** This repository's contract requires
   ordered Concept and Technical depth sections on every module and documented
   function, and `mix loopex.docs_check` now enforces it on this code. The retired
   Python carried far less.
@@ -48,7 +48,7 @@ Elixir:
   written. That is a cost of the dependency budget, not of the migration.
 - **The rest is style.** Formatted Elixir is more vertical than Python.
 
-Coverage grew as well: 37 executed tests across the three ported selectors where
+Coverage grew as well: 41 executed tests across the three ported selectors where
 the retired suite had 29. That is not a defence of the figure, only a fact a
 reviewer should have alongside it.
 

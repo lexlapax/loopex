@@ -8,9 +8,10 @@ public surface is labeled stable, release-candidate, or
 experimental, and experimental surfaces may break in a minor release with
 migration notes.
 
-Loopex is pre-implementation: nothing is released or installable. Entries below
-the first release record repository and planning work only, and carry no
-compatibility meaning.
+Nothing is released or installable yet. Entries below the first release record
+repository, planning, and milestone implementation work, and carry no
+compatibility meaning: M0's product code is disposable experiment and scaffold,
+and no public surface is labelled.
 
 Updating this file is part of a milestone closure candidate, not an optional
 courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Gates. Each gate locks

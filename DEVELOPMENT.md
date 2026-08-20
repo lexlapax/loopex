@@ -87,13 +87,11 @@ their adapters and parity smokes exist.
 
 ## Product Toolchain
 
-The bootstrap floor for future product work is OTP 26+ and Elixir 1.17+.
-No product scaffold exists yet, so installing that toolchain does not create a
-meaningful product command today. Before scaffolding, the first milestone plan
-and red gate must lock the exact repository-owned setup, format, compile,
-analysis, test, and gate commands and prove the declared outcome is still
-missing. Only after their acceptance may implementation add the scaffold and
-entrypoints that make those commands pass.
+The bootstrap floor is OTP 26+ and Elixir 1.17+, and ADR 0002 locks two exact
+pairs, recorded in `.tool-versions`. The product scaffold exists, so installing
+the toolchain lets you build and test today: `mix test` from the repository root,
+`bash scripts/check-bootstrap.sh` for the aggregate, and
+`bash scripts/check-m0-gate.sh` for the milestone gate.
 
 The M0 gate locks the self-hosting transition, and that transition has landed:
 the local aggregate, its structural and mutation checks, and the tested
@@ -136,17 +134,18 @@ documentation. A private function uses adjacent `# Concept:` and
 mode, or design decision. Obvious helpers rely on clear names and direct code;
 documentation should clarify rather than paraphrase syntax.
 
-## Before Product Work
+## Before Working
 
 Read [AGENTS.md](AGENTS.md), then the
 [plans status register](docs/plans/README.md), and use the
 [agent context map](docs/developer/agent-context-map.md) only to load relevant
-Concept sections and their exact Technical depth. Product implementation remains
-unauthorized until the maintainer or a recorded delegate explicitly opens and
-accepts the first milestone plan and branch-only red gate.
+Concept sections and their exact Technical depth. `M0` is accepted and in review;
+implementation authority is bounded by its accepted envelopes and locked gate, and
+a later milestone needs its own accepted plan and red gate before its work begins.
 
-When product tests arrive, they must use a temporary `LOOPEX_HOME` and temporary
-workspaces. Never point development or test commands at a real `~/.loopex`.
+Tests use a temporary `LOOPEX_HOME` and temporary workspaces, and the helpers fail
+before touching real user state. Never point development or test commands at a
+real `~/.loopex`.
 
 ## Toolchain pairs
 

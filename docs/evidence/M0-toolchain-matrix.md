@@ -28,9 +28,9 @@ both immediately after itself and immediately after the other. With no
 `LOOPEX_PROVIDER_API_KEY` present the same runner stops at outcome 7 reporting
 evidence unavailable rather than skipping, which is the fail-closed direction.
 
-These runs were executed at the candidate named above. This file is written in the
-commit immediately after it, so the closure candidate differs from the runs' SHA by
-this file alone — there is no way to record a run inside the commit the run
+These runs were executed at the candidate named above. This file and the
+self-hosting evidence are written in the commit immediately after it, so the
+closure candidate differs from the runs' SHA by those retained evidence files — there is no way to record a run inside the commit the run
 observed. That residual gap is stated rather than papered over, and it is why the
 gate expects a reviewer to re-run at the closure candidate rather than trust a
 retained verdict.

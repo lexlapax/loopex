@@ -57,10 +57,9 @@ separate decision duty when a founding boundary or invariant would change.
 
 ## Test Quick Reference
 
-No Mix project exists yet, so there is no product test command. Until the first
-accepted gate locks one, `bash scripts/check-bootstrap.sh` is the whole suite.
+The umbrella exists. Product tests run with `mix test` from the repository root, and the repository's own checks are Mix tasks: `mix loopex.deps_budget`, `loopex.core_only`, `loopex.matrix`, `loopex.format_scope`, `loopex.version_train`, `loopex.docs_check`, `loopex.hook_registration`, and `loopex.self_hosting`. `bash scripts/check-bootstrap.sh` runs the aggregate and `bash scripts/check-m0-gate.sh` runs the milestone gate.
 
-When product tests arrive they run against a temporary `LOOPEX_HOME`; the
+Product tests run against a temporary `LOOPEX_HOME`; the
 affected conformance suites (`conformance/`) run for any adapter or behaviour
 change; property tests own reducer/replay claims; fault injection owns
 durable-transition claims. Real-provider runs are a tagged, explicitly invoked
