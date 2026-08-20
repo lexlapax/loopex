@@ -52,7 +52,11 @@ papered over, and it is why the gate expects a reviewer to re-run at the closure
 candidate rather than trust a retained verdict.
 
 The gate is also run once more AFTER this file is committed, and that verdict is
-recorded below. An earlier candidate skipped that step on the reasoning that an
+recorded here: at `2edb51d06811ccfafcc97d095fc7e8b71df673b3`, which carries this
+file with the five runs above, both lanes were green -- current in 102s and floor
+in 89s, working tree clean before and after. That is the run which proves the
+retained evidence does not red the gate, and it is the one the previous candidate
+never did. An earlier candidate skipped that step on the reasoning that an
 evidence-only commit changes no product bytes -- and the gate reads these bytes.
 The commit that recorded five green runs turned the gate red, because it put a
 second demonstration into an outcome section where the locked runner requires
