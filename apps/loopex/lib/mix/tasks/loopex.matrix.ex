@@ -119,12 +119,22 @@ defmodule Mix.Tasks.Loopex.Matrix do
     contents
     |> String.split("\n")
     |> Enum.any?(fn line ->
-      # The EXACT version, not the major. Searching for the major let a fabricated
-      # row naming "OTP 26" satisfy a lock that promises 26.0, so runtime matching
-      # was exact while the retained evidence it depends on was not.
-      String.contains?(line, pair.elixir) and String.contains?(line, pair.otp_exact) and
+      version_present?(line, pair.elixir) and version_present?(line, pair.otp_exact) and
         String.contains?(line, "GREEN")
     end)
+  end
+
+  # Concept: a lock names one exact version, and only that version satisfies it.
+  #
+  # Technical depth: `String.contains?/2` is substring matching, so a lock promising
+  # OTP 26.0 was satisfied by a row recording 26.0.1 — a different toolchain. The
+  # earlier fix replaced the major with the exact version but kept the substring
+  # test, which only shortened the tail: every version is a prefix of longer ones.
+  # Matching the version as a whole token removes the class rather than the instance.
+  # A version is bounded when the characters on either side are not themselves part
+  # of a version number, so digits and dots are the only rejected neighbours.
+  defp version_present?(line, version) do
+    Regex.match?(~r/(?<![0-9.])#{Regex.escape(version)}(?![0-9.])/, line)
   end
 
   @doc """

@@ -98,6 +98,28 @@ defmodule Loopex.StatusCheckTest do
     # A row naming the pair without a verdict is not a recorded run.
     File.write!(record, "| 1 | first | Elixir 1.17.0 / OTP 26.0 | pending | |\n")
     assert {:error, _} = Matrix.both_lanes_recorded(root, pairs)
+
+    # Naming the exact version fixed the instance and left the class: matching is
+    # by substring, and every version is a prefix of longer ones, so a run on a
+    # DIFFERENT toolchain still satisfied the lock. A lock promising 26.0 is not
+    # evidence that 26.0.1 was run, in either field.
+    for row <- [
+          "| 1 | first | Elixir 1.17.0 / OTP 26.0.1 | `M0 gate GREEN` | 0 |\n",
+          "| 1 | first | Elixir 1.17.01 / OTP 26.0 | `M0 gate GREEN` | 0 |\n"
+        ] do
+      File.write!(record, row)
+
+      assert {:error, _} = Matrix.both_lanes_recorded(root, pairs),
+             "a longer version must not satisfy a lock that is a prefix of it: #{row}"
+    end
+
+    # The version still matches where it genuinely appears, whatever follows it.
+    File.write!(
+      record,
+      "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 |\n"
+    )
+
+    assert :ok = Matrix.both_lanes_recorded(root, pairs)
   end
 
   test "an acceptance chain edge must run backwards along history" do
