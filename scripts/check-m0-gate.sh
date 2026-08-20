@@ -642,7 +642,12 @@ esac
 # Rather than keep adding forms, the rule is now the token PATH, quoted or not,
 # wherever a shell can bind it: an assignment, an array element write, or any of
 # the builtins that assign.
-path_mutation='(^|[[:space:]]|;|\(|\{)(export|declare|typeset|local|readonly|unset|read|mapfile|readarray)([[:space:]]+-[^[:space:]]*)*([[:space:]]+[^[:space:]]+)*[[:space:]]+["'"'"'"]?PATH["'"'"'"]?([^[:alnum:]_]|$)|(^|[[:space:]]|;|\(|\{)["'"'"'"]?PATH["'"'"'"]?([[:space:]]*=|\[)|printf[[:space:]]+([^[:space:]]+[[:space:]]+)*-v[[:space:]]+["'"'"'"]?PATH["'"'"'"]?'
+# AMENDMENT 5. `for` and `select` bind the loop variable with no operator on the
+# line at all, so an ordinary loop over the variable set it while matching
+# neither scan -- and the body then reached a real interpreter. They join the
+# binding constructs rather than being added as two more syntaxes: what makes a
+# line a binding is the construct, not the punctuation.
+path_mutation='(^|[[:space:]]|;|\(|\{)(export|declare|typeset|local|readonly|unset|read|mapfile|readarray|for|select)([[:space:]]+-[^[:space:]]*)*([[:space:]]+[^[:space:]]+)*[[:space:]]+["'"'"'"]?PATH["'"'"'"]?([^[:alnum:]_]|$)|(^|[[:space:]]|;|\(|\{)["'"'"'"]?PATH["'"'"'"]?([[:space:]]*=|\[)|printf[[:space:]]+([^[:space:]]+[[:space:]]+)*-v[[:space:]]+["'"'"'"]?PATH["'"'"'"]?'
 mutation_status=0
 git grep -nE "$path_mutation" -- $scan_tree >/dev/null 2>&1 || mutation_status=$?
 case "$mutation_status" in
