@@ -22,6 +22,7 @@ defmodule Loopex.StatusCheckTest do
   alias Loopex.Checks.Invalid
   alias Loopex.Checks.History
   alias Loopex.Checks.Plan
+  alias Mix.Tasks.Loopex.Matrix
   alias Loopex.Checks.Register
   alias Loopex.StatusFixtures, as: Fixture
 
@@ -54,6 +55,49 @@ defmodule Loopex.StatusCheckTest do
         true -> plan_text
       end
     end
+  end
+
+  test "only a real ATX heading can justify an amendment" do
+    # CommonMark caps an ATX heading at six hashes. Accepting any number let a
+    # seven-hash line -- which renders as ordinary text, not a heading -- stand as
+    # the visible declaration that justifies a new generation.
+    gate = Fixture.gate()
+    assert 0 == Plan.gate_generation(gate, "gate")
+
+    for {label, heading} <- [{"seven hashes", "#######"}, {"one hash", "#"}] do
+      hidden = gate <> "\n<a id=\"amendment-1\"></a>\n#{heading} Amendment 1\n"
+
+      assert 0 == Plan.gate_generation(hidden, "gate"),
+             "#{label} is not an ATX heading and must not mint a generation"
+    end
+
+    for heading <- ["##", "######"] do
+      real = gate <> "\n<a id=\"amendment-1\"></a>\n#{heading} Amendment 1\n"
+      assert 1 == Plan.gate_generation(real, "gate")
+    end
+  end
+
+  test "retained matrix evidence must name exact toolchain versions" do
+    # Runtime matching was exact while the evidence it depends on was searched by
+    # major, so a fabricated row naming "OTP 26" satisfied a lock promising 26.0.
+    pairs = [%{elixir: "1.17.0", otp: "26", otp_exact: "26.0"}]
+
+    root = Path.join(System.tmp_dir!(), "matrix-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(root, "docs/evidence"))
+    record = Path.join(root, "docs/evidence/M0-toolchain-matrix.md")
+    on_exit(fn -> File.rm_rf(root) end)
+
+    File.write!(record, "| 1 | first | Elixir 1.17.0 / OTP 26 | `M0 gate GREEN` | 0 |\n")
+
+    assert {:error, reason} = Matrix.both_lanes_recorded(root, pairs)
+    assert reason =~ "does not record a run"
+
+    File.write!(record, "| 1 | first | Elixir 1.17.0 / OTP 26.0 | `M0 gate GREEN` | 0 |\n")
+    assert :ok = Matrix.both_lanes_recorded(root, pairs)
+
+    # A row naming the pair without a verdict is not a recorded run.
+    File.write!(record, "| 1 | first | Elixir 1.17.0 / OTP 26.0 | pending | |\n")
+    assert {:error, _} = Matrix.both_lanes_recorded(root, pairs)
   end
 
   test "an acceptance chain edge must run backwards along history" do

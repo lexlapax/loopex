@@ -119,7 +119,10 @@ defmodule Mix.Tasks.Loopex.Matrix do
     contents
     |> String.split("\n")
     |> Enum.any?(fn line ->
-      String.contains?(line, pair.elixir) and String.contains?(line, pair.otp) and
+      # The EXACT version, not the major. Searching for the major let a fabricated
+      # row naming "OTP 26" satisfy a lock that promises 26.0, so runtime matching
+      # was exact while the retained evidence it depends on was not.
+      String.contains?(line, pair.elixir) and String.contains?(line, pair.otp_exact) and
         String.contains?(line, "GREEN")
     end)
   end

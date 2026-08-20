@@ -138,7 +138,10 @@ defmodule Loopex.Checks.Plan do
             {numbers, String.to_integer(Enum.at(anchor, 1))}
 
           pending != nil ->
-            case Regex.run(~r/\A##+ Amendment (\d+)\b/, line) do
+            # Two to six hashes. CommonMark caps an ATX heading at six, and `##+`
+            # accepted any number -- so a seven-hash line, which renders as text,
+            # was read as the heading that justifies an amendment.
+            case Regex.run(~r/\A\#{2,6} Amendment (\d+)\b/, line) do
               [_all, declared] ->
                 if String.to_integer(declared) == pending do
                   {[pending | numbers], nil}

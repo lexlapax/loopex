@@ -18,10 +18,10 @@ build directory once made the second lane fail on beams the first had compiled.
 
 | # | Order | Toolchain | Verdict | Exit | Wall clock |
 | --- | --- | --- | --- | --- | --- |
-| 1 | first | Elixir 1.17.0 / OTP 26 erts-14.0 | `M0 gate GREEN` | 0 | 89s |
-| 2 | second | Elixir 1.20.3 / OTP 29 erts-17.0.5 | `M0 gate GREEN` | 0 | 101s |
-| 3 | third | Elixir 1.20.3 / OTP 29 erts-17.0.5 | `M0 gate GREEN` | 0 | 56s |
-| 4 | fourth | Elixir 1.17.0 / OTP 26 erts-14.0 | `M0 gate GREEN` | 0 | 87s |
+| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 89s |
+| 2 | second | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 101s |
+| 3 | third | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 56s |
+| 4 | fourth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 87s |
 
 Runs 1 and 2 are floor-then-current; runs 3 and 4 reverse that, so each pair ran
 both immediately after itself and immediately after the other. With no
@@ -34,6 +34,12 @@ closure candidate differs from the runs' SHA by those retained evidence files â€
 observed. That residual gap is stated rather than papered over, and it is why the
 gate expects a reviewer to re-run at the closure candidate rather than trust a
 retained verdict.
+
+The toolchain column names the EXACT version each lane ran, not the major release.
+`mix loopex.matrix` searches for that exact string: it previously searched for the
+major, so a row naming "OTP 26" satisfied a lock that promises 26.0 while runtime
+matching was exact. Evidence a check accepts loosely is evidence the check does not
+really constrain.
 
 `mix loopex.matrix` requires this file to name every locked pair with a green
 verdict. It cannot verify that a recorded run happened, and says so; that judgment

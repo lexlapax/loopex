@@ -467,6 +467,33 @@ defmodule Loopex.JournalReplayTest do
     assert {:error, {{:epoch_not_monotonic, 0, _current}, _at}} =
              Session.replay("expected", records ++ [stale])
 
+    # The EQUAL-epoch boundary, which the generated histories cannot reach: the
+    # generator always emits epoch + 1, and the stale case above only tests zero.
+    # Changing the reducer from > to >= therefore passed every seed while admitting
+    # a repeated epoch -- two incarnations claiming the same one, which is exactly
+    # what monotonicity exists to prevent. A boundary that no generator visits has
+    # to be asserted at the boundary.
+    repeated = %{
+      kind: :session_opened,
+      seq: state.seq + 1,
+      session_id: "expected",
+      epoch: state.epoch
+    }
+
+    assert {:error, {{:epoch_not_monotonic, _same, _current}, _index}} =
+             Session.replay("expected", records ++ [repeated])
+
+    # One past the current epoch is the only accepted step.
+    advanced = %{
+      kind: :session_opened,
+      seq: state.seq + 1,
+      session_id: "expected",
+      epoch: state.epoch + 1
+    }
+
+    assert {:ok, %{epoch: next}} = Session.replay("expected", records ++ [advanced])
+    assert next == state.epoch + 1
+
     out_of_order = %{kind: :fact_committed, seq: state.seq + 7, fact: "skipped ahead"}
 
     assert {:error, {{:out_of_sequence, _detail}, _index}} =
