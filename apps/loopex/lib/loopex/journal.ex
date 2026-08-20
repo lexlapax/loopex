@@ -93,34 +93,34 @@ defmodule Loopex.Journal do
   @spec append(Path.t(), entry()) :: :ok | {:error, term()}
   def append(path, record) when is_map(record) do
     with :ok <- validate(record),
-         :ok <- refuse_during_repair(path),
+         :ok <- refuse_foreign_writer(path),
          {:ok, frame} <- frame(record) do
       write(path, frame)
     end
   end
 
-  # Concept: an append during a repair is a record the repair is about to delete.
-  # Technical depth: the repair verifies a tear and then truncates. An append that
-  # lands between those two steps is synced, acknowledged, and then destroyed, and
-  # the repair's own record-count check cannot see it because the surviving prefix
-  # count is unchanged. Refusing here is what makes the sentinel mean something to
-  # a writer; taking it only in the repair left `append/2` free to ignore it.
+  # Concept: only the session owner writes to a claimed journal.
+  # Technical depth: the claim already makes a second COORDINATOR impossible. This
+  # covers the other writer -- a process that bypasses the coordinator entirely,
+  # which a review demonstrated could append and corrupt the sequence. It is not
+  # the check-then-write that was wrong before: repair happens once, in the owner,
+  # before it serves anything, so this cannot race a truncation.
   #
-  # A journal that does not exist yet cannot be under repair, so a missing file is
-  # not an error here -- the first append creates it.
-  defp refuse_during_repair(path) do
-    case lock_path(path) do
-      {:error, {:journal_unavailable, _path, :enoent}} ->
-        :ok
-
-      {:error, reason} ->
-        {:error, reason}
-
-      {:ok, lock} ->
-        case File.exists?(lock) do
-          false -> :ok
-          true -> {:error, {:repair_in_progress, path, lock}}
-        end
+  # An unclaimed journal is allowed, because tools and tests legitimately use one
+  # directly. A claim naming a live process on this node that is not the caller is
+  # refused. A claim whose owner cannot be checked -- another node, another VM, or
+  # a dead pid -- is allowed, because refusing would block the recovery the
+  # takeover rule exists to permit.
+  defp refuse_foreign_writer(path) do
+    with {:ok, lock} <- lock_path(path),
+         {:ok, contents} <- File.read(lock),
+         {:ok, owner} <- parse_owner(contents),
+         true <- owner.node == Atom.to_string(node()),
+         true <- pid_alive?(owner.erl_pid),
+         false <- owner.erl_pid == inspect(self()) do
+      {:error, {:not_the_session_owner, path, owner.erl_pid}}
+    else
+      _other -> :ok
     end
   end
 
@@ -170,8 +170,8 @@ defmodule Loopex.Journal do
   complete record, so no caller was ever told it committed.
 
   Truncation is the one destructive operation in this module, so it refuses
-  everything it cannot prove is a torn append. Three separate refusals apply, and
-  each exists because a review found data being destroyed without it:
+  everything it cannot prove is a torn append. Three refusals apply, and each
+  exists because a review found data being destroyed without it:
 
   * A complete frame that fails its checksum is corruption, not a tear. A killed
     writer leaves a strict prefix of one frame; it cannot leave a whole frame with
@@ -179,89 +179,130 @@ defmodule Loopex.Journal do
   * A tail that reads as a strict prefix is still scanned for any frame that
     decodes and passes its checksum, because a corrupted length prefix can claim
     more bytes than remain while intact records sit past it.
-  * Verification and truncation happen through one handle, under a sentinel created
-    exclusively and named by the journal's device and inode, so every alias of one
-    journal contends for one sentinel. `append/2` refuses while that sentinel
-    exists, which is what makes it mean something to a writer rather than only to
-    another repairer. The cut is additionally refused if the file changed size
-    since verification.
+  * The cut is refused if the file changed size since verification.
 
-  The exclusion covers writers that go through this module. A process writing to
-  the journal by other means is outside it, and so is a `kill -9` between claiming
-  the sentinel and recording who claimed it. `repair_lock_path/1` names the file so
-  an operator can inspect and remove a stale one; that is the recovery procedure,
-  and it is deliberately manual because expiry by age or pid can evict a live
-  owner.
+  ## What this proves, and what it does not
+
+  M0 is a feasibility milestone and outcomes 4 through 6 are disposable
+  experiments, so this states its boundary rather than implying durability
+  guarantees it has not earned.
+
+  Proved: a single-machine journal whose one session owner is enforced by an
+  exclusive claim held for that owner's lifetime, so a second coordinator cannot
+  start and a process bypassing the coordinator cannot append. Repair happens once,
+  inside the owner, before it serves anything, so it cannot interleave with an
+  append. Every alias of one journal contends for one claim.
+
+  Not proved, and not claimed:
+
+  * Durability across power loss. Records are synced, but the truncation's length
+    update is not separately synced, and no barrier or fsync-of-directory
+    discipline is established.
+  * Exclusion against a writer that does not use this module at all.
+  * Exclusion between processes that disagree about the temporary directory, since
+    the claim lives there.
+  * Anything about performance, concurrency at scale, or a durable store. M0
+    explicitly selects no store.
+
+  A later milestone that claims production durability owns those; this one answers
+  whether replay and fencing hold under the intended semantics.
   """
   @spec discard_torn_tail(Path.t(), non_neg_integer()) :: :ok | {:error, term()}
   def discard_torn_tail(path, offset) when is_integer(offset) and offset >= 0 do
-    # One handle for the whole operation. Re-reading the path and then separately
-    # opening it to truncate left a window in which another writer could repair the
-    # tear and append records that this truncation would then delete. Verifying and
-    # cutting through the same descriptor closes that window for this process; the
-    # one-serial-owner invariant is what excludes a second writer, and the
-    # coordinator enforces it per journal.
-    with :ok <- acquire_lock(path) do
-      # Released even if something raises. Releasing only on the normal return
-      # would strand the lock after any unexpected failure, and a stranded lock
-      # fails every later repair closed -- turning a transient fault into a journal
-      # that needs a human before it can recover again.
-      try do
-        case File.open(path, [:read, :write, :binary]) do
-          {:error, posix} ->
-            {:error, {:journal_unavailable, path, posix}}
+    # No lock is taken here. The caller must already be the journal's session
+    # owner, which the coordinator establishes with claim_session/1 before it
+    # reads anything and holds until it stops. Taking a lock only around this
+    # operation was the defect: it left append/2 free to interleave.
+    case File.open(path, [:read, :write, :binary]) do
+      {:error, posix} ->
+        {:error, {:journal_unavailable, path, posix}}
 
-          {:ok, io} ->
-            try do
-              verify_and_truncate(io, path, offset)
-            after
-              :file.close(io)
-            end
+      {:ok, io} ->
+        try do
+          verify_and_truncate(io, path, offset)
+        after
+          :file.close(io)
         end
-      after
-        release_lock(path)
-      end
     end
   end
 
-  # Concept: only one writer may repair a journal, and the exclusion is real rather
-  # than a narrow window.
-  # Technical depth: verifying through one handle removes the gap between checking
-  # and cutting *within* a process, but two coordinators could still interleave —
-  # one verifies a tear, the other repairs and appends, the first truncates and
-  # deletes the new records. Post-hoc record counting cannot detect that, because
-  # the surviving prefix count is unchanged. A lock file created with `:exclusive`
-  # is an atomic create-or-fail at the filesystem, so exclusion holds across
-  # processes and across VMs, which a VM-global registry would not.
-  #
-  # A stale lock left by a killed process fails the next repair closed. That is the
-  # correct direction for durable truth: a human decides whether the previous owner
-  # is really gone, and the lock records who claimed it so they can tell.
   @doc """
   ## Concept
 
-  Where the repair sentinel for a journal lives.
+  Claims a journal for one session owner, for as long as that owner lives.
 
   ## Technical depth
 
-  Public because an operator needs it. A stale sentinel — left by a process killed
-  mid-repair — fails every later repair closed, deliberately: a human decides
-  whether the previous owner is really gone, since automatic expiry by age or pid
-  can evict a live one. That trade is only acceptable if the operator can find the
-  file and see who claimed it, so this returns the path and the sentinel records
-  node, OS pid, and claim time. Removing it by hand is the recovery procedure.
+  This replaces a lock held only around the repair. Held there, `append/2` could
+  only *check* for a sentinel and then write, and a check is not exclusion: a
+  repair could begin between the look and the write, and the append it then
+  destroyed had already been acknowledged. Narrowing that window does not close
+  it.
 
-  The path is derived from the journal's device and inode, so every alias of one
-  journal resolves to one sentinel.
+  Held for the owner's whole lifetime, the sentinel makes a second owner
+  impossible rather than unlikely, and every write comes from the one process
+  holding it. Within that process the coordinator is a GenServer, so its own
+  appends and its recovery are already serialised. That is the product's "one
+  serial session owner" invariant enforced by construction rather than restated.
+
+  Creation is exclusive, so the claim is atomic at the filesystem and holds across
+  processes and across VMs.
   """
-  @spec repair_lock_path(Path.t()) :: {:ok, Path.t()} | {:error, term()}
-  def repair_lock_path(path), do: lock_path(path)
-
-  defp acquire_lock(path) do
-    with {:ok, lock} <- lock_path(path) do
+  @spec claim_session(Path.t()) :: :ok | {:error, term()}
+  def claim_session(path) do
+    # The claim is identified by the journal's device and inode, so the file has to
+    # exist before it can be claimed. A first start creates it empty, which is
+    # already how `read/1` treats a missing journal -- an empty complete one -- so
+    # this adds no state, only the identity the claim needs.
+    with :ok <- ensure_directory(path),
+         :ok <- ensure_file(path),
+         {:ok, lock} <- lock_path(path) do
       claim_lock(lock)
     end
   end
+
+  defp ensure_file(path) do
+    case File.exists?(path) do
+      true ->
+        :ok
+
+      false ->
+        case File.open(path, [:write, :append]) do
+          {:ok, io} -> File.close(io)
+          {:error, posix} -> {:error, {:journal_unavailable, path, posix}}
+        end
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Releases a session claim.
+
+  ## Technical depth
+
+  A failed release is returned rather than swallowed, because a sentinel that
+  survives its owner blocks the next one with nothing explaining why.
+  """
+  @spec release_session(Path.t()) :: :ok | {:error, term()}
+  def release_session(path), do: release_lock(path)
+
+  @doc """
+  ## Concept
+
+  Where a journal's session sentinel lives.
+
+  ## Technical depth
+
+  Public because an operator needs it. A sentinel left by a process killed while
+  it held the journal blocks the next owner, deliberately: a human decides whether
+  the previous owner is really gone, since expiry by age or pid can evict a live
+  one. That trade is only acceptable if the file can be found and says who claimed
+  it, so this returns the path and the sentinel records node, OS pid, and time.
+  Removing it by hand is the recovery procedure.
+  """
+  @spec session_lock_path(Path.t()) :: {:ok, Path.t()} | {:error, term()}
+  def session_lock_path(path), do: lock_path(path)
 
   # Concept: the lock names the FILE, not the spelling of its path.
   # Technical depth: deriving it as `path <> ".repair-lock"` made the identity
@@ -284,20 +325,80 @@ defmodule Loopex.Journal do
   defp claim_lock(lock) do
     case File.open(lock, [:write, :exclusive]) do
       {:ok, io} ->
-        # Written and synced before the repair begins, so a process killed during
-        # the repair still leaves a sentinel that says who to ask. A kill between
-        # the create and this write can still leave an empty one; that is a smaller
-        # window than leaving the whole claim implicit, not a closed one.
-        IO.write(io, "node=#{node()} os_pid=#{System.pid()} at=#{System.system_time(:second)}\n")
+        # Synced before the journal is touched, so a process killed mid-session
+        # still leaves a sentinel that says who to ask.
+        IO.write(io, owner_line())
         :file.sync(io)
         File.close(io)
         :ok
 
       {:error, :eexist} ->
-        {:error, {:repair_already_held, lock, File.read(lock)}}
+        reclaim_if_owner_is_gone(lock)
 
       {:error, posix} ->
         {:error, {:journal_unavailable, lock, posix}}
+    end
+  end
+
+  defp owner_line do
+    "node=#{node()} erl_pid=#{inspect(self())} os_pid=#{System.pid()} " <>
+      "at=#{System.system_time(:second)}\n"
+  end
+
+  # Concept: a sentinel whose owner is provably gone may be taken over; one whose
+  # owner cannot be checked may not.
+  # Technical depth: an owner killed outright never runs its release, and a
+  # session that could never recover from that would be worse than the race the
+  # sentinel exists to prevent. Expiry by age or pid number is the wrong fix -- it
+  # can evict a live owner. An Erlang pid on THIS node is different: if it is not
+  # alive, it is definitively gone, and that is exact rather than heuristic.
+  #
+  # An owner on another node or another VM cannot be checked from here, so the
+  # claim is refused and a human decides. That is the fail-closed half of the same
+  # rule, and `session_lock_path/1` is public so the file can be found.
+  defp reclaim_if_owner_is_gone(lock) do
+    with {:ok, contents} <- File.read(lock),
+         {:ok, owner} <- parse_owner(contents),
+         true <- owner.node == Atom.to_string(node()),
+         false <- pid_alive?(owner.erl_pid) do
+      case File.rm(lock) do
+        :ok -> claim_lock(lock)
+        {:error, posix} -> {:error, {:journal_unavailable, lock, posix}}
+      end
+    else
+      _other -> {:error, {:repair_already_held, lock, File.read(lock)}}
+    end
+  end
+
+  defp parse_owner(contents) do
+    fields =
+      contents
+      |> String.trim()
+      |> String.split()
+      |> Map.new(fn pair ->
+        case String.split(pair, "=", parts: 2) do
+          [key, value] -> {key, value}
+          _other -> {pair, ""}
+        end
+      end)
+
+    case fields do
+      %{"node" => node_name, "erl_pid" => erl_pid} -> {:ok, %{node: node_name, erl_pid: erl_pid}}
+      _other -> :error
+    end
+  end
+
+  defp pid_alive?(text) do
+    case Regex.run(~r/\A#PID(<\d+\.\d+\.\d+>)\z/, text) do
+      [_all, inner] ->
+        try do
+          Process.alive?(:erlang.list_to_pid(String.to_charlist(inner)))
+        rescue
+          _error -> true
+        end
+
+      nil ->
+        true
     end
   end
 

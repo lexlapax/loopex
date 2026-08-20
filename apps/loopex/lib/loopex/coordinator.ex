@@ -228,7 +228,19 @@ defmodule Loopex.Coordinator do
     # facts that disappear on the next restart. The tail is therefore resolved
     # first, and a failure to resolve it stops the coordinator rather than letting
     # it run on a journal it cannot durably extend.
-    with {:ok, records, tail} <- Journal.read(journal),
+    # The journal is claimed before it is read, and held until this process stops.
+    # A claim taken only around the repair made every append a check-then-write:
+    # a repair could start between the check and the write, and the append it then
+    # destroyed had already been acknowledged. Holding it for the session's whole
+    # life makes a second owner impossible, so the only writer is this GenServer,
+    # which serialises its own appends and its recovery by construction.
+    #
+    # Exits are trapped so terminate/2 runs and the claim is released; without it
+    # a clean stop would strand the sentinel and the next owner would need a human.
+    Process.flag(:trap_exit, true)
+
+    with :ok <- Journal.claim_session(journal),
+         {:ok, records, tail} <- Journal.read(journal),
          :ok <- resolve_tail(journal, tail),
          {:ok, session} <- Session.replay(session_id, records) do
       state = %{
@@ -244,9 +256,23 @@ defmodule Loopex.Coordinator do
         {:error, reason} -> {:stop, {:recovery_failed, reason}}
       end
     else
-      {:error, reason} -> {:stop, {:recovery_failed, reason}}
+      {:error, {:repair_already_held, _lock, _who} = held} ->
+        # Never released here: this process does not own it.
+        {:stop, {:journal_claimed_by_another_owner, held}}
+
+      {:error, reason} ->
+        Journal.release_session(journal)
+        {:stop, {:recovery_failed, reason}}
     end
   end
+
+  @impl GenServer
+  def terminate(_reason, %{journal: journal}) do
+    Journal.release_session(journal)
+    :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
 
   # Concept: a journal must end where its durable truth ends.
   # Technical depth: nothing acknowledged is discarded — a torn frame was never a

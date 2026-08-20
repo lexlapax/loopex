@@ -274,46 +274,57 @@ defmodule Loopex.JournalReplayTest do
     assert File.stat!(inflated).size == size, "an intact record beyond the tear must survive"
   end
 
-  test "a held repair lock excludes a second writer" do
-    journal = DurableTruth.journal_path("repair-lock")
+  test "one owner holds a journal for its whole life and a second cannot start" do
+    # This is the property that replaced "append checks for a sentinel". A check is
+    # not exclusion: a repair could begin between the check and the write, and the
+    # append it destroyed had already been acknowledged. Holding the claim for the
+    # owner's lifetime makes a second owner impossible instead.
+    Process.flag(:trap_exit, true)
+    collector = DurableTruth.start_collector()
+    journal = DurableTruth.journal_path("one-owner")
 
-    for seq <- 1..2 do
-      assert :ok = Journal.append(journal, %{kind: :fact_committed, seq: seq, fact: "f#{seq}"})
-    end
+    {:ok, first} = DurableTruth.start(journal, "session-one-owner", collector)
+    assert {:ok, lock} = Journal.session_lock_path(journal)
+    assert File.exists?(lock), "the owner must hold its claim while it runs"
 
-    File.open!(journal, [:append, :binary], fn io -> IO.binwrite(io, <<0, 0, 0, 90, 1>>) end)
-    assert {:ok, kept, {:torn, offset}} = Journal.read(journal)
-    size = File.stat!(journal).size
+    assert {:error, {:journal_claimed_by_another_owner, _held}} =
+             DurableTruth.start(journal, "session-one-owner", collector)
 
-    assert {:ok, lock} = Journal.repair_lock_path(journal)
-    File.write!(lock, "node=someone-else\n")
-    on_exit(fn -> File.rm(lock) end)
-
-    assert {:error, {:repair_already_held, ^lock, _who}} =
-             Journal.discard_torn_tail(journal, offset)
-
-    assert File.stat!(journal).size == size, "a refused repair must not alter the journal"
-
-    # An append during a repair is a record the repair is about to delete, so a
-    # writer must see the sentinel too. Taking it only in the repair left append/2
-    # free to ignore it, and a synced, acknowledged record was then destroyed.
-    assert {:error, {:repair_in_progress, ^journal, ^lock}} =
-             Journal.append(journal, %{kind: :fact_committed, seq: 3, fact: "during"})
-
-    # Every alias of one journal contends for one sentinel. A lexical lock name
-    # gave two spellings two different locks and two exclusive owners.
+    # Every alias of one journal contends for the same claim.
     alias_path = journal <> ".alias"
     File.ln_s!(journal, alias_path)
     on_exit(fn -> File.rm(alias_path) end)
-    assert {:ok, ^lock} = Journal.repair_lock_path(alias_path)
+    assert {:ok, ^lock} = Journal.session_lock_path(alias_path)
 
-    assert {:error, {:repair_already_held, ^lock, _also}} =
-             Journal.discard_torn_tail(alias_path, offset)
+    assert {:error, {:journal_claimed_by_another_owner, _also}} =
+             DurableTruth.start(alias_path, "session-one-owner", collector)
 
-    File.rm!(lock)
-    assert :ok = Journal.discard_torn_tail(journal, offset)
-    assert {:ok, ^kept, :complete} = Journal.read(journal)
-    refute File.exists?(lock), "the lock must be released after a successful repair"
+    # A clean stop releases it, so the next owner starts without human help.
+    GenServer.stop(first)
+    refute File.exists?(lock), "a clean stop must release the claim"
+    {:ok, second} = DurableTruth.start(journal, "session-one-owner", collector)
+
+    # A killed owner cannot release it, and an Erlang pid on this node that is not
+    # alive is definitively gone -- so takeover is exact rather than a guess.
+    DurableTruth.kill(second)
+    assert File.exists?(lock), "a killed owner leaves its claim behind"
+    {:ok, third} = DurableTruth.start(journal, "session-one-owner", collector)
+    assert :ok = Coordinator.commit_fact(third, :workspace, "after takeover")
+    GenServer.stop(third)
+  end
+
+  test "a claim whose owner cannot be checked is refused" do
+    # The other half of the same rule. An owner on another node or VM cannot be
+    # verified from here, so the claim is refused and a human decides. Expiry by
+    # age or pid number would be the wrong fix: it can evict a live owner.
+    journal = DurableTruth.journal_path("foreign-claim")
+    assert :ok = Journal.claim_session(journal)
+    assert {:ok, lock} = Journal.session_lock_path(journal)
+
+    File.write!(lock, "node=someone@elsewhere erl_pid=#PID<0.999.0> os_pid=1 at=0\n")
+
+    assert {:error, {:repair_already_held, ^lock, _who}} = Journal.claim_session(journal)
+    assert :ok = Journal.release_session(journal)
   end
 
   test "a record appended after a tear survives a later repair" do
