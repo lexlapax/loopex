@@ -239,8 +239,43 @@ defmodule Loopex.Coordinator do
     # a clean stop would strand the sentinel and the next owner would need a human.
     Process.flag(:trap_exit, true)
 
-    with {:ok, claim} <- Journal.claim_session(journal),
-         {:ok, records, tail} <- Journal.read(journal),
+    # The claim is taken in its own step, before anything that can fail, because
+    # what happens on failure differs by whether this process holds it. Inside a
+    # single `with`, `else` cannot bind `claim` -- there is no way to tell "the
+    # claim was refused" from "the claim was taken and the read then failed", and
+    # the second case must release.
+    case Journal.claim_session(journal) do
+      {:error, {:repair_already_held, _lock, _who} = held} ->
+        # Never released here: this process does not own it.
+        {:stop, {:journal_claimed_by_another_owner, held}}
+
+      {:error, reason} ->
+        {:stop, {:recovery_failed, reason}}
+
+      {:ok, claim} ->
+        case start_claimed(journal, claim, session_id, options) do
+          {:ok, state} ->
+            {:ok, state}
+
+          {:stop, reason} ->
+            # gen_server does NOT call terminate/2 when init/1 returns {:stop, _},
+            # so this is the only place the claim can be released on this path.
+            # Leaving it stranded was survivable inside one VM -- the next start
+            # proved the owner dead and took over -- and permanent across a VM
+            # restart, where the recorded os_pid is no longer this process: the
+            # session could not start until a human deleted a file in a temp
+            # directory. Repairing the journal is the operator's expected next
+            # move and has to be sufficient.
+            Journal.release_session(journal, claim)
+            {:stop, reason}
+        end
+    end
+  end
+
+  # Everything after the claim is taken. Returning {:stop, _} here is what tells
+  # init/1 to release before it stops.
+  defp start_claimed(journal, claim, session_id, options) do
+    with {:ok, records, tail} <- Journal.read(journal),
          :ok <- resolve_tail(journal, tail, claim),
          {:ok, session} <- Session.replay(session_id, records) do
       state = %{
@@ -257,14 +292,7 @@ defmodule Loopex.Coordinator do
         {:error, reason} -> {:stop, {:recovery_failed, reason}}
       end
     else
-      {:error, {:repair_already_held, _lock, _who} = held} ->
-        # Never released here: this process does not own it.
-        {:stop, {:journal_claimed_by_another_owner, held}}
-
-      {:error, reason} ->
-        # Only released when this process holds it; a claim held by someone else
-        # is not ours to remove, which is why release now needs the token.
-        {:stop, {:recovery_failed, reason}}
+      {:error, reason} -> {:stop, {:recovery_failed, reason}}
     end
   end
 

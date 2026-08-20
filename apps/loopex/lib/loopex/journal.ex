@@ -65,6 +65,22 @@ defmodule Loopex.Journal do
   """
   @type tail :: :complete | {:torn, non_neg_integer()} | {:corrupt, non_neg_integer()}
 
+  @typedoc """
+  ## Concept
+
+  Proof that the holder claimed this journal, and the only thing that authorises
+  writing to it or truncating it.
+
+  ## Technical depth
+
+  A bearer value: holding it IS the authority, so it is never written anywhere a
+  second process could read it. The sentinel beside the journal carries a SHA-256
+  digest of it instead, which identifies the owner to an operator without granting
+  what the owner holds. `nil` is accepted by the writing functions and always
+  refused, so a caller that never claimed gets an error rather than a match.
+  """
+  @type claim :: binary()
+
   # Technical depth: a durable record is bounded so one malformed write cannot
   # make recovery allocate without limit. Both ceilings are far above anything
   # this milestone's records need; they exist as a refusal, not as a tuning knob.
@@ -90,7 +106,7 @@ defmodule Loopex.Journal do
   durability failure. Every error is returned, never raised: recovery code
   distinguishes an unavailable journal from a rejected record.
   """
-  @spec append(Path.t(), entry()) :: :ok | {:error, term()}
+  @spec append(Path.t(), entry(), claim() | nil) :: :ok | {:error, term()}
   def append(path, record, token \\ nil) when is_map(record) do
     with :ok <- validate(record),
          :ok <- refuse_foreign_writer(path, token),
@@ -144,8 +160,13 @@ defmodule Loopex.Journal do
 
   A journal that does not exist yet reads as an empty complete journal, so a
   first start needs no separate creation step. Decoding stops at the first frame
-  that is short, fails its checksum, or does not decode to a plain record map,
-  and reports `{:torn, offset}` with the records before it.
+  it cannot accept and reports the records before it, but WHICH tail is reported
+  matters: a short frame is `{:torn, offset}`, an append that did not finish, and
+  is safe to discard. A frame that is complete and fails its checksum, or that
+  decodes to something other than a plain record map, is `{:corrupt, offset}` --
+  bytes changed under a record that was acknowledged, and the records past it may
+  be intact. Reporting the second as torn made repair delete durable truth to
+  make startup succeed, so callers must distinguish them.
 
   Payloads decode with `:safe`, so a journal cannot introduce an atom the VM
   does not already have. That matters because the decoded record's `:kind`
@@ -217,7 +238,7 @@ defmodule Loopex.Journal do
   A later milestone that claims production durability owns those; this one answers
   whether replay and fencing hold under the intended semantics.
   """
-  @spec discard_torn_tail(Path.t(), non_neg_integer()) :: :ok | {:error, term()}
+  @spec discard_torn_tail(Path.t(), non_neg_integer(), claim() | nil) :: :ok | {:error, term()}
   def discard_torn_tail(path, offset, token \\ nil) when is_integer(offset) and offset >= 0 do
     with :ok <- refuse_foreign_writer(path, token) do
       open_and_truncate(path, offset)
@@ -268,7 +289,7 @@ defmodule Loopex.Journal do
   Creation is exclusive, so the claim is atomic at the filesystem and holds across
   processes and across VMs.
   """
-  @spec claim_session(Path.t()) :: {:ok, binary()} | {:error, term()}
+  @spec claim_session(Path.t()) :: {:ok, claim()} | {:error, term()}
   def claim_session(path) do
     with :ok <- ensure_directory(path),
          :ok <- ensure_file(path),
@@ -318,7 +339,7 @@ defmodule Loopex.Journal do
   A failed release is returned rather than swallowed, because a sentinel that
   survives its owner blocks the next one with nothing explaining why.
   """
-  @spec release_session(Path.t(), binary()) :: :ok | {:error, term()}
+  @spec release_session(Path.t(), claim()) :: :ok | {:error, term()}
   def release_session(path, token) when is_binary(token) do
     with {:ok, lock} <- lock_path(path),
          {:ok, contents} <- File.read(lock),

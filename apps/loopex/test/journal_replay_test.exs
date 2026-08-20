@@ -442,6 +442,17 @@ defmodule Loopex.JournalReplayTest do
              DurableTruth.start(journal, "session-corrupt", collector)
 
     assert File.stat!(journal).size == size, "a refused start must not alter the journal"
+
+    # A refused start must not strand the claim it took. `init/1` claims before it
+    # can know whether recovery will succeed, and gen_server does NOT call
+    # terminate/2 when init/1 returns {:stop, _} -- so every failure after the
+    # claim left the sentinel behind. Within one VM the next start took it over,
+    # which is why nothing caught this; after a VM restart the recorded os_pid is
+    # no longer this process, the owner cannot be proved dead, and the session was
+    # unstartable until a human deleted a file in a temp directory. Repairing the
+    # journal is the operator's expected next move, and it has to be enough.
+    assert {:ok, lock} = Journal.session_lock_path(journal)
+    refute File.exists?(lock), "a refused start must release the claim it took"
   end
 
   test "discarding a torn tail refuses anything it cannot prove is torn" do
