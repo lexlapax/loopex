@@ -121,7 +121,14 @@ defmodule Loopex.Checks.Plan do
       lines
       |> Enum.with_index()
       |> Enum.reduce({[], nil}, fn {line, number}, {numbers, pending} ->
-        anchor = Regex.run(@amendment_anchor, String.trim(line))
+        # The anchor and its heading must both start at column zero, and the heading
+        # must name the same number as the anchor. Trimming first accepted an
+        # indented anchor, which CommonMark reads as code -- so a four-space block
+        # minted a generation with nothing visible behind it. Requiring column zero
+        # removes every indentation-based hiding construct at once, rather than
+        # teaching the reader about one more of them. The heading number was also
+        # unchecked, so "## Amendment 999" could sit under anchor 1.
+        anchor = Regex.run(@amendment_anchor, line)
 
         cond do
           not MapSet.member?(visible, number) ->
@@ -131,9 +138,18 @@ defmodule Loopex.Checks.Plan do
             {numbers, String.to_integer(Enum.at(anchor, 1))}
 
           pending != nil ->
-            case Regex.match?(~r/^##+\s+Amendment\s/, line) do
-              true -> {[pending | numbers], nil}
-              false -> {numbers, if(String.trim(line) == "", do: pending, else: nil)}
+            case Regex.run(~r/\A##+ Amendment (\d+)\b/, line) do
+              [_all, declared] ->
+                if String.to_integer(declared) == pending do
+                  {[pending | numbers], nil}
+                else
+                  raise Invalid,
+                        "#{path}: amendment anchor #{pending} is followed by a heading " <>
+                          "declaring amendment #{declared}"
+                end
+
+              nil ->
+                {numbers, if(String.trim(line) == "", do: pending, else: nil)}
             end
 
           true ->
@@ -607,6 +623,13 @@ defmodule Loopex.Checks.Plan do
 
         verify_edge_digests!(path, revision, prior, {concept, technical, gate}, resolve_file)
 
+        # An edge proving its own bytes is not enough: the node it points at must
+        # itself have been a valid accepted state. Without this, a chain O -> B -> C
+        # passed where B carried a generation but was never a legitimate Accepted
+        # record. Validating each inner node closes the difference between "these
+        # bytes exist" and "this was an acceptance".
+        verify_inner_acceptance!(path, prior, prior_text)
+
         acceptance_chain(
           prior_text,
           path,
@@ -635,6 +658,30 @@ defmodule Loopex.Checks.Plan do
     end
 
     :ok
+  end
+
+  # Concept: an inner chain node must be a structurally valid acceptance.
+  # Technical depth: the outer candidate is validated by the caller; every earlier
+  # one was previously trusted for anything beyond its digests. The check here is
+  # the same one the register applies -- exactly one complete Acceptance row and no
+  # Closure row -- so a node that could never have been Accepted cannot sit in a
+  # lineage. An empty-governance original is the terminal case and is allowed.
+  defp verify_inner_acceptance!(path, revision, text) do
+    {_rows, _bound, complete} =
+      Records.governance_records(text, "#{path} at chain node #{revision}")
+
+    case complete do
+      [false, false] ->
+        :ok
+
+      [true, false] ->
+        :ok
+
+      other ->
+        raise Invalid,
+              "#{path}: chain node #{revision} has governance #{inspect(other)}; a node in an " <>
+                "acceptance lineage is either an empty original or a complete acceptance"
+    end
   end
 
   # Concept: an inner chain link's digests must describe real bytes.

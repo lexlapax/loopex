@@ -92,32 +92,32 @@ defmodule Loopex.JournalReplayTest do
         assert {:ok, state} = Session.replay(session_id, records),
                "seed #{seed}: a legal history was refused"
 
-        assert state.seq == model.seq, "seed #{seed}: sequence"
-        assert state.epoch == model.epoch, "seed #{seed}: epoch"
-        # Values, not sizes. Comparing counts let a reducer that stored the wrong
-        # resolution for every effect agree with the model exactly, turning failed
-        # effects into committed durable truth invisibly.
-        assert Session.facts(state) == model.facts, "seed #{seed}: facts in order"
-        assert Session.pending_txs(state) == Enum.sort(model.pending), "seed #{seed}: pending"
-        assert Session.unknown_txs(state) == Enum.sort(model.unknown), "seed #{seed}: unknown"
-        assert state.resolved == model.resolved, "seed #{seed}: each resolution"
+        # Every field of the struct is compared, and the list of fields is derived
+        # from the struct rather than written out. Naming aspects by hand is how
+        # this oracle failed three times: counts instead of values, then a field
+        # list containing names the record does not have, then a comparison that
+        # never looked at session_id at all, so a reducer admitting a foreign
+        # session's records passed every seed. A field added later now fails loudly
+        # here instead of going silently unchecked.
+        expected = %{
+          session_id: session_id,
+          seq: model.seq,
+          epoch: model.epoch,
+          # The struct keeps facts newest-first; Session.facts/1 reverses on read.
+          facts: Enum.reverse(model.facts),
+          resolved: model.resolved,
+          operations: model.operations,
+          pending: Map.new(model.pending, &{&1, Map.fetch!(model.intents, &1)}),
+          unknown: Map.new(model.unknown, &{&1, Map.fetch!(model.intents, &1)})
+        }
 
-        # The whole map, not a lookup per expected key. Iterating expected keys only
-        # let a reducer ADD an entry beside the legitimate one and still satisfy
-        # every lookup, so the mapping was never actually compared as a whole.
-        assert state.operations == model.operations, "seed #{seed}: operation mapping"
+        actual = Map.from_struct(state)
 
-        # The WHOLE retained intent, not a list of field names. An earlier version
-        # named :session_epoch and :executor, neither of which a durable intent
-        # has, so both sides compared nil to nil and every assertion was vacuous --
-        # a mutation storing epoch: 0 on every intent passed all twelve tests. A
-        # field list can be wrong silently; a whole-map comparison cannot.
-        for tx_id <- Map.keys(state.pending) ++ Map.keys(state.unknown) do
-          assert {:ok, intent} = Session.intent(state, tx_id)
+        assert Map.keys(actual) |> Enum.sort() == Map.keys(expected) |> Enum.sort(),
+               "seed #{seed}: the session struct gained or lost a field the model does not " <>
+                 "predict; extend the model rather than leaving it uncompared"
 
-          assert intent == Map.fetch!(model.intents, tx_id),
-                 "seed #{seed}: retained intent for #{tx_id} differs from the model"
-        end
+        assert actual == expected, "seed #{seed}: replayed state differs from the model"
 
         MapSet.union(seen, MapSet.new(records, &Map.fetch!(&1, :kind)))
       end)
@@ -390,6 +390,30 @@ defmodule Loopex.JournalReplayTest do
 
     assert :ok = Journal.discard_torn_tail(journal, size)
     assert {:ok, ^records, :complete} = Journal.read(journal)
+  end
+
+  test "records from another session, epoch, or sequence are rejected" do
+    # The generated histories only ever carry the expected session, so the property
+    # above cannot reach these paths however strong its comparison is -- a reducer
+    # that admitted a foreign session passed every seed. Identity invariants need
+    # records the generator will not produce, so they are asserted directly.
+    {records, _model} = DurableTruth.history(3, 6, "expected")
+    assert {:ok, state} = Session.replay("expected", records)
+
+    intruder = %{kind: :session_opened, seq: state.seq + 1, session_id: "intruder", epoch: 99}
+
+    assert {:error, {{:session_mismatch, "intruder", "expected"}, _at}} =
+             Session.replay("expected", records ++ [intruder])
+
+    stale = %{kind: :session_opened, seq: state.seq + 1, session_id: "expected", epoch: 0}
+
+    assert {:error, {{:epoch_not_monotonic, 0, _current}, _at}} =
+             Session.replay("expected", records ++ [stale])
+
+    out_of_order = %{kind: :fact_committed, seq: state.seq + 7, fact: "skipped ahead"}
+
+    assert {:error, {{:out_of_sequence, _detail}, _index}} =
+             Session.replay("expected", records ++ [out_of_order])
   end
 
   test "a journal truncated at any byte replays to an intact prefix" do

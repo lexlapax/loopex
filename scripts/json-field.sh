@@ -123,6 +123,21 @@ function unescape(text,   out, index_, char_, next_) {
   return out
 }
 
+# Concept: did this record end with an escaped quote?
+# Technical depth: with the quote as the record separator, a trailing odd number of
+# backslashes means the separator that followed was escaped and the string has not
+# actually closed. Counted from the end, so the cost is the length of the backslash
+# run rather than the length of the record.
+function odd_backslashes(text,   i_, run_) {
+  run_ = 0
+  i_ = length(text)
+  while (i_ >= 1 && substr(text, i_, 1) == "\\") {
+    run_++
+    i_--
+  }
+  return run_ % 2
+}
+
 # Concept: four hex digits to a number, or -1 when they are not hex.
 function hexval(digits_,   i_, char_, value_, total_) {
   if (length(digits_) != 4) { return -1 }
@@ -235,6 +250,10 @@ function decoded_key(token) {
 }
 
 BEGIN {
+  RS = "\""
+  inside = 0
+  depth = 0
+  pending = 0
   count = split(fields, wanted, ",")
   longest_wanted = length(object)
   for (i = 1; i <= count; i++) {
@@ -243,44 +262,57 @@ BEGIN {
   }
 }
 
-{ buffer = buffer $0 "\n" }
+# Concept: one forward pass that never copies the remaining document.
+# Technical depth: the previous scanner took substr(buffer, position) for every
+# token, so each token copied the rest of the input and a document with many
+# fields was quadratic -- 16,000 short fields took over ten seconds, and a hook
+# past its timeout exits 124, which does not block. Three superlinear paths were
+# found here in three reviews (a large value, a large key, many fields), each
+# fixed where it was demonstrated. This removes the class instead: awk splits the
+# input on the quote character itself, so the work is linear in the input by
+# construction and no position arithmetic over the whole buffer exists to be slow.
+#
+# Records alternate outside/inside string. A record ending in an odd number of
+# backslashes means the quote that followed was escaped, so the string continues.
+{
+  if (inside) {
+    if (odd_backslashes($0)) {
+      token = token $0 "\""
+    } else {
+      token = token $0
+      inside = 0
+      pending = 1
+      pending_token = token
+    }
+  } else {
+    if (pending) {
+      # A colon after the closed string makes it a key; anything else a value.
+      if ($0 ~ /^[ \t\r\n]*:/) {
+        key[depth] = decoded_key(pending_token)
+      } else if (depth == 2 && key[1] == object && (key[2] in requested)) {
+        # The RAW token is stored; at most one is decoded, at output.
+        found[key[2]] = pending_token
+      }
+      pending = 0
+    }
+    depth = depth + depth_delta($0)
+    inside = 1
+    token = ""
+  }
+}
 
 END {
-  position = 1
-  depth = 0
-  while (1) {
-    tail = substr(buffer, position)
-    if (match(tail, /"([^"\\]|\\.)*"/) == 0) {
-      break
-    }
-    depth = depth + depth_delta(substr(tail, 1, RSTART - 1))
-    token = substr(tail, RSTART + 1, RLENGTH - 2)
-    position = position + RSTART + RLENGTH - 1
-    following = substr(buffer, position)
-    if (match(following, /^[ \t\r\n]*:/) != 0) {
-      # Keys are decoded like values. Storing them raw meant an ordinary escaped
-      # spelling -- "comm\u0061nd" -- did not match the requested name, so a hook
-      # read nothing and passed a command it would otherwise have blocked.
-      key[depth] = decoded_key(token)
-      continue
-    }
-    if (depth == 2 && key[1] == object && (key[2] in requested)) {
-      # The RAW token is stored and decoded only if it is the one returned.
-      # Decoding every candidate as it was scanned made a document with several
-      # large escaped values quadratic: a 1 MB input took seconds, and past the
-      # hook timeout the client sees exit 124, which does not block. Decoding at
-      # most one value removes the amplification.
-      #
-      # A duplicate key takes the LAST occurrence, which is what a real parser
-      # does. Keeping the first let a document put a decoy ahead of the real value.
-      found[key[2]] = token
-    }
+  # A string closing at end of input has no following record to classify it.
+  if (pending && depth == 2 && key[1] == object && (key[2] in requested)) {
+    found[key[2]] = pending_token
   }
+
   for (i = 1; i <= count; i++) {
     if (wanted[i] in found) {
       emit_unescaped(found[wanted[i]])
       exit 0
     }
   }
+  exit 0
 }
 '

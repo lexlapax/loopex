@@ -32,7 +32,7 @@ defmodule Mix.Tasks.Loopex.Matrix do
     case check(File.cwd!()) do
       {:ok, pair} ->
         Mix.shell().info(
-          "running toolchain matches locked pair Elixir #{pair.elixir} / OTP #{pair.otp}"
+          "running toolchain matches locked pair Elixir #{pair.elixir} / OTP #{pair.otp_exact}"
         )
 
       {:error, reason} ->
@@ -59,7 +59,7 @@ defmodule Mix.Tasks.Loopex.Matrix do
 
     with {:ok, contents} <- read(path),
          {:ok, pairs} <- pairs(contents, path) do
-      running = %{elixir: System.version(), otp: System.otp_release()}
+      running = %{elixir: System.version(), otp: exact_otp_version()}
 
       with matched when is_map(matched) <- Enum.find(pairs, &pair_matches?(&1, running)),
            :ok <- both_lanes_recorded(root, pairs) do
@@ -124,6 +124,32 @@ defmodule Mix.Tasks.Loopex.Matrix do
     end)
   end
 
+  @doc """
+  ## Concept
+
+  The exact OTP version, not just its major release.
+
+  ## Technical depth
+
+  `System.otp_release/0` returns the major only, so comparing against it let any
+  26.x satisfy a lock that names 26.0 — the gate documented exact pairs while the
+  check enforced a family. The installation records the full version in its
+  release directory, which is the same string `.tool-versions` carries.
+
+  When that file is missing the major is returned and the caller says so, because
+  reporting a major as though it were exact is the failure this exists to prevent.
+  """
+  @spec exact_otp_version() :: String.t()
+  def exact_otp_version do
+    major = System.otp_release()
+    path = Path.join([to_string(:code.root_dir()), "releases", major, "OTP_VERSION"])
+
+    case File.read(path) do
+      {:ok, contents} -> String.trim(contents)
+      {:error, _posix} -> major
+    end
+  end
+
   defp read(path) do
     case File.read(path) do
       {:ok, contents} -> {:ok, contents}
@@ -133,18 +159,21 @@ defmodule Mix.Tasks.Loopex.Matrix do
 
   # Concept: an elixir line carries both the Elixir version and the OTP major it
   # is built against, which is exactly the pair ADR 0002 validates.
+  # Each pair is an elixir line followed by the erlang line beside it. The elixir
+  # line names the OTP MAJOR it was built against; the erlang line names the exact
+  # version, and that exact version is what the lock actually promises.
   defp pairs(contents, path) do
-    parsed =
+    lines =
       contents
       |> String.split("\n")
       |> Enum.map(&String.trim/1)
       |> Enum.reject(&(&1 == "" or String.starts_with?(&1, "#")))
-      |> Enum.filter(&String.starts_with?(&1, "elixir "))
-      |> Enum.map(&parse_elixir_line/1)
+
+    parsed = collect_pairs(lines, [])
 
     cond do
-      Enum.any?(parsed, &(&1 == :error)) ->
-        {:error, "#{path} has an elixir line that is not <version>-otp-<major>"}
+      parsed == :error ->
+        {:error, "#{path} has an elixir line not followed by its erlang line"}
 
       length(parsed) != 2 ->
         {:error,
@@ -154,6 +183,20 @@ defmodule Mix.Tasks.Loopex.Matrix do
         {:ok, parsed}
     end
   end
+
+  defp collect_pairs([], accumulated), do: Enum.reverse(accumulated)
+
+  defp collect_pairs(["elixir " <> spec | rest], accumulated) do
+    with %{elixir: elixir, otp: major} <- parse_elixir_line("elixir " <> spec),
+         ["erlang " <> exact | tail] <- rest do
+      pair = %{elixir: elixir, otp: major, otp_exact: String.trim(exact)}
+      collect_pairs(tail, [pair | accumulated])
+    else
+      _other -> :error
+    end
+  end
+
+  defp collect_pairs([_other | rest], accumulated), do: collect_pairs(rest, accumulated)
 
   defp parse_elixir_line("elixir " <> spec) do
     case String.split(spec, "-otp-") do
@@ -165,12 +208,22 @@ defmodule Mix.Tasks.Loopex.Matrix do
     end
   end
 
-  defp pair_matches?(%{elixir: elixir, otp: otp}, %{elixir: elixir, otp: otp}), do: true
-  defp pair_matches?(_pair, _running), do: false
+  # The elixir line carries the OTP MAJOR it was built against; the erlang line
+  # beside it carries the exact version. A pair matches when the Elixir version is
+  # identical, the running major matches the pair's major, and the running exact
+  # version matches the exact version the lock records. Comparing the major alone
+  # accepted any patch in the family while the gate claimed exact pairs.
+  defp pair_matches?(pair, running) do
+    pair.elixir == running.elixir and
+      major_of(pair.otp_exact) == major_of(running.otp) and
+      pair.otp_exact == running.otp
+  end
+
+  defp major_of(version), do: version |> String.split(".") |> hd()
 
   defp describe(pairs) do
     pairs
-    |> Enum.map(fn pair -> "Elixir #{pair.elixir} / OTP #{pair.otp}" end)
+    |> Enum.map(fn pair -> "Elixir #{pair.elixir} / OTP #{pair.otp_exact}" end)
     |> Enum.join(" and ")
   end
 end
