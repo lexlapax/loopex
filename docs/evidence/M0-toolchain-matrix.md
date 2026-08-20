@@ -2,14 +2,14 @@
 
 Retained by outcome 3. ADR 0002 validates two (Elixir, OTP) pairs rather than a
 cross-product, and one Mix run has one Erlang runtime, so the gate runner is
-invoked once per pair and both runs are recorded here.
+invoked once per pair, and every run is recorded here.
 
 ADR 0002 validates two (Elixir, OTP) pairs rather than a cross-product, and one Mix
 run has one Erlang runtime, so the gate runner is invoked once per pair. Both
 orders are run, because a per-lane pass proves nothing about ordering — a shared
 build directory once made the second lane fail on beams the first had compiled.
 
-- candidate: `b8b7bf480f53a131977bd51ff72faff03a6adf5a`
+- candidate: `676b2b3d41391a830728ea8293325c281c101351`
 - gate digest: `sha256:6e02cd424bab8e3410205ca053adce150ee9fa1a84d7b6f5b032390c4529e09f`
 - command: `bash scripts/check-m0-gate.sh`, with `LOOPEX_PROVIDER_API_KEY` set, the
   floor pair supplied by `mise exec erlang@26.0 elixir@1.17.0-otp-26 --`
@@ -18,18 +18,28 @@ build directory once made the second lane fail on beams the first had compiled.
 
 | # | Order | Toolchain | Verdict | Exit | Wall clock |
 | --- | --- | --- | --- | --- | --- |
-| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 55s |
-| 2 | second | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 102s |
+| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 91s |
+| 2 | second | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 103s |
 | 3 | third | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 58s |
 | 4 | fourth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 88s |
+| 5 | fifth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 56s |
 
 The previous candidate's runs are superseded rather than kept alongside these.
 Product bytes changed, which invalidates the evidence taken before them; a table
 carrying rows from two revisions invites a reader to count four runs that were
 never all true of one tree.
 
-Runs 1 and 2 are floor-then-current; runs 3 and 4 reverse that, so each pair ran
-both immediately after itself and immediately after the other. With no
+Runs 1 and 2 are floor-then-current; runs 3 and 4 reverse that; run 5 follows the
+floor lane with itself. The four adjacencies present are therefore floor-current,
+current-current, current-floor, and floor-floor -- each pair immediately after
+itself and immediately after the other.
+
+Run 5 exists because the previous table asserted exactly that sentence while the
+runs were floor, current, current, floor: there was no floor-after-floor anywhere
+in it. The cheaper repair was to narrow the claim to what had been run. Running
+the missing lane was chosen instead, because the sentence describes the coverage
+the outcome is supposed to have, and the shared-build-directory defect it exists
+to catch is not the only way two lanes can interact. With no
 `LOOPEX_PROVIDER_API_KEY` present the same runner stops at outcome 7 reporting
 evidence unavailable rather than skipping, which is the fail-closed direction.
 
@@ -77,6 +87,6 @@ core-only lane shared the umbrella's build directory, so it depended on which
 toolchain had compiled last: running the floor pair after the current pair loaded
 beams built by the other Elixir and the VM died with a corrupt atom table. The gate
 failed on a docs-only commit that had passed minutes earlier. The lane now owns a
-temporary build directory. Both lanes were then run in both orders, four runs, all
-green -- which is the evidence that matters here, because a per-lane green proves
-nothing about ordering.
+temporary build directory. Both lanes were then run in both orders and each after
+itself, five runs, all green -- which is the evidence that matters here, because a
+per-lane green proves nothing about ordering.

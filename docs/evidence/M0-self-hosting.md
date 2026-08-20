@@ -20,19 +20,29 @@ The size figure is audit material. No run passes or fails on it.
 Taken by running `mix loopex.self_hosting`, not transcribed:
 
 ```text
-documentation 1719   comment 480   blank 1419   code 6337   total 9955
+documentation 1739   comment 566   blank 1457   code 6494   total 10256
 ```
 
 Against the 4,462-line gate-commit baseline the plan binds, that is
-2.23x. Against the 4,688 lines those files actually held at the
-revision they were retired, it is 2.12x. Both are stated because a
+2.30x. Against the 4,688 lines those files actually held at the
+revision they were retired, it is 2.19x. Both are stated because a
 reader comparing to the deleted files computes the second, and the two numbers are
 different.
 
-The figure rose by 33 lines from the previous candidate: the reader and the two
-guards gained the escape, duplicate-binding, and fail-closed handling a review
-demonstrated was missing, and most of that is the comment explaining why each
-rule exists rather than new code.
+The figure rose by 301 lines from the previous candidate, and most of that is one
+correction rather than growth: `apps/loopex/test/tool_call_reader_test.exs` is now
+measured. It tests the replacement's reader, exactly as the three test files
+already listed test the rest of the replacement, and leaving it out understated
+the figure -- which this command's own documentation calls worse than reporting
+none, because an understated number still reads as evidence.
+
+The previous entry credited its increase to "the reader and the two guards". That
+was wrong: `.claude/hooks/guard-bash.sh` and `guard-filesystem.sh` are not in the
+measured set and contribute nothing to this total. The guards are client adapters;
+what is measured is the repository-owned replacement they call.
+
+Splitting the awk program into `scripts/json-field.awk` moved lines between two
+measured files without changing their sum.
 
 ## What the figure means
 
