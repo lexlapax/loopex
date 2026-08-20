@@ -28,6 +28,8 @@ defmodule Loopex.JournalReplayTest do
   alias Loopex.Session
   alias LoopexTest.DurableTruth
 
+  # Concept: a generated failure has to be reproducible to be actionable.
+  #
   # Technical depth: fixed seeds, so a failure is reproducible on both locked
   # toolchains and a bisect sees the same history the failing run saw.
   @seeds [1, 7, 13, 101, 4_242, 65_537]
@@ -584,6 +586,8 @@ defmodule Loopex.JournalReplayTest do
 
     bytes = File.read!(journal)
 
+    # Concept: the expected count is derived, never transcribed.
+    #
     # Technical depth: the frame layout is recomputed here from the same
     # deterministic encoding the journal writes, so the expected record count at
     # a given truncation is derived independently of what the reader reports. A

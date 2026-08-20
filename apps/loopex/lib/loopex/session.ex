@@ -91,6 +91,8 @@ defmodule Loopex.Session do
   """
   @type fence :: :open | {:fenced, binary()}
 
+  # Concept: an intent is admissible only if it carries what later comparisons need.
+  #
   # Technical depth: an intent must carry every field the admission rules later
   # compare against. Checked as a set at apply time so a partially built intent
   # is refused at the write, not discovered during a reconciliation months later

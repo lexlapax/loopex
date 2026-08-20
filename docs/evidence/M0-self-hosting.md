@@ -20,16 +20,16 @@ The size figure is audit material. No run passes or fails on it.
 Taken by running `mix loopex.self_hosting`, not transcribed:
 
 ```text
-documentation 1763   comment 608   blank 1484   code 6588   total 10443
+documentation 1763   comment 622   blank 1491   code 6606   total 10482
 ```
 
 Against the 4,462-line gate-commit baseline the plan binds, that is
-2.34x. Against the 4,688 lines those files actually held at the
-revision they were retired, it is 2.23x. Both are stated because a
+2.35x. Against the 4,688 lines those files actually held at the
+revision they were retired, it is 2.24x. Both are stated because a
 reader comparing to the deleted files computes the second, and the two numbers are
 different.
 
-The figure is 10443 at this candidate. Two earlier rounds account for the shape of
+The figure is 10482 at this candidate. Two earlier rounds account for the shape of
 it, and the numbers belong to different candidates rather than to one delta:
 
 - +301 when `apps/loopex/test/tool_call_reader_test.exs` was added to the measured
@@ -40,10 +40,11 @@ it, and the numbers belong to different candidates rather than to one delta:
   an understated number still reads as evidence.
 - +9 from a comment correction in `apps/loopex/lib/mix/tasks/status/register.ex`,
   which is in the measured set.
-- +178 at this candidate: `apps/loopex/test/docs_check_test.exs` is new and joins
+- +217 at this candidate: `apps/loopex/test/docs_check_test.exs` is new and joins
   the measured set beside the reader's test, `loopex.docs_check.ex` grew by
-  separating its uncovered tally into three counts, and the new test carries the
-  reason it does not run async.
+  separating its uncovered tally into three counts and gained a case for the
+  silent-module path it could not report, and fifteen labelled depth comments
+  across the repository gained the purpose line the contract pairs them with.
 
 Each of those deltas was recorded only after re-running the command. A figure
 headed "at the closure candidate" was once carried forward from the candidate

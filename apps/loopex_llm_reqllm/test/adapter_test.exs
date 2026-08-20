@@ -41,6 +41,8 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
     variable = Adapter.credential_variable()
     assert variable == "LOOPEX_PROVIDER_API_KEY"
 
+    # Concept: a test must not disarm the lane that carries the real-path evidence.
+    #
     # Technical depth: the variable is restored afterwards so this test cannot
     # disarm the real-provider lane for a later run in the same VM. `async:
     # false` keeps the mutation off concurrent tests.

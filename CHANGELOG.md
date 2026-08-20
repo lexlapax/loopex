@@ -28,8 +28,13 @@ the exact document set its milestone must update.
 - Repository checks became Mix tasks: dependency budget and direction, version
   train, formatter scope, toolchain matrix, core-only lane, compiled-documentation
   check, hook registration, and self-hosting measurement. Each keeps its logic in
-  a function the protected tests call directly, so a selector exercises the real
-  code path.
+  a function a test can call directly rather than behind the task's `run/1`, so a
+  test exercises the real code path. How much of that is locked varies: dependency
+  budget, core-only and hook registration are driven by protected selectors;
+  toolchain matrix and compiled documentation are covered by tests that are not
+  protected selectors; version train and self-hosting measurement have no test and
+  rest on the gate running the command. That spread is stated rather than implied
+  by "each", which read as uniform coverage the gate does not lock.
 - Durable-truth experiments for M0's constitutional core. A session journal
   replays across an induced restart, checked by properties over generated
   histories against an independent model, by process kills at every durable

@@ -51,6 +51,8 @@ defmodule Mix.Tasks.Loopex.CoreOnlyTest do
     # The same tree without the read produces no environment reason, so the
     # rejection is about the call and not about the fixture being present at all.
     #
+    # Concept: assert on the property this case covers, not on the whole check.
+    #
     # Technical depth: `check/1` evaluates both properties, and the isolated lane
     # cannot run in a fixture root that has no Mix project -- so this asserts on
     # the environment reasons rather than on :ok. Asserting :ok here would make

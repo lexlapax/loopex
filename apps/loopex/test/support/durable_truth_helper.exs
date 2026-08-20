@@ -31,6 +31,8 @@ defmodule LoopexTest.DurableTruth do
   alias Loopex.Effect
   alias Loopex.Session
 
+  # Concept: a deterministic generator the suite owns, so histories are stable.
+  #
   # Technical depth: a minimal Lehmer generator. The modulus is prime and the
   # multiplier is a primitive root of it, so a nonzero seed never reaches zero and
   # the sequence does not collapse. Sufficient for choosing between a handful of

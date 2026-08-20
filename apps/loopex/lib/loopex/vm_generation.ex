@@ -104,6 +104,8 @@ defmodule Loopex.VmGeneration do
   """
   @type artifact :: %{module: module(), generation: integer(), binary: binary()}
 
+  # Concept: an isolated VM that stops answering must fail its caller.
+  #
   # Technical depth: an explicit bound rather than `:peer.call/4`'s `:infinity`.
   # An isolated VM that stops answering must fail the caller, because a hang here
   # would surface as a suite-level timeout with no indication of which call stuck.

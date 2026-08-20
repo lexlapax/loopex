@@ -44,6 +44,8 @@ defmodule Loopex.ToolCallReaderTest do
 
   # The smallest timeout the client applies to a guard, in milliseconds.
   #
+  # Concept: the budget the client actually enforces, not a copy of it.
+  #
   # Technical depth: read from the configuration rather than restated in the test,
   # because a budget written down twice drifts, and the copy in the test is the one
   # that goes stale silently -- it keeps passing while the real hook is being
@@ -70,7 +72,8 @@ defmodule Loopex.ToolCallReaderTest do
     end
   end
 
-  # Runs an executable with `document` on standard input and returns {output, status}.
+  # Concept: runs an executable with `document` on standard input, returning
+  # {output, status}.
   #
   # Technical depth: the document is staged in a file and redirected rather than
   # written to a port, because an Erlang port cannot close only the standard input
@@ -103,8 +106,8 @@ defmodule Loopex.ToolCallReaderTest do
 
   describe "the reader agrees with a real JSON parser about which binding wins" do
     test "a repeated parent object discards what the earlier one bound", %{reader: reader} do
-      # A real parser keeps the LAST tool_input, so a document whose second parent
-      # never binds the requested key has no value for it at all.
+      # Concept: a real parser keeps the LAST tool_input, so a document whose
+      # second parent never binds the requested key has no value for it at all.
       #
       # Technical depth: the second parent must bind a DIFFERENT key for this to
       # reach the parent reset. When both parents bind `command`, last-wins for
@@ -247,8 +250,8 @@ defmodule Loopex.ToolCallReaderTest do
       fs_guard: guard,
       real_home: real_home
     } do
-      # The bypass that motivated last-wins at the parent level, and the only shape
-      # that reaches it through a guard.
+      # Concept: the bypass that motivated last-wins at the parent level, and the
+      # only shape that reaches it through a guard.
       #
       # Technical depth: this guard asks for `file_path notebook_path path` in
       # priority order, so the discarded parent must bind a HIGHER-priority field

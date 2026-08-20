@@ -107,9 +107,11 @@ lane — never part of the default suite.
   role default is not proof: if the live parent or client overrides it with a
   writable profile, the reviewer reports unavailable and stops. Retain both a
   positive read-only smoke and a negative fail-closed smoke where supported.
-  Required inspection checks must also execute in that environment: during the
-  bridge period, Python assertions live in tracked scripts rather than shell
-  here-documents that need ambient temporary writes.
+  Required inspection checks must also execute in that environment. The
+  bridge-period rule that kept Python assertions in tracked scripts is retired
+  with the bridge: assertions now live in Mix tasks and their tests, which need a
+  writable build directory, so a read-only reviewer runs the gate runner's
+  inspection prefix or directs the build into an explicit isolated task root.
 - For development-client ecosystem changes, check current primary vendor docs
   or release notes plus installed behavior, derive shared consequences first,
   and retain version-specific facts here. Material changes

@@ -81,6 +81,8 @@ defmodule Loopex.Journal do
   """
   @type claim :: binary()
 
+  # Concept: recovery must survive a malformed write without unbounded allocation.
+  #
   # Technical depth: a durable record is bounded so one malformed write cannot
   # make recovery allocate without limit. Both ceilings are far above anything
   # this milestone's records need; they exist as a refusal, not as a tuning knob.

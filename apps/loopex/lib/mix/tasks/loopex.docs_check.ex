@@ -151,7 +151,7 @@ defmodule Mix.Tasks.Loopex.DocsCheck do
         {["#{module}: module documentation #{detail}"], 0, %{hidden: 0, none: 0, generated: 0}}
 
       :none ->
-        {["#{module}: has no module documentation"], 0, 0}
+        {["#{module}: has no module documentation"], 0, %{hidden: 0, none: 0, generated: 0}}
     end
   end
 

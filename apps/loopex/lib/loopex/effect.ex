@@ -82,11 +82,15 @@ defmodule Loopex.Effect do
           required(:fencing_token) => non_neg_integer()
         }
 
+  # Concept: exactly which request fields the digest binds.
+  #
   # Technical depth: the exact projection the digest covers. Listed as data so
   # the digest's definition is one readable line, and so adding a request field
   # is a visible decision about whether the digest binds it.
   @digest_fields [:operation_id, :attempt, :domain, :domain_version, :payload]
 
+  # Concept: what makes a live result the answer to this intent and no other.
+  #
   # Technical depth: a live result must match the intent on every one of these.
   # The session epoch is compared separately because it is checked against the
   # coordinator's current epoch, not against the journaled one -- that asymmetry

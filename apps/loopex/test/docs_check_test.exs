@@ -38,7 +38,8 @@ defmodule Mix.Tasks.Loopex.DocsCheckTest do
     {:ok, build: build, ebin: ebin}
   end
 
-  # Compiles one module into the fixture ebin so the task finds it by wildcard.
+  # Concept: compiles one module into the fixture ebin so the task finds it by
+  # wildcard.
   #
   # Technical depth: the Docs chunk is opt-in here. Without it every fixture beam
   # came back `:chunk_not_found`, and the two rejection cases passed on THAT error
@@ -76,6 +77,13 @@ defmodule Mix.Tasks.Loopex.DocsCheckTest do
 
     assert {:error, reasons} = DocsCheck.check(build, ["fixture"])
 
+    # Asserting the module name alone is satisfiable by the :chunk_not_found path,
+    # because that reason interpolates the beam PATH and the path contains the
+    # module name. The reason has to name the ORDERING, which only the classifier
+    # produces.
+    assert Enum.any?(reasons, &String.contains?(&1, "places")),
+           "the reason must name the ordering it rejected: #{inspect(reasons)}"
+
     assert Enum.any?(reasons, &String.contains?(&1, "DocsFixtureInverted")),
            "the reason must name the offending module: #{inspect(reasons)}"
   end
@@ -91,7 +99,13 @@ defmodule Mix.Tasks.Loopex.DocsCheckTest do
     end
     """)
 
-    assert {:error, _reasons} = DocsCheck.check(build, ["fixture"])
+    assert {:error, reasons} = DocsCheck.check(build, ["fixture"])
+
+    assert Enum.any?(reasons, &String.contains?(&1, "is missing")),
+           "the reason must say what was missing: #{inspect(reasons)}"
+
+    assert Enum.any?(reasons, &String.contains?(&1, "DocsFixtureHalf")),
+           "the reason must name the offending module: #{inspect(reasons)}"
   end
 
   test "a correctly documented module is accepted and counted as covered", %{
@@ -130,6 +144,28 @@ defmodule Mix.Tasks.Loopex.DocsCheckTest do
     assert {:ok, result} = DocsCheck.check(build, ["fixture"])
     assert result.hidden.hidden == 1, "a declared @moduledoc false is one declared exclusion"
     assert result.hidden.none == 0, "nothing here was silently undocumented"
+  end
+
+  test "a module with no documentation at all is rejected by name", %{build: build, ebin: ebin} do
+    # The task's own moduledoc calls silence "the accident this check exists to
+    # catch", and this is its primary rejection path. It had no case, and the tally
+    # refactor left one accumulator here as an integer while every other became a
+    # map -- so instead of reporting the reason, the check died with a BadMapError
+    # inside the merge. A crash is fail-closed, but it names no module and produces
+    # no reason, and nothing here would have noticed.
+    compile!(ebin, """
+    defmodule DocsFixtureSilent do
+      def visible, do: :ok
+    end
+    """)
+
+    assert {:error, reasons} = DocsCheck.check(build, ["fixture"])
+
+    assert Enum.any?(reasons, &String.contains?(&1, "has no module documentation")),
+           "the reason must say the documentation is absent: #{inspect(reasons)}"
+
+    assert Enum.any?(reasons, &String.contains?(&1, "DocsFixtureSilent")),
+           "the reason must name the silent module: #{inspect(reasons)}"
   end
 
   test "an application with no compiled beams is unavailable evidence, not a pass", %{
