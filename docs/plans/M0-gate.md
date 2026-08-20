@@ -32,7 +32,7 @@ against the file it names at every validation.
 
 | SHA-256 | Path |
 | --- | --- |
-| `b08eb452e003ae416670910527f7f8102ada2ecbff486816e884b4a4c97f11e6` | `scripts/check-m0-gate.sh` |
+| `77a0042d65b2fde0e8bea9d61ecf17cbb71545773b390ec58b7d2521f1761f58` | `scripts/check-m0-gate.sh` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 | `ef67304cbf2e3be1f424eb6bad463a12a61538aaeee953f4bf8f16574759be9a` | `scripts/fixtures/hook-cases/guard-bash.stdin` |
 | `94538072921e9a56fb62f402766979ee7872df952228bd5ca8baaccaffe8729e` | `scripts/fixtures/hook-cases/guard-filesystem.stdin` |
@@ -650,3 +650,39 @@ replaced by a derivation — the scan from the stub list — it was. Where it co
 replaced by structure — a builtin makes a binding, an operator makes an assignment
 — it was. What remains enumerated is stated as such rather than described as
 complete.
+
+<a id="amendment-5"></a>
+## Amendment 5 — loop constructs bind the search-path variable too
+
+**Acceptance: OUTSTANDING.** Drafted for the maintainer's disposition. **Scope:**
+the search-path mutation rule in the bound runner. **Not changed:** every locked
+command, selector, minimum executed count, locked test name, fixture, toolchain
+pair, evidence class, and closure document.
+
+A loop over the search-path variable binds it with no operator on the line at all:
+
+```text
+for <the variable> in /usr/bin; do
+  <an interpreter>
+done
+```
+
+That matched neither scan, so the loop body reached a real interpreter while the
+absence lane reported success. `select` has the same shape.
+
+Amendment 4 replaced a list of syntaxes with a structural rule — a binding builtin
+followed by the token, or a bare token with an assignment operator. This finding
+shows that rule was still one category short: `for` and `select` bind by iterating,
+not by assigning. They join the binding constructs rather than being appended as
+two more syntaxes, because what makes a line a binding is the construct, not the
+punctuation.
+
+Ten forms are now caught and six near-misses are not, including a loop that merely
+*reads* the variable.
+
+This is the fifth amendment, and it is worth being plain about the pattern rather
+than claiming the rule is now complete: each one narrowed a check that had been
+described as total. A textual scan of shell cannot be proved exhaustive, and the
+gate says so where the residual is stated — indirection through a nameref, `eval`,
+or a computed name leaves no token to match, and no containment available in the
+development baseline closes it.
