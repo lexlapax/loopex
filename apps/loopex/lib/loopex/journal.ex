@@ -93,8 +93,34 @@ defmodule Loopex.Journal do
   @spec append(Path.t(), entry()) :: :ok | {:error, term()}
   def append(path, record) when is_map(record) do
     with :ok <- validate(record),
+         :ok <- refuse_during_repair(path),
          {:ok, frame} <- frame(record) do
       write(path, frame)
+    end
+  end
+
+  # Concept: an append during a repair is a record the repair is about to delete.
+  # Technical depth: the repair verifies a tear and then truncates. An append that
+  # lands between those two steps is synced, acknowledged, and then destroyed, and
+  # the repair's own record-count check cannot see it because the surviving prefix
+  # count is unchanged. Refusing here is what makes the sentinel mean something to
+  # a writer; taking it only in the repair left `append/2` free to ignore it.
+  #
+  # A journal that does not exist yet cannot be under repair, so a missing file is
+  # not an error here -- the first append creates it.
+  defp refuse_during_repair(path) do
+    case lock_path(path) do
+      {:error, {:journal_unavailable, _path, :enoent}} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+
+      {:ok, lock} ->
+        case File.exists?(lock) do
+          false -> :ok
+          true -> {:error, {:repair_in_progress, path, lock}}
+        end
     end
   end
 
@@ -153,9 +179,19 @@ defmodule Loopex.Journal do
   * A tail that reads as a strict prefix is still scanned for any frame that
     decodes and passes its checksum, because a corrupted length prefix can claim
     more bytes than remain while intact records sit past it.
-  * Verification and truncation happen through one handle, under a lock file
-    created exclusively, so a second writer cannot repair and append between the
-    two steps and have its records deleted.
+  * Verification and truncation happen through one handle, under a sentinel created
+    exclusively and named by the journal's device and inode, so every alias of one
+    journal contends for one sentinel. `append/2` refuses while that sentinel
+    exists, which is what makes it mean something to a writer rather than only to
+    another repairer. The cut is additionally refused if the file changed size
+    since verification.
+
+  The exclusion covers writers that go through this module. A process writing to
+  the journal by other means is outside it, and so is a `kill -9` between claiming
+  the sentinel and recording who claimed it. `repair_lock_path/1` names the file so
+  an operator can inspect and remove a stale one; that is the recovery procedure,
+  and it is deliberately manual because expiry by age or pid can evict a live
+  owner.
   """
   @spec discard_torn_tail(Path.t(), non_neg_integer()) :: :ok | {:error, term()}
   def discard_torn_tail(path, offset) when is_integer(offset) and offset >= 0 do
@@ -201,12 +237,59 @@ defmodule Loopex.Journal do
   # A stale lock left by a killed process fails the next repair closed. That is the
   # correct direction for durable truth: a human decides whether the previous owner
   # is really gone, and the lock records who claimed it so they can tell.
-  defp acquire_lock(path) do
-    lock = path <> ".repair-lock"
+  @doc """
+  ## Concept
 
+  Where the repair sentinel for a journal lives.
+
+  ## Technical depth
+
+  Public because an operator needs it. A stale sentinel — left by a process killed
+  mid-repair — fails every later repair closed, deliberately: a human decides
+  whether the previous owner is really gone, since automatic expiry by age or pid
+  can evict a live one. That trade is only acceptable if the operator can find the
+  file and see who claimed it, so this returns the path and the sentinel records
+  node, OS pid, and claim time. Removing it by hand is the recovery procedure.
+
+  The path is derived from the journal's device and inode, so every alias of one
+  journal resolves to one sentinel.
+  """
+  @spec repair_lock_path(Path.t()) :: {:ok, Path.t()} | {:error, term()}
+  def repair_lock_path(path), do: lock_path(path)
+
+  defp acquire_lock(path) do
+    with {:ok, lock} <- lock_path(path) do
+      claim_lock(lock)
+    end
+  end
+
+  # Concept: the lock names the FILE, not the spelling of its path.
+  # Technical depth: deriving it as `path <> ".repair-lock"` made the identity
+  # lexical, so two aliases of one journal -- a symlink, a bind mount, a relative
+  # spelling -- produced two different locks and two repairers each believed they
+  # held it exclusively. Device and inode identify the file itself, so every alias
+  # of one journal contends for one sentinel. It lives in the temporary directory
+  # rather than beside the journal because aliases can sit in different
+  # directories, and a lock next to one of them would not be seen from the other.
+  defp lock_path(path) do
+    case File.stat(path) do
+      {:ok, %File.Stat{major_device: device, inode: inode}} ->
+        {:ok, Path.join(System.tmp_dir!(), "loopex-repair-#{device}-#{inode}.lock")}
+
+      {:error, posix} ->
+        {:error, {:journal_unavailable, path, posix}}
+    end
+  end
+
+  defp claim_lock(lock) do
     case File.open(lock, [:write, :exclusive]) do
       {:ok, io} ->
+        # Written and synced before the repair begins, so a process killed during
+        # the repair still leaves a sentinel that says who to ask. A kill between
+        # the create and this write can still leave an empty one; that is a smaller
+        # window than leaving the whole claim implicit, not a closed one.
         IO.write(io, "node=#{node()} os_pid=#{System.pid()} at=#{System.system_time(:second)}\n")
+        :file.sync(io)
         File.close(io)
         :ok
 
@@ -218,13 +301,24 @@ defmodule Loopex.Journal do
     end
   end
 
-  defp release_lock(path), do: File.rm(path <> ".repair-lock")
+  # A failed release is reported, not swallowed. Silently returning success while
+  # the sentinel survives leaves the next repair blocked with nothing explaining
+  # why, which is the worst of both directions.
+  defp release_lock(path) do
+    with {:ok, lock} <- lock_path(path) do
+      case File.rm(lock) do
+        :ok -> :ok
+        {:error, :enoent} -> :ok
+        {:error, posix} -> {:error, {:repair_lock_not_released, lock, posix}}
+      end
+    end
+  end
 
   defp verify_and_truncate(io, path, offset) do
     with {:ok, bytes} <- read_all(io, path),
          {:ok, records} <- expect_torn_at(bytes, path, offset),
          :ok <- refuse_intact_tail(bytes, path, offset),
-         :ok <- truncate_to(io, path, offset) do
+         :ok <- truncate_to(io, path, offset, byte_size(bytes)) do
       confirm_prefix(io, path, records)
     end
   end
@@ -296,10 +390,26 @@ defmodule Loopex.Journal do
   defp scan_next(<<_skipped, rest::binary>>), do: scan_for_intact(rest)
   defp scan_next(<<>>), do: false
 
-  defp truncate_to(io, path, offset) do
-    with {:ok, _position} <- :file.position(io, offset),
-         :ok <- :file.truncate(io) do
-      :ok
+  # Concept: cut only if the file is still exactly what was verified.
+  # Technical depth: the sentinel excludes a cooperating writer, and this excludes
+  # the rest. Between verification and the cut the file must not have changed size
+  # at all -- if it has, something appended and truncating would delete it. The
+  # window is now a size comparison rather than a whole second read, but a
+  # difference is refused rather than repaired.
+  defp truncate_to(io, path, offset, verified_size) do
+    with {:ok, current} <- :file.position(io, :eof) do
+      cond do
+        current != verified_size ->
+          {:error, {:journal_grew_during_repair, path, verified_size, current}}
+
+        true ->
+          with {:ok, _position} <- :file.position(io, offset),
+               :ok <- :file.truncate(io) do
+            :ok
+          else
+            {:error, posix} -> {:error, {:journal_unavailable, path, posix}}
+          end
+      end
     else
       {:error, posix} -> {:error, {:journal_unavailable, path, posix}}
     end

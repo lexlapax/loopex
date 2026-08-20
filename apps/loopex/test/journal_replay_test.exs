@@ -107,20 +107,16 @@ defmodule Loopex.JournalReplayTest do
         # every lookup, so the mapping was never actually compared as a whole.
         assert state.operations == model.operations, "seed #{seed}: operation mapping"
 
-        # Retained intent fields, not just which transactions are open. Comparing
-        # transaction IDs alone left domain, epochs, attempt and fencing token
-        # unchecked, and those are what a dispatch and a fence are decided on.
+        # The WHOLE retained intent, not a list of field names. An earlier version
+        # named :session_epoch and :executor, neither of which a durable intent
+        # has, so both sides compared nil to nil and every assertion was vacuous --
+        # a mutation storing epoch: 0 on every intent passed all twelve tests. A
+        # field list can be wrong silently; a whole-map comparison cannot.
         for tx_id <- Map.keys(state.pending) ++ Map.keys(state.unknown) do
           assert {:ok, intent} = Session.intent(state, tx_id)
-          expected = Map.fetch!(model.intents, tx_id)
 
-          for field <- [:domain, :session_epoch, :attempt, :operation_id] do
-            assert Map.get(intent, field) == Map.get(expected, field),
-                   "seed #{seed}: #{tx_id} #{field}"
-          end
-
-          assert Map.get(intent, :executor) == Map.get(expected, :executor),
-                 "seed #{seed}: #{tx_id} executor identity, epoch and fencing token"
+          assert intent == Map.fetch!(model.intents, tx_id),
+                 "seed #{seed}: retained intent for #{tx_id} differs from the model"
         end
 
         MapSet.union(seen, MapSet.new(records, &Map.fetch!(&1, :kind)))
@@ -289,19 +285,56 @@ defmodule Loopex.JournalReplayTest do
     assert {:ok, kept, {:torn, offset}} = Journal.read(journal)
     size = File.stat!(journal).size
 
-    # A lock left by another writer fails the repair closed rather than racing it.
-    lock = journal <> ".repair-lock"
+    assert {:ok, lock} = Journal.repair_lock_path(journal)
     File.write!(lock, "node=someone-else\n")
+    on_exit(fn -> File.rm(lock) end)
 
     assert {:error, {:repair_already_held, ^lock, _who}} =
              Journal.discard_torn_tail(journal, offset)
 
     assert File.stat!(journal).size == size, "a refused repair must not alter the journal"
 
+    # An append during a repair is a record the repair is about to delete, so a
+    # writer must see the sentinel too. Taking it only in the repair left append/2
+    # free to ignore it, and a synced, acknowledged record was then destroyed.
+    assert {:error, {:repair_in_progress, ^journal, ^lock}} =
+             Journal.append(journal, %{kind: :fact_committed, seq: 3, fact: "during"})
+
+    # Every alias of one journal contends for one sentinel. A lexical lock name
+    # gave two spellings two different locks and two exclusive owners.
+    alias_path = journal <> ".alias"
+    File.ln_s!(journal, alias_path)
+    on_exit(fn -> File.rm(alias_path) end)
+    assert {:ok, ^lock} = Journal.repair_lock_path(alias_path)
+
+    assert {:error, {:repair_already_held, ^lock, _also}} =
+             Journal.discard_torn_tail(alias_path, offset)
+
     File.rm!(lock)
     assert :ok = Journal.discard_torn_tail(journal, offset)
     assert {:ok, ^kept, :complete} = Journal.read(journal)
     refute File.exists?(lock), "the lock must be released after a successful repair"
+  end
+
+  test "a record appended after a tear survives a later repair" do
+    # The reviewer's reproduction in its deterministic form: a repairer verifies a
+    # tear, another writer appends a complete record, and the repair must not
+    # delete it. The repair's own record-count check cannot notice, because the
+    # surviving prefix count is unchanged either way.
+    journal = DurableTruth.journal_path("append-after-tear")
+    assert :ok = Journal.append(journal, %{kind: :fact_committed, seq: 1, fact: "a"})
+    File.open!(journal, [:append, :binary], fn io -> IO.binwrite(io, <<0, 0, 0, 90, 1>>) end)
+    assert {:ok, _kept, {:torn, offset}} = Journal.read(journal)
+
+    # A second writer lands a complete, synced record beyond the tear.
+    assert :ok = Journal.append(journal, %{kind: :fact_committed, seq: 2, fact: "b"})
+    grown = File.stat!(journal).size
+
+    assert {:error, {:intact_record_beyond_tear, ^journal, ^offset}} =
+             Journal.discard_torn_tail(journal, offset)
+
+    assert File.stat!(journal).size == grown,
+           "a record acknowledged after the tear must survive the repair"
   end
 
   test "a coordinator refuses to start on a corrupt journal rather than repairing it" do
