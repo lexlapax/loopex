@@ -13,21 +13,26 @@ The size figure is audit material. No run passes or fails on it.
   recorded it changed the number it recorded.
 - dropped behaviors: eight, listed below and printed in full by the same command so
   the list cannot drift from the figure
-- recorded: 2026-08-17 on Elixir 1.20.3 / OTP 29.0.5
+- recorded: 2026-08-20 on Elixir 1.20.3 / OTP 29.0.5
 
 ## Measurement at the closure candidate
 
 Taken by running `mix loopex.self_hosting`, not transcribed:
 
 ```text
-documentation 1719   comment 467   blank 1414   code 6322   total 9922
+documentation 1719   comment 480   blank 1419   code 6337   total 9955
 ```
 
 Against the 4,462-line gate-commit baseline the plan binds, that is
-2.22x. Against the 4,688 lines those files actually held at the
+2.23x. Against the 4,688 lines those files actually held at the
 revision they were retired, it is 2.12x. Both are stated because a
 reader comparing to the deleted files computes the second, and the two numbers are
 different.
+
+The figure rose by 33 lines from the previous candidate: the reader and the two
+guards gained the escape, duplicate-binding, and fail-closed handling a review
+demonstrated was missing, and most of that is the comment explaining why each
+rule exists rather than new code.
 
 ## What the figure means
 

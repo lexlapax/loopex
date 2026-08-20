@@ -9,19 +9,24 @@ run has one Erlang runtime, so the gate runner is invoked once per pair. Both
 orders are run, because a per-lane pass proves nothing about ordering — a shared
 build directory once made the second lane fail on beams the first had compiled.
 
-- candidate: `89181a497d041f75ec4f539b213608ba22bdc28d`
+- candidate: `b8b7bf480f53a131977bd51ff72faff03a6adf5a`
 - gate digest: `sha256:6e02cd424bab8e3410205ca053adce150ee9fa1a84d7b6f5b032390c4529e09f`
 - command: `bash scripts/check-m0-gate.sh`, with `LOOPEX_PROVIDER_API_KEY` set, the
   floor pair supplied by `mise exec erlang@26.0 elixir@1.17.0-otp-26 --`
 - host: macOS arm64; both pairs provided by `mise`
-- recorded: 2026-08-17
+- recorded: 2026-08-20
 
 | # | Order | Toolchain | Verdict | Exit | Wall clock |
 | --- | --- | --- | --- | --- | --- |
-| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 91s |
+| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 55s |
 | 2 | second | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 102s |
-| 3 | third | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 59s |
-| 4 | fourth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 92s |
+| 3 | third | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 58s |
+| 4 | fourth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 88s |
+
+The previous candidate's runs are superseded rather than kept alongside these.
+Product bytes changed, which invalidates the evidence taken before them; a table
+carrying rows from two revisions invites a reader to count four runs that were
+never all true of one tree.
 
 Runs 1 and 2 are floor-then-current; runs 3 and 4 reverse that, so each pair ran
 both immediately after itself and immediately after the other. With no
@@ -36,10 +41,14 @@ gate expects a reviewer to re-run at the closure candidate rather than trust a
 retained verdict.
 
 The toolchain column names the EXACT version each lane ran, not the major release.
-`mix loopex.matrix` searches for that exact string: it previously searched for the
-major, so a row naming "OTP 26" satisfied a lock that promises 26.0 while runtime
-matching was exact. Evidence a check accepts loosely is evidence the check does not
-really constrain.
+`mix loopex.matrix` requires that version to appear as a whole token. It first
+searched for the major, so a row naming "OTP 26" satisfied a lock promising 26.0
+while runtime matching was exact. Searching for the exact version fixed that row
+and left the rule: the test was still a substring, and every version is a prefix of
+longer ones, so a row recording 26.0.1 — a different toolchain — still satisfied a
+lock on 26.0. Evidence a check accepts loosely is evidence the check does not
+really constrain, and narrowing what it accepts one spelling at a time leaves the
+next spelling accepted.
 
 `mix loopex.matrix` requires this file to name every locked pair with a green
 verdict. It cannot verify that a recorded run happened, and says so; that judgment
