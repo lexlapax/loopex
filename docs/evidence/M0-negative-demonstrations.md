@@ -20,19 +20,12 @@ to it, so the recorded demonstration described bytes that no longer existed, and
 under the rule that relevant byte changes invalidate affected evidence it had to
 be run again rather than renamed.
 
-A second mechanism in this outcome now has its own demonstration, because the
-defect it covers is the one a review found:
-
-- mechanism disabled: the `Journal.release_session/2` call on the failing path of `Coordinator.init/1`, so a start that claims the journal and then fails leaves the sentinel behind
-- observed failure: `a coordinator refuses to start on a corrupt journal rather than repairing it` failed on `refute File.exists?(lock)`
-- demonstrated at: `676b2b3d41391a830728ea8293325c281c101351`, reverted before commit and confirmed byte-identical by SHA-256 (`18b3b7846f1c0887723c7c74f3b7752ef29110d99ea0505460ec6b91d053899b`)
-
-Note what the second demonstration does NOT establish. It fails inside one VM
-only because the assertion looks at the lock file directly. The consequence that
-makes the defect serious — a session that cannot start at all after a VM restart,
-because the recorded OS pid is no longer this process and the owner cannot be
-proved dead — is not reachable from a single-VM test suite, and is argued from the
-takeover rule rather than demonstrated.
+Two further demonstrations cover the claim-release mechanism in this outcome.
+They are recorded in their own section below rather than here, because the gate
+requires exactly one field set per outcome and that lock is not mine to amend:
+its purpose is to stop a populated field sitting beside an unfilled one inside a
+single record, which a separate section does not defeat. The record above remains
+this outcome's one complete demonstration.
 
 The demonstration above targets the mechanism a review found missing. An earlier,
 blunter one disabled the durable write in `Journal.append/2` entirely and drove
@@ -74,3 +67,33 @@ isolated VM failed `assert VmGeneration.loaded?(vm, module)`; making
 `unload_generation/2` a no-op failed `refute VmGeneration.loaded?(vm, module)`;
 and ignoring the generation number in `build_generation/2` failed the rollback
 equality assertion with `left: 1, right: 2`.
+
+## Additional demonstrations — outcome 4 claim release
+
+Not an outcome section. These cover the claim-release mechanism, which a review
+found missing after the outcome 4 record above was written. Same format, kept
+outside the numbered sections so the locked one-per-outcome rule still holds.
+
+### The failing return path
+
+- mechanism: the `Journal.release_session/2` call on the failing path of `Coordinator.init/1`, removed, so a start that claims the journal and then stops leaves the sentinel behind
+- observed failure: `a coordinator refuses to start on a corrupt journal rather than repairing it` failed on `refute File.exists?(lock)`
+- demonstrated at: `676b2b3d41391a830728ea8293325c281c101351`, reverted before commit and confirmed byte-identical by SHA-256 (`18b3b7846f1c0887723c7c74f3b7752ef29110d99ea0505460ec6b91d053899b`)
+
+### The raising path
+
+- mechanism: `:dispatch_to` and `:executor` moved back to being fetched inside `start_claimed/5`, i.e. after the claim, so a caller omitting one raises with the sentinel already created
+- observed failure: `a start that raises after claiming releases the claim too` failed on `refute File.exists?(lock)`
+- demonstrated at: the candidate carrying this file, reverted before commit and confirmed byte-identical by SHA-256 (`578c3cf998b8188026645f154817a3576116ce1a11145da1c57c2aefa483ab80`)
+
+This second path is why the first fix was incomplete. `gen_server` does not call
+`terminate/2` when `init/1` raises any more than when it returns `{:stop, _}`, and
+two required options were still read after the claim, so a missing key stranded
+the sentinel through a path the `{:stop, _}` test could not reach. Every required
+option is now read before the claim.
+
+What these do NOT establish: both fail inside one VM only because the assertion
+looks at the lock file directly. The consequence that makes the defect serious --
+a session that cannot start at all after a VM restart, because the recorded OS pid
+is no longer this process and the owner cannot be proved dead -- is not reachable
+from a single-VM suite, and is argued from the takeover rule rather than shown.

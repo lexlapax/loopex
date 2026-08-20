@@ -9,7 +9,7 @@ run has one Erlang runtime, so the gate runner is invoked once per pair. Both
 orders are run, because a per-lane pass proves nothing about ordering — a shared
 build directory once made the second lane fail on beams the first had compiled.
 
-- candidate: `676b2b3d41391a830728ea8293325c281c101351`
+- candidate: `801bda5c5bedfb16bfeb992978fbc80a3de78e7e`
 - gate digest: `sha256:6e02cd424bab8e3410205ca053adce150ee9fa1a84d7b6f5b032390c4529e09f`
 - command: `bash scripts/check-m0-gate.sh`, with `LOOPEX_PROVIDER_API_KEY` set, the
   floor pair supplied by `mise exec erlang@26.0 elixir@1.17.0-otp-26 --`
@@ -18,11 +18,11 @@ build directory once made the second lane fail on beams the first had compiled.
 
 | # | Order | Toolchain | Verdict | Exit | Wall clock |
 | --- | --- | --- | --- | --- | --- |
-| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 91s |
-| 2 | second | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 103s |
+| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 88s |
+| 2 | second | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 101s |
 | 3 | third | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 58s |
 | 4 | fourth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 88s |
-| 5 | fifth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 56s |
+| 5 | fifth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 58s |
 
 The previous candidate's runs are superseded rather than kept alongside these.
 Product bytes changed, which invalidates the evidence taken before them; a table
@@ -43,12 +43,21 @@ to catch is not the only way two lanes can interact. With no
 `LOOPEX_PROVIDER_API_KEY` present the same runner stops at outcome 7 reporting
 evidence unavailable rather than skipping, which is the fail-closed direction.
 
-These runs were executed at the candidate named above. This file and the
-self-hosting evidence are written in the commit immediately after it, so the
-closure candidate differs from the runs' SHA by those retained evidence files — there is no way to record a run inside the commit the run
-observed. That residual gap is stated rather than papered over, and it is why the
-gate expects a reviewer to re-run at the closure candidate rather than trust a
-retained verdict.
+These runs were executed on the candidate named above with the retained-evidence
+edits already present in the working tree, so the only bytes they did not observe
+are the run table itself. This file and the self-hosting evidence are then written
+in the commit immediately after the candidate: there is no way to record a run
+inside the commit the run observed. That residual gap is stated rather than
+papered over, and it is why the gate expects a reviewer to re-run at the closure
+candidate rather than trust a retained verdict.
+
+The gate is also run once more AFTER this file is committed, and that verdict is
+recorded below. An earlier candidate skipped that step on the reasoning that an
+evidence-only commit changes no product bytes -- and the gate reads these bytes.
+The commit that recorded five green runs turned the gate red, because it put a
+second demonstration into an outcome section where the locked runner requires
+exactly one. A green gate at the code commit is not a green gate at the closure
+candidate.
 
 The toolchain column names the EXACT version each lane ran, not the major release.
 `mix loopex.matrix` requires that version to appear as a whole token. It first

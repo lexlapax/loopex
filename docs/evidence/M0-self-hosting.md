@@ -41,8 +41,11 @@ was wrong: `.claude/hooks/guard-bash.sh` and `guard-filesystem.sh` are not in th
 measured set and contribute nothing to this total. The guards are client adapters;
 what is measured is the repository-owned replacement they call.
 
-Splitting the awk program into `scripts/json-field.awk` moved lines between two
-measured files without changing their sum.
+Splitting the awk program into `scripts/json-field.awk` did not merely move lines
+between two measured files: the pair went from 367 to 398, up 31. The wrapper
+gained the program lookup and its exit-66 branch, and the program gained a header
+explaining why it is a separate file. An earlier draft of this paragraph claimed
+the sum was unchanged, which was asserted rather than counted and was wrong.
 
 ## What the figure means
 
