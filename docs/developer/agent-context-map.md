@@ -89,7 +89,7 @@ lane — never part of the default suite.
   them, and the aggregate completes with every interpreter shadowed. What the
   replacement dropped is recorded in
   [the self-hosting evidence](../evidence/M0-self-hosting.md) rather than left
-  implicit, and two of those eight items change what the repository can detect or
+  implicit, and three of those eight items change what the repository can detect or
   where it can run, so a reader should weigh them there. The decision as
   originally recorded read: repository checks migrate to Elixir
   standard-library or Mix entrypoints and tested client hooks migrate to them.

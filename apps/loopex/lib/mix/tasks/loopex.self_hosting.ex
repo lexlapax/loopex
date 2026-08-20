@@ -73,7 +73,8 @@ defmodule Mix.Tasks.Loopex.SelfHosting do
     "scripts/check-status.sh",
     "scripts/json-field.sh",
     "scripts/json-field.awk",
-    "apps/loopex/test/tool_call_reader_test.exs"
+    "apps/loopex/test/tool_call_reader_test.exs",
+    "apps/loopex/test/docs_check_test.exs"
   ]
 
   # Concept: every behavior the replacement does not preserve, with the reason and

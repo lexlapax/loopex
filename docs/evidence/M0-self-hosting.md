@@ -20,29 +20,33 @@ The size figure is audit material. No run passes or fails on it.
 Taken by running `mix loopex.self_hosting`, not transcribed:
 
 ```text
-documentation 1739   comment 575   blank 1457   code 6494   total 10265
+documentation 1763   comment 602   blank 1484   code 6588   total 10437
 ```
 
 Against the 4,462-line gate-commit baseline the plan binds, that is
-2.30x. Against the 4,688 lines those files actually held at the
-revision they were retired, it is 2.19x. Both are stated because a
+2.34x. Against the 4,688 lines those files actually held at the
+revision they were retired, it is 2.23x. Both are stated because a
 reader comparing to the deleted files computes the second, and the two numbers are
 different.
 
-The figure is 10265 at this candidate. Two earlier rounds account for the shape of
+The figure is 10437 at this candidate. Two earlier rounds account for the shape of
 it, and the numbers belong to different candidates rather than to one delta:
 
 - +301 when `apps/loopex/test/tool_call_reader_test.exs` was added to the measured
-  set, which was a correction rather than growth.   It tests the replacement's reader, exactly as the three test files already listed
-  test the rest of the replacement, and leaving it out understated the figure --
+  set, which was a correction rather than growth. It tests the replacement's
+  reader, exactly as the three test files already listed test the rest of the
+  replacement, and leaving it out understated the figure --
   which this command's own documentation calls worse than reporting none, because
   an understated number still reads as evidence.
-- +9 at this candidate, from a comment correction in
-  `apps/loopex/lib/mix/tasks/status/register.ex`, which is in the measured set.
+- +9 from a comment correction in `apps/loopex/lib/mix/tasks/status/register.ex`,
+  which is in the measured set.
+- +172 at this candidate: `apps/loopex/test/docs_check_test.exs` is new and joins
+  the measured set beside the reader's test, and `loopex.docs_check.ex` grew by
+  separating its uncovered tally into three counts.
 
-That second delta is why 10256 was recorded here while the tree measured 10265: a
-figure headed "at the closure candidate" was carried forward from the candidate
-before it. Re-measured rather than adjusted.
+Each of those deltas was recorded only after re-running the command. A figure
+headed "at the closure candidate" was once carried forward from the candidate
+before it, which is how 10256 came to sit above a tree that measured 10265.
 
 The previous entry credited its increase to "the reader and the two guards". That
 was wrong: `.claude/hooks/guard-bash.sh` and `guard-filesystem.sh` are not in the
@@ -68,14 +72,21 @@ Elixir:
   ordered Concept and Technical depth sections on every module and documented
   function, and `mix loopex.docs_check` now enforces it on this code. The retired
   Python carried far less.
-- **About 850 lines replace two dependencies rather than two files.** The bridge
+- **724 lines replace two dependencies rather than two files.** The bridge
   read JSON with `jq` and TOML with a Python library, both free to it. Neither is
   available to core, which is stdlib and OTP only, so readers for both had to be
-  written. That is a cost of the dependency budget, not of the migration.
+  written: `status/json.ex` (173), `status/toml.ex` (153), `json-field.sh` (67) and
+  `json-field.awk` (331). That is a cost of the dependency budget, not of the
+  migration. The files are named because an unnamed round number cannot be
+  checked, and the earlier "about 850" could not be reconstructed from any
+  grouping of them.
 - **The rest is style.** Formatted Elixir is more vertical than Python.
 
-Coverage grew as well: 41 executed tests across the three ported selectors where
-the retired suite had 29. That is not a defence of the figure, only a fact a
+Coverage grew as well: 43 executed tests across the three ported selectors --
+`status_check_test.exs` (26), `history_anchoring_test.exs` (12) and
+`hook_registration_test.exs` (5) -- where the retired suite had 29. The selectors
+are named for the same reason: an earlier "41" matched a different triple, one
+that counted `tool_call_reader_test.exs`, which is new here rather than ported. That is not a defence of the figure, only a fact a
 reviewer should have alongside it.
 
 ## Dropped behaviours

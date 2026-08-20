@@ -61,9 +61,9 @@ unlocked it, and choosing a replacement would have required an explicit governed
 change to the named prerequisite and that guard, because the bootstrap checker
 does not infer a supersession graph. Its plan pair and gate define the first
 scope-specific minimalism budget rather than a universal line-count target. Its
-closure removes the temporary Python/`jq` bridge by migrating repository checks
-and tested client-hook paths to the accepted Elixir/OTP toolchain and proving the
-adapter path with `jq` absent.
+closure candidate removes the temporary Python/`jq` bridge: repository checks and
+tested client-hook paths run on the accepted Elixir/OTP toolchain, and the adapter
+path is proved with `jq` absent.
 
 That migration belongs to M0 rather than a later milestone because M0 is the
 first milestone to produce an accepted Elixir/OTP toolchain and application

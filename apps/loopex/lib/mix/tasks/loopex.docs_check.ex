@@ -45,7 +45,8 @@ defmodule Mix.Tasks.Loopex.DocsCheck do
         Mix.shell().info(
           "compiled documentation holds across #{Enum.join(applications, ", ")}: " <>
             "#{covered} covered entries carry Concept before Technical depth " <>
-            "(#{hidden} explicitly undocumented)"
+            "(#{hidden.hidden} declared out of scope, #{hidden.none} undocumented, " <>
+            "#{hidden.generated} macro-injected)"
         )
 
       {:error, reasons} ->
@@ -82,7 +83,15 @@ defmodule Mix.Tasks.Loopex.DocsCheck do
   """
   @spec check(Path.t(), [String.t()]) ::
           {:ok,
-           %{covered: non_neg_integer(), hidden: non_neg_integer(), applications: [String.t()]}}
+           %{
+             covered: non_neg_integer(),
+             hidden: %{
+               hidden: non_neg_integer(),
+               none: non_neg_integer(),
+               generated: non_neg_integer()
+             },
+             applications: [String.t()]
+           }}
           | {:error, [String.t()]}
   def check(build_path, applications) do
     beams =
@@ -98,7 +107,10 @@ defmodule Mix.Tasks.Loopex.DocsCheck do
 
       found ->
         {reasons, covered, hidden} =
-          Enum.reduce(Enum.sort(found), {[], 0, 0}, fn beam, acc -> inspect_beam(beam, acc) end)
+          Enum.reduce(Enum.sort(found), {[], 0, %{hidden: 0, none: 0, generated: 0}}, fn beam,
+                                                                                         acc ->
+            inspect_beam(beam, acc)
+          end)
 
         case reasons do
           [] -> {:ok, %{covered: covered, hidden: hidden, applications: applications}}
@@ -114,10 +126,12 @@ defmodule Mix.Tasks.Loopex.DocsCheck do
         {module_reasons, module_covered, module_hidden} = module_entry(module, module_doc)
 
         {entry_reasons, entry_covered, entry_hidden} =
-          Enum.reduce(entries, {[], 0, 0}, fn entry, acc -> inspect_entry(module, entry, acc) end)
+          Enum.reduce(entries, {[], 0, %{hidden: 0, none: 0, generated: 0}}, fn entry, acc ->
+            inspect_entry(module, entry, acc)
+          end)
 
         {module_reasons ++ entry_reasons ++ reasons, covered + module_covered + entry_covered,
-         hidden + module_hidden + entry_hidden}
+         merge_counts([hidden, module_hidden, entry_hidden])}
 
       {:error, reason} ->
         {["#{beam}: documentation is unavailable (#{inspect(reason)})" | reasons], covered,
@@ -127,10 +141,17 @@ defmodule Mix.Tasks.Loopex.DocsCheck do
 
   defp module_entry(module, doc) do
     case classify(doc) do
-      :hidden -> {[], 0, 1}
-      :ok -> {[], 1, 0}
-      {:error, detail} -> {["#{module}: module documentation #{detail}"], 0, 0}
-      :none -> {["#{module}: has no module documentation"], 0, 0}
+      :hidden ->
+        {[], 0, bump(%{hidden: 0, none: 0, generated: 0}, :hidden)}
+
+      :ok ->
+        {[], 1, %{hidden: 0, none: 0, generated: 0}}
+
+      {:error, detail} ->
+        {["#{module}: module documentation #{detail}"], 0, %{hidden: 0, none: 0, generated: 0}}
+
+      :none ->
+        {["#{module}: has no module documentation"], 0, 0}
     end
   end
 
@@ -140,7 +161,7 @@ defmodule Mix.Tasks.Loopex.DocsCheck do
          {reasons, covered, hidden}
        ) do
     cond do
-      generated?(anno, metadata) -> {reasons, covered, hidden + 1}
+      generated?(anno, metadata) -> {reasons, covered, bump(hidden, :generated)}
       true -> entry_outcome(module, kind, name, arity, doc, {reasons, covered, hidden})
     end
   end
@@ -176,13 +197,26 @@ defmodule Mix.Tasks.Loopex.DocsCheck do
 
   defp unsourced_metadata?(_metadata), do: false
 
+  # Concept: three different reasons an entry is not covered, counted apart.
+  #
+  # Technical depth: one tally carried all three, and the command reported it as
+  # "explicitly undocumented" -- so an author declaring an entry out of scope with
+  # `@doc false`, an author who simply forgot, and a macro injecting `child_spec/1`
+  # were the same number. A public function losing its `@doc` moved a unit from
+  # covered to that tally and read as a deliberate declaration. Outcome 10 has no
+  # other signal, so the distinction is the evidence.
+  defp bump(counts, reason), do: Map.update!(counts, reason, &(&1 + 1))
+
+  defp merge_counts(list),
+    do: Enum.reduce(list, fn a, b -> Map.merge(a, b, fn _k, x, y -> x + y end) end)
+
   defp entry_outcome(module, kind, name, arity, doc, {reasons, covered, hidden}) do
     case classify(doc) do
       :hidden ->
-        {reasons, covered, hidden + 1}
+        {reasons, covered, bump(hidden, :hidden)}
 
       :none ->
-        {reasons, covered, hidden + 1}
+        {reasons, covered, bump(hidden, :none)}
 
       :ok ->
         {reasons, covered + 1, hidden}

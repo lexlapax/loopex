@@ -754,10 +754,16 @@ defmodule Loopex.Journal do
   # sit beyond it, which `discard_torn_tail/3` checks before removing anything.
   defp decode(_short, offset, read), do: {:ok, Enum.reverse(read), {:torn, offset}}
 
+  # Concept: a frame is intact only if its bytes and its shape both survive.
+  #
   # Technical depth: a torn append can leave any bytes at all, so the checksum is
-  # verified before the payload is decoded and the decode itself is guarded. A
-  # frame that decodes to something other than a plain record map is treated as
-  # torn rather than raised on, because recovery must not crash on its own log.
+  # verified before the payload is decoded and the decode itself is guarded --
+  # recovery must not crash on its own log. A complete frame that fails either
+  # check is reported CORRUPT, not torn: its bytes changed under a record that was
+  # acknowledged, and the records past it may be intact, so discarding from there
+  # would destroy durable truth to make startup succeed. This comment previously
+  # said such a frame was "treated as torn", which the clause below disproves and
+  # which would have licensed exactly that repair.
   defp intact(payload, crc) do
     case :erlang.crc32(payload) == crc do
       false -> :error

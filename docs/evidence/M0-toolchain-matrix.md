@@ -2,12 +2,10 @@
 
 Retained by outcome 3. ADR 0002 validates two (Elixir, OTP) pairs rather than a
 cross-product, and one Mix run has one Erlang runtime, so the gate runner is
-invoked once per pair, and every run is recorded here.
-
-ADR 0002 validates two (Elixir, OTP) pairs rather than a cross-product, and one Mix
-run has one Erlang runtime, so the gate runner is invoked once per pair. Both
-orders are run, because a per-lane pass proves nothing about ordering — a shared
-build directory once made the second lane fail on beams the first had compiled.
+invoked once per pair and every run is recorded here. Both orders are run, and
+each pair is also run after itself, because a per-lane pass proves nothing about
+ordering — a shared build directory once made the second lane fail on beams the
+first had compiled.
 
 - runs taken at: `801bda5c5bedfb16bfeb992978fbc80a3de78e7e` (the code commit; the
   closure candidate is a later commit carrying this file, which is why the gate

@@ -223,6 +223,8 @@ defmodule Loopex.Coordinator do
     dispatch_to = Keyword.fetch!(options, :dispatch_to)
     executor = Keyword.fetch!(options, :executor)
 
+    # Concept: a torn tail is recoverable; a corrupt one is not.
+    #
     # Technical depth: a torn tail is deliberately not a startup failure. The
     # records before the tear are the state that was acknowledged, so recovery
     # replays them and continues; refusing to start would turn every crash

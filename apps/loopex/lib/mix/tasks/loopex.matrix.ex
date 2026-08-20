@@ -53,7 +53,9 @@ defmodule Mix.Tasks.Loopex.Matrix do
   partial pass: the accepted rule is two validated pairs, and anything else means
   the lock no longer says what ADR 0002 requires.
   """
-  @spec check(Path.t()) :: {:ok, %{elixir: String.t(), otp: String.t()}} | {:error, String.t()}
+  @spec check(Path.t()) ::
+          {:ok, %{elixir: String.t(), otp: String.t(), otp_exact: String.t()}}
+          | {:error, String.t()}
   def check(root) do
     path = Path.join(root, @tool_versions)
 
@@ -90,8 +92,10 @@ defmodule Mix.Tasks.Loopex.Matrix do
   happened — only review can judge that — but a missing or incomplete record now
   fails rather than passing silently.
   """
-  @spec both_lanes_recorded(Path.t(), [%{elixir: String.t(), otp: String.t()}]) ::
-          :ok | {:error, String.t()}
+  @spec both_lanes_recorded(
+          Path.t(),
+          [%{elixir: String.t(), otp: String.t(), otp_exact: String.t()}]
+        ) :: :ok | {:error, String.t()}
   def both_lanes_recorded(root, pairs) do
     record = Path.join(root, @matrix_evidence)
 

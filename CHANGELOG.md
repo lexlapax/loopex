@@ -283,7 +283,7 @@ the exact document set its milestone must update.
   whitespace-only content; bare outcome headings are counted consistently; and
   the gate now states the evidence field names, hook exit semantics, and
   dependency-hook requirements the runner enforces.
-- Six bounded corrections inside that boundary: a named hook that disappears now
+- Seven bounded corrections inside that boundary: a named hook that disappears now
   fails rather than skipping its check, since removing a tested hook is
   behaviour loss ADR 0002 permits only by disposition; retained inline budget
   logic is rejected again; the history-preservation cases are executed tests
