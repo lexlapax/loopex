@@ -127,27 +127,23 @@ defmodule Mix.Tasks.Loopex.Matrix do
 
   # Concept: the runs this check counts are the rows a reader sees in the table.
   #
-  # Technical depth: this was narrowed four times and evaded four times -- the
-  # major satisfied an exact lock; "whole token" excluded digits and dots, so a
-  # prerelease suffix walked through; `contains?("GREEN")` accepted "NOT GREEN";
-  # and parsing the row still parsed a RAW line, so fields hidden inside an inline
-  # HTML comment were read as if visible while a reader saw an empty cell.
+  # Technical depth: this was narrowed five times and evaded five times. The major
+  # satisfied an exact lock. "Whole token" excluded digits and dots, so a
+  # prerelease suffix walked through. `contains?("GREEN")` accepted "NOT GREEN".
+  # Parsing the row still parsed a RAW line, so an inline comment hid fields a
+  # reader saw as blank. And reducing the line with the wrong reducer let a code
+  # span DELETE text: a verdict rendering as NOT GREEN reduced to GREEN.
   #
-  # Every one of those was a filter added to reject the last example. The rule is
-  # not a filter: read the table the reader reads. Lines the Markdown reader calls
-  # hidden are dropped, each surviving line is reduced to what it actually exposes,
-  # and the result must be an exact table under the declared header -- byte-for-byte
-  # header and separator, exact column count, no empty cells. A row whose fields
-  # live inside a comment exposes an empty cell and is refused as malformed rather
-  # than parsed.
+  # Every one of those was a filter added to reject the previous example, which is
+  # why each held exactly until the next construction was tried. The rule is not a
+  # filter. Lines the Markdown reader calls hidden are dropped. Each surviving line
+  # is reduced to what a reader SEES rendered -- comments gone, code-span text
+  # kept. Every cell must be printable ASCII, so nothing invisible can occupy one.
+  # The result must parse as an exact table under the declared header, with a
+  # byte-identical header and separator, exact column count, and no empty cells.
   #
-  # The verdict is required as plain text rather than a code span, because
-  # exposing a line removes code-span content too. That is stricter, not looser: a
-  # verdict written inside a code span now exposes an empty cell and is refused,
-  # so there is no markup in which a verdict can sit and still count.
-  #
-  # There is no next construction to enumerate, because nothing is being searched
-  # for and nothing hidden survives to be parsed.
+  # Each rule is separately mutation-tested, because a suite of evasions can pass
+  # in full while a rule it never isolates is missing.
   @table_header ["#", "Order", "Toolchain", "Verdict", "Exit", "Wall clock"]
 
   # The Markdown reader raises on a document it cannot read -- an unclosed comment
@@ -167,7 +163,7 @@ defmodule Mix.Tasks.Loopex.Matrix do
       lines
       |> Enum.with_index()
       |> Enum.filter(fn {_line, number} -> MapSet.member?(visible, number) end)
-      |> Enum.map(fn {line, _number} -> Markdown.exposed_line(line) end)
+      |> Enum.map(fn {line, _number} -> render_row(line) end)
 
     header = "| " <> Enum.join(@table_header, " | ") <> " |"
 
@@ -183,21 +179,88 @@ defmodule Mix.Tasks.Loopex.Matrix do
     end
   end
 
+  # A retained row has no reason to contain a comment, and one that does reads
+  # differently in the source than it renders -- `M0 gate <!--NOT -->GREEN` shows
+  # a reader GREEN. Refusing any commented row outright is simpler to reason about
+  # than deciding what each one hides, and it must be decided on the RAW line,
+  # because rendering has already removed the evidence by then.
+  defp render_row(line) do
+    rendered = rendered_line(line)
+
+    if String.starts_with?(String.trim_leading(line), "|") and String.contains?(line, "<!--") do
+      "| commented row |"
+    else
+      rendered
+    end
+  end
+
+  # Concept: the line as a reader sees it rendered.
+  #
+  # Technical depth: deliberately NOT `Markdown.exposed_line/1`. That answers a
+  # different question -- what a line says OUTSIDE markup -- which is right for
+  # heading identity and wrong here, in both directions. It strips code-span
+  # contents, so a verdict written as a code span rendered fine and reduced to an
+  # empty cell; worse, a code span placed mid-cell DELETES text, and
+  # `M0 gate ` <> code("NOT ") <> `GREEN` renders as NOT GREEN and reduced to
+  # GREEN. A failing run read as a passing one.
+  #
+  # A reader sees code-span text. So comments are removed, because they are truly
+  # invisible, and backtick delimiters are removed while their contents stay.
+  # An unterminated comment truncates the rest of the line rather than leaking it.
+  defp rendered_line(line) do
+    line
+    |> strip_comments()
+    |> String.replace("`", "")
+  end
+
+  defp strip_comments(line) do
+    case String.split(line, "<!--", parts: 2) do
+      [only] ->
+        only
+
+      [before, rest] ->
+        case String.split(rest, "-->", parts: 2) do
+          [_unterminated] -> before
+          [_hidden, tail] -> before <> strip_comments(tail)
+        end
+    end
+  end
+
+  # Concept: a governed cell is plain printable text.
+  #
+  # Technical depth: a cell holding only a non-breaking space, a zero-width space,
+  # or a right-to-left override passed the "no empty cells" rule while rendering
+  # blank -- and the same family of characters can make two different strings look
+  # identical. Rather than enumerate them, the rule is inverted: every character in
+  # every cell must be printable ASCII. Retained evidence has no reason to carry
+  # anything else, and anything else is a way for the record and the reader to
+  # disagree.
+  defp printable?(cell), do: Regex.match?(~r/\A[\x20-\x7E]*\z/, cell)
+
   # `Markdown.table/3` raises on a malformed row rather than skipping it, which is
   # the behaviour wanted here: a row that cannot be read is not a row that passed.
   defp parse_table(lines, path), do: {:ok, Markdown.table(lines, @table_header, path)}
 
   defp records_pair?(rows, pair) do
-    Enum.any?(rows, fn
-      [number, order, toolchain, verdict, exit_code | _rest] ->
-        numbered?(number) and order != "" and
+    Enum.any?(rows, fn cells ->
+      Enum.all?(cells, &printable?/1) and records_cells?(cells, pair)
+    end)
+  end
+
+  defp records_cells?(cells, pair) do
+    case cells do
+      # No separate non-empty check on the order cell: `Markdown.table/3` already
+      # refuses an empty or untrimmed cell in any column, and a redundant rule in a
+      # check like this is one a reader has to verify is not the load-bearing one.
+      [number, _order, toolchain, verdict, exit_code | _rest] ->
+        numbered?(number) and
           toolchain_matches?(toolchain, pair) and
           verdict == @green_verdict and
           exit_code == "0"
 
       _other ->
         false
-    end)
+    end
   end
 
   @doc """

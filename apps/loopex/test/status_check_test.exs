@@ -78,18 +78,19 @@ defmodule Loopex.StatusCheckTest do
   end
 
   test "retained matrix evidence counts only runs a reader can see" do
-    # This check was narrowed four times and evaded four times: the major
-    # satisfied an exact lock; "whole token" excluded digits and dots, so a
-    # prerelease suffix walked through; `contains?("GREEN")` accepted "NOT GREEN";
-    # and parsing the row still parsed a RAW line, so fields inside an inline HTML
-    # comment were read as if visible while a reader saw an empty cell.
+    # Narrowed five times, evaded five times. The major satisfied an exact lock.
+    # "Whole token" excluded digits and dots, so a prerelease walked through.
+    # `contains?("GREEN")` accepted "NOT GREEN". Parsing the row still parsed a RAW
+    # line, so a comment hid fields a reader saw as blank. And reducing the line
+    # with the wrong reducer let a code span DELETE text: a verdict rendering as
+    # NOT GREEN reduced to GREEN, so a failing run read as a passing one.
     #
-    # Every one of those was a filter added to reject the previous example, which
-    # is why each held exactly until someone tried the next construction. The rule
-    # is not a filter: read the table the reader reads. So this case is not a list
-    # of the constructions that were tried -- it is a list of every way found to
-    # write something that looks like a run, asserting that only a visible, exact,
-    # green, zero-exit row in the declared table counts as one.
+    # Each fix was a filter rejecting the previous example, which is why each held
+    # exactly until the next construction. Two disciplines replace that. Cases vary
+    # ONE thing from a row that passes, so no case can pass on a second defect --
+    # the earlier "NOT GREEN" case also set exit 1, so removing verdict equality
+    # broke nothing. And every rule is mutation-checked: removing it must break at
+    # least one case here, or it is untested or redundant.
     pairs = [%{elixir: "1.17.0", otp: "26", otp_exact: "26.0"}]
 
     root = Path.join(System.tmp_dir!(), "matrix-#{System.unique_integer([:positive])}")
@@ -101,25 +102,40 @@ defmodule Loopex.StatusCheckTest do
     rule = "| --- | --- | --- | --- | --- | --- |"
     real = "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"
     table = fn rows -> Enum.join([header, rule | rows], "\n") <> "\n" end
+    verdict = fn v -> "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | #{v} | 0 | 91s |" end
+
+    order = fn o ->
+      "| 1 | #{o} | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"
+    end
 
     File.write!(record, table.([real]))
     assert :ok = Matrix.both_lanes_recorded(root, pairs), "a real run must count"
 
     refused = [
-      {"a same-line inline comment",
+      # A code span removes its delimiters, so one placed mid-cell deletes text.
+      # The row renders NOT GREEN and must not reduce to GREEN.
+      {"a code span deleting NOT", table.([verdict.("M0 gate `NOT `GREEN")])},
+      {"a code span deleting NOT with no space", table.([verdict.("M0 gate `NOT`GREEN")])},
+      {"doubled backticks deleting NOT", table.([verdict.("M0 gate ``NOT ``GREEN")])},
+      {"any commented row", table.([verdict.("M0 gate <!--NOT -->GREEN")])},
+      # Verdict varied alone: exit stays 0, so only verdict equality can refuse.
+      {"a failing verdict at exit 0", table.([verdict.("M0 gate NOT GREEN")])},
+      {"an empty verdict at exit 0", table.([verdict.("")])},
+      {"a lowercased verdict", table.([verdict.("m0 gate green")])},
+      {"a verdict with trailing text", table.([verdict.("M0 gate GREEN (cached)")])},
+      # Characters that occupy a cell while rendering blank, or that make two
+      # different strings look identical.
+      {"a non-breaking space as the order", table.([order.("\u00A0")])},
+      {"a zero-width space as the order", table.([order.("\u200B")])},
+      {"a bidi override as the order", table.([order.("\u202E")])},
+      {"a zero-width space inside NOT", table.([verdict.("M0 gate NOT\u200B GREEN")])},
+      {"a Cyrillic homoglyph in the verdict", table.([verdict.("M0 g\u0430te GREEN")])},
+      {"a non-breaking space inside the verdict", table.([verdict.("M0 gate\u00A0GREEN")])},
+      # Hiding the row from the reader entirely.
+      {"a same-line comment",
        table.([
          "| 1 | <!--first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | t--> |"
        ])},
-      {"a comment hiding only the verdict",
-       table.([
-         "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | <!--M0 gate GREEN--> | 0 | 91s |"
-       ])},
-      {"a comment hiding only the exit",
-       table.([
-         "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | <!--0--> | 91s |"
-       ])},
-      {"a verdict inside a code span",
-       table.(["| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 91s |"])},
       {"a commented-out table", "<!--\n" <> table.([real]) <> "-->\n"},
       {"a backtick fence", "```\n" <> table.([real]) <> "```\n"},
       {"a tilde fence", "~~~\n" <> table.([real]) <> "~~~\n"},
@@ -127,20 +143,20 @@ defmodule Loopex.StatusCheckTest do
        "    " <> header <> "\n    " <> rule <> "\n    " <> real <> "\n"},
       {"a blockquoted table", "> " <> header <> "\n> " <> rule <> "\n> " <> real <> "\n"},
       {"an unterminated comment", "<!--\n" <> table.([real])},
+      # Not a row of this table at all.
       {"a row with no table", real <> "\n"},
       {"a row under a different header",
        "| A | B | C | D | E | F |\n" <> rule <> "\n" <> real <> "\n"},
       {"a table with no rows", table.([])},
       {"an unnumbered run",
        table.(["| x | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"])},
-      {"an empty order cell",
-       table.(["| 1 |  | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"])},
+      {"an empty order cell", table.([order.("")])},
       {"a row missing a column",
        table.(["| 1 | first | Elixir 1.17.0 / OTP 26.0 | M0 gate GREEN | 0 |"])},
       {"shifted columns",
        table.(["| 1 | Elixir 1.17.0 / OTP 26.0 erts-14.0 | first | M0 gate GREEN | 0 | 91s |"])},
-      {"an untrimmed cell",
-       table.(["| 1 | first  | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"])},
+      {"an untrimmed cell", table.([order.("first ")])},
+      # A different toolchain than the one locked.
       {"a prerelease Elixir",
        table.([
          "| 1 | first | Elixir 1.17.0-rc.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"
@@ -153,10 +169,7 @@ defmodule Loopex.StatusCheckTest do
        table.(["| 1 | first | Elixir 1.17.0 / OTP 26.0.1 erts-14.0 | M0 gate GREEN | 0 | 91s |"])},
       {"the major alone",
        table.(["| 1 | first | Elixir 1.17.0 / OTP 26 | M0 gate GREEN | 0 | 91s |"])},
-      {"a failing verdict",
-       table.([
-         "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate NOT GREEN | 1 | 91s |"
-       ])},
+      # Exit varied alone: verdict stays green.
       {"a nonzero exit",
        table.(["| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 1 | 91s |"])},
       {"prose naming every field", "Elixir 1.17.0 / OTP 26.0 ran, M0 gate GREEN, exit 0\n"}
@@ -169,9 +182,8 @@ defmodule Loopex.StatusCheckTest do
              "#{label} must not count as a recorded run"
     end
 
-    # And the real row still counts after all of that.
     File.write!(record, table.([real]))
-    assert :ok = Matrix.both_lanes_recorded(root, pairs)
+    assert :ok = Matrix.both_lanes_recorded(root, pairs), "and the real row still counts"
   end
 
   test "an acceptance chain edge must run backwards along history" do
