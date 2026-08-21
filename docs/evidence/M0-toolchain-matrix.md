@@ -7,7 +7,7 @@ each pair is also run after itself, because a per-lane pass proves nothing about
 ordering — a shared build directory once made the second lane fail on beams the
 first had compiled.
 
-- runs taken at: `9161282b274aa70f57c6d02efd36c28bf5938369` (the code commit; the
+- runs taken at: `7451bb649f637a335140065745548d24af2ae104` (the code commit; the
   closure candidate is a later commit carrying this file, which is why the gate
   is re-run there rather than trusting these rows)
 - gate digest: `sha256:6e02cd424bab8e3410205ca053adce150ee9fa1a84d7b6f5b032390c4529e09f`
@@ -27,10 +27,10 @@ alike. There is nothing to render, and so nothing to disagree about.
 
 <!-- loopex:matrix-runs:start -->
 ```text
-run=1 order=first elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=87s
+run=1 order=first elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=91s
 run=2 order=second elixir=1.20.3 otp=29.0.5 erts=17.0.5 verdict=GREEN exit=0 wall=103s
-run=3 order=third elixir=1.20.3 otp=29.0.5 erts=17.0.5 verdict=GREEN exit=0 wall=59s
-run=4 order=fourth elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=88s
+run=3 order=third elixir=1.20.3 otp=29.0.5 erts=17.0.5 verdict=GREEN exit=0 wall=68s
+run=4 order=fourth elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=93s
 run=5 order=fifth elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=60s
 ```
 <!-- loopex:matrix-runs:end -->
