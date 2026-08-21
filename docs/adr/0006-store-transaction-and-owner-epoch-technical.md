@@ -284,11 +284,11 @@ The conformance suite every implementation runs covers at minimum:
   and an incarnation mismatch wins over version when the epoch is current;
 - an interrupted commit resolves to exactly one of committed or not committed
   when re-presented by `tx_id`, and never to both;
-- reusing a transaction ID with a different session, epoch, version, digest, or
-  canonical record bytes is refused for both committed and terminal non-commit
-  resolutions, including when different record bytes are presented with the
-  same digest; a proved non-commit can be retried only under a new transaction
-  ID;
+- reusing a transaction ID with a different session, epoch,
+  owner-incarnation ID, version, digest, or canonical record bytes is refused
+  for both committed and terminal non-commit resolutions, including when
+  different record bytes are presented with the same digest; a proved
+  non-commit can be retried only under a new transaction ID;
 - both terminal transaction-status results expose none of the owner-incarnation
   ID, canonical bytes, digest, expected version, or mutation authority, and
   neither permits an ordinary commit without the independently held current
@@ -382,9 +382,10 @@ Concept: [Compatibility, migration, and rollback](0006-store-transaction-and-own
 Nothing is released and no store holds data that must survive, so there is no
 migration. `M0`'s journals stay bound to `M0`'s closed record.
 
-The record schema is fixed here because adding `owner_epoch` and
-`journal_version` after records exist is a migration, and the whole point of
-deciding before implementation is that `M1` does not perform one.
+The record schema is fixed here because adding `owner_epoch`,
+`owner_incarnation_id`, or `journal_version` after records exist is a migration,
+and the whole point of deciding before implementation is that `M1` does not
+perform one.
 
 Rollback is removing the port while no implementation depends on it. After the
 first implementation ships, rollback is a successor decision, not an edit.
