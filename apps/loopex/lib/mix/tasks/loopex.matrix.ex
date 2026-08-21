@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Loopex.Matrix do
   @tool_versions ".tool-versions"
   alias Loopex.Checks.Markdown
 
-  @green_verdict "`M0 gate GREEN`"
+  @green_verdict "M0 gate GREEN"
   @matrix_evidence "docs/evidence/M0-toolchain-matrix.md"
 
   @impl Mix.Task
@@ -107,88 +107,98 @@ defmodule Mix.Tasks.Loopex.Matrix do
         {:error, "#{record}: #{:file.format_error(posix)}; the matrix record is unavailable"}
 
       {:ok, contents} ->
-        case Enum.reject(pairs, &recorded?(contents, &1, record)) do
-          [] ->
-            :ok
+        case recorded_rows(contents, record) do
+          {:error, reason} ->
+            {:error, "#{reason}; the matrix record cannot be read as retained runs"}
 
-          missing ->
-            {:error,
-             "#{record} does not record a run for #{describe(missing)}; " <>
-               "the gate claims both locked pairs are recorded"}
+          {:ok, rows} ->
+            case Enum.reject(pairs, &records_pair?(rows, &1)) do
+              [] ->
+                :ok
+
+              missing ->
+                {:error,
+                 "#{record} does not record a run for #{describe(missing)}; " <>
+                   "the gate claims both locked pairs are recorded"}
+            end
         end
     end
   end
 
-  # A pair counts as recorded when its exact Elixir and OTP versions appear on one
-  # line together with a green verdict, so a line naming a pair without an outcome
-  # does not satisfy it.
-  defp recorded?(contents, pair, path) do
+  # Concept: the runs this check counts are the rows a reader sees in the table.
+  #
+  # Technical depth: this was narrowed four times and evaded four times -- the
+  # major satisfied an exact lock; "whole token" excluded digits and dots, so a
+  # prerelease suffix walked through; `contains?("GREEN")` accepted "NOT GREEN";
+  # and parsing the row still parsed a RAW line, so fields hidden inside an inline
+  # HTML comment were read as if visible while a reader saw an empty cell.
+  #
+  # Every one of those was a filter added to reject the last example. The rule is
+  # not a filter: read the table the reader reads. Lines the Markdown reader calls
+  # hidden are dropped, each surviving line is reduced to what it actually exposes,
+  # and the result must be an exact table under the declared header -- byte-for-byte
+  # header and separator, exact column count, no empty cells. A row whose fields
+  # live inside a comment exposes an empty cell and is refused as malformed rather
+  # than parsed.
+  #
+  # The verdict is required as plain text rather than a code span, because
+  # exposing a line removes code-span content too. That is stricter, not looser: a
+  # verdict written inside a code span now exposes an empty cell and is refused,
+  # so there is no markup in which a verdict can sit and still count.
+  #
+  # There is no next construction to enumerate, because nothing is being searched
+  # for and nothing hidden survives to be parsed.
+  @table_header ["#", "Order", "Toolchain", "Verdict", "Exit", "Wall clock"]
+
+  # The Markdown reader raises on a document it cannot read -- an unclosed comment
+  # or fence, for instance -- and that is a reason the record cannot be trusted,
+  # not a crash to let out of a check. Rescued here so the gate reports why.
+  defp recorded_rows(contents, path) do
+    read_rows(contents, path)
+  rescue
+    error in [Loopex.Checks.Invalid] -> {:error, Exception.message(error)}
+  end
+
+  defp read_rows(contents, path) do
     lines = Markdown.lines(contents, path)
     visible = Markdown.visible_line_numbers(contents, path)
 
-    lines
-    |> Enum.with_index()
-    |> Enum.any?(fn {line, number} ->
-      MapSet.member?(visible, number) and row_records?(line, pair)
-    end)
+    exposed =
+      lines
+      |> Enum.with_index()
+      |> Enum.filter(fn {_line, number} -> MapSet.member?(visible, number) end)
+      |> Enum.map(fn {line, _number} -> Markdown.exposed_line(line) end)
+
+    header = "| " <> Enum.join(@table_header, " | ") <> " |"
+
+    case Enum.find_index(exposed, &(&1 == header)) do
+      nil ->
+        {:error, "#{path}: no visible #{Enum.join(@table_header, " | ")} table"}
+
+      at ->
+        exposed
+        |> Enum.drop(at)
+        |> Enum.take_while(&String.starts_with?(&1, "|"))
+        |> parse_table(path)
+    end
   end
 
-  # Concept: a recorded run is a table row whose fields say exactly this pair
-  # passed, not a line of prose that happens to contain the right words.
-  #
-  # Technical depth: matching by substring was narrowed twice and evaded twice.
-  # First the major satisfied a lock on 26.0; then "whole token" excluded adjacent
-  # digits and dots, so `26.0-rc1` satisfied `26.0` because `-` is neither. And the
-  # verdict was `String.contains?(line, "GREEN")`, which `M0 gate NOT GREEN`
-  # satisfies. A fabricated row naming two prerelease toolchains and a failing
-  # verdict passed as evidence that both locked pairs ran green.
-  #
-  # The row is parsed instead: split on the delimiter, take the number, order,
-  # toolchain, verdict and exit fields by position, and require exact equality on
-  # each. There is no spelling left to narrow, because nothing is being searched
-  # for.
-  #
-  # Parsing a row is still not enough on its own. A line that LOOKS like a row is
-  # not one if a reader cannot see it, and exact rows hidden inside a fenced block
-  # or an HTML comment satisfied this while appearing nowhere in the document. The
-  # repository already decides what is visible, for gate amendments, so this asks
-  # that same reader rather than adding a second opinion about Markdown -- two
-  # parsers disagreeing about visibility is how hidden content gets in.
-  defp row_records?(line, pair) do
-    case String.split(line, "|", trim: false) do
-      ["", number, order, toolchain, verdict, exit_code | _rest] ->
-        numbered?(String.trim(number)) and String.trim(order) != "" and
-          toolchain_matches?(String.trim(toolchain), pair) and
-          String.trim(verdict) == @green_verdict and
-          String.trim(exit_code) == "0"
+  # `Markdown.table/3` raises on a malformed row rather than skipping it, which is
+  # the behaviour wanted here: a row that cannot be read is not a row that passed.
+  defp parse_table(lines, path), do: {:ok, Markdown.table(lines, @table_header, path)}
+
+  defp records_pair?(rows, pair) do
+    Enum.any?(rows, fn
+      [number, order, toolchain, verdict, exit_code | _rest] ->
+        numbered?(number) and order != "" and
+          toolchain_matches?(toolchain, pair) and
+          verdict == @green_verdict and
+          exit_code == "0"
 
       _other ->
         false
-    end
+    end)
   end
-
-  # A recorded run is numbered and ordered. The separator row and any half-filled
-  # row are not runs.
-  defp numbered?(cell), do: Regex.match?(~r/\A[0-9]+\z/, cell)
-
-  # The toolchain cell names both exact versions and nothing else that could be
-  # mistaken for them. `erts-` is allowed to follow because the rows carry it.
-  defp toolchain_matches?(cell, pair) do
-    case Regex.run(~r/\AElixir (\S+) \/ OTP (\S+?)(?: erts-\S+)?\z/, cell) do
-      [_all, elixir, otp] -> elixir == pair.elixir and otp == pair.otp_exact
-      _other -> false
-    end
-  end
-
-  # Concept: a lock names one exact version, and only that version satisfies it.
-  #
-  # Technical depth: `String.contains?/2` is substring matching, so a lock promising
-  # OTP 26.0 was satisfied by a row recording 26.0.1 — a different toolchain. The
-  # earlier fix replaced the major with the exact version but kept the substring
-  # test, which only shortened the tail: every version is a prefix of longer ones.
-  # Matching the version as a whole token removes the class rather than the instance.
-  # A version is bounded when the characters on either side are not themselves part
-  # of a version number, so digits and dots are the only rejected neighbours.
 
   @doc """
   ## Concept
@@ -286,6 +296,19 @@ defmodule Mix.Tasks.Loopex.Matrix do
   end
 
   defp major_of(version), do: version |> String.split(".") |> hd()
+
+  # A recorded run is numbered. The cells are already exposed and trimmed by the
+  # table reader, so these compare exact values rather than search text.
+  defp numbered?(cell), do: Regex.match?(~r/\A[0-9]+\z/, cell)
+
+  # The toolchain cell names both exact versions and nothing else that could be
+  # mistaken for them. `erts-` is allowed to follow because the rows carry it.
+  defp toolchain_matches?(cell, pair) do
+    case Regex.run(~r/\AElixir (\S+) \/ OTP (\S+?)(?: erts-\S+)?\z/, cell) do
+      [_all, elixir, otp] -> elixir == pair.elixir and otp == pair.otp_exact
+      _other -> false
+    end
+  end
 
   defp describe(pairs) do
     pairs

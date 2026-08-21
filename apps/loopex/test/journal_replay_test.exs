@@ -394,13 +394,15 @@ defmodule Loopex.JournalReplayTest do
     assert {:error, {:claim_unreadable, ^lock, :malformed}} =
              Journal.append(journal, record, claim)
 
-    # A sentinel carrying a different token digest. Named for what it is: this
-    # fails at token verification, before either process-identity check, so it
-    # covers the token and nothing more. Foreign OS-process and foreign
-    # Erlang-process identity are covered by their own cases in
-    # `journal_ownership_test.exs`, which construct a matching digest precisely so
-    # the token check cannot be what refuses them.
-    superseded = "node=elsewhere os_pid=1 erl_pid=#PID<0.9.0> token_digest=abc at=0\n"
+    # A sentinel that differs from this caller in the token digest and NOTHING
+    # else: same node, same OS process, same Erlang process. An earlier version
+    # changed all three at once and claimed to isolate the token, which it could
+    # not -- with the token check removed it stayed green through the process
+    # mismatches. Isolating one identity means varying one.
+    superseded =
+      "node=#{node()} os_pid=#{System.pid()} erl_pid=#{inspect(self())} " <>
+        "token_digest=abc at=0\n"
+
     File.write!(lock, superseded)
     assert {:error, {:not_the_session_owner, ^journal}} = Journal.append(journal, record, claim)
 

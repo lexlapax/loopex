@@ -77,9 +77,19 @@ defmodule Loopex.StatusCheckTest do
     end
   end
 
-  test "retained matrix evidence must name exact toolchain versions" do
-    # Runtime matching was exact while the evidence it depends on was searched by
-    # major, so a fabricated row naming "OTP 26" satisfied a lock promising 26.0.
+  test "retained matrix evidence counts only runs a reader can see" do
+    # This check was narrowed four times and evaded four times: the major
+    # satisfied an exact lock; "whole token" excluded digits and dots, so a
+    # prerelease suffix walked through; `contains?("GREEN")` accepted "NOT GREEN";
+    # and parsing the row still parsed a RAW line, so fields inside an inline HTML
+    # comment were read as if visible while a reader saw an empty cell.
+    #
+    # Every one of those was a filter added to reject the previous example, which
+    # is why each held exactly until someone tried the next construction. The rule
+    # is not a filter: read the table the reader reads. So this case is not a list
+    # of the constructions that were tried -- it is a list of every way found to
+    # write something that looks like a run, asserting that only a visible, exact,
+    # green, zero-exit row in the declared table counts as one.
     pairs = [%{elixir: "1.17.0", otp: "26", otp_exact: "26.0"}]
 
     root = Path.join(System.tmp_dir!(), "matrix-#{System.unique_integer([:positive])}")
@@ -87,97 +97,81 @@ defmodule Loopex.StatusCheckTest do
     record = Path.join(root, "docs/evidence/M0-toolchain-matrix.md")
     on_exit(fn -> File.rm_rf(root) end)
 
-    File.write!(record, "| 1 | first | Elixir 1.17.0 / OTP 26 | `M0 gate GREEN` | 0 |\n")
+    header = "| # | Order | Toolchain | Verdict | Exit | Wall clock |"
+    rule = "| --- | --- | --- | --- | --- | --- |"
+    real = "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"
+    table = fn rows -> Enum.join([header, rule | rows], "\n") <> "\n" end
 
-    assert {:error, reason} = Matrix.both_lanes_recorded(root, pairs)
-    assert reason =~ "does not record a run"
+    File.write!(record, table.([real]))
+    assert :ok = Matrix.both_lanes_recorded(root, pairs), "a real run must count"
 
-    File.write!(record, "| 1 | first | Elixir 1.17.0 / OTP 26.0 | `M0 gate GREEN` | 0 |\n")
-    assert :ok = Matrix.both_lanes_recorded(root, pairs)
+    refused = [
+      {"a same-line inline comment",
+       table.([
+         "| 1 | <!--first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | t--> |"
+       ])},
+      {"a comment hiding only the verdict",
+       table.([
+         "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | <!--M0 gate GREEN--> | 0 | 91s |"
+       ])},
+      {"a comment hiding only the exit",
+       table.([
+         "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | <!--0--> | 91s |"
+       ])},
+      {"a verdict inside a code span",
+       table.(["| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 91s |"])},
+      {"a commented-out table", "<!--\n" <> table.([real]) <> "-->\n"},
+      {"a backtick fence", "```\n" <> table.([real]) <> "```\n"},
+      {"a tilde fence", "~~~\n" <> table.([real]) <> "~~~\n"},
+      {"an indented code block",
+       "    " <> header <> "\n    " <> rule <> "\n    " <> real <> "\n"},
+      {"a blockquoted table", "> " <> header <> "\n> " <> rule <> "\n> " <> real <> "\n"},
+      {"an unterminated comment", "<!--\n" <> table.([real])},
+      {"a row with no table", real <> "\n"},
+      {"a row under a different header",
+       "| A | B | C | D | E | F |\n" <> rule <> "\n" <> real <> "\n"},
+      {"a table with no rows", table.([])},
+      {"an unnumbered run",
+       table.(["| x | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"])},
+      {"an empty order cell",
+       table.(["| 1 |  | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"])},
+      {"a row missing a column",
+       table.(["| 1 | first | Elixir 1.17.0 / OTP 26.0 | M0 gate GREEN | 0 |"])},
+      {"shifted columns",
+       table.(["| 1 | Elixir 1.17.0 / OTP 26.0 erts-14.0 | first | M0 gate GREEN | 0 | 91s |"])},
+      {"an untrimmed cell",
+       table.(["| 1 | first  | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"])},
+      {"a prerelease Elixir",
+       table.([
+         "| 1 | first | Elixir 1.17.0-rc.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"
+       ])},
+      {"a prerelease OTP",
+       table.([
+         "| 1 | first | Elixir 1.17.0 / OTP 26.0-rc1 erts-14.0 | M0 gate GREEN | 0 | 91s |"
+       ])},
+      {"a longer OTP version",
+       table.(["| 1 | first | Elixir 1.17.0 / OTP 26.0.1 erts-14.0 | M0 gate GREEN | 0 | 91s |"])},
+      {"the major alone",
+       table.(["| 1 | first | Elixir 1.17.0 / OTP 26 | M0 gate GREEN | 0 | 91s |"])},
+      {"a failing verdict",
+       table.([
+         "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate NOT GREEN | 1 | 91s |"
+       ])},
+      {"a nonzero exit",
+       table.(["| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 1 | 91s |"])},
+      {"prose naming every field", "Elixir 1.17.0 / OTP 26.0 ran, M0 gate GREEN, exit 0\n"}
+    ]
 
-    # A row naming the pair without a verdict is not a recorded run.
-    File.write!(record, "| 1 | first | Elixir 1.17.0 / OTP 26.0 | pending | |\n")
-    assert {:error, _} = Matrix.both_lanes_recorded(root, pairs)
+    for {label, body} <- refused do
+      File.write!(record, body)
 
-    # Naming the exact version fixed the instance and left the class: matching is
-    # by substring, and every version is a prefix of longer ones, so a run on a
-    # DIFFERENT toolchain still satisfied the lock. A lock promising 26.0 is not
-    # evidence that 26.0.1 was run, in either field.
-    for row <- [
-          "| 1 | first | Elixir 1.17.0 / OTP 26.0.1 | `M0 gate GREEN` | 0 |\n",
-          "| 1 | first | Elixir 1.17.01 / OTP 26.0 | `M0 gate GREEN` | 0 |\n"
-        ] do
-      File.write!(record, row)
-
-      assert {:error, _} = Matrix.both_lanes_recorded(root, pairs),
-             "a longer version must not satisfy a lock that is a prefix of it: #{row}"
-    end
-
-    # The version still matches where it genuinely appears, whatever follows it.
-    File.write!(
-      record,
-      "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 |\n"
-    )
-
-    assert :ok = Matrix.both_lanes_recorded(root, pairs)
-
-    # Substring matching was narrowed twice and evaded twice: first the major
-    # satisfied a lock on 26.0, then "whole token" excluded only adjacent digits
-    # and dots, so a prerelease suffix walked through -- and the verdict test was
-    # `contains?("GREEN")`, which "NOT GREEN" satisfies. One fabricated row
-    # asserted that both locked pairs ran green while naming neither and reporting
-    # a failure. The row is parsed by field now, so there is no spelling left to
-    # narrow.
-    for {label, row} <- [
-          {"a prerelease Elixir",
-           "| 1 | first | Elixir 1.17.0-rc.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 |"},
-          {"a prerelease OTP",
-           "| 1 | first | Elixir 1.17.0 / OTP 26.0-rc1 erts-14.0 | `M0 gate GREEN` | 0 |"},
-          {"a failing verdict",
-           "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate NOT GREEN` | 1 |"},
-          {"a nonzero exit",
-           "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 1 |"},
-          {"prose rather than a row",
-           "Elixir 1.17.0 / OTP 26.0 ran and printed M0 gate GREEN with exit 0"}
-        ] do
-      File.write!(record, row <> "\n")
-
-      assert {:error, _} = Matrix.both_lanes_recorded(root, pairs),
-             "#{label} must not satisfy a locked pair"
-    end
-
-    # Parsing a row is not enough on its own: a line that looks like a row is not
-    # one if no reader can see it. Exact rows hidden inside a fenced block or an
-    # HTML comment satisfied the check while appearing nowhere in the document.
-    real = "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 91s |"
-
-    for {label, body} <- [
-          {"a fenced code block", "```text\n" <> real <> "\n```"},
-          {"an HTML comment", "<!--\n" <> real <> "\n-->"},
-          {"an indented code block", "    " <> real}
-        ] do
-      File.write!(record, body <> "\n")
-
-      assert {:error, _} = Matrix.both_lanes_recorded(root, pairs),
-             "a row hidden in #{label} must not count as a recorded run"
-    end
-
-    # And a row must be a run: numbered, ordered, not the separator.
-    for {label, row} <- [
-          {"an unnumbered run",
-           "| x | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 |"},
-          {"an unordered run",
-           "| 1 |  | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 |"},
-          {"the separator row", "| --- | --- | --- | --- | --- |"}
-        ] do
-      File.write!(record, row <> "\n")
-
-      assert {:error, _} = Matrix.both_lanes_recorded(root, pairs),
+      assert {:error, _reason} = Matrix.both_lanes_recorded(root, pairs),
              "#{label} must not count as a recorded run"
     end
 
-    File.write!(record, real <> "\n")
-    assert :ok = Matrix.both_lanes_recorded(root, pairs), "the real row must still count"
+    # And the real row still counts after all of that.
+    File.write!(record, table.([real]))
+    assert :ok = Matrix.both_lanes_recorded(root, pairs)
   end
 
   test "an acceptance chain edge must run backwards along history" do

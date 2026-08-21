@@ -18,11 +18,11 @@ first had compiled.
 
 | # | Order | Toolchain | Verdict | Exit | Wall clock |
 | --- | --- | --- | --- | --- | --- |
-| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 88s |
-| 2 | second | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 101s |
-| 3 | third | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | `M0 gate GREEN` | 0 | 58s |
-| 4 | fourth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 88s |
-| 5 | fifth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 58s |
+| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 88s |
+| 2 | second | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | M0 gate GREEN | 0 | 101s |
+| 3 | third | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | M0 gate GREEN | 0 | 58s |
+| 4 | fourth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 88s |
+| 5 | fifth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 58s |
 
 The previous candidate's runs are superseded rather than kept alongside these.
 Product bytes changed, which invalidates the evidence taken before them; a table

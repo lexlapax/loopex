@@ -11,8 +11,11 @@ defmodule Loopex.Journal do
   A journal is named by a filesystem path and nothing else. There is no handle and
   no registry, so the caller holds the reference explicitly and two runtimes in one
   VM cannot collide through a global name. There IS an owning process: a claimed
-  journal is mutable only by the process that claimed it, and that process is the
-  Coordinator. What this module avoids is a global name for it, not ownership.
+  journal is mutable only by the process that claimed it. This module does not name
+  which process that is -- any caller may claim, and its own tests do -- but in the
+  runtime it is the Coordinator, which is what makes the Coordinator the ownership
+  boundary rather than this file. What is avoided is a global name for the owner,
+  not ownership itself.
 
   ## Technical depth
 
@@ -70,8 +73,9 @@ defmodule Loopex.Journal do
   @typedoc """
   ## Concept
 
-  Proof that the holder claimed this journal, and the only thing that authorises
-  writing to it or truncating it.
+  One of the three identities a mutation must present. It proves the caller knows
+  what was handed out at claim time; the OS process and the Erlang process prove
+  the caller IS the owner. No one of them authorises anything alone.
 
   ## Technical depth
 
@@ -297,11 +301,10 @@ defmodule Loopex.Journal do
   # the coordinator holds the claim for its lifetime. That reasoning covered the
   # coordinator and nothing else: a review repaired -- and truncated -- a journal
   # while another process held its live claim. It now takes the same triple
-  # identity as an append, and there is no unclaimed repair path: a journal with no
-  # live claim cannot be truncated at all. The one operation that deletes
-  # durable bytes was the one operation outside the mechanism built to protect
-  # them. It now requires the same token as an append, so an unclaimed journal is
-  # still repairable directly by a tool, and a claimed one only by its owner.
+  # identity as an append. The one operation that deletes durable bytes was the one
+  # operation outside the mechanism built to protect them; it is inside now, and a
+  # journal with no live claim cannot be truncated at all -- not by a tool, not by
+  # anything.
   defp open_and_truncate(path, offset) do
     case File.open(path, [:read, :write, :binary]) do
       {:error, posix} ->
