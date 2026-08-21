@@ -422,6 +422,29 @@ cc88d0a  gen 3  binds 19a1a93
 9418ac8  gen 0  empty governance — the original acceptance
 ```
 
+<a id="disposition-m1-prerequisite-adrs-2026-08-21"></a>
+### M1 prerequisite ADR acceptance — 2026-08-21
+
+The maintainer explicitly accepted
+[ADR 0006](../adr/0006-store-transaction-and-owner-epoch.md#concept) and
+[ADR 0007](../adr/0007-local-executor-grant-job-receipt.md#concept) as the
+Proposed pairs existing at candidate
+`58281e34cd6233d1223579af55710642909f5a1f`, in a direct instruction to accept
+both after receiving the exact candidate and four binding digests. Acceptance
+binds both files of each pair as they existed at that candidate; the digests are
+recorded in each Concept file's governance record.
+
+These acceptances settle M1's store-transaction and executor-grant
+prerequisites. They do not accept the rejected M1 plan pair or gate, authorize
+product implementation, or imply that a revised M1 candidate exists. The next
+transition is to create that revised plan-pair and gate candidate and have the
+exact candidate independently reviewed before any acceptance decision.
+
+This record is written before the administrative acceptance commit so that the
+pointer resolves to already-integrated bytes. It is the maintainer's disposition
+evidence, not an independent review: the transition itself still requires the
+read-only exact-diff review the plans register mandates.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
