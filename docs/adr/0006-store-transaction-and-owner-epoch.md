@@ -46,14 +46,16 @@ Technical depth: [Why replay-only fencing fails](0006-store-transaction-and-owne
 <a id="concept-adr-0006-decision"></a>
 ## Decision
 
-- **Fencing happens at commit, not at replay.** Every session-journal
-  transaction carries an expected owner epoch and an expected journal version.
-  For a transaction ID without a retained terminal outcome, the store compares
-  both **atomically with the commit** and refuses the transaction when either
-  does not match. A superseded owner can never newly commit. Re-presenting a
-  known transaction first validates its immutable bindings and returns its
-  recorded outcome, so a now-stale originator receives `committed` only for a
-  transaction committed while its authority was valid.
+- **Fencing happens at commit, not at replay.** Every ordinary session-journal
+  transaction carries an expected owner epoch, expected owner-incarnation ID,
+  and expected journal version. For a transaction ID without a retained
+  terminal outcome, the store compares all three **atomically with the commit**
+  and refuses the transaction when any does not match. Ownership succession
+  instead compares its prior epoch and version while binding the fresh ID it
+  proposes to install. A superseded owner can never newly commit.
+  Re-presenting a known transaction first validates its immutable bindings and
+  returns its recorded outcome, so a now-stale originator receives `committed`
+  only for a transaction committed while its authority was valid.
 - **The store contract has exactly three outcomes**, as the vision fixes them:
   `committed(tx_id)`, `not_committed(reason)`, and `commit_unknown(tx_id)`. A
   refused stale owner is `not_committed`, and a timeout is never evidence of
@@ -62,26 +64,30 @@ Technical depth: [Why replay-only fencing fails](0006-store-transaction-and-owne
   dispatch occurs on `not_committed` or while `commit_unknown` is unresolved.
   `commit_unknown(tx_id)` fences its mutation domain and resolves by transaction
   ID before either branch is chosen.
-- **At most one current committing owner at a time.** A superseded coordinator
-  may still be alive, but its epoch cannot commit or authorize work. A successor
-  atomically advances the durable session epoch before admitting any command;
-  ownership is a store fact, not an inference from process liveness.
+- **At most one current committing owner at a time.** The store owns the durable
+  `{owner_epoch, owner_incarnation_id}` pair. Each coordinator incarnation
+  generates a fresh opaque bounded string or binary, and succession atomically
+  installs that ID with the next epoch before admitting any command. A
+  superseded coordinator may still be alive, but neither its old epoch nor a
+  different incarnation at the same proposed epoch can commit or authorize
+  work. Ownership is a store fact, not an inference from process liveness.
 - **Transaction identity is immutable.** A transaction ID is bound to its
-  session and mutation domain, expected epoch, expected version, and complete
-  canonical mutation digest and record-set bytes. Both are retained with every
-  terminal outcome, including a non-commit. Repeating the same identity and
-  bytes resolves the same outcome; changing any binding is a conflict even if
-  two record sets have the same digest. A retry after a proved non-commit uses a
-  new transaction ID.
+  session and mutation domain, expected ownership, expected version, and
+  complete canonical mutation digest and record-set bytes. An `advance_owner`
+  transaction also binds its proposed fresh owner-incarnation ID. These values
+  are retained with every terminal outcome, including a non-commit. Repeating
+  the same identity and bytes resolves the same outcome; changing any binding is
+  a conflict even if two record sets have the same digest. A retry after a
+  proved non-commit uses a new transaction ID.
 - **Versions form one store-stamped session sequence.** Journal versions remain
   globally consecutive across owner changes. The store, not the caller, stamps
   the committed record range, so replay can detect gaps, resets, and epoch
   changes that were not durably recorded.
-- **Epochs are retained in records anyway.** Commit-time comparison is the
-  safety mechanism; retained epochs are the audit mechanism. Replay validates
-  them and refuses a history that could not have been produced by a legal
-  sequence of owners, which detects a store that failed to enforce its own
-  contract instead of trusting it.
+- **Ownership is retained in private records anyway.** Commit-time comparison
+  is the safety mechanism; retained epochs and incarnation IDs are the audit
+  mechanism. Replay validates them and refuses a history that could not have
+  been produced by a legal sequence of owners, which detects a store that failed
+  to enforce its own contract instead of trusting it.
 - **The port owns this, not one implementation.** Refusing a stale owner is a
   conformance obligation every store implementation runs, so the guarantee
   survives replacing the filesystem journal.
@@ -117,14 +123,18 @@ Technical depth: [Alternative analysis](0006-store-transaction-and-owner-epoch-t
 <a id="concept-adr-0006-consequences"></a>
 ## Consequences
 
-Every session-journal transaction carries two more bound values, and every store
-implementation must express one atomic conditional commit. A store that cannot
-express one cannot implement this port — that is the intended filter.
+Every ordinary session-journal transaction carries three bound comparison
+values, and every store implementation must express one atomic conditional
+commit. A succession transaction additionally binds the proposed incarnation
+ID it will install. A store that cannot express this cannot implement the port —
+that is the intended filter.
 
 Recovery becomes slower and more explicit: a successor must durably advance the
-epoch before it admits anything, so restart has a mandatory write before its
-first command. The alternative is admitting a command whose ownership is
-unproven.
+epoch with a new incarnation ID before it admits anything, so restart has a
+mandatory write before its first command. It need not possess the prior owner's
+ID: after resolving any earlier uncertain succession, it may atomically
+supersede the current pair with its own fresh ID. The alternative is admitting a
+command whose ownership is unproven.
 
 A commit remains committed even if its reply reaches a coordinator after that
 coordinator has been superseded. The delayed reply may truthfully acknowledge
@@ -142,6 +152,13 @@ a transaction committed, the session is unavailable rather than optimistic. A
 caller sees a stall where a speculating system would have shown a duplicate
 effect.
 
+The owner-incarnation ID is a trusted-local capability and private recovery
+data, not a public security credential. It is plain bounded serializable data —
+never a PID, reference, or other runtime term — and never enters public events,
+progress, or diagnostics. Deliberate trusted code that copies the ID or tampers
+with the store can impersonate its holder; this decision does not claim to
+defend against that trusted-code compromise.
+
 `M0`'s `Loopex.Journal` becomes an adapter behind this port or is replaced by
 one. That choice is implementation and belongs to `M1`'s work, not to this
 decision.
@@ -156,8 +173,9 @@ migration. `M0`'s retained journals are bound to `M0`'s closed record and are no
 carried forward.
 
 Rollback is removing the port while no implementation depends on it. Once a
-record format carries owner epochs, removing them is a schema change, which is
-why the schema is fixed here rather than discovered during implementation.
+record format carries owner epochs and incarnation IDs, removing them is a
+schema change, which is why the schema is fixed here rather than discovered
+during implementation.
 
 Technical depth: [Compatibility and rollback mechanics](0006-store-transaction-and-owner-epoch-technical.md#technical-adr-0006-compatibility).
 
