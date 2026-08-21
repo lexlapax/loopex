@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Loopex.Matrix do
   @tool_versions ".tool-versions"
   alias Loopex.Checks.Markdown
 
-  @green_verdict "M0 gate GREEN"
+  @green_verdict "GREEN"
   @matrix_evidence "docs/evidence/M0-toolchain-matrix.md"
 
   @impl Mix.Task
@@ -107,12 +107,12 @@ defmodule Mix.Tasks.Loopex.Matrix do
         {:error, "#{record}: #{:file.format_error(posix)}; the matrix record is unavailable"}
 
       {:ok, contents} ->
-        case recorded_rows(contents, record) do
+        case recorded_runs(contents, record) do
           {:error, reason} ->
             {:error, "#{reason}; the matrix record cannot be read as retained runs"}
 
-          {:ok, rows} ->
-            case Enum.reject(pairs, &records_pair?(rows, &1)) do
+          {:ok, runs} ->
+            case Enum.reject(pairs, &records_pair?(runs, &1)) do
               [] ->
                 :ok
 
@@ -125,158 +125,82 @@ defmodule Mix.Tasks.Loopex.Matrix do
     end
   end
 
-  # Concept: the runs this check counts are the rows a reader sees in the table.
+  # Concept: the runs are recorded where a reader and a parser cannot disagree.
   #
-  # Technical depth: this was narrowed five times and evaded five times. The major
-  # satisfied an exact lock. "Whole token" excluded digits and dots, so a
-  # prerelease suffix walked through. `contains?("GREEN")` accepted "NOT GREEN".
-  # Parsing the row still parsed a RAW line, so an inline comment hid fields a
-  # reader saw as blank. And reducing the line with the wrong reducer let a code
-  # span DELETE text: a verdict rendering as NOT GREEN reduced to GREEN.
+  # Technical depth: this boundary was rejected seven times, and every fix was the
+  # same mistake in a new place -- comparing against a hand-written approximation
+  # of how Markdown renders. The major satisfied an exact lock. "Whole token"
+  # excluded digits and dots, so a prerelease suffix passed. `contains?("GREEN")`
+  # accepted "NOT GREEN". Parsing the row parsed a RAW line, so a comment hid
+  # fields. Reducing with `exposed_line/1` let a code span DELETE text. Then
+  # stripping every backtick mis-modelled nested code spans, and comparing an
+  # undecoded header let `&#35;` render as `#` and smuggle in a second table.
   #
-  # Every one of those was a filter added to reject the previous example, which is
-  # why each held exactly until the next construction was tried. The rule is not a
-  # filter. Lines the Markdown reader calls hidden are dropped. Each surviving line
-  # is reduced to what a reader SEES rendered -- comments gone, code-span text
-  # kept. Every cell must be printable ASCII, so nothing invisible can occupy one.
-  # The result must parse as an exact table under the declared header, with a
-  # byte-identical header and separator, exact column count, and no empty cells.
+  # Each of those was a narrowing, and each held until the next construction,
+  # because reimplementing CommonMark well enough to predict a reader is not a
+  # thing this check should be attempting. So it stops attempting it.
   #
-  # Each rule is separately mutation-tested, because a suite of evasions can pass
-  # in full while a rule it never isolates is missing.
-  @table_header ["#", "Order", "Toolchain", "Verdict", "Exit", "Wall clock"]
+  # The runs live in a fenced block between governed markers. Content inside a
+  # fence renders verbatim -- CommonMark gives it no inline structure at all, so
+  # backticks, entities, and comment syntax are literal characters both to a
+  # reader and to this parser. There is nothing to render, so there is nothing to
+  # disagree about. `Markdown.block/4` supplies the block and already requires the
+  # marker pair to occur exactly once on governed lines, so a commented-out or
+  # fenced copy cannot supply a second one.
+  @run_format ~r/\Arun=(?<run>[0-9]+) order=(?<order>[a-z]+) elixir=(?<elixir>\S+) otp=(?<otp>\S+) erts=(?<erts>\S+) verdict=(?<verdict>\S+) exit=(?<exit>[0-9]+) wall=(?<wall>\S+)\z/
 
-  # The Markdown reader raises on a document it cannot read -- an unclosed comment
-  # or fence, for instance -- and that is a reason the record cannot be trusted,
-  # not a crash to let out of a check. Rescued here so the gate reports why.
-  defp recorded_rows(contents, path) do
-    read_rows(contents, path)
+  defp recorded_runs(contents, path) do
+    read_runs(contents, path)
   rescue
     error in [Loopex.Checks.Invalid] -> {:error, Exception.message(error)}
   end
 
-  defp read_rows(contents, path) do
-    lines = Markdown.lines(contents, path)
-    visible = Markdown.visible_line_numbers(contents, path)
+  defp read_runs(contents, path) do
+    body = Markdown.block(contents, path, :matrix_runs)
 
-    exposed =
-      lines
-      |> Enum.with_index()
-      |> Enum.filter(fn {_line, number} -> MapSet.member?(visible, number) end)
-      |> Enum.map(fn {line, _number} -> render_row(line) end)
-
-    header = "| " <> Enum.join(@table_header, " | ") <> " |"
-
-    # Exactly one table. Two tables under the same header make the record
-    # contradict itself -- one may say a lane passed while the other says it
-    # failed -- and picking the first would decide that by position.
-    case Enum.filter(Enum.with_index(exposed), fn {line, _n} -> line == header end) do
+    case Enum.reject(body, &fence_or_blank?/1) do
       [] ->
-        {:error, "#{path}: no visible #{Enum.join(@table_header, " | ")} table"}
+        {:error, "#{path}: the recorded-runs block names no run"}
 
-      [{_line, at}] ->
-        exposed
-        |> Enum.drop(at)
-        |> Enum.take_while(&String.starts_with?(&1, "|"))
-        |> parse_table(path)
+      lines ->
+        parsed = Enum.map(lines, &Regex.named_captures(@run_format, &1))
 
-      many ->
-        {:error,
-         "#{path}: #{length(many)} visible #{Enum.join(@table_header, " | ")} tables; " <>
-           "exactly one records the runs"}
-    end
-  end
-
-  # A retained row has no reason to contain a comment, and one that does reads
-  # differently in the source than it renders -- `M0 gate <!--NOT -->GREEN` shows
-  # a reader GREEN. Refusing any commented row outright is simpler to reason about
-  # than deciding what each one hides, and it must be decided on the RAW line,
-  # because rendering has already removed the evidence by then.
-  defp render_row(line) do
-    rendered = rendered_line(line)
-
-    if String.starts_with?(String.trim_leading(line), "|") and String.contains?(line, "<!--") do
-      "| commented row |"
-    else
-      rendered
-    end
-  end
-
-  # Concept: the line as a reader sees it rendered.
-  #
-  # Technical depth: deliberately NOT `Markdown.exposed_line/1`. That answers a
-  # different question -- what a line says OUTSIDE markup -- which is right for
-  # heading identity and wrong here, in both directions. It strips code-span
-  # contents, so a verdict written as a code span rendered fine and reduced to an
-  # empty cell; worse, a code span placed mid-cell DELETES text, and
-  # `M0 gate ` <> code("NOT ") <> `GREEN` renders as NOT GREEN and reduced to
-  # GREEN. A failing run read as a passing one.
-  #
-  # A reader sees code-span text. So comments are removed, because they are truly
-  # invisible, and backtick delimiters are removed while their contents stay.
-  # An unterminated comment truncates the rest of the line rather than leaking it.
-  defp rendered_line(line) do
-    line
-    |> strip_comments()
-    |> String.replace("`", "")
-  end
-
-  defp strip_comments(line) do
-    case String.split(line, "<!--", parts: 2) do
-      [only] ->
-        only
-
-      [before, rest] ->
-        case String.split(rest, "-->", parts: 2) do
-          [_unterminated] -> before
-          [_hidden, tail] -> before <> strip_comments(tail)
+        if Enum.any?(parsed, &is_nil/1) do
+          {:error, "#{path}: a recorded run is not in the required form"}
+        else
+          {:ok, parsed}
         end
     end
   end
 
-  # Concept: a governed cell is plain printable text.
-  #
-  # Technical depth: a cell holding only a non-breaking space, a zero-width space,
-  # or a right-to-left override passed the "no empty cells" rule while rendering
-  # blank -- and the same family of characters can make two different strings look
-  # identical. Rather than enumerate them, the rule is inverted: every character in
-  # every cell must be printable ASCII. Retained evidence has no reason to carry
-  # anything else, and anything else is a way for the record and the reader to
-  # disagree.
-  defp printable?(cell), do: Regex.match?(~r/\A[\x20-\x7E]*\z/, cell)
+  defp fence_or_blank?(line) do
+    trimmed = String.trim(line)
+    trimmed == "" or String.starts_with?(trimmed, "```") or String.starts_with?(trimmed, "~~~")
+  end
 
-  # `Markdown.table/3` raises on a malformed row rather than skipping it, which is
-  # the behaviour wanted here: a row that cannot be read is not a row that passed.
-  defp parse_table(lines, path), do: {:ok, Markdown.table(lines, @table_header, path)}
+  # Concept: a run line is one exact form or it is not a run.
+  #
+  # Technical depth: no separate printable-character guard. Earlier versions needed
+  # one because a non-breaking or zero-width character could occupy a cell while
+  # rendering as nothing. Here every field is compared by equality against an exact
+  # expected value rather than searched, so a field carrying an invisible character
+  # simply is not equal to the value it imitates. Mutation-checking found the guard
+  # broke no case, and a redundant rule in a check like this is one a reader has to
+  # verify is not the load-bearing one.
 
   # Concept: every recorded run passed, and this pair is among them.
   #
-  # Technical depth: asking only whether SOME row records this pair green let a
-  # failing row sit beside a passing one and be ignored. The table records the
-  # runs taken at this candidate and the gate claims they were green, so a row
+  # Technical depth: asking only whether SOME run recorded this pair green let a
+  # failing run sit beside a passing one and be ignored. The block records the
+  # runs taken at this candidate and the gate claims they were green, so a run
   # that is not a green zero-exit run contradicts the claim wherever it appears.
-  # Both halves are required: every row green, and this pair actually present.
-  defp records_pair?(rows, pair) do
-    Enum.all?(rows, &green_run?/1) and Enum.any?(rows, &names_pair?(&1, pair))
+  defp records_pair?(runs, pair) do
+    Enum.all?(runs, &green_run?/1) and Enum.any?(runs, &names_pair?(&1, pair))
   end
 
-  defp green_run?(cells) do
-    case cells do
-      [number, _order, _toolchain, verdict, exit_code | _rest] ->
-        Enum.all?(cells, &printable?/1) and numbered?(number) and
-          verdict == @green_verdict and exit_code == "0"
+  defp green_run?(run), do: run["verdict"] == @green_verdict and run["exit"] == "0"
 
-      _other ->
-        false
-    end
-  end
-
-  defp names_pair?(cells, pair) do
-    case cells do
-      [_number, _order, toolchain | _rest] -> toolchain_matches?(toolchain, pair)
-      _other -> false
-    end
-  end
+  defp names_pair?(run, pair), do: run["elixir"] == pair.elixir and run["otp"] == pair.otp_exact
 
   @doc """
   ## Concept
@@ -374,19 +298,6 @@ defmodule Mix.Tasks.Loopex.Matrix do
   end
 
   defp major_of(version), do: version |> String.split(".") |> hd()
-
-  # A recorded run is numbered. The cells are already exposed and trimmed by the
-  # table reader, so these compare exact values rather than search text.
-  defp numbered?(cell), do: Regex.match?(~r/\A[0-9]+\z/, cell)
-
-  # The toolchain cell names both exact versions and nothing else that could be
-  # mistaken for them. `erts-` is allowed to follow because the rows carry it.
-  defp toolchain_matches?(cell, pair) do
-    case Regex.run(~r/\AElixir (\S+) \/ OTP (\S+?)(?: erts-\S+)?\z/, cell) do
-      [_all, elixir, otp] -> elixir == pair.elixir and otp == pair.otp_exact
-      _other -> false
-    end
-  end
 
   defp describe(pairs) do
     pairs

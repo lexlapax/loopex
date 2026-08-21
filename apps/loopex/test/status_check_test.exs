@@ -77,20 +77,21 @@ defmodule Loopex.StatusCheckTest do
     end
   end
 
-  test "retained matrix evidence counts only runs a reader can see" do
-    # Narrowed five times, evaded five times. The major satisfied an exact lock.
-    # "Whole token" excluded digits and dots, so a prerelease walked through.
-    # `contains?("GREEN")` accepted "NOT GREEN". Parsing the row still parsed a RAW
-    # line, so a comment hid fields a reader saw as blank. And reducing the line
-    # with the wrong reducer let a code span DELETE text: a verdict rendering as
-    # NOT GREEN reduced to GREEN, so a failing run read as a passing one.
+  test "retained matrix evidence is read verbatim, not rendered" do
+    # This boundary was rejected seven times. Every fix compared a locked pair
+    # against a hand-written approximation of how Markdown renders, and every one
+    # was evaded: the major satisfied an exact lock; "whole token" excluded digits
+    # and dots; `contains?("GREEN")` accepted "NOT GREEN"; a raw line was parsed
+    # while a comment hid fields; `exposed_line/1` let a code span DELETE text; then
+    # stripping every backtick mis-modelled nested spans, and an undecoded header
+    # let `&#35;` render as `#` and smuggle in a second table of failures.
     #
-    # Each fix was a filter rejecting the previous example, which is why each held
-    # exactly until the next construction. Two disciplines replace that. Cases vary
-    # ONE thing from a row that passes, so no case can pass on a second defect --
-    # the earlier "NOT GREEN" case also set exit 1, so removing verdict equality
-    # broke nothing. And every rule is mutation-checked: removing it must break at
-    # least one case here, or it is untested or redundant.
+    # The design changed rather than narrowing again. Runs live in a fenced block
+    # between governed markers, and fenced content has no inline structure at all --
+    # a backtick, an entity and comment syntax are literal characters to a reader
+    # and to the parser alike. So these cases are not a list of evasions to reject.
+    # They are the constructions that broke every previous version, asserting that
+    # the new one has nothing left for them to exploit.
     pairs = [%{elixir: "1.17.0", otp: "26", otp_exact: "26.0"}]
 
     root = Path.join(System.tmp_dir!(), "matrix-#{System.unique_integer([:positive])}")
@@ -98,110 +99,66 @@ defmodule Loopex.StatusCheckTest do
     record = Path.join(root, "docs/evidence/M0-toolchain-matrix.md")
     on_exit(fn -> File.rm_rf(root) end)
 
-    header = "| # | Order | Toolchain | Verdict | Exit | Wall clock |"
-    rule = "| --- | --- | --- | --- | --- | --- |"
-    real = "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"
-    table = fn rows -> Enum.join([header, rule | rows], "\n") <> "\n" end
-    verdict = fn v -> "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | #{v} | 0 | 91s |" end
+    {open, close} = Loopex.Checks.Markdown.markers(:matrix_runs)
+    good = "run=1 order=first elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=91s"
+    fail = "run=1 order=first elixir=1.17.0 otp=26.0 erts=14.0 verdict=NOT_GREEN exit=1 wall=91s"
+    doc = fn body -> open <> "\n```text\n" <> body <> "\n```\n" <> close <> "\n" end
 
-    order = fn o ->
-      "| 1 | #{o} | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"
-    end
-
-    File.write!(record, table.([real]))
+    File.write!(record, doc.(good))
     assert :ok = Matrix.both_lanes_recorded(root, pairs), "a real run must count"
 
     refused = [
-      # A code span removes its delimiters, so one placed mid-cell deletes text.
-      # The row renders NOT GREEN and must not reduce to GREEN.
-      {"a code span deleting NOT", table.([verdict.("M0 gate `NOT `GREEN")])},
-      {"a code span deleting NOT with no space", table.([verdict.("M0 gate `NOT`GREEN")])},
-      {"doubled backticks deleting NOT", table.([verdict.("M0 gate ``NOT ``GREEN")])},
-      {"any commented row", table.([verdict.("M0 gate <!--NOT -->GREEN")])},
-      # Verdict varied alone: exit stays 0, so only verdict equality can refuse.
-      {"a failing verdict at exit 0", table.([verdict.("M0 gate NOT GREEN")])},
-      {"an empty verdict at exit 0", table.([verdict.("")])},
-      {"a lowercased verdict", table.([verdict.("m0 gate green")])},
-      {"a verdict with trailing text", table.([verdict.("M0 gate GREEN (cached)")])},
-      # Characters that occupy a cell while rendering blank, or that make two
-      # different strings look identical.
-      {"a non-breaking space as the order", table.([order.("\u00A0")])},
-      {"a zero-width space as the order", table.([order.("\u200B")])},
-      {"a bidi override as the order", table.([order.("\u202E")])},
-      {"a zero-width space inside NOT", table.([verdict.("M0 gate NOT\u200B GREEN")])},
-      {"a Cyrillic homoglyph in the verdict", table.([verdict.("M0 g\u0430te GREEN")])},
-      {"a non-breaking space inside the verdict", table.([verdict.("M0 gate\u00A0GREEN")])},
-      # Hiding the row from the reader entirely.
-      {"a same-line comment",
-       table.([
-         "| 1 | <!--first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | t--> |"
-       ])},
-      {"a commented-out table", "<!--\n" <> table.([real]) <> "-->\n"},
-      {"a backtick fence", "```\n" <> table.([real]) <> "```\n"},
-      {"a tilde fence", "~~~\n" <> table.([real]) <> "~~~\n"},
-      {"an indented code block",
-       "    " <> header <> "\n    " <> rule <> "\n    " <> real <> "\n"},
-      {"a blockquoted table", "> " <> header <> "\n> " <> rule <> "\n> " <> real <> "\n"},
-      {"an unterminated comment", "<!--\n" <> table.([real])},
-      # Not a row of this table at all.
-      {"a row with no table", real <> "\n"},
-      {"a row under a different header",
-       "| A | B | C | D | E | F |\n" <> rule <> "\n" <> real <> "\n"},
-      {"a table with no rows", table.([])},
-      {"an unnumbered run",
-       table.(["| x | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"])},
-      {"an empty order cell", table.([order.("")])},
-      {"a row missing a column",
-       table.(["| 1 | first | Elixir 1.17.0 / OTP 26.0 | M0 gate GREEN | 0 |"])},
-      {"shifted columns",
-       table.(["| 1 | Elixir 1.17.0 / OTP 26.0 erts-14.0 | first | M0 gate GREEN | 0 | 91s |"])},
-      {"an untrimmed cell", table.([order.("first ")])},
+      # Verdict and exit vary alone, so only their own rule can refuse each.
+      {"a failing verdict at exit 0",
+       doc.(
+         "run=1 order=first elixir=1.17.0 otp=26.0 erts=14.0 verdict=NOT_GREEN exit=0 wall=91s"
+       )},
+      {"a nonzero exit with a green verdict",
+       doc.("run=1 order=first elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=1 wall=91s")},
       # A different toolchain than the one locked.
       {"a prerelease Elixir",
-       table.([
-         "| 1 | first | Elixir 1.17.0-rc.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 91s |"
-       ])},
+       doc.(
+         "run=1 order=first elixir=1.17.0-rc.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=91s"
+       )},
       {"a prerelease OTP",
-       table.([
-         "| 1 | first | Elixir 1.17.0 / OTP 26.0-rc1 erts-14.0 | M0 gate GREEN | 0 | 91s |"
-       ])},
+       doc.(
+         "run=1 order=first elixir=1.17.0 otp=26.0-rc1 erts=14.0 verdict=GREEN exit=0 wall=91s"
+       )},
       {"a longer OTP version",
-       table.(["| 1 | first | Elixir 1.17.0 / OTP 26.0.1 erts-14.0 | M0 gate GREEN | 0 | 91s |"])},
+       doc.("run=1 order=first elixir=1.17.0 otp=26.0.1 erts=14.0 verdict=GREEN exit=0 wall=91s")},
       {"the major alone",
-       table.(["| 1 | first | Elixir 1.17.0 / OTP 26 | M0 gate GREEN | 0 | 91s |"])},
-      # Exit varied alone: verdict stays green.
-      {"a nonzero exit",
-       table.(["| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 1 | 91s |"])},
-      {"prose naming every field", "Elixir 1.17.0 / OTP 26.0 ran, M0 gate GREEN, exit 0\n"},
-      # A record that contradicts itself decides nothing. Two tables under the
-      # declared header, or a failing row beside a passing one, were both accepted
-      # by asking whether SOME row recorded the pair green.
-      {"two tables where the second records a failure",
-       table.([real]) <>
-         "\ntext\n\n" <>
-         table.([
-           "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate NOT GREEN | 1 | 91s |"
-         ])},
-      {"a failing row beside a passing one",
-       table.([
-         real,
-         "| 2 | second | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate NOT GREEN | 1 | 91s |"
-       ])},
-      # Constructions that hide or forge outside the insertion fuzzer's reach.
-      {"a nested comment hiding NOT", table.([verdict.("M0 gate <!--a<!--b-->NOT GREEN")])},
-      {"an escaped backtick around NOT", table.([verdict.("M0 gate \\`NOT \\`GREEN")])},
-      {"an HTML entity in the verdict", table.([verdict.("M0 gate &#71;REEN")])},
-      {"a byte-order mark before a failing table",
-       "\uFEFF" <>
-         table.([
-           "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate NOT GREEN | 1 | 91s |"
-         ])},
-      {"a line separator inside the verdict", table.([verdict.("M0 gate\u2028GREEN")])},
-      {"a tab inside the verdict", table.([verdict.("M0\tgate GREEN")])},
-      {"an escaped pipe hiding columns",
-       table.([
-         "| 1 | first \\| x | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate NOT GREEN | 1 | 91s |"
-       ])}
+       doc.("run=1 order=first elixir=1.17.0 otp=26 erts=14.0 verdict=GREEN exit=0 wall=91s")},
+      # A record that contradicts itself decides nothing.
+      {"a failing run beside a passing one",
+       doc.(good <> "\n" <> String.replace(fail, "run=1", "run=2"))},
+      {"a second marked block", doc.(good) <> "\ntext\n\n" <> doc.(fail)},
+      # The constructions that defeated every earlier version. Inside a fence they
+      # are literal characters, so each simply fails to parse as a run.
+      {"a code span deleting text",
+       doc.(String.replace(good, "verdict=GREEN", "verdict=`NOT `GREEN"))},
+      {"nested code spans", doc.(String.replace(good, "verdict=GREEN", "verdict=``GRE`EN``"))},
+      {"an inline comment hiding a field",
+       doc.(String.replace(good, "verdict=GREEN", "verdict=<!--NOT -->GREEN"))},
+      {"an HTML entity in a field",
+       doc.(String.replace(good, "verdict=GREEN", "verdict=&#71;REEN"))},
+      # Characters that occupy a field while rendering as nothing.
+      {"a non-breaking space in a field",
+       doc.(String.replace(good, "order=first", "order=fir\u00A0st"))},
+      {"a zero-width space in a field",
+       doc.(String.replace(good, "order=first", "order=fir\u200Bst"))},
+      {"a bidi override in a field",
+       doc.(String.replace(good, "order=first", "order=fir\u202Est"))},
+      # Not a run at all.
+      {"no block at all", "just prose naming Elixir 1.17.0 and OTP 26.0 as GREEN\n"},
+      {"an empty block", doc.("")},
+      {"a malformed run line", doc.("run=1 elixir=1.17.0 verdict=GREEN")},
+      {"a run line with a field missing",
+       doc.("run=1 order=first elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0")},
+      {"an unnumbered run",
+       doc.("run=x order=first elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=91s")},
+      # A commented-out or fenced marker cannot supply the pair.
+      {"markers inside a comment", "<!--\n" <> doc.(good) <> "-->\n"},
+      {"markers inside a fence", "```\n" <> doc.(good) <> "```\n"}
     ]
 
     for {label, body} <- refused do
@@ -211,8 +168,8 @@ defmodule Loopex.StatusCheckTest do
              "#{label} must not count as a recorded run"
     end
 
-    File.write!(record, table.([real]))
-    assert :ok = Matrix.both_lanes_recorded(root, pairs), "and the real row still counts"
+    File.write!(record, doc.(good))
+    assert :ok = Matrix.both_lanes_recorded(root, pairs), "and the real run still counts"
   end
 
   test "an acceptance chain edge must run backwards along history" do

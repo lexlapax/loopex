@@ -64,6 +64,7 @@ defmodule Loopex.Checks.Markdown do
     plan_technical_envelope:
       {"<!-- loopex:plan-technical-envelope:start -->",
        "<!-- loopex:plan-technical-envelope:end -->"},
+    matrix_runs: {"<!-- loopex:matrix-runs:start -->", "<!-- loopex:matrix-runs:end -->"},
     rejoin_source: {"<!-- loopex:rejoin-source:start -->", "<!-- loopex:rejoin-source:end -->"},
     rejoin_copy: {"<!-- loopex:rejoin-copy:start -->", "<!-- loopex:rejoin-copy:end -->"}
   }

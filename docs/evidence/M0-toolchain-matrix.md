@@ -16,18 +16,29 @@ first had compiled.
 - host: macOS arm64; both pairs provided by `mise`
 - recorded: 2026-08-20
 
-| # | Order | Toolchain | Verdict | Exit | Wall clock |
-| --- | --- | --- | --- | --- | --- |
-| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 88s |
-| 2 | second | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | M0 gate GREEN | 0 | 101s |
-| 3 | third | Elixir 1.20.3 / OTP 29.0.5 erts-17.0.5 | M0 gate GREEN | 0 | 58s |
-| 4 | fourth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 88s |
-| 5 | fifth | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 0 | 58s |
+The runs are recorded below as verbatim text rather than as a Markdown table.
+That is deliberate, and it is the seventh version of this check. Every earlier one
+compared a locked pair against a hand-written approximation of how Markdown
+renders, and every one was evaded: a code span that deleted text, a comment that
+hid a field, `&#35;` rendering as `#` to smuggle in a second table with failing
+runs. Content inside a fence has no inline structure at all, so a backtick, an
+entity and comment syntax are literal characters to a reader and to the parser
+alike. There is nothing to render, and so nothing to disagree about.
+
+<!-- loopex:matrix-runs:start -->
+```text
+run=1 order=first elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=88s
+run=2 order=second elixir=1.20.3 otp=29.0.5 erts=17.0.5 verdict=GREEN exit=0 wall=101s
+run=3 order=third elixir=1.20.3 otp=29.0.5 erts=17.0.5 verdict=GREEN exit=0 wall=58s
+run=4 order=fourth elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=88s
+run=5 order=fifth elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=58s
+```
+<!-- loopex:matrix-runs:end -->
 
 The previous candidate's runs are superseded rather than kept alongside these.
-Product bytes changed, which invalidates the evidence taken before them; a table
-carrying rows from two revisions invites a reader to count four runs that were
-never all true of one tree.
+Product bytes changed, which invalidates the evidence taken before them; a record
+carrying runs from two revisions invites a reader to count runs that were never
+all true of one tree.
 
 Runs 1 and 2 are floor-then-current; runs 3 and 4 reverse that; run 5 follows the
 floor lane with itself. The four adjacencies present are therefore floor-current,
@@ -45,10 +56,11 @@ evidence unavailable rather than skipping, which is the fail-closed direction.
 
 These runs were executed on the code commit named above with the retained-evidence
 edits of that round already present in the working tree. They did not observe this
-file as it now stands: the run table, the header above it, the adjacency narration
-describing run 5, and the verdict-handling paragraph below were all written or
-rewritten after them. An earlier version of this sentence claimed the run table was
-the only difference, which was not true even when written. This file and the self-hosting evidence are then written
+file as it now stands: the recorded-runs block, the header above it, the adjacency
+narration describing run 5, and the verdict-handling paragraph below were all
+written or rewritten after them. An earlier version of this sentence claimed the
+runs were the only difference, which was not true even when written. This file and
+the self-hosting evidence are then written
 in the commit immediately after the candidate: there is no way to record a run
 inside the commit the run observed. That residual gap is stated rather than
 papered over, and it is why the gate expects a reviewer to re-run at the closure
@@ -69,15 +81,13 @@ second demonstration into an outcome section where the locked runner requires
 exactly one. A green gate at the code commit is not a green gate at the closure
 candidate.
 
-The toolchain column names the EXACT version each lane ran, not the major release.
-`mix loopex.matrix` requires that version to appear as a whole token. It first
-searched for the major, so a row naming "OTP 26" satisfied a lock promising 26.0
-while runtime matching was exact. Searching for the exact version fixed that row
-and left the rule: the test was still a substring, and every version is a prefix of
-longer ones, so a row recording 26.0.1 — a different toolchain — still satisfied a
-lock on 26.0. Evidence a check accepts loosely is evidence the check does not
-really constrain, and narrowing what it accepts one spelling at a time leaves the
-next spelling accepted.
+Each run names the EXACT versions its lane ran, and `mix loopex.matrix` compares
+them by equality on a parsed field rather than by searching text. Every run in the
+block must be green with exit zero: asking only whether SOME run recorded a pair
+green let a failing run sit beside a passing one and be ignored. Evidence a check
+accepts loosely is evidence the check does not really constrain, and narrowing
+what it accepts one spelling at a time leaves the next spelling accepted — which
+is what six earlier versions of this check each discovered in turn.
 
 `mix loopex.matrix` requires this file to name every locked pair with a green
 verdict. It cannot verify that a recorded run happened, and says so; that judgment

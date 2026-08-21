@@ -20,7 +20,7 @@ The size figure is audit material. No run passes or fails on it.
 Taken by running `mix loopex.self_hosting`, not transcribed:
 
 ```text
-documentation 1763   comment 640   blank 1490   code 6682   total 10575
+documentation 1763   comment 636   blank 1489   code 6645   total 10533
 ```
 
 Against the 4,462-line gate-commit baseline the plan binds, that is
@@ -29,7 +29,7 @@ revision they were retired, it is 2.25x. Both are stated because a
 reader comparing to the deleted files computes the second, and the two numbers are
 different.
 
-The figure is 10575 at this candidate. Two earlier rounds account for the shape of
+The figure is 10533 at this candidate. Two earlier rounds account for the shape of
 it, and the numbers belong to different candidates rather than to one delta:
 
 - +301 when `apps/loopex/test/tool_call_reader_test.exs` was added to the measured
