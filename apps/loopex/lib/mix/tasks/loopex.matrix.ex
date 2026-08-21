@@ -156,26 +156,93 @@ defmodule Mix.Tasks.Loopex.Matrix do
   end
 
   defp read_runs(contents, path) do
-    body = Markdown.block(contents, path, :matrix_runs)
+    with {:ok, inner} <- fenced_body(Markdown.block(contents, path, :matrix_runs), path) do
+      parsed = Enum.map(inner, &Regex.named_captures(@run_format, &1))
 
-    case Enum.reject(body, &fence_or_blank?/1) do
-      [] ->
-        {:error, "#{path}: the recorded-runs block names no run"}
+      cond do
+        inner == [] ->
+          {:error, "#{path}: the recorded-runs block names no run"}
 
-      lines ->
-        parsed = Enum.map(lines, &Regex.named_captures(@run_format, &1))
-
-        if Enum.any?(parsed, &is_nil/1) do
+        Enum.any?(parsed, &is_nil/1) ->
           {:error, "#{path}: a recorded run is not in the required form"}
-        else
+
+        true ->
           {:ok, parsed}
-        end
+      end
     end
   end
 
-  defp fence_or_blank?(line) do
-    trimmed = String.trim(line)
-    trimmed == "" or String.starts_with?(trimmed, "```") or String.starts_with?(trimmed, "~~~")
+  # Concept: the records must actually be inside the fence, not merely near it.
+  #
+  # Technical depth: the previous version discarded fence-looking lines and parsed
+  # whatever was left, which asserted the fenced-verbatim premise in a comment and
+  # never checked it. Unfenced records between the markers parsed fine, so
+  # `erts=14.0<!-- verdict=GREEN exit=0 wall=91s-->` recorded a green zero-exit run
+  # that a reader never sees: outside a fence the comment is a comment again, and
+  # every guarantee this design rests on evaporates.
+  #
+  # The interior is therefore required to be exactly one fenced block: an opening
+  # fence, run lines, a closing fence of the same character and at least the same
+  # length, and nothing else. A premise the parser depends on is checked by the
+  # parser.
+  defp fenced_body(lines, path) do
+    case Enum.drop_while(lines, &blank?/1) |> Enum.reverse() |> Enum.drop_while(&blank?/1) do
+      [] ->
+        {:error, "#{path}: the recorded-runs block is empty"}
+
+      [last | reversed_rest] ->
+        [open | inner] = Enum.reverse([last | reversed_rest])
+        close_fenced(open, inner, last, path)
+    end
+  end
+
+  # Concept: the closing fence and the absence of inner fences are checked here
+  # too, deliberately, even though the Markdown scan already rejects them.
+  #
+  # Technical depth: mutation-checking shows both are currently redundant --
+  # `visible_line_numbers/2` raises on an unclosed construct, and a mismatched
+  # delimiter or an info-stringed closer leaves the fence open, so the block never
+  # reaches this function. A redundant guard was removed elsewhere in this module
+  # for good reason, and the difference is worth stating: that one duplicated an
+  # equality check three lines below it, while these depend on an incidental
+  # property of ANOTHER module. If that scan ever stops raising, the premise this
+  # design rests on would fail silently rather than loudly. This boundary has been
+  # evaded eight times; the cheap local check stays.
+  defp close_fenced(open, inner, last, path) do
+    with {:ok, char, len} <- fence_open(open),
+         true <- inner != [],
+         true <- fence_close?(last, char, len),
+         body = Enum.drop(inner, -1),
+         false <- Enum.any?(body, &fence_line?/1) do
+      {:ok, body}
+    else
+      _other ->
+        {:error,
+         "#{path}: the recorded-runs block must be exactly one fenced block, " <>
+           "so a reader sees the runs verbatim"}
+    end
+  end
+
+  defp blank?(line), do: String.trim(line) == ""
+
+  defp fence_line?(line), do: String.match?(line, ~r/\A\s{0,3}(`{3,}|~{3,})/)
+
+  # An opening fence is a run of at least three backticks or tildes with at most a
+  # simple info string. Anything else is not a fence a reader will see as one.
+  defp fence_open(line) do
+    case Regex.run(~r/\A(`{3,}|~{3,})([A-Za-z0-9]*)\z/, String.trim_trailing(line)) do
+      [_all, delim, _info] -> {:ok, String.first(delim), String.length(delim)}
+      _other -> :error
+    end
+  end
+
+  # A closing fence matches the opener's character and is at least as long, and
+  # carries no info string.
+  defp fence_close?(line, char, len) do
+    case Regex.run(~r/\A(`{3,}|~{3,})\z/, String.trim_trailing(line)) do
+      [_all, delim] -> String.first(delim) == char and String.length(delim) >= len
+      _other -> false
+    end
   end
 
   # Concept: a run line is one exact form or it is not a run.

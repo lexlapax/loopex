@@ -103,6 +103,7 @@ defmodule Loopex.StatusCheckTest do
     good = "run=1 order=first elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=91s"
     fail = "run=1 order=first elixir=1.17.0 otp=26.0 erts=14.0 verdict=NOT_GREEN exit=1 wall=91s"
     doc = fn body -> open <> "\n```text\n" <> body <> "\n```\n" <> close <> "\n" end
+    raw = fn body -> open <> "\n" <> body <> "\n" <> close <> "\n" end
 
     File.write!(record, doc.(good))
     assert :ok = Matrix.both_lanes_recorded(root, pairs), "a real run must count"
@@ -158,7 +159,29 @@ defmodule Loopex.StatusCheckTest do
        doc.("run=x order=first elixir=1.17.0 otp=26.0 erts=14.0 verdict=GREEN exit=0 wall=91s")},
       # A commented-out or fenced marker cannot supply the pair.
       {"markers inside a comment", "<!--\n" <> doc.(good) <> "-->\n"},
-      {"markers inside a fence", "```\n" <> doc.(good) <> "```\n"}
+      {"markers inside a fence", "```\n" <> doc.(good) <> "```\n"},
+      # The premise the whole design rests on -- records render verbatim -- holds
+      # only if they are actually inside a fence. An earlier version asserted that
+      # in a comment and never checked it, so unfenced records parsed and an HTML
+      # comment could hide fields a reader never sees while the parser read them.
+      # Every case here keeps otherwise-valid records and varies only the fence.
+      {"records with no fence at all", raw.(good)},
+      {"unfenced records with fields inside a comment",
+       raw.(
+         "run=1 order=first elixir=1.17.0 otp=26.0 erts=14.0<!-- verdict=GREEN exit=0 wall=91s-->"
+       )},
+      {"an opening fence with no closer", raw.("```text\n" <> good)},
+      {"a closing fence with no opener", raw.(good <> "\n```")},
+      {"mismatched fence delimiters", raw.("```text\n" <> good <> "\n~~~")},
+      {"a closing fence shorter than its opener", raw.("````text\n" <> good <> "\n```")},
+      {"an info string on the closing fence", raw.("```text\n" <> good <> "\n```text")},
+      {"a record outside the fence", raw.("```text\n" <> good <> "\n```\n" <> good)},
+      {"a record before the fence", raw.(good <> "\n```text\n" <> good <> "\n```")},
+      {"two fenced blocks", raw.("```text\n" <> good <> "\n```\n```text\n" <> good <> "\n```")},
+      {"an indented fence, which is a code block",
+       raw.("    ```text\n    " <> good <> "\n    ```")},
+      {"an empty fence", raw.("```text\n```")},
+      {"a blank line inside the fence", raw.("```text\n" <> good <> "\n\n```")}
     ]
 
     for {label, body} <- refused do
@@ -166,6 +189,17 @@ defmodule Loopex.StatusCheckTest do
 
       assert {:error, _reason} = Matrix.both_lanes_recorded(root, pairs),
              "#{label} must not count as a recorded run"
+    end
+
+    # Legitimate fence shapes still count, so the rule refuses hiding rather than
+    # refusing Markdown.
+    for {label, body} <- [
+          {"a bare fence", raw.("```\n" <> good <> "\n```")},
+          {"a tilde fence", raw.("~~~text\n" <> good <> "\n~~~")},
+          {"a closing fence longer than its opener", raw.("```text\n" <> good <> "\n`````")}
+        ] do
+      File.write!(record, body)
+      assert :ok = Matrix.both_lanes_recorded(root, pairs), "#{label} must still count"
     end
 
     File.write!(record, doc.(good))
