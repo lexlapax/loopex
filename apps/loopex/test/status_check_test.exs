@@ -145,6 +145,39 @@ defmodule Loopex.StatusCheckTest do
       assert {:error, _} = Matrix.both_lanes_recorded(root, pairs),
              "#{label} must not satisfy a locked pair"
     end
+
+    # Parsing a row is not enough on its own: a line that looks like a row is not
+    # one if no reader can see it. Exact rows hidden inside a fenced block or an
+    # HTML comment satisfied the check while appearing nowhere in the document.
+    real = "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 | 91s |"
+
+    for {label, body} <- [
+          {"a fenced code block", "```text\n" <> real <> "\n```"},
+          {"an HTML comment", "<!--\n" <> real <> "\n-->"},
+          {"an indented code block", "    " <> real}
+        ] do
+      File.write!(record, body <> "\n")
+
+      assert {:error, _} = Matrix.both_lanes_recorded(root, pairs),
+             "a row hidden in #{label} must not count as a recorded run"
+    end
+
+    # And a row must be a run: numbered, ordered, not the separator.
+    for {label, row} <- [
+          {"an unnumbered run",
+           "| x | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 |"},
+          {"an unordered run",
+           "| 1 |  | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 |"},
+          {"the separator row", "| --- | --- | --- | --- | --- |"}
+        ] do
+      File.write!(record, row <> "\n")
+
+      assert {:error, _} = Matrix.both_lanes_recorded(root, pairs),
+             "#{label} must not count as a recorded run"
+    end
+
+    File.write!(record, real <> "\n")
+    assert :ok = Matrix.both_lanes_recorded(root, pairs), "the real row must still count"
   end
 
   test "an acceptance chain edge must run backwards along history" do

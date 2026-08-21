@@ -25,6 +25,8 @@ defmodule Mix.Tasks.Loopex.Matrix do
   use Mix.Task
 
   @tool_versions ".tool-versions"
+  alias Loopex.Checks.Markdown
+
   @green_verdict "`M0 gate GREEN`"
   @matrix_evidence "docs/evidence/M0-toolchain-matrix.md"
 
@@ -105,7 +107,7 @@ defmodule Mix.Tasks.Loopex.Matrix do
         {:error, "#{record}: #{:file.format_error(posix)}; the matrix record is unavailable"}
 
       {:ok, contents} ->
-        case Enum.reject(pairs, &recorded?(contents, &1)) do
+        case Enum.reject(pairs, &recorded?(contents, &1, record)) do
           [] ->
             :ok
 
@@ -120,10 +122,15 @@ defmodule Mix.Tasks.Loopex.Matrix do
   # A pair counts as recorded when its exact Elixir and OTP versions appear on one
   # line together with a green verdict, so a line naming a pair without an outcome
   # does not satisfy it.
-  defp recorded?(contents, pair) do
-    contents
-    |> String.split("\n")
-    |> Enum.any?(&row_records?(&1, pair))
+  defp recorded?(contents, pair, path) do
+    lines = Markdown.lines(contents, path)
+    visible = Markdown.visible_line_numbers(contents, path)
+
+    lines
+    |> Enum.with_index()
+    |> Enum.any?(fn {line, number} ->
+      MapSet.member?(visible, number) and row_records?(line, pair)
+    end)
   end
 
   # Concept: a recorded run is a table row whose fields say exactly this pair
@@ -136,13 +143,22 @@ defmodule Mix.Tasks.Loopex.Matrix do
   # satisfies. A fabricated row naming two prerelease toolchains and a failing
   # verdict passed as evidence that both locked pairs ran green.
   #
-  # The row is parsed instead: split on the delimiter, take the toolchain, verdict
-  # and exit fields by position, and require exact equality on each. There is no
-  # spelling left to narrow, because nothing is being searched for.
+  # The row is parsed instead: split on the delimiter, take the number, order,
+  # toolchain, verdict and exit fields by position, and require exact equality on
+  # each. There is no spelling left to narrow, because nothing is being searched
+  # for.
+  #
+  # Parsing a row is still not enough on its own. A line that LOOKS like a row is
+  # not one if a reader cannot see it, and exact rows hidden inside a fenced block
+  # or an HTML comment satisfied this while appearing nowhere in the document. The
+  # repository already decides what is visible, for gate amendments, so this asks
+  # that same reader rather than adding a second opinion about Markdown -- two
+  # parsers disagreeing about visibility is how hidden content gets in.
   defp row_records?(line, pair) do
     case String.split(line, "|", trim: false) do
-      ["", _n, _order, toolchain, verdict, exit_code | _rest] ->
-        toolchain_matches?(String.trim(toolchain), pair) and
+      ["", number, order, toolchain, verdict, exit_code | _rest] ->
+        numbered?(String.trim(number)) and String.trim(order) != "" and
+          toolchain_matches?(String.trim(toolchain), pair) and
           String.trim(verdict) == @green_verdict and
           String.trim(exit_code) == "0"
 
@@ -150,6 +166,10 @@ defmodule Mix.Tasks.Loopex.Matrix do
         false
     end
   end
+
+  # A recorded run is numbered and ordered. The separator row and any half-filled
+  # row are not runs.
+  defp numbered?(cell), do: Regex.match?(~r/\A[0-9]+\z/, cell)
 
   # The toolchain cell names both exact versions and nothing else that could be
   # mistaken for them. `erts-` is allowed to follow because the rows carry it.

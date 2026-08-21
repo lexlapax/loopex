@@ -8,9 +8,11 @@ defmodule Loopex.Journal do
   a restart the journal — not any process's memory — is what the runtime
   believes.
 
-  A journal is named by a filesystem path and nothing else. There is no handle,
-  no registry, and no owning process, so the caller holds the reference
-  explicitly and two runtimes in one VM cannot collide through a global name.
+  A journal is named by a filesystem path and nothing else. There is no handle and
+  no registry, so the caller holds the reference explicitly and two runtimes in one
+  VM cannot collide through a global name. There IS an owning process: a claimed
+  journal is mutable only by the process that claimed it, and that process is the
+  Coordinator. What this module avoids is a global name for it, not ownership.
 
   ## Technical depth
 
@@ -73,11 +75,17 @@ defmodule Loopex.Journal do
 
   ## Technical depth
 
-  A bearer value: holding it IS the authority, so it is never written anywhere a
-  second process could read it. The sentinel beside the journal carries a SHA-256
-  digest of it instead, which identifies the owner to an operator without granting
-  what the owner holds. `nil` is accepted by the writing functions and always
-  refused, so a caller that never claimed gets an error rather than a match.
+  Not a bearer value. Holding the token was once sufficient, and that is the defect
+  this replaced: a token outlives the claim it came from, so stale-token appends
+  landed after a new owner had taken over. The token is one of three identities a
+  mutation must present -- the token, the OS process, and the Erlang process -- so
+  a second process that copies it is still refused.
+
+  It is nonetheless never written anywhere a second process could read it. The
+  sentinel carries a SHA-256 digest instead, which identifies the owner to an
+  operator without handing over what the owner holds. `nil` is accepted by the
+  writing functions and always refused, so a caller that never claimed gets an
+  error rather than a match.
   """
   @type claim :: binary()
 
@@ -284,10 +292,13 @@ defmodule Loopex.Journal do
   end
 
   # Concept: the destructive path is inside the capability, not beside it.
+  #
   # Technical depth: this took no lock and checked no token, on the reasoning that
   # the coordinator holds the claim for its lifetime. That reasoning covered the
   # coordinator and nothing else: a review repaired -- and truncated -- a journal
-  # while another process held its live claim. The one operation that deletes
+  # while another process held its live claim. It now takes the same triple
+  # identity as an append, and there is no unclaimed repair path: a journal with no
+  # live claim cannot be truncated at all. The one operation that deletes
   # durable bytes was the one operation outside the mechanism built to protect
   # them. It now requires the same token as an append, so an unclaimed journal is
   # still repairable directly by a tool, and a claimed one only by its owner.

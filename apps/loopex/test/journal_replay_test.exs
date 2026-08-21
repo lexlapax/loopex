@@ -394,8 +394,14 @@ defmodule Loopex.JournalReplayTest do
     assert {:error, {:claim_unreadable, ^lock, :malformed}} =
              Journal.append(journal, record, claim)
 
-    foreign = "node=elsewhere os_pid=1 erl_pid=#PID<0.9.0> token_digest=abc at=0\n"
-    File.write!(lock, foreign)
+    # A sentinel carrying a different token digest. Named for what it is: this
+    # fails at token verification, before either process-identity check, so it
+    # covers the token and nothing more. Foreign OS-process and foreign
+    # Erlang-process identity are covered by their own cases in
+    # `journal_ownership_test.exs`, which construct a matching digest precisely so
+    # the token check cannot be what refuses them.
+    superseded = "node=elsewhere os_pid=1 erl_pid=#PID<0.9.0> token_digest=abc at=0\n"
+    File.write!(lock, superseded)
     assert {:error, {:not_the_session_owner, ^journal}} = Journal.append(journal, record, claim)
 
     # An owner in another VM cannot be verified from here, so it is never evicted.
