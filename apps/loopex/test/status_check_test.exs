@@ -120,6 +120,31 @@ defmodule Loopex.StatusCheckTest do
     )
 
     assert :ok = Matrix.both_lanes_recorded(root, pairs)
+
+    # Substring matching was narrowed twice and evaded twice: first the major
+    # satisfied a lock on 26.0, then "whole token" excluded only adjacent digits
+    # and dots, so a prerelease suffix walked through -- and the verdict test was
+    # `contains?("GREEN")`, which "NOT GREEN" satisfies. One fabricated row
+    # asserted that both locked pairs ran green while naming neither and reporting
+    # a failure. The row is parsed by field now, so there is no spelling left to
+    # narrow.
+    for {label, row} <- [
+          {"a prerelease Elixir",
+           "| 1 | first | Elixir 1.17.0-rc.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 0 |"},
+          {"a prerelease OTP",
+           "| 1 | first | Elixir 1.17.0 / OTP 26.0-rc1 erts-14.0 | `M0 gate GREEN` | 0 |"},
+          {"a failing verdict",
+           "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate NOT GREEN` | 1 |"},
+          {"a nonzero exit",
+           "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | `M0 gate GREEN` | 1 |"},
+          {"prose rather than a row",
+           "Elixir 1.17.0 / OTP 26.0 ran and printed M0 gate GREEN with exit 0"}
+        ] do
+      File.write!(record, row <> "\n")
+
+      assert {:error, _} = Matrix.both_lanes_recorded(root, pairs),
+             "#{label} must not satisfy a locked pair"
+    end
   end
 
   test "an acceptance chain edge must run backwards along history" do

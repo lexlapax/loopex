@@ -25,6 +25,7 @@ defmodule Mix.Tasks.Loopex.Matrix do
   use Mix.Task
 
   @tool_versions ".tool-versions"
+  @green_verdict "`M0 gate GREEN`"
   @matrix_evidence "docs/evidence/M0-toolchain-matrix.md"
 
   @impl Mix.Task
@@ -122,10 +123,41 @@ defmodule Mix.Tasks.Loopex.Matrix do
   defp recorded?(contents, pair) do
     contents
     |> String.split("\n")
-    |> Enum.any?(fn line ->
-      version_present?(line, pair.elixir) and version_present?(line, pair.otp_exact) and
-        String.contains?(line, "GREEN")
-    end)
+    |> Enum.any?(&row_records?(&1, pair))
+  end
+
+  # Concept: a recorded run is a table row whose fields say exactly this pair
+  # passed, not a line of prose that happens to contain the right words.
+  #
+  # Technical depth: matching by substring was narrowed twice and evaded twice.
+  # First the major satisfied a lock on 26.0; then "whole token" excluded adjacent
+  # digits and dots, so `26.0-rc1` satisfied `26.0` because `-` is neither. And the
+  # verdict was `String.contains?(line, "GREEN")`, which `M0 gate NOT GREEN`
+  # satisfies. A fabricated row naming two prerelease toolchains and a failing
+  # verdict passed as evidence that both locked pairs ran green.
+  #
+  # The row is parsed instead: split on the delimiter, take the toolchain, verdict
+  # and exit fields by position, and require exact equality on each. There is no
+  # spelling left to narrow, because nothing is being searched for.
+  defp row_records?(line, pair) do
+    case String.split(line, "|", trim: false) do
+      ["", _n, _order, toolchain, verdict, exit_code | _rest] ->
+        toolchain_matches?(String.trim(toolchain), pair) and
+          String.trim(verdict) == @green_verdict and
+          String.trim(exit_code) == "0"
+
+      _other ->
+        false
+    end
+  end
+
+  # The toolchain cell names both exact versions and nothing else that could be
+  # mistaken for them. `erts-` is allowed to follow because the rows carry it.
+  defp toolchain_matches?(cell, pair) do
+    case Regex.run(~r/\AElixir (\S+) \/ OTP (\S+?)(?: erts-\S+)?\z/, cell) do
+      [_all, elixir, otp] -> elixir == pair.elixir and otp == pair.otp_exact
+      _other -> false
+    end
   end
 
   # Concept: a lock names one exact version, and only that version satisfies it.
@@ -137,9 +169,6 @@ defmodule Mix.Tasks.Loopex.Matrix do
   # Matching the version as a whole token removes the class rather than the instance.
   # A version is bounded when the characters on either side are not themselves part
   # of a version number, so digits and dots are the only rejected neighbours.
-  defp version_present?(line, version) do
-    Regex.match?(~r/(?<![0-9.])#{Regex.escape(version)}(?![0-9.])/, line)
-  end
 
   @doc """
   ## Concept

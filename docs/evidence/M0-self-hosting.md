@@ -20,7 +20,7 @@ The size figure is audit material. No run passes or fails on it.
 Taken by running `mix loopex.self_hosting`, not transcribed:
 
 ```text
-documentation 1763   comment 622   blank 1491   code 6606   total 10482
+documentation 1763   comment 629   blank 1493   code 6622   total 10507
 ```
 
 Against the 4,462-line gate-commit baseline the plan binds, that is
@@ -29,7 +29,7 @@ revision they were retired, it is 2.24x. Both are stated because a
 reader comparing to the deleted files computes the second, and the two numbers are
 different.
 
-The figure is 10482 at this candidate. Two earlier rounds account for the shape of
+The figure is 10507 at this candidate. Two earlier rounds account for the shape of
 it, and the numbers belong to different candidates rather than to one delta:
 
 - +301 when `apps/loopex/test/tool_call_reader_test.exs` was added to the measured
@@ -44,7 +44,8 @@ it, and the numbers belong to different candidates rather than to one delta:
   the measured set beside the reader's test, `loopex.docs_check.ex` grew by
   separating its uncovered tally into three counts and gained a case for the
   silent-module path it could not report, and fifteen labelled depth comments
-  across the repository gained the purpose line the contract pairs them with.
+  across the repository gained the purpose line the contract pairs them with,
+  and `loopex.matrix.ex` replaced substring matching with row parsing.
 
 Each of those deltas was recorded only after re-running the command. A figure
 headed "at the closure candidate" was once carried forward from the candidate
