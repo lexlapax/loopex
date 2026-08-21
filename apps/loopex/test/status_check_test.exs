@@ -1590,6 +1590,66 @@ defmodule Loopex.StatusCheckTest do
     assert [] == Fixture.checked(matching)
   end
 
+  # Concept: a register holds a milestone's whole life, so a closed one and a
+  # newly opened one coexist from the moment a second milestone opens.
+  #
+  # Technical depth: derivation must name the milestone a reader would call
+  # active. With M0 closed and M1 open, the capsule describes M1; the closed row
+  # is history, and describing it would tell a reader no work is authorized while
+  # M1 is open. The negative case pins exactly that: M0's closed capsule, every
+  # field of it a real derived value, must be refused once M1 is open.
+  test "an open milestone beside a closed one derives the open one's capsule" do
+    rename = &String.replace(&1, "M0", "M1")
+
+    documents =
+      Fixture.documents()
+      |> Map.new(fn {path, text} ->
+        {path,
+         text
+         |> String.replace(
+           Fixture.blocked_row(),
+           "| `M0` | Closed | [concept](M0.md) | [technical depth](M0-technical.md) | " <>
+             "[gate](M0-gate.md) |\n" <>
+             "| `M1` | Open | [concept](M1.md) | [technical depth](M1-technical.md) | " <>
+             "[gate](M1-gate.md) |"
+         )
+         |> String.replace(Fixture.summary(), rename.(Fixture.open_summary()))}
+      end)
+      |> Map.put("docs/plans/M0.md", Fixture.plan(governed: true, closed: true))
+      |> Map.put("docs/plans/M0-technical.md", Fixture.technical_plan())
+      |> Map.put("docs/plans/M0-gate.md", Fixture.gate())
+      |> Map.put("docs/plans/M1.md", rename.(Fixture.plan()))
+      |> Map.put("docs/plans/M1-technical.md", rename.(Fixture.technical_plan()))
+      |> Map.put("docs/plans/M1-gate.md", rename.(Fixture.gate()))
+      |> replace("docs/plans/README.md", "Seed bootstrap — 2026-08-15", "`M0` — 2026-08-15")
+      |> Map.update!("docs/plans/README.md", &capsule(&1, "Open", "M1"))
+
+    assert [] == Fixture.checked(documents)
+
+    documents
+    |> Map.update!("docs/plans/README.md", &capsule(&1, "Closed", "M0"))
+    |> assert_invalid("exact derived status capsule")
+  end
+
+  # Concept: rewrite the fixture's status capsule to the values a given register
+  # state and milestone derive.
+  #
+  # Technical depth: field names and their order come from the fixture's own
+  # table rather than a list restated here, so a case asserts the derived values
+  # and cannot accidentally assert the field order twice. The checkpoint field
+  # keeps whatever the document already carries, because it is derived from the
+  # register's closed rows and not from the described milestone.
+  defp capsule(text, state, name) do
+    expected = Register.expected_capsule(state, name, %{})
+
+    Regex.replace(~r/^\| ([^|\n]+?) \| [^|\n]*? \|$/m, text, fn line, field ->
+      case Map.fetch(expected, field) do
+        {:ok, value} when field != "Last integrated checkpoint" -> "| #{field} | #{value} |"
+        _other -> line
+      end
+    end)
+  end
+
   defp replace(documents, path, old, new) do
     Map.update!(documents, path, &String.replace(&1, old, new))
   end

@@ -163,7 +163,32 @@ defmodule Loopex.Checks.Status do
   # was for this field.
   @checkpoint_field "Last integrated checkpoint"
 
+  # Concept: the capsule describes the milestone that is currently active.
+  #
+  # Technical depth: this covered exactly one registered milestone and raised
+  # otherwise, telling the next transition to extend it rather than relax it --
+  # which is this transition, the first to register a second milestone. Closed
+  # milestones are history and do not drive the capsule; exactly one active
+  # milestone does. With none active the last Closed one describes the state,
+  # which is what a repository between milestones looks like. More than one
+  # active is already refused by `Register.summary/2`, and is refused here too
+  # rather than picking one by position.
   defp require_derived_capsule!(rows, values, adr_statuses) do
+    active = Enum.filter(rows, fn {_name, state} -> state in Register.active_states() end)
+    closed = Enum.filter(rows, fn {_name, state} -> state == "Closed" end)
+
+    describing =
+      case {active, closed} do
+        {[one], _any} -> [one]
+        {[], [_ | _] = done} -> [List.last(done)]
+        {[], []} -> rows
+        {_many, _any} -> rows
+      end
+
+    require_single_capsule!(describing, values, adr_statuses)
+  end
+
+  defp require_single_capsule!(rows, values, adr_statuses) do
     case rows do
       [{name, state}] ->
         expected =

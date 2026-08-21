@@ -14,16 +14,16 @@ integrated; `main` describes integrated project state, not every remote activity
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Pre-implementation planning; no milestone is active; no next candidate is recorded.
+**Revision status:** Pre-implementation planning; active milestone `M1` is open; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Pre-implementation planning |
 | Last integrated checkpoint | `M0` — 2026-08-21 |
-| Blockers | None; `M0` is closed and its governance row is recorded |
-| Authorized work | Explicitly authorized planning, ADR, and review work only; no product implementation until the next milestone is opened gate-first |
-| Next maintainer decision | Open the next milestone gate-first, or defer it |
-| Next transition | Create the next milestone's plan pair and red gate, and move it to Open |
+| Blockers | `M1` is open and not accepted; the recorded acceptance authority must accept both normative envelopes and the gate |
+| Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
+| Next maintainer decision | Accept or reject the `M1` plan pair and gate |
+| Next transition | Record the acceptance governance row and move `M1` to Accepted |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -109,6 +109,7 @@ row is the next candidate.
 | Milestone | State | Concept | Technical depth | Gate |
 | --- | --- | --- | --- | --- |
 | `M0` | Closed | [concept](M0.md) | [technical depth](M0-technical.md) | [gate](M0-gate.md) |
+| `M1` | Open | [concept](M1.md) | [technical depth](M1-technical.md) | [gate](M1-gate.md) |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept, Technical depth, and Gate columns link their
