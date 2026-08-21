@@ -510,6 +510,48 @@ defmodule Loopex.StatusCheckTest do
     assert in_progress["Next transition"] =~ "In review"
   end
 
+  test "the M1 open capsule is derived independently from both prerequisite ADRs" do
+    adr6 = "docs/adr/0006-store-transaction-and-owner-epoch.md"
+    adr7 = "docs/adr/0007-local-executor-grant-job-receipt.md"
+
+    both_proposed =
+      Register.expected_capsule("Open", "M1", %{adr6 => "Proposed", adr7 => "Proposed"})
+
+    only_6_accepted =
+      Register.expected_capsule("Open", "M1", %{adr6 => "Accepted", adr7 => "Proposed"})
+
+    only_7_accepted =
+      Register.expected_capsule("Open", "M1", %{adr6 => "Proposed", adr7 => "Accepted"})
+
+    both_accepted =
+      Register.expected_capsule("Open", "M1", %{adr6 => "Accepted", adr7 => "Accepted"})
+
+    assert both_proposed["Blockers"] =~ "ADR 0006"
+    assert both_proposed["Blockers"] =~ "ADR 0007"
+    assert both_proposed["Next maintainer decision"] == "Disposition ADR 0006 and ADR 0007"
+
+    assert only_6_accepted["Blockers"] =~ "ADR 0007"
+    refute only_6_accepted["Blockers"] =~ "ADR 0006"
+    assert only_6_accepted["Next maintainer decision"] == "Disposition ADR 0007"
+
+    assert only_7_accepted["Blockers"] =~ "ADR 0006"
+    refute only_7_accepted["Blockers"] =~ "ADR 0007"
+    assert only_7_accepted["Next maintainer decision"] == "Disposition ADR 0006"
+
+    assert both_accepted["Blockers"] =~ "independent review before acceptance"
+
+    assert both_accepted["Next maintainer decision"] ==
+             "Accept or reject the revised `M1` plan pair and gate"
+
+    invariant_fields = ["Integrated phase", "Authorized work", "Validation"]
+
+    for field <- invariant_fields,
+        capsule <- [only_6_accepted, only_7_accepted, both_accepted] do
+      assert capsule[field] == both_proposed[field],
+             "changing an ADR status must not change #{field}"
+    end
+  end
+
   test "a milestone state with no derived capsule fails closed" do
     assert "In review" in Register.active_states()
 
@@ -1594,12 +1636,13 @@ defmodule Loopex.StatusCheckTest do
   # newly opened one coexist from the moment a second milestone opens.
   #
   # Technical depth: derivation must name the milestone a reader would call
-  # active. With M0 closed and M1 open, the capsule describes M1; the closed row
-  # is history, and describing it would tell a reader no work is authorized while
-  # M1 is open. The negative case pins exactly that: M0's closed capsule, every
-  # field of it a real derived value, must be refused once M1 is open.
+  # active. With M0 closed and M2 open in this generic fixture, the capsule
+  # describes M2; the closed row is history, and describing it would tell a
+  # reader no work is authorized while M2 is open. The negative case pins exactly
+  # that: M0's closed capsule, every field of it a real derived value, must be
+  # refused once M2 is open.
   test "an open milestone beside a closed one derives the open one's capsule" do
-    rename = &String.replace(&1, "M0", "M1")
+    rename = &String.replace(&1, "M0", "M2")
 
     documents =
       Fixture.documents()
@@ -1610,19 +1653,19 @@ defmodule Loopex.StatusCheckTest do
            Fixture.blocked_row(),
            "| `M0` | Closed | [concept](M0.md) | [technical depth](M0-technical.md) | " <>
              "[gate](M0-gate.md) |\n" <>
-             "| `M1` | Open | [concept](M1.md) | [technical depth](M1-technical.md) | " <>
-             "[gate](M1-gate.md) |"
+             "| `M2` | Open | [concept](M2.md) | [technical depth](M2-technical.md) | " <>
+             "[gate](M2-gate.md) |"
          )
          |> String.replace(Fixture.summary(), rename.(Fixture.open_summary()))}
       end)
       |> Map.put("docs/plans/M0.md", Fixture.plan(governed: true, closed: true))
       |> Map.put("docs/plans/M0-technical.md", Fixture.technical_plan())
       |> Map.put("docs/plans/M0-gate.md", Fixture.gate())
-      |> Map.put("docs/plans/M1.md", rename.(Fixture.plan()))
-      |> Map.put("docs/plans/M1-technical.md", rename.(Fixture.technical_plan()))
-      |> Map.put("docs/plans/M1-gate.md", rename.(Fixture.gate()))
+      |> Map.put("docs/plans/M2.md", rename.(Fixture.plan()))
+      |> Map.put("docs/plans/M2-technical.md", rename.(Fixture.technical_plan()))
+      |> Map.put("docs/plans/M2-gate.md", rename.(Fixture.gate()))
       |> replace("docs/plans/README.md", "Seed bootstrap — 2026-08-15", "`M0` — 2026-08-15")
-      |> Map.update!("docs/plans/README.md", &capsule(&1, "Open", "M1"))
+      |> Map.update!("docs/plans/README.md", &capsule(&1, "Open", "M2"))
 
     assert [] == Fixture.checked(documents)
 

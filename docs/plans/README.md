@@ -20,10 +20,10 @@ integrated; `main` describes integrated project state, not every remote activity
 | --- | --- |
 | Integrated phase | Pre-implementation planning |
 | Last integrated checkpoint | `M0` — 2026-08-21 |
-| Blockers | `M1` is open and not accepted; the recorded acceptance authority must accept both normative envelopes and the gate |
+| Blockers | [ADR 0006](../adr/0006-store-transaction-and-owner-epoch.md#concept) and [ADR 0007](../adr/0007-local-executor-grant-job-receipt.md#concept) must be accepted before the `M1` plan pair and gate can be accepted |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Accept or reject the `M1` plan pair and gate |
-| Next transition | Record the acceptance governance row and move `M1` to Accepted |
+| Next maintainer decision | Disposition ADR 0006 and ADR 0007 |
+| Next transition | After both prerequisites are accepted, revise and independently review the `M1` plan pair and gate |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -442,7 +442,9 @@ diagnosis only, so ask for the fix when you want the fix. Naming a workstream or
 file bounds the work to it, which is usually faster than correcting scope
 afterward.
 
-**Today.** `M0` is accepted and in review, so every row applies. The rows above it describe what to say before a milestone exists; they are kept because the next milestone starts there.
+**Current use.** `M0` is closed and `M1` is open at its prerequisite decision
+boundary. The lifecycle rows remain the reusable procedure for this and later
+milestones.
 The Current Status capsule at the top of this file names the exact next
 decision; it is not repeated here, because a second copy would drift.
 

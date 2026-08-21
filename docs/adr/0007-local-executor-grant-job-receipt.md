@@ -45,6 +45,10 @@ Technical depth: [Why an enumerated field list is the wrong contract](0007-local
 - **One required-binding schema, declared once in code.** The set of bindings a
   grant must carry is a single structural definition. The plan does not restate
   it, the gate does not restate it, and tests do not transcribe it.
+- **Only host policy issues authority.** A grant exists only after an explicit
+  host-policy `allow` decision. `M1` may use the documented trusted-local
+  `AllowAll` reference policy, but Loopex, model output, tool metadata, and
+  ordinary client input cannot mint or widen a grant.
 - **The schema carries every vision-required binding**, including the two the
   current plan omits: `tool_id` and `tool_version`, and the effect class. A
   binding the vision requires and the schema lacks is a defect in the schema.
@@ -53,20 +57,29 @@ Technical depth: [Why an enumerated field list is the wrong contract](0007-local
   executor's audience, this operation and attempt, this request's digest, this
   workspace lease, the current fence, the wall-clock expiry. A present-but-wrong
   binding is refused exactly like a missing one.
-- **The mutation corpus derives from the schema.** Tests enumerate the schema's
-  required bindings, alter each present binding independently, and assert that
-  every one is individually refused. They also assert that the set of bindings
-  covered by the corpus **equals** the set the schema requires, so adding a
-  binding without a test fails the suite rather than silently reducing coverage.
+- **The closed binding set has an independent conformance oracle.** The
+  implementation schema must equal this ADR's exact ten-binding set. From that
+  schema, tests derive one positive case plus one missing and one present,
+  well-formed, wrong-value case for each binding, with an exact refusal reason.
+  This separates completeness from the implementation definition it checks.
 - **Trusted-local, with no authenticity claim.** In `M1` the grant is a
   structured value produced and consumed inside one trusted VM. `M1` claims that
   the executor refuses a grant that does not bind correctly. It does **not**
   claim the grant is unforgeable, tamper-evident, or safe to transport, and no
   document may say otherwise.
-- **A job and a receipt bind the same digest.** The grant, the durable operation
-  attempt, the job request, and the retained receipt all carry one recorded
-  `canonical_request_digest`. There is no second independently computed digest
-  that can drift, and any mismatch fails closed.
+- **Validation occurs at the final serialized pre-start boundary.** Queueing is
+  not authority to act. Immediately before the executor starts the effect it
+  validates every binding, expiry, current fence, and the workspace lease; the
+  lease remains held for the job's full lifetime.
+- **A job and a receipt bind one digest semantic.** The coordinator computes and
+  journals the canonical request digest. The executor independently recomputes
+  that same protocol-versioned digest from the immutable `JobRequest`, compares
+  it with the recorded and granted value, and the receipt echoes the verified
+  value. Independent computation is required; a second digest identity is not.
+- **The complete executor protocol remains authoritative.** These ten fields are
+  the grant-binding subset, not a replacement for the vision's full job, event,
+  receipt, and reconciliation identity tuples. `M1` uses exact
+  `effect_class` equality; no strength lattice is implied.
 
 Technical depth: [Exact bindings, refusal rules, and corpus derivation](0007-local-executor-grant-job-receipt-technical.md#technical-adr-0007-decision).
 
@@ -103,9 +116,11 @@ narrow. "The executor refuses a wrong binding" is provable now. "The grant canno
 be forged" is not, and stating it would be the kind of untested claim a gate
 cannot catch.
 
-Adding a binding later means adding it to the schema, which fails the equality
-assertion until its mutation case exists. That is the intended friction: it makes
-an untested binding a build failure rather than a review finding.
+Adding a binding later means changing the governed set, implementation schema,
+validation, and generated missing/wrong-value corpus together. The independent
+equality assertion rejects a schema-only change, and corpus coverage rejects an
+untested implementation binding. That friction turns omissions into build
+failures rather than review findings.
 
 Technical depth: [Operational consequences](0007-local-executor-grant-job-receipt-technical.md#technical-adr-0007-consequences).
 
@@ -130,6 +145,7 @@ Technical depth: [Compatibility and rollback mechanics](0007-local-executor-gran
   contract whose fence this grant binds
 - [ADR 0003](0003-extension-contract-boundary.md#concept) — the extension and
   distribution boundary this decision does not reopen
-- [Vision §6.3](../vision.md#concept) — authority grants and what a grant binds
+- [Vision ownership and trust](../vision.md#concept-vision-ownership-trust) — authority grants and what a grant binds
+- [Vision executor protocol](../vision-technical.md#technical-vision-executor-protocol) — complete job, event, receipt, and reconciliation tuples
 - [AGENTS.md](../../AGENTS.md) — authority grants, trust boundaries, brains and
   hands

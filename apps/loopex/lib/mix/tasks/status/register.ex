@@ -57,6 +57,16 @@ defmodule Loopex.Checks.Register do
     "docs/adr/0002-bootstrap-runtime-floor.md" => "ADR 0002"
   }
 
+  @m1_adrs [
+    "docs/adr/0006-store-transaction-and-owner-epoch.md",
+    "docs/adr/0007-local-executor-grant-job-receipt.md"
+  ]
+
+  @m1_adr_names %{
+    "docs/adr/0006-store-transaction-and-owner-epoch.md" => "ADR 0006",
+    "docs/adr/0007-local-executor-grant-job-receipt.md" => "ADR 0007"
+  }
+
   @seed_blocked %{
     "Integrated phase" => "Pre-implementation planning",
     "Last integrated checkpoint" => @seed_checkpoint,
@@ -354,6 +364,8 @@ defmodule Loopex.Checks.Register do
     blocked_values(adr_statuses)
   end
 
+  def expected_capsule("Open", "M1", adr_statuses), do: m1_open_values(adr_statuses)
+
   def expected_capsule("Open", name, _adr_statuses) do
     @seed_blocked
     |> Map.put(
@@ -457,6 +469,59 @@ defmodule Loopex.Checks.Register do
       "Next transition",
       "Turn the locked gate green, then move `#{name}` to In progress and In review"
     )
+  end
+
+  # Concept: M1 cannot reach plan acceptance while either architecture decision
+  # that shapes its store or executor outcome remains Proposed.
+  #
+  # Technical depth: derive the blocker, decision, and transition from the two
+  # ADR records independently. This makes accepting either one remove exactly
+  # that prerequisite while preserving the planning-only authority boundary.
+  defp m1_open_values(adr_statuses) do
+    unresolved = Enum.filter(@m1_adrs, &(Map.fetch!(adr_statuses, &1) != "Accepted"))
+
+    {blockers, decision, transition} =
+      case unresolved do
+        [] ->
+          {
+            "`M1` remains open and unaccepted; its revised plan pair and gate require " <>
+              "independent review before acceptance",
+            "Accept or reject the revised `M1` plan pair and gate",
+            "Record the acceptance governance row and move `M1` to Accepted"
+          }
+
+        [path] ->
+          name = Map.fetch!(@m1_adr_names, path)
+          link = m1_adr_link(path, name)
+
+          {
+            "#{link} must be accepted before the `M1` plan pair and gate can be accepted",
+            "Disposition #{name}",
+            "After the prerequisite is accepted, revise and independently review the " <>
+              "`M1` plan pair and gate"
+          }
+
+        paths ->
+          [first, second] = Enum.map(paths, &m1_adr_link(&1, Map.fetch!(@m1_adr_names, &1)))
+
+          {
+            "#{first} and #{second} must be accepted before the `M1` plan pair and gate " <>
+              "can be accepted",
+            "Disposition ADR 0006 and ADR 0007",
+            "After both prerequisites are accepted, revise and independently review the " <>
+              "`M1` plan pair and gate"
+          }
+      end
+
+    @seed_blocked
+    |> Map.put("Blockers", blockers)
+    |> Map.put("Next maintainer decision", decision)
+    |> Map.put("Next transition", transition)
+  end
+
+  defp m1_adr_link(path, name) do
+    filename = Loopex.Checks.Paths.strip_prefix(path, "docs/adr/")
+    "[#{name}](../adr/#{filename}#concept)"
   end
 
   defp blocked_values(adr_statuses) do

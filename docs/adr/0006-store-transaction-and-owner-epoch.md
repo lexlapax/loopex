@@ -58,9 +58,19 @@ Technical depth: [Why replay-only fencing fails](0006-store-transaction-and-owne
   dispatch occurs on `not_committed` or while `commit_unknown` is unresolved.
   `commit_unknown(tx_id)` fences its mutation domain and resolves by transaction
   ID before either branch is chosen.
-- **At most one live coordinator at a time.** A successor durably advances the
-  session epoch before admitting any command. Ownership is a durable fact in the
-  store, not an inference from a live process.
+- **At most one current committing owner at a time.** A superseded coordinator
+  may still be alive, but its epoch cannot commit or authorize work. A successor
+  atomically advances the durable session epoch before admitting any command;
+  ownership is a store fact, not an inference from process liveness.
+- **Transaction identity is immutable.** A transaction ID is bound to its
+  session and mutation domain, expected epoch, expected version, and complete
+  canonical mutation digest. Repeating the same identity and bytes resolves the
+  same outcome; changing any binding is a conflict. A retry after a proved
+  non-commit uses a new transaction ID.
+- **Versions form one store-stamped session sequence.** Journal versions remain
+  globally consecutive across owner changes. The store, not the caller, stamps
+  the committed record range, so replay can detect gaps, resets, and epoch
+  changes that were not durably recorded.
 - **Epochs are retained in records anyway.** Commit-time comparison is the
   safety mechanism; retained epochs are the audit mechanism. Replay validates
   them and refuses a history that could not have been produced by a legal
@@ -109,6 +119,11 @@ epoch before it admits anything, so restart has a mandatory write before its
 first command. The alternative is admitting a command whose ownership is
 unproven.
 
+A commit remains committed even if its reply reaches a coordinator after that
+coordinator has been superseded. The stale process cannot publish or dispatch;
+the current owner recovers and processes the committed outbox or intent exactly
+once under the current fences.
+
 `commit_unknown` makes unavailability visible. When the store cannot say whether
 a transaction committed, the session is unavailable rather than optimistic. A
 caller sees a stall where a speculating system would have shown a duplicate
@@ -137,7 +152,7 @@ Technical depth: [Compatibility and rollback mechanics](0006-store-transaction-a
 
 - [ADR 0007](0007-local-executor-grant-job-receipt.md#concept) — the grant
   boundary that depends on a store able to refuse a stale owner
-- [Vision technical §9.1](../vision-technical.md#technical-depth) — the three
+- [Vision transaction and recovery truth](../vision-technical.md#technical-vision-recovery-truth) — the three
   store outcomes and transaction-ID resolution this decision adopts
 - [Plans register](../plans/README.md) — milestone register and lifecycle
 - [AGENTS.md](../../AGENTS.md) — durability and recovery truth, one serial

@@ -44,8 +44,11 @@ a struct, not a fence.
 Concept: [Decision](0007-local-executor-grant-job-receipt.md#concept-adr-0007-decision).
 
 The required-binding schema is one structural definition in code. It is the sole
-source for the executor's validation, for the mutation corpus, and for any
-documentation that needs to name a binding.
+source for the executor's validation and generated mutation corpus. Its
+completeness has a separate oracle: conformance asserts that its keys equal the
+closed ten-binding set in this decision, so an implementation cannot
+omit a binding and then derive a self-consistent but incomplete test suite from
+the same omission.
 
 | Binding | Validated against |
 | --- | --- |
@@ -54,7 +57,7 @@ documentation that needs to name a binding.
 | `canonical_request_digest` | The digest recorded for this job request; recomputed and compared, never trusted from the grant |
 | `tool_id` | The tool actually being invoked |
 | `tool_version` | The version of that tool's definition |
-| `effect_class` | The class the tool declares; a grant for a weaker class does not authorize a stronger effect |
+| `effect_class` | Exact equality with the class the tool declares for this job; `M1` defines no strength ordering |
 | `workspace_lease` | The lease the executor holds for that workspace |
 | `executor_audience` | This executor's own identity; another executor's grant is refused |
 | `expiry` | Wall clock at validation; an expired grant is refused |
@@ -64,6 +67,13 @@ documentation that needs to name a binding.
 interpreted — Loopex transports host policy evidence without reading a host's
 user, role, or approval semantics.
 
+Only an explicit host-policy `allow` decision may issue the grant. The
+trusted-local reference host may deliberately use the vision's documented
+`AllowAll` policy for a trusted workspace, which is still a host decision with a
+visible policy boundary. Loopex, the model, a tool declaration, an interaction
+response, context, metadata, or ordinary client input cannot mint, select, or
+widen authority.
+
 Validation is fail-closed in both directions. A missing binding is refused, and a
 present binding whose value does not match what the executor independently knows
 is refused identically. The executor never derives the expected value *from the
@@ -72,32 +82,57 @@ no independent source at the executor cannot be validated and does not belong in
 the schema.
 
 The digest binds the chain. The host grant, the durable operation attempt, the
-`JobRequest`, and the retained receipt all carry one recorded
-`canonical_request_digest`. It is computed once and compared everywhere; there is
-no second independently computed digest that can drift at the boundary, and any
-mismatch fails closed.
+`JobRequest`, and the retained receipt all carry one
+`canonical_request_digest` semantic. The coordinator computes and journals it
+using the protocol-versioned canonicalization. At the final executor boundary,
+the executor independently applies that same canonicalization to the immutable
+semantic `JobRequest` fields, compares the result with the recorded and granted
+value, and refuses any mismatch. The receipt echoes the value the executor
+verified. There is one digest identity, not one physical computation.
 
-The mutation corpus is derived, not written:
+Validation happens after queueing at the executor's final serialized pre-start
+boundary. The executor compares all bindings, checks expiry and the current
+fence, confirms that it still holds the named workspace lease, and only then
+starts the effect. Expiry grants authority to start, not to outlive the
+workspace lease. The lease remains held for the whole job; loss invokes the
+vision's cancellation, cleanup, bounded-output, and retained-evidence path and
+never becomes silent success.
 
-1. Enumerate the schema's required bindings.
-2. For each one, construct an otherwise-valid grant with that single binding
+Completeness and behavior use separate checks:
+
+1. Assert independently that the implementation schema equals this ADR's closed
+   set of ten required bindings.
+2. Construct one valid baseline and prove it is admitted at the final pre-start
+   boundary.
+3. Enumerate the implementation schema's required bindings.
+4. For each one, construct an otherwise-valid grant with that single binding
+   absent and assert the exact missing-binding refusal reason.
+5. For each one, construct an otherwise-valid grant with that single binding
    altered to a present, well-formed, wrong value — a different executor's
    audience, the previous attempt, another request's digest, a superseded fence,
-   an expiry in the past, a weaker effect class, an older tool version.
-3. Assert each is individually refused, and assert the refusal names that
+   an expiry in the past, a different effect class, an older tool version.
+6. Assert each is individually refused, and assert the refusal names that
    binding, so two guards cannot mask each other by both firing.
-4. Assert the set of bindings the corpus covers **equals** the set the schema
-   requires. Not a subset. A binding added to the schema without a corresponding
-   case fails this assertion.
+7. Assert separately for the missing and wrong-value corpora that each set of
+   covered bindings **equals** the set the schema requires. Not a subset. A
+   binding added to the schema without a corresponding case fails this
+   assertion.
 
-Step 4 is the load-bearing one. Steps 1 through 3 are what a careful author
-writes anyway; step 4 is what makes the coverage a property of the code rather
-than of the author's diligence, and it is what turns the plan's original
-omission into a failing build instead of a review finding.
+Step 1 is the completeness boundary: deriving a corpus from the implementation
+alone cannot detect a field omitted from that implementation. Steps 4 through 7
+make every implemented binding test-sensitive without manually duplicating the
+implementation list.
 
 Wrong values are used rather than missing ones because a missing value is the
 easy case: it fails almost any implementation. A present, well-formed, wrong
 value is what distinguishes a validator from a shape check.
+
+These ten bindings are only the grant-binding subset. Implementations still
+carry and validate the vision's complete `JobRequest`, executor event identity,
+terminal receipt, and solicited reconciliation tuples, including job, session,
+run, turn, tool-call, origin session/executor epoch, executor identity,
+reconciliation query, and output-policy fields where that contract requires
+them. This ADR narrows no field outside the grant.
 
 <a id="technical-adr-0007-alternatives"></a>
 ## Alternative Analysis
@@ -133,9 +168,10 @@ assertion has nothing to assert against.
 
 Concept: [Consequences](0007-local-executor-grant-job-receipt.md#concept-adr-0007-consequences).
 
-Adding a binding is a three-part change: schema, validation, corpus case. The
-equality assertion makes the third mandatory. This is friction on purpose, and it
-is small — one case per binding, and the case is mechanical.
+Adding a binding is a four-part change: decision, schema, validation, and the
+derived missing/wrong-value corpus. The independent equality assertion makes the
+decision update visible instead of letting the schema certify itself. This is
+friction on purpose, and it is small — two mechanical cases per binding.
 
 The security claim `M1` may make is narrow and must stay narrow in every
 document: the executor refuses a grant whose bindings do not match. It is not a
@@ -145,9 +181,10 @@ otherwise is a defect regardless of the code being correct.
 Validation cost is a fixed comparison per binding, once per effect, against
 values the executor already holds. It is not on any hot path that matters.
 
-The retained receipt carries the same digest as the grant and the attempt, so
-reconciliation after a restart compares one recorded value rather than
-recomputing at a boundary where recomputation could disagree.
+The retained receipt carries the same verified digest as the grant and the
+attempt, so reconciliation after a restart compares one digest identity. The
+executor-side recomputation is deliberate conformance evidence for that identity,
+not a competing canonicalization.
 
 <a id="technical-adr-0007-compatibility"></a>
 ## Compatibility and Rollback Mechanics

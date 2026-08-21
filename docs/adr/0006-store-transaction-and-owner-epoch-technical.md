@@ -54,9 +54,12 @@ records                   the transaction's atomic record set
 
 The store performs one atomic operation: compare `expected_owner_epoch` against
 the session's durable current epoch, compare `expected_journal_version` against
-its durable current version, and commit only when both match. There is no
-sequence of two store calls that a caller can perform instead — a check followed
-by a write reintroduces exactly the race this record exists to close.
+its durable current version, allocate and stamp the next globally consecutive
+journal-version range, and commit the records only when both comparisons match.
+The epoch comparison is evaluated first, so a superseded caller receives
+`stale_owner_epoch` even when its cached journal version is also stale. There is
+no sequence of two store calls that a caller can perform instead — a check
+followed by a write reintroduces exactly the race this record exists to close.
 
 Outcomes and required owner behavior:
 
@@ -71,22 +74,48 @@ implementation-specific refusals, because a stale owner must stop rather than
 retry, while a version conflict may be re-derived and retried by the current
 owner.
 
-Resolution after `commit_unknown` re-presents the same `tx_id`. Repeating a
-transaction ID is a query, never a second logical mutation. Until it resolves,
-the domain is fenced: new mutations are refused or reported temporarily
-unavailable, and if the store stays unavailable the session stays unavailable.
+On first presentation, the store durably binds `tx_id` to `session_id`, the
+session-journal mutation domain, `expected_owner_epoch`,
+`expected_journal_version`, and `canonical_mutation_digest`. Re-presentation
+with the same bindings is an idempotent query or resolution, never a second
+logical mutation. Reusing the ID with any different binding is
+`tx_id_conflict`, including a digest collision between different record sets.
+The digest covers the complete canonical record set and its order.
 
-Every durable record retains `owner_epoch` and `journal_version`. Replay
-validates that epochs are non-decreasing and that versions are consecutive within
-an epoch, and refuses a history that violates either. This never substitutes for
-the commit-time comparison; it detects a store implementation that failed to
-honor its contract, which is the failure a conformance suite cannot otherwise
-observe from outside.
+Resolution after `commit_unknown` re-presents those exact bindings. Until it
+resolves, the domain is fenced: new mutations are refused or reported
+temporarily unavailable, and if the store stays unavailable the session stays
+unavailable. A proved `not_committed` outcome is terminal for that transaction
+ID. A current owner may rederive from the new durable version only as a new
+logical transaction with a new ID; it cannot turn the resolved non-commit into a
+commit by presenting new expected values.
 
-Succession is a durable write. A successor reads the current epoch, atomically
-advances it, and only then admits a command. The advance uses the same
-conditional commit, so two simultaneous successors produce exactly one winner and
-the loser observes `not_committed(stale_owner_epoch)`.
+Every durable record retains `owner_epoch` and the store-stamped
+`journal_version`. Versions are one globally consecutive sequence for the
+session; an owner change does not reset it. A multi-record transaction receives
+one contiguous range in canonical record order. Replay refuses a gap, duplicate,
+reset, out-of-order version, decreasing epoch, epoch increment without its
+recorded succession transition, or records under a new epoch before that
+transition. This never substitutes for the commit-time comparison; it detects a
+store implementation that failed to honor its contract, which is the failure a
+conformance suite cannot otherwise observe from outside.
+
+Succession is a distinct `advance_owner` transaction. It binds the durable
+current epoch and session-global journal version, atomically increments the
+epoch by exactly one, appends the succession record at the next store-stamped
+version, and returns the new epoch only after that transition is durable. Only
+that winner may admit commands. Two contenders using the same prior epoch and
+version therefore produce exactly one winner; the loser observes
+`not_committed(stale_owner_epoch)`. This is ownership of commit authority, not a
+liveness guarantee: the superseded coordinator may remain alive, but every
+later transaction from it is fenced by its old epoch.
+
+A delayed `committed(tx_id)` reply does not transfer current-owner authority.
+The transaction remains durable and must not be discarded merely because its
+originator was superseded after commit. The stale coordinator does not publish,
+acknowledge, or dispatch from that late reply. The current owner recovers the
+committed outbox or intent and processes it exactly once under the current
+session and executor fences.
 
 The conformance suite every implementation runs covers at minimum:
 
@@ -94,11 +123,19 @@ The conformance suite every implementation runs covers at minimum:
   `committed`;
 - the refused transaction leaves no durable record and produces no outbox row;
 - two simultaneous successors yield exactly one winner;
+- a superseded but still-live coordinator cannot commit, acknowledge, publish,
+  or dispatch, while the current owner processes a transaction committed before
+  succession exactly once even if its reply was delayed;
 - a version conflict from the current owner is distinguishable from a stale
-  epoch;
+  epoch, and an epoch mismatch wins when both comparisons fail;
 - an interrupted commit resolves to exactly one of committed or not committed
   when re-presented by `tx_id`, and never to both;
-- replay refuses a hand-constructed history with a decreasing epoch.
+- reusing a transaction ID with a different session, epoch, version, digest, or
+  record set is refused, while a proved non-commit can be retried only under a
+  new transaction ID;
+- replay refuses hand-constructed histories with a version gap, reset,
+  duplicate, or out-of-order record, a decreasing epoch, or an epoch transition
+  lacking its succession record.
 
 <a id="technical-adr-0006-alternatives"></a>
 ## Alternative Analysis
