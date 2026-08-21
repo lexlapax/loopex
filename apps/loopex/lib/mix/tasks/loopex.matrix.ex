@@ -157,17 +157,18 @@ defmodule Mix.Tasks.Loopex.Matrix do
 
   defp read_runs(contents, path) do
     with {:ok, inner} <- fenced_body(Markdown.block(contents, path, :matrix_runs), path) do
-      parsed = Enum.map(inner, &Regex.named_captures(@run_format, &1))
-
       cond do
         inner == [] ->
           {:error, "#{path}: the recorded-runs block names no run"}
 
-        Enum.any?(parsed, &is_nil/1) ->
+        Enum.any?(inner, &(not printable_ascii?(&1))) ->
+          {:error, "#{path}: a recorded run contains a non-printable or non-ASCII byte"}
+
+        Enum.any?(inner, &(not Regex.match?(@run_format, &1))) ->
           {:error, "#{path}: a recorded run is not in the required form"}
 
         true ->
-          {:ok, parsed}
+          {:ok, Enum.map(inner, &Regex.named_captures(@run_format, &1))}
       end
     end
   end
@@ -228,8 +229,9 @@ defmodule Mix.Tasks.Loopex.Matrix do
 
   defp blank?(line), do: String.trim(line) == ""
 
-  # An opening fence is a run of at least three backticks or tildes with at most a
-  # simple info string. Anything else is not a fence a reader will see as one.
+  # The retained record uses a canonical column-zero opening fence: a run of at
+  # least three backticks or tildes with at most a simple info string. Supporting
+  # every CommonMark-equivalent indentation is unnecessary for this governed file.
   defp fence_open(line) do
     if Regex.match?(~r/\A(`{3,}|~{3,})[A-Za-z0-9]*\z/, String.trim_trailing(line)),
       do: :ok,
@@ -238,13 +240,17 @@ defmodule Mix.Tasks.Loopex.Matrix do
 
   # Concept: a run line is one exact form or it is not a run.
   #
-  # Technical depth: no separate printable-character guard. Earlier versions needed
-  # one because a non-breaking or zero-width character could occupy a cell while
-  # rendering as nothing. Here every field is compared by equality against an exact
-  # expected value rather than searched, so a field carrying an invisible character
-  # simply is not equal to the value it imitates. Mutation-checking found the guard
-  # broke no case, and a redundant rule in a check like this is one a reader has to
-  # verify is not the load-bearing one.
+  # Technical depth: fenced Markdown removes inline interpretation, but it does not
+  # neutralise Unicode display controls. `erts` and `wall` are retained audit fields
+  # rather than equality-checked lock fields, so a right-to-left override in either
+  # could reorder the displayed verdict and exit while the parser read their original
+  # byte order. A closed printable-ASCII domain removes that disagreement without a
+  # blacklist of individual Unicode spellings.
+  defp printable_ascii?(line) do
+    line
+    |> :binary.bin_to_list()
+    |> Enum.all?(&(&1 in 0x20..0x7E))
+  end
 
   # Concept: every recorded run passed, and this pair is among them.
   #

@@ -182,7 +182,7 @@ defmodule Loopex.StatusCheckTest do
        raw.("    ```text\n    " <> good <> "\n    ```")},
       {"an empty fence", raw.("```text\n```")},
       {"a blank line inside the fence", raw.("```text\n" <> good <> "\n\n```")},
-      # Each of the next four isolates one rule. Two overlapping guards mask each
+      # Each of the next cases isolates one rule. Two overlapping guards mask each
       # other -- stubbing either alone changed nothing while both were reachable --
       # so a case has to exist that only one rule can refuse.
       #
@@ -214,7 +214,13 @@ defmodule Loopex.StatusCheckTest do
           {"a single unfenced record", raw.(good), "no fenced body"},
           {"a fenced line that is not a run", raw.("```text\nnot a run at all\n```"),
            "not in the required form"},
-          {"a fence containing nothing", raw.("```text\n```"), "names no run"}
+          {"a fence containing nothing", raw.("```text\n```"), "names no run"},
+          {"a bidi override in the ERTS field",
+           doc.(String.replace(good, "erts=14.0", "erts=14.0\u202E")),
+           "non-printable or non-ASCII byte"},
+          {"a zero-width character in the wall-clock field",
+           doc.(String.replace(good, "wall=91s", "wall=91\u200Bs")),
+           "non-printable or non-ASCII byte"}
         ] do
       File.write!(record, body)
 
