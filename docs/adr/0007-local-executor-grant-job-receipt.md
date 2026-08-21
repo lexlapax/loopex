@@ -5,7 +5,7 @@
 
 Technical depth: [Binding schema and validation mechanics](0007-local-executor-grant-job-receipt-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-21
 - **Decision owner:** Maintainer
 - **Prerequisite for:** `M1` acceptance, and implementation of its outcome 6
@@ -14,7 +14,7 @@ Technical depth: [Binding schema and validation mechanics](0007-local-executor-g
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m1-prerequisite-adrs-2026-08-21) | candidate `58281e34cd6233d1223579af55710642909f5a1f`; concept `sha256:95a1fc27eeed0a61e25aa3ebdf7ea2ef188dab7863b94023017881d0aaa09650`; technical `sha256:34d634a54a963986aa3f79094bb2ac4bf337b5595d28ff57751565f2c404b508` |
 
 <a id="concept-adr-0007-context"></a>
 ## Context

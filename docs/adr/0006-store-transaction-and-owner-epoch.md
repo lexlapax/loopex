@@ -5,7 +5,7 @@
 
 Technical depth: [Transaction and fencing mechanics](0006-store-transaction-and-owner-epoch-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-21
 - **Decision owner:** Maintainer
 - **Prerequisite for:** `M1` acceptance, and implementation of its outcomes 2, 3,
@@ -15,7 +15,7 @@ Technical depth: [Transaction and fencing mechanics](0006-store-transaction-and-
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m1-prerequisite-adrs-2026-08-21) | candidate `58281e34cd6233d1223579af55710642909f5a1f`; concept `sha256:706b58d746b782cf21e9093bdd1fcdbd6af07b264e3d7433a85bbf1fe63085ae`; technical `sha256:973415786ab332115aaa5fef7a738dad2b822733e8f4baf8d9318c5c79c990ab` |
 
 <a id="concept-adr-0006-context"></a>
 ## Context

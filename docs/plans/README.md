@@ -20,10 +20,10 @@ integrated; `main` describes integrated project state, not every remote activity
 | --- | --- |
 | Integrated phase | Pre-implementation planning |
 | Last integrated checkpoint | `M0` — 2026-08-21 |
-| Blockers | [ADR 0006](../adr/0006-store-transaction-and-owner-epoch.md#concept) and [ADR 0007](../adr/0007-local-executor-grant-job-receipt.md#concept) must be accepted before the `M1` plan pair and gate can be accepted |
+| Blockers | `M1` remains open and unaccepted; no revised plan-pair and gate candidate exists after the prerequisite decisions |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Disposition ADR 0006 and ADR 0007 |
-| Next transition | After both prerequisites are accepted, revise and independently review the `M1` plan pair and gate |
+| Next maintainer decision | Create the revised `M1` plan-pair and gate candidate |
+| Next transition | Independently review that exact revised `M1` candidate before any acceptance decision |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
