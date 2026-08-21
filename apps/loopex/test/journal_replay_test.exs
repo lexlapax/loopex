@@ -35,6 +35,21 @@ defmodule Loopex.JournalReplayTest do
   @seeds [1, 7, 13, 101, 4_242, 65_537]
   @history_length 40
 
+  # Concept: a test that mutates a journal owns it, like every other writer.
+  #
+  # Technical depth: these cases used to append to an unclaimed journal, which is
+  # the path that no longer exists. Claiming here is not ceremony -- it is the
+  # same triple identity the Coordinator presents, taken from the test process, so
+  # the case exercises the real rule rather than a relaxed one for tests.
+  #
+  # Deliberately no `on_exit` release: `on_exit` runs in a different process, and
+  # a release from a process that is not the owner is refused -- correctly. Each
+  # case uses a unique journal, so its sentinel is unique too.
+  defp owned(journal) do
+    {:ok, token} = Journal.claim_session(journal)
+    token
+  end
+
   setup do
     # Concept: a killed coordinator is linked to this process, so exits must be
     # trapped or the test dies with it.
@@ -223,17 +238,23 @@ defmodule Loopex.JournalReplayTest do
     # repair was written to fix. Two shapes reach that state and both must refuse.
     build = fn name, count ->
       journal = DurableTruth.journal_path(name)
+      token = owned(journal)
 
       for seq <- 1..count do
-        assert :ok = Journal.append(journal, %{kind: :fact_committed, seq: seq, fact: "f#{seq}"})
+        assert :ok =
+                 Journal.append(
+                   journal,
+                   %{kind: :fact_committed, seq: seq, fact: "f#{seq}"},
+                   token
+                 )
       end
 
-      journal
+      {journal, token}
     end
 
     # A complete frame whose payload changed under it. That is corruption, never a
     # torn append, because a killed writer cannot leave a whole frame with bad bytes.
-    interior = build.("interior-corruption", 3)
+    {interior, interior_token} = build.("interior-corruption", 3)
     size = File.stat!(interior).size
     bytes = File.read!(interior)
     at = 60
@@ -248,14 +269,14 @@ defmodule Loopex.JournalReplayTest do
     assert {:ok, [_first], {:corrupt, offset}} = Journal.read(interior)
 
     assert {:error, {:corrupt_not_torn, ^interior, ^offset}} =
-             Journal.discard_torn_tail(interior, offset)
+             Journal.discard_torn_tail(interior, offset, interior_token)
 
     assert File.stat!(interior).size == size, "corruption must not cost a single byte"
 
     # A corrupted length prefix claims more bytes than remain, so the tail reads as
     # a strict prefix while whole records sit beyond it. The short shape alone is
     # not proof of a torn append.
-    inflated = build.("inflated-length", 3)
+    {inflated, inflated_token} = build.("inflated-length", 3)
     size = File.stat!(inflated).size
     bytes = File.read!(inflated)
     <<first_size::unsigned-big-32, _crc::unsigned-big-32, _rest::binary>> = bytes
@@ -271,7 +292,7 @@ defmodule Loopex.JournalReplayTest do
     assert {:ok, [_kept], {:torn, torn_at}} = Journal.read(inflated)
 
     assert {:error, {:intact_record_beyond_tear, ^inflated, ^torn_at}} =
-             Journal.discard_torn_tail(inflated, torn_at)
+             Journal.discard_torn_tail(inflated, torn_at, inflated_token)
 
     assert File.stat!(inflated).size == size, "an intact record beyond the tear must survive"
   end
@@ -316,6 +337,7 @@ defmodule Loopex.JournalReplayTest do
   end
 
   test "a claim is a capability, not a fact about a path" do
+    # This case owns its claim lifecycle explicitly; it must not be pre-claimed.
     journal = DurableTruth.journal_path("claim-capability")
     assert {:ok, claim} = Journal.claim_session(journal)
     assert {:ok, lock} = Journal.session_lock_path(journal)
@@ -343,7 +365,7 @@ defmodule Loopex.JournalReplayTest do
     # Releasing and writing require having claimed.
     assert {:error, {:not_the_claim_holder, ^lock}} = Journal.release_session(journal, "wrong")
     assert File.exists?(lock), "a refused release must not remove the claim"
-    assert {:error, {:not_the_session_owner, ^journal}} = Journal.append(journal, record)
+    assert {:error, {:not_the_session_owner, ^journal}} = Journal.append(journal, record, nil)
     assert {:error, {:not_the_session_owner, ^journal}} = Journal.append(journal, record, "wrong")
     assert :ok = Journal.append(journal, record, claim)
 
@@ -355,8 +377,9 @@ defmodule Loopex.JournalReplayTest do
     assert {:ok, kept, {:torn, offset}} = Journal.read(journal)
     size = File.stat!(journal).size
 
+    # Presenting nothing, and presenting the wrong token, are both refused.
     assert {:error, {:not_the_session_owner, ^journal}} =
-             Journal.discard_torn_tail(journal, offset)
+             Journal.discard_torn_tail(journal, offset, nil)
 
     assert {:error, {:not_the_session_owner, ^journal}} =
              Journal.discard_torn_tail(journal, offset, "wrong")
@@ -401,16 +424,17 @@ defmodule Loopex.JournalReplayTest do
     # delete it. The repair's own record-count check cannot notice, because the
     # surviving prefix count is unchanged either way.
     journal = DurableTruth.journal_path("append-after-tear")
-    assert :ok = Journal.append(journal, %{kind: :fact_committed, seq: 1, fact: "a"})
+    token = owned(journal)
+    assert :ok = Journal.append(journal, %{kind: :fact_committed, seq: 1, fact: "a"}, token)
     File.open!(journal, [:append, :binary], fn io -> IO.binwrite(io, <<0, 0, 0, 90, 1>>) end)
     assert {:ok, _kept, {:torn, offset}} = Journal.read(journal)
 
     # A second writer lands a complete, synced record beyond the tear.
-    assert :ok = Journal.append(journal, %{kind: :fact_committed, seq: 2, fact: "b"})
+    assert :ok = Journal.append(journal, %{kind: :fact_committed, seq: 2, fact: "b"}, token)
     grown = File.stat!(journal).size
 
     assert {:error, {:intact_record_beyond_tear, ^journal, ^offset}} =
-             Journal.discard_torn_tail(journal, offset)
+             Journal.discard_torn_tail(journal, offset, token)
 
     assert File.stat!(journal).size == grown,
            "a record acknowledged after the tear must survive the repair"
@@ -501,13 +525,14 @@ defmodule Loopex.JournalReplayTest do
 
   test "discarding a torn tail refuses anything it cannot prove is torn" do
     journal = DurableTruth.journal_path("torn-refusal")
+    token = owned(journal)
     {records, _model} = DurableTruth.history(11, 6, "session-torn-refusal")
-    Enum.each(records, fn record -> assert :ok = Journal.append(journal, record) end)
+    Enum.each(records, fn record -> assert :ok = Journal.append(journal, record, token) end)
 
     # A complete journal is never truncated, whatever offset is offered.
-    assert {:error, {:not_torn, ^journal}} = Journal.discard_torn_tail(journal, 0)
+    assert {:error, {:not_torn, ^journal}} = Journal.discard_torn_tail(journal, 0, token)
     size = File.stat!(journal).size
-    assert {:error, {:not_torn, ^journal}} = Journal.discard_torn_tail(journal, size)
+    assert {:error, {:not_torn, ^journal}} = Journal.discard_torn_tail(journal, size, token)
     assert File.stat!(journal).size == size
 
     File.open!(journal, [:append, :binary], fn io -> IO.binwrite(io, <<0, 1, 2>>) end)
@@ -516,11 +541,11 @@ defmodule Loopex.JournalReplayTest do
     # An offset that is not the one read/1 reports is refused, so a caller cannot
     # cut a journal at a place of its own choosing.
     assert {:error, {:torn_offset_moved, ^journal, _tail, 0}} =
-             Journal.discard_torn_tail(journal, 0)
+             Journal.discard_torn_tail(journal, 0, token)
 
     assert File.stat!(journal).size == torn_size
 
-    assert :ok = Journal.discard_torn_tail(journal, size)
+    assert :ok = Journal.discard_torn_tail(journal, size, token)
     assert {:ok, ^records, :complete} = Journal.read(journal)
   end
 
@@ -579,8 +604,9 @@ defmodule Loopex.JournalReplayTest do
     session_id = "session-truncation"
     {records, _model} = DurableTruth.history(31, 24, session_id)
     journal = DurableTruth.journal_path("truncation")
+    token = owned(journal)
 
-    Enum.each(records, fn record -> assert :ok = Journal.append(journal, record) end)
+    Enum.each(records, fn record -> assert :ok = Journal.append(journal, record, token) end)
 
     assert {:ok, ^records, :complete} = Journal.read(journal)
 
@@ -693,13 +719,15 @@ defmodule Loopex.JournalReplayTest do
 
   test "a durable record refuses anything that is not plain boundary data" do
     journal = DurableTruth.journal_path("plain-data")
+    token = owned(journal)
 
     for value <- [self(), make_ref(), fn -> :ok end, %Loopex.Session{}] do
       assert {:error, {:invalid_record, :not_plain_data}} =
-               Journal.append(journal, %{kind: :fact_committed, seq: 1, fact: value})
+               Journal.append(journal, %{kind: :fact_committed, seq: 1, fact: value}, token)
     end
 
-    assert {:error, {:invalid_record, :missing_kind}} = Journal.append(journal, %{seq: 1})
+    assert {:error, {:invalid_record, :missing_kind}} =
+             Journal.append(journal, %{seq: 1}, token)
 
     # Nothing was written, so a refused record cannot be replayed later.
     assert {:ok, [], :complete} = Journal.read(journal)

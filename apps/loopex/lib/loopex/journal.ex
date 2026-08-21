@@ -108,47 +108,74 @@ defmodule Loopex.Journal do
   durability failure. Every error is returned, never raised: recovery code
   distinguishes an unavailable journal from a rejected record.
   """
-  @spec append(Path.t(), entry(), claim() | nil) :: :ok | {:error, term()}
-  def append(path, record, token \\ nil) when is_map(record) do
+  @spec append(Path.t(), entry(), claim()) :: :ok | {:error, term()}
+  def append(path, record, token) when is_map(record) do
     with :ok <- validate(record),
-         :ok <- refuse_foreign_writer(path, token),
+         :ok <- require_active_claim(path, token),
          {:ok, frame} <- frame(record) do
       write(path, frame)
     end
   end
 
-  # Concept: a claimed journal is written only by the holder of that claim.
-  # Technical depth: the previous rule refused only a parseable, live, same-node
-  # pid and let every other case through its catch-all -- foreign, malformed,
-  # unreadable, unverifiable. Each of those is a claim someone holds, and "I could
-  # not tell whose" is not a reason to write. The rule inverts: if a claim exists,
-  # the caller must present its token. An unclaimed journal is still writable
-  # directly, which is what tools and tests use.
-  defp refuse_foreign_writer(path, token) do
-    case lock_path(path) do
-      {:error, _reason} ->
-        :ok
+  # Concept: only the live holder of the active claim may change a journal.
+  #
+  # Technical depth: identity is checked three ways because each one alone has a
+  # hole. The token proves knowledge, but a token outlives the claim it came from
+  # -- stale-token appends landed after a new owner had taken over. The OS pid
+  # proves the same VM, but two unnamed BEAMs are both `nonode@nohost`, so it is
+  # what distinguishes them. The Erlang pid proves the same PROCESS, which is what
+  # makes the Coordinator the ownership boundary rather than the file: a second
+  # process in this VM holding a copied token is refused.
+  #
+  # There is no unclaimed mutation path. Writing to a journal nobody has claimed
+  # used to be allowed "for tools and tests", and that was the hole every other
+  # rule was layered on top of: an unclaimed write cannot be attributed, cannot be
+  # fenced, and cannot be refused later.
+  #
+  # This does not make check-and-write atomic. A window remains between reading
+  # the sentinel and writing, and closing it needs store-level owner-epoch
+  # fencing, deferred to M1. What it does remove is every way a caller that is not
+  # the live owning process reaches a mutation.
+  defp require_active_claim(path, token) do
+    with {:ok, lock} <- lock_path(path),
+         {:ok, contents} <- read_claim(lock),
+         {:ok, owner} <- parse_claim(contents, lock) do
+      cond do
+        # A claim exists -- read_claim/1 proved it -- so presenting nothing is not
+        # "unclaimed", it is not being the owner. `:journal_unclaimed` is reserved
+        # for a journal with no sentinel at all.
+        not is_binary(token) ->
+          {:error, {:not_the_session_owner, path}}
 
-      {:ok, lock} ->
-        case File.read(lock) do
-          {:error, :enoent} ->
-            :ok
+        not token_matches?(owner.token_digest, token) ->
+          {:error, {:not_the_session_owner, path}}
 
-          {:error, posix} ->
-            {:error, {:claim_unreadable, lock, posix}}
+        owner.os_pid != System.pid() ->
+          {:error, {:not_the_session_owner, path}}
 
-          {:ok, contents} ->
-            case parse_owner(contents) do
-              {:ok, %{token_digest: held}} ->
-                case is_binary(token) and token_matches?(held, token) do
-                  true -> :ok
-                  false -> {:error, {:not_the_session_owner, path}}
-                end
+        owner.erl_pid != inspect(self()) ->
+          {:error, {:not_the_session_owner, path}}
 
-              :error ->
-                {:error, {:claim_unreadable, lock, :malformed}}
-            end
-        end
+        true ->
+          :ok
+      end
+    end
+  end
+
+  # A journal with no readable claim is not writable. Unavailable evidence of
+  # ownership is refusal, not permission.
+  defp read_claim(lock) do
+    case File.read(lock) do
+      {:ok, contents} -> {:ok, contents}
+      {:error, :enoent} -> {:error, {:journal_unclaimed, lock}}
+      {:error, posix} -> {:error, {:claim_unreadable, lock, posix}}
+    end
+  end
+
+  defp parse_claim(contents, lock) do
+    case parse_owner(contents) do
+      {:ok, owner} -> {:ok, owner}
+      :error -> {:error, {:claim_unreadable, lock, :malformed}}
     end
   end
 
@@ -220,29 +247,38 @@ defmodule Loopex.Journal do
   experiments, so this states its boundary rather than implying durability
   guarantees it has not earned.
 
-  Proved: a single-machine journal whose one session owner is enforced by an
-  exclusive claim held for that owner's lifetime, so a second coordinator cannot
-  start and a process bypassing the coordinator cannot append. Repair happens once,
-  inside the owner, before it serves anything, so it cannot interleave with an
-  append. Every alias of one journal contends for one claim.
+  Proved: on one machine, every append, repair, truncation and release is bound to
+  the live owning process. Identity is checked three ways -- the claim token, the
+  OS process, and the Erlang process -- so a caller that knows the token but is not
+  the owning process is refused, a token that outlived its claim is refused, and a
+  release holding a superseded token cannot delete the live claim. There is no
+  unclaimed mutation path: a journal nobody holds cannot be written at all. That is
+  what makes the Coordinator the ownership boundary rather than this file, which is
+  why a later store can replace the claim without moving who owns session truth.
 
   Not proved, and not claimed:
 
-  * Durability across power loss. Records are synced, but the truncation's length
-    update is not separately synced, and no barrier or fsync-of-directory
-    discipline is established.
-  * Exclusion against a writer that does not use this module at all.
+  * Anything across hosts. The claim is a local file, so two machines sharing a
+    journal over a network filesystem are outside every guarantee here.
   * Exclusion between processes that disagree about the temporary directory, since
-    the claim lives there.
-  * Anything about performance, concurrency at scale, or a durable store. M0
-    explicitly selects no store.
+    the claim lives there and its path is derived from that directory.
+  * Exclusion against tampering. A process that edits or deletes the sentinel
+    directly, rather than going through this module, defeats all of it.
+  * Durability of the truncation across power loss. Records are synced; the
+    truncation's length update is not separately synced, and no barrier or
+    fsync-of-directory discipline is established.
 
-  A later milestone that claims production durability owns those; this one answers
-  whether replay and fencing hold under the intended semantics.
+  One residual race is known and deferred rather than hidden: reading the sentinel
+  and performing the write are still separable, so a window remains in which
+  ownership changes between the check and the mutation. Closing it needs
+  store-level owner-epoch fencing, where a stale writer's records are refused at
+  replay rather than prevented at write, and that belongs to M1 with the store
+  port. Every path by which a caller that is not the live owning process reached a
+  mutation is closed here.
   """
-  @spec discard_torn_tail(Path.t(), non_neg_integer(), claim() | nil) :: :ok | {:error, term()}
-  def discard_torn_tail(path, offset, token \\ nil) when is_integer(offset) and offset >= 0 do
-    with :ok <- refuse_foreign_writer(path, token) do
+  @spec discard_torn_tail(Path.t(), non_neg_integer(), claim()) :: :ok | {:error, term()}
+  def discard_torn_tail(path, offset, token) when is_integer(offset) and offset >= 0 do
+    with :ok <- require_active_claim(path, token) do
       open_and_truncate(path, offset)
     end
   end
@@ -343,20 +379,26 @@ defmodule Loopex.Journal do
   """
   @spec release_session(Path.t(), claim()) :: :ok | {:error, term()}
   def release_session(path, token) when is_binary(token) do
-    with {:ok, lock} <- lock_path(path),
-         {:ok, contents} <- File.read(lock),
-         {:ok, owner} <- parse_owner(contents) do
-      # Deleting someone else's claim was possible from anywhere, which let a
-      # second owner start while the first was still live. Releasing now requires
-      # having claimed.
-      case token_matches?(owner.token_digest, token) do
-        true -> remove_lock(lock)
-        false -> {:error, {:not_the_claim_holder, lock}}
-      end
-    else
-      {:error, {:journal_unavailable, _path, :enoent}} -> :ok
-      {:error, :enoent} -> :ok
-      _other -> {:error, {:claim_unreadable, path}}
+    # Releasing is a mutation and takes the same triple identity as writing.
+    # Verifying only the token let a delayed release delete a LIVE claim: two
+    # legitimate releases both read the old sentinel, the first removed it, a new
+    # owner claimed, and the second deleted the new owner's file. Requiring the
+    # OS and Erlang pid as well means the second release is looking at a sentinel
+    # that is not its own and refuses.
+    case lock_path(path) do
+      {:error, {:journal_unavailable, _path, :enoent}} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+
+      {:ok, lock} ->
+        case require_active_claim(path, token) do
+          :ok -> remove_lock(lock)
+          {:error, {:journal_unclaimed, _what}} -> :ok
+          {:error, {:not_the_session_owner, _path}} -> {:error, {:not_the_claim_holder, lock}}
+          {:error, reason} -> {:error, reason}
+        end
     end
   end
 
