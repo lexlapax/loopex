@@ -20,10 +20,10 @@ integrated; `main` describes integrated project state, not every remote activity
 | --- | --- |
 | Integrated phase | Pre-implementation planning |
 | Last integrated checkpoint | `M0` — 2026-08-21 |
-| Blockers | `M1` remains open and unaccepted; no revised plan-pair and gate candidate exists after the prerequisite decisions |
+| Blockers | `M1` remains open and unaccepted; its revised plan-pair and gate candidate awaits independent review |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Create the revised `M1` plan-pair and gate candidate |
-| Next transition | Independently review that exact revised `M1` candidate before any acceptance decision |
+| Next maintainer decision | Independently review the exact revised `M1` candidate |
+| Next transition | After a clear review, accept or reject the `M1` plan pair and gate |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 

@@ -539,15 +539,14 @@ defmodule Loopex.StatusCheckTest do
     assert only_7_accepted["Next maintainer decision"] == "Disposition ADR 0006"
 
     assert both_accepted["Blockers"] ==
-             "`M1` remains open and unaccepted; no revised plan-pair and gate candidate " <>
-               "exists after the prerequisite decisions"
+             "`M1` remains open and unaccepted; its revised plan-pair and gate candidate " <>
+               "awaits independent review"
 
     assert both_accepted["Next maintainer decision"] ==
-             "Create the revised `M1` plan-pair and gate candidate"
+             "Independently review the exact revised `M1` candidate"
 
     assert both_accepted["Next transition"] ==
-             "Independently review that exact revised `M1` candidate before any " <>
-               "acceptance decision"
+             "After a clear review, accept or reject the `M1` plan pair and gate"
 
     invariant_fields = ["Integrated phase", "Authorized work", "Validation"]
 

@@ -1,9 +1,10 @@
 # Development
 
-Loopex is pre-implementation. This document describes how to validate and work
-on the repository, and it owns the commands, not the milestone state. There is no
-installable package and no public product surface; the umbrella exists so the
-accepted milestone's repository checks and experiments have somewhere to live.
+Loopex has closed its M0 feasibility milestone and is preparing the M1 working
+loop. M1 is open and unaccepted on this revision, so product implementation is
+not yet authorized. This document describes how to validate and work on the
+repository, and it owns the commands, not the milestone state. There is no
+installable package and no public product surface.
 
 The canonical status for the checked-out revision, including currently
 authorized work and the next maintainer decision, is in
@@ -90,8 +91,22 @@ their adapters and parity smokes exist.
 The bootstrap floor is OTP 26+ and Elixir 1.17+, and ADR 0002 locks two exact
 pairs, recorded in `.tool-versions`. The product scaffold exists, so installing
 the toolchain lets you build and test today: `mix test` from the repository root,
-`bash scripts/check-bootstrap.sh` for the aggregate, and
-`bash scripts/check-m0-gate.sh` for the milestone gate.
+`bash scripts/check-bootstrap.sh` for the aggregate,
+`bash scripts/check-m0-gate.sh` for the closed M0 gate, and
+`bash scripts/check-m1-gate.sh` for the active M1 gate candidate.
+
+The M1 gate is deliberately red before implementation and must report the
+declared missing runtime selector before allocating a state root. Its plan pair
+and gate remain candidates until an exact-SHA independent review and explicit
+maintainer acceptance bind them; a red result for that declared absence is the
+opening proof, not implementation authority.
+
+After the protected product selectors exist, M1's two explicitly tagged
+real-provider selectors require `LOOPEX_PROVIDER_API_KEY`. The runner removes
+the credential before its first child process and passes it only to those
+provider commands; do not put the value in a command argument, log, fixture, or
+retained evidence. The ordinary full suite and repository checks remain
+credential-free.
 
 The M0 gate locks the self-hosting transition, and that transition has landed:
 the local aggregate, its structural and mutation checks, and the tested
@@ -139,9 +154,10 @@ documentation should clarify rather than paraphrase syntax.
 Read [AGENTS.md](AGENTS.md), then the
 [plans status register](docs/plans/README.md), and use the
 [agent context map](docs/developer/agent-context-map.md) only to load relevant
-Concept sections and their exact Technical depth. `M0` is accepted and in review;
-implementation authority is bounded by its accepted envelopes and locked gate, and
-a later milestone needs its own accepted plan and red gate before its work begins.
+Concept sections and their exact Technical depth. `M0` is closed. `M1` is open
+and unaccepted, and only planning, ADR, bootstrap, and review work is currently
+authorized. Product implementation begins only after the revised M1 plan pair
+and red gate are independently reviewed and explicitly accepted.
 
 Tests use a temporary `LOOPEX_HOME` and temporary workspaces, and the helpers fail
 before touching real user state. Never point development or test commands at a
@@ -157,6 +173,7 @@ floor pair needs a version manager. `mise` was used to provide both:
 mise install erlang@26.0
 mise install elixir@1.17.0-otp-26
 mise exec erlang@26.0 elixir@1.17.0-otp-26 -- bash scripts/check-m0-gate.sh
+mise exec erlang@26.0 elixir@1.17.0-otp-26 -- bash scripts/check-m1-gate.sh
 ```
 
 Alternating pairs also shares mutable dependency state. `MIX_BUILD_PATH` alone

@@ -484,11 +484,10 @@ defmodule Loopex.Checks.Register do
       case unresolved do
         [] ->
           {
-            "`M1` remains open and unaccepted; no revised plan-pair and gate candidate " <>
-              "exists after the prerequisite decisions",
-            "Create the revised `M1` plan-pair and gate candidate",
-            "Independently review that exact revised `M1` candidate before any " <>
-              "acceptance decision"
+            "`M1` remains open and unaccepted; its revised plan-pair and gate candidate " <>
+              "awaits independent review",
+            "Independently review the exact revised `M1` candidate",
+            "After a clear review, accept or reject the `M1` plan pair and gate"
           }
 
         [path] ->
