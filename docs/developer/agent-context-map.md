@@ -350,6 +350,39 @@ cc88d0a  gen 3  binds 19a1a93
 9418ac8  gen 0  empty governance — the original acceptance
 ```
 
+<a id="disposition-m0-closure-2026-08-21"></a>
+#### M0 closure — accepted 2026-08-21
+
+The maintainer closed `M0` at `d4d8b4d6fe8fd83eab41a0c3f1aaf6a2254d00c3`, having
+approved the merge to `main` and then stated the closure decision explicitly. The
+candidate was merged fast-forward with both locked lanes green on `main` after the
+merge rather than only on the branch.
+
+What the maintainer accepted, stated plainly so the record is not read as more
+than it is:
+
+* Ten outcomes proved, with the gate green on both locked pairs at the closure
+  candidate and the acceptance-bound Concept, Technical depth, and gate digests
+  unchanged since acceptance.
+* Four recorded limitations on outcome 4 — anything across hosts, processes that
+  disagree about the temporary directory, tampering with the sentinel directly,
+  and durability of the truncation across power loss.
+* One accepted deferral: sentinel read and mutation remain separable in
+  `Loopex.Journal`, and store-level owner-epoch fencing moves to M1 with the store
+  port.
+* No independent review approved this exact SHA. Eight review rounds each rejected
+  the candidate they saw, and the defects they found were real; the maintainer
+  closed on the mechanical state and the retained evidence rather than on a
+  clean review verdict. That is a maintainer judgment, recorded here because a
+  reader of this closure should know it was made.
+
+Outcome 3's evidence check was rewritten seven times during this milestone, each
+version narrowing a hand-written approximation of how Markdown renders, and each
+narrowing evaded. It was replaced with a verbatim fenced record and a closed
+printable-ASCII domain. The lesson worth carrying to M1 is not about Markdown: a
+check that compares against a model of another system will be wrong wherever the
+model is, and the fix is to remove the model rather than refine it.
+
 <a id="disposition-m0-amendment-5-2026-08-20"></a>
 #### Amendment 5 — accepted 2026-08-20
 

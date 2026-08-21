@@ -551,6 +551,39 @@ defmodule Loopex.StatusFixtures do
   @doc """
   ## Concept
 
+  The status capsule a Closed milestone derives.
+
+  ## Technical depth
+
+  Written by the transition that first recorded `Closed`, which is what the
+  register's catch-all demands rather than permitting the check to be relaxed.
+  Rewrites exactly the four fields the Closed derivation changes; the checkpoint
+  is left alone because `Register.checkpoint/2` owns that field.
+  """
+  def closed_capsule(text) do
+    text
+    |> String.replace(
+      @blockers_cell,
+      "| Blockers | None; `M0` is closed and its governance row is recorded |"
+    )
+    |> String.replace(
+      "| Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |",
+      "| Authorized work | Explicitly authorized planning, ADR, and review work only; " <>
+        "no product implementation until the next milestone is opened gate-first |"
+    )
+    |> String.replace(
+      "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |",
+      "| Next maintainer decision | Open the next milestone gate-first, or defer it |"
+    )
+    |> String.replace(
+      "| Next transition | After the prerequisites are accepted, the maintainer explicitly opens `M0` gate-first |",
+      "| Next transition | Create the next milestone's plan pair and red gate, and move it to Open |"
+    )
+  end
+
+  @doc """
+  ## Concept
+
   The fixture plans index rewritten into its derived Open capsule.
 
   ## Technical depth

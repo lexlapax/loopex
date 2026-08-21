@@ -316,10 +316,15 @@ defmodule Loopex.StatusCheckTest do
     assert Map.fetch!(in_review, "Next maintainer decision") =~ "Close `M0`"
     assert Map.fetch!(in_review, "Next transition") =~ "Closed"
 
-    # A state nobody added enforcement for must fail rather than fall through.
-    assert_raise Invalid, ~r/no derived status capsule/, fn ->
-      Register.expected_capsule("Closed", "M0", %{})
-    end
+    # Closure narrows authority rather than widening it: a closed envelope grants
+    # no further implementation. This assertion replaces one that Closed had no
+    # derivation at all, which stopped being true when the closing transition
+    # wrote it.
+    closed = Register.expected_capsule("Closed", "M0", %{})
+
+    refute Map.fetch!(closed, "Authorized work") == Map.fetch!(accepted, "Authorized work")
+    assert Map.fetch!(closed, "Authorized work") =~ "no product implementation"
+    assert Map.fetch!(closed, "Next transition") =~ "next milestone"
   end
 
   test "the JSON reader decodes unicode escapes so hooks still match" do
@@ -508,10 +513,24 @@ defmodule Loopex.StatusCheckTest do
   test "a milestone state with no derived capsule fails closed" do
     assert "In review" in Register.active_states()
 
-    for state <- Register.states(),
-        state not in ["Blocked", "Open", "Accepted", "In progress", "In review"] do
+    # Every registered state now has a derivation -- Closed gained one when the
+    # first milestone closed. What the catch-all protects is the NEXT state
+    # somebody registers: adding one to the list without adding its enforcement
+    # must fail rather than fall through to an unchecked capsule.
+    # Blocked derives from ADR statuses, so it needs them; the rest ignore them.
+    adr_statuses = %{
+      "docs/adr/0001-repository-and-application-layout.md" => "Accepted",
+      "docs/adr/0002-bootstrap-runtime-floor.md" => "Accepted"
+    }
+
+    for state <- Register.states() do
+      assert is_map(Register.expected_capsule(state, "M0", adr_statuses)),
+             "#{state} is registered and must derive a capsule"
+    end
+
+    for unregistered <- ["Superseded", "Withdrawn", ""] do
       assert_raise Invalid, ~r/no derived status capsule/, fn ->
-        Register.expected_capsule(state, "M0", %{})
+        Register.expected_capsule(unregistered, "M0", %{})
       end
     end
   end
@@ -1191,7 +1210,7 @@ defmodule Loopex.StatusCheckTest do
     assert Git.resolver(root).(String.trim(head), "README.md") != nil
   end
 
-  test "an open plan is accepted and a closed one has no derived capsule" do
+  test "an open plan and a closed one each require their derived capsule" do
     for {state, governed, closed} <- [{"Open", false, false}, {"Closed", true, true}] do
       new_row =
         "| `M0` | #{state} | [concept](M0.md) | " <>
@@ -1243,7 +1262,21 @@ defmodule Loopex.StatusCheckTest do
           |> assert_invalid("exact derived status capsule")
 
         "Closed" ->
-          assert_invalid(documents, "no derived status capsule")
+          # Closed had no derived capsule until the transition that first recorded
+          # it wrote one, which is what the register's catch-all demands. This case
+          # asserted that absence; it now asserts the derivation, because a state
+          # whose capsule is unenforced is the thing the catch-all exists to
+          # prevent.
+          closed = Map.update!(documents, "docs/plans/README.md", &Fixture.closed_capsule/1)
+          assert [] == Fixture.checked(closed)
+
+          closed
+          |> replace(
+            "docs/plans/README.md",
+            "| Next maintainer decision | Open the next milestone gate-first, or defer it |",
+            "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |"
+          )
+          |> assert_invalid("exact derived status capsule")
       end
     end
   end

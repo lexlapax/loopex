@@ -408,6 +408,30 @@ defmodule Loopex.Checks.Register do
     )
   end
 
+  # Concept: a closed milestone authorises nothing until the next one opens.
+  #
+  # Technical depth: this clause is written by the transition that first records
+  # `Closed`, which is what the catch-all below demands rather than permitting the
+  # check to be relaxed. Authorized work narrows back to planning and review: a
+  # closed envelope grants no further implementation, and the next milestone opens
+  # gate-first with its own plan pair and locked gate. The blocker field states the
+  # closure rather than a gate verdict, because a canonical record should not
+  # assert a run it cannot observe.
+  def expected_capsule("Closed", name, _adr_statuses) do
+    @seed_blocked
+    |> Map.put("Blockers", "None; `#{name}` is closed and its governance row is recorded")
+    |> Map.put(
+      "Authorized work",
+      "Explicitly authorized planning, ADR, and review work only; no product " <>
+        "implementation until the next milestone is opened gate-first"
+    )
+    |> Map.put("Next maintainer decision", "Open the next milestone gate-first, or defer it")
+    |> Map.put(
+      "Next transition",
+      "Create the next milestone's plan pair and red gate, and move it to Open"
+    )
+  end
+
   def expected_capsule(state, _name, _adr_statuses) do
     raise Invalid,
           "#{@index}: milestone state #{inspect(state)} has no derived status capsule; " <>

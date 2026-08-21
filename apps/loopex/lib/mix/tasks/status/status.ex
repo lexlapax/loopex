@@ -151,10 +151,25 @@ defmodule Loopex.Checks.Status do
   # Technical depth: enforcement covers exactly one registered milestone today.
   # Registering a second one must extend this deliberately, because "which
   # milestone does the capsule describe" has no single answer otherwise.
+  # Concept: one field, one owner.
+  #
+  # Technical depth: `Last integrated checkpoint` is excluded here because
+  # `Register.checkpoint/2` owns it, and owning it twice made the two disagree the
+  # moment a milestone closed: the derived capsule pins the seed value for every
+  # state, while the checkpoint rule requires the final Closed milestone once one
+  # exists. Both cannot hold. Excluding it is not a relaxation -- `checkpoint/2`
+  # still enforces the seed value until the first closure and an exact
+  # `` `name` — YYYY-MM-DD `` after it, which is stricter than the capsule ever
+  # was for this field.
+  @checkpoint_field "Last integrated checkpoint"
+
   defp require_derived_capsule!(rows, values, adr_statuses) do
     case rows do
       [{name, state}] ->
-        if values != Register.expected_capsule(state, name, adr_statuses) do
+        expected =
+          Map.delete(Register.expected_capsule(state, name, adr_statuses), @checkpoint_field)
+
+        if Map.delete(values, @checkpoint_field) != expected do
           raise Invalid, "#{@index}: the register state requires its exact derived status capsule"
         end
 
