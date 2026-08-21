@@ -181,14 +181,47 @@ defmodule Loopex.StatusCheckTest do
       {"an indented fence, which is a code block",
        raw.("    ```text\n    " <> good <> "\n    ```")},
       {"an empty fence", raw.("```text\n```")},
-      {"a blank line inside the fence", raw.("```text\n" <> good <> "\n\n```")}
+      {"a blank line inside the fence", raw.("```text\n" <> good <> "\n\n```")},
+      # Each of the next four isolates one rule. Two overlapping guards mask each
+      # other -- stubbing either alone changed nothing while both were reachable --
+      # so a case has to exist that only one rule can refuse.
+      #
+      # Only the opening-fence rule refuses this: there are two lines, so the
+      # non-empty guard is satisfied, and dropping the last leaves a parsable run.
+      {"two unfenced records", raw.(good <> "\n" <> String.replace(good, "run=1", "run=2"))},
+      {"an opening fence and nothing else", raw.("```text")},
+      {"a fenced line that is not a run", raw.("```text\nnot a run at all\n```")},
+      {"a fence containing nothing", raw.("```text\n```")}
     ]
 
     for {label, body} <- refused do
       File.write!(record, body)
 
-      assert {:error, _reason} = Matrix.both_lanes_recorded(root, pairs),
+      # Asserted as a boolean rather than a pattern match: a pattern match raises
+      # MatchError, which reports the value and not which case produced it, so a
+      # failure named nothing.
+      assert match?({:error, _reason}, Matrix.both_lanes_recorded(root, pairs)),
              "#{label} must not count as a recorded run"
+    end
+
+    # Each rule must refuse for its OWN reason, not merely be masked by a later one.
+    # Asserting the message is what makes each necessary: without it, removing any
+    # of these four changed no result, because a downstream rule rejected the same
+    # input for a different reason and the case could not tell the difference.
+    for {label, body, reason} <- [
+          {"records with no fence", raw.(good <> "\n" <> String.replace(good, "run=1", "run=2")),
+           "must open with a fence"},
+          {"a single unfenced record", raw.(good), "no fenced body"},
+          {"a fenced line that is not a run", raw.("```text\nnot a run at all\n```"),
+           "not in the required form"},
+          {"a fence containing nothing", raw.("```text\n```"), "names no run"}
+        ] do
+      File.write!(record, body)
+
+      assert {:error, message} = Matrix.both_lanes_recorded(root, pairs)
+
+      assert message =~ reason,
+             "#{label} must be refused for #{inspect(reason)}, got #{inspect(message)}"
     end
 
     # Legitimate fence shapes still count, so the rule refuses hiding rather than
