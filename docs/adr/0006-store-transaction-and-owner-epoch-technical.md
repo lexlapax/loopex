@@ -95,7 +95,30 @@ Outcomes and required owner behavior:
 | --- | --- | --- |
 | `committed(tx_id)` | A matching known transaction was already committed, or an unknown transaction satisfied its atomic admission comparisons and its records became durable | Treat the commit as durable fact and eligible work; report that durable result truthfully, and process publication or dispatch only through the durable owned paths and their current fences |
 | `not_committed(reason)` | A matching known transaction already has that terminal resolution, or an unknown transaction failed an admission comparison and its non-commit resolution became durable | Publish nothing, dispatch nothing, acknowledge nothing; a stale owner stops admitting |
-| `commit_unknown(tx_id)` | Timeout, disconnect, crash, lost reply, or failure to establish a durable terminal resolution | Fence the domain, stop new dispatch, resolve by `tx_id` before choosing a branch |
+| `commit_unknown(tx_id)` | Timeout, disconnect, crash, lost reply, or failure to establish a durable terminal resolution | Fence the domain and stop new dispatch; resolve by exact re-presentation, or safely supersede dead-owner succession through the status/head/CAS sequence before admission |
+
+The separate read-only API
+`transaction_status(session_id, mutation_domain, tx_id)` has four observations:
+
+| Observation | Meaning | Recovery consequence |
+| --- | --- | --- |
+| `{:terminal, :committed}` | A matching scoped transaction has a durable committed resolution | Durable observation only; it conveys no authority or original bindings |
+| `{:terminal, {:not_committed, reason}}` | A matching scoped transaction has a durable terminal refusal | Durable observation only; it conveys no authority or original bindings |
+| `:absent` | No matching scoped transaction resolution exists at the lookup's linearization point | Authoritative for that instant, but not terminal; a concurrent transaction may linearize later |
+| `:unavailable` | The store cannot make an authoritative status observation | The mutation domain remains fenced |
+
+This is a separate read API, not a fourth commit outcome and not a mutation. Its
+result contains no owner-incarnation ID, canonical record bytes, mutation
+digest, expected version, or other mutation authority. A live caller that still
+owns the original transaction request resolves ambiguity by exact
+re-presentation so the store can compare every immutable binding; a status read
+cannot substitute for that comparison. A mismatched exact re-presentation is
+still `tx_id_conflict` even after status reported a terminal result.
+
+Transaction status is scoped by the complete
+`{session_id, mutation_domain, tx_id}` key. The same `tx_id` in another session
+or mutation domain is unrelated and neither satisfies nor conflicts with the
+lookup.
 
 `committed` establishes durable fact and eligibility; it does not confer
 caller-local post-commit authority. Eligibility lives in the committed outbox or
@@ -126,27 +149,38 @@ with any different binding is `tx_id_conflict`. Equal digests do not make
 different canonical record bytes equal, so a digest collision is refused rather
 than treated as identity.
 
-Resolution after `commit_unknown` re-presents those exact bindings and canonical
-record bytes. A retained terminal entry returns its recorded outcome. If no
-entry exists, the request takes the unknown-ID branch and can establish only one
-terminal outcome under the atomic epoch-first and version-second comparison.
-Until it resolves, the domain is fenced: new mutations are refused or reported
-temporarily unavailable, and if the store stays unavailable the session stays
-unavailable. A proved `not_committed` outcome is terminal for that transaction
-ID. A current owner may rederive from the new durable version only as a new
-logical transaction with a new ID; it cannot turn the resolved non-commit into a
-commit by presenting new expected values.
+When the original bindings remain available, resolution after `commit_unknown`
+re-presents those exact bindings and canonical record bytes. A retained terminal
+entry returns its recorded outcome. If no entry exists, the request takes the
+unknown-ID branch and can establish only one terminal outcome under the atomic
+epoch-first, incarnation-second, and version-third comparison. The dead-owner
+succession case, where the recovering process deliberately lacks the prior
+capability and exact bindings, uses the non-authorizing status/head/CAS sequence
+below instead. Until either path resolves or safely supersedes the uncertainty,
+the domain is fenced: new mutations are refused or reported temporarily
+unavailable, and if the store stays unavailable the session stays unavailable.
+A proved `not_committed` outcome is terminal for that transaction ID. A current
+owner may rederive from the new durable version only as a new logical transaction
+with a new ID; it cannot turn the resolved non-commit into a commit by presenting
+new expected values.
 
-Every durable private record retains `owner_epoch`, `owner_incarnation_id`, and
-the store-stamped `journal_version`. Versions are one globally consecutive
-sequence for the session; an owner change does not reset it. A multi-record
-transaction receives one contiguous range in canonical record order. Replay
-refuses a gap, duplicate, reset, out-of-order version, decreasing epoch, epoch or
-incarnation change without its recorded succession transition, or records under
-a new ownership pair before that transition. This never substitutes for the
-commit-time comparison; it detects a store implementation that failed to honor
-its contract, which is the failure a conformance suite cannot otherwise observe
-from outside.
+Every durable private record carries these store-stamped ownership and sequence
+fields:
+
+```text
+owner_epoch
+owner_incarnation_id
+journal_version
+```
+
+Versions are one globally consecutive sequence for the session; an owner change
+does not reset it. A multi-record transaction receives one contiguous range in
+canonical record order. Replay refuses a gap, duplicate, reset, out-of-order
+version, decreasing epoch, epoch or incarnation change without its recorded
+succession transition, or records under a new ownership pair before that
+transition. This never substitutes for the commit-time comparison; it detects a
+store implementation that failed to honor its contract, which is the failure a
+conformance suite cannot otherwise observe from outside.
 
 Succession is a distinct `advance_owner` transaction. Each coordinator
 incarnation creates a fresh `owner_incarnation_id`: an opaque bounded
@@ -177,14 +211,27 @@ after a later succession therefore remains truthfully `committed` but cannot
 authorize a new mutation.
 
 Crash recovery creates a new incarnation ID and may supersede the prior owner
-without possessing the prior capability. Before admission, it resolves and
-converges any recoverable `advance_owner` transaction left unknown by the dead
-coordinator. If that succession committed, recovery observes its installed pair
-and advances once more to its own fresh ID; if it did not commit, recovery
-advances from the still-current pair and version. If the result remains unknown,
-admission remains fenced. A dead coordinator therefore cannot strand ownership,
-but a second coordinator cannot treat the dead coordinator's historical result
-as its own capability.
+without possessing the prior capability or exact prior transaction bindings. It
+uses the recoverable scoped succession transaction ID to call
+`transaction_status/3`. For either terminal observation or `:absent`, it then
+calls the read-only `ownership_head(session_id, mutation_domain)`, which returns
+the durable owner epoch and journal version needed for succession but no
+incumbent incarnation ID. Recovery proposes its fresh ID in a new
+`advance_owner` transaction against that head. `:unavailable` leaves admission
+fenced.
+
+The status lookup, ownership-head read, transaction-resolution writes, and
+`advance_owner` compare-and-set all linearize in one serialized store history
+for the session and mutation domain. They need not be one multi-call
+transaction: the final compare-and-set closes every interval. If the dead
+coordinator's in-flight succession or a third contender changes the head after
+either read, recovery's stale compare-and-set is refused; recovery observes the
+new durable history and repeats rather than overwriting it. If recovery advances
+first, the older in-flight succession is refused by the same comparison. Thus
+both orders converge on one current ownership pair, while continued
+unavailability keeps the domain fenced. A dead coordinator cannot strand
+ownership, and a second coordinator cannot treat the dead coordinator's status
+or historical result as its own capability.
 
 This is ownership of commit authority, not a liveness or hostile-code boundary.
 The superseded coordinator may remain alive, but every later ordinary
@@ -242,9 +289,26 @@ The conformance suite every implementation runs covers at minimum:
   resolutions, including when different record bytes are presented with the
   same digest; a proved non-commit can be retried only under a new transaction
   ID;
-- when a coordinator dies after an unknown succession result, recovery resolves
-  that transaction before admission and converges by installing its own new
-  incarnation whether the prior succession committed or did not commit;
+- both terminal transaction-status results expose none of the owner-incarnation
+  ID, canonical bytes, digest, expected version, or mutation authority, and
+  neither permits an ordinary commit without the independently held current
+  ownership pair;
+- after either terminal status result, exact re-presentation with any mismatched
+  binding still returns `tx_id_conflict` rather than the observed result;
+- an unavailable status lookup for an unknown succession keeps admission and
+  mutation fenced;
+- when status reports `:absent` while the dead coordinator's succession is in
+  flight, both linearization orders — original succession first and recovery
+  succession first — leave exactly one current ownership pair and a refused
+  loser;
+- when a third succession commits after recovery's ownership-head read,
+  recovery's final compare-and-set is refused instead of overwriting the third
+  owner;
+- equal transaction IDs in different sessions or mutation domains have isolated
+  status and resolution state; neither scope can observe or satisfy the other;
+- recovery from each of the four status observations converges or fences:
+  terminal committed, terminal non-commit, and absence proceed through a fresh
+  head read and fresh-ID succession, while unavailability remains fenced;
 - mutation checks prove that removing any one of the ordinary commit's epoch,
   incarnation-ID, or journal-version comparisons makes its corresponding
   refusal case fail;

@@ -60,10 +60,19 @@ Technical depth: [Why replay-only fencing fails](0006-store-transaction-and-owne
   `committed(tx_id)`, `not_committed(reason)`, and `commit_unknown(tx_id)`. A
   refused stale owner is `not_committed`, and a timeout is never evidence of
   failure.
+- **Transaction status observes but never authorizes.** The separate read-only
+  `transaction_status(session_id, mutation_domain, tx_id)` API reports a durable
+  terminal commit, a durable terminal non-commit, absence at its linearization
+  point, or unavailability. It exposes no owner-incarnation ID, canonical bytes,
+  digest, or mutation capability. These observations are not a fourth commit
+  outcome and cannot replace exact transaction re-presentation when a caller
+  still owns the original bindings.
 - **Nothing follows a non-commit.** No acknowledgement, no publication, and no
   dispatch occurs on `not_committed` or while `commit_unknown` is unresolved.
-  `commit_unknown(tx_id)` fences its mutation domain and resolves by transaction
-  ID before either branch is chosen.
+  `commit_unknown(tx_id)` fences its mutation domain. A live owner resolves by
+  exact transaction re-presentation; dead-owner succession recovery may instead
+  use the non-authorizing status/head/fresh-CAS sequence, but remains fenced
+  until that sequence safely converges.
 - **At most one current committing owner at a time.** The store owns the durable
   `{owner_epoch, owner_incarnation_id}` pair. Each coordinator incarnation
   generates a fresh opaque bounded string or binary, and succession atomically
@@ -132,8 +141,11 @@ that is the intended filter.
 Recovery becomes slower and more explicit: a successor must durably advance the
 epoch with a new incarnation ID before it admits anything, so restart has a
 mandatory write before its first command. It need not possess the prior owner's
-ID: after resolving any earlier uncertain succession, it may atomically
-supersede the current pair with its own fresh ID. The alternative is admitting a
+ID. For an earlier uncertain succession, dead-owner recovery reads its scoped
+transaction status, reads the durable head, and attempts a new succession with
+its own fresh ID. Those reads and the final compare-and-set share one serialized
+store history, so the final write either supersedes the observed head or refuses
+a race; unavailability leaves admission fenced. The alternative is admitting a
 command whose ownership is unproven.
 
 A commit remains committed even if its reply reaches a coordinator after that
