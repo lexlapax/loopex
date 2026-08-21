@@ -52,26 +52,44 @@ expected_owner_epoch      the epoch the caller believes it owns
 expected_journal_version  the version the caller believes it is extending
 tx_id                     allocated before the call, recoverable from the
                           owning command or operation identity
-canonical_mutation_digest bound to tx_id
+canonical_record_bytes    exact bounded canonical encoding of the complete
+                          ordered record set
+canonical_mutation_digest digest of those exact canonical bytes, bound to tx_id
 records                   the transaction's atomic record set
 ```
 
-The store performs one atomic operation: compare `expected_owner_epoch` against
-the session's durable current epoch, compare `expected_journal_version` against
-its durable current version, allocate and stamp the next globally consecutive
-journal-version range, and commit the records only when both comparisons match.
-The epoch comparison is evaluated first, so a superseded caller receives
-`stale_owner_epoch` even when its cached journal version is also stale. There is
-no sequence of two store calls that a caller can perform instead — a check
-followed by a write reintroduces exactly the race this record exists to close.
+The store resolves `tx_id` before testing current ownership. When a terminal
+resolution already exists, it compares every immutable binding, including both
+the digest and the retained canonical record bytes, and returns the recorded
+outcome only when all match. A mismatch is `tx_id_conflict`; the known-ID branch
+never performs another journal mutation.
+
+Only when `tx_id` has no retained resolution does the store perform the atomic
+conditional commit. It compares `expected_owner_epoch` against the session's
+durable current epoch first, then compares `expected_journal_version` against
+its durable current version. When both match, it allocates and stamps the next
+globally consecutive journal-version range and commits the records. When either
+fails, it commits a terminal non-commit resolution without journal or outbox
+records. In both cases the resolution retains all immutable bindings, the
+canonical record bytes, and their digest. If the store cannot durably establish
+that one terminal resolution, it returns `commit_unknown(tx_id)` rather than a
+result it cannot reproduce.
+
+This lookup, comparison, journal mutation when admitted, and terminal-resolution
+write is one store operation. An unknown transaction from a superseded caller
+therefore receives `stale_owner_epoch` even when its cached journal version is
+also stale, while a now-stale caller may still retrieve `committed` for a known
+transaction committed under its then-valid authority. There is no sequence of
+two store calls that a caller can perform instead — a check followed by a write
+reintroduces exactly the race this record exists to close.
 
 Outcomes and required owner behavior:
 
 | Result | Condition | Owner behavior |
 | --- | --- | --- |
-| `committed(tx_id)` | Both comparisons matched and the records are durable | Treat the commit as durable fact and eligible work; report that durable result truthfully, and process publication or dispatch only through the durable owned paths and their current fences |
-| `not_committed(reason)` | Either comparison failed, or the store proves no transaction exists | Publish nothing, dispatch nothing, acknowledge nothing; a stale owner stops admitting |
-| `commit_unknown(tx_id)` | Timeout, disconnect, crash, or lost reply | Fence the domain, stop new dispatch, resolve by `tx_id` before choosing a branch |
+| `committed(tx_id)` | A matching known transaction was already committed, or an unknown transaction matched both comparisons and its records became durable | Treat the commit as durable fact and eligible work; report that durable result truthfully, and process publication or dispatch only through the durable owned paths and their current fences |
+| `not_committed(reason)` | A matching known transaction already has that terminal resolution, or an unknown transaction failed a comparison and its non-commit resolution became durable | Publish nothing, dispatch nothing, acknowledge nothing; a stale owner stops admitting |
+| `commit_unknown(tx_id)` | Timeout, disconnect, crash, lost reply, or failure to establish a durable terminal resolution | Fence the domain, stop new dispatch, resolve by `tx_id` before choosing a branch |
 
 `committed` establishes durable fact and eligibility; it does not confer
 caller-local post-commit authority. Eligibility lives in the committed outbox or
@@ -87,16 +105,22 @@ implementation-specific refusals, because a stale owner must stop rather than
 retry, while a version conflict may be re-derived and retried by the current
 owner.
 
-On first presentation, the store durably binds `tx_id` to `session_id`, the
+On first presentation, the store derives the exact bounded canonical bytes of
+the complete ordered record set. Every terminal transaction-resolution entry,
+including `not_committed`, retains those bytes alongside `session_id`, the
 session-journal mutation domain, `expected_owner_epoch`,
 `expected_journal_version`, and `canonical_mutation_digest`. Re-presentation
-with the same bindings is an idempotent query or resolution, never a second
-logical mutation. Reusing the ID with any different binding is
-`tx_id_conflict`, including a digest collision between different record sets.
-The digest covers the complete canonical record set and its order.
+compares the scalar bindings, digest, and canonical bytes before returning the
+recorded terminal outcome; it is an idempotent query or resolution, never a
+second logical mutation. Reusing the ID with any different binding is
+`tx_id_conflict`. Equal digests do not make different canonical record bytes
+equal, so a digest collision is refused rather than treated as identity.
 
-Resolution after `commit_unknown` re-presents those exact bindings. Until it
-resolves, the domain is fenced: new mutations are refused or reported
+Resolution after `commit_unknown` re-presents those exact bindings and canonical
+record bytes. A retained terminal entry returns its recorded outcome. If no
+entry exists, the request takes the unknown-ID branch and can establish only one
+terminal outcome under the atomic epoch-first and version-second comparison.
+Until it resolves, the domain is fenced: new mutations are refused or reported
 temporarily unavailable, and if the store stays unavailable the session stays
 unavailable. A proved `not_committed` outcome is terminal for that transaction
 ID. A current owner may rederive from the new durable version only as a new
@@ -128,27 +152,36 @@ The transaction remains durable and must not be discarded merely because its
 originator was superseded after commit. The delayed reply may truthfully
 acknowledge that durable commit to its originator, but the stale coordinator
 does not update the current cache or directly publish or dispatch from the
-reply. A successor or other currently owned path recovers the committed outbox
-or intent and processes it exactly once through the durable event-hub and
-dispatch paths under the current operation, session, and executor fences.
+reply. A successor or other currently owned path recovers the one durable
+logical outbox/event identity. The event hub delivers it at least once, and
+consumers deduplicate by event ID and sequence. The owned effect path separately
+recovers committed intent and admits dispatch only under current operation,
+session, and executor fences plus durable executor deduplication, so recovery or
+a delayed reply cannot start a second logical effect.
 
 The conformance suite every implementation runs covers at minimum:
 
-- a stale owner is refused at commit, and observes `not_committed`, never
-  `committed`;
-- the refused transaction leaves no durable record and produces no outbox row;
+- an unknown transaction from a stale owner is refused at commit and observes
+  `not_committed`, never `committed`, while that owner can retrieve a matching
+  transaction committed before it was superseded;
+- the refused transaction leaves no durable journal record and produces no
+  outbox row, but does retain its matching terminal non-commit resolution;
 - two simultaneous successors yield exactly one winner;
 - a superseded but still-live coordinator cannot update the current cache or
   directly publish or dispatch from a delayed reply; that reply may truthfully
-  report a durable commit, while a currently owned path processes the transaction
-  committed before succession exactly once even if its reply was delayed;
+  report a transaction committed before succession, while a currently owned
+  path exposes one durable event identity whose at-least-once deliveries retain
+  the same event ID and sequence, and cannot start the committed logical effect
+  twice under retry or delayed-reply recovery;
 - a version conflict from the current owner is distinguishable from a stale
   epoch, and an epoch mismatch wins when both comparisons fail;
 - an interrupted commit resolves to exactly one of committed or not committed
   when re-presented by `tx_id`, and never to both;
 - reusing a transaction ID with a different session, epoch, version, digest, or
-  record set is refused, while a proved non-commit can be retried only under a
-  new transaction ID;
+  canonical record bytes is refused for both committed and terminal non-commit
+  resolutions, including when different record bytes are presented with the
+  same digest; a proved non-commit can be retried only under a new transaction
+  ID;
 - replay refuses hand-constructed histories with a version gap, reset,
   duplicate, or out-of-order record, a decreasing epoch, or an epoch transition
   lacking its succession record.

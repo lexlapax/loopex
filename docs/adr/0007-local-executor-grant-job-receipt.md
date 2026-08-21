@@ -52,7 +52,7 @@ Technical depth: [Why an enumerated field list is the wrong contract](0007-local
   host-policy `allow` decision. `M1` may use the documented trusted-local
   `AllowAll` reference policy, but Loopex, model output, tool metadata, and
   ordinary client input cannot mint or widen a grant.
-- **The schema carries every vision-required binding**, including the two the
+- **The schema carries every vision-required binding**, including the three the
   current plan omits: `tool_id` and `tool_version`, and the effect class. A
   binding the vision requires and the schema lacks is a defect in the schema.
 - **Validation is fail-closed and compares values, not presence.** Each binding

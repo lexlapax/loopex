@@ -48,9 +48,12 @@ Technical depth: [Why replay-only fencing fails](0006-store-transaction-and-owne
 
 - **Fencing happens at commit, not at replay.** Every session-journal
   transaction carries an expected owner epoch and an expected journal version.
-  The store compares both **atomically with the commit** and refuses the
-  transaction when either does not match. A stale owner never receives
-  `committed`.
+  For a transaction ID without a retained terminal outcome, the store compares
+  both **atomically with the commit** and refuses the transaction when either
+  does not match. A superseded owner can never newly commit. Re-presenting a
+  known transaction first validates its immutable bindings and returns its
+  recorded outcome, so a now-stale originator receives `committed` only for a
+  transaction committed while its authority was valid.
 - **The store contract has exactly three outcomes**, as the vision fixes them:
   `committed(tx_id)`, `not_committed(reason)`, and `commit_unknown(tx_id)`. A
   refused stale owner is `not_committed`, and a timeout is never evidence of
@@ -65,9 +68,11 @@ Technical depth: [Why replay-only fencing fails](0006-store-transaction-and-owne
   ownership is a store fact, not an inference from process liveness.
 - **Transaction identity is immutable.** A transaction ID is bound to its
   session and mutation domain, expected epoch, expected version, and complete
-  canonical mutation digest. Repeating the same identity and bytes resolves the
-  same outcome; changing any binding is a conflict. A retry after a proved
-  non-commit uses a new transaction ID.
+  canonical mutation digest and record-set bytes. Both are retained with every
+  terminal outcome, including a non-commit. Repeating the same identity and
+  bytes resolves the same outcome; changing any binding is a conflict even if
+  two record sets have the same digest. A retry after a proved non-commit uses a
+  new transaction ID.
 - **Versions form one store-stamped session sequence.** Journal versions remain
   globally consecutive across owner changes. The store, not the caller, stamps
   the committed record range, so replay can detect gaps, resets, and epoch
@@ -124,11 +129,13 @@ unproven.
 A commit remains committed even if its reply reaches a coordinator after that
 coordinator has been superseded. The delayed reply may truthfully acknowledge
 the durable commit, but the stale process cannot update the current cache or
-directly publish or dispatch from that reply. The durable outbox/event-hub path
-publishes once, and a successor or other currently owned path processes committed
-intent once only after current operation, session, and executor fences and
+directly publish or dispatch from that reply. Each committed outbox fact has one
+durable logical event identity; delivery is at least once, and consumers
+deduplicate by event ID and sequence. A successor or other currently owned path
+may dispatch committed intent only after current operation, session, and
+executor fences, durable effect deduplication, and
 [ADR 0007](0007-local-executor-grant-job-receipt.md#concept)'s final validation
-permit dispatch.
+permit the one logical effect.
 
 `commit_unknown` makes unavailability visible. When the store cannot say whether
 a transaction committed, the session is unavailable rather than optimistic. A
