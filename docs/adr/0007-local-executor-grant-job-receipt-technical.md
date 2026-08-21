@@ -22,10 +22,13 @@ missing three are never refused because they were never mentioned, and nothing i
 the chain from plan to gate to test can notice, because every link transcribed
 the same list.
 
-Restating a set in three places is the mechanism. Each restatement can drift, and
-none of them is authoritative, so the version a reader checks against depends on
-which document they opened. One structural definition removes the possibility:
-there is nothing to drift from.
+Restating a set across the plan, gate, validation, and generated cases is the
+mechanism. Each restatement can drift, so production behavior and its mutation
+corpus instead derive from one implementation schema. One deliberate duplicate
+remains: a protected conformance assertion carries the literal ten-binding set
+fixed by this ADR and compares it with that schema. That independent oracle may
+drift only by failing loudly; removing it would let an incomplete schema certify
+itself.
 
 The second failure is subtler and is the one a presence check hides. Consider a
 grant for operation `op-1`, attempt 2, addressed to executor `alpha`, with
@@ -43,12 +46,14 @@ a struct, not a fence.
 
 Concept: [Decision](0007-local-executor-grant-job-receipt.md#concept-adr-0007-decision).
 
-The required-binding schema is one structural definition in code. It is the sole
-source for the executor's validation and generated mutation corpus. Its
-completeness has a separate oracle: conformance asserts that its keys equal the
-closed ten-binding set in this decision, so an implementation cannot
-omit a binding and then derive a self-consistent but incomplete test suite from
-the same omission.
+The production required-binding schema is one structural definition in code.
+The executor's validation and generated mutation corpus both derive from it.
+Its completeness has a deliberately separate oracle: one protected conformance
+assertion contains a literal expected set of these ten binding names and compares
+it with the production schema. That intentional transcription is the only test
+list allowed to duplicate the governed set; without it, an implementation could
+omit a binding and derive a self-consistent but incomplete suite from the same
+omission.
 
 | Binding | Validated against |
 | --- | --- |
@@ -100,8 +105,10 @@ never becomes silent success.
 
 Completeness and behavior use separate checks:
 
-1. Assert independently that the implementation schema equals this ADR's closed
-   set of ten required bindings.
+1. In one protected conformance assertion, compare the implementation schema
+   with a literal expected set containing exactly `operation_id`, `attempt`,
+   `canonical_request_digest`, `tool_id`, `tool_version`, `effect_class`,
+   `workspace_lease`, `executor_audience`, `expiry`, and `fencing_token`.
 2. Construct one valid baseline and prove it is admitted at the final pre-start
    boundary.
 3. Enumerate the implementation schema's required bindings.
@@ -119,9 +126,10 @@ Completeness and behavior use separate checks:
    assertion.
 
 Step 1 is the completeness boundary: deriving a corpus from the implementation
-alone cannot detect a field omitted from that implementation. Steps 4 through 7
-make every implemented binding test-sensitive without manually duplicating the
-implementation list.
+alone cannot detect a field omitted from that implementation. Its one literal
+expected set is intentional and protected. Steps 4 through 7 make every
+implemented binding test-sensitive without duplicating the implementation list
+again.
 
 Wrong values are used rather than missing ones because a missing value is the
 easy case: it fails almost any implementation. A present, well-formed, wrong
@@ -168,10 +176,12 @@ assertion has nothing to assert against.
 
 Concept: [Consequences](0007-local-executor-grant-job-receipt.md#concept-adr-0007-consequences).
 
-Adding a binding is a four-part change: decision, schema, validation, and the
-derived missing/wrong-value corpus. The independent equality assertion makes the
-decision update visible instead of letting the schema certify itself. This is
-friction on purpose, and it is small — two mechanical cases per binding.
+Adding a binding changes the governed decision, the production schema, and the
+one protected literal oracle. Validation and the missing/wrong-value corpus then
+derive from the production schema. The independent equality assertion makes a
+schema-only or oracle-only change fail instead of letting either definition
+certify itself. This is friction on purpose, and it is small — one intentional
+oracle entry plus two mechanically generated cases per binding.
 
 The security claim `M1` may make is narrow and must stay narrow in every
 document: the executor refuses a grant whose bindings do not match. It is not a

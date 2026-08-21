@@ -32,13 +32,14 @@ writer's records be refused *at replay* rather than prevented at write. That
 answer is unsafe, and choosing it in a plan rather than a decision is why this
 record exists.
 
-Replay-only fencing means the store acknowledges a stale writer's commit. The
-stale owner then does exactly what an acknowledgement authorizes: it publishes
-its events and dispatches its effects. Replay discards the record later, so the
-durable history is eventually correct and the observable world is not — an effect
-ran, a subscriber saw a fact, and neither is recoverable by discarding a row. The
-vision's ordering exists to prevent precisely this: intent commits before
-dispatch, and facts commit before publication.
+Replay-only fencing makes a stale writer's records durable and eligible work.
+Before a later replay rejects them, the durable outbox/event-hub path can publish
+their facts and the dispatch path can present their intent for execution. Current
+executor fences remain required and may refuse that dispatch, but they cannot
+make the stale durable fact truthful or retract a publication; if the downstream
+fence has not advanced separately, the effect can run too. The vision's ordering
+exists to prevent precisely this: intent commits before dispatch, and facts
+commit before publication.
 
 Technical depth: [Why replay-only fencing fails](0006-store-transaction-and-owner-epoch-technical.md#technical-adr-0006-context).
 
@@ -96,8 +97,9 @@ correctness depends on lease-expiry timing that differs per implementation, whil
 an epoch-and-version comparison is the same arithmetic everywhere.
 
 **Replay-only rejection** is what the current `M1` plan mandates. It is rejected
-above: it acknowledges a stale writer, which authorizes publication and dispatch
-that no later replay can retract.
+above: it makes stale outbox and intent records durable eligible work. A later
+replay cannot retract publication, and relying on a downstream executor fence
+does not make the session journal truthful.
 
 **Write prevention by process identity alone** is `M0`'s mechanism carried
 forward. It is not sufficient for a replaceable port, because a store reached
@@ -120,9 +122,13 @@ first command. The alternative is admitting a command whose ownership is
 unproven.
 
 A commit remains committed even if its reply reaches a coordinator after that
-coordinator has been superseded. The stale process cannot publish or dispatch;
-the current owner recovers and processes the committed outbox or intent exactly
-once under the current fences.
+coordinator has been superseded. The delayed reply may truthfully acknowledge
+the durable commit, but the stale process cannot update the current cache or
+directly publish or dispatch from that reply. The durable outbox/event-hub path
+publishes once, and a successor or other currently owned path processes committed
+intent once only after current operation, session, and executor fences and
+[ADR 0007](0007-local-executor-grant-job-receipt.md#concept)'s final validation
+permit dispatch.
 
 `commit_unknown` makes unavailability visible. When the store cannot say whether
 a transaction committed, the session is unavailable rather than optimistic. A

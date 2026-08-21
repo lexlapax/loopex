@@ -15,14 +15,18 @@ paused, or simply slow. `B` takes over, durably advances the session to epoch 5,
 and begins admitting commands. `A` has not noticed and issues a transaction.
 
 Under replay-only rejection the store accepts `A`'s transaction and returns
-`committed`. That return value is the authorization to act, so `A` publishes its
-outbox rows and dispatches its effect. A tool runs. A subscriber receives a fact.
-Some time later a replay reads the journal, notices that a record carries epoch 4
-after a record carrying epoch 5, and discards it.
+`committed`. The stale records are now durable fact and eligible work: the
+outbox/event-hub path can publish them and the dispatch path can present their
+intent. A current executor fence may refuse that dispatch, but it cannot retract
+a published fact or make the stale journal record truthful; if the downstream
+fence has not advanced independently, the tool can run too. Some time later a
+replay reads the journal, notices that a record carries epoch 4 after a record
+carrying epoch 5, and discards it.
 
-The history is now correct and the world is not. The effect ran once for real,
-the published fact was consumed, and neither is undone by dropping a row. Replay
-repairs the record of what happened; it cannot repair what happened.
+The history is now superficially correct and the world is not. A published fact
+may already have been consumed and an effect may already have run; neither is
+undone by dropping a row. Replay repairs the record of what happened; it cannot
+repair what happened.
 
 This is exactly the ordering the durability rule fixes: intent commits before
 dispatch, and facts commit before publication. The commit *is* the fence. Moving
@@ -65,9 +69,18 @@ Outcomes and required owner behavior:
 
 | Result | Condition | Owner behavior |
 | --- | --- | --- |
-| `committed(tx_id)` | Both comparisons matched and the records are durable | Update cached state, publish the outbox, acknowledge, dispatch |
+| `committed(tx_id)` | Both comparisons matched and the records are durable | Treat the commit as durable fact and eligible work; report that durable result truthfully, and process publication or dispatch only through the durable owned paths and their current fences |
 | `not_committed(reason)` | Either comparison failed, or the store proves no transaction exists | Publish nothing, dispatch nothing, acknowledge nothing; a stale owner stops admitting |
 | `commit_unknown(tx_id)` | Timeout, disconnect, crash, or lost reply | Fence the domain, stop new dispatch, resolve by `tx_id` before choosing a branch |
+
+`committed` establishes durable fact and eligibility; it does not confer
+caller-local post-commit authority. Eligibility lives in the committed outbox or
+intent and is processed through the ordinary owner-epoch-fenced paths, not by an
+extra current-owner read between commit and action. Publication comes from the
+durable outbox/event-hub path. Effect dispatch still has to pass the current
+operation, session, and executor fences and
+[ADR 0007](0007-local-executor-grant-job-receipt.md#concept)'s final executor
+validation.
 
 `reason` distinguishes at least `stale_owner_epoch`, `stale_journal_version`, and
 implementation-specific refusals, because a stale owner must stop rather than
@@ -112,10 +125,12 @@ later transaction from it is fenced by its old epoch.
 
 A delayed `committed(tx_id)` reply does not transfer current-owner authority.
 The transaction remains durable and must not be discarded merely because its
-originator was superseded after commit. The stale coordinator does not publish,
-acknowledge, or dispatch from that late reply. The current owner recovers the
-committed outbox or intent and processes it exactly once under the current
-session and executor fences.
+originator was superseded after commit. The delayed reply may truthfully
+acknowledge that durable commit to its originator, but the stale coordinator
+does not update the current cache or directly publish or dispatch from the
+reply. A successor or other currently owned path recovers the committed outbox
+or intent and processes it exactly once through the durable event-hub and
+dispatch paths under the current operation, session, and executor fences.
 
 The conformance suite every implementation runs covers at minimum:
 
@@ -123,9 +138,10 @@ The conformance suite every implementation runs covers at minimum:
   `committed`;
 - the refused transaction leaves no durable record and produces no outbox row;
 - two simultaneous successors yield exactly one winner;
-- a superseded but still-live coordinator cannot commit, acknowledge, publish,
-  or dispatch, while the current owner processes a transaction committed before
-  succession exactly once even if its reply was delayed;
+- a superseded but still-live coordinator cannot update the current cache or
+  directly publish or dispatch from a delayed reply; that reply may truthfully
+  report a durable commit, while a currently owned path processes the transaction
+  committed before succession exactly once even if its reply was delayed;
 - a version conflict from the current owner is distinguishable from a stale
   epoch, and an epoch mismatch wins when both comparisons fail;
 - an interrupted commit resolves to exactly one of committed or not committed

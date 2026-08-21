@@ -42,9 +42,12 @@ Technical depth: [Why an enumerated field list is the wrong contract](0007-local
 <a id="concept-adr-0007-decision"></a>
 ## Decision
 
-- **One required-binding schema, declared once in code.** The set of bindings a
-  grant must carry is a single structural definition. The plan does not restate
-  it, the gate does not restate it, and tests do not transcribe it.
+- **One production schema plus one intentional conformance oracle.** Production
+  validation and the generated missing/wrong-value corpus derive from one
+  structural schema in code. One protected conformance assertion deliberately
+  transcribes this ADR's literal expected ten-binding set and compares it with
+  that production schema; this independent duplicate is how an omitted binding
+  becomes a failing test. No plan, gate, or other test list restates the set.
 - **Only host policy issues authority.** A grant exists only after an explicit
   host-policy `allow` decision. `M1` may use the documented trusted-local
   `AllowAll` reference policy, but Loopex, model output, tool metadata, and
@@ -117,10 +120,11 @@ be forged" is not, and stating it would be the kind of untested claim a gate
 cannot catch.
 
 Adding a binding later means changing the governed set, implementation schema,
-validation, and generated missing/wrong-value corpus together. The independent
-equality assertion rejects a schema-only change, and corpus coverage rejects an
-untested implementation binding. That friction turns omissions into build
-failures rather than review findings.
+and the one protected literal oracle together. Production validation and the
+generated missing/wrong-value corpus then follow the implementation schema. The
+independent equality assertion rejects either schema or oracle changing alone,
+and corpus coverage rejects an untested implementation binding. That friction
+turns omissions into build failures rather than review findings.
 
 Technical depth: [Operational consequences](0007-local-executor-grant-job-receipt-technical.md#technical-adr-0007-consequences).
 
