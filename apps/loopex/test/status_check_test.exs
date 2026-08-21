@@ -172,7 +172,36 @@ defmodule Loopex.StatusCheckTest do
       # Exit varied alone: verdict stays green.
       {"a nonzero exit",
        table.(["| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate GREEN | 1 | 91s |"])},
-      {"prose naming every field", "Elixir 1.17.0 / OTP 26.0 ran, M0 gate GREEN, exit 0\n"}
+      {"prose naming every field", "Elixir 1.17.0 / OTP 26.0 ran, M0 gate GREEN, exit 0\n"},
+      # A record that contradicts itself decides nothing. Two tables under the
+      # declared header, or a failing row beside a passing one, were both accepted
+      # by asking whether SOME row recorded the pair green.
+      {"two tables where the second records a failure",
+       table.([real]) <>
+         "\ntext\n\n" <>
+         table.([
+           "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate NOT GREEN | 1 | 91s |"
+         ])},
+      {"a failing row beside a passing one",
+       table.([
+         real,
+         "| 2 | second | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate NOT GREEN | 1 | 91s |"
+       ])},
+      # Constructions that hide or forge outside the insertion fuzzer's reach.
+      {"a nested comment hiding NOT", table.([verdict.("M0 gate <!--a<!--b-->NOT GREEN")])},
+      {"an escaped backtick around NOT", table.([verdict.("M0 gate \\`NOT \\`GREEN")])},
+      {"an HTML entity in the verdict", table.([verdict.("M0 gate &#71;REEN")])},
+      {"a byte-order mark before a failing table",
+       "\uFEFF" <>
+         table.([
+           "| 1 | first | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate NOT GREEN | 1 | 91s |"
+         ])},
+      {"a line separator inside the verdict", table.([verdict.("M0 gate\u2028GREEN")])},
+      {"a tab inside the verdict", table.([verdict.("M0\tgate GREEN")])},
+      {"an escaped pipe hiding columns",
+       table.([
+         "| 1 | first \\| x | Elixir 1.17.0 / OTP 26.0 erts-14.0 | M0 gate NOT GREEN | 1 | 91s |"
+       ])}
     ]
 
     for {label, body} <- refused do

@@ -167,15 +167,23 @@ defmodule Mix.Tasks.Loopex.Matrix do
 
     header = "| " <> Enum.join(@table_header, " | ") <> " |"
 
-    case Enum.find_index(exposed, &(&1 == header)) do
-      nil ->
+    # Exactly one table. Two tables under the same header make the record
+    # contradict itself -- one may say a lane passed while the other says it
+    # failed -- and picking the first would decide that by position.
+    case Enum.filter(Enum.with_index(exposed), fn {line, _n} -> line == header end) do
+      [] ->
         {:error, "#{path}: no visible #{Enum.join(@table_header, " | ")} table"}
 
-      at ->
+      [{_line, at}] ->
         exposed
         |> Enum.drop(at)
         |> Enum.take_while(&String.starts_with?(&1, "|"))
         |> parse_table(path)
+
+      many ->
+        {:error,
+         "#{path}: #{length(many)} visible #{Enum.join(@table_header, " | ")} tables; " <>
+           "exactly one records the runs"}
     end
   end
 
@@ -241,25 +249,32 @@ defmodule Mix.Tasks.Loopex.Matrix do
   # the behaviour wanted here: a row that cannot be read is not a row that passed.
   defp parse_table(lines, path), do: {:ok, Markdown.table(lines, @table_header, path)}
 
+  # Concept: every recorded run passed, and this pair is among them.
+  #
+  # Technical depth: asking only whether SOME row records this pair green let a
+  # failing row sit beside a passing one and be ignored. The table records the
+  # runs taken at this candidate and the gate claims they were green, so a row
+  # that is not a green zero-exit run contradicts the claim wherever it appears.
+  # Both halves are required: every row green, and this pair actually present.
   defp records_pair?(rows, pair) do
-    Enum.any?(rows, fn cells ->
-      Enum.all?(cells, &printable?/1) and records_cells?(cells, pair)
-    end)
+    Enum.all?(rows, &green_run?/1) and Enum.any?(rows, &names_pair?(&1, pair))
   end
 
-  defp records_cells?(cells, pair) do
+  defp green_run?(cells) do
     case cells do
-      # No separate non-empty check on the order cell: `Markdown.table/3` already
-      # refuses an empty or untrimmed cell in any column, and a redundant rule in a
-      # check like this is one a reader has to verify is not the load-bearing one.
-      [number, _order, toolchain, verdict, exit_code | _rest] ->
-        numbered?(number) and
-          toolchain_matches?(toolchain, pair) and
-          verdict == @green_verdict and
-          exit_code == "0"
+      [number, _order, _toolchain, verdict, exit_code | _rest] ->
+        Enum.all?(cells, &printable?/1) and numbered?(number) and
+          verdict == @green_verdict and exit_code == "0"
 
       _other ->
         false
+    end
+  end
+
+  defp names_pair?(cells, pair) do
+    case cells do
+      [_number, _order, toolchain | _rest] -> toolchain_matches?(toolchain, pair)
+      _other -> false
     end
   end
 
