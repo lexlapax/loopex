@@ -153,10 +153,12 @@ defmodule Loopex.JournalOwnershipTest do
     # pid is the only field that does.
     token = "a-known-token"
     digest = :crypto.hash(:sha256, token) |> Base.encode16(case: :lower)
+    foreign_os_pid = if System.pid() == "1", do: "2", else: "1"
+    refute foreign_os_pid == System.pid()
 
     File.write!(
       lock,
-      "node=#{node()} os_pid=1 erl_pid=#{inspect(self())} token_digest=#{digest} at=0\n"
+      "node=#{node()} os_pid=#{foreign_os_pid} erl_pid=#{inspect(self())} token_digest=#{digest} at=0\n"
     )
 
     assert {:error, {:not_the_session_owner, ^journal}} =
