@@ -992,7 +992,7 @@ defmodule Loopex.M1EvidenceVerifier do
     with :ok <- audit_token(value, label),
          [nofile, nproc] <-
            Regex.run(
-             ~r/\Anofile-([^,]+),nproc-([^,]+)\z/u,
+             ~r/\Acore-soft-0,core-hard-0,nofile-([^,]+),nproc-([^,]+)\z/u,
              value,
              capture: :all_but_first
            ),
@@ -1001,12 +1001,15 @@ defmodule Loopex.M1EvidenceVerifier do
       :ok
     else
       _other ->
-        {:error, "#{label} must use nofile-<integer|unlimited>,nproc-<integer|unlimited>"}
+        {:error,
+         "#{label} must use core-soft-0,core-hard-0,nofile-<integer|unlimited>,nproc-<integer|unlimited>"}
     end
   end
 
   defp resource_limits(_value, label),
-    do: {:error, "#{label} must use nofile-<integer|unlimited>,nproc-<integer|unlimited>"}
+    do:
+      {:error,
+       "#{label} must use core-soft-0,core-hard-0,nofile-<integer|unlimited>,nproc-<integer|unlimited>"}
 
   defp canonical_limit("unlimited"), do: :ok
 

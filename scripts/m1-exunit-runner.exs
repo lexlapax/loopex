@@ -314,6 +314,9 @@ defmodule Loopex.M1Gate.SelectorRunner do
   alias Loopex.M1Gate.ExUnitReport
 
   @nonce ~r/\A[0-9a-f]{32}\z/u
+  @input_header "LOOPEX_M1_SELECTOR_V1"
+  @max_provider_bytes 16_384
+  @max_input_bytes byte_size(@input_header) + 1 + 32 + 1 + @max_provider_bytes + 1
   @app_name ~r/\A[a-z][a-z0-9_]*\z/u
   @real_path_fields %{
     "model" => ~w(provider model endpoint adapter_build),
@@ -323,7 +326,7 @@ defmodule Loopex.M1Gate.SelectorRunner do
   @placeholder_values ~w(tbd todo pending unknown -)
 
   def main(args) do
-    input = IO.binread(:stdio, :eof)
+    input = IO.binread(:stdio, @max_input_bytes + 1)
     System.delete_env("LOOPEX_PROVIDER_API_KEY")
 
     result =
@@ -465,7 +468,7 @@ defmodule Loopex.M1Gate.SelectorRunner do
 
   defp input(input, false) do
     case input do
-      <<nonce::binary-size(32), "\n">> ->
+      <<@input_header, 0, nonce::binary-size(32), 0, 0>> ->
         if Regex.match?(@nonce, nonce), do: {:ok, nonce, nil}, else: {:error, "invalid nonce"}
 
       _ ->
@@ -475,11 +478,20 @@ defmodule Loopex.M1Gate.SelectorRunner do
 
   defp input(input, true) do
     case input do
-      <<nonce::binary-size(32), "\n", key::binary>> when byte_size(key) > 0 ->
+      <<@input_header, 0, nonce::binary-size(32), 0, key::binary>>
+      when byte_size(key) > 1 and byte_size(key) <= @max_provider_bytes + 1 ->
         cond do
-          not Regex.match?(@nonce, nonce) -> {:error, "invalid nonce"}
-          :binary.match(key, <<0>>) != :nomatch -> {:error, "provider input is malformed"}
-          true -> {:ok, nonce, key}
+          not String.ends_with?(key, <<0>>) ->
+            {:error, "provider input is malformed"}
+
+          not Regex.match?(@nonce, nonce) ->
+            {:error, "invalid nonce"}
+
+          :binary.match(binary_part(key, 0, byte_size(key) - 1), <<0>>) != :nomatch ->
+            {:error, "provider input is malformed"}
+
+          true ->
+            {:ok, nonce, binary_part(key, 0, byte_size(key) - 1)}
         end
 
       _ ->

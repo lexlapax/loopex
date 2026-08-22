@@ -154,9 +154,25 @@ and forged human-readable summaries from satisfying the gate; it does not claim
 to sandbox a hostile candidate.
 
 The ordinary full suite and every credential-free control remain
-credential-free. Only the explicitly tagged real-provider invocations receive
-`LOOPEX_PROVIDER_API_KEY`; absence is evidence unavailable and fails those
-invocations rather than skipping them. Retained real-path evidence contains
+credential-free. The outer gate refuses `LOOPEX_PROVIDER_API_KEY` in its initial
+environment. Before it reads optional provider stdin or starts any external
+child, Bash builtins set and verify both soft and hard core-file limits at zero.
+An interactive stdin or immediate EOF means no key; otherwise only exact
+`LOOPEX_M1_PROVIDER_V1\0<key>\0` framing is accepted, with a nonempty key of at
+most 16,384 bytes, LF preserved inside the key, and every other nonempty input
+refused. Only the explicitly tagged real-provider invocations receive the key
+through exact
+`LOOPEX_M1_SELECTOR_V1\0<32-lowercase-hex-nonce>\0<key>\0` framing; absence is
+evidence unavailable and fails those invocations rather than skipping them.
+The key is never conveyed through argv, an inherited child environment, a file,
+or retained output. `run_gate_test` captures selector stdout/stderr plus exact
+status by appending a validated non-LF terminal status suffix before Bash
+command substitution and removing only that suffix afterward. This preserves
+all preceding trailing LF bytes for literal key detection while retaining the
+child exit exactly. The retained `ERL_CRASH_DUMP` controls disable gate-owned
+BEAM dump files, and the sealed zero hard core limit prevents file-backed OS
+core dumps; privileged host crash collectors remain host authority and are not
+controlled by the gate. Retained real-path evidence contains
 only non-secret provider/model/endpoint, adapter build, executor build and
 runtime identity, tool identity, and an exact UTC observation time. Those values
 come from the successful real-role process and are sealed into its nonce-bound
@@ -271,7 +287,10 @@ commands and toolchain pairs, exit and verdict, and only non-secret
 provider/model/endpoint identity.
 
 Each M1 capture row records its exact operating-system family, architecture,
-open-file and process limits, then retains eight ordered printable-ASCII/UTC
+open-file, process, soft-core, and hard-core limits, with both core limits
+required to equal zero and serialized in the exact order
+`limits=core-soft-0,core-hard-0,nofile-<positive|unlimited>,nproc-<positive|unlimited>`,
+then retains eight ordered printable-ASCII/UTC
 fields from the combined real-role result: provider, model, endpoint, adapter
 build, executor build, executor runtime identity, tool identity, and observation
 time. The model-only and combined real roles must agree on their shared fields
@@ -561,8 +580,13 @@ launcher exists because preserving an ambient search path would weaken M1's
 credential and command containment, while assigning one in shell would break
 the immutable M0 gate. It only clears and replaces the sealed runner's process
 environment, preserves an exact incoming M0 absence-stub root ahead of the
-derived toolchain path, conveys private controls over stdin, and returns the
-child's bytes and exit status. It is not a general command runner. These tools
+derived toolchain path, conveys bounded versioned private controls over stdin,
+and returns the child's bytes and exit status. The outer shell has already
+sealed and verified both core limits at zero before it can read those controls
+or spawn the launcher. Gate-owned BEAM dump files are disabled by the retained
+`ERL_CRASH_DUMP` controls, and the zero hard core limit prevents file-backed OS
+core dumps; privileged host crash collectors are host authority and are not
+controlled. The launcher is not a general command runner. These tools
 remain repository tooling outside the product boundary and create no product
 mechanism or generalized evidence framework.
 

@@ -26,21 +26,31 @@ evidence file, status row, or document alone cannot make it green.
 
 ## Read-Only Opening Condition
 
-Before any temporary directory, dependency copy, Mix command, or product test,
-the runner:
+Before reading provider input, spawning any external child, creating any
+temporary directory, copying a dependency, running Mix, or starting a product
+test, the outer runner:
 
 1. requires the exact privileged-Bash mode, disables tracing and automatic
-   export, and privately captures only the provider key, supplied home,
-   temporary-root input, installed Mix-prerequisite root, gate seed, and
-   toolchain path;
+   export, rejects `LOOPEX_PROVIDER_API_KEY` when it is present in the initial
+   environment, uses Bash builtins to set both the soft and hard core-file
+   limits to exactly zero, and reads both limits back as exactly zero so no
+   descendant can raise them;
 2. resets aliases, hashing, options, glob controls, `IFS`, `CDPATH`, and umask;
    removes ambient mutable variables, leaves the shell search-path value and
    export attribute untouched, and resolves the absolute OTP `escript`
    executable beside the selected `erl`;
-3. sends the private controls over a pipe—not argv, environment, a file, or
-   retained output—to the digest-bound launcher, whose bootstrap environment
-   contains only locale and crash-dump controls and no provider credential;
-4. has the launcher clear every inherited environment entry for its child,
+3. treats an interactive stdin or immediate EOF as no provider key, otherwise
+   accepts exactly `LOOPEX_M1_PROVIDER_V1\0<key>\0`, with a nonempty key of at
+   most 16,384 bytes; any other nonempty input, missing terminator, additional
+   field, oversized key, or trailing byte is refused, while LF bytes within the
+   key remain literal;
+4. privately captures only the optional provider record, supplied home,
+   temporary-root input, installed Mix-prerequisite root, gate seed, and
+   toolchain path, then sends the private controls over a pipe—not argv,
+   environment, a file, or retained output—to the digest-bound launcher, whose
+   bootstrap environment contains only locale and gate-owned BEAM dump controls
+   and no provider credential;
+5. has the launcher clear every inherited environment entry for its child,
    install exactly the derived absolute toolchain `PATH`, `HOME=/`,
    `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and `GIT_OPTIONAL_LOCKS=0`, and start the
    same bound shell in its sealed-inner role; when the incoming path begins with
@@ -52,18 +62,22 @@ the runner:
    assigning or changing the export attribute of `PATH`, then makes
    `/usr/bin/env` its first external child and requires the complete output to
    equal that allowlist plus the conventional `_=/usr/bin/env` entry;
-5. keeps `ERL_CRASH_DUMP=/dev/null` and `ERL_CRASH_DUMP_SECONDS=0` in force for
-   the launcher and every later BEAM child, resolves the actual account home
-   through validated Bash account expansion, and requires the supplied home to
-   have the same physical device/inode identity;
-6. resolves the repository and every inherited task, toolchain, Mix, and
+6. keeps `ERL_CRASH_DUMP=/dev/null` and `ERL_CRASH_DUMP_SECONDS=0` in force for
+   the launcher and every later BEAM child, thereby disabling gate-owned BEAM
+   dump files, while the sealed zero soft/hard core limits prevent file-backed
+   OS core dumps; privileged host crash collectors remain host authority and
+   are neither configured nor controlled by this gate; resolves the actual
+   account home through validated Bash account expansion and requires the
+   supplied home to have the same physical device/inode identity;
+7. resolves the repository and every inherited task, toolchain, Mix, and
    temporary path outside the actual account's physical `~/.loopex`;
-7. requires Darwin or Linux, proves the canonical locale resolves to the exact
+8. requires Darwin or Linux, proves the canonical locale resolves to the exact
    `UTF-8` charmap, selects a validated BSD or GNU `stat` dialect and a validated
    `shasum` or `sha256sum` dialect, records populated
-   architecture and resource limits, and any capture lane's exact OS pairing;
+   architecture and resource limits including `core-soft-0` and `core-hard-0`,
+   and any capture lane's exact OS pairing;
    and
-8. requires every protected selector as a tracked ordinary `100644` blob,
+9. requires every protected selector as a tracked ordinary `100644` blob,
    every exact locked name, and each exact real-provider tag.
 
 An invalid raw `execve` environment name is not an ordinary Bash identifier.
@@ -93,13 +107,13 @@ product selector, and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `e2b63cdb5d7b544a46b8c207251a9ade2cf19252bfa8475a67beb04be8a1f409` | `scripts/check-m1-gate.sh` |
+| `da0ff8de9a9a43b7004a63c0304ab7088cc10119cb4357375279c5e4de165e43` | `scripts/check-m1-gate.sh` |
 | `d29358ad791436eefb677fc04077ddd720b521a77d3a8f708c11fd76db17e2ba` | `scripts/m1-gate-launcher.escript` |
-| `954ff0e05521ac1b59e2438ba4e0f836f5137d44175eefdb85d509e3aa37aaa4` | `scripts/m1-exunit-runner.exs` |
-| `0e67f7bec0edeb1296a64c9fecec9fa1486fe18f98154c2ca11fdf220abb23dc` | `scripts/m1-evidence-verifier.exs` |
+| `6aa177be0672179cb0713a7e73ccf54a52fa4dc957d5e7d00e3e514d5015f8c2` | `scripts/m1-exunit-runner.exs` |
+| `360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c` | `scripts/m1-evidence-verifier.exs` |
 | `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `612f428246137f4d064396fa33e5db4b0371df58692d9892a223235e40b9e22e` | `apps/loopex/test/m1_gate_evidence_test.exs` |
-| `662ca1cd0838ca8f5689697181a04e0e137a07fd017e207c1689fb7941bec20b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
+| `dd7afd259226b2cd9b78568816d7b34ee4a26688dcad3bff9d14fa5acc8cf7f5` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 
@@ -118,7 +132,9 @@ Git, JSON, and Matrix code remains
 evolvable and is not part of the M1 trust root. Product selectors and Mix
 projects are not byte-bound: their candidate bytes are bound historically by
 the capture commit, while paths, roles, dependency direction, names, states,
-counts, and results are checked structurally on every run.
+counts, and results are checked structurally on every run. The launcher and all
+of its descendants inherit the already verified zero hard core limit; the
+launcher does not create a later opportunity to relax it.
 
 ## Repository Commands and Owned State
 
@@ -268,10 +284,14 @@ Mix test task or alias:
 elixir scripts/m1-exunit-runner.exs --loopex-m1-selector [--only-real-provider] <root> <test-build> <selector> <owner> <internal-csv> <allowed-csv> <seed> <minimum> <zero|positive> <state=name>...
 ```
 
-The default role receives exactly a random 32-lowercase-hex nonce plus LF on
-stdin. A real-only role receives that nonce and LF followed by the nonempty,
-NUL-free provider key as raw bytes to EOF. The key appears in neither argv nor
-the inherited environment. The script consumes stdin before candidate startup,
+Every role receives exactly
+`LOOPEX_M1_SELECTOR_V1\0<32-lowercase-hex-nonce>\0<key>\0` on stdin, bounded
+to a provider-key field of at most 16,384 bytes. The default role's key field is
+empty; a real-only role's key field is nonempty. This frame preserves LF bytes
+within a key, while an invalid header or nonce, missing or extra field, missing
+terminal NUL, trailing byte, oversized key, or NUL within the key is refused.
+The key appears in neither argv nor the inherited environment. The script
+consumes stdin before candidate startup,
 requires the selector to be a tracked ordinary `100644` file under
 `apps/<owner>/test/`, verifies the compiled owner and source-derived dependency
 closure, adds only link-free closure `ebin` paths, and starts that application
@@ -422,9 +442,9 @@ green-base invariant until implementation or closure.
 
 ```text
 matrix candidate=<C> gate_sha256=<digest> runner_sha256=<digest> launcher_sha256=<digest> exunit_runner_sha256=<digest> deps_budget_sha256=<digest> verifier_sha256=<digest> tool_versions_sha256=<digest> command=bash-p:scripts/check-m1-gate.sh
-capture lane=floor candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.17.0 otp=26.0 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=darwin arch=<ASCII-token> limits=nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<ASCII-token> model=<ASCII-token> endpoint=<ASCII-token> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<ASCII-token> tool_identity=<ASCII-token> recorded=<UTC-RFC3339-second>
-capture lane=current candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=darwin arch=<independent-ASCII-token> limits=nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<same> model=<same> endpoint=<same> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<same> tool_identity=<same> recorded=<UTC-RFC3339-second>
-capture lane=linux-current candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=linux arch=<independent-ASCII-token> limits=nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<same> model=<same> endpoint=<same> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<same> tool_identity=<same> recorded=<UTC-RFC3339-second>
+capture lane=floor candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.17.0 otp=26.0 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=darwin arch=<ASCII-token> limits=core-soft-0,core-hard-0,nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<ASCII-token> model=<ASCII-token> endpoint=<ASCII-token> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<ASCII-token> tool_identity=<ASCII-token> recorded=<UTC-RFC3339-second>
+capture lane=current candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=darwin arch=<independent-ASCII-token> limits=core-soft-0,core-hard-0,nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<same> model=<same> endpoint=<same> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<same> tool_identity=<same> recorded=<UTC-RFC3339-second>
+capture lane=linux-current candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=linux arch=<independent-ASCII-token> limits=core-soft-0,core-hard-0,nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<same> model=<same> endpoint=<same> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<same> tool_identity=<same> recorded=<UTC-RFC3339-second>
 m0 lane=floor candidate=<C> gate_sha256=<M0 digest> command=bash:scripts/check-m0-gate.sh elixir=1.17.0 otp=26.0 provider=<nonsecret> model=<nonsecret> endpoint=<nonsecret> verdict=GREEN exit=0
 m0 lane=current candidate=<C> gate_sha256=<M0 digest> command=bash:scripts/check-m0-gate.sh elixir=1.20.3 otp=29.0.5 provider=<nonsecret> model=<nonsecret> endpoint=<nonsecret> verdict=GREEN exit=0
 ```
@@ -490,17 +510,27 @@ proves one clean-baseline mechanism was disabled and caused the named failure.
 
 ## Credential and Provider Boundary
 
-The structural child-environment allowlist removes ambient credential aliases,
-proxy values, client state, and unrelated exported secrets even when the
-canonical key is absent. The key remains in one private outer-runner holder and
-is sent only to real-only selector VMs through stdin after their nonce. It is
-never an argv field, inherited child-environment entry, fixture, evidence field,
-or crash dump. Credential-free roles, compilation, repository commands, and the
-full suite never receive the canonical key.
+The outer runner refuses an initially exported canonical provider key. Its
+structural child-environment allowlist removes ambient credential aliases,
+proxy values, client state, and unrelated exported secrets. Only after both
+core limits are sealed and verified at zero may an optional provider key enter
+through the strict bounded `LOOPEX_M1_PROVIDER_V1\0<key>\0` stdin record. The
+key remains in one private outer-runner holder and is sent only to real-only
+selector VMs through their exact versioned NUL frame. It is never an argv
+field, child-environment entry, file, fixture, evidence field, retained output,
+or gate-owned BEAM dump; the zero hard core limit prevents it from entering a
+file-backed OS core dump. Privileged host crash collectors remain host
+authority and are not controlled by this gate. Credential-free roles,
+compilation, repository commands, and the full suite never receive the
+canonical key.
 
-Provider stdout/stderr is captured. On failure the outer Bash removes every
-literal occurrence in-process, proves the bytes absent, and otherwise emits only
-a fixed suppressed diagnostic; successful provider output is not printed.
+Provider stdout/stderr is captured together with exact status. Because command
+substitution strips trailing LF bytes, `run_gate_test` appends a validated
+non-LF terminal status suffix, removes only that suffix after capture, and thus
+preserves every preceding trailing LF for literal secret detection while
+retaining the exact child exit. On failure the outer Bash removes every literal
+key occurrence in-process, proves the bytes absent, and otherwise emits only a
+fixed suppressed diagnostic; successful provider output is not printed.
 Outcome 6 separately requires its controlled OS tool to receive an explicit
 credential-free environment, and Outcome 8 repeats that assertion in the real
 trace. This is containment at the runner and product boundaries, not semantic

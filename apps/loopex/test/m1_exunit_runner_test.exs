@@ -6,6 +6,8 @@ defmodule Loopex.M1ExUnitRunnerTest do
   alias Loopex.M1Gate.ExUnitReport
 
   @nonce "0123456789abcdef0123456789abcdef"
+  @input_header "LOOPEX_M1_SELECTOR_V1"
+  @max_provider_bytes 16_384
   @model_identity %{
     "provider" => "fixture-provider",
     "model" => "fixture-model",
@@ -247,6 +249,59 @@ defmodule Loopex.M1ExUnitRunnerTest do
       ),
       {"model", @model_identity}
     )
+
+    lf_key = "fixture-secret\nwith-line-feed\n"
+
+    lf_provider =
+      write_selector(
+        fixture,
+        "fixture_app",
+        "lf_provider_test.exs",
+        """
+        defmodule FixtureLfProviderTest do
+          use ExUnit.Case
+          @tag :real_provider
+          test "provider bytes remain exact" do
+            assert System.get_env("LOOPEX_PROVIDER_API_KEY") == #{inspect(lf_key)}
+
+            assert :ok =
+                     Loopex.M1Gate.RealPathEvidence.report(#{inspect(@model_identity)})
+          end
+        end
+        """
+      )
+
+    track!(fixture.root, lf_provider)
+
+    assert_success(
+      run(fixture, lf_provider, ["passed=provider bytes remain exact"],
+        real_path: "model",
+        provider_key: lf_key
+      ),
+      {"model", @model_identity}
+    )
+
+    valid_real_frame = selector_frame("fixture-secret")
+
+    malformed_frames = [
+      <<>>,
+      @input_header,
+      valid_real_frame <> "trailing",
+      selector_frame(""),
+      selector_frame(String.duplicate("x", @max_provider_bytes + 1)),
+      @input_header <> <<0>> <> @nonce <> <<0>> <> "split" <> <<0>> <> "key" <> <<0>>
+    ]
+
+    Enum.each(malformed_frames, fn input ->
+      assert_refused(
+        run(fixture, split_roles, ["excluded=deterministic", "passed=provider"],
+          real_path: "model",
+          provider_key: "fixture-secret",
+          policy: "positive",
+          input: input
+        )
+      )
+    end)
   end
 
   test "fake stdout at_exit and early halt cannot manufacture one authoritative result" do
@@ -616,7 +671,9 @@ defmodule Loopex.M1ExUnitRunnerTest do
       end)
 
     key = Keyword.get(options, :provider_key, "")
-    input = @nonce <> "\n" <> key
+    input = Keyword.get(options, :input, selector_frame(key))
+    input_path = Path.join(fixture.root, "runner-input-#{System.unique_integer([:positive])}")
+    File.write!(input_path, input)
     script = Path.expand("../../../scripts/m1-exunit-runner.exs", __DIR__)
 
     args =
@@ -633,11 +690,18 @@ defmodule Loopex.M1ExUnitRunnerTest do
           Keyword.get(options, :policy, "zero")
         ] ++ expectations
 
-    command = "builtin printf '%s' \"$1\" | exec \"$2\" \"$3\" --loopex-m1-selector \"\${@:4}\""
+    command = "exec \"$2\" \"$3\" --loopex-m1-selector \"\${@:4}\" <\"$1\""
 
     System.cmd(
       "/bin/bash",
-      ["-c", command, "m1-runner", input, System.find_executable("elixir"), script | args],
+      [
+        "-c",
+        command,
+        "m1-runner",
+        input_path,
+        System.find_executable("elixir"),
+        script | args
+      ],
       env:
         [
           {"ERL_CRASH_DUMP", "/dev/null"},
@@ -646,6 +710,8 @@ defmodule Loopex.M1ExUnitRunnerTest do
       stderr_to_stdout: true
     )
   end
+
+  defp selector_frame(key), do: @input_header <> <<0>> <> @nonce <> <<0>> <> key <> <<0>>
 
   defp assert_success(result, expected_identity \\ nil)
 

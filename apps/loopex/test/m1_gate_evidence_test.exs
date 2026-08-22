@@ -18,6 +18,8 @@ defmodule Loopex.M1GateEvidenceTest do
   use ExUnit.Case, async: false
 
   @artifact_blob "restored mechanism bytes\n"
+  @provider_input_header "LOOPEX_M1_PROVIDER_V1"
+  @max_provider_bytes 16_384
   @identity_fields ~w(provider model endpoint adapter_build executor_build executor_identity tool_identity recorded)
   @capture_bound_fields ~w(os arch limits provider model endpoint adapter_build executor_build executor_identity tool_identity recorded)
   @capture_identity %{
@@ -101,6 +103,44 @@ defmodule Loopex.M1GateEvidenceTest do
       stderr_to_stdout: true
     )
   end
+
+  defp run_gate_with_input(input, args, env) do
+    producer =
+      "IO.binwrite(Base.decode64!(List.first(System.argv())))"
+
+    System.cmd(
+      "/bin/bash",
+      [
+        "-p",
+        "-c",
+        "\"$1\" -e \"$2\" -- \"$3\" | /bin/bash -p scripts/check-m1-gate.sh \"\${@:4}\"",
+        "m1-provider-input",
+        System.find_executable("elixir"),
+        producer,
+        Base.encode64(input) | args
+      ],
+      cd: repo_root(),
+      env: env,
+      stderr_to_stdout: true
+    )
+  end
+
+  defp run_gate_without_input(args, env) do
+    System.cmd(
+      "/bin/bash",
+      [
+        "-p",
+        "-c",
+        "exec /bin/bash -p scripts/check-m1-gate.sh \"$@\" </dev/null",
+        "m1-no-provider-input" | args
+      ],
+      cd: repo_root(),
+      env: env,
+      stderr_to_stdout: true
+    )
+  end
+
+  defp provider_frame(key), do: @provider_input_header <> <<0>> <> key <> <<0>>
 
   defp load_verifier_for_mutations do
     trailer = "\nLoopex.M1EvidenceVerifier.CLI.main(System.argv())\n"
@@ -294,9 +334,9 @@ defmodule Loopex.M1GateEvidenceTest do
     <!-- loopex:m1-matrix:start -->
     ```text
     matrix candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} runner_sha256=#{context.runner_sha256} launcher_sha256=#{context.launcher_sha256} exunit_runner_sha256=#{context.exunit_runner_sha256} deps_budget_sha256=#{context.deps_budget_sha256} verifier_sha256=#{context.verifier_sha256} tool_versions_sha256=#{context.tool_versions_sha256} command=bash-p:scripts/check-m1-gate.sh
-    capture lane=floor candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.17.0 otp=26.0 erts=14.0 seed=11 executed=101 verdict=CAPTURE exit=0 wall=1s os=darwin arch=arm64 limits=nofile-256,nproc-709 #{floor_identity}
-    capture lane=current candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=17.0.5 seed=12 executed=102 verdict=CAPTURE exit=0 wall=2s os=darwin arch=x86_64 limits=nofile-unlimited,nproc-709 #{current_identity}
-    capture lane=linux-current candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=17.0.5 seed=13 executed=103 verdict=CAPTURE exit=0 wall=3s os=linux arch=aarch64 limits=nofile-1048576,nproc-unlimited #{linux_identity}
+    capture lane=floor candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.17.0 otp=26.0 erts=14.0 seed=11 executed=101 verdict=CAPTURE exit=0 wall=1s os=darwin arch=arm64 limits=core-soft-0,core-hard-0,nofile-256,nproc-709 #{floor_identity}
+    capture lane=current candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=17.0.5 seed=12 executed=102 verdict=CAPTURE exit=0 wall=2s os=darwin arch=x86_64 limits=core-soft-0,core-hard-0,nofile-unlimited,nproc-709 #{current_identity}
+    capture lane=linux-current candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=17.0.5 seed=13 executed=103 verdict=CAPTURE exit=0 wall=3s os=linux arch=aarch64 limits=core-soft-0,core-hard-0,nofile-1048576,nproc-unlimited #{linux_identity}
     m0 lane=floor candidate=#{context.candidate} gate_sha256=#{context.m0_gate_sha256} command=bash:scripts/check-m0-gate.sh elixir=1.17.0 otp=26.0 provider=fixture-provider model=fixture-model endpoint=https://example.invalid verdict=GREEN exit=0
     m0 lane=current candidate=#{context.candidate} gate_sha256=#{context.m0_gate_sha256} command=bash:scripts/check-m0-gate.sh elixir=1.20.3 otp=29.0.5 provider=fixture-provider model=fixture-model endpoint=https://example.invalid verdict=GREEN exit=0
     ```
@@ -526,9 +566,11 @@ defmodule Loopex.M1GateEvidenceTest do
     assert output =~ "linux-current capture arch"
 
     for {lane, limits} <- [
-          {"floor", "nofile-0256,nproc-709"},
-          {"current", "nofile-unlimited,nproc-pending"},
-          {"linux-current", "nproc-unlimited,nofile-1048576"}
+          {"floor", "core-soft-1,core-hard-0,nofile-256,nproc-709"},
+          {"current", "core-soft-0,core-hard-1,nofile-unlimited,nproc-709"},
+          {"linux-current", "nofile-1048576,nproc-unlimited,core-soft-0,core-hard-0"},
+          {"floor", "core-soft-0,core-hard-0,nofile-0256,nproc-709"},
+          {"current", "core-soft-0,core-hard-0,nofile-unlimited,nproc-pending"}
         ] do
       File.write!(path, replace_capture_field(original, lane, "limits", limits))
       assert {output, status} = run_loaded_verifier(context.root)
@@ -797,13 +839,11 @@ defmodule Loopex.M1GateEvidenceTest do
     on_exit(fn -> File.rm(bash_env) end)
 
     {output, 0} =
-      System.cmd(
-        "/bin/bash",
-        ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
-        cd: root,
-        env: [
+      run_gate_with_input(
+        provider_frame(token),
+        ["--environment-fixture"],
+        [
           {"HOME", actual_home},
-          {"LOOPEX_PROVIDER_API_KEY", token},
           {"ANTHROPIC_API_KEY", token},
           {"ALTERNATE_PROVIDER_ALIAS", "another-secret"},
           {"COMPOSITE_PROVIDER_ALIAS", "prefix-#{token}-suffix"},
@@ -813,8 +853,7 @@ defmodule Loopex.M1GateEvidenceTest do
           {"HTTPS_PROXY", "https://ambient.invalid"},
           {"loopex_m1_attacker", "must-also-disappear"},
           {"UNRELATED_ENVIRONMENT_VALUE", "must-disappear"}
-        ],
-        stderr_to_stdout: true
+        ]
       )
 
     refute output =~ token
@@ -840,7 +879,7 @@ defmodule Loopex.M1GateEvidenceTest do
 
     assert [summary, os, arch, locale, stat, sha256, limits] =
              Regex.run(
-               ~r/^M1 environment preflight OK os=(darwin|linux) arch=([A-Za-z0-9._-]+) locale=(UTF-8) stat=(bsd|gnu) sha256=(shasum|sha256sum) limits=(nofile-(?:[1-9][0-9]*|unlimited),nproc-(?:[1-9][0-9]*|unlimited))$/m,
+               ~r/^M1 environment preflight OK os=(darwin|linux) arch=([A-Za-z0-9._-]+) locale=(UTF-8) stat=(bsd|gnu) sha256=(shasum|sha256sum) limits=(core-soft-0,core-hard-0,nofile-(?:[1-9][0-9]*|unlimited),nproc-(?:[1-9][0-9]*|unlimited))$/m,
                output
              )
 
@@ -851,7 +890,10 @@ defmodule Loopex.M1GateEvidenceTest do
     assert locale == "UTF-8"
     assert stat in ["bsd", "gnu"]
     assert sha256 in ["shasum", "sha256sum"]
-    assert limits =~ ~r/\Anofile-(?:[1-9][0-9]*|unlimited),nproc-(?:[1-9][0-9]*|unlimited)\z/
+
+    assert limits =~
+             ~r/\Acore-soft-0,core-hard-0,nofile-(?:[1-9][0-9]*|unlimited),nproc-(?:[1-9][0-9]*|unlimited)\z/
+
     assert summary in environment_lines
 
     boundary_functions =
@@ -888,14 +930,47 @@ defmodule Loopex.M1GateEvidenceTest do
         env: [
           {"HOME", actual_home},
           {"LOOPEX_PROVIDER_API_KEY", token},
-          {"MIX_HOME", "/tmp/#{token}/mix"}
+          {"MIX_HOME", "/tmp/mix"}
         ],
         stderr_to_stdout: true
       )
 
     assert status != 0
+
+    assert output ==
+             "M1 gate RED: canonical provider credential is forbidden in the initial environment\n"
+
+    refute output =~ token
+
+    {output, status} =
+      run_gate_with_input(
+        provider_frame(token),
+        ["--environment-fixture"],
+        [{"HOME", actual_home}, {"MIX_HOME", "/tmp/#{token}/mix"}]
+      )
+
+    assert status != 0
     assert output =~ "a required runner control contains provider credential bytes"
     refute output =~ token
+
+    malformed_provider_inputs = [
+      @provider_input_header,
+      @provider_input_header <> <<0>>,
+      provider_frame(""),
+      provider_frame("fixture") <> "trailing",
+      provider_frame("split" <> <<0>> <> "key"),
+      provider_frame(String.duplicate("x", @max_provider_bytes + 1))
+    ]
+
+    Enum.each(malformed_provider_inputs, fn input ->
+      {output, status} =
+        run_gate_with_input(input, ["--environment-fixture"], [{"HOME", actual_home}])
+
+      assert status != 0
+      assert output =~ "M1 gate RED: provider input is malformed"
+      refute output =~ token
+      refute output =~ "M1 environment preflight OK"
+    end)
 
     {output, status} =
       System.cmd("/bin/bash", ["scripts/check-m1-gate.sh"],
@@ -913,8 +988,8 @@ defmodule Loopex.M1GateEvidenceTest do
           "BAD-NAME=ambient",
           "/bin/bash",
           "-p",
-          "scripts/check-m1-gate.sh",
-          "--environment-fixture"
+          "-c",
+          "exec /bin/bash -p scripts/check-m1-gate.sh --environment-fixture </dev/null"
         ],
         cd: root,
         stderr_to_stdout: true
@@ -955,7 +1030,50 @@ defmodule Loopex.M1GateEvidenceTest do
           ;;
         *)
           /bin/cat >/dev/null
-          builtin printf 'successful provider output prefix-%s-suffix\n' "$provider_key_value"
+          builtin printf '%s' "$provider_key_value"
+          return 7
+          ;;
+      esac
+    }
+    repository_root=/tmp
+    deps_budget_source=deps-budget.ex
+    selector_runner_source=selector-runner.exs
+    test_build_path=/tmp
+    project_configs=()
+    gate_seed=1
+    protected_executed=0
+    last_gate_executed=0
+    provider_key_value=$'fixture-secret\nwith-line-feed\n'
+    run_gate_test real-model apps/loopex_reference_client/test/fixture.exs 1 zero no \
+      passed=fixture
+    """
+
+    {output, status} =
+      System.cmd("/bin/bash", ["-c", real_role_probe], stderr_to_stdout: true)
+
+    assert status != 0
+    assert output =~ "emitted provider credential bytes instead of contained evidence"
+    refute output =~ "fixture-secret"
+
+    status_probe = """
+    #{real_role_functions}
+    validate_generated_tree() { :; }
+    redacted() { :; }
+    fail() {
+      builtin printf 'captured-status=%s\ncaptured-output-start\n%s' "$gate_test_status" "$output"
+      builtin printf 'captured-output-end\n'
+      builtin exit 1
+    }
+    elixir() {
+      case " $* " in
+        *" --context "*)
+          builtin printf '%s\n' \
+            'LOOPEX_DEPENDENCY_CONTEXT owner=loopex_reference_client internal=loopex_reference_client allowed=loopex_reference_client'
+          ;;
+        *)
+          /bin/cat >/dev/null
+          builtin printf 'tail\n\n'
+          return 7
           ;;
       esac
     }
@@ -973,13 +1091,30 @@ defmodule Loopex.M1GateEvidenceTest do
     """
 
     {output, status} =
-      System.cmd("/bin/bash", ["-c", real_role_probe], stderr_to_stdout: true)
+      System.cmd("/bin/bash", ["-c", status_probe], stderr_to_stdout: true)
 
     assert status != 0
-    assert output =~ "emitted provider credential bytes instead of contained evidence"
-    refute output =~ "fixture-secret"
+
+    assert output ==
+             "captured-status=7\ncaptured-output-start\ntail\n\ncaptured-output-end\n"
 
     source = runner_source()
+    outer_launch_body = shell_function(source, "outer_launch")
+    soft_core = :binary.match(outer_launch_body, "builtin ulimit -S -c 0") |> elem(0)
+    hard_core = :binary.match(outer_launch_body, "builtin ulimit -H -c 0") |> elem(0)
+
+    provider_read =
+      :binary.match(
+        outer_launch_body,
+        "IFS= builtin read -r -d '' -n \"$provider_frame_header_limit\" provider_frame_header"
+      )
+      |> elem(0)
+
+    first_child = :binary.match(outer_launch_body, "/usr/bin/env -i") |> elem(0)
+    assert soft_core < hard_core
+    assert hard_core < provider_read
+    assert provider_read < first_child
+
     run_gate_body = shell_function(source, "run_gate_test")
     assert run_gate_body =~ "--only-real-provider --real-path model"
     assert run_gate_body =~ "--only-real-provider --real-path combined"
@@ -998,16 +1133,13 @@ defmodule Loopex.M1GateEvidenceTest do
     actual_home = account_home!()
 
     {output, status} =
-      System.cmd(
-        "/bin/bash",
-        ["-p", "scripts/check-m1-gate.sh"],
-        cd: root,
-        env: [
+      run_gate_without_input(
+        [],
+        [
           {"HOME", fake_home},
           {"TMPDIR", Path.join(actual_home, ".loopex")},
           {"MIX_HOME", Path.join(actual_home, ".mix")}
-        ],
-        stderr_to_stdout: true
+        ]
       )
 
     assert status != 0
@@ -1022,12 +1154,9 @@ defmodule Loopex.M1GateEvidenceTest do
 
     Enum.each(protected_controls, fn {name, controls} ->
       {output, status} =
-        System.cmd(
-          "/bin/bash",
-          ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
-          cd: root,
-          env: [{"HOME", actual_home} | controls],
-          stderr_to_stdout: true
+        run_gate_without_input(
+          ["--environment-fixture"],
+          [{"HOME", actual_home} | controls]
         )
 
       assert status != 0, "#{name} unexpectedly passed:\n#{output}"
@@ -1075,12 +1204,9 @@ defmodule Loopex.M1GateEvidenceTest do
     incoming_path = System.fetch_env!("PATH")
 
     {output, 0} =
-      System.cmd(
-        "/bin/bash",
-        ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
-        cd: root,
-        env: [{"HOME", actual_home}, {"PATH", shadow_root <> ":" <> incoming_path}],
-        stderr_to_stdout: true
+      run_gate_without_input(
+        ["--environment-fixture"],
+        [{"HOME", actual_home}, {"PATH", shadow_root <> ":" <> incoming_path}]
       )
 
     {physical_shadow_root, 0} =
@@ -1094,12 +1220,9 @@ defmodule Loopex.M1GateEvidenceTest do
     File.chmod!(extra, 0o755)
 
     {output, status} =
-      System.cmd(
-        "/bin/bash",
-        ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
-        cd: root,
-        env: [{"HOME", actual_home}, {"PATH", shadow_root <> ":" <> incoming_path}],
-        stderr_to_stdout: true
+      run_gate_without_input(
+        ["--environment-fixture"],
+        [{"HOME", actual_home}, {"PATH", shadow_root <> ":" <> incoming_path}]
       )
 
     assert status != 0
@@ -1109,12 +1232,9 @@ defmodule Loopex.M1GateEvidenceTest do
     File.write!(Path.join(shadow_root, "jq"), "#!/bin/sh\nexit 127\n")
 
     {output, status} =
-      System.cmd(
-        "/bin/bash",
-        ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
-        cd: root,
-        env: [{"HOME", actual_home}, {"PATH", shadow_root <> ":" <> incoming_path}],
-        stderr_to_stdout: true
+      run_gate_without_input(
+        ["--environment-fixture"],
+        [{"HOME", actual_home}, {"PATH", shadow_root <> ":" <> incoming_path}]
       )
 
     assert status != 0
@@ -1208,12 +1328,9 @@ defmodule Loopex.M1GateEvidenceTest do
     end)
 
     {output, status} =
-      System.cmd(
-        "/bin/bash",
-        ["-p", "scripts/check-m1-gate.sh"],
-        cd: repo_root(),
-        env: [{"HOME", account_home!()}, {"TMPDIR", unwritable_tmp}],
-        stderr_to_stdout: true
+      run_gate_without_input(
+        [],
+        [{"HOME", account_home!()}, {"TMPDIR", unwritable_tmp}]
       )
 
     assert status != 0

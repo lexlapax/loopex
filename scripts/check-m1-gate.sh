@@ -106,9 +106,52 @@ outer_launch() {
   local loopex_m1_value loopex_m1_name loopex_m1_env_capture
   local loopex_m1_env_status loopex_m1_path_rest loopex_m1_path_entry
   local loopex_m1_path_done loopex_m1_first_path_entry loopex_m1_launcher
-  local loopex_m1_escript loopex_m1_status
+  local loopex_m1_escript loopex_m1_status loopex_m1_core_soft loopex_m1_core_hard
+  local provider_frame_header provider_frame_trailing provider_frame_header_limit
+  local provider_frame_version=LOOPEX_M1_PROVIDER_V1
+  local provider_frame_max=16384
 
-  provider_key_value="${LOOPEX_PROVIDER_API_KEY-}"
+  builtin unset -v LC_ALL \
+    || fail "the byte-counting locale could not be isolated"
+  local LC_ALL=C
+  builtin export -n LC_ALL \
+    || fail "the byte-counting locale could not be made private"
+
+  builtin ulimit -S -c 0 || fail "the soft core-file limit could not be sealed"
+  builtin ulimit -H -c 0 || fail "the hard core-file limit could not be sealed"
+  loopex_m1_core_soft="$(builtin ulimit -S -c)" \
+    || fail "the soft core-file limit could not be verified"
+  loopex_m1_core_hard="$(builtin ulimit -H -c)" \
+    || fail "the hard core-file limit could not be verified"
+  [ "$loopex_m1_core_soft" = 0 ] && [ "$loopex_m1_core_hard" = 0 ] \
+    || fail "the core-file limits are not sealed at zero"
+
+  if [ "${LOOPEX_PROVIDER_API_KEY+x}" = x ]; then
+    fail "canonical provider credential is forbidden in the initial environment"
+  fi
+
+  provider_key_value=""
+  provider_frame_header=""
+  if ! [ -t 0 ]; then
+    provider_frame_header_limit=$((${#provider_frame_version} + 1))
+    if IFS= builtin read -r -d '' -n "$provider_frame_header_limit" provider_frame_header; then
+      [ "$provider_frame_header" = "$provider_frame_version" ] \
+        || fail "provider input is malformed"
+      IFS= builtin read -r -d '' -n $((provider_frame_max + 1)) provider_key_value \
+        || fail "provider input is malformed"
+      [ -n "$provider_key_value" ] && [ "${#provider_key_value}" -le "$provider_frame_max" ] \
+        || fail "provider input is malformed"
+      provider_frame_trailing=""
+      if IFS= builtin read -r -d '' -n 1 provider_frame_trailing ||
+        [ -n "$provider_frame_trailing" ]
+      then
+        fail "provider input is malformed"
+      fi
+    elif [ -n "$provider_frame_header" ]; then
+      fail "provider input is malformed"
+    fi
+  fi
+
   loopex_m1_real_home_input="${HOME-}"
   loopex_m1_task_tmp_input="${TMPDIR:-/tmp}"
   loopex_m1_source_mix_home_input="${MIX_HOME:-${HOME-}/.mix}"
@@ -236,7 +279,7 @@ outer_launch() {
           || fail "ambient environment contains an invalid dynamic entry"
         loopex_m1_under_count=$((loopex_m1_under_count + 1))
         ;;
-      *) fail "ambient environment contains a non-identifier shell name" ;;
+      *) fail "ambient environment retains unexpected identifier $loopex_m1_env_name" ;;
     esac
   done
   [ "$loopex_m1_path_count" -eq 1 ] && [ "$loopex_m1_under_count" -eq 1 ] \
@@ -549,11 +592,17 @@ runtime_nofile="$(ulimit -n)" \
   || fail "the open-file limit is unavailable"
 runtime_nproc="$(ulimit -u)" \
   || fail "the process limit is unavailable"
+runtime_core_soft="$(ulimit -S -c)" \
+  || fail "the soft core-file limit is unavailable"
+runtime_core_hard="$(ulimit -H -c)" \
+  || fail "the hard core-file limit is unavailable"
+[ "$runtime_core_soft" = 0 ] && [ "$runtime_core_hard" = 0 ] \
+  || fail "the inherited core-file limits are not sealed at zero"
 [[ "$runtime_nofile" =~ ^([1-9][0-9]*|unlimited)$ ]] \
   || fail "the open-file limit is malformed"
 [[ "$runtime_nproc" =~ ^([1-9][0-9]*|unlimited)$ ]] \
   || fail "the process limit is malformed"
-runtime_limits="nofile-$runtime_nofile,nproc-$runtime_nproc"
+runtime_limits="core-soft-$runtime_core_soft,core-hard-$runtime_core_hard,nofile-$runtime_nofile,nproc-$runtime_nproc"
 
 detect_sha256_style() {
   local output digest
@@ -990,19 +1039,19 @@ require_bound_artifact "$gate_launcher_source" \
   d29358ad791436eefb677fc04077ddd720b521a77d3a8f708c11fd76db17e2ba \
   "bound sealed gate launcher"
 require_bound_artifact "$selector_runner_source" \
-  954ff0e05521ac1b59e2438ba4e0f836f5137d44175eefdb85d509e3aa37aaa4 \
+  6aa177be0672179cb0713a7e73ccf54a52fa4dc957d5e7d00e3e514d5015f8c2 \
   "bound standalone selector runner"
 require_bound_artifact "$evidence_verifier_source" \
-  0e67f7bec0edeb1296a64c9fecec9fa1486fe18f98154c2ca11fdf220abb23dc \
+  360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c \
   "bound M1 evidence verifier"
 require_bound_artifact apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861 \
   "bound dependency-direction reader"
 require_bound_artifact apps/loopex/test/m1_gate_evidence_test.exs \
-  612f428246137f4d064396fa33e5db4b0371df58692d9892a223235e40b9e22e \
+  dd7afd259226b2cd9b78568816d7b34ee4a26688dcad3bff9d14fa5acc8cf7f5 \
   "bound M1 mechanics corpus"
 require_bound_artifact apps/loopex/test/m1_exunit_runner_test.exs \
-  662ca1cd0838ca8f5689697181a04e0e137a07fd017e207c1689fb7941bec20b \
+  558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b \
   "bound selector-runner corpus"
 require_bound_artifact apps/loopex/test/deps_budget_test.exs \
   36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750 \
@@ -1409,7 +1458,7 @@ run_gate_test() {
   local role="$1" file="$2" minimum="$3" exclusion_policy="$4" accumulate="$5"
   local nonce output output_rest gate_test_status report_count=0 marker=""
   local line prefix rest executed suffix context_output context_owner context_internal
-  local context_allowed
+  local context_allowed terminal_prefix terminal_status terminal_suffix
   shift 5
 
   validate_generated_tree "$test_build_path" \
@@ -1437,35 +1486,41 @@ run_gate_test() {
   case "$role" in
     default)
       output="$(
-        builtin printf '%s\n' "$nonce" \
+        builtin printf 'LOOPEX_M1_SELECTOR_V1\0%s\0\0' "$nonce" \
           | elixir "$repository_root/$selector_runner_source" \
               --loopex-m1-selector "$repository_root" "$test_build_path" \
               "$file" "$context_owner" "$context_internal" "$context_allowed" \
               "$gate_seed" "$minimum" "$exclusion_policy" "$@" 2>&1
+        loopex_m1_pipeline_status="${PIPESTATUS[1]}"
+        builtin printf '\036LOOPEX_M1_SELECTOR_STATUS_V1:%s:%s' \
+          "$nonce" "$loopex_m1_pipeline_status"
       )"
-      gate_test_status=$?
       ;;
     real-model)
       output="$(
-        builtin printf '%s\n%s' "$nonce" "$provider_key_value" \
+        builtin printf 'LOOPEX_M1_SELECTOR_V1\0%s\0%s\0' "$nonce" "$provider_key_value" \
           | elixir "$repository_root/$selector_runner_source" \
               --loopex-m1-selector --only-real-provider --real-path model \
               "$repository_root" "$test_build_path" "$file" \
               "$context_owner" "$context_internal" "$context_allowed" \
               "$gate_seed" "$minimum" "$exclusion_policy" "$@" 2>&1
+        loopex_m1_pipeline_status="${PIPESTATUS[1]}"
+        builtin printf '\036LOOPEX_M1_SELECTOR_STATUS_V1:%s:%s' \
+          "$nonce" "$loopex_m1_pipeline_status"
       )"
-      gate_test_status=$?
       ;;
     real-combined)
       output="$(
-        builtin printf '%s\n%s' "$nonce" "$provider_key_value" \
+        builtin printf 'LOOPEX_M1_SELECTOR_V1\0%s\0%s\0' "$nonce" "$provider_key_value" \
           | elixir "$repository_root/$selector_runner_source" \
               --loopex-m1-selector --only-real-provider --real-path combined \
               "$repository_root" "$test_build_path" "$file" \
               "$context_owner" "$context_internal" "$context_allowed" \
               "$gate_seed" "$minimum" "$exclusion_policy" "$@" 2>&1
+        loopex_m1_pipeline_status="${PIPESTATUS[1]}"
+        builtin printf '\036LOOPEX_M1_SELECTOR_STATUS_V1:%s:%s' \
+          "$nonce" "$loopex_m1_pipeline_status"
       )"
-      gate_test_status=$?
       ;;
     *)
       set -e
@@ -1473,6 +1528,21 @@ run_gate_test() {
       ;;
   esac
   set -e
+
+  terminal_prefix=$'\036'"LOOPEX_M1_SELECTOR_STATUS_V1:$nonce:"
+  case "$output" in
+    *"$terminal_prefix"*) terminal_status="${output##*"$terminal_prefix"}" ;;
+    *) fail "$file produced a malformed terminal selector status" ;;
+  esac
+  [[ "$terminal_status" =~ ^(0|[1-9][0-9]{0,2})$ ]] &&
+    [ "$terminal_status" -le 255 ] \
+    || fail "$file produced a malformed terminal selector status"
+  terminal_suffix="$terminal_prefix$terminal_status"
+  case "$output" in
+    *"$terminal_suffix") output="${output%"$terminal_suffix"}" ;;
+    *) fail "$file produced a malformed terminal selector status" ;;
+  esac
+  gate_test_status="$terminal_status"
 
   if [ "$role" != default ] && [ -n "$provider_key_value" ]; then
     case "$output" in
