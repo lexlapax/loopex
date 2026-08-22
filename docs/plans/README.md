@@ -442,9 +442,9 @@ diagnosis only, so ask for the fix when you want the fix. Naming a workstream or
 file bounds the work to it, which is usually faster than correcting scope
 afterward.
 
-**Current use.** `M0` is closed and `M1` is open at its prerequisite decision
-boundary. The lifecycle rows remain the reusable procedure for this and later
-milestones.
+**Current use.** `M0` is closed and `M1` is open at its independent plan-pair
+and gate-review boundary. The lifecycle rows remain the reusable procedure for
+this and later milestones.
 The Current Status capsule at the top of this file names the exact next
 decision; it is not repeated here, because a second copy would drift.
 

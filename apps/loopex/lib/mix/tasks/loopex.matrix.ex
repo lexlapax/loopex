@@ -16,29 +16,23 @@ defmodule Mix.Tasks.Loopex.Matrix do
   claimed to have verified a pair it never ran on would be reporting a wish.
 
   `.tool-versions` is the bound artifact, so its bytes are digested by the gate.
-  Comparison is exact for both Elixir and OTP: the OTP patch comes from the
-  installation's `OTP_VERSION`, because `System.otp_release/0` reports only the
-  major. If that file is unavailable the major cannot satisfy an exact lock.
+  Comparison is exact for both Elixir and OTP: the full OTP version comes from
+  the installation's `OTP_VERSION`, because `System.otp_release/0` reports only
+  the major. If that file is unavailable, the major cannot satisfy either exact
+  locked version.
   """
 
   use Mix.Task
 
   @tool_versions ".tool-versions"
-  alias Loopex.Checks.Git
   alias Loopex.Checks.Markdown
 
   @green_verdict "GREEN"
   @matrix_evidence "docs/evidence/M0-toolchain-matrix.md"
-  @m1_matrix_evidence "docs/evidence/M1-toolchain-matrix.md"
-  @m1_gate "docs/plans/M1-gate.md"
-  @m1_command "bash:scripts/check-m1-gate.sh"
-  @m1_orders ~w(first second third fourth fifth)
 
   @impl Mix.Task
-  def run(args) do
-    {evidence, profile} = invocation!(args)
-
-    case check(File.cwd!(), evidence: evidence, profile: profile) do
+  def run([]) do
+    case check(File.cwd!()) do
       {:ok, pair} ->
         Mix.shell().info(
           "running toolchain matches locked pair Elixir #{pair.elixir} / OTP #{pair.otp_exact}"
@@ -48,6 +42,9 @@ defmodule Mix.Tasks.Loopex.Matrix do
         Mix.raise("toolchain matrix is not satisfied: #{reason}")
     end
   end
+
+  def run(_args),
+    do: Mix.raise("usage: mix loopex.matrix")
 
   @doc """
   ## Concept
@@ -66,28 +63,6 @@ defmodule Mix.Tasks.Loopex.Matrix do
           {:ok, %{elixir: String.t(), otp: String.t(), otp_exact: String.t()}}
           | {:error, String.t()}
   def check(root) do
-    check(root, evidence: @matrix_evidence, profile: :m0)
-  end
-
-  @doc """
-  ## Concept
-
-  Confirms one explicitly selected milestone matrix record as well as the
-  running pair.
-
-  ## Technical depth
-
-  The no-argument form remains the closed M0 contract. M1 names both its evidence
-  path and its profile at the command boundary so a later milestone cannot pass
-  by silently reading M0's retained rows. The profile selects additional
-  structure; it never weakens the exact-pair comparison.
-  """
-  @spec check(Path.t(), keyword()) ::
-          {:ok, %{elixir: String.t(), otp: String.t(), otp_exact: String.t()}}
-          | {:error, String.t()}
-  def check(root, options) do
-    evidence = Keyword.fetch!(options, :evidence)
-    profile = Keyword.fetch!(options, :profile)
     path = Path.join(root, @tool_versions)
 
     with {:ok, contents} <- read(path),
@@ -95,7 +70,7 @@ defmodule Mix.Tasks.Loopex.Matrix do
       running = %{elixir: System.version(), otp: exact_otp_version()}
 
       with matched when is_map(matched) <- Enum.find(pairs, &pair_matches?(&1, running)),
-           :ok <- both_lanes_recorded(root, pairs, evidence, profile) do
+           :ok <- both_lanes_recorded(root, pairs) do
         {:ok, matched}
       else
         nil ->
@@ -128,140 +103,28 @@ defmodule Mix.Tasks.Loopex.Matrix do
           [%{elixir: String.t(), otp: String.t(), otp_exact: String.t()}]
         ) :: :ok | {:error, String.t()}
   def both_lanes_recorded(root, pairs) do
-    both_lanes_recorded(root, pairs, @matrix_evidence, :m0)
-  end
-
-  @doc """
-  ## Concept
-
-  Confirms a named retained matrix record satisfies its milestone profile.
-
-  ## Technical depth
-
-  M0 retains its original presence rule. M1 additionally binds one reachable
-  candidate whose committed gate, the current gate, and the recorded gate digest
-  are identical, then requires the minimal five-run walk whose four adjacent
-  edges are floor-to-floor, floor-to-current, current-to-floor, and
-  current-to-current. Exact run numbering, order labels, numeric seeds, and
-  positive executed counts bind the claim to physical lines.
-  """
-  @spec both_lanes_recorded(
-          Path.t(),
-          [%{elixir: String.t(), otp: String.t(), otp_exact: String.t()}],
-          String.t(),
-          :m0 | :m1
-        ) :: :ok | {:error, String.t()}
-  def both_lanes_recorded(root, pairs, evidence, profile) do
-    record = Path.join(root, evidence)
+    record = Path.join(root, @matrix_evidence)
 
     case File.read(record) do
       {:error, posix} ->
         {:error, "#{record}: #{:file.format_error(posix)}; the matrix record is unavailable"}
 
       {:ok, contents} ->
-        case recorded_runs(contents, record, profile, root) do
+        case recorded_runs(contents, record) do
           {:error, reason} ->
             {:error, "#{reason}; the matrix record cannot be read as retained runs"}
 
           {:ok, runs} ->
-            validate_runs(runs, pairs, profile, record)
+            case Enum.reject(pairs, &records_pair?(runs, &1)) do
+              [] ->
+                :ok
+
+              missing ->
+                {:error,
+                 "#{record} does not record a run for #{describe(missing)}; " <>
+                   "the gate claims both locked pairs are recorded"}
+            end
         end
-    end
-  end
-
-  defp invocation!([]), do: {@matrix_evidence, :m0}
-
-  defp invocation!(["--evidence", @m1_matrix_evidence, "--profile", "m1"]),
-    do: {@m1_matrix_evidence, :m1}
-
-  defp invocation!(_args) do
-    Mix.raise("usage: mix loopex.matrix [--evidence #{@m1_matrix_evidence} --profile m1]")
-  end
-
-  defp validate_runs(runs, pairs, :m0, record) do
-    case Enum.reject(pairs, &records_pair?(runs, &1)) do
-      [] ->
-        :ok
-
-      missing ->
-        {:error,
-         "#{record} does not record a run for #{describe(missing)}; " <>
-           "the gate claims both locked pairs are recorded"}
-    end
-  end
-
-  defp validate_runs(runs, pairs, :m1, record) do
-    expected_edges =
-      MapSet.new([{:floor, :floor}, {:floor, :current}, {:current, :floor}, {:current, :current}])
-
-    with :ok <- all_green(runs, record),
-         :ok <- exact_m1_sequence(runs, record),
-         {:ok, lanes} <- identify_lanes(runs, pairs, record),
-         :ok <- exact_adjacencies(lanes, expected_edges, record) do
-      :ok
-    end
-  end
-
-  defp validate_runs(_runs, _pairs, profile, record),
-    do: {:error, "#{record}: unknown matrix evidence profile #{inspect(profile)}"}
-
-  defp all_green(runs, record) do
-    case Enum.find_index(runs, &(not green_run?(&1))) do
-      nil -> :ok
-      index -> {:error, "#{record}: run #{index + 1} is not GREEN with exit 0"}
-    end
-  end
-
-  defp exact_m1_sequence(runs, record) do
-    expected_numbers = Enum.map(1..5, &Integer.to_string/1)
-
-    cond do
-      length(runs) != 5 ->
-        {:error, "#{record}: M1 requires exactly five retained runs"}
-
-      Enum.map(runs, & &1["run"]) != expected_numbers ->
-        {:error, "#{record}: M1 run numbers must be 1 through 5 in physical order"}
-
-      Enum.map(runs, & &1["order"]) != @m1_orders ->
-        {:error, "#{record}: M1 order fields must be first through fifth in physical order"}
-
-      true ->
-        :ok
-    end
-  end
-
-  defp identify_lanes(runs, [floor, current], record) do
-    Enum.reduce_while(runs, {:ok, []}, fn run, {:ok, lanes} ->
-      lane =
-        cond do
-          names_pair?(run, floor) -> :floor
-          names_pair?(run, current) -> :current
-          true -> nil
-        end
-
-      case lane do
-        nil ->
-          {:halt, {:error, "#{record}: run #{run["run"]} does not name either exact locked pair"}}
-
-        value ->
-          {:cont, {:ok, [value | lanes]}}
-      end
-    end)
-    |> case do
-      {:ok, lanes} -> {:ok, Enum.reverse(lanes)}
-      error -> error
-    end
-  end
-
-  defp identify_lanes(_runs, _pairs, record),
-    do: {:error, "#{record}: M1 adjacency evidence requires exactly two locked pairs"}
-
-  defp exact_adjacencies(lanes, expected, record) do
-    actual = lanes |> Enum.zip(Enum.drop(lanes, 1)) |> MapSet.new()
-
-    case actual == expected do
-      true -> :ok
-      false -> {:error, "#{record}: M1 runs do not cover all four locked-pair adjacencies"}
     end
   end
 
@@ -288,16 +151,14 @@ defmodule Mix.Tasks.Loopex.Matrix do
   # marker pair to occur exactly once on governed lines, so a commented-out or
   # fenced copy cannot supply a second one.
   @run_format ~r/\Arun=(?<run>[0-9]+) order=(?<order>[a-z]+) elixir=(?<elixir>\S+) otp=(?<otp>\S+) erts=(?<erts>\S+) verdict=(?<verdict>\S+) exit=(?<exit>[0-9]+) wall=(?<wall>\S+)\z/
-  @m1_run_format ~r/\Arun=(?<run>[0-9]+) order=(?<order>[a-z]+) elixir=(?<elixir>\S+) otp=(?<otp>\S+) erts=(?<erts>\S+) seed=(?<seed>[0-9]+) executed=(?<executed>[1-9][0-9]*) verdict=(?<verdict>\S+) exit=(?<exit>[0-9]+) wall=(?<wall>\S+)\z/
-  @m1_metadata_format ~r/\Amatrix candidate=(?<candidate>[0-9a-f]{40}) gate_sha256=(?<gate_sha256>[0-9a-f]{64}) command=(?<command>bash:scripts\/check-m1-gate\.sh) platform=(?<platform>\S+) limits=(?<limits>\S+)\z/
 
-  defp recorded_runs(contents, path, profile, root) do
-    read_runs(contents, path, profile, root)
+  defp recorded_runs(contents, path) do
+    read_runs(contents, path)
   rescue
     error in [Loopex.Checks.Invalid] -> {:error, Exception.message(error)}
   end
 
-  defp read_runs(contents, path, :m0, _root) do
+  defp read_runs(contents, path) do
     with {:ok, inner} <- fenced_body(Markdown.block(contents, path, :matrix_runs), path) do
       cond do
         inner == [] ->
@@ -312,87 +173,6 @@ defmodule Mix.Tasks.Loopex.Matrix do
         true ->
           {:ok, Enum.map(inner, &Regex.named_captures(@run_format, &1))}
       end
-    end
-  end
-
-  defp read_runs(contents, path, :m1, root) do
-    with {:ok, inner} <- fenced_body(Markdown.block(contents, path, :matrix_runs), path) do
-      case inner do
-        [metadata | runs] when length(runs) == 5 ->
-          cond do
-            Enum.any?(inner, &(not printable_ascii?(&1))) ->
-              {:error, "#{path}: M1 metadata and runs must use printable ASCII only"}
-
-            not Regex.match?(@m1_metadata_format, metadata) ->
-              {:error, "#{path}: M1 matrix metadata is not in the required form"}
-
-            Enum.any?(runs, &(not Regex.match?(@m1_run_format, &1))) ->
-              {:error, "#{path}: an M1 run is not in the required form"}
-
-            true ->
-              identity = Regex.named_captures(@m1_metadata_format, metadata)
-
-              with :ok <- validate_m1_identity(identity, root, path) do
-                {:ok, Enum.map(runs, &Regex.named_captures(@m1_run_format, &1))}
-              end
-          end
-
-        _other ->
-          {:error,
-           "#{path}: M1 requires exactly one metadata record and exactly five retained runs"}
-      end
-    end
-  end
-
-  defp read_runs(_contents, path, profile, _root),
-    do: {:error, "#{path}: unknown matrix evidence profile #{inspect(profile)}"}
-
-  defp validate_m1_identity(identity, root, path) do
-    candidate = identity["candidate"]
-    gate_path = Path.join(root, @m1_gate)
-    gate_digest = identity["gate_sha256"]
-
-    with {:ok, gate} <- read(gate_path),
-         :ok <- current_gate_matches(gate, gate_digest, path),
-         :ok <- candidate_gate_matches(root, candidate, gate_digest, path),
-         true <- identity["command"] == @m1_command do
-      :ok
-    else
-      {:error, reason} ->
-        {:error, reason}
-
-      false ->
-        {:error, "#{path}: M1 matrix command does not match the locked runner"}
-    end
-  end
-
-  defp current_gate_matches(gate, digest, path) do
-    if Markdown.digest(gate) == digest,
-      do: :ok,
-      else: {:error, "#{path}: M1 matrix digest does not match the current gate"}
-  end
-
-  defp candidate_gate_matches(root, candidate, digest, path) do
-    with {resolved, 0} <-
-           Git.run(root, ["rev-parse", "--verify", "--quiet", "#{candidate}^{commit}"]),
-         true <- String.trim(resolved) == candidate,
-         true <- Git.ancestor?(root, candidate, "HEAD"),
-         {entry, 0} <- Git.run(root, ["ls-tree", "-z", candidate, "--", @m1_gate]),
-         :ok <- regular_gate_entry(entry),
-         gate when is_binary(gate) <- Git.resolver(root).(candidate, @m1_gate) do
-      if Markdown.digest(gate) == digest,
-        do: :ok,
-        else: {:error, "#{path}: M1 matrix candidate gate does not match the recorded digest"}
-    else
-      _other ->
-        {:error, "#{path}: M1 matrix candidate does not carry a reachable gate blob"}
-    end
-  end
-
-  defp regular_gate_entry(entry) do
-    case String.split(entry, [" ", "\t", <<0>>], trim: true) do
-      ["100644", "blob", _object, @m1_gate] -> :ok
-      _other -> :error
     end
   end
 
@@ -522,11 +302,11 @@ defmodule Mix.Tasks.Loopex.Matrix do
     end
   end
 
-  # Concept: an elixir line carries both the Elixir version and the OTP major it
-  # is built against, which is exactly the pair ADR 0002 validates.
-  # Each pair is an elixir line followed by the erlang line beside it. The elixir
-  # line names the OTP MAJOR it was built against; the erlang line names the exact
-  # version, and that exact version is what the lock actually promises.
+  # Concept: each locked pair is represented by an Elixir line and its adjacent
+  # Erlang line.
+  # Technical depth: the Elixir line supplies the Elixir version and build-target
+  # OTP major; the adjacent Erlang line supplies the exact OTP version used by the
+  # lock and runtime comparison.
   defp pairs(contents, path) do
     lines =
       contents

@@ -105,6 +105,13 @@ defmodule Loopex.StatusCheckTest do
     doc = fn body -> open <> "\n```text\n" <> body <> "\n```\n" <> close <> "\n" end
     raw = fn body -> open <> "\n" <> body <> "\n" <> close <> "\n" end
 
+    for args <- [
+          ["--evidence", "docs/evidence/M1-toolchain-matrix.md", "--profile", "m1"],
+          ["--unknown"]
+        ] do
+      assert_raise Mix.Error, "usage: mix loopex.matrix", fn -> Matrix.run(args) end
+    end
+
     File.write!(record, doc.(good))
     assert :ok = Matrix.both_lanes_recorded(root, pairs), "a real run must count"
 
@@ -508,53 +515,6 @@ defmodule Loopex.StatusCheckTest do
 
     assert MapSet.new(["Blockers", "Next transition"]) == MapSet.new(changed)
     assert in_progress["Next transition"] =~ "In review"
-  end
-
-  test "the M1 open capsule is derived independently from both prerequisite ADRs" do
-    adr6 = "docs/adr/0006-store-transaction-and-owner-epoch.md"
-    adr7 = "docs/adr/0007-local-executor-grant-job-receipt.md"
-
-    both_proposed =
-      Register.expected_capsule("Open", "M1", %{adr6 => "Proposed", adr7 => "Proposed"})
-
-    only_6_accepted =
-      Register.expected_capsule("Open", "M1", %{adr6 => "Accepted", adr7 => "Proposed"})
-
-    only_7_accepted =
-      Register.expected_capsule("Open", "M1", %{adr6 => "Proposed", adr7 => "Accepted"})
-
-    both_accepted =
-      Register.expected_capsule("Open", "M1", %{adr6 => "Accepted", adr7 => "Accepted"})
-
-    assert both_proposed["Blockers"] =~ "ADR 0006"
-    assert both_proposed["Blockers"] =~ "ADR 0007"
-    assert both_proposed["Next maintainer decision"] == "Disposition ADR 0006 and ADR 0007"
-
-    assert only_6_accepted["Blockers"] =~ "ADR 0007"
-    refute only_6_accepted["Blockers"] =~ "ADR 0006"
-    assert only_6_accepted["Next maintainer decision"] == "Disposition ADR 0007"
-
-    assert only_7_accepted["Blockers"] =~ "ADR 0006"
-    refute only_7_accepted["Blockers"] =~ "ADR 0007"
-    assert only_7_accepted["Next maintainer decision"] == "Disposition ADR 0006"
-
-    assert both_accepted["Blockers"] ==
-             "`M1` remains open and unaccepted; its revised plan-pair and gate candidate " <>
-               "awaits independent review"
-
-    assert both_accepted["Next maintainer decision"] ==
-             "Independently review the exact revised `M1` candidate"
-
-    assert both_accepted["Next transition"] ==
-             "After a clear review, accept or reject the `M1` plan pair and gate"
-
-    invariant_fields = ["Integrated phase", "Authorized work", "Validation"]
-
-    for field <- invariant_fields,
-        capsule <- [only_6_accepted, only_7_accepted, both_accepted] do
-      assert capsule[field] == both_proposed[field],
-             "changing an ADR status must not change #{field}"
-    end
   end
 
   test "a milestone state with no derived capsule fails closed" do

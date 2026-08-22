@@ -6,6 +6,7 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
   def project do
     [
       app: :loopex_llm_reqllm,
+      loopex_role: :edge,
       version: @version,
       build_path: "../../_build",
       config_path: "../../config/config.exs",
@@ -32,7 +33,7 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
   # in the core lane.
   defp deps do
     [
-      {:req_llm, "~> 1.20"},
+      {:req_llm, "~> 1.17.1"},
       {:loopex_protocol, in_umbrella: true}
     ]
   end

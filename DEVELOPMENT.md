@@ -1,10 +1,10 @@
 # Development
 
 Loopex has closed its M0 feasibility milestone and is preparing the M1 working
-loop. M1 is open and unaccepted on this revision, so product implementation is
-not yet authorized. This document describes how to validate and work on the
-repository, and it owns the commands, not the milestone state. There is no
-installable package and no public product surface.
+loop. Product implementation is authorized only after M1 carries recorded
+acceptance. This document describes how to validate and work on the repository,
+and it owns the commands, not the milestone state. There is no installable
+package and no public product surface.
 
 The canonical status for the checked-out revision, including currently
 authorized work and the next maintainer decision, is in
@@ -37,6 +37,13 @@ that calls Mix, and several do.
 
 Adding another development dependency requires the ordinary dependency
 decision.
+
+The M1 gate's stronger filesystem and containment lane additionally requires
+`stat`, `find`, `sort`, `comm`, `od`, `mktemp`, `cp`, `uname`, `/usr/bin/env`,
+`/usr/bin/id`, `/usr/bin/locale`, and either `shasum` or `sha256sum`. The runner probes and validates
+the BSD/GNU `stat` and SHA-256 dialects before trusting their output. Its closed
+child environment fixes `LANG=C.UTF-8` and `LC_ALL=C.UTF-8`; a platform without
+that locale is unavailable M1 evidence rather than an implicit encoding change.
 
 The checkout must preserve the tracked relative `.claude/skills` symlink. On
 Windows, WSL is the straightforward path; Git Bash also requires Windows
@@ -93,20 +100,26 @@ pairs, recorded in `.tool-versions`. The product scaffold exists, so installing
 the toolchain lets you build and test today: `mix test` from the repository root,
 `bash scripts/check-bootstrap.sh` for the aggregate,
 `bash scripts/check-m0-gate.sh` for the closed M0 gate, and
-`bash scripts/check-m1-gate.sh` for the active M1 gate candidate.
+`/bin/bash -p scripts/check-m1-gate.sh` for the M1 gate. The
+privileged-Bash flag is part of the command: the runner refuses an ordinary Bash
+because inherited functions and `BASH_ENV` would otherwise precede its
+environment boundary.
 
-The M1 gate is deliberately red before implementation and must report the
-declared missing runtime selector before allocating a state root. Its plan pair
-and gate remain candidates until an exact-SHA independent review and explicit
-maintainer acceptance bind them; a red result for that declared absence is the
-opening proof, not implementation authority.
+Before implementation begins, the M1 gate is deliberately red and must report
+the declared missing runtime selector before allocating a state root. The plan
+pair and gate gain implementation authority only through exact-SHA independent
+review and explicit recorded maintainer acceptance; the declared red is opening
+proof, not implementation authority.
 
 After the protected product selectors exist, M1's two explicitly tagged
 real-provider selectors require `LOOPEX_PROVIDER_API_KEY`. The runner removes
-the credential before its first child process and passes it only to those
-provider commands; do not put the value in a command argument, log, fixture, or
-retained evidence. The ordinary full suite and repository checks remain
-credential-free.
+the entire ambient exported environment before its first external child,
+establishes an exact non-secret allowlist, and passes the credential over standard
+input only to the two direct real-provider VMs. Each runner consumes it before
+candidate startup, starts the application without the credential, and installs
+it only for the explicitly tagged real-provider selector; do not put the value
+in a command argument, log, fixture, or retained evidence. The ordinary full
+suite and repository checks remain credential-free.
 
 The M0 gate locks the self-hosting transition, and that transition has landed:
 the local aggregate, its structural and mutation checks, and the tested
@@ -124,9 +137,31 @@ before `## Technical depth`; a module with no documentation at all fails, and on
 marked `@moduledoc false` is excluded and counted in the report. Semantic
 usefulness and proportional private comments remain review obligations.
 
-Core will use only the Elixir/Erlang standard runtime. Provider, store, client,
-transport, and other integration dependencies belong in adapter applications,
-subject to the accepted plan and dependency-direction checks.
+Core will use only the Elixir/Erlang standard runtime. Every child project
+declares one literal `loopex_role`: `:contract`, `:core`, `:edge`, `:client`, or
+`:extension`. The reusable parser recognises the extension role, but the M1
+repository overlay permits only its exact six planned application identities
+and admits no extension. Contract carries no dependency; core depends only on
+protocol; store/model/executor edges depend in production on core and may also
+depend on protocol; a client depends in production on core and composes concrete
+edges only in tests. The only M1 direct external dependency is exactly
+`{:req_llm, "~> 1.17.1"}` in the ReqLLM edge. At the accepted red opening, that
+existing edge may retain
+its M0 protocol-only inward shape while the six-app inventory is incomplete;
+every complete inventory, and therefore every green gate, requires its core
+edge too. The M1 gate requires physical child projects to equal the candidate
+index and reads the literal dependency authority before Mix. It rejects locked-command aliases,
+redirected umbrella paths, identity mismatches, duplicates, alternate
+path/source-control dependencies, and statically visible unknown or reverse
+edges. The offline materializer derives the exact required non-optional lock
+closure, refuses missing, unsatisfied, and unreachable records, and admits an
+archive only after its checksums and literal `metadata.config` package,
+build-tool, dependency, and Elixir-floor authority match the lock. Cached
+archives remain ordinary and physically disjoint from protected user state, and
+all are validated before the gate-owned dependency tree is written without
+consulting an ambient `deps/`.
+Later project callbacks and task definitions remain trusted candidate code
+reviewed independently; they are not claimed as mechanically absent.
 
 ## Implementation Posture
 
@@ -154,10 +189,11 @@ documentation should clarify rather than paraphrase syntax.
 Read [AGENTS.md](AGENTS.md), then the
 [plans status register](docs/plans/README.md), and use the
 [agent context map](docs/developer/agent-context-map.md) only to load relevant
-Concept sections and their exact Technical depth. `M0` is closed. `M1` is open
-and unaccepted, and only planning, ADR, bootstrap, and review work is currently
-authorized. Product implementation begins only after the revised M1 plan pair
-and red gate are independently reviewed and explicitly accepted.
+Concept sections and their exact Technical depth. `M0` is closed. `M1` is the
+active milestone on this development line; consult the marked register capsule
+for its exact lifecycle state and currently authorized work. Product
+implementation begins only after the M1 plan pair and red gate are independently
+reviewed and explicitly accepted.
 
 Tests use a temporary `LOOPEX_HOME` and temporary workspaces, and the helpers fail
 before touching real user state. Never point development or test commands at a
@@ -173,14 +209,98 @@ floor pair needs a version manager. `mise` was used to provide both:
 mise install erlang@26.0
 mise install elixir@1.17.0-otp-26
 mise exec erlang@26.0 elixir@1.17.0-otp-26 -- bash scripts/check-m0-gate.sh
-mise exec erlang@26.0 elixir@1.17.0-otp-26 -- bash scripts/check-m1-gate.sh
+mise exec erlang@26.0 elixir@1.17.0-otp-26 -- /bin/bash -p scripts/check-m1-gate.sh
 ```
+
+### M1 retained toolchain evidence
+
+M1 capture is deliberately not an ordinary gate pass. Start from one clean,
+committed source candidate `C` and run the three bound non-gate roles, retaining
+each final `capture ... verdict=CAPTURE exit=0` record:
+
+```text
+Darwin floor     mise exec erlang@26.0 elixir@1.17.0-otp-26 -- /bin/bash -p scripts/check-m1-gate.sh --capture floor
+Darwin current   /bin/bash -p scripts/check-m1-gate.sh --capture current
+Linux current    /bin/bash -p scripts/check-m1-gate.sh --capture linux-current
+```
+
+Each capture uses a fresh, disjoint task root, runs every M1 command except
+validation of the matrix it will populate, prints `CAPTURE` rather than GREEN,
+and is not merge evidence. Physical order and adjacency carry no meaning because
+the three processes share no mutable run state. Do not edit or amend `C` between
+captures. The Linux lane requires the exact current pair; it is not satisfied by
+a nearby distribution package and makes no floor-on-Linux claim.
+
+On the `serenity` Linux evidence host, the distribution VM is not a locked pair.
+The reproducible current-pair environment performs no toolchain or dependency
+download at gate runtime and is made from these exact linux/amd64 manifests:
+
+```dockerfile
+FROM hexpm/elixir@sha256:ae4e58c68e37ef304ed2438ff098fb08da6d087e99c478a28d14cc2a0240e0b8 AS toolchain
+FROM buildpack-deps@sha256:0a1caa1cbfad810ca0d10eec9fc5924ea1033eeecb13cdab9fb00bfb47f196bd
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends 'libsctp1=1.0.19+dfsg-2build1' \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=toolchain /usr/local/ /usr/local/
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+```
+
+The first image supplies Elixir 1.20.3 / OTP 29.0.5; the second supplies Git and
+the baseline userland. The pinned `libsctp1` runtime package preserves the OTP
+build's enabled SCTP support after `/usr/local` is copied into the second stage;
+the prepared image is built before the gate and the gate performs no package
+download. Run with an account represented in the container's
+passwd database and owning the checkout: either copy the exact candidate into a
+root-owned read-only tree for the image's root account, or provision the host
+UID/GID, passwd entry, and matching home explicitly. Mount the prepared Mix/Hex
+inputs read-only and give the account an owned writable `/tmp`. The two tagged
+real-provider roles still require provider network access. Pass their credential
+through a wrapper's standard input rather than an image argument or environment
+flag. Docker is an evidence-host provisioner here, not a Loopex product or
+development dependency, and another Linux environment is valid if it supplies
+the same exact pair and gate prerequisites.
+
+Against that same source candidate, separately run
+`bash scripts/check-m0-gate.sh` under the floor pair and then the current pair.
+Capture each process's combined stdout and stderr before displaying any
+diagnostic, replace literal provider-key bytes in-process, and retain only the
+non-secret provider, model, and endpoint identity beside the exact candidate,
+M0 gate digest, toolchain, verdict, and exit. Bootstrap does not replace either
+M0 run, and the M1 runner never invokes M0 recursively.
+
+Write one canonical metadata record, the Darwin floor/current and Linux-current
+capture records, and the two M0 records to
+`docs/evidence/M1-toolchain-matrix.md`. The metadata binds `C`, the M1 gate,
+shell runner, standalone ExUnit runner, dependency authority, self-contained
+evidence verifier, `.tool-versions`, and canonical command. Each capture binds
+its OS, architecture, open-file/process limits, and nonce-bound observed
+provider/model/endpoint, adapter build, executor build and runtime identity,
+tool identity, and observation time.
+The model-only and combined real roles must agree on their shared fields before
+the capture row is emitted. Candidate `C` plus each fixed application/version
+identifies the exact source build. Commit the matrix alone as direct evidence
+commit `E` of `C`. The
+ordinary M1 gate runs on `E` and validates that the complete trees differ only at
+that path before it may print GREEN. An open descendant of `E` is invalid.
+
+At closure, the unique first-closing transition `T` must be `E`'s direct
+one-parent child and change exactly `docs/plans/M1.md`, `docs/plans/README.md`,
+and `README.md`: only the empty Closure row and canonical marked status blocks
+may change, and Closure must bind `E`. Later descendants retain the evidence only
+while `E` and `T` stay reachable, the Closure binding stays byte-identical, and
+the matrix bytes remain those committed at `E`. Any interposed commit or earlier
+product, selector, harness, toolchain, or gate change requires a new `C`, three
+new M1 captures, two new M0 re-proofs, and a new direct `E`.
 
 Alternating pairs also shares mutable dependency state. `MIX_BUILD_PATH` alone
 leaves `deps/` and the Rebar cache common to both, which produces cache
 restore/discard diagnostics and, once observed, a self-healing corrupt-beam
-warning. Neither changed an exit status, but a genuinely isolated task root sets
-`MIX_DEPS_PATH` as well:
+warning. Neither changed an exit status. The M1 runner instead reconstructs
+`MIX_DEPS_PATH` offline from the exact package archives checksum-bound by the
+candidate's literal `mix.lock`; it never copies the ambient repository `deps/`
+tree. A missing cached package is unavailable evidence and fails. Outside the
+gate, prime the ordinary Hex cache with the accepted toolchain before capture.
+A manual isolated command must likewise set both paths:
 
 ```text
 env MIX_BUILD_PATH=<root>/build MIX_DEPS_PATH=<root>/deps mix <task>

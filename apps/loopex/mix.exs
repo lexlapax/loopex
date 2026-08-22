@@ -6,6 +6,7 @@ defmodule Loopex.MixProject do
   def project do
     [
       app: :loopex,
+      loopex_role: :core,
       version: @version,
       build_path: "../../_build",
       config_path: "../../config/config.exs",
