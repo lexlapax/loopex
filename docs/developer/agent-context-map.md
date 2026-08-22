@@ -499,6 +499,25 @@ previously forbade the merge, M1 Amendment 1 must still receive independent
 exact-candidate review and explicit binding acceptance before its governance
 transition may integrate.
 
+<a id="disposition-m1-amendments-1-and-2-2026-08-22"></a>
+### M1 Amendments 1 and 2 acceptance — 2026-08-22
+
+The maintainer explicitly accepted the `M1` amendment proposal at candidate
+`83c4bfb11c09f2f54417aa2d64e6bf84958adefe` after receiving an independent
+exact-candidate APPROVE verdict with no findings. Acceptance binds the unchanged
+Concept envelope at
+`sha256:dad88ff975fd5f9a418a279c58f321d41b92cc52842775465daac190eb0bcf62`,
+the amended Technical depth envelope at
+`sha256:163275593815b801ca0dd13e4b34f57cd426134ee1354695393fae6fa7b8a73b`,
+and the amended gate at
+`sha256:0954a5f7b492b6fe777a4a305df7da6d1cc5edb78716a1d24f98e3b87fce5c37`.
+
+This disposition accepts the generic governance-only integration and one-gate
+lookahead policy, the versioned strict proposal-to-rebind amendment transaction,
+and its closed-history migration boundary as implemented by that exact
+candidate. It authorizes the direct administrative rebind and governance-only
+merge to `main`; it does not authorize M1 product implementation.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
