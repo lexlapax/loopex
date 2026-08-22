@@ -107,7 +107,7 @@ product selector, and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `da0ff8de9a9a43b7004a63c0304ab7088cc10119cb4357375279c5e4de165e43` | `scripts/check-m1-gate.sh` |
+| `5914abfc4933124307cbd697fe4ff48f1d7f523b5427ac841079dd24dfe5aa4e` | `scripts/check-m1-gate.sh` |
 | `d29358ad791436eefb677fc04077ddd720b521a77d3a8f708c11fd76db17e2ba` | `scripts/m1-gate-launcher.escript` |
 | `6aa177be0672179cb0713a7e73ccf54a52fa4dc957d5e7d00e3e514d5015f8c2` | `scripts/m1-exunit-runner.exs` |
 | `360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c` | `scripts/m1-evidence-verifier.exs` |

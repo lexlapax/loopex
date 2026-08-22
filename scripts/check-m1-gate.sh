@@ -279,6 +279,9 @@ outer_launch() {
           || fail "ambient environment contains an invalid dynamic entry"
         loopex_m1_under_count=$((loopex_m1_under_count + 1))
         ;;
+      "" | [!A-Za-z_]* | *[!A-Za-z0-9_]*)
+        fail "ambient environment contains a non-identifier shell name"
+        ;;
       *) fail "ambient environment retains unexpected identifier $loopex_m1_env_name" ;;
     esac
   done
