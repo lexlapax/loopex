@@ -445,6 +445,31 @@ pointer resolves to already-integrated bytes. It is the maintainer's disposition
 evidence, not an independent review: the transition itself still requires the
 read-only exact-diff review the plans register mandates.
 
+<a id="disposition-m1-plan-acceptance-2026-08-22"></a>
+### M1 plan and gate acceptance — 2026-08-22
+
+The maintainer explicitly accepted the `M1` plan pair and gate at candidate
+`2f9559c6f638e813ce6ef5464c826ebc5f049af9` after receiving an independent
+exact-candidate APPROVE verdict with no findings and the three binding digests.
+Acceptance binds the Concept envelope at
+`sha256:dad88ff975fd5f9a418a279c58f321d41b92cc52842775465daac190eb0bcf62`,
+the Technical depth envelope at
+`sha256:2373d96dfa6c397617675c496bb0f9616d991f03f36cb16482631aa1db59bf6c`,
+and the gate at
+`sha256:d7d0b3263e9d158cf798ccfd089cccf540c7a45e04e21a8ee4ec0f14254c7b9a`.
+
+This disposition authorizes implementation only inside the eight accepted
+outcomes and three named product boundaries. It does not itself disposition the
+separate development-lifecycle question of whether an accepted, deliberately red
+opening checkpoint may integrate to `main`; the maintainer requested that rule be
+changed, and that material project-state decision remains a distinct governed
+change rather than being inferred from plan acceptance.
+
+This record is the maintainer's disposition evidence, not the independent
+review. The administrative acceptance transition still changes only the empty
+plan governance row, the plans register and capsule, and the root summary, and
+it still requires its exact-diff review before integration.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
