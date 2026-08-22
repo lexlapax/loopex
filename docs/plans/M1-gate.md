@@ -50,11 +50,13 @@ the runner:
 7. requires every protected selector as a tracked ordinary `100644` blob,
    every exact locked name, and each exact real-provider tag.
 
-An invalid raw `execve` environment name is not a Bash variable and cannot be
-removed in-process. The first environment inspection sees it and refuses the
-invocation before any ordinary child; the gate does not claim the inspector
-itself never received that raw entry. Invocation through a non-privileged or
-hostile already-running shell is outside the accepted command and fails.
+An invalid raw `execve` environment name is not an ordinary Bash identifier.
+Bash releases either expose it during imported-name enumeration or retain it
+only in the inherited environment; the runner refuses at that enumeration or
+at the first environment inspection, before any ordinary child. The gate does
+not claim the inspector itself never received that raw entry. Invocation
+through a non-privileged or hostile already-running shell is outside the
+accepted command and fails.
 
 At the accepted opening checkpoint the first missing selector is
 `apps/loopex/test/runtime_test.exs`, producing exactly:
@@ -73,11 +75,11 @@ product selector, and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `2d7da2f8d4a0baa494c8c5e26a1806ccb87f23d7d2659ee1df5996ce4ffbce36` | `scripts/check-m1-gate.sh` |
+| `b7e0b00852d87f021d25a131c19a0a176b45daf137bab24282a0dccdff8795f5` | `scripts/check-m1-gate.sh` |
 | `954ff0e05521ac1b59e2438ba4e0f836f5137d44175eefdb85d509e3aa37aaa4` | `scripts/m1-exunit-runner.exs` |
 | `131a96c3b860f13d9085d4524bc9349c1104d4ff895a8f9fbcda6507db86e5b3` | `scripts/m1-evidence-verifier.exs` |
 | `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `d80ce71cf1cac573883d70bcf9a6362b3e8cf63311aba2b903e7e1f3a930723b` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `cf7cee235208fbbe166f300f4457aa77251858e3e243fc095f0d406c899233ea` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `662ca1cd0838ca8f5689697181a04e0e137a07fd017e207c1689fb7941bec20b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |

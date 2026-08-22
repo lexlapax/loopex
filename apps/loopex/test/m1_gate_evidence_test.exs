@@ -896,7 +896,12 @@ defmodule Loopex.M1GateEvidenceTest do
       )
 
     assert status != 0
-    assert output =~ "non-identifier shell name"
+
+    assert output in [
+             "M1 gate RED: ambient environment contains a non-identifier shell name\n",
+             "M1 gate RED: the first child received an ambient or invalid environment entry\n"
+           ]
+
     refute output =~ "M1 environment preflight OK"
 
     redaction_functions =
