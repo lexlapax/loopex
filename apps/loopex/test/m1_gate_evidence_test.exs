@@ -760,9 +760,7 @@ defmodule Loopex.M1GateEvidenceTest do
         ~s({"selector":"duplicate", "mechanism_disabled":),
         global: false
       ),
-      &String.replace(&1, "current_owner_post_commit_fence", "different_mechanism",
-        global: false
-      ),
+      &String.replace(&1, "current_owner_post_commit_fence", "other", global: false),
       &String.replace(&1, context.base, String.duplicate("f", 40), global: false),
       &String.replace(&1, "locked selector failed", "locked sélector failed", global: false),
       &String.replace(&1, "\n", "\r\n", global: false),
