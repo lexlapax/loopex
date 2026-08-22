@@ -52,6 +52,26 @@ defmodule Loopex.M1GateEvidenceTest do
   defp runner_source, do: File.read!(Path.join(repo_root(), "scripts/check-m1-gate.sh"))
   defp launcher_source, do: File.read!(Path.join(repo_root(), "scripts/m1-gate-launcher.escript"))
 
+  defp account_home! do
+    script = """
+    account=$(/usr/bin/id -un 2>/dev/null) || exit 1
+    case "$account" in
+      '' | *[!A-Za-z0-9._-]*) exit 1 ;;
+    esac
+    account_spec="~$account"
+    builtin eval "account_home=$account_spec" || exit 1
+    case "$account_home" in
+      /*) builtin printf '%s' "$account_home" ;;
+      *) exit 1 ;;
+    esac
+    """
+
+    case System.cmd("/bin/bash", ["-c", script], stderr_to_stdout: true) do
+      {home, 0} when home != "" -> home
+      {output, status} -> flunk("OS account home resolution failed #{status}: #{output}")
+    end
+  end
+
   defp shell_function(source, name) do
     case Regex.run(~r/^#{Regex.escape(name)}\(\) \{(?:[^\n]*\}\n|\n.*?^\}\n)/ms, source) do
       [function] -> function
@@ -772,6 +792,7 @@ defmodule Loopex.M1GateEvidenceTest do
 
   test "the environment preflight removes credential aliases and unrelated ambient state" do
     root = repo_root()
+    actual_home = account_home!()
     token = "synthetic-provider-token-#{System.unique_integer([:positive])}"
     bash_env = Path.join(System.tmp_dir!(), "m1-bash-env-#{System.unique_integer([:positive])}")
     File.write!(bash_env, "printf 'BASH_ENV_RAN\\n' >&2\n")
@@ -783,6 +804,7 @@ defmodule Loopex.M1GateEvidenceTest do
         ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
         cd: root,
         env: [
+          {"HOME", actual_home},
           {"LOOPEX_PROVIDER_API_KEY", token},
           {"ANTHROPIC_API_KEY", token},
           {"ALTERNATE_PROVIDER_ALIAS", "another-secret"},
@@ -866,6 +888,7 @@ defmodule Loopex.M1GateEvidenceTest do
         ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
         cd: root,
         env: [
+          {"HOME", actual_home},
           {"LOOPEX_PROVIDER_API_KEY", token},
           {"MIX_HOME", "/tmp/#{token}/mix"}
         ],
@@ -974,7 +997,7 @@ defmodule Loopex.M1GateEvidenceTest do
 
     File.mkdir_p!(fake_home)
     on_exit(fn -> File.rm_rf(fake_home) end)
-    actual_home = System.user_home!()
+    actual_home = account_home!()
 
     {output, status} =
       System.cmd(
@@ -1058,7 +1081,7 @@ defmodule Loopex.M1GateEvidenceTest do
         "/bin/bash",
         ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
         cd: root,
-        env: [{"PATH", shadow_root <> ":" <> incoming_path}],
+        env: [{"HOME", actual_home}, {"PATH", shadow_root <> ":" <> incoming_path}],
         stderr_to_stdout: true
       )
 
@@ -1077,7 +1100,7 @@ defmodule Loopex.M1GateEvidenceTest do
         "/bin/bash",
         ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
         cd: root,
-        env: [{"PATH", shadow_root <> ":" <> incoming_path}],
+        env: [{"HOME", actual_home}, {"PATH", shadow_root <> ":" <> incoming_path}],
         stderr_to_stdout: true
       )
 
@@ -1092,7 +1115,7 @@ defmodule Loopex.M1GateEvidenceTest do
         "/bin/bash",
         ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
         cd: root,
-        env: [{"PATH", shadow_root <> ":" <> incoming_path}],
+        env: [{"HOME", actual_home}, {"PATH", shadow_root <> ":" <> incoming_path}],
         stderr_to_stdout: true
       )
 
@@ -1191,7 +1214,7 @@ defmodule Loopex.M1GateEvidenceTest do
         "/bin/bash",
         ["-p", "scripts/check-m1-gate.sh"],
         cd: repo_root(),
-        env: [{"TMPDIR", unwritable_tmp}],
+        env: [{"HOME", account_home!()}, {"TMPDIR", unwritable_tmp}],
         stderr_to_stdout: true
       )
 
