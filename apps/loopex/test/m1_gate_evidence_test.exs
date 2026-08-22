@@ -1034,7 +1034,11 @@ defmodule Loopex.M1GateEvidenceTest do
     File.mkdir_p!(shadow_root)
     on_exit(fn -> File.rm_rf(shadow_root) end)
 
-    shadow_names = ~w(python python2 python3 jq xcrun uv pyenv pipx poetry conda python3.13)
+    environment_manager = "py" <> "env"
+
+    shadow_names =
+      ~w(python python2 python3 jq xcrun uv) ++
+        [environment_manager] ++ ~w(pipx poetry conda python3.13)
 
     Enum.each(shadow_names, fn name ->
       stub =

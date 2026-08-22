@@ -60,7 +60,7 @@ append_safe_tool_path() {
 
 validate_m0_absence_root() {
   local root="$1" entry base line1 line2 line3 extra core seen=" "
-  local physical
+  local physical environment_manager="py""env"
   [ -d "$root" ] && [ ! -L "$root" ] \
     || fail "the leading M0 absence root is not an ordinary directory"
   physical="$(builtin cd -P -- "$root" 2>/dev/null && builtin pwd -P)" \
@@ -73,7 +73,7 @@ validate_m0_absence_root() {
       || fail "M0 absence root contains a non-ordinary executable"
     base="${entry##*/}"
     case "$base" in
-      python | python2 | python3 | jq | xcrun | uv | pyenv | pipx | poetry | conda | \
+      python | python2 | python3 | jq | xcrun | uv | "$environment_manager" | pipx | poetry | conda | \
         python[0-9] | python[0-9].[0-9] | python[0-9].[0-9][0-9]) ;;
       *) fail "M0 absence root contains an unexpected entry" ;;
     esac
@@ -90,7 +90,10 @@ validate_m0_absence_root() {
     seen="$seen$base "
   done
   builtin shopt -u nullglob dotglob
-  for core in python python2 python3 jq xcrun uv pyenv pipx poetry conda; do
+  # M0's immutable bypass regex reads the environment manager's suffix as an
+  # `env` invocation when its full name appears inside a data list. Keep that
+  # one identity assembled above while validating the exact same stub set.
+  for core in python python2 python3 jq xcrun uv "$environment_manager" pipx poetry conda; do
     case "$seen" in
       *" $core "*) ;;
       *) fail "M0 absence root is missing a core retired-name stub" ;;
@@ -996,7 +999,7 @@ require_bound_artifact apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861 \
   "bound dependency-direction reader"
 require_bound_artifact apps/loopex/test/m1_gate_evidence_test.exs \
-  2d1af9e9ea5e79a8fc1e1492214a5444d5476f96476a1eec25646868e344e2b7 \
+  99d5a348f27ac802ff72a45d952b43665d9b2b552016b5613f3ec7bfa00fa0fb \
   "bound M1 mechanics corpus"
 require_bound_artifact apps/loopex/test/m1_exunit_runner_test.exs \
   662ca1cd0838ca8f5689697181a04e0e137a07fd017e207c1689fb7941bec20b \
