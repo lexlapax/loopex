@@ -17,6 +17,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0005 | Milestone supersession | Proposed (parked) | [Decision](0005-milestone-supersession.md#concept) | [Technical depth](0005-milestone-supersession-technical.md#technical-depth) |
 | 0006 | Store transaction contract and owner epoch | Accepted | [Decision](0006-store-transaction-and-owner-epoch.md#concept) | [Technical depth](0006-store-transaction-and-owner-epoch-technical.md#technical-depth) |
 | 0007 | Local executor grant, job, and receipt | Accepted | [Decision](0007-local-executor-grant-job-receipt.md#concept) | [Technical depth](0007-local-executor-grant-job-receipt-technical.md#technical-depth) |
+| 0008 | Owner succession recovery and runtime placement | Proposed | [Decision](0008-owner-succession-recovery-and-runtime-placement.md#concept) | [Technical depth](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -26,6 +27,11 @@ foreclose, so that they stay open until there is evidence to decide them.
 store refuses a stale session owner; 0007 decides what a local executor validates
 before an effect. Both must be dispositioned before `M1` is accepted, not merely
 before the outcomes they govern are implemented.
+
+0008 is an implementation-time prerequisite for revising `M1` Workstream A and
+then completing Workstream B. It supplies the durable identity ADR 0006's
+dead-owner recovery requires and makes M1's active-passive runtime-placement
+boundary explicit without adding an active-active coordination claim.
 
 0004 and 0005 are both parked. They designed correction paths for a defect
 found in an accepted plan, then the defect that prompted them turned out to be

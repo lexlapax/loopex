@@ -47,6 +47,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0005 — milestone supersession | [Decision](adr/0005-milestone-supersession.md#concept) | [Technical depth](adr/0005-milestone-supersession-technical.md#technical-depth) |
 | 0006 — store transaction and owner epoch | [Decision](adr/0006-store-transaction-and-owner-epoch.md#concept) | [Technical depth](adr/0006-store-transaction-and-owner-epoch-technical.md#technical-depth) |
 | 0007 — local executor grant, job, and receipt | [Decision](adr/0007-local-executor-grant-job-receipt.md#concept) | [Technical depth](adr/0007-local-executor-grant-job-receipt-technical.md#technical-depth) |
+| 0008 — owner succession recovery and runtime placement | [Decision](adr/0008-owner-succession-recovery-and-runtime-placement.md#concept) | [Technical depth](adr/0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
