@@ -160,12 +160,23 @@ child, Bash builtins set and verify both soft and hard core-file limits at zero.
 An interactive stdin or immediate EOF means no key; otherwise only exact
 `LOOPEX_M1_PROVIDER_V1\0<key>\0` framing is accepted, with a nonempty key of at
 most 16,384 bytes, LF preserved inside the key, and every other nonempty input
-refused. Only the explicitly tagged real-provider invocations receive the key
-through exact
+refused. That exact parse establishes frame validity only: a valid key,
+including `0`, is refused later when its literal bytes collide with a required
+gate-owned control or complete would-be output. Only the explicitly tagged
+real-provider invocations receive the key through exact
 `LOOPEX_M1_SELECTOR_V1\0<32-lowercase-hex-nonce>\0<key>\0` framing; absence is
 evidence unavailable and fails those invocations rather than skipping them.
 The key is never conveyed through argv, an inherited child environment, a file,
-or retained output. `run_gate_test` captures selector stdout/stderr plus exact
+or retained output. After intake, the outer Bash process captures the complete
+combined launcher/child output and exact status behind a validated non-LF
+suffix, restores all preceding terminal LF bytes, counts them under a private
+non-exported C byte locale, refuses NUL or a sealed stream exceeding 16,777,216
+bytes, and emits only after one literal-key collision check over the complete
+would-be output. Inner failure
+diagnostics, the environment fixture, and the final capture/GREEN record use the
+same complete-LF emission invariant; a collision exits nonzero and suppresses
+the colliding bytes rather than redacting or blacklisting a spelling.
+`run_gate_test` captures selector stdout/stderr plus exact
 status by appending a validated non-LF terminal status suffix before Bash
 command substitution and removing only that suffix afterward. This preserves
 all preceding trailing LF bytes for literal key detection while retaining the

@@ -43,7 +43,9 @@ test, the outer runner:
    accepts exactly `LOOPEX_M1_PROVIDER_V1\0<key>\0`, with a nonempty key of at
    most 16,384 bytes; any other nonempty input, missing terminator, additional
    field, oversized key, or trailing byte is refused, while LF bytes within the
-   key remain literal;
+   key remain literal; frame validity is only input syntax, so a syntactically
+   valid key such as `0` is still refused later if its exact bytes collide with
+   gate-owned controls or would-be output;
 4. privately captures only the optional provider record, supplied home,
    temporary-root input, installed Mix-prerequisite root, gate seed, and
    toolchain path, then sends the private controls over a pipe—not argv,
@@ -80,6 +82,18 @@ test, the outer runner:
 9. requires every protected selector as a tracked ordinary `100644` blob,
    every exact locked name, and each exact real-provider tag.
 
+After provider parsing, one Bash-owned emission rule governs every gate-owned
+byte. The outer shell captures the launcher's complete combined output and exact
+status behind a validated non-LF suffix, restores every preceding terminal LF,
+counts under a private non-exported C byte locale, refuses NUL or a sealed stream
+exceeding 16,777,216 bytes, and compares the complete would-be emission against
+the nonempty key before printing anything.
+Inner diagnostics, the complete environment-fixture record, and the final
+`CAPTURE` or GREEN record construct their terminal LF before the same comparison.
+A collision exits nonzero and suppresses the colliding bytes; this is
+fail-closed output containment, distinct from accepting the provider frame
+syntax, and is not a blacklist of credential spellings.
+
 An invalid raw `execve` environment name is not an ordinary Bash identifier.
 Bash releases either expose it during imported-name enumeration or retain it
 only in the inherited environment. The outer shell or launcher refuses it
@@ -100,19 +114,20 @@ M1 gate RED: no apps/loopex/test/runtime_test.exs; the outcome it proves does no
 No write may move above that condition. The runner's bounded
 `--environment-fixture` role executes the same environment, account-home,
 repository, and physical-path preflight, then prints a second environment dump
-and `M1 environment preflight OK`. It allocates no task root, invokes no Mix or
-product selector, and can print neither `CAPTURE` nor `M1 gate GREEN`.
+and `M1 environment preflight OK` only after constructing and checking that
+complete output. It allocates no task root, invokes no Mix or product selector,
+and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 ## Bound Artifacts
 
 | SHA-256 | Path |
 | --- | --- |
-| `5914abfc4933124307cbd697fe4ff48f1d7f523b5427ac841079dd24dfe5aa4e` | `scripts/check-m1-gate.sh` |
+| `3ba5c9aec51bcfe0d31f2f76cb3e9126a6e6858092840dee942dc8dcb60bf0a8` | `scripts/check-m1-gate.sh` |
 | `d29358ad791436eefb677fc04077ddd720b521a77d3a8f708c11fd76db17e2ba` | `scripts/m1-gate-launcher.escript` |
 | `6aa177be0672179cb0713a7e73ccf54a52fa4dc957d5e7d00e3e514d5015f8c2` | `scripts/m1-exunit-runner.exs` |
 | `360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c` | `scripts/m1-evidence-verifier.exs` |
 | `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `dd7afd259226b2cd9b78568816d7b34ee4a26688dcad3bff9d14fa5acc8cf7f5` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `a70a881e4075d324ab7c6dc2c91bbea7fa217607224fe32d7a4a0c03cbf2e273` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |

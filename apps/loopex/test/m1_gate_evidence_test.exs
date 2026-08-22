@@ -896,6 +896,45 @@ defmodule Loopex.M1GateEvidenceTest do
 
     assert summary in environment_lines
 
+    for {reason, colliding_key} <- [
+          {"canonical environment dump", "/dev/null"},
+          {"gate-owned control", "0"},
+          {"summary", "preflight OK"},
+          {"terminal line feed", "\n"}
+        ] do
+      {collision_output, collision_status} =
+        run_gate_with_input(
+          provider_frame(colliding_key),
+          ["--environment-fixture"],
+          [{"HOME", actual_home}]
+        )
+
+      assert collision_status != 0, "#{reason} collision unexpectedly succeeded"
+      refute collision_output =~ colliding_key, "#{reason} collision was emitted"
+    end
+
+    {diagnostic_output, diagnostic_status} =
+      run_gate_with_input(
+        provider_frame("M1 gate RED"),
+        ["--not-a-role"],
+        [{"HOME", actual_home}]
+      )
+
+    assert diagnostic_status != 0, "diagnostic-prefix collision unexpectedly succeeded"
+    assert diagnostic_output == ""
+
+    for noncolliding_key <- ["fixture-provider-token", "fixture\nprovider-token"] do
+      {noncollision_output, 0} =
+        run_gate_with_input(
+          provider_frame(noncolliding_key),
+          ["--environment-fixture"],
+          [{"HOME", actual_home}]
+        )
+
+      assert noncollision_output =~ "M1 environment preflight OK"
+      refute noncollision_output =~ noncolliding_key
+    end
+
     boundary_functions =
       Enum.map_join(
         ["valid_utf8_charmap", "valid_gate_seed"],
@@ -1000,7 +1039,11 @@ defmodule Loopex.M1GateEvidenceTest do
     refute output =~ "M1 environment preflight OK"
 
     redaction_functions =
-      Enum.map_join(["fail", "redacted"], "\n", &shell_function(runner_source(), &1))
+      Enum.map_join(
+        ["emit_gate_output", "fail", "redacted"],
+        "\n",
+        &shell_function(runner_source(), &1)
+      )
 
     {output, 0} =
       System.cmd(
@@ -1016,7 +1059,11 @@ defmodule Loopex.M1GateEvidenceTest do
     refute output =~ "redacted"
 
     real_role_functions =
-      Enum.map_join(["fail", "run_gate_test"], "\n", &shell_function(runner_source(), &1))
+      Enum.map_join(
+        ["emit_gate_output", "fail", "run_gate_test"],
+        "\n",
+        &shell_function(runner_source(), &1)
+      )
 
     real_role_probe = """
     #{real_role_functions}
@@ -1114,6 +1161,81 @@ defmodule Loopex.M1GateEvidenceTest do
     assert soft_core < hard_core
     assert hard_core < provider_read
     assert provider_read < first_child
+    assert outer_launch_body =~ "      loopex_m1_status=\"${PIPESTATUS[1]}\""
+    assert outer_launch_body =~ "    } 2>&1\n  )"
+    assert outer_launch_body =~ "capture_outer_gate_output < <("
+    refute outer_launch_body =~ "\"$loopex_m1_launcher\" \"$@\" 2>&1"
+
+    capture_functions =
+      Enum.map_join(
+        ["emit_gate_output", "fail", "capture_outer_gate_output"],
+        "\n",
+        &shell_function(source, &1)
+      )
+
+    capture_body = shell_function(source, "capture_outer_gate_output")
+    assert capture_body =~ "loopex_m1_output_max=16777216"
+    assert capture_body =~ "local LC_ALL=C"
+    assert capture_body =~ "builtin export -n LC_ALL"
+    assert capture_body =~ "do\n      :\n    done"
+
+    for {captured_bytes, captured_status} <- [{"ok\n", 0}, {"tail\n\n", 7}] do
+      status_probe = """
+      #{capture_functions}
+      provider_key_value=ordinary-provider-key
+      capture_outer_gate_output < <(
+        builtin printf '#{String.replace(captured_bytes, "\n", "\\n")}'
+        builtin printf '\\035LOOPEX_M1_OUTER_STATUS_V1:#{captured_status}'
+      )
+      exit "$loopex_m1_status"
+      """
+
+      assert {^captured_bytes, ^captured_status} =
+               System.cmd("/bin/bash", ["-c", status_probe], stderr_to_stdout: true)
+    end
+
+    for {provider_key, nul_output} <- [
+          {"ordinary-provider-key", "prefix\\0suffix\\n"},
+          {"warning", "prefixwarning\\0suffix\\n"}
+        ] do
+      nul_capture_probe = """
+      #{capture_functions}
+      provider_key_value=#{provider_key}
+      capture_outer_gate_output < <(builtin printf '#{nul_output}')
+      exit 2
+      """
+
+      assert {"M1 gate RED: the sealed gate output contains a NUL byte\n", 1} =
+               System.cmd("/bin/bash", ["-c", nul_capture_probe], stderr_to_stdout: true)
+    end
+
+    oversized_probe = """
+    #{capture_functions}
+    provider_key_value=ordinary-provider-key
+    capture_outer_gate_output < <(
+      "#{System.find_executable("elixir")}" -e 'IO.binwrite(:binary.copy("x", 16_777_217))'
+    )
+    exit 2
+    """
+
+    assert {"M1 gate RED: the sealed gate output exceeds its byte bound\n", 1} =
+             System.cmd("/bin/bash", ["-c", oversized_probe], stderr_to_stdout: true)
+
+    uncooperative_probe = """
+    #{capture_functions}
+    provider_key_value=M1
+    capture_outer_gate_output < <(
+      {
+        builtin printf '%s' "$provider_key_value"
+        builtin printf '%s' "$provider_key_value" >&2
+        builtin printf '\\035LOOPEX_M1_OUTER_STATUS_V1:0'
+      } 2>&1
+    )
+    exit "$loopex_m1_status"
+    """
+
+    assert {"", 1} =
+             System.cmd("/bin/bash", ["-c", uncooperative_probe], stderr_to_stdout: true)
 
     run_gate_body = shell_function(source, "run_gate_test")
     assert run_gate_body =~ "--only-real-provider --real-path model"
@@ -1314,7 +1436,8 @@ defmodule Loopex.M1GateEvidenceTest do
     pre_red = lines |> Enum.take(red_index) |> Enum.join("\n")
     refute pre_red =~ "<<<"
     refute Regex.match?(~r/(^|\n)\s*<<[-]?\s*/, pre_red)
-    refute Regex.match?(~r/[<>]\(/, pre_red)
+    assert Regex.scan(~r/[<>]\(/, pre_red) == [["<("]]
+    assert pre_red =~ "capture_outer_gate_output < <("
 
     unwritable_tmp =
       Path.join(System.tmp_dir!(), "m1-read-only-tmp-#{System.unique_integer([:positive])}")
@@ -1627,6 +1750,7 @@ defmodule Loopex.M1GateEvidenceTest do
     functions =
       Enum.map_join(
         [
+          "emit_gate_output",
           "fail",
           "resolve_physical",
           "valid_node_id",
@@ -1747,7 +1871,11 @@ defmodule Loopex.M1GateEvidenceTest do
     File.write!(Path.join(tracked_root, "target.md"), "ordinary target\n")
 
     tracked_functions =
-      Enum.map_join(["fail", "require_tracked_regular"], "\n", &shell_function(source, &1))
+      Enum.map_join(
+        ["emit_gate_output", "fail", "require_tracked_regular"],
+        "\n",
+        &shell_function(source, &1)
+      )
 
     for {path, label} <- [
           {"docs/evidence/M1-toolchain-matrix.md", "matrix evidence"},
@@ -1888,6 +2016,7 @@ defmodule Loopex.M1GateEvidenceTest do
     functions =
       Enum.map_join(
         [
+          "emit_gate_output",
           "fail",
           "resolve_physical",
           "valid_node_id",

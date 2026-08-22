@@ -24,9 +24,86 @@ builtin set +a
 builtin set +e
 builtin set +u
 
+emit_gate_output() {
+  local destination="$1" bytes="$2"
+  if [ -n "${provider_key_value-}" ]; then
+    case "$bytes" in
+      *"$provider_key_value"*) return 1 ;;
+    esac
+  fi
+  case "$destination" in
+    stdout) builtin printf '%s' "$bytes" ;;
+    stderr) builtin printf '%s' "$bytes" >&2 ;;
+    *) return 1 ;;
+  esac
+}
+
 fail() {
-  builtin printf '%s\n' "M1 gate RED: $1" >&2
+  local failure_output="M1 gate RED: $1"$'\n'
+  emit_gate_output stderr "$failure_output" || :
   builtin exit 1
+}
+
+# Read the sealed child stream with Bash builtins so NUL bytes are refused
+# without asking another process to inspect provider-bearing output. The
+# non-LF suffix makes every preceding LF and the exact child status observable.
+capture_outer_gate_output() {
+  local loopex_m1_output_max=16777216
+  local loopex_m1_output_chunk loopex_m1_read_status
+  local loopex_m1_capture_refusal
+  local loopex_m1_terminal_prefix loopex_m1_terminal_status
+  local loopex_m1_terminal_suffix loopex_m1_output_destination
+  local LC_ALL=C
+  builtin export -n LC_ALL \
+    || fail "the sealed gate output byte locale could not be isolated"
+
+  loopex_m1_output_chunk=""
+  if IFS= builtin read -r -d '' -n $((loopex_m1_output_max + 1)) \
+    loopex_m1_output_chunk
+  then
+    if [ "${#loopex_m1_output_chunk}" -ge $((loopex_m1_output_max + 1)) ]; then
+      loopex_m1_capture_refusal="the sealed gate output exceeds its byte bound"
+    else
+      loopex_m1_capture_refusal="the sealed gate output contains a NUL byte"
+    fi
+    while IFS= builtin read -r -d '' -n $((loopex_m1_output_max + 1)) \
+      loopex_m1_output_chunk
+    do
+      :
+    done
+    fail "$loopex_m1_capture_refusal"
+  else
+    loopex_m1_read_status=$?
+  fi
+  [ "$loopex_m1_read_status" -eq 1 ] \
+    || fail "the sealed gate output could not be captured"
+  loopex_m1_output="$loopex_m1_output_chunk"
+
+  loopex_m1_terminal_prefix=$'\035'LOOPEX_M1_OUTER_STATUS_V1:
+  case "$loopex_m1_output" in
+    *"$loopex_m1_terminal_prefix"*)
+      loopex_m1_terminal_status="${loopex_m1_output##*"$loopex_m1_terminal_prefix"}"
+      ;;
+    *) fail "the sealed gate output status is malformed" ;;
+  esac
+  [[ "$loopex_m1_terminal_status" =~ ^(0|[1-9][0-9]{0,2})$ ]] &&
+    [ "$loopex_m1_terminal_status" -le 255 ] \
+    || fail "the sealed gate output status is malformed"
+  loopex_m1_terminal_suffix="$loopex_m1_terminal_prefix$loopex_m1_terminal_status"
+  case "$loopex_m1_output" in
+    *"$loopex_m1_terminal_suffix")
+      loopex_m1_output="${loopex_m1_output%"$loopex_m1_terminal_suffix"}"
+      ;;
+    *) fail "the sealed gate output status is malformed" ;;
+  esac
+  loopex_m1_status="$loopex_m1_terminal_status"
+  if [ "$loopex_m1_status" -eq 0 ]; then
+    loopex_m1_output_destination=stdout
+  else
+    loopex_m1_output_destination=stderr
+  fi
+  emit_gate_output "$loopex_m1_output_destination" "$loopex_m1_output" \
+    || fail "gate-owned output collides with provider credential bytes"
 }
 
 # The outer role performs no ordinary child work. It captures the few controls
@@ -251,9 +328,11 @@ outer_launch() {
     esac
   done
   loopex_m1_env_capture="$(
-    /usr/bin/env
-    loopex_m1_env_status=$?
-    builtin printf 'LOOPEX_M1_ENV_STATUS=%s' "$loopex_m1_env_status"
+    {
+      /usr/bin/env
+      loopex_m1_env_status=$?
+      builtin printf 'LOOPEX_M1_ENV_STATUS=%s' "$loopex_m1_env_status"
+    } 2>&1
   )"
   loopex_m1_env_rest="${loopex_m1_env_capture%$'\nLOOPEX_M1_ENV_STATUS=0'}"
   loopex_m1_path_count=0
@@ -288,22 +367,27 @@ outer_launch() {
   [ "$loopex_m1_path_count" -eq 1 ] && [ "$loopex_m1_under_count" -eq 1 ] \
     || fail "the scrubbed outer environment was incomplete"
 
-  {
-    builtin printf '%s\0' \
-      LOOPEX_M1_LAUNCHER_V1 \
-      "$loopex_m1_real_home_input" \
-      "$loopex_m1_task_tmp_input" \
-      "$loopex_m1_source_mix_home_input" \
-      "$loopex_m1_gate_seed_input" \
-      "$loopex_m1_safe_path" \
-      "$provider_key_value"
-  } | /usr/bin/env -i \
-    ERL_CRASH_DUMP=/dev/null \
-    ERL_CRASH_DUMP_SECONDS=0 \
-    LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8 \
-    "$loopex_m1_escript" "$loopex_m1_launcher" "$@"
-  loopex_m1_status=$?
+  capture_outer_gate_output < <(
+    {
+      {
+        builtin printf '%s\0' \
+          LOOPEX_M1_LAUNCHER_V1 \
+          "$loopex_m1_real_home_input" \
+          "$loopex_m1_task_tmp_input" \
+          "$loopex_m1_source_mix_home_input" \
+          "$loopex_m1_gate_seed_input" \
+          "$loopex_m1_safe_path" \
+          "$provider_key_value"
+      } | /usr/bin/env -i \
+        ERL_CRASH_DUMP=/dev/null \
+        ERL_CRASH_DUMP_SECONDS=0 \
+        LANG=C.UTF-8 \
+        LC_ALL=C.UTF-8 \
+        "$loopex_m1_escript" "$loopex_m1_launcher" "$@"
+      loopex_m1_status="${PIPESTATUS[1]}"
+      builtin printf '\035LOOPEX_M1_OUTER_STATUS_V1:%s' "$loopex_m1_status"
+    } 2>&1
+  )
   builtin exit "$loopex_m1_status"
 }
 
@@ -476,15 +560,17 @@ SECONDS=0
 # suppressed instead. The value is neither an argv element nor input to a
 # redaction subprocess.
 redacted() {
+  local redacted_output
   if [ -n "$provider_key_value" ]; then
     local cleaned="${1//"$provider_key_value"/}"
     case "$cleaned" in
-      *"$provider_key_value"*) builtin printf '%s\n' "provider diagnostic suppressed" ;;
-      *) builtin printf '%s\n' "$cleaned" ;;
+      *"$provider_key_value"*) redacted_output="provider diagnostic suppressed"$'\n' ;;
+      *) redacted_output="$cleaned"$'\n' ;;
     esac
   else
-    builtin printf '%s\n' "$1"
+    redacted_output="$1"$'\n'
   fi
+  emit_gate_output stdout "$redacted_output"
 }
 
 repository_output="$(command -p git rev-parse --show-toplevel 2>&1)" \
@@ -776,9 +862,21 @@ do
 done
 
 if [ "$gate_role" = environment-fixture ]; then
-  /usr/bin/env
-  builtin printf '%s\n' \
-    "M1 environment preflight OK os=$runtime_os arch=$runtime_arch locale=$locale_charmap stat=$stat_style sha256=$sha256_style limits=$runtime_limits"
+  environment_fixture_output="$(
+    /usr/bin/env
+    environment_fixture_status=$?
+    builtin printf '\035LOOPEX_M1_ENV_FIXTURE_STATUS_V1:%s' "$environment_fixture_status"
+  )"
+  case "$environment_fixture_output" in
+    *$'\035LOOPEX_M1_ENV_FIXTURE_STATUS_V1:0')
+      environment_fixture_output="${environment_fixture_output%$'\035LOOPEX_M1_ENV_FIXTURE_STATUS_V1:0'}"
+      ;;
+    *) fail "the canonical environment fixture could not be captured" ;;
+  esac
+  environment_fixture_output="$environment_fixture_output"\
+"M1 environment preflight OK os=$runtime_os arch=$runtime_arch locale=$locale_charmap stat=$stat_style sha256=$sha256_style limits=$runtime_limits"$'\n'
+  emit_gate_output stdout "$environment_fixture_output" \
+    || fail "environment fixture output collides with provider credential bytes"
   builtin exit 0
 fi
 
@@ -1051,7 +1149,7 @@ require_bound_artifact apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861 \
   "bound dependency-direction reader"
 require_bound_artifact apps/loopex/test/m1_gate_evidence_test.exs \
-  dd7afd259226b2cd9b78568816d7b34ee4a26688dcad3bff9d14fa5acc8cf7f5 \
+  a70a881e4075d324ab7c6dc2c91bbea7fa217607224fe32d7a4a0c03cbf2e273 \
   "bound M1 mechanics corpus"
 require_bound_artifact apps/loopex/test/m1_exunit_runner_test.exs \
   558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b \
@@ -1577,9 +1675,11 @@ run_gate_test() {
 
   if [ "$gate_test_status" -ne 0 ] || [ "$report_count" -ne 1 ]; then
     if [ "$role" != default ]; then
-      redacted "$output" >&2
+      redacted "$output" >&2 \
+        || fail "$file diagnostic collides with provider credential bytes"
     else
-      printf '%s\n' "$output" >&2
+      emit_gate_output stderr "$output"$'\n' \
+        || fail "$file diagnostic collides with provider credential bytes"
     fi
     fail "$file did not produce exactly one successful authoritative ExUnit report"
   fi
@@ -1881,7 +1981,9 @@ if [ "$gate_role" = capture ]; then
       *"$provider_key_value"*) fail "the final capture contains provider credential bytes" ;;
     esac
   fi
-  builtin printf '%s\n' "$capture_record"
+  final_gate_output="$capture_record"$'\n'
 else
-  builtin printf '%s\n' "M1 gate GREEN seed=$gate_seed protected_executed=$protected_executed"
+  final_gate_output="M1 gate GREEN seed=$gate_seed protected_executed=$protected_executed"$'\n'
 fi
+emit_gate_output stdout "$final_gate_output" \
+  || fail "final gate output collides with provider credential bytes"
