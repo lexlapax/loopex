@@ -179,14 +179,16 @@ would-be output. Inner failure
 diagnostics, the environment fixture, and the final capture/GREEN record use the
 same complete-LF emission invariant; a collision exits nonzero and suppresses
 the colliding bytes rather than redacting or blacklisting a spelling.
-Before the key enters the launcher frame, Bash derives a comprehensive carrier
-manifest from the exact non-secret frame, environment and argument arrays used
-by that invocation. Before the launcher forwards the key to the sealed child,
-it independently derives the child manifest from the exact executable,
-arguments, environment names and values, and non-secret inner-frame values used
-by `open_port` and stdin. Both refuse literal collision; each manifest is owned
-and consumed at the boundary that derives it, so no parallel enumeration can
-drift from the actual carrier construction.
+Before its first external child, Bash derives and checks the exact executable,
+incoming `PATH`, and conventional `_` name, value, and serialized records that
+the following outer environment inspection validates. Before the key enters the
+launcher frame, Bash separately checks the exact non-secret frame, environment,
+and argument arrays used by that invocation. Before the launcher forwards the
+key to the sealed child, it independently derives the child manifest from the
+exact executable, arguments, environment names and values, and non-secret
+inner-frame values used by `open_port` and stdin. Every check refuses literal
+collision and is consumed at the boundary that derives it, so no parallel
+enumeration can drift from the actual carrier construction.
 `run_gate_test` captures selector stdout/stderr plus exact
 status by appending a validated non-LF terminal status suffix before Bash
 command substitution and removing only that suffix afterward. This preserves

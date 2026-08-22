@@ -51,10 +51,13 @@ test, the outer runner:
    toolchain path, then sends the private controls over a pipe—not argv,
    environment, a file, or retained output—to the digest-bound launcher, whose
    bootstrap environment contains only locale and gate-owned BEAM dump controls
-   and no provider credential; before forwarding the key, Bash derives one
-   carrier manifest from the exact launcher frame, environment and argument
-   arrays it will use and refuses a literal collision with any non-secret
-   header, name, value, role, executable or dynamic path;
+   and no provider credential; before its first external child, Bash derives
+   and checks the exact retained outer-child executable plus the incoming
+   `PATH` and conventional `_` names, values, and serialized entries that its
+   following environment inspection must prove; before forwarding the key,
+   Bash separately checks the exact launcher frame, environment, and argument
+   arrays it will use, refusing a literal collision with any non-secret header,
+   name, value, role, executable, or dynamic path;
 5. has the launcher clear every inherited environment entry for its child,
    install exactly the derived absolute toolchain `PATH`, `HOME=/`,
    `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and `GIT_OPTIONAL_LOCKS=0`, and start the
@@ -103,11 +106,12 @@ A collision exits nonzero and suppresses the colliding bytes; this is
 fail-closed output containment, distinct from accepting the provider frame
 syntax, and is not a blacklist of credential spellings.
 
-The two carrier manifests are derived at the two owners rather than copied
-between them: Bash validates the same arrays it uses to frame and invoke the
-launcher, and the launcher validates the same child arguments, environment and
-non-secret frame values it uses for `open_port` and stdin. The key itself is
-excluded from each manifest and remains only the final private frame field.
+Carrier checks are derived at their owners rather than copied between them:
+Bash validates the exact retained outer-child records that its subsequent
+inspection proves and the same arrays it uses to frame and invoke the launcher;
+the launcher validates the same child arguments, environment, and non-secret
+frame values it uses for `open_port` and stdin. The key itself is excluded from
+each manifest and remains only the final private frame field.
 
 An invalid raw `execve` environment name is not an ordinary Bash identifier.
 Bash releases either expose it during imported-name enumeration or retain it
@@ -137,12 +141,12 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `8a6fbe3527cb95e56937d0355fc616fadc9ec936b37184cd5683fc849b447de9` | `scripts/check-m1-gate.sh` |
+| `7f2cb935244db369bc7717e1deda0bd3ca64e41f9541fa651685e39c9266a937` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `6aa177be0672179cb0713a7e73ccf54a52fa4dc957d5e7d00e3e514d5015f8c2` | `scripts/m1-exunit-runner.exs` |
 | `360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c` | `scripts/m1-evidence-verifier.exs` |
 | `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `b5314e913fd083b1d9bc861d0000fb4c6d41f2dc24bc8de5b7446f0b59ca864e` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `b3564733ea78b8be1d8897b8cfc0bc89add625cce6fe08eb9a7be116fac11322` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |

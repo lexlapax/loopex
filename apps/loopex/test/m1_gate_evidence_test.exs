@@ -104,7 +104,7 @@ defmodule Loopex.M1GateEvidenceTest do
     )
   end
 
-  defp run_gate_with_input(input, args, env) do
+  defp run_gate_with_input(input, args, env, gate \\ "scripts/check-m1-gate.sh") do
     producer =
       "IO.binwrite(Base.decode64!(List.first(System.argv())))"
 
@@ -113,11 +113,12 @@ defmodule Loopex.M1GateEvidenceTest do
       [
         "-p",
         "-c",
-        "\"$1\" -e \"$2\" -- \"$3\" | /bin/bash -p scripts/check-m1-gate.sh \"\${@:4}\"",
+        "\"$1\" -e \"$2\" -- \"$3\" | /bin/bash -p \"$4\" \"\${@:5}\"",
         "m1-provider-input",
         System.find_executable("elixir"),
         producer,
-        Base.encode64(input) | args
+        Base.encode64(input),
+        gate | args
       ],
       cd: repo_root(),
       env: env,
@@ -935,6 +936,60 @@ defmodule Loopex.M1GateEvidenceTest do
       refute noncollision_output =~ noncolliding_key
     end
 
+    ambient_path_key = "ambient-collision-token-#{System.unique_integer([:positive])}"
+
+    {ambient_output, ambient_status} =
+      run_gate_with_input(
+        provider_frame(ambient_path_key),
+        ["--environment-fixture"],
+        [
+          {"HOME", actual_home},
+          {"PATH",
+           Path.join(System.tmp_dir!(), ambient_path_key) <> ":" <> System.fetch_env!("PATH")}
+        ]
+      )
+
+    assert ambient_status != 0, "unused incoming PATH carrier unexpectedly succeeded"
+
+    assert ambient_output ==
+             "M1 gate RED: an outer child carrier collides with provider credential bytes\n"
+
+    refute ambient_output =~ ambient_path_key
+
+    carrier_guard =
+      """
+        refuse_provider_carrier_collision "${loopex_m1_outer_child_carriers[@]}" \\
+          || fail "an outer child carrier collides with provider credential bytes"
+      """
+
+    mutant_source = String.replace(runner_source(), carrier_guard, "  :\n", global: false)
+    refute mutant_source == runner_source(), "outer child carrier mutation did not apply"
+
+    mutant_path =
+      Path.join(
+        System.tmp_dir!(),
+        "m1-outer-carrier-mutant-#{System.unique_integer([:positive])}"
+      )
+
+    File.write!(mutant_path, mutant_source)
+    File.chmod!(mutant_path, 0o700)
+    on_exit(fn -> File.rm(mutant_path) end)
+
+    {mutant_output, mutant_status} =
+      run_gate_with_input(
+        provider_frame(ambient_path_key),
+        ["--environment-fixture"],
+        [
+          {"HOME", actual_home},
+          {"PATH",
+           Path.join(System.tmp_dir!(), ambient_path_key) <> ":" <> System.fetch_env!("PATH")}
+        ],
+        mutant_path
+      )
+
+    assert mutant_status == 0, "carrier-check mutation remained refusing:\n#{mutant_output}"
+    assert mutant_output =~ "M1 environment preflight OK"
+
     carrier_keys = [
       "LANG",
       "PATH",
@@ -1194,9 +1249,31 @@ defmodule Loopex.M1GateEvidenceTest do
     assert outer_launch_body =~ "    } 2>&1\n  )"
     assert outer_launch_body =~ "capture_outer_gate_output < <("
     refute outer_launch_body =~ "/usr/bin/env -i"
-    assert outer_captured_body =~ "/usr/bin/env -i"
+    assert outer_captured_body =~ "loopex_m1_outer_child_executable=/usr/bin/env"
+    assert outer_captured_body =~ "      /usr/bin/env\n"
+    assert outer_captured_body =~ "} | /usr/bin/env -i"
     assert outer_captured_body =~ "return \"${PIPESTATUS[1]}\""
     assert outer_captured_body =~ "refuse_provider_carrier_collision"
+    assert outer_captured_body =~ "\"${loopex_m1_outer_child_carriers[@]}\""
+
+    for carrier <- ~w(
+      loopex_m1_outer_child_executable
+      loopex_m1_outer_child_path_name
+      loopex_m1_original_tool_path
+      loopex_m1_outer_child_path_record
+      loopex_m1_outer_child_under_name
+      loopex_m1_outer_child_under_value
+      loopex_m1_outer_child_under_record
+    ) do
+      assert outer_captured_body =~ "\"$#{carrier}\"", "outer carrier missing #{carrier}"
+    end
+
+    assert outer_captured_body =~
+             "[ \"$loopex_m1_line\" = \"$loopex_m1_outer_child_path_record\" ]"
+
+    assert outer_captured_body =~
+             "[ \"$loopex_m1_line\" = \"$loopex_m1_outer_child_under_record\" ]"
+
     assert outer_captured_body =~ "\"${loopex_m1_launcher_frame[@]}\""
     assert outer_captured_body =~ "\"${loopex_m1_launcher_environment[@]}\""
     assert outer_captured_body =~ "\"${loopex_m1_launcher_arguments[@]}\""

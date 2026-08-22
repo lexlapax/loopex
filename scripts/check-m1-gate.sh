@@ -256,6 +256,24 @@ outer_launch_captured() {
   loopex_m1_source_mix_home_input="${MIX_HOME:-${HOME-}/.mix}"
   loopex_m1_gate_seed_input="${LOOPEX_GATE_SEED-}"
   loopex_m1_original_tool_path="${PATH-}"
+  loopex_m1_outer_child_executable=/usr/bin/env
+  loopex_m1_outer_child_path_name=PATH
+  loopex_m1_outer_child_under_name=_
+  loopex_m1_outer_child_under_value="$loopex_m1_outer_child_executable"
+  loopex_m1_outer_child_path_record="${loopex_m1_outer_child_path_name}=${loopex_m1_original_tool_path}"
+  loopex_m1_outer_child_under_record="${loopex_m1_outer_child_under_name}=${loopex_m1_outer_child_under_value}"
+  loopex_m1_outer_child_carriers=(
+    "$loopex_m1_outer_child_executable"
+    "$loopex_m1_outer_child_path_name"
+    "$loopex_m1_original_tool_path"
+    "$loopex_m1_outer_child_path_record"
+    "$loopex_m1_outer_child_under_name"
+    "$loopex_m1_outer_child_under_value"
+    "$loopex_m1_outer_child_under_record"
+  )
+  refuse_provider_carrier_collision "${loopex_m1_outer_child_carriers[@]}" \
+    || fail "an outer child carrier collides with provider credential bytes"
+
   loopex_m1_original_path_entries=()
   loopex_m1_path_rest="$loopex_m1_original_tool_path"
   loopex_m1_path_done=0
@@ -390,13 +408,15 @@ outer_launch_captured() {
     loopex_m1_env_name="${loopex_m1_line%%=*}"
     loopex_m1_env_value="${loopex_m1_line#*=}"
     case "$loopex_m1_env_name" in
-      PATH)
-        [ "$loopex_m1_env_value" = "$loopex_m1_original_tool_path" ] \
+      "$loopex_m1_outer_child_path_name")
+        [ "$loopex_m1_line" = "$loopex_m1_outer_child_path_record" ] &&
+          [ "$loopex_m1_env_value" = "$loopex_m1_original_tool_path" ] \
           || fail "the incoming search path changed during environment inspection"
         loopex_m1_path_count=$((loopex_m1_path_count + 1))
         ;;
-      _)
-        [ "$loopex_m1_env_value" = /usr/bin/env ] \
+      "$loopex_m1_outer_child_under_name")
+        [ "$loopex_m1_line" = "$loopex_m1_outer_child_under_record" ] &&
+          [ "$loopex_m1_env_value" = "$loopex_m1_outer_child_under_value" ] \
           || fail "ambient environment contains an invalid dynamic entry"
         loopex_m1_under_count=$((loopex_m1_under_count + 1))
         ;;
@@ -1177,7 +1197,7 @@ require_bound_artifact apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861 \
   "bound dependency-direction reader"
 require_bound_artifact apps/loopex/test/m1_gate_evidence_test.exs \
-  b5314e913fd083b1d9bc861d0000fb4c6d41f2dc24bc8de5b7446f0b59ca864e \
+  b3564733ea78b8be1d8897b8cfc0bc89add625cce6fe08eb9a7be116fac11322 \
   "bound M1 mechanics corpus"
 require_bound_artifact apps/loopex/test/m1_exunit_runner_test.exs \
   558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b \
