@@ -1,0 +1,492 @@
+Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+
+defmodule Loopex.SessionLifecycleTest do
+  use ExUnit.Case, async: false
+
+  alias Loopex.M1RuntimeTestStore
+  alias Loopex.Runtime
+  alias Loopex.Runtime.Control
+  alias Loopex.Runtime.SessionCoordinator
+  alias Loopex.Store.Transitions
+
+  setup do
+    fixture = start_fixture("session-runtime")
+    on_exit(fn -> stop_fixture(fixture) end)
+    fixture
+  end
+
+  test "session creation atomically records its runtime command mapping and genesis re-presents identical bytes idempotently and conflicts on changed bytes",
+       fixture do
+    assert {:ok, session_id} =
+             Loopex.create_session(fixture.runtime, %{"workspace" => "one"},
+               command_id: "create-session"
+             )
+
+    first = M1RuntimeTestStore.inspect_state(fixture.store_pid)
+    mapping = Map.fetch!(first.runtime_commands, {fixture.runtime_id, "create-session"})
+    session = Map.fetch!(first.sessions, session_id)
+
+    assert mapping.session_id == session_id
+    assert {:committed, "create-session", %{session_id: ^session_id}} = mapping.outcome
+
+    assert [genesis, owner] = session.records
+    assert genesis.journal_version == 1
+    assert genesis.owner_epoch == 0
+    assert genesis.owner_incarnation_id == nil
+    assert genesis.payload.kind == "session_genesis"
+    assert genesis.payload["options"] == %{"workspace" => "one"}
+    assert owner.journal_version == 2
+    assert owner.payload.kind == "owner_advanced"
+
+    assert {:ok, ^session_id} =
+             Loopex.create_session(fixture.runtime, %{"workspace" => "one"},
+               command_id: "create-session"
+             )
+
+    assert durable_store_projection(first) ==
+             durable_store_projection(M1RuntimeTestStore.inspect_state(fixture.store_pid))
+
+    assert {:error, :tx_id_conflict} =
+             Loopex.create_session(fixture.runtime, %{"workspace" => "changed"},
+               command_id: "create-session"
+             )
+
+    assert durable_store_projection(first) ==
+             durable_store_projection(M1RuntimeTestStore.inspect_state(fixture.store_pid))
+  end
+
+  test "initial and resumed coordinators commit advance_owner before admitting commands",
+       fixture do
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store_pid,
+        :session_journal_advance_owner,
+        self()
+      )
+
+    create =
+      Task.async(fn ->
+        Loopex.create_session(fixture.runtime, %{}, command_id: "create-delayed")
+      end)
+
+    assert_receive {:transaction_linearized, initial_waiter, _store,
+                    :session_journal_advance_owner, {:committed, _tx, initial_receipt}}
+
+    assert initial_receipt.owner_epoch == 1
+    assert Task.yield(create, 0) == nil
+
+    initial_session =
+      fixture.store_pid
+      |> M1RuntimeTestStore.inspect_state()
+      |> Map.fetch!(:sessions)
+      |> Map.fetch!("s_test_1")
+
+    assert Enum.map(initial_session.records, & &1.payload.kind) == [
+             "session_genesis",
+             "owner_advanced"
+           ]
+
+    M1RuntimeTestStore.release(initial_waiter)
+    assert {:ok, session_id} = Task.await(create)
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store_pid,
+        :session_journal_advance_owner,
+        self()
+      )
+
+    resume =
+      Task.async(fn ->
+        Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-delayed")
+      end)
+
+    assert_receive {:transaction_linearized, resume_waiter, _store,
+                    :session_journal_advance_owner, {:committed, _tx, resume_receipt}}
+
+    assert resume_receipt.owner_epoch == 2
+
+    command =
+      Task.async(fn ->
+        Loopex.command(attachment, %{
+          type: :prompt,
+          command_id: "queued-command",
+          content: "must wait"
+        })
+      end)
+
+    assert Task.yield(resume, 0) == nil
+    assert Task.yield(command, 0) == nil
+
+    before_release =
+      fixture.store_pid
+      |> M1RuntimeTestStore.inspect_state()
+      |> Map.fetch!(:sessions)
+      |> Map.fetch!(session_id)
+
+    assert List.last(before_release.records).payload.kind == "owner_advanced"
+    refute Enum.any?(before_release.records, &(&1.payload.kind == "command_admitted"))
+
+    M1RuntimeTestStore.release(resume_waiter)
+    assert {:ok, ^session_id} = Task.await(resume)
+    assert {:error, :session_unavailable} = Task.await(command)
+
+    {:ok, resumed_attachment} =
+      Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    assert {:accepted, "after-resume"} =
+             Loopex.command(resumed_attachment, %{
+               type: :prompt,
+               command_id: "after-resume",
+               content: "now admitted"
+             })
+
+    records =
+      fixture.store_pid
+      |> M1RuntimeTestStore.inspect_state()
+      |> Map.fetch!(:sessions)
+      |> Map.fetch!(session_id)
+      |> Map.fetch!(:records)
+
+    assert Enum.map(records, & &1.payload.kind) == [
+             "session_genesis",
+             "owner_advanced",
+             "owner_advanced",
+             "command_admitted"
+           ]
+  end
+
+  test "a superseded owner cannot newly commit or use a delayed result to update cache publish dispatch or authorize",
+       fixture do
+    session_id = create_session!(fixture, "create-supersession")
+    {:ok, old_attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+    old = current_entry(fixture.runtime, session_id)
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store_pid,
+        :session_journal_commit,
+        self()
+      )
+
+    delayed =
+      Task.async(fn ->
+        Loopex.command(old_attachment, %{
+          type: :prompt,
+          command_id: "old-owner-command",
+          content: "durable before reply"
+        })
+      end)
+
+    assert_receive {:transaction_linearized, waiter, _store, :session_journal_commit,
+                    {:committed, "old-owner-command", _receipt}}
+
+    assert current_entry(fixture.runtime, session_id).event_sequence == 0
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id,
+               command_id: "resume-after-old-commit"
+             )
+
+    current = current_entry(fixture.runtime, session_id)
+    assert current.coordinator != old.coordinator
+    assert current.owner.owner_epoch == old.owner.owner_epoch + 1
+    assert current.event_sequence == 2
+
+    eventually(fn -> Loopex.next_event(old_attachment) == {:error, :stale_attachment} end)
+
+    {:ok, current_attachment} =
+      Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    delivered = drain_events(current_attachment)
+    assert Enum.map(delivered, & &1.event_sequence) == [1, 2]
+    assert Enum.map(delivered, & &1.kind) == ["user.message_appended", "run.started"]
+
+    control_before_reply = control_projection(fixture.runtime, session_id)
+    store_before_reply = M1RuntimeTestStore.inspect_state(fixture.store_pid)
+
+    M1RuntimeTestStore.release(waiter)
+
+    assert {:error, {:superseded_after_commit, {:accepted, "old-owner-command"}}} =
+             Task.await(delayed)
+
+    assert control_before_reply == control_projection(fixture.runtime, session_id)
+    assert store_before_reply == M1RuntimeTestStore.inspect_state(fixture.store_pid)
+    assert {:error, :empty} = Loopex.next_event(current_attachment)
+
+    assert {:error, :superseded_owner} =
+             SessionCoordinator.command(old.coordinator, old.owner, %{
+               type: :abort,
+               command_id: "old-owner-authority"
+             })
+
+    assert {:ok, %{pending_work_ids: [pending], active_run_id: pending}} =
+             Loopex.session_status(fixture.runtime, session_id)
+  end
+
+  test "declared injected and observed transition and fault point pairs are equal", _fixture do
+    {injected, observed} =
+      Enum.reduce(Transitions.declared_pairs(), {MapSet.new(), MapSet.new()}, fn pair,
+                                                                                 {all_injected,
+                                                                                  all_observed} ->
+        transition = elem(pair, 0)
+        isolated = start_fixture("fault-#{transition}-#{elem(pair, 1)}")
+
+        try do
+          drive_fault_pair(isolated, pair)
+
+          {
+            MapSet.union(all_injected, M1RuntimeTestStore.injected(isolated.store_pid)),
+            MapSet.union(all_observed, M1RuntimeTestStore.observed(isolated.store_pid))
+          }
+        after
+          stop_fixture(isolated)
+        end
+      end)
+
+    declared = MapSet.new(Transitions.declared_pairs())
+    assert injected == declared
+    assert observed == declared
+  end
+
+  test "a prompt cannot start a second active run", fixture do
+    session_id = create_session!(fixture, "create-single-run")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    first =
+      Task.async(fn ->
+        Loopex.command(attachment, %{type: :prompt, command_id: "prompt-1", content: "one"})
+      end)
+
+    second =
+      Task.async(fn ->
+        Loopex.command(attachment, %{type: :prompt, command_id: "prompt-2", content: "two"})
+      end)
+
+    replies = [Task.await(first), Task.await(second)]
+    assert Enum.count(replies, &match?({:accepted, _command_id}, &1)) == 1
+    assert Enum.count(replies, &(&1 == {:error, :run_active})) == 1
+
+    accepted_id =
+      Enum.find_value(replies, fn
+        {:accepted, command_id} -> command_id
+        _other -> nil
+      end)
+
+    rejected_id = if accepted_id == "prompt-1", do: "prompt-2", else: "prompt-1"
+    rejected_content = if rejected_id == "prompt-1", do: "one", else: "two"
+    before_retry = M1RuntimeTestStore.inspect_state(fixture.store_pid)
+
+    assert {:error, :run_active} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: rejected_id,
+               content: rejected_content
+             })
+
+    assert before_retry == M1RuntimeTestStore.inspect_state(fixture.store_pid)
+
+    assert {:accepted, "abort-run"} =
+             Loopex.command(attachment, %{type: :abort, command_id: "abort-run"})
+
+    assert {:error, :run_active} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: rejected_id,
+               content: rejected_content
+             })
+
+    session = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id]
+    assert Enum.count(session.events, &(&1.kind == "run.started")) == 1
+    assert Enum.count(session.events, &(&1.kind == "run.finished")) == 1
+    assert Enum.count(session.records, &(&1.payload.kind == "command_admitted")) == 3
+  end
+
+  test "only one coordinator owns a session at a time after durable succession", fixture do
+    session_id = create_session!(fixture, "create-owner-series")
+    first = current_entry(fixture.runtime, session_id)
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-owner-2")
+
+    second = current_entry(fixture.runtime, session_id)
+
+    assert {session_id, "session", first.owner.transaction_id} in M1RuntimeTestStore.inspect_state(
+             fixture.store_pid
+           ).status_queries
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-owner-3")
+
+    third = current_entry(fixture.runtime, session_id)
+
+    assert {session_id, "session", second.owner.transaction_id} in M1RuntimeTestStore.inspect_state(
+             fixture.store_pid
+           ).status_queries
+
+    assert Enum.map([first, second, third], & &1.owner.owner_epoch) == [1, 2, 3]
+
+    assert MapSet.size(
+             MapSet.new(Enum.map([first, second, third], & &1.owner.owner_incarnation_id))
+           ) == 3
+
+    assert Process.alive?(first.coordinator)
+    assert Process.alive?(second.coordinator)
+    assert Process.alive?(third.coordinator)
+
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    refute Control.current_owner?(control, session_id, first.owner)
+    refute Control.current_owner?(control, session_id, second.owner)
+    assert Control.current_owner?(control, session_id, third.owner)
+
+    assert {:error, :superseded_owner} =
+             SessionCoordinator.command(first.coordinator, first.owner, %{
+               type: :prompt,
+               command_id: "stale-first",
+               content: "refused"
+             })
+
+    assert {:error, :superseded_owner} =
+             SessionCoordinator.command(second.coordinator, second.owner, %{
+               type: :prompt,
+               command_id: "stale-second",
+               content: "refused"
+             })
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    assert {:accepted, "current-command"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "current-command",
+               content: "accepted"
+             })
+
+    session = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id]
+    owner_records = Enum.filter(session.records, &(&1.payload.kind == "owner_advanced"))
+    assert Enum.map(owner_records, & &1.owner_epoch) == [1, 2, 3]
+    assert session.owner_epoch == 3
+    assert session.owner_incarnation_id == third.owner.owner_incarnation_id
+  end
+
+  defp drive_fault_pair(fixture, {:runtime_control_create_session, _phase} = pair) do
+    :ok = M1RuntimeTestStore.inject(fixture.store_pid, pair)
+
+    eventually_match(
+      fn ->
+        Loopex.create_session(fixture.runtime, %{}, command_id: "faulted-create")
+      end,
+      &match?({:ok, _session_id}, &1)
+    )
+  end
+
+  defp drive_fault_pair(fixture, {:session_journal_advance_owner, _phase} = pair) do
+    session_id = create_session!(fixture, "advance-baseline")
+    prior_epoch = current_entry(fixture.runtime, session_id).owner.owner_epoch
+    :ok = M1RuntimeTestStore.inject(fixture.store_pid, pair)
+
+    assert Loopex.resume_session(fixture.runtime, session_id, command_id: "faulted-advance") in [
+             {:ok, session_id},
+             {:error, :owner_acquiring}
+           ]
+
+    eventually(fn ->
+      case Loopex.session_status(fixture.runtime, session_id) do
+        {:ok, %{owner_epoch: epoch}} -> epoch == prior_epoch + 1
+        _other -> false
+      end
+    end)
+  end
+
+  defp drive_fault_pair(fixture, {:session_journal_commit, _phase} = pair) do
+    session_id = create_session!(fixture, "commit-baseline")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+    :ok = M1RuntimeTestStore.inject(fixture.store_pid, pair)
+
+    eventually_match(
+      fn ->
+        Loopex.command(attachment, %{
+          type: :prompt,
+          command_id: "faulted-command",
+          content: "commit"
+        })
+      end,
+      &(&1 == {:accepted, "faulted-command"})
+    )
+  end
+
+  defp start_fixture(runtime_id) do
+    {store_pid, store} = M1RuntimeTestStore.start_store(label: runtime_id)
+    {:ok, runtime} = Loopex.start_link(runtime_id: runtime_id, store: store)
+    %{runtime: runtime, runtime_id: runtime_id, store: store, store_pid: store_pid}
+  end
+
+  defp stop_fixture(fixture) do
+    if Runtime.alive?(fixture.runtime), do: Loopex.stop(fixture.runtime)
+    if Process.alive?(fixture.store_pid), do: GenServer.stop(fixture.store_pid)
+  end
+
+  defp create_session!(fixture, command_id) do
+    assert {:ok, session_id} = Loopex.create_session(fixture.runtime, %{}, command_id: command_id)
+    session_id
+  end
+
+  defp current_entry(runtime, session_id) do
+    {:ok, %{control: control}} = Runtime.children(runtime)
+    :sys.get_state(control).sessions |> Map.fetch!(session_id)
+  end
+
+  defp control_projection(runtime, session_id) do
+    entry = current_entry(runtime, session_id)
+
+    Map.take(entry, [
+      :status,
+      :coordinator,
+      :owner,
+      :journal_version,
+      :event_sequence,
+      :attachment
+    ])
+  end
+
+  defp durable_store_projection(state) do
+    Map.take(state, [:next_session, :runtime_commands, :sessions, :resolutions])
+  end
+
+  defp drain_events(attachment, accumulated \\ []) do
+    case Loopex.next_event(attachment) do
+      {:ok, event} -> drain_events(attachment, [event | accumulated])
+      {:error, :empty} -> Enum.reverse(accumulated)
+    end
+  end
+
+  defp eventually(assertion, attempts \\ 400)
+
+  defp eventually(assertion, attempts) when attempts > 0 do
+    if assertion.() do
+      :ok
+    else
+      Process.sleep(5)
+      eventually(assertion, attempts - 1)
+    end
+  end
+
+  defp eventually(_assertion, 0), do: flunk("condition did not become true")
+
+  defp eventually_match(operation, accepted, attempts \\ 400)
+
+  defp eventually_match(operation, accepted, attempts) when attempts > 0 do
+    result = operation.()
+
+    if accepted.(result) do
+      result
+    else
+      Process.sleep(5)
+      eventually_match(operation, accepted, attempts - 1)
+    end
+  end
+
+  defp eventually_match(_operation, _accepted, 0),
+    do: flunk("operation did not reach its terminal result")
+end

@@ -208,6 +208,7 @@ defmodule Loopex.Store.Local.State do
       "prior_owner_epoch" => session.owner_epoch,
       "owner_epoch" => owner_epoch,
       "owner_incarnation_id" => transaction.proposed_owner_incarnation_id,
+      "owner_transaction_id" => transaction.tx_id,
       kind: "owner_advanced"
     }
 

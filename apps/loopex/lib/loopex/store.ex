@@ -546,6 +546,7 @@ defmodule Loopex.Store do
         fn -> adapter.transact(reference, transaction) end,
         {:commit_unknown, tx_id}
       )
+      |> normalize_outcome(tx_id)
     else
       {:error, _reason} -> {:not_committed, :invalid_transaction}
     end
@@ -577,6 +578,7 @@ defmodule Loopex.Store do
         fn -> adapter.transaction_status(reference, session_id, mutation_domain, tx_id) end,
         :unavailable
       )
+      |> normalize_transaction_status()
     else
       _invalid -> :unavailable
     end
@@ -607,6 +609,7 @@ defmodule Loopex.Store do
         fn -> adapter.ownership_head(reference, session_id, mutation_domain) end,
         :unavailable
       )
+      |> normalize_ownership_head()
     else
       _invalid -> :unavailable
     end
@@ -631,6 +634,7 @@ defmodule Loopex.Store do
         fn -> store.adapter.load_records(store.reference, session_id, after_version, limit) end,
         :unavailable
       )
+      |> normalize_private_page(after_version, limit)
     end
   end
 
@@ -654,6 +658,7 @@ defmodule Loopex.Store do
         fn -> store.adapter.load_events(store.reference, session_id, after_sequence, limit) end,
         :unavailable
       )
+      |> normalize_event_page(after_sequence, limit)
     end
   end
 
@@ -1123,6 +1128,113 @@ defmodule Loopex.Store do
        do: :ok
 
   defp validate_page(_after_position, _limit), do: {:error, :invalid_page}
+
+  defp normalize_outcome({:committed, tx_id, receipt}, tx_id) when is_map(receipt),
+    do: {:committed, tx_id, receipt}
+
+  defp normalize_outcome({:not_committed, reason}, _tx_id) when is_atom(reason),
+    do: {:not_committed, reason}
+
+  defp normalize_outcome({:commit_unknown, tx_id}, tx_id), do: {:commit_unknown, tx_id}
+  defp normalize_outcome(_malformed, tx_id), do: {:commit_unknown, tx_id}
+
+  defp normalize_transaction_status({:terminal, :committed} = status), do: status
+
+  defp normalize_transaction_status({:terminal, {:not_committed, reason}} = status)
+       when is_atom(reason),
+       do: status
+
+  defp normalize_transaction_status(status) when status in [:absent, :unavailable], do: status
+  defp normalize_transaction_status(_malformed), do: :unavailable
+
+  defp normalize_ownership_head(
+         {:ok, %{owner_epoch: owner_epoch, journal_version: journal_version} = head}
+       )
+       when is_integer(owner_epoch) and owner_epoch >= 0 and is_integer(journal_version) and
+              journal_version > 0 do
+    if Map.keys(head) |> Enum.sort() == [:journal_version, :owner_epoch],
+      do: {:ok, head},
+      else: :unavailable
+  end
+
+  defp normalize_ownership_head(result) when result in [:absent, :unavailable], do: result
+  defp normalize_ownership_head(_malformed), do: :unavailable
+
+  defp normalize_private_page({:ok, rows}, after_version, limit)
+       when is_list(rows) and length(rows) <= limit do
+    case validate_private_rows(rows, after_version) do
+      :ok -> {:ok, rows}
+      :error -> {:error, :invalid_store_page}
+    end
+  end
+
+  defp normalize_private_page(:unavailable, _after_version, _limit), do: :unavailable
+  defp normalize_private_page({:error, reason}, _after_version, _limit), do: {:error, reason}
+
+  defp normalize_private_page(_malformed, _after_version, _limit),
+    do: {:error, :invalid_store_page}
+
+  defp validate_private_rows([], _prior), do: :ok
+
+  defp validate_private_rows(
+         [
+           %{
+             journal_version: version,
+             owner_epoch: owner_epoch,
+             owner_incarnation_id: incarnation,
+             payload: payload
+           } = row
+           | rest
+         ],
+         prior
+       )
+       when version == prior + 1 and is_integer(owner_epoch) and owner_epoch >= 0 and
+              (is_nil(incarnation) or is_binary(incarnation)) and is_map(payload) do
+    with true <-
+           Map.keys(row) |> Enum.sort() ==
+             [:journal_version, :owner_epoch, :owner_incarnation_id, :payload],
+         {:ok, normalized} <- normalize_record(payload),
+         true <- normalized == payload do
+      validate_private_rows(rest, version)
+    else
+      _other -> :error
+    end
+  end
+
+  defp validate_private_rows(_rows, _prior), do: :error
+
+  defp normalize_event_page({:ok, rows}, after_sequence, limit)
+       when is_list(rows) and length(rows) <= limit do
+    case validate_event_rows(rows, after_sequence) do
+      :ok -> {:ok, rows}
+      :error -> {:error, :invalid_store_page}
+    end
+  end
+
+  defp normalize_event_page(:unavailable, _after_sequence, _limit), do: :unavailable
+  defp normalize_event_page({:error, reason}, _after_sequence, _limit), do: {:error, reason}
+
+  defp normalize_event_page(_malformed, _after_sequence, _limit),
+    do: {:error, :invalid_store_page}
+
+  defp validate_event_rows([], _prior), do: :ok
+
+  defp validate_event_rows(
+         [%{event_sequence: sequence} = row | rest],
+         prior
+       )
+       when sequence == prior + 1 do
+    unstamped = Map.delete(row, :event_sequence)
+
+    with {:ok, normalized} <- normalize_event(unstamped),
+         true <- normalized == unstamped do
+      validate_event_rows(rest, sequence)
+    else
+      _other -> :error
+    end
+  end
+
+  defp validate_event_rows(_rows, _prior), do: :error
 
   defp adapter_call(fun, fallback) do
     fun.()
