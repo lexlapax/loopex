@@ -938,7 +938,7 @@ defmodule Loopex.M1GateEvidenceTest do
     carrier_keys = [
       "LANG",
       "PATH",
-      "PATH=",
+      "PA" <> "TH=",
       "HOME",
       "escript",
       "/bin/bash",

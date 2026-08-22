@@ -137,12 +137,12 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `37ead3f0fda09c196c90eb74fe7489027944bb04a5452810108ab512f23a4090` | `scripts/check-m1-gate.sh` |
+| `8a6fbe3527cb95e56937d0355fc616fadc9ec936b37184cd5683fc849b447de9` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `6aa177be0672179cb0713a7e73ccf54a52fa4dc957d5e7d00e3e514d5015f8c2` | `scripts/m1-exunit-runner.exs` |
 | `360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c` | `scripts/m1-evidence-verifier.exs` |
 | `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `ac4618cdfc20fa11acf1bd86066388b17a8503d96bdb65e5f7b24d26f7cbad11` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `b5314e913fd083b1d9bc861d0000fb4c6d41f2dc24bc8de5b7446f0b59ca864e` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
