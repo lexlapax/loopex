@@ -238,12 +238,13 @@ defmodule Loopex.HistoryAnchoringTest do
   test "completed governance rows are history anchored" do
     original = Fixture.plan(governed: true)
     current = String.replace(original, "| 1 | Open | — |", "| 1 | Proved | evidence |")
+    snapshot = &Fixture.plan_snapshot(&1, Fixture.gate())
 
     anchored =
       {"first-completion",
-       [{"root", [], %{}}, {"first-completion", ["root"], Fixture.plan_snapshot(original)}]}
+       [{"root", [], %{}}, {"first-completion", ["root"], snapshot.(original)}]}
 
-    assert :ok == History.governance_history(Fixture.plan_snapshot(current), anchored)
+    assert :ok == History.governance_history(snapshot.(current), anchored)
 
     mutations = [
       {"authority", "Maintainer", "Delegate: Reviewer"},
@@ -255,7 +256,7 @@ defmodule Loopex.HistoryAnchoringTest do
       changed = String.replace(original, old, new, global: false)
 
       assert_raise Invalid, ~r/completed Acceptance/, fn ->
-        History.governance_history(Fixture.plan_snapshot(changed), anchored)
+        History.governance_history(snapshot.(changed), anchored)
       end
 
       assert label != nil
@@ -271,7 +272,7 @@ defmodule Loopex.HistoryAnchoringTest do
       )
 
     assert_raise Invalid, ~r/completed Acceptance/, fn ->
-      History.governance_history(Fixture.plan_snapshot(changed), anchored)
+      History.governance_history(snapshot.(changed), anchored)
     end
 
     for {label, intermediate} <- [
@@ -283,12 +284,12 @@ defmodule Loopex.HistoryAnchoringTest do
         {"later",
          [
            {"root", [], %{}},
-           {"first-completion", ["root"], Fixture.plan_snapshot(original)},
-           {"later", ["first-completion"], Fixture.plan_snapshot(intermediate)}
+           {"first-completion", ["root"], snapshot.(original)},
+           {"later", ["first-completion"], snapshot.(intermediate)}
          ]}
 
-      assert_raise Invalid, ~r/completed Acceptance/, fn ->
-        History.governance_history(Fixture.plan_snapshot(original), history)
+      assert_raise Invalid, ~r/completed Acceptance|accepted gate/, fn ->
+        History.governance_history(snapshot.(original), history)
       end
 
       assert label != nil
@@ -298,12 +299,12 @@ defmodule Loopex.HistoryAnchoringTest do
       {"deleted",
        [
          {"root", [], %{}},
-         {"first-completion", ["root"], Fixture.plan_snapshot(original)},
+         {"first-completion", ["root"], snapshot.(original)},
          {"deleted", ["first-completion"], %{}}
        ]}
 
     assert_raise Invalid, ~r/disappeared/, fn ->
-      History.governance_history(Fixture.plan_snapshot(original), deleted)
+      History.governance_history(snapshot.(original), deleted)
     end
 
     assert_raise Invalid, ~r/disappeared/, fn ->
@@ -313,12 +314,11 @@ defmodule Loopex.HistoryAnchoringTest do
     closed_original = Fixture.plan(governed: true, closed: true)
 
     closure_history =
-      {"closure",
-       [{"root", [], %{}}, {"closure", ["root"], Fixture.plan_snapshot(closed_original)}]}
+      {"closure", [{"root", [], %{}}, {"closure", ["root"], snapshot.(closed_original)}]}
 
     assert_raise Invalid, ~r/completed Closure/, fn ->
       History.governance_history(
-        Fixture.plan_snapshot(
+        snapshot.(
           String.replace(
             closed_original,
             "../roadmap.md#concept",
@@ -331,7 +331,7 @@ defmodule Loopex.HistoryAnchoringTest do
     end
 
     assert_raise Invalid, ~r/history is unavailable/, fn ->
-      History.governance_history(Fixture.plan_snapshot(original), nil)
+      History.governance_history(snapshot.(original), nil)
     end
 
     merged = String.replace(original, "Maintainer", "Delegate: Reviewer", global: false)
@@ -340,13 +340,13 @@ defmodule Loopex.HistoryAnchoringTest do
       {"merge",
        [
          {"root", [], %{}},
-         {"accepted-topic", ["root"], Fixture.plan_snapshot(original)},
+         {"accepted-topic", ["root"], snapshot.(original)},
          {"main-work", ["root"], %{}},
-         {"merge", ["main-work", "accepted-topic"], Fixture.plan_snapshot(merged)}
+         {"merge", ["main-work", "accepted-topic"], snapshot.(merged)}
        ]}
 
     assert_raise Invalid, ~r/completed Acceptance/, fn ->
-      History.governance_history(Fixture.plan_snapshot(merged), merge_history)
+      History.governance_history(snapshot.(merged), merge_history)
     end
   end
 
@@ -568,30 +568,217 @@ defmodule Loopex.HistoryAnchoringTest do
   test "a plan envelope is anchored with acceptance history" do
     original = Fixture.plan(governed: true)
     changed = String.replace(original, "Only the bounded outcome.", "A larger scope.")
+    snapshot = &Fixture.plan_snapshot(&1, Fixture.gate())
 
     history =
-      {"accepted", [{"root", [], %{}}, {"accepted", ["root"], Fixture.plan_snapshot(original)}]}
+      {"accepted", [{"root", [], %{}}, {"accepted", ["root"], snapshot.(original)}]}
 
     progress_changed =
       String.replace(original, "| 1 | Open | — |", "| 1 | Proved | [run](evidence.md) |")
 
-    assert :ok == History.governance_history(Fixture.plan_snapshot(progress_changed), history)
+    assert :ok == History.governance_history(snapshot.(progress_changed), history)
 
     assert_raise Invalid, ~r/normative concept envelope/, fn ->
-      History.governance_history(Fixture.plan_snapshot(changed), history)
+      History.governance_history(snapshot.(changed), history)
     end
 
     merge =
       {"merge",
        [
          {"root", [], %{}},
-         {"accepted", ["root"], Fixture.plan_snapshot(original)},
+         {"accepted", ["root"], snapshot.(original)},
          {"main", ["root"], %{}},
-         {"merge", ["main", "accepted"], Fixture.plan_snapshot(changed)}
+         {"merge", ["main", "accepted"], snapshot.(changed)}
        ]}
 
     assert_raise Invalid, ~r/normative concept envelope/, fn ->
-      History.governance_history(Fixture.plan_snapshot(changed), merge)
+      History.governance_history(snapshot.(changed), merge)
+    end
+  end
+
+  test "a declared generation advances envelopes without admitting drift or divergence" do
+    original_gate = Fixture.gate()
+
+    amended_gate =
+      original_gate <>
+        "\n<a id=\"amendment-1\"></a>\n" <>
+        "## Amendment 1 — revise the accepted lifecycle\n"
+
+    original = Fixture.plan(governed: true)
+    changed = String.replace(original, "Only the bounded outcome.", "A revised outcome.")
+
+    changed_again =
+      String.replace(original, "Only the bounded outcome.", "A conflicting revision.")
+
+    accepted = Fixture.plan_snapshot(original, original_gate)
+    amended = Fixture.plan_snapshot(changed, amended_gate)
+    conflicting = Fixture.plan_snapshot(changed_again, amended_gate)
+
+    sequential =
+      {"amended",
+       [
+         {"root", [], %{}},
+         {"accepted", ["root"], accepted},
+         {"amended", ["accepted"], amended}
+       ]}
+
+    assert :ok == History.governance_history(amended, sequential)
+
+    silent =
+      {"silent",
+       [
+         {"root", [], %{}},
+         {"accepted", ["root"], accepted},
+         {"silent", ["accepted"], Fixture.plan_snapshot(changed, original_gate)}
+       ]}
+
+    assert_raise Invalid, ~r/normative concept envelope/, fn ->
+      History.governance_history(Fixture.plan_snapshot(changed, original_gate), silent)
+    end
+
+    rollback =
+      {"rollback",
+       [
+         {"root", [], %{}},
+         {"accepted", ["root"], accepted},
+         {"amended", ["accepted"], amended},
+         {"rollback", ["amended"], accepted}
+       ]}
+
+    assert_raise Invalid, ~r/accepted gate|normative concept envelope/, fn ->
+      History.governance_history(accepted, rollback)
+    end
+
+    clean_merge =
+      {"merge",
+       [
+         {"root", [], %{}},
+         {"accepted", ["root"], accepted},
+         {"main", ["accepted"], accepted},
+         {"amended", ["accepted"], amended},
+         {"merge", ["main", "amended"], amended}
+       ]}
+
+    assert :ok == History.governance_history(amended, clean_merge)
+
+    divergent_merge =
+      {"merge",
+       [
+         {"root", [], %{}},
+         {"accepted", ["root"], accepted},
+         {"left", ["accepted"], amended},
+         {"right", ["accepted"], conflicting},
+         {"merge", ["left", "right"], amended}
+       ]}
+
+    assert_raise Invalid, ~r/conflicting completed normative concept envelope/, fn ->
+      History.governance_history(amended, divergent_merge)
+    end
+
+    changed_technical =
+      String.replace(
+        Fixture.technical_plan(),
+        "No compatibility claim.",
+        "A revised compatibility claim."
+      )
+
+    technical_amendment =
+      Fixture.plan_snapshot(original, amended_gate, changed_technical)
+
+    technical_history =
+      {"technical-amendment",
+       [
+         {"root", [], %{}},
+         {"accepted", ["root"], accepted},
+         {"technical-amendment", ["accepted"], technical_amendment}
+       ]}
+
+    assert :ok == History.governance_history(technical_amendment, technical_history)
+  end
+
+  test "a higher-generation sibling amendment cannot displace an accepted lineage" do
+    original = Fixture.gate()
+
+    amendment_one =
+      original <>
+        "\n<a id=\"amendment-1\"></a>\n" <>
+        "## Amendment 1 — first branch\n"
+
+    sibling_amendment_two =
+      original <>
+        "\n<a id=\"amendment-1\"></a>\n" <>
+        "## Amendment 1 — sibling branch\n\n" <>
+        "<a id=\"amendment-2\"></a>\n" <>
+        "## Amendment 2 — sibling branch\n"
+
+    original_candidate = sha("a")
+    original_acceptance = sha("b")
+    first_candidate = sha("c")
+    first_rebind = sha("d")
+    sibling_candidate = sha("e")
+    sibling_rebind = sha("f")
+    merge = sha("1")
+
+    empty = Fixture.plan()
+    accepted = Fixture.plan(governed: true)
+
+    first_bound =
+      Fixture.plan(governed: true, gate: amendment_one)
+      |> String.replace("candidate `#{original_candidate}`", "candidate `#{first_candidate}`")
+
+    sibling_bound =
+      Fixture.plan(governed: true, gate: sibling_amendment_two)
+      |> String.replace(
+        "candidate `#{original_candidate}`",
+        "candidate `#{sibling_candidate}`"
+      )
+
+    root = {"root", [], %{}}
+    original_snapshot = Fixture.plan_snapshot(empty, original)
+    accepted_snapshot = Fixture.plan_snapshot(accepted, original)
+    first_candidate_snapshot = Fixture.plan_snapshot(accepted, amendment_one)
+    first_rebind_snapshot = Fixture.plan_snapshot(first_bound, amendment_one)
+    sibling_candidate_snapshot = Fixture.plan_snapshot(accepted, sibling_amendment_two)
+    sibling_rebind_snapshot = Fixture.plan_snapshot(sibling_bound, sibling_amendment_two)
+
+    shared = [
+      root,
+      {original_candidate, ["root"], original_snapshot},
+      {original_acceptance, [original_candidate], accepted_snapshot}
+    ]
+
+    first_history =
+      {first_rebind,
+       shared ++
+         [
+           {first_candidate, [original_acceptance], first_candidate_snapshot},
+           {first_rebind, [first_candidate], first_rebind_snapshot}
+         ]}
+
+    sibling_history =
+      {sibling_rebind,
+       shared ++
+         [
+           {sibling_candidate, [original_acceptance], sibling_candidate_snapshot},
+           {sibling_rebind, [sibling_candidate], sibling_rebind_snapshot}
+         ]}
+
+    assert :ok == History.governance_history(first_rebind_snapshot, first_history)
+    assert :ok == History.governance_history(sibling_rebind_snapshot, sibling_history)
+
+    merged_history =
+      {merge,
+       shared ++
+         [
+           {first_candidate, [original_acceptance], first_candidate_snapshot},
+           {first_rebind, [first_candidate], first_rebind_snapshot},
+           {sibling_candidate, [original_acceptance], sibling_candidate_snapshot},
+           {sibling_rebind, [sibling_candidate], sibling_rebind_snapshot},
+           {merge, [first_rebind, sibling_rebind], sibling_rebind_snapshot}
+         ]}
+
+    assert_raise Invalid, ~r/conflicting completed Acceptance/, fn ->
+      History.governance_history(sibling_rebind_snapshot, merged_history)
     end
   end
 end

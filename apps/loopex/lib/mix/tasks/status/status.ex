@@ -25,6 +25,12 @@ defmodule Loopex.Checks.Status do
   `validate/2` returns a list of messages rather than raising, so a caller can
   report and exit non-zero without an exception trace, and so the checks are
   callable from a test with in-memory documents and no repository at all.
+
+  The checked-out bytes cannot prove which branch integrated them. This checker
+  therefore proves lifecycle shape and the last Closed product checkpoint, but
+  never certifies that an Acceptance checkpoint reached `main` or that an Open
+  successor descended from it. The gate-opening procedure and exact
+  base-to-transition review own those Git facts.
   """
 
   alias Loopex.Checks.Adr
@@ -86,7 +92,11 @@ defmodule Loopex.Checks.Status do
     plans_text = Map.fetch!(documents, @index)
     {values, summary_line} = Register.current_status(plans_text)
     rows = Register.register(plans_text)
-    Register.checkpoint(Map.fetch!(values, "Last integrated checkpoint"), rows)
+
+    Register.closed_product_checkpoint(
+      Map.fetch!(values, "Last closed product checkpoint"),
+      rows
+    )
 
     expected_summary = Register.summary(Map.fetch!(values, "Integrated phase"), rows)
 
@@ -114,6 +124,16 @@ defmodule Loopex.Checks.Status do
 
     state_by_name = Map.new(rows)
 
+    history = plan_history && plan_history.()
+
+    History.governance_history(
+      governed_documents(documents, adr_paths),
+      governance_only(history),
+      resolve_file
+    )
+
+    History.artifact_history(history)
+
     Enum.each(plan_names, fn name ->
       Plan.governance(
         Map.fetch!(documents, "docs/plans/#{name}.md"),
@@ -121,13 +141,10 @@ defmodule Loopex.Checks.Status do
         Map.fetch!(documents, "docs/plans/#{name}-gate.md"),
         name,
         Map.fetch!(state_by_name, name),
-        resolve_file
+        resolve_file,
+        lifecycle_history_verified: true
       )
     end)
-
-    history = plan_history && plan_history.()
-    History.governance_history(governed_documents(documents, adr_paths), governance_only(history))
-    History.artifact_history(history)
 
     verify_rejoin_barrier!(documents)
     []
@@ -147,61 +164,59 @@ defmodule Loopex.Checks.Status do
     end)
   end
 
-  # Concept: every representable register state derives its exact status capsule.
-  # Technical depth: enforcement covers exactly one registered milestone today.
-  # Registering a second one must extend this deliberately, because "which
-  # milestone does the capsule describe" has no single answer otherwise.
   # Concept: one field, one owner.
   #
-  # Technical depth: `Last integrated checkpoint` is excluded here because
-  # `Register.checkpoint/2` owns it, and owning it twice made the two disagree the
-  # moment a milestone closed: the derived capsule pins the seed value for every
-  # state, while the checkpoint rule requires the final Closed milestone once one
-  # exists. Both cannot hold. Excluding it is not a relaxation -- `checkpoint/2`
-  # still enforces the seed value until the first closure and an exact
-  # `` `name` — YYYY-MM-DD `` after it, which is stricter than the capsule ever
-  # was for this field.
-  @checkpoint_field "Last integrated checkpoint"
+  # Technical depth: `Last closed product checkpoint` is excluded here because
+  # `Register.closed_product_checkpoint/2` owns it, and owning it twice made the
+  # two disagree the moment a milestone closed: the derived capsule pins the seed
+  # value for every state, while the checkpoint rule requires the final Closed
+  # milestone once one exists. Both cannot hold. Excluding it is not a relaxation
+  # -- the dedicated check still enforces the seed value until the first closure
+  # and an exact `` `name` — YYYY-MM-DD `` after it, which is stricter than the
+  # capsule ever was for this field.
+  @checkpoint_field "Last closed product checkpoint"
 
-  # Concept: the capsule describes the milestone that is currently active.
+  # Concept: the capsule describes the current delivery milestone and its one
+  # permitted Open successor.
   #
-  # Technical depth: this covered exactly one registered milestone and raised
-  # otherwise, telling the next transition to extend it rather than relax it --
-  # which is this transition, the first to register a second milestone. Closed
-  # milestones are history and do not drive the capsule; exactly one active
-  # milestone does. With none active the last Closed one describes the state,
-  # which is what a repository between milestones looks like. More than one
-  # active is already refused by `Register.summary/2`, and is refused here too
-  # rather than picking one by position.
+  # Technical depth: `Register.milestone_roles/1` validates the entire ordered
+  # register before anything is selected. Closed milestones are history; one
+  # delivery milestone may be followed by one Open planning lookahead. With no
+  # delivery milestone, an Open or founding Blocked candidate describes the
+  # state; between milestones the last Closed row does.
   defp require_derived_capsule!(rows, values, adr_statuses) do
-    active = Enum.filter(rows, fn {_name, state} -> state in Register.active_states() end)
+    roles = Register.milestone_roles(rows)
     closed = Enum.filter(rows, fn {_name, state} -> state == "Closed" end)
 
-    describing =
-      case {active, closed} do
-        {[one], _any} -> [one]
-        {[], [_ | _] = done} -> [List.last(done)]
-        {[], []} -> rows
-        {_many, _any} -> rows
+    expected =
+      case {roles.delivery, roles.open, roles.blocked, closed} do
+        {{delivery_name, delivery_state}, {open_name, "Open"}, nil, _closed} ->
+          Register.expected_capsule(
+            {delivery_name, delivery_state},
+            {open_name, "Open"},
+            adr_statuses
+          )
+
+        {{name, state}, nil, nil, _closed} ->
+          Register.expected_capsule(state, name, adr_statuses)
+
+        {nil, {name, "Open"}, nil, _closed} ->
+          Register.expected_capsule("Open", name, adr_statuses)
+
+        {nil, nil, {name, "Blocked"}, _closed} ->
+          Register.expected_capsule("Blocked", name, adr_statuses)
+
+        {nil, nil, nil, [_ | _] = done} ->
+          {name, "Closed"} = List.last(done)
+          Register.expected_capsule("Closed", name, adr_statuses)
+
+        {nil, nil, nil, []} ->
+          raise Invalid, "#{@index}: milestone register is empty"
       end
+      |> Map.delete(@checkpoint_field)
 
-    require_single_capsule!(describing, values, adr_statuses)
-  end
-
-  defp require_single_capsule!(rows, values, adr_statuses) do
-    case rows do
-      [{name, state}] ->
-        expected =
-          Map.delete(Register.expected_capsule(state, name, adr_statuses), @checkpoint_field)
-
-        if Map.delete(values, @checkpoint_field) != expected do
-          raise Invalid, "#{@index}: the register state requires its exact derived status capsule"
-        end
-
-      _other ->
-        raise Invalid,
-              "#{@index}: lifecycle enforcement covers exactly one registered milestone; " <>
-                "extend it before registering another"
+    if Map.delete(values, @checkpoint_field) != expected do
+      raise Invalid, "#{@index}: the register state requires its exact derived status capsule"
     end
   end
 
@@ -250,7 +265,7 @@ defmodule Loopex.Checks.Status do
       adr_paths |> Enum.flat_map(&[&1, Paths.technical(&1)]) |> MapSet.new()
 
     Map.filter(documents, fn {path, _text} ->
-      MapSet.member?(adr_set, path) or
+      path == @index or MapSet.member?(adr_set, path) or
         (String.starts_with?(path, "docs/plans/") and path != @index and
            String.ends_with?(path, ".md"))
     end)

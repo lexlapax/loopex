@@ -389,6 +389,17 @@ the exact document set its milestone must update.
 
 ### Changed
 
+- Accepted milestone governance may integrate to `main` after exact review and
+  explicit protected-branch approval while product implementation remains on
+  the milestone branch until closure. Once that governance checkpoint is
+  integrated, one generic successor may be Open for planning and gate review;
+  it cannot be accepted or implemented before its predecessor closes and it is
+  refreshed on that exact product base.
+- Accepted-plan amendments now use one generic proposal/rebind transaction.
+  Proposal `A` is reviewed with its deliberately stale prior binding; transition
+  `R` records the exact acceptance and is where binding-dependent inherited gates
+  must pass before governance integration. Results remain attributed to the SHA
+  where they ran and cannot stand in for later product-candidate evidence.
 - Substantive development updates, reviews, questions, and decision packets now
   lead with `Concept` and then `Technical depth`; short acknowledgements and
   compact status notifications remain exempt.

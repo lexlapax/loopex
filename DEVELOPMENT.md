@@ -192,14 +192,40 @@ Read [AGENTS.md](AGENTS.md), then the
 [plans status register](docs/plans/README.md), and use the
 [agent context map](docs/developer/agent-context-map.md) only to load relevant
 Concept sections and their exact Technical depth. `M0` is closed. `M1` is the
-active milestone on this development line; consult the marked register capsule
-for its exact lifecycle state and currently authorized work. Product
-implementation begins only after the M1 plan pair and red gate are independently
-reviewed and explicitly accepted.
+current delivery milestone; consult the marked register capsule for its exact
+lifecycle state and currently authorized work. An accepted governance checkpoint
+may be present on `main`, but M1 product work stays on its designated milestone
+branch until closure. If the register also names one Open successor, that branch
+is planning/gate-only: it cannot be accepted or implemented until M1 closes and
+the candidate is refreshed and reviewed on the integrated closed base.
 
 Tests use a temporary `LOOPEX_HOME` and temporary workspaces, and the helpers fail
 before touching real user state. Never point development or test commands at a
 real `~/.loopex`.
+
+### Accepted-plan amendments
+
+An accepted plan or gate amendment uses two direct, one-parent revisions for
+every milestone, not a milestone-specific exception. Number Amendment sections
+consecutively in physical document order. Every active or future amended gate
+carries exactly one visible `<a id="amendment-transaction-v1"></a>` marker;
+closed pre-v1 amendment history remains valid. Proposal `A` is the first revision to
+advance the generation; it carries the amended bytes and retains the prior
+Acceptance row and lifecycle state. Confirm that `mix loopex.status`, bootstrap,
+and any
+inherited gate that invokes them stop only on the stale binding; run the amended
+milestone gate directly and run all binding-independent checks. After independent
+review and explicit maintainer acceptance, create immediate-child rebind `R` that
+binds exact `A`, preserves lifecycle state, changes only the Acceptance row, adds
+one new amendment-specific disposition anchor to an existing durable document
+where that anchor was absent at `A`, and makes
+only conforming derived status changes. Do not reuse, complete, or edit an earlier
+disposition; do not interpose a commit, overlap the next proposal, or start
+another amendment before `R`.
+At exact `R`, run status and bootstrap to green, every inherited required gate to
+green on its locked lanes, and the amended milestone gate directly to the same
+truthful product state seen at `A`. Keep `A` and `R` distinct in reports and
+retained evidence; only `R` can be proposed for integration.
 
 ## Toolchain pairs
 

@@ -19,16 +19,20 @@ defmodule Loopex.Checks.Plan do
   current gate and the gate at that revision — so neither the plan nor the gate
   can move while the record stays valid.
 
-  A gate's bytes may change only when the document records one more numbered
-  amendment than the bytes being replaced, which is the mechanical form of "the
-  accepted gate is immutable, and an amendment is the only exception".
+  A gate's bytes and either accepted envelope may change only when the gate
+  document records a later numbered amendment than the bytes being replaced.
+  The same generation then permits the administrative Acceptance rebind. This
+  is the mechanical form of "the accepted commitment is immutable, and an
+  accepted amendment is the only exception".
   """
 
   alias Loopex.Checks.Git
   alias Loopex.Checks.Documents
   alias Loopex.Checks.Invalid
   alias Loopex.Checks.Markdown
+  alias Loopex.Checks.Paths
   alias Loopex.Checks.Records
+  alias Loopex.Checks.Register
 
   @concept_sections ["### Purpose", "### Outcomes", "### Scope", "### Non-Goals"]
   @concept_anchors [
@@ -75,6 +79,7 @@ defmodule Loopex.Checks.Plan do
   @progress_states ["Open", "Proved", "Accepted limitation", "Accepted deferral"]
 
   @amendment_anchor ~r/\A<a id="amendment-([0-9]+)"><\/a>\z/u
+  @amendment_transaction_v1 ~s(<a id="amendment-transaction-v1"></a>)
 
   @doc """
   ## Concept
@@ -159,13 +164,27 @@ defmodule Loopex.Checks.Plan do
             {numbers, pending}
         end
       end)
-      |> then(fn {numbers, _pending} -> Enum.sort(numbers) end)
+      |> then(fn {numbers, _pending} -> Enum.reverse(numbers) end)
 
     if found != Enum.to_list(1..length(found)//1) do
-      raise Invalid, "#{path}: amendment anchors must be numbered consecutively from 1"
+      raise Invalid,
+            "#{path}: amendment anchors must appear in document order, numbered " <>
+              "consecutively from 1"
     end
 
     length(found)
+  end
+
+  @doc false
+  def amendment_transaction_v1?(text, path) do
+    lines = Markdown.lines(text, path)
+
+    count =
+      text
+      |> Markdown.visible_line_numbers(path)
+      |> Enum.count(&(Enum.at(lines, &1) == @amendment_transaction_v1))
+
+    count == 1
   end
 
   @doc """
@@ -466,13 +485,17 @@ defmodule Loopex.Checks.Plan do
   @doc """
   ## Concept
 
-  The progress table must carry exactly one row per outcome, with a known state,
-  and a closed milestone may leave no outcome open.
+  The progress table must carry exactly one row per outcome, with a known state.
+  An Open milestone may record no completed outcome: every progress row remains
+  Open. A Closed milestone may leave no outcome open.
 
   ## Technical depth
 
-  Totality is the property: a missing row hides an unproved outcome and an extra
-  row claims one that was never committed to. An accepted limitation or deferral
+  Totality is the first property: a missing row hides an unproved outcome and an
+  extra row claims one that was never committed to. Requiring every Open-plan row
+  to remain Open makes a planning lookahead mechanically incapable of claiming
+  product progress. It does not prove that arbitrary product bytes are absent;
+  the exact-SHA review owns that boundary. An accepted limitation or deferral
   requires disposition evidence, because those two states are the only way an
   outcome reaches closure without being proved.
   """
@@ -488,6 +511,10 @@ defmodule Loopex.Checks.Plan do
 
     if Enum.any?(rows, &(Enum.at(&1, 1) not in @progress_states)) do
       raise Invalid, "#{path}: Progress and Evidence contains an unknown State"
+    end
+
+    if lifecycle_state == "Open" and Enum.any?(rows, &(Enum.at(&1, 1) != "Open")) do
+      raise Invalid, "#{path}: Open progress permits only Open outcomes"
     end
 
     if lifecycle_state == "Closed" and Enum.any?(rows, &(Enum.at(&1, 1) == "Open")) do
@@ -511,32 +538,51 @@ defmodule Loopex.Checks.Plan do
 
   ## Technical depth
 
-  Gate bytes are strict: they may differ only when the document records one more
-  numbered amendment than the bytes being replaced, so a silent edit keeps the
-  same generation and is rejected.
+  Gate and envelope bytes are strict: they may differ only when the gate
+  document records a later numbered amendment than the bytes being replaced, so
+  a silent edit keeps the same generation and is rejected.
 
   An acceptance row is deliberately weaker, because an amendment cannot be one
   commit: its rebind must name a candidate carrying the amended gate, and no
   commit can name its own hash, so the amended gate lands first and the row
-  follows, sharing a generation. What makes the looser rule safe is that the row
-  is not trusted on its own — its digests must equal the current envelopes, its
-  gate digest must equal both the current gate and the gate at the candidate it
-  binds, and its candidate chain must terminate at an empty-governance original.
-  All this rule adds is that a rebind is impossible until an amendment is on
-  record.
+  follows, sharing a generation. The new bound candidate's recorded lineage must
+  contain the exact candidate the old row bound, so a numerically later sibling
+  cannot displace an accepted amendment it never inherited. The row is not
+  trusted on its own — its digests must equal the current envelopes, its gate
+  digest must equal both the current gate and the gate at the candidate it binds,
+  and its candidate chain must terminate at an empty-governance original.
   """
   @spec supersedes?(String.t(), String.t() | nil, String.t() | nil) :: boolean()
-  def supersedes?(_label, anchor, value) do
+  def supersedes?(label, anchor, value) do
     with generation when is_integer(generation) <- generation_of(value),
          prior when is_integer(prior) <- generation_of(anchor) do
-      # One rule for both labels: strictly increasing. For a gate that is its own
-      # amendment generation; for an acceptance row it is the generation of the
-      # gate carried by the candidate the row binds. Either way a change is
-      # admitted only when it moves forward, so a silent edit, a rewrite at the
-      # same generation, and a rollback are all rejected.
-      generation > prior
+      # One rule for every amendable plan anchor: strictly increasing. A gate and
+      # both envelopes use the ambient amendment generation; an Acceptance row
+      # uses the generation and candidate lineage carried by its bound candidate.
+      # Either way a change is admitted only when it moves forward, so a silent
+      # edit, a sibling jump, a rewrite at the same generation, and a rollback
+      # are all rejected.
+      generation > prior and lineage_supersedes?(label, anchor, value)
     else
       _other -> false
+    end
+  end
+
+  defp lineage_supersedes?("Acceptance", anchor, value) do
+    with [_anchor_candidate | _] = anchor_lineage <- lineage_of(anchor),
+         [_new_candidate | prior_candidates] <- lineage_of(value) do
+      Enum.take(prior_candidates, -length(anchor_lineage)) == anchor_lineage
+    else
+      _other -> false
+    end
+  end
+
+  defp lineage_supersedes?(_label, _anchor, _value), do: true
+
+  defp lineage_of(value) do
+    case String.split(value, "\0", parts: 3) do
+      [_generation, lineage, _row] when lineage != "" -> String.split(lineage, ",")
+      _other -> []
     end
   end
 
@@ -758,9 +804,11 @@ defmodule Loopex.Checks.Plan do
   Checks the exact Concept-to-Technical-depth section mapping, both envelopes,
   the progress table, and the governance rows; then resolves every bound
   candidate and compares its envelope and gate bytes with the current ones. The
-  acceptance candidate must itself be an Open plan, and the closure candidate must
-  retain the identical acceptance row while leaving Closure empty — so closure
-  cannot quietly restate what was accepted.
+  original generation-zero acceptance candidate must itself have all outcomes
+  Open. A later amendment candidate may retain conforming progress from the
+  already-running milestone. The closure candidate must retain the identical
+  acceptance row while leaving Closure empty — so closure cannot quietly restate
+  what was accepted.
   """
   @spec governance(
           String.t(),
@@ -768,12 +816,22 @@ defmodule Loopex.Checks.Plan do
           String.t(),
           String.t(),
           String.t(),
-          (String.t(), String.t() -> String.t() | nil) | nil
+          (String.t(), String.t() -> String.t() | nil) | nil,
+          keyword()
         ) :: :ok
-  def governance(text, technical_text, gate_text, name, state, resolve_file) do
+  def governance(text, technical_text, gate_text, name, state, resolve_file, options \\ []) do
     path = "docs/plans/#{name}.md"
     technical_path = "docs/plans/#{name}-technical.md"
     gate_path = "docs/plans/#{name}-gate.md"
+
+    current_gate_digest = gate_digest(gate_text, gate_path)
+    generation = gate_generation(gate_text, gate_path)
+
+    if state != "Closed" and generation > 0 and
+         not amendment_transaction_v1?(gate_text, gate_path) do
+      raise Invalid,
+            "#{gate_path}: an active amended gate must declare amendment transaction v1"
+    end
 
     mapping =
       text
@@ -807,7 +865,7 @@ defmodule Loopex.Checks.Plan do
           path: path,
           technical_path: technical_path,
           gate_path: gate_path,
-          gate_digest: gate_digest(gate_text, gate_path),
+          gate_digest: current_gate_digest,
           concept_digest: envelope_digest(envelope),
           technical_digest: envelope_digest(technical)
         },
@@ -816,9 +874,13 @@ defmodule Loopex.Checks.Plan do
 
     verify_acceptance!(
       Enum.at(bound, 0),
+      Enum.at(rows, 0),
       candidates,
       envelope,
       technical,
+      name,
+      state,
+      Keyword.get(options, :lifecycle_history_verified, false),
       path,
       technical_path,
       resolve_file
@@ -882,9 +944,13 @@ defmodule Loopex.Checks.Plan do
 
   defp verify_acceptance!(
          nil,
+         _row,
          _candidates,
          _envelope,
          _technical,
+         _name,
+         _state,
+         _lifecycle_history_verified,
          _path,
          _technical_path,
          _resolve
@@ -894,14 +960,18 @@ defmodule Loopex.Checks.Plan do
 
   defp verify_acceptance!(
          {revision, _concept, _technical_digest, _gate},
+         acceptance_row,
          candidates,
          envelope,
          technical,
+         name,
+         state,
+         lifecycle_history_verified,
          path,
          technical_path,
          resolve_file
        ) do
-    {candidate, technical_candidate, _gate} = Map.fetch!(candidates, revision)
+    {candidate, technical_candidate, candidate_gate} = Map.fetch!(candidates, revision)
 
     {candidate_envelope, candidate_outcomes} =
       concept_envelope(candidate, "#{path} at #{revision}")
@@ -909,7 +979,43 @@ defmodule Loopex.Checks.Plan do
     candidate_technical =
       technical_envelope(technical_candidate, "#{technical_path} at #{revision}")
 
-    progress(candidate, "#{path} at acceptance candidate #{revision}", candidate_outcomes, "Open")
+    generation =
+      gate_generation(candidate_gate, "#{path} gate at acceptance candidate #{revision}")
+
+    candidate_lifecycle =
+      case generation do
+        0 ->
+          "Open"
+
+        _amendment ->
+          amendment_candidate_lifecycle!(
+            revision,
+            name,
+            state,
+            path,
+            resolve_file,
+            lifecycle_history_verified
+          )
+      end
+
+    if generation > 0 and
+         amendment_transaction_v1?(candidate_gate, "#{path} gate at candidate #{revision}") do
+      validate_amendment_disposition!(
+        acceptance_row,
+        candidate,
+        path,
+        revision,
+        resolve_file
+      )
+    end
+
+    progress(
+      candidate,
+      "#{path} at acceptance candidate #{revision}",
+      candidate_outcomes,
+      candidate_lifecycle
+    )
+
     acceptance_chain(candidate, path, revision, resolve_file, MapSet.new(), ancestor_check())
 
     if envelope != candidate_envelope do
@@ -922,6 +1028,129 @@ defmodule Loopex.Checks.Plan do
     end
 
     :ok
+  end
+
+  defp amendment_candidate_lifecycle!(
+         revision,
+         name,
+         current_state,
+         path,
+         resolve_file,
+         lifecycle_history_verified
+       ) do
+    index = resolve_file && resolve_file.(revision, "docs/plans/README.md")
+
+    if is_nil(index) do
+      raise Invalid,
+            "#{path}: amendment candidate #{revision} lifecycle state is unavailable"
+    end
+
+    case List.keyfind(Register.register(index), name, 0) do
+      {^name, ^current_state} ->
+        current_state
+
+      {^name, candidate_state}
+      when lifecycle_history_verified and
+             candidate_state in ["Accepted", "In progress", "In review"] ->
+        # History has already proved exact A and R carried the same state. Later
+        # descendants may legitimately advance; candidate progress is judged
+        # against A's historical state rather than today's state.
+        candidate_state
+
+      {^name, candidate_state} ->
+        raise Invalid,
+              "#{path}: administrative rebind must preserve amendment candidate lifecycle " <>
+                "state #{candidate_state}; current state is #{current_state}"
+
+      nil ->
+        raise Invalid,
+              "#{path}: amendment candidate #{revision} does not register #{name}"
+    end
+  end
+
+  @doc false
+  def validate_amendment_disposition!(
+        acceptance_row,
+        candidate_text,
+        path,
+        revision,
+        resolve_file,
+        record_revision \\ nil
+      ) do
+    {candidate_rows, _bound, _complete} =
+      Records.governance_records(candidate_text, "#{path} at amendment candidate #{revision}")
+
+    current_evidence = Enum.at(acceptance_row, 2)
+    prior_evidence = candidate_rows |> Enum.at(0) |> Enum.at(2)
+
+    if current_evidence == prior_evidence do
+      raise Invalid,
+            "#{path}: amendment rebind must name a new amendment-specific disposition record"
+    end
+
+    {target, fragment} = amendment_disposition_target!(current_evidence, path)
+    candidate_target = resolve_file && resolve_file.(revision, target)
+
+    if candidate_target == nil do
+      raise Invalid,
+            "#{path}: amendment disposition target #{target} is unavailable at candidate " <>
+              revision
+    end
+
+    if visible_anchor_count(candidate_target, target, fragment) > 0 do
+      raise Invalid,
+            "#{path}: amendment disposition #{target}##{fragment} already existed at " <>
+              "candidate #{revision}; the rebind must add a new record"
+    end
+
+    if record_revision != nil and record_revision != "working tree" do
+      record_target = resolve_file && resolve_file.(record_revision, target)
+
+      if record_target == nil or visible_anchor_count(record_target, target, fragment) != 1 do
+        raise Invalid,
+              "#{path}: amendment disposition #{target}##{fragment} must first appear exactly " <>
+                "once at rebind #{record_revision}"
+      end
+    end
+
+    :ok
+  end
+
+  defp amendment_disposition_target!(evidence, path) do
+    case Regex.run(~r/\A\[disposition\]\(([^#) \t]*)#([^#) \t]+)\)\z/u, evidence) do
+      [_all, raw_target, fragment] ->
+        target =
+          case raw_target do
+            "" -> path
+            _other -> Paths.normalise(Paths.join(Paths.dirname(path), raw_target))
+          end
+
+        if String.starts_with?(raw_target, ["/", "http:", "https:", "//"]) or
+             target == ".." or String.starts_with?(target, "../") do
+          raise Invalid,
+                "#{path}: amendment disposition must be one local fragmented record"
+        end
+
+        {target, fragment}
+
+      _other ->
+        raise Invalid,
+              "#{path}: amendment disposition must be one local fragmented record"
+    end
+  end
+
+  defp visible_anchor_count(text, path, fragment) do
+    lines = Markdown.lines(text, path)
+
+    text
+    |> Markdown.visible_line_numbers(path)
+    |> Enum.count(fn index ->
+      lines
+      |> Enum.at(index)
+      |> Markdown.exposed_line()
+      |> Markdown.anchors_in()
+      |> Enum.member?(fragment)
+    end)
   end
 
   defp verify_closure!(nil, _candidates, _envelope, _technical, _rows, _path, _technical_path) do

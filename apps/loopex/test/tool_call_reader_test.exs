@@ -81,7 +81,7 @@ defmodule Loopex.ToolCallReaderTest do
   # and the case times out instead of testing anything. `exec` replaces the shell,
   # so the hook is still reached through `execve` and a lost execute bit or broken
   # shebang still fails here.
-  defp feed(executable, args, document) do
+  defp feed(executable, args, document, options \\ []) do
     path =
       Path.join(
         System.tmp_dir!(),
@@ -96,7 +96,11 @@ defmodule Loopex.ToolCallReaderTest do
         |> Enum.map_join(" ", &shell_quote/1)
         |> then(&"exec #{&1} < #{shell_quote(path)} 2>&1")
 
-      System.cmd("/bin/sh", ["-c", command], stderr_to_stdout: true)
+      System.cmd(
+        "/bin/sh",
+        ["-c", command],
+        Keyword.merge([stderr_to_stdout: true], options)
+      )
     after
       File.rm(path)
     end
@@ -105,6 +109,37 @@ defmodule Loopex.ToolCallReaderTest do
   defp shell_quote(word), do: "'" <> String.replace(word, "'", ~S('\'')) <> "'"
 
   describe "the reader agrees with a real JSON parser about which binding wins" do
+    test "UTF-8 escape bytes are independent of the caller locale", %{reader: reader} do
+      root =
+        Path.join(
+          System.tmp_dir!(),
+          "loopex-awk-locale-#{System.unique_integer([:positive])}"
+        )
+
+      bin = Path.join(root, "bin")
+      File.mkdir_p!(bin)
+      fake_awk = Path.join(bin, "awk")
+      real_awk = System.find_executable("awk") || raise "awk is unavailable"
+
+      File.write!(
+        fake_awk,
+        "#!/bin/sh\n[ \"${LC_ALL-}\" = C ] || exit 97\nexec #{shell_quote(real_awk)} \"$@\"\n"
+      )
+
+      File.chmod!(fake_awk, 0o755)
+      on_exit(fn -> File.rm_rf(root) end)
+
+      document = ~s({"tool_input":{"command":"e \\ud83d\\ude00"}})
+
+      assert {"e 😀", 0} =
+               feed(reader, ["tool_input", "command"], document,
+                 env: [
+                   {"LC_ALL", "en_US.UTF-8"},
+                   {"PATH", bin <> ":" <> System.fetch_env!("PATH")}
+                 ]
+               )
+    end
+
     test "a repeated parent object discards what the earlier one bound", %{reader: reader} do
       # Concept: a real parser keeps the LAST tool_input, so a document whose
       # second parent never binds the requested key has no value for it at all.

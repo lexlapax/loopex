@@ -470,6 +470,35 @@ review. The administrative acceptance transition still changes only the empty
 plan governance row, the plans register and capsule, and the root summary, and
 it still requires its exact-diff review before integration.
 
+<a id="disposition-governance-acceptance-integration-2026-08-22"></a>
+### Governance-only acceptance integration — 2026-08-22
+
+The maintainer explicitly approved governance-only Acceptance integration and
+rejected partial implementation integration. Once the exact administrative
+transition and the complete base-to-transition surface are independently
+reviewed, the accepted plan/gate machinery, governance, derived status and
+documentation, and portable enforcement may integrate to `main` while the exact
+accepted opening gate remains red. No milestone product implementation byte may
+integrate before separately approved closure, and the designated delivery branch
+remains live because it owns that unintegrated work.
+
+The maintainer also explicitly approved the generic successor rule: after the
+current delivery milestone's governance checkpoint is integrated, exactly one
+anticipated next milestone may become `Open` on its own branch for mutable
+plan/gate construction and review. The current milestone remains the sole
+implementation authority and remains `Accepted` in the lookahead branch;
+`In progress` plus `Open` and `In review` plus `Open` are not authorized. The
+successor cannot be accepted, integrated, or implemented until its predecessor
+is Closed and integrated; it must then absorb that exact product base, re-prove
+inherited gates green and its own distinct red, and receive a fresh exact-SHA
+review. A second lookahead is not authorized.
+
+This disposition authorizes the lifecycle policy but does not accept arbitrary
+bytes that implement it. Because M1's accepted Migration and Rollback commitment
+previously forbade the merge, M1 Amendment 1 must still receive independent
+exact-candidate review and explicit binding acceptance before its governance
+transition may integrate.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15

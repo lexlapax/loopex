@@ -34,7 +34,7 @@ defmodule Loopex.Checks.Register do
 
   @fields [
     "Integrated phase",
-    "Last integrated checkpoint",
+    "Last closed product checkpoint",
     "Blockers",
     "Authorized work",
     "Next maintainer decision",
@@ -43,7 +43,7 @@ defmodule Loopex.Checks.Register do
   ]
 
   @states ["Blocked", "Open", "Accepted", "In progress", "In review", "Closed"]
-  @active_states ["Open", "Accepted", "In progress", "In review"]
+  @delivery_states ["Accepted", "In progress", "In review"]
 
   @seed_checkpoint "Seed bootstrap — 2026-08-15"
   @validation "`bash scripts/check-bootstrap.sh`"
@@ -69,7 +69,7 @@ defmodule Loopex.Checks.Register do
 
   @seed_blocked %{
     "Integrated phase" => "Pre-implementation planning",
-    "Last integrated checkpoint" => @seed_checkpoint,
+    "Last closed product checkpoint" => @seed_checkpoint,
     "Blockers" =>
       "[ADR 0001](../adr/0001-repository-and-application-layout.md#concept) and " <>
         "[ADR 0002](../adr/0002-bootstrap-runtime-floor.md#concept) must be accepted before " <>
@@ -101,12 +101,11 @@ defmodule Loopex.Checks.Register do
   @doc """
   ## Concept
 
-  The register states the contract defines, and the subset that counts as active.
+  The register states the contract defines.
 
   ## Technical depth
 
-  Exposed so the derived summary and the at-most-one-active rule read the same
-  definition the register validation does.
+  Exposed so plan and register validation read the same lifecycle vocabulary.
   """
   @spec states() :: [String.t()]
   def states, do: @states
@@ -114,15 +113,16 @@ defmodule Loopex.Checks.Register do
   @doc """
   ## Concept
 
-  The active register states.
+  The states that authorize delivery work for one accepted milestone.
 
   ## Technical depth
 
-  `In review` is active but has no derived capsule yet, which is deliberate: the
-  transition that first records it must add one.
+  `Open` is deliberately absent. An Open milestone is a plan-and-gate candidate;
+  when an earlier milestone is still delivering, it is the sole planning
+  lookahead and cannot become a second implementation authority.
   """
-  @spec active_states() :: [String.t()]
-  def active_states, do: @active_states
+  @spec delivery_states() :: [String.t()]
+  def delivery_states, do: @delivery_states
 
   @doc """
   ## Concept
@@ -233,29 +233,37 @@ defmodule Loopex.Checks.Register do
 
   ## Technical depth
 
-  At most one active and one blocked milestone may be registered, because the
-  sentence names one of each and a second would be invisible to a reader who
-  trusted it.
+  One Accepted delivery milestone may coexist with one immediately following
+  Open planning candidate. With no delivery milestone, Open remains the current
+  plan candidate as before. Closed history must precede either role; every other
+  shape fails closed.
   """
   @spec summary(String.t(), [{String.t(), String.t()}]) :: String.t()
   def summary(phase, rows) do
-    active = Enum.filter(rows, fn {_name, state} -> state in @active_states end)
-    blocked = Enum.filter(rows, fn {_name, state} -> state == "Blocked" end)
-
-    if length(active) > 1 or length(blocked) > 1 do
-      raise Invalid, "#{@index}: at most one active and one Blocked milestone are allowed"
-    end
+    roles = milestone_roles(rows)
 
     status =
-      case active do
-        [{name, state}] -> "active milestone `#{name}` is #{String.downcase(state)}"
-        [] -> "no milestone is active"
+      case {roles.delivery, roles.open} do
+        {{name, state}, _lookahead} ->
+          "active milestone `#{name}` is #{String.downcase(state)}"
+
+        {nil, {name, "Open"}} ->
+          "active milestone `#{name}` is open"
+
+        {nil, nil} ->
+          "no milestone is active"
       end
 
     next =
-      case blocked do
-        [{name, _state}] -> "next candidate `#{name}` is blocked"
-        [] -> "no next candidate is recorded"
+      case {roles.delivery, roles.open, roles.blocked} do
+        {delivery, {name, "Open"}, nil} when not is_nil(delivery) ->
+          "next candidate `#{name}` is open"
+
+        {_delivery, nil, {name, "Blocked"}} ->
+          "next candidate `#{name}` is blocked"
+
+        _other ->
+          "no next candidate is recorded"
       end
 
     "**Revision status:** #{phase}; #{status}; #{next}."
@@ -264,8 +272,59 @@ defmodule Loopex.Checks.Register do
   @doc """
   ## Concept
 
-  Checks the last-integrated-checkpoint field against the register: it names the
-  final Closed milestone once one exists, and stays at the seed value until then.
+  Classifies the register into closed history, one delivery milestone, and one
+  planning lookahead.
+
+  ## Technical depth
+
+  After zero or more Closed rows, the accepted tails are empty, one founding
+  Blocked row, one Open candidate, one delivery milestone in `Accepted`,
+  `In progress`, or `In review`, or an Accepted delivery milestone immediately
+  followed by one Open successor. The predecessor stays Accepted because the
+  lookahead branches from its governance-only integration, not its product
+  branch. This admits one bounded planning lookahead without creating a second
+  implementation authority or an unbounded queue.
+  """
+  @spec milestone_roles([{String.t(), String.t()}]) :: %{
+          delivery: {String.t(), String.t()} | nil,
+          open: {String.t(), String.t()} | nil,
+          blocked: {String.t(), String.t()} | nil
+        }
+  def milestone_roles(rows) do
+    {_closed, tail} = Enum.split_while(rows, fn {_name, state} -> state == "Closed" end)
+
+    case tail do
+      [] ->
+        %{delivery: nil, open: nil, blocked: nil}
+
+      [{_name, "Blocked"} = blocked] ->
+        %{delivery: nil, open: nil, blocked: blocked}
+
+      [{_name, "Open"} = open] ->
+        %{delivery: nil, open: open, blocked: nil}
+
+      [{_name, state} = delivery] when state in @delivery_states ->
+        %{delivery: delivery, open: nil, blocked: nil}
+
+      [
+        {_delivery_name, "Accepted"} = delivery,
+        {_open_name, "Open"} = open
+      ] ->
+        %{delivery: delivery, open: open, blocked: nil}
+
+      _other ->
+        raise Invalid,
+              "#{@index}: rows must be Closed history followed by at most one delivery " <>
+                "milestone and one Open successor"
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Checks the last-closed-product-checkpoint field against the register: it names
+  the final Closed milestone once one exists, and stays at the seed value until
+  then.
 
   ## Technical depth
 
@@ -273,8 +332,8 @@ defmodule Loopex.Checks.Register do
   malformed or impossible date fails rather than reading as a recorded
   integration.
   """
-  @spec checkpoint(String.t(), [{String.t(), String.t()}]) :: :ok
-  def checkpoint(value, rows) do
+  @spec closed_product_checkpoint(String.t(), [{String.t(), String.t()}]) :: :ok
+  def closed_product_checkpoint(value, rows) do
     closed = for {name, "Closed"} <- rows, do: name
 
     case List.last(closed) do
@@ -298,7 +357,7 @@ defmodule Loopex.Checks.Register do
 
         unless valid do
           raise Invalid,
-                "#{@index}: Last integrated checkpoint must name the final Closed row"
+                "#{@index}: Last closed product checkpoint must name the final Closed row"
         end
 
         :ok
@@ -344,15 +403,19 @@ defmodule Loopex.Checks.Register do
   @doc """
   ## Concept
 
-  The exact status capsule one registered milestone's lifecycle state requires.
+  The exact status capsule the registered delivery and planning roles require.
 
   ## Technical depth
 
-  Fails closed for a state with no derivation, which is what forces the
-  transition that first records `In review` or `Closed` to add lifecycle
-  enforcement instead of leaving the capsule unchecked.
+  A single role derives from its lifecycle state. The one composite form is an
+  Accepted predecessor plus an Open successor. Every other composite fails
+  closed rather than letting two roles silently share one authority surface.
   """
-  @spec expected_capsule(String.t(), String.t(), %{String.t() => String.t()}) ::
+  @spec expected_capsule(
+          String.t() | {String.t(), String.t()},
+          String.t() | {String.t(), String.t()},
+          %{String.t() => String.t()}
+        ) ::
           %{String.t() => String.t()}
   def expected_capsule("Blocked", name, adr_statuses) do
     if name != "M0" do
@@ -381,6 +444,42 @@ defmodule Loopex.Checks.Register do
   end
 
   def expected_capsule("Accepted", name, _adr_statuses), do: accepted_values(name)
+
+  def expected_capsule(
+        {delivery_name, "Accepted"},
+        {lookahead_name, "Open"},
+        _adr_statuses
+      ) do
+    expected_capsule("Accepted", delivery_name, %{})
+    |> Map.put(
+      "Blockers",
+      "None for `#{delivery_name}` delivery; `#{lookahead_name}` acceptance, integration, " <>
+        "and product implementation wait until `#{delivery_name}` closes and the Open " <>
+        "candidate is refreshed and independently reviewed on that closed base"
+    )
+    |> Map.put(
+      "Authorized work",
+      "Implementation inside the accepted `#{delivery_name}` envelopes and locked gate on " <>
+        "its designated milestone branch; planning, gate construction, and review for Open " <>
+        "`#{lookahead_name}`; no milestone product bytes integrate before closure and no " <>
+        "`#{lookahead_name}` product implementation"
+    )
+    |> Map.put(
+      "Next maintainer decision",
+      "None until `#{delivery_name}` is ready for independent review; `#{lookahead_name}` " <>
+        "cannot be accepted before `#{delivery_name}` closes"
+    )
+    |> Map.put(
+      "Next transition",
+      "Turn the locked `#{delivery_name}` gate green and close it; then refresh and " <>
+        "independently review `#{lookahead_name}` on that closed base"
+    )
+  end
+
+  def expected_capsule({_delivery_name, state}, {_lookahead_name, "Open"}, _adr_statuses) do
+    raise Invalid,
+          "#{@index}: an Open successor requires an Accepted predecessor, not #{state}"
+  end
 
   def expected_capsule("In progress", name, _adr_statuses) do
     name
@@ -435,7 +534,7 @@ defmodule Loopex.Checks.Register do
     |> Map.put(
       "Authorized work",
       "Explicitly authorized planning, ADR, and review work only; no product " <>
-        "implementation until the next milestone is opened gate-first"
+        "implementation until the next milestone is accepted"
     )
     |> Map.put("Next maintainer decision", "Open the next milestone gate-first, or defer it")
     |> Map.put(
@@ -458,8 +557,8 @@ defmodule Loopex.Checks.Register do
     |> Map.put("Blockers", "None; `#{name}` is accepted and implementation may proceed")
     |> Map.put(
       "Authorized work",
-      "Implementation inside the accepted `#{name}` envelopes and its locked gate; " <>
-        "no other product implementation"
+      "Implementation inside the accepted `#{name}` envelopes and its locked gate on the " <>
+        "designated milestone branch; no milestone product bytes integrate before closure"
     )
     |> Map.put(
       "Next maintainer decision",

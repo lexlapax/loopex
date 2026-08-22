@@ -64,4 +64,10 @@ if [ ! -r "$program" ]; then
   exit 66
 fi
 
+# The awk program constructs UTF-8 one byte at a time. GNU awk in a multibyte
+# locale re-encodes each numeric byte passed through `%c`, producing mojibake;
+# byte locale keeps GNU and BSD awk on the same representation. Literal UTF-8
+# input remains byte-identical because the scanner copies non-escape runs.
+export LC_ALL=C
+
 exec awk -v object="$object" -v fields="$fields" -f "$program"

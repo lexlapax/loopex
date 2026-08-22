@@ -34,9 +34,9 @@ pre-start boundary.
 
 No product implementation is authorized until the maintainer or a recorded
 delegate accepts both normative envelopes and the gate's canonical bytes
-together. Before that Acceptance record may be completed, the exact clean
-candidate must produce the declared M1 opening red on every opening platform
-lane and independently keep the immutable M0 gate green on both locked
+together. Before the generation-zero opening Acceptance record may be completed,
+the exact clean candidate must produce the declared M1 opening red on every
+opening platform lane and independently keep the immutable M0 gate green on both locked
 toolchain pairs, including its real-provider role. The two M0 runs are
 out-of-band acceptance evidence: they are never pasted into a gate input,
 nested inside the M1 runner, or replaced by bootstrap, status, a credential-free
@@ -487,15 +487,35 @@ There is no installed base and no released artifact. M0 journals and retained
 evidence are not migrated; M1 tests and demonstrations create isolated M1 data
 roots. No PostgreSQL, SQLite, or other external store migration is claimed.
 
-Before M1 first becomes green, every checkpoint offered for integration or
-review keeps bootstrap and both exact M0 lanes green while the M1 runner reaches
-its next truthful missing-behavior red. The accepted opening checkpoint remains
-the complete repository rollback target: reverting unintegrated M1 work to it
-restores the accepted red condition without rewriting durable user data. After
-a complete M1 candidate first becomes green, each later checkpoint must keep M1
-and both M0 lanes green or be reverted to the last reviewed green checkpoint.
-Ordinary local red-green work between checkpoints is not represented as an
-integration candidate.
+Before M1 first becomes green, every product checkpoint offered for review keeps
+bootstrap and both exact M0 lanes green while the M1 runner reaches its next
+truthful missing-behavior red. The accepted opening checkpoint remains the
+complete repository rollback target for unintegrated M1 product work: reverting
+the designated milestone branch to it restores the accepted red condition
+without rewriting durable user data. After a complete M1 candidate first becomes
+green, each later checkpoint must keep M1 and both M0 lanes green or be reverted
+to the last reviewed green checkpoint. Ordinary local red-green work between
+checkpoints is not represented as an integration candidate.
+
+The accepted governance checkpoint is the one integration exception before M1
+closure. After its exact transition is independently reviewed and the maintainer
+separately approves the protected-branch merge, the accepted plan/gate machinery,
+governance, derived status and documentation, and portable enforcement may
+integrate to `main` while the exact accepted opening gate remains red. That
+surface contains no M1 product implementation bytes; `main`'s product baseline
+therefore remains M0. The designated M1 branch remains live because it owns the
+unintegrated product work through closure. Rolling back integrated governance is
+a forward corrective transition that preserves bound-candidate history, not a
+rewrite that erases the accepted record.
+
+After that governance checkpoint is integrated, one successor milestone may be
+Open on its own branch for mutable plan/gate construction and review only. M1
+remains `Accepted` in that branch and is the sole implementation authority;
+`In progress` plus `Open` and `In review` plus `Open` are invalid register
+shapes. The successor cannot be accepted, integrated, or implemented until M1
+is Closed and integrated; it must then absorb that exact product base, re-prove
+inherited gates green and its own distinct red, and receive a fresh exact-SHA
+review. No second successor may be queued.
 
 The closed M0 gate remains immutable. Its two pre-acceptance runs establish the
 green base for the accepted opening SHA; it is then re-proved independently
@@ -504,9 +524,31 @@ retained evidence obligation above. The direct `C→E→T` chain carries those
 same-source proofs through closure; another proof is required whenever a new
 `C` is required. M0 is never nested inside the M1 runner.
 
-The branch does not merge while M1 is red. No rollback claim extends to a data
-root written by a different source revision, because this milestone accepts no
-installed-store compatibility contract.
+An accepted-plan amendment is not a source candidate `C`; it uses the generic
+direct one-parent proposal/rebind transaction. Amendment sections are physically
+ordered and consecutively numbered. Its v1 marker activates strict enforcement
+without retroactively changing closed pre-v1 amendment history. Proposal `A` is the first revision to advance
+the generation and retains the prior Acceptance row and lifecycle state, so
+status, bootstrap, and both M0 commands necessarily stop at stale binding. The
+M1 runner is invoked directly at `A` and must retain the amendment's truthful
+product-state result. After independent review and explicit acceptance of `A`,
+its immediate-child administrative rebind `R` binds exact `A`, preserves
+lifecycle state, changes only the Acceptance row, adds one new
+amendment-specific authority-disposition anchor to an existing durable document
+where that anchor was absent at `A`, and
+updates only conforming derived status bytes. It never reuses, completes, or
+edits an earlier disposition; no commit intervenes, overlaps another proposal,
+or begins the next amendment before `R`. At exact `R`, status and
+bootstrap must pass, both complete M0 commands must be green on their locked
+pairs including the real-provider role, and the direct M1 runner must reproduce
+the same product-state result seen at `A`. An exact `A→R` review proves that no
+Technical envelope, gate, portable-enforcement, or product byte changed. These
+`R` runs establish governance-integration safety only; they never satisfy a
+future exact-`C` retained evidence obligation.
+
+No M1 product implementation merges while M1 is red or before closure. No
+rollback claim extends to a data root written by a different source revision,
+because this milestone accepts no installed-store compatibility contract.
 
 <a id="technical-plan-packaging"></a>
 ### Packaging

@@ -94,7 +94,7 @@ defmodule Loopex.StatusFixtures do
     | Field | Value |
     | --- | --- |
     | Integrated phase | Pre-implementation planning |
-    | Last integrated checkpoint | Seed bootstrap — 2026-08-15 |
+    | Last closed product checkpoint | Seed bootstrap — 2026-08-15 |
     #{@blockers_cell}
     | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
     | Next maintainer decision | Disposition ADR 0001 and ADR 0002 |
@@ -558,7 +558,7 @@ defmodule Loopex.StatusFixtures do
   Written by the transition that first recorded `Closed`, which is what the
   register's catch-all demands rather than permitting the check to be relaxed.
   Rewrites exactly the four fields the Closed derivation changes; the checkpoint
-  is left alone because `Register.checkpoint/2` owns that field.
+  is left alone because `Register.closed_product_checkpoint/2` owns that field.
   """
   def closed_capsule(text) do
     text
@@ -569,7 +569,7 @@ defmodule Loopex.StatusFixtures do
     |> String.replace(
       "| Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |",
       "| Authorized work | Explicitly authorized planning, ADR, and review work only; " <>
-        "no product implementation until the next milestone is opened gate-first |"
+        "no product implementation until the next milestone is accepted |"
     )
     |> String.replace(
       "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |",

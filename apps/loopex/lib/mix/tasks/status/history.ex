@@ -35,6 +35,9 @@ defmodule Loopex.Checks.History do
   alias Loopex.Checks.Paths
   alias Loopex.Checks.Plan
   alias Loopex.Checks.Records
+  alias Loopex.Checks.Register
+
+  @index "docs/plans/README.md"
 
   @adr_labels ["Acceptance", "accepted concept", "accepted technical depth"]
   @gate_labels ["accepted gate"]
@@ -63,20 +66,36 @@ defmodule Loopex.Checks.History do
   restoration is the same mutate-then-restore pattern with the file removed
   instead of edited.
   """
-  @spec governance_history(map(), {String.t(), [{String.t(), [String.t()], map()}]} | nil) :: :ok
-  def governance_history(_current, nil) do
+  @spec governance_history(
+          map(),
+          {String.t(), [{String.t(), [String.t()], map()}]} | nil,
+          (String.t(), String.t() -> String.t() | nil) | nil
+        ) :: :ok
+  def governance_history(current, history, resolve_file \\ nil)
+
+  def governance_history(_current, nil, _resolve_file) do
     raise Invalid, "governed documents: complete reachable governance history is unavailable"
   end
 
-  def governance_history(current, {head, snapshots}) do
+  def governance_history(current, {head, snapshots}, resolve_file) do
     all_paths =
       Enum.reduce(snapshots, MapSet.new(Map.keys(current)), fn {_revision, _parents, governed},
                                                                acc ->
         MapSet.union(acc, MapSet.new(Map.keys(governed)))
       end)
 
-    adr_concepts = all_paths |> Enum.filter(&Documents.adr_concept?/1) |> MapSet.new()
-    {plans, gates} = classify_primary!(all_paths, adr_concepts)
+    governed_paths =
+      Enum.filter(all_paths, fn path ->
+        String.starts_with?(path, "docs/plans/") or
+          Documents.adr_concept?(path) or
+          (String.ends_with?(path, "-technical.md") and
+             Documents.adr_concept?(Paths.concept(path)))
+      end)
+
+    adr_concepts = governed_paths |> Enum.filter(&Documents.adr_concept?/1) |> MapSet.new()
+
+    {plans, gates} =
+      classify_primary!(MapSet.delete(MapSet.new(governed_paths), @index), adr_concepts)
 
     primary =
       adr_concepts |> MapSet.union(plans) |> MapSet.union(gates) |> Enum.sort()
@@ -87,6 +106,9 @@ defmodule Loopex.Checks.History do
     # carried by the candidate it binds rather than only the ambient one.
     by_revision =
       Map.new(snapshots, fn {revision, _parents, governed} -> {revision, governed} end)
+
+    parents_by_revision =
+      Map.new(snapshots, fn {revision, parents, _governed} -> {revision, parents} end)
 
     Enum.reduce(walk, %{}, fn {revision, parents, governed}, inherited ->
       if Map.has_key?(inherited, revision) or
@@ -104,7 +126,9 @@ defmodule Loopex.Checks.History do
              governed,
              inherited,
              adr_concepts,
-             by_revision
+             by_revision,
+             parents_by_revision,
+             resolve_file
            )}
         end)
 
@@ -156,7 +180,9 @@ defmodule Loopex.Checks.History do
          governed,
          inherited,
          adr_concepts,
-         by_revision
+         by_revision,
+         parents_by_revision,
+         resolve_file
        ) do
     labels = labels(path, adr_concepts)
 
@@ -188,6 +214,19 @@ defmodule Loopex.Checks.History do
       text ->
         current = values(text, path, revision, governed, adr_concepts, by_revision)
 
+        validate_revision_transaction!(
+          path,
+          revision,
+          parents,
+          governed,
+          from_parents,
+          current,
+          adr_concepts,
+          by_revision,
+          parents_by_revision,
+          resolve_file
+        )
+
         labels
         |> Enum.with_index()
         |> Enum.map(fn {label, index} ->
@@ -200,6 +239,381 @@ defmodule Loopex.Checks.History do
             adr_concepts
           )
         end)
+    end
+  end
+
+  defp validate_revision_transaction!(
+         path,
+         revision,
+         parents,
+         governed,
+         from_parents,
+         current,
+         adr_concepts,
+         by_revision,
+         parents_by_revision,
+         resolve_file
+       ) do
+    transaction_v1 = amendment_transaction_v1?(path, revision, governed, adr_concepts)
+
+    cond do
+      MapSet.member?(adr_concepts, path) ->
+        :ok
+
+      transaction_v1 and length(parents) > 1 and current != from_parents ->
+        raise Invalid,
+              "#{path}: governance transitions require one direct parent; #{revision} is a merge"
+
+      String.ends_with?(path, "-gate.md") ->
+        :ok
+
+      true ->
+        changed =
+          0..3
+          |> Enum.filter(&(Enum.at(from_parents, &1) != Enum.at(current, &1)))
+
+        current_generation = acceptance_generation(Enum.at(current, 0))
+
+        if transaction_v1 and
+             (Enum.at(from_parents, 0) != nil or
+                (is_integer(current_generation) and current_generation > 0)) do
+          validate_plan_change_set!(
+            changed,
+            path,
+            revision,
+            parents,
+            governed,
+            from_parents,
+            current,
+            by_revision,
+            parents_by_revision,
+            resolve_file
+          )
+        else
+          :ok
+        end
+    end
+  end
+
+  defp amendment_transaction_v1?(path, revision, governed, adr_concepts) do
+    cond do
+      MapSet.member?(adr_concepts, path) ->
+        false
+
+      String.ends_with?(path, "-gate.md") ->
+        case Map.get(governed, path) do
+          nil -> false
+          gate -> Plan.amendment_transaction_v1?(gate, "#{path} at #{revision}")
+        end
+
+      true ->
+        gate_path = Paths.strip_suffix(path, ".md") <> "-gate.md"
+
+        case Map.get(governed, gate_path) do
+          nil -> false
+          gate -> Plan.amendment_transaction_v1?(gate, "#{gate_path} at #{revision}")
+        end
+    end
+  end
+
+  defp validate_plan_change_set!(
+         [],
+         _path,
+         _revision,
+         _parents,
+         _governed,
+         _from,
+         _current,
+         _by,
+         _parents_by,
+         _resolve_file
+       ),
+       do: :ok
+
+  defp validate_plan_change_set!(
+         [2, 3],
+         path,
+         revision,
+         [parent],
+         governed,
+         from,
+         _current,
+         by_revision,
+         _parents_by_revision,
+         resolve_file
+       ) do
+    require_settled_amendment_parent!(
+      path,
+      revision,
+      parent,
+      Enum.at(from, 0),
+      by_revision
+    )
+
+    require_same_lifecycle!(
+      path,
+      revision,
+      parent,
+      governed,
+      by_revision,
+      resolve_file,
+      "amendment proposal"
+    )
+  end
+
+  defp validate_plan_change_set!(
+         [0],
+         path,
+         revision,
+         [parent],
+         governed,
+         _from,
+         current,
+         by_revision,
+         parents_by_revision,
+         resolve_file
+       ) do
+    generation = acceptance_generation(Enum.at(current, 0))
+
+    if is_integer(generation) and generation > 0 do
+      require_direct_candidate!(path, revision, parent, Enum.at(current, 0))
+      require_amendment_proposal!(path, parent, by_revision, parents_by_revision)
+
+      require_same_lifecycle!(
+        path,
+        revision,
+        parent,
+        governed,
+        by_revision,
+        resolve_file,
+        "amendment rebind"
+      )
+
+      validate_historical_disposition!(
+        path,
+        revision,
+        parent,
+        Enum.at(current, 0),
+        by_revision,
+        resolve_file
+      )
+    end
+
+    :ok
+  end
+
+  defp validate_plan_change_set!(
+         [0, 2, 3],
+         path,
+         revision,
+         [_parent],
+         _governed,
+         from,
+         current,
+         _by_revision,
+         _parents_by_revision,
+         _resolve_file
+       ) do
+    if Enum.at(from, 0) != nil or acceptance_generation(Enum.at(current, 0)) != 0 do
+      raise Invalid,
+            "#{path}: amendment proposal and Acceptance rebind must be distinct revisions at " <>
+              revision
+    end
+
+    :ok
+  end
+
+  defp validate_plan_change_set!(
+         [1],
+         _path,
+         _revision,
+         [_parent],
+         _governed,
+         _from,
+         _current,
+         _by,
+         _parents_by,
+         _resolve_file
+       ),
+       do: :ok
+
+  defp validate_plan_change_set!(
+         changed,
+         path,
+         revision,
+         _parents,
+         _governed,
+         _from,
+         _current,
+         _by,
+         _parents_by,
+         _resolve_file
+       ) do
+    raise Invalid,
+          "#{path}: governance fields #{inspect(changed)} changed together at #{revision}; " <>
+            "proposal, rebind, and closure are distinct one-parent revisions"
+  end
+
+  defp require_direct_candidate!(path, revision, parent, acceptance) do
+    candidate = acceptance_candidate(acceptance)
+
+    if candidate != parent do
+      raise Invalid,
+            "#{path}: Acceptance rebind at #{revision} must directly follow and bind its sole " <>
+              "proposal parent #{parent}"
+    end
+
+    :ok
+  end
+
+  defp require_amendment_proposal!(path, candidate, by_revision, parents_by_revision) do
+    case Map.get(parents_by_revision, candidate) do
+      [proposal_parent] ->
+        candidate_files = Map.fetch!(by_revision, candidate)
+        parent_files = Map.fetch!(by_revision, proposal_parent)
+        gate_path = Paths.strip_suffix(path, ".md") <> "-gate.md"
+
+        candidate_generation =
+          candidate_files
+          |> Map.fetch!(gate_path)
+          |> Plan.gate_generation("#{gate_path} at #{candidate}")
+
+        parent_generation =
+          parent_files
+          |> Map.fetch!(gate_path)
+          |> Plan.gate_generation("#{gate_path} at #{proposal_parent}")
+
+        {candidate_rows, _candidate_bound, _candidate_complete} =
+          candidate_files
+          |> Map.fetch!(path)
+          |> Records.governance_records("#{path} at #{candidate}")
+
+        {parent_rows, _parent_bound, _parent_complete} =
+          parent_files
+          |> Map.fetch!(path)
+          |> Records.governance_records("#{path} at #{proposal_parent}")
+
+        if candidate_generation <= parent_generation or
+             Enum.at(candidate_rows, 0) != Enum.at(parent_rows, 0) do
+          raise Invalid,
+                "#{path}: Acceptance may bind only the exact proposal revision that first " <>
+                  "advanced the amendment generation while retaining the prior row"
+        end
+
+        :ok
+
+      _other ->
+        raise Invalid,
+              "#{path}: amendment proposal #{candidate} must be a one-parent revision"
+    end
+  end
+
+  defp require_settled_amendment_parent!(
+         path,
+         revision,
+         parent,
+         retained_acceptance,
+         by_revision
+       ) do
+    gate_path = Paths.strip_suffix(path, ".md") <> "-gate.md"
+
+    parent_generation =
+      by_revision
+      |> Map.fetch!(parent)
+      |> Map.fetch!(gate_path)
+      |> Plan.gate_generation("#{gate_path} at #{parent}")
+
+    bound_generation = acceptance_generation(retained_acceptance)
+
+    if not is_integer(bound_generation) or parent_generation != bound_generation do
+      raise Invalid,
+            "#{path}: amendment proposal at #{revision} cannot advance from unsettled " <>
+              "parent #{parent}; its gate generation #{parent_generation} is not the " <>
+              "Acceptance-bound generation #{inspect(bound_generation)}"
+    end
+
+    :ok
+  end
+
+  defp require_same_lifecycle!(
+         path,
+         revision,
+         parent,
+         governed,
+         by_revision,
+         resolve_file,
+         transition
+       ) do
+    name = path |> Paths.strip_prefix("docs/plans/") |> Paths.strip_suffix(".md")
+    current_state = lifecycle_state!(governed, name, path, revision, resolve_file)
+
+    parent_state =
+      lifecycle_state!(Map.fetch!(by_revision, parent), name, path, parent, resolve_file)
+
+    if current_state != parent_state do
+      raise Invalid,
+            "#{path}: #{transition} at #{revision} changed lifecycle state from " <>
+              "#{parent_state} to #{current_state}"
+    end
+
+    :ok
+  end
+
+  defp lifecycle_state!(files, name, path, revision, resolve_file) do
+    index = Map.get(files, @index) || (resolve_file && resolve_file.(revision, @index))
+
+    case index do
+      nil ->
+        raise Invalid, "#{path}: lifecycle state is unavailable at #{revision}"
+
+      index ->
+        case List.keyfind(Register.register(index), name, 0) do
+          {^name, state} -> state
+          nil -> raise Invalid, "#{path}: #{name} is not registered at #{revision}"
+        end
+    end
+  end
+
+  defp validate_historical_disposition!(
+         path,
+         revision,
+         candidate,
+         acceptance,
+         by_revision,
+         resolve_file
+       ) do
+    files = Map.fetch!(by_revision, candidate)
+    candidate_text = Map.fetch!(files, path)
+    row = acceptance_row(acceptance)
+
+    Plan.validate_amendment_disposition!(
+      row,
+      candidate_text,
+      path,
+      candidate,
+      resolve_file,
+      revision
+    )
+  end
+
+  defp acceptance_generation(nil), do: nil
+
+  defp acceptance_generation(value) do
+    case value |> String.split("\0", parts: 2) |> hd() |> Integer.parse() do
+      {generation, ""} -> generation
+      _other -> nil
+    end
+  end
+
+  defp acceptance_candidate(value) do
+    case String.split(value, "\0", parts: 3) do
+      [_generation, lineage, _row] -> lineage |> String.split(",") |> hd()
+    end
+  end
+
+  defp acceptance_row(value) do
+    case String.split(value, "\0") do
+      [_generation, _lineage | row] -> row
     end
   end
 
@@ -221,16 +635,17 @@ defmodule Loopex.Checks.History do
     reconcile!(values, path, revision, label, adr_concepts)
   end
 
-  # Concept: parents may legitimately disagree when one of them amended the gate.
+  # Concept: parents may legitimately disagree when one of them carries a
+  # declared plan amendment.
   # Technical depth: raising on every divergence made a merge that brings in an
   # accepted amendment unrepresentable -- the branch carrying it and the branch
   # without it meet with different anchors, which is the normal shape of landing
-  # one. The rule here is the same strictly-increasing generation rule used for a
-  # sequential change: exactly one candidate must supersede every other, and
+  # one. The gate generation governs the accepted gate, both plan envelopes, and
+  # the Acceptance rebind. Exactly one candidate must supersede every other, and
   # anything else is still a conflict. Two sides at the same generation with
-  # different bytes remain irreconcilable, which is the case worth refusing.
+  # different bytes remain irreconcilable.
   defp reconcile!(values, path, revision, label, adr_concepts) do
-    amendable = label in ["accepted gate", "Acceptance"] and path not in adr_concepts
+    amendable = plan_amendable?(label, path, adr_concepts)
 
     latest =
       case amendable do
@@ -279,8 +694,7 @@ defmodule Loopex.Checks.History do
         anchor
 
       true ->
-        amendable =
-          label in ["accepted gate", "Acceptance"] and not MapSet.member?(adr_concepts, path)
+        amendable = plan_amendable?(label, path, adr_concepts)
 
         if amendable and Plan.supersedes?(label, anchor, value) do
           value
@@ -288,6 +702,15 @@ defmodule Loopex.Checks.History do
           raise Invalid, "#{path}: completed #{label} governance record changed at #{revision}"
         end
     end
+  end
+
+  defp plan_amendable?(label, path, adr_concepts) do
+    label in [
+      "accepted gate",
+      "Acceptance",
+      "normative concept envelope",
+      "normative technical envelope"
+    ] and not Enum.member?(adr_concepts, path)
   end
 
   defp labels(path, adr_concepts) do
@@ -347,8 +770,7 @@ defmodule Loopex.Checks.History do
   defp bound_candidate_generation(row, path, by_revision) do
     gate_path = Paths.strip_suffix(path, ".md") <> "-gate.md"
 
-    with [_decision, _authority, _evidence, bound] <- row,
-         [_all, candidate] <- Regex.run(~r/candidate `([0-9a-f]{40})`/, bound),
+    with candidate when is_binary(candidate) <- bound_candidate_revision(row),
          files when is_map(files) <- Map.get(by_revision, candidate),
          text when is_binary(text) <- Map.get(files, gate_path) do
       Plan.gate_generation(text, "#{gate_path} at #{candidate}")
@@ -356,6 +778,55 @@ defmodule Loopex.Checks.History do
       _other -> nil
     end
   end
+
+  # Concept: an Acceptance amendment supersedes the commitment it actually
+  # inherits, not any lower generation found on a sibling branch.
+  # Technical depth: encode the complete candidate chain already present in the
+  # candidate plans. Merge and sequential reconciliation can then require the
+  # prior accepted candidate to occur in the new lineage. Missing historical
+  # candidate bytes stop the chain at that candidate; current plan governance
+  # separately requires the complete reachable chain before a rebind can pass.
+  defp bound_candidate_lineage(row, path, by_revision) do
+    case bound_candidate_revision(row) do
+      nil -> []
+      candidate -> candidate_lineage(candidate, path, by_revision, MapSet.new())
+    end
+  end
+
+  defp candidate_lineage(candidate, path, by_revision, seen) do
+    cond do
+      MapSet.member?(seen, candidate) ->
+        [candidate]
+
+      true ->
+        next_seen = MapSet.put(seen, candidate)
+
+        with files when is_map(files) <- Map.get(by_revision, candidate),
+             text when is_binary(text) <- Map.get(files, path) do
+          {_rows, bound, complete} =
+            Records.governance_records(text, "#{path} at candidate #{candidate}")
+
+          case {Enum.at(complete, 0), Enum.at(bound, 0)} do
+            {true, {prior, _concept, _technical, _gate}} ->
+              [candidate | candidate_lineage(prior, path, by_revision, next_seen)]
+
+            _original_or_incomplete ->
+              [candidate]
+          end
+        else
+          _unavailable -> [candidate]
+        end
+    end
+  end
+
+  defp bound_candidate_revision([_decision, _authority, _evidence, bound]) do
+    case Regex.run(~r/candidate `([0-9a-f]{40})`/, bound) do
+      [_all, candidate] -> candidate
+      _other -> nil
+    end
+  end
+
+  defp bound_candidate_revision(_row), do: nil
 
   defp gate_values(text, path, historical_path, governed, revision) do
     plan_path = Paths.strip_suffix(path, "-gate.md") <> ".md"
@@ -396,22 +867,46 @@ defmodule Loopex.Checks.History do
         technical_envelope =
           Plan.technical_envelope(technical, "#{technical_path} at #{revision}")
 
-        # The leading field is the amendment generation of the gate carried by the
-        # candidate this row binds -- deliberately NOT the ambient generation of
-        # the gate at this revision. Using the ambient one made the anchor change
-        # at the amendment commit itself, where the row had not moved at all, and
-        # tying a rebind to the ambient value also left the row freely rewritable
-        # once any amendment existed. Comparing the bound candidates instead means
-        # a rebind is admitted only when it moves to a genuinely later-amended
-        # candidate, which is the same strictly-increasing rule the gate label uses.
+        # The leading fields are the amendment generation and complete candidate
+        # lineage carried by the candidate this row binds -- deliberately NOT the
+        # ambient generation of the gate at this revision. Using the ambient one
+        # made the anchor change at the amendment commit itself, where the row had
+        # not moved at all. Generation prevents same-version rewrites; lineage
+        # prevents a later-numbered sibling from displacing a candidate it did not
+        # inherit.
         candidate_generation =
           bound_candidate_generation(Enum.at(rows, 0), path, by_revision)
 
+        candidate_lineage =
+          rows
+          |> Enum.at(0)
+          |> bound_candidate_lineage(path, by_revision)
+          |> Enum.join(",")
+
+        # Concept: a declared gate amendment is the one version boundary for the
+        # accepted plan commitment as a whole.
+        # Technical depth: prefix both envelope anchors with the ambient gate
+        # generation. Their bytes may therefore change only in the commit that
+        # advances that generation; same-generation edits, rollback, and merge
+        # divergence still fail. Acceptance uses the bound candidate generation
+        # above because its administrative rebind necessarily follows later.
+        gate_path = Paths.strip_suffix(path, ".md") <> "-gate.md"
+
+        ambient_generation =
+          case Map.get(governed, gate_path) do
+            nil ->
+              raise Invalid, "#{gate_path}: accepted plan gate disappeared at #{revision}"
+
+            gate ->
+              Plan.gate_generation(gate, "#{gate_path} at #{revision}")
+          end
+
         [
-          "#{candidate_generation}\0" <> Enum.join(Enum.at(rows, 0), "\0"),
+          "#{candidate_generation}\0#{candidate_lineage}\0" <>
+            Enum.join(Enum.at(rows, 0), "\0"),
           if(Enum.at(complete, 1), do: Enum.join(Enum.at(rows, 1), "\0")),
-          Enum.join(concept_envelope, "\n"),
-          Enum.join(technical_envelope, "\n")
+          "#{ambient_generation}\0" <> Enum.join(concept_envelope, "\n"),
+          "#{ambient_generation}\0" <> Enum.join(technical_envelope, "\n")
         ]
     end
   end

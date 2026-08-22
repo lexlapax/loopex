@@ -12,8 +12,8 @@ defmodule Loopex.StatusCheckTest do
   ## Technical depth
 
   Compact in-memory fixtures exercise structural parsing, digest binding, and
-  derived-capsule enforcement without touching the checkout. The two cases that
-  need a real repository read one, and write nothing.
+  derived-capsule enforcement without touching the checkout. Cases that need a
+  real repository read one, and write nothing.
   """
 
   use ExUnit.Case, async: true
@@ -302,6 +302,44 @@ defmodule Loopex.StatusCheckTest do
     assert_raise Invalid, ~r/conflicting completed/, fn ->
       History.reconcile_for_test(["1\0a", "2\0b"], "docs/plans/M0.md", "rev", "Closure", [])
     end
+
+    for label <- ["normative concept envelope", "normative technical envelope"] do
+      assert History.reconcile_for_test(
+               ["0\0old", "1\0new"],
+               "docs/plans/M0.md",
+               "rev",
+               label,
+               []
+             ) == "1\0new"
+
+      assert_raise Invalid, ~r/conflicting completed/, fn ->
+        History.reconcile_for_test(
+          ["1\0left", "1\0right"],
+          "docs/plans/M0.md",
+          "rev",
+          label,
+          []
+        )
+      end
+    end
+
+    assert History.reconcile_for_test(
+             ["0\0aaa\0row", "2\0ccc,bbb,aaa\0row"],
+             "docs/plans/M0.md",
+             "rev",
+             "Acceptance",
+             []
+           ) == "2\0ccc,bbb,aaa\0row"
+
+    assert_raise Invalid, ~r/conflicting completed Acceptance/, fn ->
+      History.reconcile_for_test(
+        ["1\0bbb,aaa\0row", "2\0ccc,aaa\0row"],
+        "docs/plans/M0.md",
+        "rev",
+        "Acceptance",
+        []
+      )
+    end
   end
 
   test "the in-review capsule does not widen authority either" do
@@ -417,19 +455,38 @@ defmodule Loopex.StatusCheckTest do
     # Rolling back to an earlier generation is not a supersession.
     refute Plan.supersedes?("accepted gate", "1\0bbb", "0\0aaa")
 
-    # An acceptance row is judged on the amendment generation of the gate carried
-    # by the candidate it binds, and the rule is the same strictly-increasing one.
-    # Requiring merely that some amendment existed left the row freely rewritable
-    # once the first amendment landed: a generation-2 acceptance could be rebound
-    # repeatedly with no Amendment 3.
-    assert Plan.supersedes?("Acceptance", "0\0row", "1\0other")
+    # An acceptance row is judged on both the amendment generation and complete
+    # candidate lineage. A later candidate must actually inherit the exact
+    # candidate the prior row bound.
+    assert Plan.supersedes?("Acceptance", "0\0aaa\0row", "1\0bbb,aaa\0other")
+
+    assert Plan.supersedes?(
+             "Acceptance",
+             "0\0aaa\0row",
+             "2\0ccc,bbb,aaa\0other"
+           )
+
+    # A higher-numbered sibling forked from the original cannot displace the
+    # already accepted generation-1 candidate.
+    refute Plan.supersedes?(
+             "Acceptance",
+             "1\0bbb,aaa\0row",
+             "2\0ccc,aaa\0other"
+           )
+
+    refute Plan.supersedes?(
+             "Acceptance",
+             "1\0bbb,aaa\0row",
+             "2\0ccc,bbb,zzz\0other"
+           )
+
     # A rewrite at the same generation is not a supersession.
-    refute Plan.supersedes?("Acceptance", "1\0row", "1\0other")
-    refute Plan.supersedes?("Acceptance", "0\0row", "0\0other")
+    refute Plan.supersedes?("Acceptance", "1\0bbb,aaa\0row", "1\0ccc,bbb,aaa\0other")
+    refute Plan.supersedes?("Acceptance", "0\0aaa\0row", "0\0bbb,aaa\0other")
     # Going backwards is not a supersession either.
-    refute Plan.supersedes?("Acceptance", "2\0row", "1\0other")
+    refute Plan.supersedes?("Acceptance", "2\0ccc,bbb,aaa\0row", "1\0bbb,aaa\0other")
     # An unresolvable candidate cannot be used to claim one.
-    refute Plan.supersedes?("Acceptance", "\0row", "\0other")
+    refute Plan.supersedes?("Acceptance", "nil\0aaa\0row", "nil\0bbb,aaa\0other")
 
     # An anchor inside a fenced code block is illustration, not a declaration.
     fenced =
@@ -448,9 +505,11 @@ defmodule Loopex.StatusCheckTest do
     for bad <- [
           "<a id=\"amendment-2\"></a>\n## Amendment 2",
           "<a id=\"amendment-1\"></a>\n## Amendment 1\n\n" <>
+            "<a id=\"amendment-1\"></a>\n## Amendment 1",
+          "<a id=\"amendment-2\"></a>\n## Amendment 2\n\n" <>
             "<a id=\"amendment-1\"></a>\n## Amendment 1"
         ] do
-      assert_raise Invalid, ~r/consecutively/, fn ->
+      assert_raise Invalid, ~r/document order.*consecutively/, fn ->
         Plan.gate_generation(gate <> "\n" <> bad <> "\n", "gate")
       end
     end
@@ -500,6 +559,336 @@ defmodule Loopex.StatusCheckTest do
     end
   end
 
+  test "an amendment is invalid until its administrative Acceptance rebind" do
+    root = LoopexTest.Repo.root()
+    {proposal_revision, 0} = Git.run(root, ["rev-parse", "HEAD"])
+    {prior_revision, 0} = Git.run(root, ["rev-parse", "HEAD^"])
+    proposal_revision = String.trim(proposal_revision)
+    prior_revision = String.trim(prior_revision)
+
+    old_plan = Fixture.plan()
+    old_technical = Fixture.technical_plan()
+    old_gate = Fixture.gate()
+
+    retained_acceptance =
+      Fixture.plan(governed: true)
+      |> String.replace(String.duplicate("a", 40), prior_revision, global: false)
+
+    amended_technical =
+      String.replace(
+        old_technical,
+        "No compatibility claim.",
+        "Compatibility remains governed by the accepted amendment."
+      )
+
+    amended_gate =
+      String.trim_trailing(old_gate, "\n") <>
+        "\n\n<a id=\"amendment-transaction-v1\"></a>\n" <>
+        "<a id=\"amendment-1\"></a>\n## Amendment 1\n"
+
+    assert Plan.amendment_transaction_v1?(amended_gate, "gate")
+    refute Plan.amendment_transaction_v1?(old_gate, "gate")
+
+    resolver = fn revision, path ->
+      accepted_index =
+        Fixture.documents()
+        |> Map.fetch!("docs/plans/README.md")
+        |> String.replace(
+          Fixture.blocked_row(),
+          "| `M0` | Accepted | [concept](M0.md) | " <>
+            "[technical depth](M0-technical.md) | [gate](M0-gate.md) |"
+        )
+
+      cond do
+        revision == prior_revision and String.ends_with?(path, "M0.md") ->
+          old_plan
+
+        revision == prior_revision and String.ends_with?(path, "M0-technical.md") ->
+          old_technical
+
+        revision == prior_revision and String.ends_with?(path, "M0-gate.md") ->
+          old_gate
+
+        revision == proposal_revision and String.ends_with?(path, "M0.md") ->
+          retained_acceptance
+
+        revision == proposal_revision and String.ends_with?(path, "M0-technical.md") ->
+          amended_technical
+
+        revision == proposal_revision and String.ends_with?(path, "M0-gate.md") ->
+          amended_gate
+
+        revision == proposal_revision and path == "docs/plans/README.md" ->
+          accepted_index
+
+        revision == proposal_revision and
+            path == "docs/developer/agent-context-map.md" ->
+          "# Context map\n"
+
+        true ->
+          nil
+      end
+    end
+
+    # Proposal A and transition R use the same validator. There is no candidate
+    # mode that makes stale governance valid while the amendment awaits review.
+    assert_raise Invalid,
+                 "docs/plans/M0.md: governance technical digest does not match current and " <>
+                   "candidate envelopes",
+                 fn ->
+                   Plan.governance(
+                     retained_acceptance,
+                     amended_technical,
+                     amended_gate,
+                     "M0",
+                     "Accepted",
+                     resolver
+                   )
+                 end
+
+    concept_digest =
+      Fixture.envelope_digest(
+        retained_acceptance,
+        Fixture.concept_marker_start(),
+        Fixture.concept_marker_end()
+      )
+
+    technical_digest =
+      Fixture.envelope_digest(
+        amended_technical,
+        Fixture.technical_marker_start(),
+        Fixture.technical_marker_end()
+      )
+
+    rebound_with_reused_disposition =
+      Regex.replace(
+        ~r/candidate `[0-9a-f]{40}`; concept `sha256:[0-9a-f]{64}`; technical `sha256:[0-9a-f]{64}`; gate `sha256:[0-9a-f]{64}`/,
+        retained_acceptance,
+        "candidate `#{proposal_revision}`; concept `sha256:#{concept_digest}`; " <>
+          "technical `sha256:#{technical_digest}`; " <>
+          "gate `sha256:#{Loopex.Checks.Markdown.digest(amended_gate)}`",
+        global: false
+      )
+
+    assert_raise Invalid, ~r/new amendment-specific disposition/, fn ->
+      Plan.governance(
+        rebound_with_reused_disposition,
+        amended_technical,
+        amended_gate,
+        "M0",
+        "Accepted",
+        resolver
+      )
+    end
+
+    rebound =
+      String.replace(
+        rebound_with_reused_disposition,
+        "[disposition](../vision.md#concept)",
+        "[disposition](../developer/agent-context-map.md#amendment-test-disposition)",
+        global: false
+      )
+
+    assert :ok ==
+             Plan.governance(
+               rebound,
+               amended_technical,
+               amended_gate,
+               "M0",
+               "Accepted",
+               resolver
+             )
+
+    assert_raise Invalid, ~r/must preserve amendment candidate lifecycle state/, fn ->
+      Plan.governance(
+        rebound,
+        amended_technical,
+        amended_gate,
+        "M0",
+        "In progress",
+        resolver
+      )
+    end
+  end
+
+  test "amendment proposal and rebind remain one exact history transaction" do
+    original = String.duplicate("a", 40)
+    accepted_revision = String.duplicate("b", 40)
+    proposal = String.duplicate("c", 40)
+    interposed = String.duplicate("d", 40)
+    rebind = String.duplicate("e", 40)
+
+    old_plan = Fixture.plan(governed: true)
+
+    gate_one =
+      String.trim_trailing(Fixture.gate(), "\n") <>
+        "\n\n<a id=\"amendment-transaction-v1\"></a>\n" <>
+        "<a id=\"amendment-1\"></a>\n## Amendment 1\n"
+
+    gate_two =
+      String.trim_trailing(gate_one, "\n") <>
+        "\n\n<a id=\"amendment-2\"></a>\n## Amendment 2\n"
+
+    new_evidence =
+      "[disposition](../developer/agent-context-map.md#amendment-test-disposition)"
+
+    rebound =
+      old_plan
+      |> String.replace(original, proposal, global: false)
+      |> String.replace(
+        "[disposition](../vision.md#concept)",
+        new_evidence,
+        global: false
+      )
+
+    interposed_rebound = String.replace(rebound, proposal, interposed, global: false)
+
+    index = fn state ->
+      Fixture.documents()
+      |> Map.fetch!("docs/plans/README.md")
+      |> String.replace(
+        Fixture.blocked_row(),
+        "| `M0` | #{state} | [concept](M0.md) | " <>
+          "[technical depth](M0-technical.md) | [gate](M0-gate.md) |"
+      )
+    end
+
+    context_before = "# Context map\n"
+
+    context_after =
+      context_before <>
+        "\n<a id=\"amendment-test-disposition\"></a>\n" <>
+        "## Amendment test disposition\n\nMaintainer accepted the exact proposal.\n"
+
+    snapshot = fn plan, gate, state, context ->
+      Fixture.plan_snapshot(plan, gate)
+      |> Map.put("docs/plans/README.md", index.(state))
+      |> Map.put(
+        "docs/vision.md",
+        Fixture.documents() |> Map.fetch!("docs/vision.md")
+      )
+      |> Map.put("docs/developer/agent-context-map.md", context)
+    end
+
+    original_snapshot = snapshot.(Fixture.plan(), Fixture.gate(), "Open", context_before)
+    accepted_snapshot = snapshot.(old_plan, Fixture.gate(), "Accepted", context_before)
+    proposal_snapshot = snapshot.(old_plan, gate_one, "Accepted", context_before)
+    valid_rebind = snapshot.(rebound, gate_one, "Accepted", context_after)
+
+    base = [
+      {"root", [], %{}},
+      {original, ["root"], original_snapshot},
+      {accepted_revision, [original], accepted_snapshot},
+      {proposal, [accepted_revision], proposal_snapshot}
+    ]
+
+    resolver = fn snapshots ->
+      files = Map.new(snapshots, fn {revision, _parents, contents} -> {revision, contents} end)
+      fn revision, path -> files |> Map.get(revision, %{}) |> Map.get(path) end
+    end
+
+    valid_history = base ++ [{rebind, [proposal], valid_rebind}]
+
+    assert :ok ==
+             History.governance_history(
+               valid_rebind,
+               {rebind, valid_history},
+               resolver.(valid_history)
+             )
+
+    reused =
+      snapshot.(
+        String.replace(rebound, new_evidence, "[disposition](../vision.md#concept)"),
+        gate_one,
+        "Accepted",
+        context_before
+      )
+
+    reused_history = base ++ [{rebind, [proposal], reused}]
+
+    assert_raise Invalid, ~r/new amendment-specific disposition/, fn ->
+      History.governance_history(reused, {rebind, reused_history}, resolver.(reused_history))
+    end
+
+    missing_record = snapshot.(rebound, gate_one, "Accepted", context_before)
+    missing_record_history = base ++ [{rebind, [proposal], missing_record}]
+
+    assert_raise Invalid, ~r/must first appear exactly once at rebind/, fn ->
+      History.governance_history(
+        missing_record,
+        {rebind, missing_record_history},
+        resolver.(missing_record_history)
+      )
+    end
+
+    changed_lifecycle = snapshot.(rebound, gate_one, "In progress", context_after)
+    lifecycle_history = base ++ [{rebind, [proposal], changed_lifecycle}]
+
+    assert_raise Invalid, ~r/amendment rebind.*changed lifecycle state/, fn ->
+      History.governance_history(
+        changed_lifecycle,
+        {rebind, lifecycle_history},
+        resolver.(lifecycle_history)
+      )
+    end
+
+    interposed_snapshot = snapshot.(old_plan, gate_one, "Accepted", context_before)
+
+    after_interposed =
+      snapshot.(interposed_rebound, gate_one, "Accepted", context_after)
+
+    interposed_history =
+      base ++
+        [
+          {interposed, [proposal], interposed_snapshot},
+          {rebind, [interposed], after_interposed}
+        ]
+
+    assert_raise Invalid, ~r/exact proposal revision that first advanced/, fn ->
+      History.governance_history(
+        after_interposed,
+        {rebind, interposed_history},
+        resolver.(interposed_history)
+      )
+    end
+
+    overlapped = snapshot.(rebound, gate_two, "Accepted", context_after)
+    overlap_history = base ++ [{interposed, [proposal], overlapped}]
+
+    assert_raise Invalid, ~r/proposal and Acceptance rebind must be distinct/, fn ->
+      History.governance_history(
+        overlapped,
+        {interposed, overlap_history},
+        resolver.(overlap_history)
+      )
+    end
+
+    second_proposal = String.duplicate("f", 40)
+    collapsed_rebind = String.duplicate("1", 40)
+    second_proposal_snapshot = snapshot.(old_plan, gate_two, "Accepted", context_before)
+
+    collapsed_rebound =
+      String.replace(rebound, proposal, second_proposal, global: false)
+
+    collapsed_rebind_snapshot =
+      snapshot.(collapsed_rebound, gate_two, "Accepted", context_after)
+
+    collapsed_history =
+      base ++
+        [
+          {second_proposal, [proposal], second_proposal_snapshot},
+          {collapsed_rebind, [second_proposal], collapsed_rebind_snapshot}
+        ]
+
+    assert_raise Invalid, ~r/cannot advance from unsettled parent/, fn ->
+      History.governance_history(
+        collapsed_rebind_snapshot,
+        {collapsed_rebind, collapsed_history},
+        resolver.(collapsed_history)
+      )
+    end
+  end
+
   test "the in-progress capsule does not widen authority" do
     accepted = Register.expected_capsule("Accepted", "M0", %{})
     in_progress = Register.expected_capsule("In progress", "M0", %{})
@@ -518,7 +907,7 @@ defmodule Loopex.StatusCheckTest do
   end
 
   test "a milestone state with no derived capsule fails closed" do
-    assert "In review" in Register.active_states()
+    assert "In review" in Register.delivery_states()
 
     # Every registered state now has a derivation -- Closed gained one when the
     # first milestone closed. What the catch-all protects is the NEXT state
@@ -936,10 +1325,11 @@ defmodule Loopex.StatusCheckTest do
       Plan.governance(governed, technical, gate, "M0", "Accepted", candidate_without_progress)
     end
 
-    closure_without_acceptance = fn _sha, path ->
+    closure_without_acceptance = fn sha, path ->
       cond do
         String.ends_with?(path, "M0-gate.md") -> gate
         String.ends_with?(path, "M0-technical.md") -> technical
+        sha == String.duplicate("a", 40) -> plan
         true -> Fixture.plan(progress: "Proved")
       end
     end
@@ -1067,34 +1457,34 @@ defmodule Loopex.StatusCheckTest do
     end
 
     for state <- ["Accepted limitation", "Accepted deferral"] do
-      invalid.(
-        String.replace(plan, "| 1 | Open | — |", "| 1 | #{state} | — |"),
-        "Open",
-        ~r/disposition evidence/
-      )
+      assert_raise Invalid, ~r/disposition evidence/, fn ->
+        plan
+        |> String.replace("| 1 | Open | — |", "| 1 | #{state} | — |")
+        |> Plan.progress("docs/plans/M0.md", ["1"], "Accepted")
+      end
 
       assert :ok ==
-               Plan.governance(
-                 String.replace(
-                   plan,
-                   "| 1 | Open | — |",
-                   "| 1 | #{state} | [disposition](decision.md) |"
-                 ),
-                 technical,
-                 gate,
-                 "M0",
-                 "Open",
-                 none
+               plan
+               |> String.replace(
+                 "| 1 | Open | — |",
+                 "| 1 | #{state} | [disposition](decision.md) |"
                )
+               |> Plan.progress("docs/plans/M0.md", ["1"], "Accepted")
 
       for bad <- ["evidence.md", "[decision](decision.md)"] do
-        invalid.(
-          String.replace(plan, "| 1 | Open | — |", "| 1 | #{state} | #{bad} |"),
-          "Open",
-          ~r/disposition evidence/
-        )
+        assert_raise Invalid, ~r/disposition evidence/, fn ->
+          plan
+          |> String.replace("| 1 | Open | — |", "| 1 | #{state} | #{bad} |")
+          |> Plan.progress("docs/plans/M0.md", ["1"], "Accepted")
+        end
       end
     end
+
+    invalid.(
+      String.replace(plan, "| 1 | Open | — |", "| 1 | Proved | evidence |"),
+      "Open",
+      ~r/Open progress permits only Open outcomes/
+    )
 
     invalid.(
       String.replace(
@@ -1168,10 +1558,17 @@ defmodule Loopex.StatusCheckTest do
       )
 
     history =
-      {"accepted", [{"root", [], %{}}, {"accepted", ["root"], Fixture.plan_snapshot(governed)}]}
+      {"accepted",
+       [
+         {"root", [], %{}},
+         {"accepted", ["root"], Fixture.plan_snapshot(governed, Fixture.gate())}
+       ]}
 
     assert_raise Invalid, ~r/headings|Workstreams/, fn ->
-      Loopex.Checks.History.governance_history(Fixture.plan_snapshot(bad_history), history)
+      Loopex.Checks.History.governance_history(
+        Fixture.plan_snapshot(bad_history, Fixture.gate()),
+        history
+      )
     end
   end
 
@@ -1355,7 +1752,7 @@ defmodule Loopex.StatusCheckTest do
       expected =
         case label do
           "renamed M0" -> "applies only to M0"
-          "removed M0" -> "exactly one registered milestone"
+          "removed M0" -> "milestone register is empty"
         end
 
       assert_invalid(documents, expected)
@@ -1531,7 +1928,7 @@ defmodule Loopex.StatusCheckTest do
       |> Map.put("docs/plans/M0-technical.md", technical)
       |> Map.put("docs/plans/M0-gate.md", gate)
 
-    assert_invalid(closed_documents, "Last integrated checkpoint")
+    assert_invalid(closed_documents, "Last closed product checkpoint")
 
     invalid.(
       String.replace(
@@ -1639,6 +2036,163 @@ defmodule Loopex.StatusCheckTest do
     |> assert_invalid("exact derived status capsule")
   end
 
+  test "one delivery milestone may carry exactly one generic Open successor" do
+    successor = &String.replace(&1, "M0", "M2")
+
+    rows = [{"M0", "Accepted"}, {"M2", "Open"}]
+    summary = Register.summary("Pre-implementation planning", rows)
+
+    assert summary ==
+             "**Revision status:** Pre-implementation planning; active milestone `M0` is " <>
+               "accepted; next candidate `M2` is open."
+
+    documents =
+      Fixture.documents()
+      |> Map.new(fn {path, text} ->
+        {path,
+         text
+         |> String.replace(
+           Fixture.blocked_row(),
+           "| `M0` | Accepted | [concept](M0.md) | " <>
+             "[technical depth](M0-technical.md) | [gate](M0-gate.md) |\n" <>
+             "| `M2` | Open | [concept](M2.md) | " <>
+             "[technical depth](M2-technical.md) | [gate](M2-gate.md) |"
+         )
+         |> String.replace(Fixture.summary(), summary)}
+      end)
+      |> Map.put("docs/plans/M0.md", Fixture.plan(governed: true))
+      |> Map.put("docs/plans/M0-technical.md", Fixture.technical_plan())
+      |> Map.put("docs/plans/M0-gate.md", Fixture.gate())
+      |> Map.put("docs/plans/M2.md", successor.(Fixture.plan()))
+      |> Map.put("docs/plans/M2-technical.md", successor.(Fixture.technical_plan()))
+      |> Map.put("docs/plans/M2-gate.md", Fixture.gate())
+      |> Map.update!(
+        "docs/plans/README.md",
+        &capsule(&1, {"M0", "Accepted"}, {"M2", "Open"})
+      )
+
+    assert [] == Fixture.checked(documents)
+
+    authorized =
+      documents
+      |> Map.fetch!("docs/plans/README.md")
+      |> Register.current_status()
+      |> elem(0)
+      |> Map.fetch!("Authorized work")
+
+    assert authorized =~ "accepted `M0`"
+    assert authorized =~ "planning, gate construction, and review for Open `M2`"
+    assert authorized =~ "no `M2` product implementation"
+
+    documents
+    |> replace(
+      "docs/plans/M2.md",
+      "| 1 | Open | — |",
+      "| 1 | Proved | proof |"
+    )
+    |> assert_invalid("Open progress permits only Open outcomes")
+  end
+
+  test "the generic delivery and lookahead roles reject every adjacent extra shape" do
+    states = Register.states()
+
+    assert states == ["Blocked", "Open", "Accepted", "In progress", "In review", "Closed"]
+
+    valid_tails =
+      MapSet.new([
+        [],
+        ["Blocked"],
+        ["Open"],
+        ["Accepted"],
+        ["In progress"],
+        ["In review"],
+        ["Accepted", "Open"]
+      ])
+
+    assert %{delivery: nil, open: nil, blocked: nil} == Register.milestone_roles([])
+
+    sequences =
+      1..3
+      |> Enum.flat_map(fn length ->
+        Enum.reduce(1..length, [[]], fn _position, prefixes ->
+          for prefix <- prefixes, state <- states, do: prefix ++ [state]
+        end)
+      end)
+
+    for sequence <- sequences do
+      rows =
+        sequence
+        |> Enum.with_index(1)
+        |> Enum.map(fn {state, index} -> {"milestone-#{index}", state} end)
+
+      {_closed_prefix, tail_rows} =
+        Enum.split_while(rows, fn {_name, state} -> state == "Closed" end)
+
+      tail_states = Enum.map(tail_rows, &elem(&1, 1))
+
+      if MapSet.member?(valid_tails, tail_states) do
+        expected =
+          case tail_rows do
+            [] ->
+              %{delivery: nil, open: nil, blocked: nil}
+
+            [{_name, "Blocked"} = blocked] ->
+              %{delivery: nil, open: nil, blocked: blocked}
+
+            [{_name, "Open"} = open] ->
+              %{delivery: nil, open: open, blocked: nil}
+
+            [{_name, state} = delivery]
+            when state in ["Accepted", "In progress", "In review"] ->
+              %{delivery: delivery, open: nil, blocked: nil}
+
+            [{_delivery_name, "Accepted"} = delivery, {_open_name, "Open"} = open] ->
+              %{delivery: delivery, open: open, blocked: nil}
+          end
+
+        assert expected == Register.milestone_roles(rows),
+               "valid lifecycle sequence failed: #{inspect(sequence)}"
+      else
+        assert_raise Invalid, ~r/Closed history.*one delivery.*one Open successor/, fn ->
+          Register.milestone_roles(rows)
+        end
+      end
+    end
+
+    for state <- ["In progress", "In review"] do
+      assert_raise Invalid, ~r/Open successor requires an Accepted predecessor/, fn ->
+        Register.expected_capsule({"current", state}, {"next", "Open"}, %{})
+      end
+    end
+  end
+
+  test "the Accepted plus Open capsule pins both delivery and lookahead authority" do
+    capsule = Register.expected_capsule({"current", "Accepted"}, {"next", "Open"}, %{})
+
+    assert Map.take(capsule, [
+             "Blockers",
+             "Authorized work",
+             "Next maintainer decision",
+             "Next transition"
+           ]) == %{
+             "Blockers" =>
+               "None for `current` delivery; `next` acceptance, integration, and product " <>
+                 "implementation wait until `current` closes and the Open candidate is " <>
+                 "refreshed and independently reviewed on that closed base",
+             "Authorized work" =>
+               "Implementation inside the accepted `current` envelopes and locked gate on " <>
+                 "its designated milestone branch; planning, gate construction, and review " <>
+                 "for Open `next`; no milestone product bytes integrate before closure and " <>
+                 "no `next` product implementation",
+             "Next maintainer decision" =>
+               "None until `current` is ready for independent review; `next` cannot be " <>
+                 "accepted before `current` closes",
+             "Next transition" =>
+               "Turn the locked `current` gate green and close it; then refresh and " <>
+                 "independently review `next` on that closed base"
+           }
+  end
+
   # Concept: rewrite the fixture's status capsule to the values a given register
   # state and milestone derive.
   #
@@ -1647,12 +2201,25 @@ defmodule Loopex.StatusCheckTest do
   # and cannot accidentally assert the field order twice. The checkpoint field
   # keeps whatever the document already carries, because it is derived from the
   # register's closed rows and not from the described milestone.
-  defp capsule(text, state, name) do
-    expected = Register.expected_capsule(state, name, %{})
+  defp capsule(text, {delivery_name, delivery_state}, {open_name, "Open"}) do
+    expected =
+      Register.expected_capsule(
+        {delivery_name, delivery_state},
+        {open_name, "Open"},
+        %{}
+      )
 
+    rewrite_capsule(text, expected)
+  end
+
+  defp capsule(text, state, name) do
+    rewrite_capsule(text, Register.expected_capsule(state, name, %{}))
+  end
+
+  defp rewrite_capsule(text, expected) do
     Regex.replace(~r/^\| ([^|\n]+?) \| [^|\n]*? \|$/m, text, fn line, field ->
       case Map.fetch(expected, field) do
-        {:ok, value} when field != "Last integrated checkpoint" -> "| #{field} | #{value} |"
+        {:ok, value} when field != "Last closed product checkpoint" -> "| #{field} | #{value} |"
         _other -> line
       end
     end)

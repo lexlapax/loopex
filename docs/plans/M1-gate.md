@@ -472,9 +472,12 @@ redacted in-process. Bootstrap does not substitute for either run, and M1 never
 nests M0.
 
 The same two exact commands must already have exited zero against the clean
-opening candidate before M1 Acceptance is recorded. Those pre-acceptance runs
+generation-zero opening candidate before the original M1 Acceptance is recorded.
+Those pre-acceptance runs
 are review evidence only and are not committed into this gate, the matrix, or
-another candidate input. A new acceptance candidate invalidates them. This
+another candidate input. A replacement generation-zero acceptance candidate
+invalidates them; later accepted-plan amendments follow the proposal/rebind
+transaction declared below. This
 keeps the opening runner read-only and truthfully red without postponing the
 green-base invariant until implementation or closure.
 
@@ -669,3 +672,87 @@ contract through a committed real-model request and credential-free controlled
 OS tool, observes durable public events, survives an OS-process-tree kill after
 a retained receipt, reconciles without redispatch, makes a second real call,
 and reaches a durable terminal result.
+
+<a id="amendment-1"></a>
+## Amendment 1 — Integrate Accepted Governance Before Product Closure
+
+**Acceptance: OUTSTANDING.** This section declares generation 1 so the exact
+candidate that carries it can be independently reviewed and explicitly accepted
+before the Acceptance row is rebound. It supplies no authority by itself.
+At that candidate, `mix loopex.status` and the bootstrap aggregate must fail on
+the stale M1 binding; that administrative red is not M1 product evidence. The
+unchanged M1 runner must still supply its distinct accepted opening red when run
+directly. The later rebind restores structural green without changing that
+product red.
+
+This amendment changes the M1 Technical depth envelope's Migration and Rollback
+commitment and the shared lifecycle enforcement it depends on. An independently
+reviewed, explicitly approved governance-only Acceptance checkpoint may
+integrate to `main` while the exact accepted opening M1 gate remains red. That
+checkpoint may carry plan/gate machinery, governance, derived status and
+documentation, and portable enforcement, but no M1 product implementation.
+M1 product work remains on its designated branch until separately approved
+closure.
+
+After the governance checkpoint is integrated, the register may carry one
+generic Open successor as a planning-only lookahead. M1 remains the sole product
+implementation authority and remains `Accepted` in that branch; `In progress`
+plus `Open` and `In review` plus `Open` are refused. The successor cannot be
+accepted, integrated, or implemented until M1 is Closed and integrated; it must
+then absorb that exact closed product base, re-prove every inherited gate green
+and its own distinct red, and receive a fresh exact-SHA review. A second
+successor is refused.
+
+The amendment changes no Concept outcome, scope item, non-goal, product
+boundary, product command, selector, protected test, fixture, vector, minimum,
+lane schema, evidence class, bound artifact, declared opening red, or Closure
+Document Set. Amendment-validation timing follows the generic proposal/rebind
+transaction in Amendment 2; no product or retained-evidence obligation moves.
+The accepted opening red remains the required M1 state until implementation
+truthfully advances it; no product gate is weakened or waived.
+
+Because this is the first accepted-envelope amendment after the Elixir history
+walker was installed, its enforcement also binds Acceptance supersession to the
+complete candidate lineage. A higher-numbered sibling that did not inherit the
+exact previously accepted chain cannot win a merge by generation number alone.
+
+<a id="amendment-transaction-v1"></a>
+<a id="amendment-2"></a>
+## Amendment 2 — Make Amendment Reproof Satisfiable
+
+**Acceptance: OUTSTANDING.** This section declares generation 2 and corrects
+only the acceptance-evidence sequencing of Amendment 1. It supplies no authority
+by itself. Amendment 1 and this correction are reviewed and bound together at
+one exact proposal candidate `A`.
+
+The transaction is milestone-agnostic and consists of two direct, one-parent
+revisions. Amendment sections are consecutively numbered in physical document
+order. The adjacent `amendment-transaction-v1` marker activates the strict
+forward protocol while leaving closed pre-v1 amendment history valid. `A` is the first revision to advance the generation; at `A`, the prior
+Acceptance row and lifecycle state remain intact, so `mix loopex.status`,
+bootstrap, and both M0 commands must stop because
+the current M1 binding is stale. Standalone status must identify that exact
+stale-binding failure; the fixed M0 wrapper message is not treated as a partial
+gate result. Binding-independent repository checks must pass, and the unchanged
+M1 runner must still produce its distinct accepted opening red when invoked
+directly.
+
+After independent exact-SHA review and explicit maintainer acceptance of `A`,
+its immediate-child administrative transition `R` rebinds Acceptance to exact
+`A` and its digests without changing lifecycle state. It adds one new
+amendment-specific authority-disposition anchor to an existing durable document
+where that anchor was absent at `A`; it may not
+reuse, complete, or edit an earlier disposition. No commit may intervene,
+overlap the rebind with another proposal, or begin another amendment before `R`.
+Only conforming lifecycle-derived status blocks may also update; no envelope,
+gate, portable-enforcement, or product byte may change. At exact `R`, status and
+bootstrap must pass, both complete M0 commands must exit zero on the locked
+floor and current pairs including the real-provider role, and the direct M1
+runner must reproduce the same accepted opening red seen at `A`. An independent
+review binds both revisions, proves the exact `A→R` surface, and separately
+proves the integration base through `R` contains no M1 product implementation.
+Only `R` is integration-eligible.
+
+Every result names the revision where it ran. No green `R` result is attributed
+to `A`, and these governance-integration runs do not replace the later exact-`C`
+M0 evidence required by the retained `C→E→T` closure chain.

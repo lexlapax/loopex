@@ -8,8 +8,10 @@ Future capability rungs in
 
 This file is the canonical current-status register and plan index for the
 checked-out revision. The root README carries only the derived summary below.
-An accepted in-flight milestone appears on its designated branch until it is
-integrated; `main` describes integrated project state, not every remote activity.
+An accepted governance checkpoint may be integrated to `main`; its product work
+remains on the designated milestone branch until closure. `main` therefore
+describes integrated governance while its last Closed row identifies the
+integrated product baseline.
 
 <!-- loopex:current-status:start -->
 ## Current Status
@@ -19,21 +21,27 @@ integrated; `main` describes integrated project state, not every remote activity
 | Field | Value |
 | --- | --- |
 | Integrated phase | Pre-implementation planning |
-| Last integrated checkpoint | `M0` — 2026-08-21 |
+| Last closed product checkpoint | `M0` — 2026-08-21 |
 | Blockers | None; `M1` is accepted and implementation may proceed |
-| Authorized work | Implementation inside the accepted `M1` envelopes and its locked gate; no other product implementation |
+| Authorized work | Implementation inside the accepted `M1` envelopes and its locked gate on the designated milestone branch; no milestone product bytes integrate before closure |
 | Next maintainer decision | None until `M1` is ready for independent review |
 | Next transition | Turn the locked gate green, then move `M1` to In progress and In review |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
-Until the first planned milestone closes, Last integrated checkpoint is the
+Until the first planned milestone closes, `Last closed product checkpoint` is the
 exact seed-bootstrap sentinel shown above. After that it is derived from the
 register's final `Closed` row in this form:
 
 ```text
 `<final Closed milestone>` — YYYY-MM-DD
 ```
+
+The status checker deliberately does not claim that accepted governance was
+merged: identical bytes on a topic branch and on `main` are indistinguishable.
+The gate-opening procedure verifies the exact base, and the mandatory
+base-to-transition review verifies integration eligibility. This field states
+only the product fact the register can derive.
 
 While `M0` is the sole blocked candidate, the repository status check derives
 the complete capsule from the two founding ADR records. The phase, seed
@@ -97,11 +105,16 @@ changes only the Concept file's status and empty governance row; the same
 administrative commit updates the derived Current Status capsule. A mismatch or
 missing companion blocks acceptance.
 
-Only accepted, active, closed, or explicitly named next-candidate milestones
+Only accepted, delivering, closed, or explicitly named next-candidate milestones
 belong in the register. A roadmap projection does not earn a row. The register
-is the sole lifecycle-state owner: the final `Closed` row is the last closed
-milestone, an active-state row is the active milestone, and the sole `Blocked`
-row is the next candidate.
+is the sole lifecycle-state owner. Zero or more `Closed` rows come first. They
+may be followed by at most one delivery row (`Accepted`, `In progress`, or
+`In review`). Only an `Accepted` delivery row may be followed by one `Open`
+successor: the lookahead branches from integrated governance, never from the
+product branch. Without a delivery row, one `Open` candidate may follow the
+Closed history. The founding `Blocked` form is a single next candidate with no
+plan triple. No second delivery authority or second planning lookahead is
+representable.
 
 <!-- loopex:milestone-register:start -->
 ## Milestone Register
@@ -194,10 +207,15 @@ and gate plus the current canonical bytes. Once Acceptance completes, it anchors
 both accepted envelopes and exact gate bytes through every reachable descendant
 and merge. Independent review proves pair consistency, candidate compliance,
 and that the pointer identifies the named authority's actual disposition. A
-separate read-only review compares the exact
-administrative transition SHA with the bound candidate and reports to the
-current integrator that only the governance row and the three required marked
-status blocks changed; no gate or product byte may change in that transition. It is a
+separate read-only review compares the exact administrative transition SHA with
+the bound candidate and reports to the current integrator that only the
+governance row, the single durable authority-disposition record named by that
+row, and any lifecycle-derived status blocks changed; no envelope, gate,
+portable-enforcement, or product byte may change in that transition. Before a
+governance-only Acceptance checkpoint integrates, the review also compares it
+with `main` and confirms the
+complete integration surface contains planning, governance, documentation, and
+portable-enforcement bytes but no milestone product implementation. It is a
 mandatory pre-integration procedure, not another durable record or
 structural-check claim.
 
@@ -206,9 +224,9 @@ accepting maintainer or recorded delegate, durable evidence of that authority's
 explicit disposition, the accepted plan-candidate SHA, both envelope digests,
 and gate digest. Moving it to `Closed` requires the same three digests plus the
 reviewed candidate SHA. An explicit decision may be recorded; it may not be
-supplied or inferred. These
-administrative transitions change only governance and derived status bytes;
-they do not alter the bound candidate, locked gate, or product bytes.
+supplied or inferred. These administrative transitions change only that bounded
+governance and derived status surface; they do not alter the bound candidate,
+normative envelopes, locked gate, portable enforcement, or product bytes.
 
 The exact skeletons are below. Neither file has an H1 because the filename and
 register own identity. Replace `<name>` with the registered milestone name.
@@ -350,9 +368,44 @@ Change either meaning only through an accepted amendment. Workstreams,
 progress, resolved outcome state, and evidence links stay outside them and may
 be updated only when they conform to both envelopes and the locked gate.
 Structural validation checks presence and byte identity; independent review
-decides whether the pair is clear, consistent, and adequate. No plan-amendment
-record exists yet, so any accepted-envelope byte change fails closed until that
-mechanism is explicitly designed and accepted.
+decides whether the pair is clear, consistent, and adequate. A plan amendment is
+declared by the next consecutively numbered visible Amendment section in
+physical document order. Its candidate may change the accepted gate and either
+envelope while retaining the prior Acceptance row and lifecycle state; this
+intentionally fails current binding
+until an independent exact-SHA review and explicit maintainer acceptance. A
+separate administrative transition then rebinds Acceptance to that candidate
+and its new digests.
+
+That amendment is one generic two-revision, direct one-parent transaction. `A`
+is the first revision to advance the generation. The strict transaction is
+versioned by one visible `<a id="amendment-transaction-v1"></a>` gate marker:
+closed pre-v1 amendment history remains valid, and every active or future
+amended gate must carry the marker and obey v1 from its first marked proposal.
+At proposal `A`, exact binding
+validation, bootstrap, and any inherited gate that invokes them fail only
+because the retained Acceptance row still names the prior bytes. Run every
+binding-independent check and run the amended milestone gate directly at `A`,
+where it must report the truthful product state the amendment declares. After
+an exact-SHA review and explicit acceptance of `A`, its immediate-child
+administrative transition `R` rebinds Acceptance to exact `A`, preserves the
+lifecycle state, adds one new amendment-specific authority-disposition anchor to
+an existing durable document where that anchor was absent at `A`, and updates
+only conforming derived status blocks.
+It may not reuse, complete, or edit an earlier disposition. No commit may
+intervene, overlap `R` with another proposal, or begin a later amendment before
+`R` settles this one. At `R`, binding validation, bootstrap, and all inherited
+required gates must pass, and the amended milestone gate must reproduce the same
+product state as at `A`. The exact `A` to `R` review proves that no envelope, gate, portable
+enforcement, or product byte changed. Evidence always names the SHA where it
+ran; green results from `R` are neither claims about `A` nor substitutes for
+later same-source product-candidate evidence. Only `R` may integrate.
+
+Reachable history admits only a strictly later amendment
+generation whose candidate lineage contains the exact prior accepted chain;
+same-generation edits, higher-numbered sibling forks, interposed or overlapping
+transactions, lifecycle changes during A-to-R, rollback, divergent merges, and
+any Closure rewrite fail closed.
 
 Evidence links live in the Concept plan's Progress and Evidence table or in
 gate-defined artifacts; the locked Outcomes rows name their evidence class and
@@ -369,12 +422,20 @@ A gate is the executable definition of done, written before implementation and
 proved to fail for the declared missing behavior.
 
 1. **Open** — write the Concept plan, Technical depth plan, and red gate together
-   on a branch; existing checks remain green and the red tree does not merge to
-   `main`.
+   on a branch. The unaccepted red tree does not merge to `main`. Normally every
+   inherited gate is green. Once the current delivery milestone's accepted
+   governance checkpoint is integrated, one generic successor may instead Open
+   as a planning-only lookahead: Closed gates stay green, the current gate's
+   exact accepted red and the successor's distinct red are proved separately,
+   the predecessor remains `Accepted` in that branch, and no second lookahead is
+   allowed.
 2. **Accepted** — the recorded acceptance authority accepts both normative
    envelopes and the gate's canonical UTF-8/LF text; the Concept plan's
    acceptance record binds authority evidence, candidate SHA, both envelope
-   digests, and gate digest before the register moves to `Accepted`.
+   digests, and gate digest before the register moves to `Accepted`. After an
+   exact transition review and explicit protected-branch approval, this
+   governance checkpoint may integrate to `main` with no milestone product
+   implementation bytes, even though its exact accepted opening gate is red.
 3. **In progress** — implementation turns the locked gate green.
 4. **In review** — an independent reviewer examines the exact candidate SHA;
    unresolved blocking findings block closure.
@@ -382,7 +443,14 @@ proved to fail for the declared missing behavior.
    clear, required demonstrations are complete, and the recorded closing
    authority closes it; the closure record binds that disposition, reviewed
    candidate SHA, both envelope digests, and gate digest before the register
-   moves to `Closed`.
+   moves to `Closed`. Product bytes integrate only through this separately
+   approved closure transition.
+
+The one Open successor cannot be accepted, integrated, or implemented before
+the current delivery milestone is Closed and integrated. It then absorbs that
+exact product base, re-proves all inherited gates green and its own distinct red,
+and receives a fresh exact-SHA review before acceptance. The current milestone
+remains the sole product implementation authority throughout the overlap.
 
 A retry is diagnostic, not a pass. A failure that disappears is a blocking
 flake until fixed or explicitly dispositioned.
@@ -396,8 +464,9 @@ begins. The skeletons above are complete; do not add a third normative plan
 surface. Progress and Evidence has exactly one uniquely numbered row for every
 normative Outcome and no other rows. Its states are `Open`, `Proved`, `Accepted
 limitation`, or `Accepted deferral`; the latter two require disposition evidence.
-Nothing closes while any row remains `Open`, either companion is missing, or
-the pair conflicts.
+Every row remains `Open` while the register state is Open, so a planning
+lookahead cannot claim product progress. Nothing closes while any row remains
+`Open`, either companion is missing, or the pair conflicts.
 
 ## Directing the Work
 
@@ -421,7 +490,8 @@ changes nothing about how the work is directed.
 | Opening a named milestone | Concept plan, Technical depth plan, and red gate written together on a branch | Acceptance by the recorded authority |
 | Completing an accepted milestone | Implementation inside the accepted envelopes until the locked gate is green | Independent review |
 | Closing a reviewed milestone | A closure candidate is assembled from evidence, review, and demonstrations | Closure by the recorded authority |
-| Integrating approved work | Merge, push, and branch cleanup | Your explicit approval each time |
+| Integrating accepted governance | Merge the reviewed governance checkpoint without milestone product bytes; retain the delivery branch | Your explicit protected-branch approval |
+| Integrating closed product work | Merge, push, and branch cleanup | Your explicit protected-branch approval |
 
 Opening and closing a milestone are the two rows the maintainer invokes
 directly, because no actor may open or close its own gate. Both clients require
@@ -442,14 +512,13 @@ diagnosis only, so ask for the fix when you want the fix. Naming a workstream or
 file bounds the work to it, which is usually faster than correcting scope
 afterward.
 
-**Current use.** `M0` is closed and `M1` is open at its independent plan-pair
-and gate-review boundary. The lifecycle rows remain the reusable procedure for
-this and later milestones.
 The Current Status capsule at the top of this file names the exact next
 decision; it is not repeated here, because a second copy would drift.
 
 **After a milestone opens.** The last four rows become live and the lifecycle
-repeats: open, accept, complete, review, close.
+repeats: open, accept, complete, review, close. After its governance checkpoint
+is integrated, one anticipated successor may be opened for planning without
+widening product authority.
 
 **After M0 closes.** None of this changes. The verbs, their authority, and their
 stopping points are independent of the toolchain underneath. M0 replaces the

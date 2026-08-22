@@ -204,12 +204,28 @@ register and plan index.
   blocked until ADR 0001 and ADR 0002 carry recorded acceptance; its future
   opening branch must replace the seed-specific status guard with exact
   lifecycle checks rather than delete or relax it.
-- Begin from a base whose required gates are green. A claimed pre-existing
-  failure requires the same command and matching signature at the base SHA.
+- Begin acceptance and implementation from a closed product base whose required
+  gates are green. A claimed pre-existing failure requires the same command and
+  matching signature at the base SHA.
+- One bounded planning lookahead is permitted after the current delivery
+  milestone's accepted governance checkpoint is integrated to `main`. Exactly
+  one successor may be `Open` on its own branch for mutable plan/gate construction
+  and review while the current milestone remains the sole implementation
+  authority. That branch records the predecessor as `Accepted`; `In progress`
+  plus `Open` and `In review` plus `Open` are refused because those shapes imply
+  a product-branch base. The lookahead base must keep the bootstrap aggregate and every
+  Closed gate green, reproduce the current milestone's exact accepted opening
+  red independently, and fail the successor gate for its own declared missing
+  behavior. The successor cannot be accepted, integrated, or implemented until
+  the current milestone is Closed and integrated; it must then absorb that exact
+  product base, re-prove inherited gates green and its own distinct red, and
+  receive a fresh exact-SHA review. No second lookahead is permitted.
 - Before implementation of any milestone, including bounded contract experiments,
   create a branch-only gate checkpoint with the plan candidate and executable
-  acceptance. Existing gates stay green; the new gate fails for the declared
-  missing behavior. The red tree is never mergeable to `main`.
+  acceptance. Outside the bounded lookahead, existing gates stay green; under
+  the lookahead, the independently checked predecessor and successor reds above
+  apply. The new gate fails for the declared missing behavior. An unaccepted
+  Open tree never merges to `main`.
 - The accepted Concept plan's marked normative envelope names purpose/outcomes,
   scope/non-goals, and observable constraints including compatibility and
   rollout expectations. Its Technical depth
@@ -233,13 +249,47 @@ register and plan index.
   `Closed`, the plan records the closing authority and disposition, reviewed
   candidate SHA, Concept digest, Technical depth digest, and gate digest.
   Explicit decisions may be transcribed; they may not be inferred or supplied.
-  A transition-only commit may update
-  governance and derived status bytes, but not the bound candidate, locked gate,
+  A transition-only commit may update the governance row, the single durable
+  authority-disposition record that row names, and derived status bytes, but not
+  the bound candidate, locked gate, normative envelopes, portable enforcement,
   or product bytes. Before
   integration, an independent read-only review compares that exact transition
   SHA with the bound candidate and reports its changed paths and verdict to the
   current integrator; structural validation does not substitute for this
   one-time pre-integration review or make its task output durable project state.
+  An amendment to an already accepted plan uses two direct, one-parent revisions.
+  This strict transaction is versioned by the visible
+  `<a id="amendment-transaction-v1"></a>` gate marker. Closed pre-v1 amendment
+  history remains valid; every active or future amended gate must carry exactly
+  one marker and obey v1 from its first marked proposal forward.
+  Amendment sections appear in physical document order with consecutive numbers.
+  The amendment proposal `A` is the first revision that advances the generation;
+  it retains both the prior Acceptance row and lifecycle state, so binding
+  validation, bootstrap, and any inherited gate that invokes them must fail there
+  only for the stale binding. Binding-independent checks and the amended
+  milestone gate's truthful product state are still proved directly at `A`.
+  After exact-SHA review and explicit acceptance of `A`, its immediate child `R`
+  records that disposition and rebinds Acceptance to exact `A`, without changing
+  lifecycle state. `R` adds one new amendment-specific disposition anchor to an
+  existing durable document; that anchor did not exist at `A`, and `R` never
+  reuses, completes, or edits an earlier
+  disposition. No commit may intervene, overlap the rebind with another proposal,
+  or begin the next amendment before `R` settles this one. At `R`, binding
+  validation, bootstrap, and every inherited required gate must pass, while the
+  amended milestone gate must reproduce the same truthful product state proved at
+  `A`. Evidence names the revision where it ran: an `R` result is never
+  back-projected onto `A` and does not replace later same-source product-candidate
+  evidence. The exact `A` to `R` review also proves that only the allowed
+  transition bytes changed. Only `R` is eligible for integration.
+  After that review, an explicitly approved governance-only Acceptance checkpoint
+  may integrate to `main` while its exact accepted opening gate remains red. It
+  may contain the accepted plan/gate machinery, governance, derived status and
+  documentation, and portable enforcement, but no milestone product
+  implementation bytes. `main`'s product baseline remains its final Closed row;
+  product implementation stays on the designated milestone branch and integrates
+  only through separately approved closure. Preserve every bound candidate in
+  integrated history; do not squash or rebase it away. Acceptance integration is
+  neither partial product integration nor release authority.
 - Every lifecycle transition atomically updates the canonical register, the
   plans index's complete marked Current Status capsule, and README's derived
   summary. No client-specific memory or prose elsewhere substitutes for those
@@ -311,8 +361,10 @@ provider name or account-specific alias.
 Landed work leaves no residue. Once a change is pushed and contained in the
 integration branch, the integrator deletes its branch and removes its worktree;
 a branch or worktree that survives its merge is stale state a later agent or
-client can misread as in-flight work. Unmerged branches and live worktrees are
-ordinary parallel work and stay.
+client can misread as in-flight work. The designated current-milestone branch is
+the explicit exception after governance-only Acceptance integration: it owns
+unintegrated product implementation until closure and therefore remains live.
+Unmerged branches and live worktrees are ordinary parallel work and stay.
 
 Portable enforcement lives in repository-owned commands and product/test code.
 Hosted CI calls those entrypoints. Client hooks call them where the repository
