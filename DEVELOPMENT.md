@@ -158,8 +158,10 @@ closure, refuses missing, unsatisfied, and unreachable records, and admits an
 archive only after its checksums and literal `metadata.config` package,
 build-tool, dependency, and Elixir-floor authority match the lock. Cached
 archives remain ordinary and physically disjoint from protected user state, and
-all are validated before the gate-owned dependency tree is written without
-consulting an ambient `deps/`.
+all are validated before the gate-owned dependency tree is written. The
+materializer derives Hex SCM's `.hex` marker from that verified lock authority;
+package payloads cannot supply the marker themselves. No ambient `deps/` tree
+is consulted.
 Later project callbacks and task definitions remain trusted candidate code
 reviewed independently; they are not claimed as mechanically absent.
 

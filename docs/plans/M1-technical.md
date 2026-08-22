@@ -501,8 +501,11 @@ version, build tools, and dependency records exactly. Every Mix-managed package
 has exactly one valid Elixir requirement admitting 1.17.0; a non-Mix package
 may omit it, but any present requirement must admit the floor. Every archive is
 kept disjoint from protected filesystem identities before and after its bound
-read, all package authority is validated before the destination write, and only
-regular, safe relative files are written into the owned dependency tree. The
+read, all package authority is validated before the destination write, and Hex
+SCM's `.hex` marker is then derived from the verified name, version, managers,
+repository, and inner/outer checksums. A package payload cannot supply that
+marker; only regular, safe relative files are written into the owned dependency
+tree. The
 umbrella root declares no role. Unknown or duplicate identities or
 roles, nonliteral dependency construction, alternate path/SCM sources,
 redirected in-umbrella paths,

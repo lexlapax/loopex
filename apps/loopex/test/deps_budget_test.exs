@@ -731,6 +731,29 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     assert File.exists?(Path.join(valid_destination, "bridge/lib/bridge.ex"))
     assert File.exists?(Path.join(valid_destination, "leaf/lib/leaf.ex"))
 
+    for package <- valid_packages do
+      marker =
+        valid_destination
+        |> Path.join(package.name)
+        |> Path.join(".hex")
+        |> File.read!()
+        |> :erlang.binary_to_term()
+
+      archive = Path.join([valid_cache, "hexpm", "#{package.name}-#{package.version}.tar"])
+      outer_checksum = :crypto.hash(:sha256, File.read!(archive)) |> Base.encode16(case: :lower)
+
+      assert marker ==
+               {{:hex, 2, 0},
+                %{
+                  name: package.name,
+                  version: package.version,
+                  repo: "hexpm",
+                  managers: package.managers,
+                  inner_checksum: String.duplicate("a", 64),
+                  outer_checksum: outer_checksum
+                }}
+    end
+
     cases = [
       {"transitive-floor", "excludes the bound 1.17.0 floor",
        fn packages -> update_package(packages, "bridge", &Map.put(&1, :elixir, "~> 1.18")) end},
@@ -756,6 +779,10 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
        end},
       {"dependency-mismatch", "requirements do not match mix.lock",
        fn packages -> update_package(packages, "req_llm", &Map.put(&1, :metadata_deps, [])) end},
+      {"payload-scm-marker", "must not supply the Hex SCM marker",
+       fn packages ->
+         update_package(packages, "bridge", &Map.put(&1, :payload_hex_marker, true))
+       end},
       {"missing-lock", "missing required non-optional package bridge",
        fn [root | rest] -> [root | Enum.reject(rest, &(&1.name == "bridge"))] end},
       {"unsatisfied-requirement", "does not satisfy requirement \"~> 9.0\"",
@@ -1097,13 +1124,21 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     contents_path = Path.join(root, "#{package.name}-contents.tar.gz")
     module = Macro.camelize(package.name)
 
+    contents_entries =
+      [
+        {String.to_charlist("lib/#{package.name}.ex"), "defmodule #{module}, do: :ok\n"},
+        {~c"mix.exs", "defmodule #{module}.MixProject, do: nil\n"}
+      ]
+
+    contents_entries =
+      if Map.get(package, :payload_hex_marker, false),
+        do: contents_entries ++ [{~c".hex", "forged authority"}],
+        else: contents_entries
+
     :ok =
       :erl_tar.create(
         String.to_charlist(contents_path),
-        [
-          {String.to_charlist("lib/#{package.name}.ex"), "defmodule #{module}, do: :ok\n"},
-          {~c"mix.exs", "defmodule #{module}.MixProject, do: nil\n"}
-        ],
+        contents_entries,
         [:compressed]
       )
 

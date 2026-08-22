@@ -73,13 +73,13 @@ product selector, and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `ecd396fa307bcd0ef0f014eb6345ea3c2ceeda539342261d066ab22e24debee6` | `scripts/check-m1-gate.sh` |
+| `2d7da2f8d4a0baa494c8c5e26a1806ccb87f23d7d2659ee1df5996ce4ffbce36` | `scripts/check-m1-gate.sh` |
 | `954ff0e05521ac1b59e2438ba4e0f836f5137d44175eefdb85d509e3aa37aaa4` | `scripts/m1-exunit-runner.exs` |
 | `131a96c3b860f13d9085d4524bc9349c1104d4ff895a8f9fbcda6507db86e5b3` | `scripts/m1-evidence-verifier.exs` |
-| `7c78f21f1d4b65da675adadf4cd33c3c1728b5bc450b4e9bc459d84737ca9f95` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
+| `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
 | `d80ce71cf1cac573883d70bcf9a6362b3e8cf63311aba2b903e7e1f3a930723b` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `662ca1cd0838ca8f5689697181a04e0e137a07fd017e207c1689fb7941bec20b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
-| `39698b41101378b357d12a936e933c9e224f768c4c09a31ed601571424b45edd` | `apps/loopex/test/deps_budget_test.exs` |
+| `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 
 These are the complete M1-specific verdict machinery and its adversarial
@@ -210,7 +210,9 @@ lock records, and accepts only checksum-bound archives whose literal Erlang
 lock. Every Mix-managed package carries exactly one Elixir requirement that
 admits the bound 1.17.0 floor; another build tool may omit it, but any present
 requirement must admit the floor. All authority is validated before the
-destination is touched. Duplicate or unknown identities/dependencies,
+destination is touched. The materializer creates Hex SCM's `.hex` marker only
+from the verified lock checksums and metadata; an archive payload carrying that
+marker is refused. Duplicate or unknown identities/dependencies,
 nonliteral authority fields, alternate SCM/path sources, and reverse, outward, sibling,
 redirected-source, or wrong-environment edges fail. M1 contract compiler input
 is explicitly Elixir-only: Erlang headers and Erlang/generated-source forms are

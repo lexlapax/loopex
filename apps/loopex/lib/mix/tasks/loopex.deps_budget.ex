@@ -700,7 +700,7 @@ defmodule Loopex.Checks.DepsBudget do
          :ok <- safe_inner_table(inner_table),
          {:ok, inner_entries} <- tar_extract({:binary, contents}, [:compressed]),
          {:ok, files} <- extracted_files(inner_entries, inner_table) do
-      {:ok, %{name: record.name, files: files}}
+      {:ok, %{name: record.name, files: files ++ [hex_scm_marker(record)]}}
     else
       {:ok, _stat} ->
         {:error, "#{archive}: cache repository or package path is not ordinary"}
@@ -866,6 +866,28 @@ defmodule Loopex.Checks.DepsBudget do
     end
   end
 
+  # Concept: unpacked source remains the exact locked Hex dependency Mix knows,
+  # rather than an anonymous directory that merely contains the same files.
+  # Technical depth: Hex SCM recognizes the external-term `.hex` marker. Its
+  # authority is derived only after both archive checksums and metadata parity
+  # pass, and the package payload is forbidden from supplying a competing file.
+  defp hex_scm_marker(record) do
+    authority = %{
+      name: record.name,
+      version: record.version,
+      repo: record.repo,
+      managers: record.managers,
+      inner_checksum: record.inner_sha,
+      outer_checksum: record.package_sha
+    }
+
+    %{
+      name: ".hex",
+      mode: 0o644,
+      bytes: :erlang.term_to_binary({{:hex, 2, 0}, authority}, [:deterministic])
+    }
+  end
+
   defp digest(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
 
   defp tar_table(source, options) do
@@ -911,11 +933,19 @@ defmodule Loopex.Checks.DepsBudget do
          true <- Enum.all?(entries, &(&1.type == :regular and safe_relative_file?(&1.name))),
          names <- Enum.map(entries, & &1.name),
          true <- length(names) == length(Enum.uniq(names)),
+         :ok <- no_embedded_hex_marker(names),
          true <- no_file_prefix_collision?(names) do
       :ok
     else
+      {:error, reason} when is_binary(reason) -> {:error, reason}
       _other -> {:error, :unsafe_inner_table}
     end
+  end
+
+  defp no_embedded_hex_marker(names) do
+    if ".hex" in names,
+      do: {:error, "package payload must not supply the Hex SCM marker"},
+      else: :ok
   end
 
   defp table_entries(table) do
