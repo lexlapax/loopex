@@ -32,8 +32,20 @@ emit_gate_output() {
     esac
   fi
   case "$destination" in
-    stdout) builtin printf '%s' "$bytes" ;;
-    stderr) builtin printf '%s' "$bytes" >&2 ;;
+    stdout)
+      if [ "${loopex_m1_output_fds_sealed-}" = 1 ]; then
+        builtin printf '%s' "$bytes" >&8
+      else
+        builtin printf '%s' "$bytes"
+      fi
+      ;;
+    stderr)
+      if [ "${loopex_m1_output_fds_sealed-}" = 1 ]; then
+        builtin printf '%s' "$bytes" >&9
+      else
+        builtin printf '%s' "$bytes" >&2
+      fi
+      ;;
     *) return 1 ;;
   esac
 }
@@ -106,10 +118,9 @@ capture_outer_gate_output() {
     || fail "gate-owned output collides with provider credential bytes"
 }
 
-# The outer role performs no ordinary child work. It captures the few controls
-# the gate needs, derives an absolute OTP launcher, scrubs imported shell names,
-# and sends all private bytes to that launcher through stdin. The launcher owns
-# the only child-environment construction; shell code never changes the incoming
+# After the clean role begins capture, these helpers derive the absolute OTP
+# launcher and send private bytes to it through stdin. The launcher owns the only
+# child-environment construction; shell code never changes the incoming
 # search-path value or its export attribute.
 find_tool_directory() {
   local tool="$1" entry
@@ -190,10 +201,88 @@ validate_m0_absence_root() {
 }
 
 outer_launch() {
-  local loopex_m1_value loopex_m1_name loopex_m1_env_capture
-  local loopex_m1_env_status loopex_m1_path_rest loopex_m1_path_entry
-  local loopex_m1_path_done loopex_m1_first_path_entry loopex_m1_launcher
-  local loopex_m1_escript loopex_m1_status loopex_m1_core_soft loopex_m1_core_hard
+  local loopex_m1_control loopex_m1_initial_bytes=0
+  local loopex_m1_initial_max=16384 loopex_m1_initial_total_max=131072
+  local LC_ALL=C
+  builtin export -n LC_ALL \
+    || fail "the pre-frame byte-counting locale could not be isolated"
+
+  builtin cd -P . || fail "the initial repository root could not be resolved physically"
+  local loopex_m1_repository_input="$PWD"
+  local loopex_m1_clean_script="$loopex_m1_repository_input/scripts/check-m1-gate.sh"
+  local loopex_m1_clean_command='builtin source "$1" || builtin exit 1; builtin shift; clean_outer_launch "$@"'
+  local loopex_m1_clean_command_name=loopex-m1-clean-outer
+  local loopex_m1_real_home_input="${HOME-}"
+  local loopex_m1_task_tmp_input="${TMPDIR:-/tmp}"
+  local loopex_m1_source_mix_home_input="${MIX_HOME:-${HOME-}/.mix}"
+  local loopex_m1_gate_seed_input="${LOOPEX_GATE_SEED-}"
+  local loopex_m1_original_tool_path="${PATH-}"
+
+  builtin unset -v provider_key_value \
+    || fail "the pre-frame provider holder could not be cleared"
+  builtin ulimit -S -c 0 || fail "the soft core-file limit could not be sealed"
+  builtin ulimit -H -c 0 || fail "the hard core-file limit could not be sealed"
+
+  if [ "${LOOPEX_PROVIDER_API_KEY+x}" = x ]; then
+    fail "canonical provider credential is forbidden in the initial environment"
+  fi
+
+  [ -n "$PWD" ] && [ -n "$loopex_m1_real_home_input" ] &&
+    [ -n "$loopex_m1_task_tmp_input" ] && [ -n "$loopex_m1_source_mix_home_input" ] &&
+    [ -n "$loopex_m1_original_tool_path" ] \
+    || fail "a required pre-frame control is empty"
+  [ -f "$loopex_m1_clean_script" ] && [ ! -L "$loopex_m1_clean_script" ] \
+    || fail "the fixed M1 clean re-exec script is unavailable"
+
+  case "$#" in
+    0) ;;
+    1) [ "$1" = --environment-fixture ] \
+      || fail "the public M1 gate role is invalid" ;;
+    2) [ "$1" = --capture ] &&
+      case "$2" in floor | current | linux-current) : ;; *) false ;; esac \
+      || fail "the public M1 gate role is invalid" ;;
+    *) fail "the public M1 gate role is invalid" ;;
+  esac
+
+  for loopex_m1_control in \
+    "$loopex_m1_repository_input" \
+    "$loopex_m1_real_home_input" \
+    "$loopex_m1_task_tmp_input" \
+    "$loopex_m1_source_mix_home_input" \
+    "$loopex_m1_gate_seed_input" \
+    "$loopex_m1_original_tool_path" \
+    "$loopex_m1_clean_command" \
+    "$loopex_m1_clean_command_name" \
+    "$@"
+  do
+    [ "${#loopex_m1_control}" -le "$loopex_m1_initial_max" ] \
+      || fail "a pre-frame control exceeds its byte bound"
+    case "$loopex_m1_control" in
+      *$'\n'* | *$'\r'*) fail "a pre-frame control contains a line break" ;;
+    esac
+    loopex_m1_initial_bytes=$((loopex_m1_initial_bytes + ${#loopex_m1_control}))
+  done
+  [ "$loopex_m1_initial_bytes" -le "$loopex_m1_initial_total_max" ] \
+    || fail "the pre-frame controls exceed their total byte bound"
+
+  builtin exec -c /bin/bash -p -c "$loopex_m1_clean_command" \
+    "$loopex_m1_clean_command_name" \
+    "$loopex_m1_clean_script" \
+    LOOPEX_M1_CLEAN_OUTER_V1 \
+    "$loopex_m1_repository_input" \
+    "$loopex_m1_real_home_input" \
+    "$loopex_m1_task_tmp_input" \
+    "$loopex_m1_source_mix_home_input" \
+    "$loopex_m1_gate_seed_input" \
+    "$loopex_m1_original_tool_path" \
+    -- \
+    "$@"
+  fail "the fixed M1 clean re-exec failed"
+}
+
+clean_outer_launch() {
+  local loopex_m1_status loopex_m1_control loopex_m1_clean_bytes=0
+  local loopex_m1_clean_max=16384 loopex_m1_clean_total_max=131072
   local provider_frame_header provider_frame_trailing provider_frame_header_limit
   local provider_frame_version=LOOPEX_M1_PROVIDER_V1
   local provider_frame_max=16384
@@ -204,20 +293,114 @@ outer_launch() {
   builtin export -n LC_ALL \
     || fail "the byte-counting locale could not be made private"
 
-  builtin ulimit -S -c 0 || fail "the soft core-file limit could not be sealed"
-  builtin ulimit -H -c 0 || fail "the hard core-file limit could not be sealed"
-  loopex_m1_core_soft="$(builtin ulimit -S -c)" \
-    || fail "the soft core-file limit could not be verified"
-  loopex_m1_core_hard="$(builtin ulimit -H -c)" \
-    || fail "the hard core-file limit could not be verified"
-  [ "$loopex_m1_core_soft" = 0 ] && [ "$loopex_m1_core_hard" = 0 ] \
-    || fail "the core-file limits are not sealed at zero"
+  [ "$#" -ge 8 ] && [ "$1" = LOOPEX_M1_CLEAN_OUTER_V1 ] && [ "$8" = -- ] \
+    || fail "the internal clean re-exec grammar is invalid"
+  loopex_m1_clean_header="$1"
+  loopex_m1_repository_control="$2"
+  loopex_m1_real_home_input="$3"
+  loopex_m1_task_tmp_input="$4"
+  loopex_m1_source_mix_home_input="$5"
+  loopex_m1_gate_seed_input="$6"
+  loopex_m1_original_tool_path="$7"
+  shift 8
+  loopex_m1_original_arguments=("$@")
+  loopex_m1_clean_command="${BASH_EXECUTION_STRING-}"
+  loopex_m1_clean_command_name="$0"
 
-  if [ "${LOOPEX_PROVIDER_API_KEY+x}" = x ]; then
-    fail "canonical provider credential is forbidden in the initial environment"
-  fi
+  case "$#" in
+    0) ;;
+    1) [ "$1" = --environment-fixture ] \
+      || fail "the internal clean re-exec grammar is invalid" ;;
+    2) [ "$1" = --capture ] &&
+      case "$2" in floor | current | linux-current) : ;; *) false ;; esac \
+      || fail "the internal clean re-exec grammar is invalid" ;;
+    *) fail "the internal clean re-exec grammar is invalid" ;;
+  esac
 
+  [ "$loopex_m1_clean_command" = 'builtin source "$1" || builtin exit 1; builtin shift; clean_outer_launch "$@"' ] &&
+    [ "$loopex_m1_clean_command_name" = loopex-m1-clean-outer ] &&
+    [ "$PWD" = "$loopex_m1_repository_control" ] && [ "$SHLVL" = 1 ] &&
+    [ "${HOME+x}" != x ] && [ "${TMPDIR+x}" != x ] &&
+    [ "${MIX_HOME+x}" != x ] && [ "${LOOPEX_GATE_SEED+x}" != x ] &&
+    [ "${LOOPEX_PROVIDER_API_KEY+x}" != x ] && [ "${provider_key_value+x}" != x ] &&
+    [ "${BASH_ENV+x}" != x ] && [ "${ENV+x}" != x ] \
+    || fail "the internal clean re-exec state is invalid"
+  builtin ulimit -S -c 0 || fail "the inherited soft core-file limit is not sealed"
+  builtin ulimit -H -c 0 || fail "the inherited hard core-file limit is not sealed"
+
+  for loopex_m1_control in \
+    "$loopex_m1_repository_control" \
+    "$loopex_m1_real_home_input" \
+    "$loopex_m1_task_tmp_input" \
+    "$loopex_m1_source_mix_home_input" \
+    "$loopex_m1_gate_seed_input" \
+    "$loopex_m1_original_tool_path" \
+    "$loopex_m1_clean_command" \
+    "$loopex_m1_clean_command_name" \
+    "${loopex_m1_original_arguments[@]}"
+  do
+    [ "${#loopex_m1_control}" -le "$loopex_m1_clean_max" ] \
+      || fail "an internal clean re-exec control exceeds its byte bound"
+    case "$loopex_m1_control" in
+      *$'\n'* | *$'\r'*) fail "an internal clean re-exec control contains a line break" ;;
+    esac
+    loopex_m1_clean_bytes=$((loopex_m1_clean_bytes + ${#loopex_m1_control}))
+  done
+  [ "$loopex_m1_clean_bytes" -le "$loopex_m1_clean_total_max" ] \
+    || fail "the internal clean re-exec controls exceed their total byte bound"
+
+  loopex_m1_path_control_name=PATH
+  loopex_m1_path_control_record="${loopex_m1_path_control_name}=${loopex_m1_original_tool_path}"
+  loopex_m1_pre_frame_carriers=(
+    /bin/bash
+    -c
+    -p
+    "$loopex_m1_clean_command"
+    "$loopex_m1_clean_command_name"
+    "$loopex_m1_repository_control/scripts/check-m1-gate.sh"
+    "$loopex_m1_clean_header"
+    PWD
+    "$loopex_m1_repository_control"
+    "PWD=$loopex_m1_repository_control"
+    HOME
+    "$loopex_m1_real_home_input"
+    "HOME=$loopex_m1_real_home_input"
+    TMPDIR
+    "$loopex_m1_task_tmp_input"
+    "TMPDIR=$loopex_m1_task_tmp_input"
+    MIX_HOME
+    "$loopex_m1_source_mix_home_input"
+    "MIX_HOME=$loopex_m1_source_mix_home_input"
+    LOOPEX_GATE_SEED
+    "$loopex_m1_gate_seed_input"
+    "LOOPEX_GATE_SEED=$loopex_m1_gate_seed_input"
+    "$loopex_m1_path_control_name"
+    "$loopex_m1_original_tool_path"
+    "$loopex_m1_path_control_record"
+    SHLVL
+    1
+    SHLVL=1
+    LOOPEX_PROVIDER_API_KEY
+    provider_key_value
+    /dev/null
+    loopex_m1_output_fds_sealed
+    8
+    9
+    --
+    "${loopex_m1_original_arguments[@]}"
+  )
+
+  exec 8>&1 9>&2 2>/dev/null \
+    || fail "the private gate output descriptors could not be sealed"
+  loopex_m1_output_fds_sealed=1
+  builtin export -n loopex_m1_output_fds_sealed \
+    || fail "the private gate output state could not be made unexported"
+
+  builtin unset -v provider_key_value \
+    || fail "the private provider holder could not be reset"
   provider_key_value=""
+  builtin export -n provider_key_value \
+    || fail "the private provider holder could not be made unexported"
   provider_frame_header=""
   if ! [ -t 0 ]; then
     provider_frame_header_limit=$((${#provider_frame_version} + 1))
@@ -239,9 +422,15 @@ outer_launch() {
     fi
   fi
 
+  refuse_provider_carrier_collision "${loopex_m1_pre_frame_carriers[@]}" \
+    || fail "a pre-frame carrier collides with provider credential bytes"
+
   capture_outer_gate_output < <(
     {
-      (outer_launch_captured "$@")
+      exec 8>&- 9>&- \
+        || builtin exit 1
+      loopex_m1_output_fds_sealed=0
+      (outer_launch_captured "${loopex_m1_original_arguments[@]}")
       loopex_m1_status=$?
       builtin printf '\035LOOPEX_M1_OUTER_STATUS_V1:%s' "$loopex_m1_status"
     } 2>&1
@@ -250,23 +439,24 @@ outer_launch() {
 }
 
 outer_launch_captured() {
-
-  loopex_m1_real_home_input="${HOME-}"
-  loopex_m1_task_tmp_input="${TMPDIR:-/tmp}"
-  loopex_m1_source_mix_home_input="${MIX_HOME:-${HOME-}/.mix}"
-  loopex_m1_gate_seed_input="${LOOPEX_GATE_SEED-}"
-  loopex_m1_original_tool_path="${PATH-}"
   loopex_m1_outer_child_executable=/usr/bin/env
-  loopex_m1_outer_child_path_name=PATH
+  loopex_m1_outer_child_pwd_name=PWD
+  loopex_m1_outer_child_pwd_value="$PWD"
+  loopex_m1_outer_child_pwd_record="${loopex_m1_outer_child_pwd_name}=${loopex_m1_outer_child_pwd_value}"
+  loopex_m1_outer_child_shlvl_name=SHLVL
+  loopex_m1_outer_child_shlvl_value="$SHLVL"
+  loopex_m1_outer_child_shlvl_record="${loopex_m1_outer_child_shlvl_name}=${loopex_m1_outer_child_shlvl_value}"
   loopex_m1_outer_child_under_name=_
   loopex_m1_outer_child_under_value="$loopex_m1_outer_child_executable"
-  loopex_m1_outer_child_path_record="${loopex_m1_outer_child_path_name}=${loopex_m1_original_tool_path}"
   loopex_m1_outer_child_under_record="${loopex_m1_outer_child_under_name}=${loopex_m1_outer_child_under_value}"
   loopex_m1_outer_child_carriers=(
     "$loopex_m1_outer_child_executable"
-    "$loopex_m1_outer_child_path_name"
-    "$loopex_m1_original_tool_path"
-    "$loopex_m1_outer_child_path_record"
+    "$loopex_m1_outer_child_pwd_name"
+    "$loopex_m1_outer_child_pwd_value"
+    "$loopex_m1_outer_child_pwd_record"
+    "$loopex_m1_outer_child_shlvl_name"
+    "$loopex_m1_outer_child_shlvl_value"
+    "$loopex_m1_outer_child_shlvl_record"
     "$loopex_m1_outer_child_under_name"
     "$loopex_m1_outer_child_under_value"
     "$loopex_m1_outer_child_under_record"
@@ -365,70 +555,6 @@ outer_launch_captured() {
     esac
   done
 
-  # Imported Bash identifiers are removed generically after the required values
-  # have been copied into private variables. The incoming search path is the one
-  # explicit exception: it is read-only toolchain authority until env -i replaces
-  # this process. A raw execve name Bash cannot represent remains visible to the
-  # inspector and is refused before the launcher.
-  loopex_m1_environment_names=( $(builtin compgen -e) )
-  for loopex_m1_name in "${loopex_m1_environment_names[@]}"; do
-    case "$loopex_m1_name" in
-      "" | [!A-Za-z_]* | *[!A-Za-z0-9_]*)
-        fail "ambient environment contains a non-identifier shell name"
-        ;;
-    esac
-    case "$loopex_m1_name" in
-      PATH) ;;
-      *)
-        if ! builtin unset -v "$loopex_m1_name" 2>/dev/null; then
-          builtin export -n "$loopex_m1_name" 2>/dev/null \
-            || fail "ambient shell state could not be made private"
-        fi
-        ;;
-    esac
-  done
-  loopex_m1_env_capture="$(
-    {
-      /usr/bin/env
-      loopex_m1_env_status=$?
-      builtin printf 'LOOPEX_M1_ENV_STATUS=%s' "$loopex_m1_env_status"
-    } 2>&1
-  )"
-  loopex_m1_env_rest="${loopex_m1_env_capture%$'\nLOOPEX_M1_ENV_STATUS=0'}"
-  loopex_m1_path_count=0
-  loopex_m1_under_count=0
-  while [ -n "$loopex_m1_env_rest" ]; do
-    case "$loopex_m1_env_rest" in
-      *$'\n'*)
-        loopex_m1_line="${loopex_m1_env_rest%%$'\n'*}"
-        loopex_m1_env_rest="${loopex_m1_env_rest#*$'\n'}"
-        ;;
-      *) loopex_m1_line="$loopex_m1_env_rest"; loopex_m1_env_rest="" ;;
-    esac
-    loopex_m1_env_name="${loopex_m1_line%%=*}"
-    loopex_m1_env_value="${loopex_m1_line#*=}"
-    case "$loopex_m1_env_name" in
-      "$loopex_m1_outer_child_path_name")
-        [ "$loopex_m1_line" = "$loopex_m1_outer_child_path_record" ] &&
-          [ "$loopex_m1_env_value" = "$loopex_m1_original_tool_path" ] \
-          || fail "the incoming search path changed during environment inspection"
-        loopex_m1_path_count=$((loopex_m1_path_count + 1))
-        ;;
-      "$loopex_m1_outer_child_under_name")
-        [ "$loopex_m1_line" = "$loopex_m1_outer_child_under_record" ] &&
-          [ "$loopex_m1_env_value" = "$loopex_m1_outer_child_under_value" ] \
-          || fail "ambient environment contains an invalid dynamic entry"
-        loopex_m1_under_count=$((loopex_m1_under_count + 1))
-        ;;
-      "" | [!A-Za-z_]* | *[!A-Za-z0-9_]*)
-        fail "ambient environment contains a non-identifier shell name"
-        ;;
-      *) fail "ambient environment retains unexpected identifier $loopex_m1_env_name" ;;
-    esac
-  done
-  [ "$loopex_m1_path_count" -eq 1 ] && [ "$loopex_m1_under_count" -eq 1 ] \
-    || fail "the scrubbed outer environment was incomplete"
-
   {
     builtin printf '%s\0' \
       "${loopex_m1_launcher_frame[@]}" \
@@ -439,10 +565,16 @@ outer_launch_captured() {
   return "${PIPESTATUS[1]}"
 }
 
-if [ "${1-}" != --loopex-m1-sealed-inner ]; then
-  outer_launch "$@"
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  return 0
 fi
-shift
+
+case "${1-}" in
+  --loopex-m1-sealed-inner)
+    shift
+    ;;
+  *) outer_launch "$@" ;;
+esac
 
 read_sealed_field() {
   IFS= builtin read -r -d '' "$1" \
@@ -1197,7 +1329,7 @@ require_bound_artifact apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861 \
   "bound dependency-direction reader"
 require_bound_artifact apps/loopex/test/m1_gate_evidence_test.exs \
-  b3564733ea78b8be1d8897b8cfc0bc89add625cce6fe08eb9a7be116fac11322 \
+  87172408ac43f325d0e13e5228fd2cec41a4d193d5359e0838a47a8140b67a7d \
   "bound M1 mechanics corpus"
 require_bound_artifact apps/loopex/test/m1_exunit_runner_test.exs \
   558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b \

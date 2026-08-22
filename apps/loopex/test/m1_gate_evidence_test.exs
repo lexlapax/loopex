@@ -121,7 +121,7 @@ defmodule Loopex.M1GateEvidenceTest do
         gate | args
       ],
       cd: repo_root(),
-      env: env,
+      env: [{"LOOPEX_PROVIDER_API_KEY", nil} | env],
       stderr_to_stdout: true
     )
   end
@@ -136,7 +136,7 @@ defmodule Loopex.M1GateEvidenceTest do
         "m1-no-provider-input" | args
       ],
       cd: repo_root(),
-      env: env,
+      env: [{"LOOPEX_PROVIDER_API_KEY", nil} | env],
       stderr_to_stdout: true
     )
   end
@@ -897,6 +897,32 @@ defmodule Loopex.M1GateEvidenceTest do
 
     assert summary in environment_lines
 
+    exported_holder = "ambient-exported-holder-#{System.unique_integer([:positive])}"
+    private_key = "framed-private-key-#{System.unique_integer([:positive])}"
+
+    {private_output, 0} =
+      run_gate_with_input(
+        provider_frame(private_key),
+        ["--environment-fixture"],
+        [{"HOME", actual_home}, {"provider_key_value", exported_holder}]
+      )
+
+    assert private_output =~ "M1 environment preflight OK"
+    refute private_output =~ private_key
+    refute private_output =~ exported_holder
+    refute private_output =~ "provider_key_value="
+
+    {forwarded_output, forwarded_status} =
+      run_gate_with_input(
+        provider_frame("GIT_OPTIONAL_LOCKS"),
+        ["--environment-fixture"],
+        [{"HOME", actual_home}, {"provider_key_value", exported_holder}]
+      )
+
+    assert forwarded_status != 0, "exported holder erased the framed provider key"
+    assert forwarded_output =~ "sealed child carrier collides with provider credential bytes"
+    refute forwarded_output =~ exported_holder
+
     for {reason, colliding_key} <- [
           {"canonical environment dump", "/dev/null"},
           {"gate-owned control", "0"},
@@ -917,8 +943,8 @@ defmodule Loopex.M1GateEvidenceTest do
     {diagnostic_output, diagnostic_status} =
       run_gate_with_input(
         provider_frame("M1 gate RED"),
-        ["--not-a-role"],
-        [{"HOME", actual_home}]
+        ["--environment-fixture"],
+        [{"HOME", Path.join(System.tmp_dir!(), "m1-nonexistent-home")}]
       )
 
     assert diagnostic_status != 0, "diagnostic-prefix collision unexpectedly succeeded"
@@ -952,14 +978,14 @@ defmodule Loopex.M1GateEvidenceTest do
     assert ambient_status != 0, "unused incoming PATH carrier unexpectedly succeeded"
 
     assert ambient_output ==
-             "M1 gate RED: an outer child carrier collides with provider credential bytes\n"
+             "M1 gate RED: a pre-frame carrier collides with provider credential bytes\n"
 
     refute ambient_output =~ ambient_path_key
 
     carrier_guard =
       """
-        refuse_provider_carrier_collision "${loopex_m1_outer_child_carriers[@]}" \\
-          || fail "an outer child carrier collides with provider credential bytes"
+        refuse_provider_carrier_collision "${loopex_m1_pre_frame_carriers[@]}" \\
+          || fail "a pre-frame carrier collides with provider credential bytes"
       """
 
     mutant_source = String.replace(runner_source(), carrier_guard, "  :\n", global: false)
@@ -975,16 +1001,47 @@ defmodule Loopex.M1GateEvidenceTest do
     File.chmod!(mutant_path, 0o700)
     on_exit(fn -> File.rm(mutant_path) end)
 
+    producer = "IO.binwrite(Base.decode64!(List.first(System.argv())))"
+
+    clean_role_command =
+      ~s(builtin source "$1" || builtin exit 1; builtin shift; clean_outer_launch "$@")
+
+    mutant_tool_path =
+      Path.join(System.tmp_dir!(), ambient_path_key) <> ":" <> System.fetch_env!("PATH")
+
     {mutant_output, mutant_status} =
-      run_gate_with_input(
-        provider_frame(ambient_path_key),
-        ["--environment-fixture"],
+      System.cmd(
+        "/bin/bash",
         [
-          {"HOME", actual_home},
-          {"PATH",
-           Path.join(System.tmp_dir!(), ambient_path_key) <> ":" <> System.fetch_env!("PATH")}
+          "-p",
+          "-c",
+          "\"$1\" -e \"$2\" -- \"$3\" | builtin exec -c /bin/bash -p -c \"$4\" \"$5\" \"$6\" \"${@:7}\"",
+          "m1-pre-frame-carrier-mutant",
+          System.find_executable("elixir"),
+          producer,
+          Base.encode64(provider_frame(ambient_path_key)),
+          clean_role_command,
+          "loopex-m1-clean-outer",
+          mutant_path,
+          "LOOPEX_M1_CLEAN_OUTER_V1",
+          root,
+          actual_home,
+          System.tmp_dir!(),
+          Path.join(actual_home, ".mix"),
+          "",
+          mutant_tool_path,
+          "--",
+          "--environment-fixture"
         ],
-        mutant_path
+        cd: root,
+        env: [
+          {"LOOPEX_PROVIDER_API_KEY", nil},
+          {"HOME", actual_home},
+          {"TMPDIR", System.tmp_dir!()},
+          {"MIX_HOME", Path.join(actual_home, ".mix")},
+          {"PATH", System.fetch_env!("PATH")}
+        ],
+        stderr_to_stdout: true
       )
 
     assert mutant_status == 0, "carrier-check mutation remained refusing:\n#{mutant_output}"
@@ -997,9 +1054,13 @@ defmodule Loopex.M1GateEvidenceTest do
       "HOME",
       "escript",
       "/bin/bash",
+      "-c",
       "-p",
       "--environment-fixture",
+      "loopex-m1-clean-outer",
+      "builtin source",
       "--loopex-m1-sealed-inner",
+      "LOOPEX_M1_CLEAN_OUTER_V1",
       "LOOPEX_M1_LAUNCHER_V1",
       "LOOPEX_M1_SEALED_INNER_V1",
       Path.join(root, "scripts/m1-gate-launcher.escript"),
@@ -1066,6 +1127,39 @@ defmodule Loopex.M1GateEvidenceTest do
     refute output =~ token
 
     {output, status} =
+      System.cmd(
+        "/bin/bash",
+        [
+          "-p",
+          "scripts/check-m1-gate.sh",
+          "--loopex-m1-clean-outer",
+          "LOOPEX_M1_CLEAN_OUTER_V1",
+          root,
+          actual_home,
+          System.tmp_dir!(),
+          Path.join(actual_home, ".mix"),
+          "",
+          System.fetch_env!("PATH"),
+          "--",
+          "--environment-fixture"
+        ],
+        cd: root,
+        env: [
+          {"LOOPEX_PROVIDER_API_KEY", nil},
+          {"HOME", actual_home},
+          {"TMPDIR", System.tmp_dir!()},
+          {"MIX_HOME", Path.join(actual_home, ".mix")},
+          {"PATH", System.fetch_env!("PATH")}
+        ],
+        stderr_to_stdout: true
+      )
+
+    assert status != 0
+    assert output == "M1 gate RED: the public M1 gate role is invalid\n"
+    refute output =~ "provider input"
+    refute output =~ "M1 environment preflight OK"
+
+    {output, status} =
       run_gate_with_input(
         provider_frame(token),
         ["--environment-fixture"],
@@ -1073,7 +1167,7 @@ defmodule Loopex.M1GateEvidenceTest do
       )
 
     assert status != 0
-    assert output =~ "a launcher carrier collides with provider credential bytes"
+    assert output =~ "a pre-frame carrier collides with provider credential bytes"
     refute output =~ token
 
     malformed_provider_inputs = [
@@ -1104,23 +1198,175 @@ defmodule Loopex.M1GateEvidenceTest do
     assert status == 1
     assert output == "M1 gate RED: invoke exactly /bin/bash -p scripts/check-m1-gate.sh\n"
 
+    raw_environment_token =
+      "raw\nambient-token-#{System.unique_integer([:positive])}"
+
+    producer = "IO.binwrite(Base.decode64!(List.first(System.argv())))"
+
     {output, status} =
       System.cmd(
         "/usr/bin/env",
         [
-          "BAD-NAME=ambient",
+          "#{raw_environment_token}=#{raw_environment_token}",
           "/bin/bash",
           "-p",
           "-c",
-          "exec /bin/bash -p scripts/check-m1-gate.sh --environment-fixture </dev/null"
+          "\"$1\" -e \"$2\" -- \"$3\" | /bin/bash -p scripts/check-m1-gate.sh --environment-fixture",
+          "m1-raw-environment-input",
+          System.find_executable("elixir"),
+          producer,
+          Base.encode64(provider_frame(raw_environment_token))
         ],
         cd: root,
+        env: [
+          {"LOOPEX_PROVIDER_API_KEY", nil},
+          {"HOME", actual_home},
+          {"TMPDIR", System.tmp_dir!()},
+          {"MIX_HOME", Path.join(actual_home, ".mix")},
+          {"PATH", System.fetch_env!("PATH")}
+        ],
         stderr_to_stdout: true
       )
 
-    assert status != 0
-    assert output == "M1 gate RED: ambient environment contains a non-identifier shell name\n"
-    refute output =~ "M1 environment preflight OK"
+    assert status == 0
+    assert output =~ "M1 environment preflight OK"
+    refute output =~ raw_environment_token
+
+    clean_exec =
+      ~s(builtin exec -c /bin/bash -p -c "$loopex_m1_clean_command")
+
+    exec_mutant_source =
+      String.replace(
+        runner_source(),
+        clean_exec,
+        ~s(builtin exec /bin/bash -p -c "$loopex_m1_clean_command"),
+        global: false
+      )
+
+    refute exec_mutant_source == runner_source(), "clean exec mutation did not apply"
+
+    mutant_root =
+      Path.join(System.tmp_dir!(), "m1-clean-exec-mutant-#{System.unique_integer([:positive])}")
+
+    mutant_script = Path.join(mutant_root, "scripts/check-m1-gate.sh")
+    File.mkdir_p!(Path.dirname(mutant_script))
+    File.write!(mutant_script, exec_mutant_source)
+    File.chmod!(mutant_script, 0o700)
+    on_exit(fn -> File.rm_rf(mutant_root) end)
+
+    {mutant_output, mutant_status} =
+      System.cmd(
+        "/usr/bin/env",
+        [
+          "#{raw_environment_token}=#{raw_environment_token}",
+          "/bin/bash",
+          "-p",
+          "-c",
+          "\"$1\" -e \"$2\" -- \"$3\" | /bin/bash -p scripts/check-m1-gate.sh --environment-fixture",
+          "m1-clean-exec-mutant",
+          System.find_executable("elixir"),
+          producer,
+          Base.encode64(provider_frame(raw_environment_token))
+        ],
+        cd: mutant_root,
+        env: [
+          {"LOOPEX_PROVIDER_API_KEY", nil},
+          {"HOME", actual_home},
+          {"TMPDIR", System.tmp_dir!()},
+          {"MIX_HOME", Path.join(actual_home, ".mix")},
+          {"PATH", System.fetch_env!("PATH")}
+        ],
+        stderr_to_stdout: true
+      )
+
+    assert mutant_status != 0, "deleting exec -c left ambient state accepted"
+    assert mutant_output =~ "the internal clean re-exec state is invalid"
+    refute mutant_output =~ "provider input is malformed"
+    refute mutant_output =~ "M1 environment preflight OK"
+
+    capture_setup = "  capture_outer_gate_output < <(\n"
+
+    capture_failure_source =
+      String.replace(
+        runner_source(),
+        capture_setup,
+        "  exec 3>&1 4>&1 5>&1 6>&1 7>&1 || builtin exit 96\n" <>
+          "  builtin ulimit -S -n 10 || builtin exit 97\n\n" <> capture_setup,
+        global: false
+      )
+
+    refute capture_failure_source == runner_source(), "capture failure mutation did not apply"
+
+    unsealed_capture_source =
+      String.replace(
+        capture_failure_source,
+        "exec 8>&1 9>&2 2>/dev/null",
+        "exec 8>&1 9>&2",
+        global: false
+      )
+
+    refute unsealed_capture_source == capture_failure_source,
+           "capture stderr mutation did not apply"
+
+    capture_mutant_root =
+      Path.join(System.tmp_dir!(), "m1-capture-mutant-#{System.unique_integer([:positive])}")
+
+    sealed_capture_script = Path.join(capture_mutant_root, "sealed.sh")
+    unsealed_capture_script = Path.join(capture_mutant_root, "unsealed.sh")
+    File.mkdir_p!(capture_mutant_root)
+    File.write!(sealed_capture_script, capture_failure_source)
+    File.write!(unsealed_capture_script, unsealed_capture_source)
+    File.chmod!(sealed_capture_script, 0o700)
+    File.chmod!(unsealed_capture_script, 0o700)
+    on_exit(fn -> File.rm_rf(capture_mutant_root) end)
+
+    run_capture_mutant = fn script ->
+      System.cmd(
+        "/bin/bash",
+        [
+          "-p",
+          "-c",
+          "\"$1\" -e \"$2\" -- \"$3\" | builtin exec -c /bin/bash -p -c \"$4\" \"$5\" \"$6\" \"${@:7}\"",
+          "m1-capture-setup-mutant",
+          System.find_executable("elixir"),
+          producer,
+          Base.encode64(provider_frame("pipe")),
+          clean_role_command,
+          "loopex-m1-clean-outer",
+          script,
+          "LOOPEX_M1_CLEAN_OUTER_V1",
+          root,
+          actual_home,
+          System.tmp_dir!(),
+          Path.join(actual_home, ".mix"),
+          "",
+          System.fetch_env!("PATH"),
+          "--",
+          "--environment-fixture"
+        ],
+        cd: root,
+        env: [
+          {"LOOPEX_PROVIDER_API_KEY", nil},
+          {"HOME", actual_home},
+          {"TMPDIR", System.tmp_dir!()},
+          {"MIX_HOME", Path.join(actual_home, ".mix")},
+          {"PATH", System.fetch_env!("PATH")}
+        ],
+        stderr_to_stdout: true
+      )
+    end
+
+    {sealed_capture_output, sealed_capture_status} = run_capture_mutant.(sealed_capture_script)
+    assert sealed_capture_status != 0
+    refute sealed_capture_output =~ "pipe"
+    refute sealed_capture_output =~ "M1 environment preflight OK"
+
+    {unsealed_capture_output, unsealed_capture_status} =
+      run_capture_mutant.(unsealed_capture_script)
+
+    assert unsealed_capture_status != 0
+    assert unsealed_capture_output =~ "pipe"
+    refute unsealed_capture_output =~ "M1 environment preflight OK"
 
     redaction_functions =
       Enum.map_join(
@@ -1230,49 +1476,96 @@ defmodule Loopex.M1GateEvidenceTest do
              "captured-status=7\ncaptured-output-start\ntail\n\ncaptured-output-end\n"
 
     source = runner_source()
+    emit_body = shell_function(source, "emit_gate_output")
     outer_launch_body = shell_function(source, "outer_launch")
+    clean_outer_body = shell_function(source, "clean_outer_launch")
     outer_captured_body = shell_function(source, "outer_launch_captured")
     soft_core = :binary.match(outer_launch_body, "builtin ulimit -S -c 0") |> elem(0)
     hard_core = :binary.match(outer_launch_body, "builtin ulimit -H -c 0") |> elem(0)
+    clean_exec = :binary.match(outer_launch_body, "builtin exec -c /bin/bash -p -c") |> elem(0)
+
+    holder_reset =
+      :binary.match(clean_outer_body, "builtin unset -v provider_key_value") |> elem(0)
+
+    holder_private =
+      :binary.match(clean_outer_body, "builtin export -n provider_key_value") |> elem(0)
 
     provider_read =
       :binary.match(
-        outer_launch_body,
+        clean_outer_body,
         "IFS= builtin read -r -d '' -n \"$provider_frame_header_limit\" provider_frame_header"
       )
       |> elem(0)
 
-    capture_start = :binary.match(outer_launch_body, "capture_outer_gate_output < <(") |> elem(0)
+    clean_state =
+      :binary.match(clean_outer_body, "the internal clean re-exec state is invalid") |> elem(0)
+
+    output_fds =
+      :binary.match(clean_outer_body, "exec 8>&1 9>&2 2>/dev/null") |> elem(0)
+
+    pre_frame_guard =
+      :binary.match(
+        clean_outer_body,
+        "refuse_provider_carrier_collision \"${loopex_m1_pre_frame_carriers[@]}\""
+      )
+      |> elem(0)
+
+    capture_start = :binary.match(clean_outer_body, "capture_outer_gate_output < <(") |> elem(0)
     assert soft_core < hard_core
-    assert hard_core < provider_read
-    assert provider_read < capture_start
-    assert outer_launch_body =~ "    } 2>&1\n  )"
-    assert outer_launch_body =~ "capture_outer_gate_output < <("
+    assert hard_core < clean_exec
+    assert outer_launch_body =~ "builtin cd -P ."
+    assert outer_launch_body =~ "loopex_m1_clean_command_name=loopex-m1-clean-outer"
+    assert outer_launch_body =~ "builtin source \"$1\""
+    assert outer_launch_body =~ "loopex_m1_initial_total_max=131072"
+    assert outer_launch_body =~ "the public M1 gate role is invalid"
+    refute outer_launch_body =~ "builtin read"
+    refute outer_launch_body =~ "capture_outer_gate_output"
+    refute outer_launch_body =~ "/usr/bin/env"
+    refute outer_launch_body =~ ~r/\$\([^\(]/
+    assert clean_outer_body =~ "[ \"$#\" -ge 8 ]"
+    assert clean_outer_body =~ "loopex_m1_clean_total_max=131072"
+    assert clean_outer_body =~ "the internal clean re-exec controls exceed their total byte bound"
+    assert clean_outer_body =~ "[ \"$PWD\" = \"$loopex_m1_repository_control\" ]"
+    assert clean_outer_body =~ "[ \"$SHLVL\" = 1 ]"
+    assert clean_state < holder_reset
+    assert clean_state < output_fds
+    assert output_fds < holder_reset
+    assert holder_reset < holder_private
+    assert holder_private < provider_read
+    assert provider_read < pre_frame_guard
+    assert pre_frame_guard < capture_start
     refute outer_launch_body =~ "/usr/bin/env -i"
+    refute source =~ "builtin compgen -e"
+    refute source =~ "--loopex-m1-clean-outer)"
+    assert source =~ ~s(if [ "${BASH_SOURCE[0]}" != "$0" ]; then)
+    assert emit_body =~ "builtin printf '%s' \"$bytes\" >&8"
+    assert emit_body =~ "builtin printf '%s' \"$bytes\" >&9"
+    assert clean_outer_body =~ "exec 8>&- 9>&-"
+    assert clean_outer_body =~ "loopex_m1_output_fds_sealed=0"
+    refute clean_outer_body =~ "loopex_m1_env_capture"
+    refute outer_captured_body =~ "loopex_m1_env_capture"
     assert outer_captured_body =~ "loopex_m1_outer_child_executable=/usr/bin/env"
-    assert outer_captured_body =~ "      /usr/bin/env\n"
     assert outer_captured_body =~ "} | /usr/bin/env -i"
     assert outer_captured_body =~ "return \"${PIPESTATUS[1]}\""
     assert outer_captured_body =~ "refuse_provider_carrier_collision"
+    assert clean_outer_body =~ "\"${loopex_m1_pre_frame_carriers[@]}\""
+    refute outer_captured_body =~ "\"${loopex_m1_pre_frame_carriers[@]}\""
     assert outer_captured_body =~ "\"${loopex_m1_outer_child_carriers[@]}\""
 
     for carrier <- ~w(
       loopex_m1_outer_child_executable
-      loopex_m1_outer_child_path_name
-      loopex_m1_original_tool_path
-      loopex_m1_outer_child_path_record
+      loopex_m1_outer_child_pwd_name
+      loopex_m1_outer_child_pwd_value
+      loopex_m1_outer_child_pwd_record
+      loopex_m1_outer_child_shlvl_name
+      loopex_m1_outer_child_shlvl_value
+      loopex_m1_outer_child_shlvl_record
       loopex_m1_outer_child_under_name
       loopex_m1_outer_child_under_value
       loopex_m1_outer_child_under_record
     ) do
       assert outer_captured_body =~ "\"$#{carrier}\"", "outer carrier missing #{carrier}"
     end
-
-    assert outer_captured_body =~
-             "[ \"$loopex_m1_line\" = \"$loopex_m1_outer_child_path_record\" ]"
-
-    assert outer_captured_body =~
-             "[ \"$loopex_m1_line\" = \"$loopex_m1_outer_child_under_record\" ]"
 
     assert outer_captured_body =~ "\"${loopex_m1_launcher_frame[@]}\""
     assert outer_captured_body =~ "\"${loopex_m1_launcher_environment[@]}\""
@@ -1521,7 +1814,9 @@ defmodule Loopex.M1GateEvidenceTest do
     refute Regex.match?(~r/eval[^\n]*P(?:ATH)/, source)
     refute Regex.match?(~r/\$\{![A-Za-z_]/, source)
 
-    assert source =~ "PATH) ;;"
+    assert source =~ "builtin exec -c /bin/bash -p"
+    assert source =~ "loopex_m1_path_control_name=PATH"
+    refute source =~ "builtin compgen -e"
     assert launcher =~ "Clear = [{Name, false} || Name <- InheritedNames]"
     assert launcher =~ ~S|{"GIT_OPTIONAL_LOCKS", "0"}|
     assert launcher =~ "ChildEnvironment = Clear ++ Canonical"

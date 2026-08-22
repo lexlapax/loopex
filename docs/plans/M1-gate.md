@@ -32,32 +32,36 @@ test, the outer runner:
 
 1. requires the exact privileged-Bash mode, disables tracing and automatic
    export, rejects `LOOPEX_PROVIDER_API_KEY` when it is present in the initial
-   environment, uses Bash builtins to set both the soft and hard core-file
-   limits to exactly zero, and reads both limits back as exactly zero so no
-   descendant can raise them;
-2. resets aliases, hashing, options, glob controls, `IFS`, `CDPATH`, and umask;
-   removes ambient mutable variables, leaves the shell search-path value and
-   export attribute untouched, and resolves the absolute OTP `escript`
-   executable beside the selected `erl`;
-3. treats an interactive stdin or immediate EOF as no provider key, otherwise
+   environment, physically normalizes the repository directory, uses Bash
+   builtins to set the soft and hard core-file limits to exactly zero, and
+   accepts only the bounded public role grammar and bounded pre-frame controls;
+2. without reading stdin or starting a child, replaces that process in place
+   through fixed `/bin/bash -p -c` `exec -c`. The fixed command sources the
+   absolute runner in definition-only mode and invokes its clean function; the
+   executable script exposes no clean-role dispatcher. The empty-environment
+   clean role validates its exact internal grammar, synthesized `PWD`/`SHLVL`
+   state, absence of ambient controls, inherited zero core limits, and the same
+   per-control and total bounds before accepting any credential authority;
+3. recreates the provider holder as an unexported Bash variable and treats an
+   interactive stdin or immediate EOF as no provider key, otherwise
    accepts exactly `LOOPEX_M1_PROVIDER_V1\0<key>\0`, with a nonempty key of at
    most 16,384 bytes; any other nonempty input, missing terminator, additional
    field, oversized key, or trailing byte is refused, while LF bytes within the
    key remain literal; frame validity is only input syntax, so a syntactically
    valid key such as `0` is still refused later if its exact bytes collide with
    gate-owned controls or would-be output;
-4. privately captures only the optional provider record, supplied home,
-   temporary-root input, installed Mix-prerequisite root, gate seed, and
-   toolchain path, then sends the private controls over a pipe—not argv,
-   environment, a file, or retained output—to the digest-bound launcher, whose
-   bootstrap environment contains only locale and gate-owned BEAM dump controls
-   and no provider credential; before its first external child, Bash derives
-   and checks the exact retained outer-child executable plus the incoming
-   `PATH` and conventional `_` names, values, and serialized entries that its
-   following environment inspection must prove; before forwarding the key,
-   Bash separately checks the exact launcher frame, environment, and argument
-   arrays it will use, refusing a literal collision with any non-secret header,
-   name, value, role, executable, or dynamic path;
+4. before provider intake, preserves the original output descriptors privately
+   and suppresses its own raw stderr; the capture child closes those descriptors
+   before any candidate work, while collision-checked emission alone uses them
+   from the parent. Before starting that bounded combined-output capture child,
+   the parent refuses literal
+   key collision with every pre-frame control and public/internal role carrier,
+   including the clean shell's exported `PWD` and `SHLVL` state. Inside that
+   capture, before the first external child, it separately derives and checks
+   every clean-shell carrier for the absolute `/usr/bin/env -i` launch and the
+   exact launcher frame, environment, argument, executable, and dynamic-path
+   carriers. It then sends the private record and controls over a pipe—not argv,
+   environment, a file, or retained output—to the digest-bound launcher;
 5. has the launcher clear every inherited environment entry for its child,
    install exactly the derived absolute toolchain `PATH`, `HOME=/`,
    `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and `GIT_OPTIONAL_LOCKS=0`, and start the
@@ -66,7 +70,8 @@ test, the outer runner:
    after proving with builtins that the directory contains exactly the complete
    core plus any versioned interpreter stubs with M0's exact bytes and no entry
    capable of shadowing an allowed command, then retains it first in the sealed
-   path; the inner shell removes only Bash-created ambient entries without
+   path; the inner shell resets aliases, hashing, options, glob controls,
+   `IFS`, `CDPATH`, and umask, removes only Bash-created ambient entries without
    assigning or changing the export attribute of `PATH`, then makes
    `/usr/bin/env` its first external child and requires the complete output to
    equal that allowlist plus the conventional `_=/usr/bin/env` entry; before
@@ -94,7 +99,10 @@ test, the outer runner:
 After provider parsing, one Bash-owned emission rule governs every gate-owned
 byte. Capture begins immediately after successful frame parsing, before path
 discovery, M0 absence-root reads or redirections, environment inspection, or
-launcher preparation. The outer shell captures that complete post-intake phase,
+launcher preparation. Because the parent's raw stderr was suppressed before
+intake, failure while establishing the process-substitution capture cannot emit
+an unchecked shell diagnostic; it fails the gate with no credential-bearing
+output. The outer shell captures the complete established post-intake phase,
 the launcher's combined output, and exact status behind a validated non-LF
 suffix; restores every preceding terminal LF;
 counts under a private non-exported C byte locale, refuses NUL or a sealed stream
@@ -107,21 +115,20 @@ fail-closed output containment, distinct from accepting the provider frame
 syntax, and is not a blacklist of credential spellings.
 
 Carrier checks are derived at their owners rather than copied between them:
-Bash validates the exact retained outer-child records that its subsequent
-inspection proves and the same arrays it uses to frame and invoke the launcher;
+Bash validates the pre-frame controls actually passed through the empty-
+environment re-exec, the clean-shell entries that its absolute environment
+launcher supplies, and the same arrays it uses to frame and invoke the launcher;
 the launcher validates the same child arguments, environment, and non-secret
 frame values it uses for `open_port` and stdin. The key itself is excluded from
 each manifest and remains only the final private frame field.
 
-An invalid raw `execve` environment name is not an ordinary Bash identifier.
-Bash releases either expose it during imported-name enumeration or retain it
-only in the inherited environment. The outer shell or launcher refuses it
-without reproducing the entry, and the sealed child never receives it. The gate
-does not claim the bootstrap launcher itself never received an invalid raw
-entry; it does prove the provider credential arrives only through the private
-pipe and that no ambient entry survives into the sealed child. Invocation
-through a non-privileged or hostile already-running shell is outside the
-accepted command and fails.
+Arbitrary caller environment bytes, including invalid raw `execve` names, exist
+before the framed credential has entered the gate's authority. The builtins-only
+initial stage neither reads stdin nor starts a child; its same-PID `exec -c`
+removes those bytes before the clean role can read a provider frame. Therefore
+an ambient name or value may equal the later framed token without reaching any
+post-frame child or output. Invocation through a non-privileged or hostile
+already-running shell is outside the accepted command and fails.
 
 At the accepted opening checkpoint the first missing selector is
 `apps/loopex/test/runtime_test.exs`, producing exactly:
@@ -141,12 +148,12 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `7f2cb935244db369bc7717e1deda0bd3ca64e41f9541fa651685e39c9266a937` | `scripts/check-m1-gate.sh` |
+| `4f2e4f56f78ae7db7eca22c68b874a4d91659186ab9adf0c35aabd96c65b3597` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `6aa177be0672179cb0713a7e73ccf54a52fa4dc957d5e7d00e3e514d5015f8c2` | `scripts/m1-exunit-runner.exs` |
 | `360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c` | `scripts/m1-evidence-verifier.exs` |
 | `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `b3564733ea78b8be1d8897b8cfc0bc89add625cce6fe08eb9a7be116fac11322` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `87172408ac43f325d0e13e5228fd2cec41a4d193d5359e0838a47a8140b67a7d` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -544,10 +551,13 @@ proves one clean-baseline mechanism was disabled and caused the named failure.
 
 ## Credential and Provider Boundary
 
-The outer runner refuses an initially exported canonical provider key. Its
-structural child-environment allowlist removes ambient credential aliases,
-proxy values, client state, and unrelated exported secrets. Only after both
-core limits are sealed and verified at zero may an optional provider key enter
+The outer runner refuses an initially exported canonical provider key. Before
+credential authority begins, it clears every caller environment entry with a
+same-process empty-environment re-exec; credential aliases, proxy values, client
+state, unrelated exported secrets, invalid raw names, and an exported variable
+whose name matches the later private holder therefore cannot survive to a
+post-frame child. Only after both core limits are successfully set at zero and
+the clean role validates its synthesized state may an optional provider key enter
 through the strict bounded `LOOPEX_M1_PROVIDER_V1\0<key>\0` stdin record. The
 key remains in one private outer-runner holder and is sent only to real-only
 selector VMs through their exact versioned NUL frame. It is never an argv

@@ -155,8 +155,19 @@ to sandbox a hostile candidate.
 
 The ordinary full suite and every credential-free control remain
 credential-free. The outer gate refuses `LOOPEX_PROVIDER_API_KEY` in its initial
-environment. Before it reads optional provider stdin or starts any external
-child, Bash builtins set and verify both soft and hard core-file limits at zero.
+environment. Its initial accepted `/bin/bash -p` stage physically normalizes the
+repository directory and, using Bash builtins only, successfully sets both soft
+and hard core-file limits to zero, validates the exact public role grammar plus
+per-control and total byte bounds, reads no stdin, and starts no external
+child. The same PID then `exec -c`s fixed `/bin/bash -p -c`; its fixed command
+sources the absolute runner in definition-only mode and invokes the clean
+function, while the executable script exposes no clean-role dispatcher. That
+empty-environment clean role validates the exact internal grammar, its
+synthesized `PWD` and `SHLVL`, absence of caller controls, inherited zero core
+limits, and the same bounds before reading provider stdin. Arbitrary caller
+environment bytes—including credential aliases, invalid raw names or values,
+and an exported `provider_key_value`—therefore predate credential authority and
+are gone before the frame is read or any post-frame child can inherit them.
 An interactive stdin or immediate EOF means no key; otherwise only exact
 `LOOPEX_M1_PROVIDER_V1\0<key>\0` framing is accepted, with a nonempty key of at
 most 16,384 bytes, LF preserved inside the key, and every other nonempty input
@@ -167,9 +178,16 @@ real-provider invocations receive the key through exact
 `LOOPEX_M1_SELECTOR_V1\0<32-lowercase-hex-nonce>\0<key>\0` framing; absence is
 evidence unavailable and fails those invocations rather than skipping them.
 The key is never conveyed through argv, an inherited child environment, a file,
-or retained output. Immediately after successful frame parsing, the outer Bash
-process starts its bounded capture before path discovery, absence-root reads or
-redirections, environment inspection, and launcher preparation. It captures
+or retained output. Before frame parsing, the clean Bash role preserves the
+original stdout/stderr on private descriptors, suppresses its own raw stderr,
+resets the key holder, and removes its export attribute. The capture child closes
+the private descriptors before candidate work; only the parent may use them for
+collision-checked emission. Immediately after successful frame parsing, the
+parent starts its bounded capture
+before path discovery, absence-root reads or redirections, environment
+inspection, and launcher preparation. A shell failure while establishing that
+process substitution is therefore suppressed rather than escaping the capture.
+Once established, it captures
 that complete post-intake phase plus combined launcher/child output and exact
 status behind a validated non-LF suffix, restores all preceding terminal LF
 bytes, counts them under a private
@@ -179,12 +197,15 @@ would-be output. Inner failure
 diagnostics, the environment fixture, and the final capture/GREEN record use the
 same complete-LF emission invariant; a collision exits nonzero and suppresses
 the colliding bytes rather than redacting or blacklisting a spelling.
-Before its first external child, Bash derives and checks the exact executable,
-incoming `PATH`, and conventional `_` name, value, and serialized records that
-the following outer environment inspection validates. Before the key enters the
-launcher frame, Bash separately checks the exact non-secret frame, environment,
-and argument arrays used by that invocation. Before the launcher forwards the
-key to the sealed child, it independently derives the child manifest from the
+Before starting the post-frame capture child, Bash checks the exact pre-frame
+controls and public/internal role carriers, including the clean shell's exported
+`PWD` and `SHLVL` state. Inside that capture and before the first external child,
+Bash derives and checks the absolute `/usr/bin/env -i` executable plus
+synthesized `PWD`, `SHLVL`, and `_` names, values, and records, and the exact
+non-secret launcher frame, environment, arguments, executable, and dynamic paths
+used by that invocation.
+Before the launcher forwards the key to the sealed child, it independently
+derives the child manifest from the
 exact executable, arguments, environment names and values, and non-secret
 inner-frame values used by `open_port` and stdin. Every check refuses literal
 collision and is consumed at the boundary that derives it, so no parallel
