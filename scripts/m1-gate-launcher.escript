@@ -8,8 +8,9 @@
 %% M1 gate a closed child environment without changing Bash's search path and
 %% invalidating the immutable M0 gate.
 %% Technical depth: It accepts one bounded NUL-framed control record on stdin,
-%% clears every environment name visible to its VM from the Bash child, installs
-%% the five canonical entries, forwards output, and preserves the child's exit.
+%% clears every environment name visible to its VM from the Bash child, derives
+%% and checks the exact non-secret child carriers, installs the five canonical
+%% entries, forwards output, and preserves the child's exit.
 -define(OUTER_HEADER, <<"LOOPEX_M1_LAUNCHER_V1">>).
 -define(INNER_HEADER, <<"LOOPEX_M1_SEALED_INNER_V1">>).
 -define(MAX_CONTROL_BYTES, 262144).
@@ -111,7 +112,9 @@ arguments(Arguments) ->
         false -> ok
     end.
 
-launch(Arguments, Controls = {_, _, _, _, SafePath, _}) ->
+launch(Arguments,
+       Controls = {SuppliedHome, TaskTmp, SourceMixHome, GateSeed, SafePath,
+                   ProviderKey}) ->
     InheritedNames = [Name || {Name, _} <- split_environment(os:getenv())],
     Clear = [{Name, false} || Name <- InheritedNames],
     Canonical = [
@@ -127,13 +130,46 @@ launch(Arguments, Controls = {_, _, _, _, SafePath, _}) ->
         true -> ok;
         false -> throw({refuse, "the sealed gate runner is unavailable"})
     end,
+    ChildArguments = ["-p", Gate, "--loopex-m1-sealed-inner" | Arguments],
+    ChildEnvironment = Clear ++ Canonical,
+    NonsecretFrame = [
+        ?INNER_HEADER,
+        SuppliedHome,
+        TaskTmp,
+        SourceMixHome,
+        GateSeed,
+        SafePath
+    ],
+    ok = provider_carriers(
+           ProviderKey,
+           ["/bin/bash" | ChildArguments] ++
+           environment_carriers(ChildEnvironment) ++ NonsecretFrame),
     Port = open_port(
              {spawn_executable, "/bin/bash"},
              [binary, use_stdio, exit_status,
-              {args, ["-p", Gate, "--loopex-m1-sealed-inner" | Arguments]},
-              {env, Clear ++ Canonical}]),
+              {args, ChildArguments},
+              {env, ChildEnvironment}]),
     true = port_command(Port, inner_frame(Controls)),
     relay(Port).
+
+environment_carriers([]) ->
+    [];
+environment_carriers([{Name, false} | Rest]) ->
+    [Name | environment_carriers(Rest)];
+environment_carriers([{Name, Value} | Rest]) ->
+    [Name, Value, [Name, "=", Value] | environment_carriers(Rest)].
+
+provider_carriers(<<>>, _Carriers) ->
+    ok;
+provider_carriers(ProviderKey, Carriers) ->
+    case lists:any(
+           fun(Carrier) ->
+               binary:match(iolist_to_binary(Carrier), ProviderKey) =/= nomatch
+           end,
+           Carriers) of
+        true -> throw({refuse, "sealed child carrier collides with provider credential bytes"});
+        false -> ok
+    end.
 
 inner_frame({SuppliedHome, TaskTmp, SourceMixHome, GateSeed, SafePath, ProviderKey}) ->
     iolist_to_binary([

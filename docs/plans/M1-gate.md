@@ -51,7 +51,10 @@ test, the outer runner:
    toolchain path, then sends the private controls over a pipe—not argv,
    environment, a file, or retained output—to the digest-bound launcher, whose
    bootstrap environment contains only locale and gate-owned BEAM dump controls
-   and no provider credential;
+   and no provider credential; before forwarding the key, Bash derives one
+   carrier manifest from the exact launcher frame, environment and argument
+   arrays it will use and refuses a literal collision with any non-secret
+   header, name, value, role, executable or dynamic path;
 5. has the launcher clear every inherited environment entry for its child,
    install exactly the derived absolute toolchain `PATH`, `HOME=/`,
    `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and `GIT_OPTIONAL_LOCKS=0`, and start the
@@ -63,7 +66,10 @@ test, the outer runner:
    path; the inner shell removes only Bash-created ambient entries without
    assigning or changing the export attribute of `PATH`, then makes
    `/usr/bin/env` its first external child and requires the complete output to
-   equal that allowlist plus the conventional `_=/usr/bin/env` entry;
+   equal that allowlist plus the conventional `_=/usr/bin/env` entry; before
+   forwarding the key again, the launcher derives the corresponding child
+   carrier manifest from the exact argument, environment and non-secret inner
+   frame values it will pass and refuses any literal collision;
 6. keeps `ERL_CRASH_DUMP=/dev/null` and `ERL_CRASH_DUMP_SECONDS=0` in force for
    the launcher and every later BEAM child, thereby disabling gate-owned BEAM
    dump files, while the sealed zero soft/hard core limits prevent file-backed
@@ -83,8 +89,11 @@ test, the outer runner:
    every exact locked name, and each exact real-provider tag.
 
 After provider parsing, one Bash-owned emission rule governs every gate-owned
-byte. The outer shell captures the launcher's complete combined output and exact
-status behind a validated non-LF suffix, restores every preceding terminal LF,
+byte. Capture begins immediately after successful frame parsing, before path
+discovery, M0 absence-root reads or redirections, environment inspection, or
+launcher preparation. The outer shell captures that complete post-intake phase,
+the launcher's combined output, and exact status behind a validated non-LF
+suffix; restores every preceding terminal LF;
 counts under a private non-exported C byte locale, refuses NUL or a sealed stream
 exceeding 16,777,216 bytes, and compares the complete would-be emission against
 the nonempty key before printing anything.
@@ -93,6 +102,12 @@ Inner diagnostics, the complete environment-fixture record, and the final
 A collision exits nonzero and suppresses the colliding bytes; this is
 fail-closed output containment, distinct from accepting the provider frame
 syntax, and is not a blacklist of credential spellings.
+
+The two carrier manifests are derived at the two owners rather than copied
+between them: Bash validates the same arrays it uses to frame and invoke the
+launcher, and the launcher validates the same child arguments, environment and
+non-secret frame values it uses for `open_port` and stdin. The key itself is
+excluded from each manifest and remains only the final private frame field.
 
 An invalid raw `execve` environment name is not an ordinary Bash identifier.
 Bash releases either expose it during imported-name enumeration or retain it
@@ -122,12 +137,12 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `3ba5c9aec51bcfe0d31f2f76cb3e9126a6e6858092840dee942dc8dcb60bf0a8` | `scripts/check-m1-gate.sh` |
-| `d29358ad791436eefb677fc04077ddd720b521a77d3a8f708c11fd76db17e2ba` | `scripts/m1-gate-launcher.escript` |
+| `37ead3f0fda09c196c90eb74fe7489027944bb04a5452810108ab512f23a4090` | `scripts/check-m1-gate.sh` |
+| `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `6aa177be0672179cb0713a7e73ccf54a52fa4dc957d5e7d00e3e514d5015f8c2` | `scripts/m1-exunit-runner.exs` |
 | `360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c` | `scripts/m1-evidence-verifier.exs` |
 | `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `a70a881e4075d324ab7c6dc2c91bbea7fa217607224fe32d7a4a0c03cbf2e273` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `ac4618cdfc20fa11acf1bd86066388b17a8503d96bdb65e5f7b24d26f7cbad11` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |

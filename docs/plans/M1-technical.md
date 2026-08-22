@@ -167,15 +167,26 @@ real-provider invocations receive the key through exact
 `LOOPEX_M1_SELECTOR_V1\0<32-lowercase-hex-nonce>\0<key>\0` framing; absence is
 evidence unavailable and fails those invocations rather than skipping them.
 The key is never conveyed through argv, an inherited child environment, a file,
-or retained output. After intake, the outer Bash process captures the complete
-combined launcher/child output and exact status behind a validated non-LF
-suffix, restores all preceding terminal LF bytes, counts them under a private
+or retained output. Immediately after successful frame parsing, the outer Bash
+process starts its bounded capture before path discovery, absence-root reads or
+redirections, environment inspection, and launcher preparation. It captures
+that complete post-intake phase plus combined launcher/child output and exact
+status behind a validated non-LF suffix, restores all preceding terminal LF
+bytes, counts them under a private
 non-exported C byte locale, refuses NUL or a sealed stream exceeding 16,777,216
 bytes, and emits only after one literal-key collision check over the complete
 would-be output. Inner failure
 diagnostics, the environment fixture, and the final capture/GREEN record use the
 same complete-LF emission invariant; a collision exits nonzero and suppresses
 the colliding bytes rather than redacting or blacklisting a spelling.
+Before the key enters the launcher frame, Bash derives a comprehensive carrier
+manifest from the exact non-secret frame, environment and argument arrays used
+by that invocation. Before the launcher forwards the key to the sealed child,
+it independently derives the child manifest from the exact executable,
+arguments, environment names and values, and non-secret inner-frame values used
+by `open_port` and stdin. Both refuse literal collision; each manifest is owned
+and consumed at the boundary that derives it, so no parallel enumeration can
+drift from the actual carrier construction.
 `run_gate_test` captures selector stdout/stderr plus exact
 status by appending a validated non-LF terminal status suffix before Bash
 command substitution and removing only that suffix afterward. This preserves

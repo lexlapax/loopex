@@ -935,6 +935,35 @@ defmodule Loopex.M1GateEvidenceTest do
       refute noncollision_output =~ noncolliding_key
     end
 
+    carrier_keys = [
+      "LANG",
+      "PATH",
+      "PATH=",
+      "HOME",
+      "escript",
+      "/bin/bash",
+      "-p",
+      "--environment-fixture",
+      "--loopex-m1-sealed-inner",
+      "LOOPEX_M1_LAUNCHER_V1",
+      "LOOPEX_M1_SEALED_INNER_V1",
+      Path.join(root, "scripts/m1-gate-launcher.escript"),
+      Path.join(root, "scripts/check-m1-gate.sh")
+    ]
+
+    for carrier_key <- carrier_keys do
+      {carrier_output, carrier_status} =
+        run_gate_with_input(
+          provider_frame(carrier_key),
+          ["--environment-fixture"],
+          [{"HOME", actual_home}]
+        )
+
+      assert carrier_status != 0, "non-secret carrier #{inspect(carrier_key)} was admitted"
+      refute carrier_output =~ carrier_key
+      refute carrier_output =~ "M1 environment preflight OK"
+    end
+
     boundary_functions =
       Enum.map_join(
         ["valid_utf8_charmap", "valid_gate_seed"],
@@ -989,7 +1018,7 @@ defmodule Loopex.M1GateEvidenceTest do
       )
 
     assert status != 0
-    assert output =~ "a required runner control contains provider credential bytes"
+    assert output =~ "a launcher carrier collides with provider credential bytes"
     refute output =~ token
 
     malformed_provider_inputs = [
@@ -1147,6 +1176,7 @@ defmodule Loopex.M1GateEvidenceTest do
 
     source = runner_source()
     outer_launch_body = shell_function(source, "outer_launch")
+    outer_captured_body = shell_function(source, "outer_launch_captured")
     soft_core = :binary.match(outer_launch_body, "builtin ulimit -S -c 0") |> elem(0)
     hard_core = :binary.match(outer_launch_body, "builtin ulimit -H -c 0") |> elem(0)
 
@@ -1157,14 +1187,19 @@ defmodule Loopex.M1GateEvidenceTest do
       )
       |> elem(0)
 
-    first_child = :binary.match(outer_launch_body, "/usr/bin/env -i") |> elem(0)
+    capture_start = :binary.match(outer_launch_body, "capture_outer_gate_output < <(") |> elem(0)
     assert soft_core < hard_core
     assert hard_core < provider_read
-    assert provider_read < first_child
-    assert outer_launch_body =~ "      loopex_m1_status=\"${PIPESTATUS[1]}\""
+    assert provider_read < capture_start
     assert outer_launch_body =~ "    } 2>&1\n  )"
     assert outer_launch_body =~ "capture_outer_gate_output < <("
-    refute outer_launch_body =~ "\"$loopex_m1_launcher\" \"$@\" 2>&1"
+    refute outer_launch_body =~ "/usr/bin/env -i"
+    assert outer_captured_body =~ "/usr/bin/env -i"
+    assert outer_captured_body =~ "return \"${PIPESTATUS[1]}\""
+    assert outer_captured_body =~ "refuse_provider_carrier_collision"
+    assert outer_captured_body =~ "\"${loopex_m1_launcher_frame[@]}\""
+    assert outer_captured_body =~ "\"${loopex_m1_launcher_environment[@]}\""
+    assert outer_captured_body =~ "\"${loopex_m1_launcher_arguments[@]}\""
 
     capture_functions =
       Enum.map_join(
@@ -1300,8 +1335,8 @@ defmodule Loopex.M1GateEvidenceTest do
     assert status != 0
     assert output == "M1 gate RED: sealed launcher input is unavailable\n"
 
-    shadow_root =
-      Path.join(System.tmp_dir!(), "loopex-m0-absence.#{System.unique_integer([:positive])}")
+    path_key = "credential-path-#{System.unique_integer([:positive])}"
+    shadow_root = Path.join(System.tmp_dir!(), "loopex-m0-absence.#{path_key}")
 
     File.mkdir_p!(shadow_root)
     on_exit(fn -> File.rm_rf(shadow_root) end)
@@ -1336,6 +1371,21 @@ defmodule Loopex.M1GateEvidenceTest do
 
     assert output =~ "P" <> "ATH=" <> String.trim(physical_shadow_root) <> ":"
     assert output =~ "M1 environment preflight OK"
+
+    unreadable_stub = Path.join(shadow_root, "jq")
+    File.chmod!(unreadable_stub, 0o111)
+
+    {output, status} =
+      run_gate_with_input(
+        provider_frame(path_key),
+        ["--environment-fixture"],
+        [{"HOME", actual_home}, {"PATH", shadow_root <> ":" <> incoming_path}]
+      )
+
+    assert status != 0, "unreadable absence-root stub unexpectedly passed"
+    refute output =~ path_key
+    refute output =~ "M1 environment preflight OK"
+    File.chmod!(unreadable_stub, 0o755)
 
     extra = Path.join(shadow_root, "mix")
     File.write!(extra, "#!/bin/sh\nexit 0\n")
@@ -1397,16 +1447,32 @@ defmodule Loopex.M1GateEvidenceTest do
     assert source =~ "PATH) ;;"
     assert launcher =~ "Clear = [{Name, false} || Name <- InheritedNames]"
     assert launcher =~ ~S|{"GIT_OPTIONAL_LOCKS", "0"}|
-    assert launcher =~ "{env, Clear ++ Canonical}"
+    assert launcher =~ "ChildEnvironment = Clear ++ Canonical"
+    assert launcher =~ "{env, ChildEnvironment}"
     assert launcher =~ "-define(MAX_CONTROL_BYTES, 262144)."
     assert launcher =~ "file:read(standard_io, 65536)"
     assert launcher =~ "NewSize =< ?MAX_CONTROL_BYTES"
     refute launcher =~ "read_all(<<"
     assert source =~ "/usr/bin/env -i"
 
-    [_, launch_block] = String.split(launcher, "launch(Arguments, Controls =", parts: 2)
+    [_, launch_block] = String.split(launcher, "launch(Arguments,", parts: 2)
+    carrier_check = :binary.match(launch_block, "ok = provider_carriers(") |> elem(0)
+    child_start = :binary.match(launch_block, "Port = open_port(") |> elem(0)
+
+    child_frame =
+      :binary.match(launch_block, "port_command(Port, inner_frame(Controls))") |> elem(0)
+
+    assert carrier_check < child_start
+    assert child_start < child_frame
+    assert launch_block =~ "[\"/bin/bash\" | ChildArguments]"
+    assert launch_block =~ "environment_carriers(ChildEnvironment)"
+    assert launch_block =~ "NonsecretFrame"
+    assert launch_block =~ "?INNER_HEADER"
     [child_setup, frame_setup] = String.split(launch_block, "inner_frame({", parts: 2)
-    refute child_setup =~ "ProviderKey"
+    [_, open_port_setup] = String.split(child_setup, "Port = open_port(", parts: 2)
+    [open_port_arguments, _] = String.split(open_port_setup, "true = port_command", parts: 2)
+    assert child_setup =~ "provider_carriers(\n           ProviderKey"
+    refute open_port_arguments =~ "ProviderKey"
     assert frame_setup =~ "ProviderKey"
     assert source =~ ~S|"$provider_key_value"|
     refute source =~ ~r/\/usr\/bin\/env -i[^\n]*provider_key_value/

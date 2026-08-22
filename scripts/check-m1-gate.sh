@@ -135,6 +135,16 @@ append_safe_tool_path() {
   esac
 }
 
+refuse_provider_carrier_collision() {
+  local loopex_m1_carrier
+  [ -n "$provider_key_value" ] || return 0
+  for loopex_m1_carrier in "$@"; do
+    case "$loopex_m1_carrier" in
+      *"$provider_key_value"*) return 1 ;;
+    esac
+  done
+}
+
 validate_m0_absence_root() {
   local root="$1" entry base line1 line2 line3 extra core seen=" "
   local physical environment_manager="py""env"
@@ -229,6 +239,18 @@ outer_launch() {
     fi
   fi
 
+  capture_outer_gate_output < <(
+    {
+      (outer_launch_captured "$@")
+      loopex_m1_status=$?
+      builtin printf '\035LOOPEX_M1_OUTER_STATUS_V1:%s' "$loopex_m1_status"
+    } 2>&1
+  )
+  builtin exit "$loopex_m1_status"
+}
+
+outer_launch_captured() {
+
   loopex_m1_real_home_input="${HOME-}"
   loopex_m1_task_tmp_input="${TMPDIR:-/tmp}"
   loopex_m1_source_mix_home_input="${MIX_HOME:-${HOME-}/.mix}"
@@ -285,6 +307,33 @@ outer_launch() {
   [ -f "$loopex_m1_launcher" ] && [ ! -L "$loopex_m1_launcher" ] \
     || fail "the bound M1 gate launcher is unavailable"
 
+  loopex_m1_launcher_frame=(
+    LOOPEX_M1_LAUNCHER_V1
+    "$loopex_m1_real_home_input"
+    "$loopex_m1_task_tmp_input"
+    "$loopex_m1_source_mix_home_input"
+    "$loopex_m1_gate_seed_input"
+    "$loopex_m1_safe_path"
+  )
+  loopex_m1_launcher_environment=(
+    ERL_CRASH_DUMP=/dev/null
+    ERL_CRASH_DUMP_SECONDS=0
+    LANG=C.UTF-8
+    LC_ALL=C.UTF-8
+  )
+  loopex_m1_launcher_arguments=(
+    "$loopex_m1_escript"
+    "$loopex_m1_launcher"
+    "$@"
+  )
+  refuse_provider_carrier_collision \
+    /usr/bin/env \
+    -i \
+    "${loopex_m1_launcher_frame[@]}" \
+    "${loopex_m1_launcher_environment[@]}" \
+    "${loopex_m1_launcher_arguments[@]}" \
+    || fail "a launcher carrier collides with provider credential bytes"
+
   for loopex_m1_value in \
     "$loopex_m1_real_home_input" \
     "$loopex_m1_task_tmp_input" \
@@ -296,13 +345,6 @@ outer_launch() {
     case "$loopex_m1_value" in
       *$'\n'* | *$'\r'*) fail "a required runner control contains a line break" ;;
     esac
-    if [ -n "$provider_key_value" ]; then
-      case "$loopex_m1_value" in
-        *"$provider_key_value"*)
-          fail "a required runner control contains provider credential bytes"
-          ;;
-      esac
-    fi
   done
 
   # Imported Bash identifiers are removed generically after the required values
@@ -367,28 +409,14 @@ outer_launch() {
   [ "$loopex_m1_path_count" -eq 1 ] && [ "$loopex_m1_under_count" -eq 1 ] \
     || fail "the scrubbed outer environment was incomplete"
 
-  capture_outer_gate_output < <(
-    {
-      {
-        builtin printf '%s\0' \
-          LOOPEX_M1_LAUNCHER_V1 \
-          "$loopex_m1_real_home_input" \
-          "$loopex_m1_task_tmp_input" \
-          "$loopex_m1_source_mix_home_input" \
-          "$loopex_m1_gate_seed_input" \
-          "$loopex_m1_safe_path" \
-          "$provider_key_value"
-      } | /usr/bin/env -i \
-        ERL_CRASH_DUMP=/dev/null \
-        ERL_CRASH_DUMP_SECONDS=0 \
-        LANG=C.UTF-8 \
-        LC_ALL=C.UTF-8 \
-        "$loopex_m1_escript" "$loopex_m1_launcher" "$@"
-      loopex_m1_status="${PIPESTATUS[1]}"
-      builtin printf '\035LOOPEX_M1_OUTER_STATUS_V1:%s' "$loopex_m1_status"
-    } 2>&1
-  )
-  builtin exit "$loopex_m1_status"
+  {
+    builtin printf '%s\0' \
+      "${loopex_m1_launcher_frame[@]}" \
+      "$provider_key_value"
+  } | /usr/bin/env -i \
+    "${loopex_m1_launcher_environment[@]}" \
+    "${loopex_m1_launcher_arguments[@]}"
+  return "${PIPESTATUS[1]}"
 }
 
 if [ "${1-}" != --loopex-m1-sealed-inner ]; then
@@ -1137,7 +1165,7 @@ evidence_verifier_source="scripts/m1-evidence-verifier.exs"
 gate_launcher_source="scripts/m1-gate-launcher.escript"
 deps_budget_source="apps/loopex/lib/mix/tasks/loopex.deps_budget.ex"
 require_bound_artifact "$gate_launcher_source" \
-  d29358ad791436eefb677fc04077ddd720b521a77d3a8f708c11fd76db17e2ba \
+  4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd \
   "bound sealed gate launcher"
 require_bound_artifact "$selector_runner_source" \
   6aa177be0672179cb0713a7e73ccf54a52fa4dc957d5e7d00e3e514d5015f8c2 \
@@ -1149,7 +1177,7 @@ require_bound_artifact apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861 \
   "bound dependency-direction reader"
 require_bound_artifact apps/loopex/test/m1_gate_evidence_test.exs \
-  a70a881e4075d324ab7c6dc2c91bbea7fa217607224fe32d7a4a0c03cbf2e273 \
+  ac4618cdfc20fa11acf1bd86066388b17a8503d96bdb65e5f7b24d26f7cbad11 \
   "bound M1 mechanics corpus"
 require_bound_artifact apps/loopex/test/m1_exunit_runner_test.exs \
   558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b \
