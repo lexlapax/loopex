@@ -42,19 +42,29 @@ Concept: [Decision](0008-owner-succession-recovery-and-runtime-placement.md#conc
 
 ### Stable succession identity
 
-Runtime control derives one bounded `succession_id` from the durable or
-re-presentable command identity:
+Runtime control identifies one logical create or resume succession by the
+vision's runtime-command idempotency key:
 
 ```text
-create: runtime_id + create command_id + session_id
-resume: runtime_id + resume command_id + session_id
+runtime_id + command_id
 ```
 
-The same logical create or resume re-presentation produces the same
-`succession_id`. A changed command ID is a new logical succession and cannot
-resolve ambiguity belonging to the old one. The reference client therefore
-retains and re-presents its recovery command ID across the M1 process-kill
-trace; the Store, not the client, retains the private attempts beneath it.
+The Store binds that key to the command kind, target `session_id`, mutation
+domain, exact canonical command bytes, and their versioned digest. The bounded
+`succession_id` carried by staging and `advance_owner` is a canonical derivation
+of the same runtime-scoped command identity; it is not a second idempotency
+namespace. Reusing the command ID with another kind, session, canonical byte
+string, or digest is a conflict even when a different session mutation domain
+would otherwise be available.
+
+The same logical create or resume re-presentation therefore finds the same
+entry. A changed command ID is a new logical succession and cannot resolve
+ambiguity belonging to the old one. The reference client retains and
+re-presents a command ID only until it learns that logical command's durable
+result. If the runtime that owned a completed command has died, the historical
+result remains replayable but a fresh resume command ID is required to acquire a
+new live coordinator. The Store, not the client, retains the private attempts
+beneath each logical command.
 
 ### Attempt index
 
@@ -62,24 +72,35 @@ Each Store retains this private logical entry:
 
 ```text
 key:
-  session_id
-  mutation_domain
-  succession_id
+  runtime_id
+  command_id
 
 value:
+  command_kind
+  session_id
+  mutation_domain
+  canonical_command_bytes
+  canonical_command_digest
+  logical_status = open | completed
   attempt_generation
   candidate_tx_id
   stage_tx_id
   candidate_canonical_record_bytes
   candidate_canonical_mutation_digest
+  completed_candidate_tx_id | nil
+  completed_command_result | nil
 ```
 
-The stored canonical bytes and digest bind the complete staged `advance_owner`
-request and are both compared on every stage or candidate re-presentation.
-Equal digests never admit different bytes. Neither value is returned by the
-read API. The read result contains only
-`{attempt_generation, candidate_tx_id}`. It is `:absent` when no attempt has
-linearized for that key and `:unavailable` when the Store cannot make an
+The command and candidate canonical bytes and digests are compared on every
+logical-command, stage, or candidate re-presentation. Equal digests never admit
+different bytes. None of those bytes or digests is returned by the read API. An
+open read returns `{open, attempt_generation, candidate_tx_id}`; a completed
+read returns
+`{completed, attempt_generation, completed_candidate_tx_id, command_result}` as
+historical result identity, not owner authority. For M1 the bounded command
+result is the existing `{:ok, session_id}` lifecycle result and contains no owner
+incarnation or capability. It is `:absent` when no attempt has linearized for
+that runtime command key and `:unavailable` when the Store cannot make an
 authoritative observation.
 
 `stage_owner_attempt` is a fourth transaction shape inside the existing Store
@@ -89,10 +110,12 @@ that domain's status reads, ownership-head reads, staging resolutions, and owner
 compare-and-sets. It binds the key above, the prior attempt generation or
 explicit absence, a fresh stage transaction ID, a fresh candidate transaction
 ID, and the candidate's complete canonical bytes and digest. Its unknown-ID path
-atomically compares the indexed generation, installs exactly the next generation
-and candidate, and retains its terminal resolution. A stale expected generation
-is a terminal non-commit. Re-presentation validates every immutable scalar,
-exact byte string, and digest before returning the retained outcome.
+atomically compares the exact command binding, requires `logical_status = open`,
+installs exactly the next generation and candidate, and retains its terminal
+resolution. A stale expected generation or completed logical command is a
+terminal non-commit for that new staging transaction. Exact re-presentation of a
+known staging transaction validates every immutable scalar, exact byte string,
+and digest before returning its retained outcome.
 
 Staging changes only the private attempt index and the staging transaction's
 terminal resolution. It does not advance `owner_epoch`, `journal_version`, or
@@ -135,38 +158,68 @@ re-presents that command's `succession_id`; inventing a new command ID cannot
 bypass the fence.
 
 The staged `advance_owner` transaction carries the same `succession_id`, attempt
-generation, candidate transaction ID, and digest. The Store refuses an
-unstaged, superseded, or mismatched candidate before applying ADR 0006's owner
-epoch and journal-version compare-and-set. A terminal succession resolution and
-its attempt index remain consistent under exact re-presentation.
+generation, candidate transaction ID, and digest. Transaction resolution occurs
+before current-index validation: if that scoped transaction ID already has a
+terminal resolution, the Store validates all ADR 0006 immutable bindings and
+returns the retained outcome regardless of a later attempt generation, logical
+succession, or owner epoch. It does not apply ownership succession again.
+
+Only an unknown `advance_owner` transaction's first presentation must find an
+open logical succession whose current index generation points to that exact
+candidate. An unstaged, index-superseded, completed-command, or mismatched
+unknown candidate receives a retained terminal non-commit before the Store
+applies ADR 0006's owner epoch and journal-version compare-and-set. If the
+compare-and-set commits, the same atomic mutation advances ownership, retains
+the transaction resolution, and changes that logical command from `open` to
+`completed` with its candidate transaction ID and bounded command result. If it
+does not commit, the Store retains that candidate's non-commit resolution but
+leaves the logical command open so recovery may stage a later generation. Thus
+a committed candidate and an open logical command cannot coexist in a correct
+Store history.
+
+Re-presenting a completed create or resume command returns its original durable
+command result without staging, changing the owner head, or installing a local
+route. If another logical succession later advances ownership, the older
+command and its known committed `advance_owner` transaction remain truthful
+historical results but confer no current authority. After whole-runtime loss, a
+caller that needs a live coordinator submits a new resume command ID only after
+the earlier command's result is known.
 
 ### Recovery algorithm
 
-Initial acquisition with no indexed attempt reads the ownership head, constructs
-a fresh candidate, stages generation 1, and submits it only after staging is
-confirmed.
+Initial acquisition with no indexed command entry first binds the exact logical
+command, reads the ownership head, constructs a fresh candidate, stages
+generation 1, and submits it only after staging is confirmed.
 
 Recovery uses this loop:
 
-1. Read the exact attempt index for the recoverable `succession_id`.
-2. If present, call `transaction_status/3` for its exact candidate transaction.
-   If absent at the index, there is no prior candidate to authorize or replay.
-3. On either terminal status or `:absent`, read `ownership_head/2`. On
+1. Read and validate the exact command-bound attempt index.
+2. If it is completed, return the original durable command result without an
+   ownership mutation or local-route update.
+3. If it is open, call `transaction_status/3` for its exact current candidate.
+   If the command entry is absent, there is no prior candidate to authorize or
+   replay and generation 1 may be staged.
+4. A committed candidate must be accompanied by the same atomic completed index
+   state; re-read that state and return its historical result. Any inconsistent
+   committed/open observation is corruption or unavailability and fails closed.
+5. On a terminal non-commit or `:absent`, read `ownership_head/2`. On
    `:unavailable`, keep command admission and mutation fenced.
-4. Construct a new transaction and fresh owner incarnation, then stage it with
-   a compare-and-set against the observed attempt generation.
-5. Submit `advance_owner` only if that exact candidate owns the new index
-   generation.
-6. A stale stage or stale ownership head returns a terminal non-commit and
+6. Construct a new transaction and fresh owner incarnation, then stage it with
+   a compare-and-set against the observed open attempt generation.
+7. Submit `advance_owner` only if that exact unknown candidate owns the new index
+   generation. Its commit atomically completes the logical command.
+8. A stale stage or stale ownership head returns a terminal non-commit and
    restarts the loop from durable observations. No branch overwrites a newer
    attempt or ownership pair.
 
-If the prior in-flight candidate linearizes after step 2, either it changes the
-head before the new `advance_owner` and the new CAS is refused, or the new CAS
-wins and the old one is refused. If a third contender changes the attempt index
-or owner head after either read, the corresponding final compare-and-set is
-refused. Repeated coordinator or VM loss restarts at step 1 and therefore always
-finds the latest durably staged candidate for that logical succession.
+If the prior in-flight candidate linearizes after its status read, either it
+atomically completes the command before the fresh stage and the stage is
+refused, it changes the head before the new `advance_owner` and the new CAS is
+refused, or the new index generation wins first and the old unknown candidate is
+refused. If a third contender changes the attempt index or owner head after
+either read, the corresponding final compare-and-set is refused. Repeated
+coordinator or VM loss restarts at step 1 and therefore always finds either the
+latest durably staged candidate or the command's single completed result.
 
 ### Catalogue and conformance
 
@@ -178,13 +231,22 @@ observed transition/fault pairs remains required. Store conformance adds:
   staging-result recovery;
 - two candidates contending for one expected attempt generation;
 - exact staging re-presentation and changed-binding conflict;
-- index isolation by session, domain, and succession ID;
+- command identity isolation by runtime, plus conflict when the same command ID
+  is re-presented with another kind, session, domain, bytes, or digest;
 - a staged candidate whose succession is terminal committed, terminal
   non-commit, absent, and unavailable;
 - full loss again after staging the fresh candidate, proving the next recovery
   discovers that exact transaction;
 - both orders of the absent/in-flight prior candidate and the fresh CAS;
-- refusal of an unstaged or index-superseded `advance_owner` candidate; and
+- refusal of an unstaged or index-superseded unknown `advance_owner` candidate;
+- exact re-presentation of a known terminal non-commit after the attempt index
+  advances returns that retained non-commit rather than re-evaluating eligibility;
+- exact re-presentation of a known committed `advance_owner` after a later
+  logical succession returns the retained historical commit without changing
+  the current owner;
+- exact re-presentation of a completed create or resume returns its original
+  result without advancing the epoch, and replay of an older completed command
+  after a newer succession cannot displace or route around the current owner;
 - a different `succession_id` refused while any candidate in the session
   mutation domain is unresolved, then admitted only after terminal resolution,
   with mutation sensitivity for both the domain fence and attempt-generation
@@ -286,6 +348,10 @@ Concept: [Consequences](0008-owner-succession-recovery-and-runtime-placement.md#
   backup and restore. Their growth requires an eventual compaction policy, and
   a future schema change must migrate unresolved identities without reopening
   them as new operations.
+- A replayed completed create or resume reports its historical result but does
+  not recreate a dead coordinator. After learning that result, a caller that
+  still needs a live session pays for a fresh resume command and its staging
+  write. This preserves command idempotency and makes recovery intent explicit.
 
 ### If rejected
 
@@ -323,12 +389,12 @@ installed data or compatibility freeze, so implementation tests start from
 owned empty roots. M0 filesystem journals remain governed by M0 and are neither
 read nor migrated.
 
-The index is logically append-retained by succession identity for M1. Safe
-compaction may replace historical staging resolutions only after the candidate
-succession has a terminal resolution and exact re-presentation of the logical
-succession remains answerable. M1 need not implement compaction; silently
-discarding identity and letting an old command become a new succession is not
-compaction.
+The index is logically append-retained by runtime command identity for M1. Safe
+compaction may replace historical staging resolutions only after the logical
+succession is completed, while retaining its complete command binding and
+historical result so exact re-presentation remains answerable. M1 need not
+implement compaction; silently discarding identity and letting an old command
+become a new succession is not compaction.
 
 Rollback before closure removes the attempt transaction, index rows, selectors,
 and dependent Runtime code together, then discards M1-owned test roots. Once an

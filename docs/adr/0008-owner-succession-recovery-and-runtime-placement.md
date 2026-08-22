@@ -56,11 +56,12 @@ Technical depth: [The two information and authority gaps](0008-owner-succession-
 ## Decision
 
 - **The Store owns a private durable succession-attempt index.** One entry is
-  addressed by session, mutation domain, and the existing recoverable
-  `succession_id` for the runtime-control create or resume command. It records a
-  monotonic attempt generation, the exact candidate succession transaction ID,
-  and that candidate's complete canonical bytes and digest before the candidate
-  may be submitted.
+  addressed by the runtime-scoped create or resume command identity and binds
+  its kind, session, mutation domain, exact canonical command bytes, and digest.
+  It records whether that logical command is open or completed, a monotonic
+  attempt generation, the exact candidate succession transaction ID, and that
+  candidate's complete canonical bytes and digest before the candidate may be
+  submitted. Reusing a command identity with any changed binding conflicts.
 - **Staging an attempt is a catalogued Store mutation.** It uses ADR 0006's
   three outcomes and compare-and-set semantics in the same session mutation
   domain as `advance_owner`. It mutates only private recovery identity and its
@@ -71,20 +72,29 @@ Technical depth: [The two information and authority gaps](0008-owner-succession-
   ADR 0006 status/head/fresh-CAS sequence. Contenders for the same prior attempt
   generation cannot both install candidates. Every implementation must cover
   its declared pre-linearization, post-linearization, and recovery fault points.
-- **Recovery always discovers before it supersedes.** It reads the indexed
-  candidate, queries that exact transaction status, reads the current ownership
-  head, stages a fresh transaction and incarnation under the next attempt
-  generation, and only then submits `advance_owner`. Absence and either terminal
-  status may proceed; unavailability leaves admission fenced. A stale staging
-  or ownership compare-and-set retries from durable observations rather than
-  overwriting them.
+- **Recovery always discovers before it supersedes.** A completed logical
+  succession returns its original durable command result and never stages or
+  advances ownership again. An open succession reads its indexed candidate and
+  queries that exact transaction status. Candidate commit atomically completes
+  the logical succession; candidate absence or terminal non-commit may proceed
+  through a fresh ownership-head read, staged transaction, and incarnation
+  under the next attempt generation. Unavailability leaves admission fenced. A
+  stale staging or ownership compare-and-set retries from durable observations
+  rather than overwriting them. After a runtime is lost, learning that an older
+  command completed does not recreate its dead coordinator; acquiring a live
+  replacement requires a new resume command identity.
 - **The index never grants owner authority.** Its read exposes only the bounded
-  succession identity, attempt generation, and candidate transaction ID. It
-  exposes no incarnation ID, canonical mutation bytes, digest, or current-owner
-  capability. Internally, staging and `advance_owner` compare the retained exact
-  bytes as well as the digest, so equal digests never make changed bytes equal.
-  Ordinary session commits still require ADR 0006's atomic owner epoch,
-  incarnation, and journal-version comparison.
+  succession state, attempt generation, candidate transaction ID, and completed
+  lifecycle result already returned by the embedded API. It exposes no
+  incarnation ID, canonical mutation bytes, digest, or current-owner capability.
+  A known `advance_owner` transaction is resolved and its immutable
+  bindings are validated before index eligibility is considered; it always
+  returns ADR 0006's retained historical outcome. Only an unknown transaction's
+  first presentation must be the current staged candidate. Internally, staging
+  and first presentation compare the retained exact bytes as well as the digest,
+  so equal digests never make changed bytes equal. Ordinary session commits
+  still require ADR 0006's atomic owner epoch, incarnation, and journal-version
+  comparison.
 - **`M1` supports one active Runtime Control per Store/runtime placement.** A
   Store identity means the authoritative session namespace, not an incidental
   pid or handle. A session remains bound to the `runtime_id` that created it,
@@ -150,6 +160,14 @@ discarding them can turn an old retry into a new succession. That cost buys a
 durable answer to repeated coordinator and full-VM loss without exposing owner
 capability or making the caller the recovery journal.
 
+Command replay remains idempotent rather than a hidden restart primitive. Once
+a create or resume command has completed, re-presenting it returns the historical
+result without advancing the owner epoch. If its coordinator was subsequently
+lost, the caller learns that result and uses a fresh resume command identity to
+acquire a replacement. This makes one extra lifecycle step visible after that
+crash window, but prevents an old completed command from displacing a newer
+owner.
+
 The placement limit is also durable architectural debt, but visible debt. M1
 can restart or hand off only after the old runtime placement is quiescent; it
 therefore accepts quiescence downtime and cannot claim split-brain or
@@ -182,7 +200,9 @@ Before M1 closes, rollback removes the index transaction and the Workstream B
 runtime that depends on it. After a Store implementation is published or data
 is promised across versions, changing index identity, compaction, or the
 exclusive-placement contract requires a successor decision and an explicit
-migration or compatibility disposition.
+migration or compatibility disposition. Compaction must retain each completed
+command's binding and historical result so exact replay can never become a new
+succession.
 
 Technical depth: [Format, migration, and rollback mechanics](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-adr-0008-compatibility).
 
