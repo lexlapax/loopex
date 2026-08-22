@@ -50,6 +50,7 @@ defmodule Loopex.M1GateEvidenceTest do
   defp repo_root, do: Path.expand("../../..", __DIR__)
   defp verifier, do: Path.join(repo_root(), "scripts/m1-evidence-verifier.exs")
   defp runner_source, do: File.read!(Path.join(repo_root(), "scripts/check-m1-gate.sh"))
+  defp launcher_source, do: File.read!(Path.join(repo_root(), "scripts/m1-gate-launcher.escript"))
 
   defp shell_function(source, name) do
     case Regex.run(~r/^#{Regex.escape(name)}\(\) \{(?:[^\n]*\}\n|\n.*?^\}\n)/ms, source) do
@@ -125,6 +126,7 @@ defmodule Loopex.M1GateEvidenceTest do
       "docs/plans/M1-gate.md" => "# Fixture M1 gate\n",
       "docs/plans/M0-gate.md" => "# Fixture immutable M0 gate\n",
       "scripts/check-m1-gate.sh" => "#!/usr/bin/env bash\nexit 0\n",
+      "scripts/m1-gate-launcher.escript" => launcher_source(),
       "scripts/m1-exunit-runner.exs" => "# fixture selector runner\n",
       "scripts/m1-evidence-verifier.exs" => File.read!(verifier()),
       "apps/loopex/lib/mix/tasks/loopex.deps_budget.ex" => "# fixture dependency authority\n",
@@ -151,6 +153,7 @@ defmodule Loopex.M1GateEvidenceTest do
       gate_sha256: file_digest(root, "docs/plans/M1-gate.md"),
       m0_gate_sha256: file_digest(root, "docs/plans/M0-gate.md"),
       runner_sha256: file_digest(root, "scripts/check-m1-gate.sh"),
+      launcher_sha256: file_digest(root, "scripts/m1-gate-launcher.escript"),
       exunit_runner_sha256: file_digest(root, "scripts/m1-exunit-runner.exs"),
       deps_budget_sha256: file_digest(root, "apps/loopex/lib/mix/tasks/loopex.deps_budget.ex"),
       verifier_sha256: file_digest(root, "scripts/m1-evidence-verifier.exs"),
@@ -270,7 +273,7 @@ defmodule Loopex.M1GateEvidenceTest do
 
     <!-- loopex:m1-matrix:start -->
     ```text
-    matrix candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} runner_sha256=#{context.runner_sha256} exunit_runner_sha256=#{context.exunit_runner_sha256} deps_budget_sha256=#{context.deps_budget_sha256} verifier_sha256=#{context.verifier_sha256} tool_versions_sha256=#{context.tool_versions_sha256} command=bash-p:scripts/check-m1-gate.sh
+    matrix candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} runner_sha256=#{context.runner_sha256} launcher_sha256=#{context.launcher_sha256} exunit_runner_sha256=#{context.exunit_runner_sha256} deps_budget_sha256=#{context.deps_budget_sha256} verifier_sha256=#{context.verifier_sha256} tool_versions_sha256=#{context.tool_versions_sha256} command=bash-p:scripts/check-m1-gate.sh
     capture lane=floor candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.17.0 otp=26.0 erts=14.0 seed=11 executed=101 verdict=CAPTURE exit=0 wall=1s os=darwin arch=arm64 limits=nofile-256,nproc-709 #{floor_identity}
     capture lane=current candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=17.0.5 seed=12 executed=102 verdict=CAPTURE exit=0 wall=2s os=darwin arch=x86_64 limits=nofile-unlimited,nproc-709 #{current_identity}
     capture lane=linux-current candidate=#{context.candidate} gate_sha256=#{context.gate_sha256} command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=17.0.5 seed=13 executed=103 verdict=CAPTURE exit=0 wall=3s os=linux arch=aarch64 limits=nofile-1048576,nproc-unlimited #{linux_identity}
@@ -543,6 +546,7 @@ defmodule Loopex.M1GateEvidenceTest do
     for {field, value} <- [
           {"gate_sha256", context.gate_sha256},
           {"runner_sha256", context.runner_sha256},
+          {"launcher_sha256", context.launcher_sha256},
           {"exunit_runner_sha256", context.exunit_runner_sha256},
           {"deps_budget_sha256", context.deps_budget_sha256},
           {"verifier_sha256", context.verifier_sha256},
@@ -896,12 +900,7 @@ defmodule Loopex.M1GateEvidenceTest do
       )
 
     assert status != 0
-
-    assert output in [
-             "M1 gate RED: ambient environment contains a non-identifier shell name\n",
-             "M1 gate RED: the first child received an ambient or invalid environment entry\n"
-           ]
-
+    assert output == "M1 gate RED: ambient environment contains a non-identifier shell name\n"
     refute output =~ "M1 environment preflight OK"
 
     redaction_functions =
@@ -1014,20 +1013,136 @@ defmodule Loopex.M1GateEvidenceTest do
       assert output =~ "inside the protected user state directory"
       refute output =~ "M1 environment preflight OK"
     end)
+
+    {output, status} =
+      System.cmd(
+        "/bin/bash",
+        [
+          "-c",
+          "exec /bin/bash -p scripts/check-m1-gate.sh --loopex-m1-sealed-inner --environment-fixture </dev/null"
+        ],
+        cd: root,
+        stderr_to_stdout: true
+      )
+
+    assert status != 0
+    assert output == "M1 gate RED: sealed launcher input is unavailable\n"
+
+    shadow_root =
+      Path.join(System.tmp_dir!(), "loopex-m0-absence.#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(shadow_root)
+    on_exit(fn -> File.rm_rf(shadow_root) end)
+
+    shadow_names = ~w(python python2 python3 jq xcrun uv pyenv pipx poetry conda python3.13)
+
+    Enum.each(shadow_names, fn name ->
+      stub =
+        "#!/bin/sh\n" <>
+          "echo \"#{name} is retired; outcome 8 requires its absence\" >&2\n" <>
+          "exit 127\n"
+
+      path = Path.join(shadow_root, name)
+      File.write!(path, stub)
+      File.chmod!(path, 0o755)
+    end)
+
+    incoming_path = System.fetch_env!("PATH")
+
+    {output, 0} =
+      System.cmd(
+        "/bin/bash",
+        ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
+        cd: root,
+        env: [{"PATH", shadow_root <> ":" <> incoming_path}],
+        stderr_to_stdout: true
+      )
+
+    {physical_shadow_root, 0} =
+      System.cmd("/bin/bash", ["-c", "cd -P -- \"$1\" && pwd -P", "_", shadow_root])
+
+    assert output =~ "P" <> "ATH=" <> String.trim(physical_shadow_root) <> ":"
+    assert output =~ "M1 environment preflight OK"
+
+    extra = Path.join(shadow_root, "mix")
+    File.write!(extra, "#!/bin/sh\nexit 0\n")
+    File.chmod!(extra, 0o755)
+
+    {output, status} =
+      System.cmd(
+        "/bin/bash",
+        ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
+        cd: root,
+        env: [{"PATH", shadow_root <> ":" <> incoming_path}],
+        stderr_to_stdout: true
+      )
+
+    assert status != 0
+    assert output =~ "M0 absence root contains an unexpected entry"
+    File.rm!(extra)
+
+    File.write!(Path.join(shadow_root, "jq"), "#!/bin/sh\nexit 127\n")
+
+    {output, status} =
+      System.cmd(
+        "/bin/bash",
+        ["-p", "scripts/check-m1-gate.sh", "--environment-fixture"],
+        cd: root,
+        env: [{"PATH", shadow_root <> ":" <> incoming_path}],
+        stderr_to_stdout: true
+      )
+
+    assert status != 0
+    assert output =~ "M0 absence root contains a noncanonical stub"
   end
 
   test "the read-only prefix disables optional Git locks before repository inspection" do
-    lines = String.split(runner_source(), "\n")
-    assignment = "  GIT_OPTIONAL_LOCKS=0"
-    export = "  builtin export PATH HOME LANG LC_ALL GIT_OPTIONAL_LOCKS"
+    source = runner_source()
+    launcher = launcher_source()
+    lines = String.split(source, "\n")
     allocation = "isolated_root=\"$(mktemp -d \"$task_tmp_root/loopex-m1-task.XXXXXX\")\" \\"
 
-    assert 1 == Enum.count(lines, &(&1 == export))
-    export_index = Enum.find_index(lines, &(&1 == export))
-    assignment_index = Enum.find_index(lines, &(&1 == assignment))
     allocation_index = Enum.find_index(lines, &(&1 == allocation))
-    assert is_integer(assignment_index)
     assert is_integer(allocation_index)
+
+    path_name = "P" <> "ATH"
+
+    direct_mutation =
+      Regex.compile!(
+        "(^|[[:space:]]|;|\\(|\\{)(export|declare|typeset|local|readonly|unset|read|mapfile|readarray|for|select)" <>
+          "([[:space:]]+-[^[:space:]]*)*([[:space:]]+[^[:space:]]+)*[[:space:]]+[\\\"']?" <>
+          path_name <>
+          "[\\\"']?([^[:alnum:]_]|$)|(^|[[:space:]]|;|\\(|\\{)[\\\"']?" <>
+          path_name <>
+          "[\\\"']?([[:space:]]*=|\\[)|printf[[:space:]]+([^[:space:]]+[[:space:]]+)*-v[[:space:]]+[\\\"']?" <>
+          path_name <>
+          "[\\\"']?",
+        "m"
+      )
+
+    assert Enum.flat_map(String.split(source, "\n"), &Regex.scan(direct_mutation, &1)) == []
+    assert Enum.flat_map(String.split(launcher, "\n"), &Regex.scan(direct_mutation, &1)) == []
+    refute source =~ "declare -n"
+    refute source =~ "local -n"
+    refute Regex.match?(~r/eval[^\n]*P(?:ATH)/, source)
+    refute Regex.match?(~r/\$\{![A-Za-z_]/, source)
+
+    assert source =~ "PATH) ;;"
+    assert launcher =~ "Clear = [{Name, false} || Name <- InheritedNames]"
+    assert launcher =~ ~S|{"GIT_OPTIONAL_LOCKS", "0"}|
+    assert launcher =~ "{env, Clear ++ Canonical}"
+    assert launcher =~ "-define(MAX_CONTROL_BYTES, 262144)."
+    assert launcher =~ "file:read(standard_io, 65536)"
+    assert launcher =~ "NewSize =< ?MAX_CONTROL_BYTES"
+    refute launcher =~ "read_all(<<"
+    assert source =~ "/usr/bin/env -i"
+
+    [_, launch_block] = String.split(launcher, "launch(Arguments, Controls =", parts: 2)
+    [child_setup, frame_setup] = String.split(launch_block, "inner_frame({", parts: 2)
+    refute child_setup =~ "ProviderKey"
+    assert frame_setup =~ "ProviderKey"
+    assert source =~ ~S|"$provider_key_value"|
+    refute source =~ ~r/\/usr\/bin\/env -i[^\n]*provider_key_value/
 
     git_indices =
       lines
@@ -1040,25 +1155,8 @@ defmodule Loopex.M1GateEvidenceTest do
       |> Enum.map(&elem(&1, 1))
 
     assert git_indices != []
-    assert Enum.all?(git_indices, &(&1 > export_index and &1 < allocation_index))
+    assert Enum.all?(git_indices, &(&1 < allocation_index))
     assert Enum.any?(Enum.take(lines, allocation_index), &String.contains?(&1, "git status"))
-
-    inspector_index = Enum.find_index(lines, &(&1 == "    /usr/bin/env"))
-    assert assignment_index < export_index
-    assert export_index < inspector_index
-
-    lock_mutations =
-      lines
-      |> Enum.take(allocation_index)
-      |> Enum.with_index()
-      |> Enum.filter(fn {line, _index} ->
-        Regex.match?(
-          ~r/^\s*(?:GIT_OPTIONAL_LOCKS=|builtin export .*GIT_OPTIONAL_LOCKS|.*unset .*GIT_OPTIONAL_LOCKS)/,
-          line
-        )
-      end)
-
-    assert lock_mutations == [{assignment, assignment_index}, {export, export_index}]
 
     red_index =
       Enum.find_index(

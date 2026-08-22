@@ -13,10 +13,13 @@ The one ordinary gate command is:
 
 Privileged Bash is part of the command: it prevents inherited shell functions
 and `BASH_ENV` from interposing before the runner establishes its closed child
-environment. The runner catches mechanical accident and drift. Independent
-review still judges whether tests assert what their names promise, mutations
-and process faults were honestly injected, retained run fields are truthful,
-the closure documents are current, and the working loop satisfies the Purpose.
+environment. A bound OTP launcher performs the one operation a shell runner
+cannot perform without violating the immutable M0 gate: it replaces the child
+environment while the shell leaves its search-path variable unchanged. The
+runner catches mechanical accident and drift. Independent review still judges
+whether tests assert what their names promise, mutations and process faults
+were honestly injected, retained run fields are truthful, the closure documents
+are current, and the working loop satisfies the Purpose.
 
 This gate opens red because the product selectors do not exist. A checker,
 evidence file, status row, or document alone cannot make it green.
@@ -31,30 +34,45 @@ the runner:
    temporary-root input, installed Mix-prerequisite root, gate seed, and
    toolchain path;
 2. resets aliases, hashing, options, glob controls, `IFS`, `CDPATH`, and umask;
-   removes ambient mutable variables; and exports only the derived absolute
-   toolchain `PATH`, `HOME=/`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and
-   `GIT_OPTIONAL_LOCKS=0`;
-3. makes `/usr/bin/env` the first external command and requires its complete
-   output to equal that allowlist plus the conventional `_=/usr/bin/env` entry;
-4. sets `ERL_CRASH_DUMP=/dev/null` and `ERL_CRASH_DUMP_SECONDS=0` before a BEAM
-   child, resolves the actual account home through validated Bash account
-   expansion, and requires the supplied home to have the same physical
-   device/inode identity;
-5. resolves the repository and every inherited task, toolchain, Mix, and
+   removes ambient mutable variables, leaves the shell search-path value and
+   export attribute untouched, and resolves the absolute OTP `escript`
+   executable beside the selected `erl`;
+3. sends the private controls over a pipe—not argv, environment, a file, or
+   retained output—to the digest-bound launcher, whose bootstrap environment
+   contains only locale and crash-dump controls and no provider credential;
+4. has the launcher clear every inherited environment entry for its child,
+   install exactly the derived absolute toolchain `PATH`, `HOME=/`,
+   `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, and `GIT_OPTIONAL_LOCKS=0`, and start the
+   same bound shell in its sealed-inner role; when the incoming path begins with
+   M0's dynamically created absence directory, the outer shell admits it only
+   after proving with builtins that the directory contains exactly the complete
+   core plus any versioned interpreter stubs with M0's exact bytes and no entry
+   capable of shadowing an allowed command, then retains it first in the sealed
+   path; the inner shell removes only Bash-created ambient entries without
+   assigning or changing the export attribute of `PATH`, then makes
+   `/usr/bin/env` its first external child and requires the complete output to
+   equal that allowlist plus the conventional `_=/usr/bin/env` entry;
+5. keeps `ERL_CRASH_DUMP=/dev/null` and `ERL_CRASH_DUMP_SECONDS=0` in force for
+   the launcher and every later BEAM child, resolves the actual account home
+   through validated Bash account expansion, and requires the supplied home to
+   have the same physical device/inode identity;
+6. resolves the repository and every inherited task, toolchain, Mix, and
    temporary path outside the actual account's physical `~/.loopex`;
-6. requires Darwin or Linux, proves the canonical locale resolves to the exact
+7. requires Darwin or Linux, proves the canonical locale resolves to the exact
    `UTF-8` charmap, selects a validated BSD or GNU `stat` dialect and a validated
    `shasum` or `sha256sum` dialect, records populated
    architecture and resource limits, and any capture lane's exact OS pairing;
    and
-7. requires every protected selector as a tracked ordinary `100644` blob,
+8. requires every protected selector as a tracked ordinary `100644` blob,
    every exact locked name, and each exact real-provider tag.
 
 An invalid raw `execve` environment name is not an ordinary Bash identifier.
 Bash releases either expose it during imported-name enumeration or retain it
-only in the inherited environment; the runner refuses at that enumeration or
-at the first environment inspection, before any ordinary child. The gate does
-not claim the inspector itself never received that raw entry. Invocation
+only in the inherited environment. The outer shell or launcher refuses it
+without reproducing the entry, and the sealed child never receives it. The gate
+does not claim the bootstrap launcher itself never received an invalid raw
+entry; it does prove the provider credential arrives only through the private
+pipe and that no ambient entry survives into the sealed child. Invocation
 through a non-privileged or hostile already-running shell is outside the
 accepted command and fails.
 
@@ -75,19 +93,28 @@ product selector, and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `b7e0b00852d87f021d25a131c19a0a176b45daf137bab24282a0dccdff8795f5` | `scripts/check-m1-gate.sh` |
+| `97705e3de70370226bdc3767558bfa98751b44a061ac7c3ff623cd63933ec6a5` | `scripts/check-m1-gate.sh` |
+| `d29358ad791436eefb677fc04077ddd720b521a77d3a8f708c11fd76db17e2ba` | `scripts/m1-gate-launcher.escript` |
 | `954ff0e05521ac1b59e2438ba4e0f836f5137d44175eefdb85d509e3aa37aaa4` | `scripts/m1-exunit-runner.exs` |
-| `131a96c3b860f13d9085d4524bc9349c1104d4ff895a8f9fbcda6507db86e5b3` | `scripts/m1-evidence-verifier.exs` |
+| `0e67f7bec0edeb1296a64c9fecec9fa1486fe18f98154c2ca11fdf220abb23dc` | `scripts/m1-evidence-verifier.exs` |
 | `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `cf7cee235208fbbe166f300f4457aa77251858e3e243fc095f0d406c899233ea` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `2d1af9e9ea5e79a8fc1e1492214a5444d5476f96476a1eec25646868e344e2b7` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `662ca1cd0838ca8f5689697181a04e0e137a07fd017e207c1689fb7941bec20b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 
 These are the complete M1-specific verdict machinery and its adversarial
-corpora. The shell verifies every delegated source/corpus digest before loading
-it. The gate document binds the shell itself without trying to make a file
-self-hash. Generic status, Markdown, Git, JSON, and Matrix code remains
+corpora. The sealed inner shell verifies every delegated source/corpus digest
+before loading candidate code. The gate document externally binds the outer
+shell and launcher bootstrap entrypoints without pretending either can verify
+itself before execution. The launcher is a narrow process boundary, not a second gate: it can
+only clear and replace the child environment, convey private stdin, and return
+the sealed shell's output and exact exit status. Retaining a structurally exact
+incoming M0 absence root means the M1 environment boundary does not make the
+M0 aggregate's retired interpreters available again merely to escape its
+textual scan. A lookalike root, an incomplete stub set, changed stub bytes, a
+special file, or an additional entry fails closed. Generic status, Markdown,
+Git, JSON, and Matrix code remains
 evolvable and is not part of the M1 trust root. Product selectors and Mix
 projects are not byte-bound: their candidate bytes are bound historically by
 the capture commit, while paths, roles, dependency direction, names, states,
@@ -383,11 +410,18 @@ stdout/stderr is captured before diagnostic display and provider bytes are
 redacted in-process. Bootstrap does not substitute for either run, and M1 never
 nests M0.
 
+The same two exact commands must already have exited zero against the clean
+opening candidate before M1 Acceptance is recorded. Those pre-acceptance runs
+are review evidence only and are not committed into this gate, the matrix, or
+another candidate input. A new acceptance candidate invalidates them. This
+keeps the opening runner read-only and truthfully red without postponing the
+green-base invariant until implementation or closure.
+
 `docs/evidence/M1-toolchain-matrix.md` is exactly one title, the
 `loopex:m1-matrix` markers, one `text` fence, and these six lines in order:
 
 ```text
-matrix candidate=<C> gate_sha256=<digest> runner_sha256=<digest> exunit_runner_sha256=<digest> deps_budget_sha256=<digest> verifier_sha256=<digest> tool_versions_sha256=<digest> command=bash-p:scripts/check-m1-gate.sh
+matrix candidate=<C> gate_sha256=<digest> runner_sha256=<digest> launcher_sha256=<digest> exunit_runner_sha256=<digest> deps_budget_sha256=<digest> verifier_sha256=<digest> tool_versions_sha256=<digest> command=bash-p:scripts/check-m1-gate.sh
 capture lane=floor candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.17.0 otp=26.0 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=darwin arch=<ASCII-token> limits=nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<ASCII-token> model=<ASCII-token> endpoint=<ASCII-token> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<ASCII-token> tool_identity=<ASCII-token> recorded=<UTC-RFC3339-second>
 capture lane=current candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=darwin arch=<independent-ASCII-token> limits=nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<same> model=<same> endpoint=<same> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<same> tool_identity=<same> recorded=<UTC-RFC3339-second>
 capture lane=linux-current candidate=<C> gate_sha256=<M1 digest> command=bash-p:scripts/check-m1-gate.sh elixir=1.20.3 otp=29.0.5 erts=<exact> seed=<0..999999> executed=<positive> verdict=CAPTURE exit=0 wall=<ASCII-token> os=linux arch=<independent-ASCII-token> limits=nofile-<positive|unlimited>,nproc-<positive|unlimited> provider=<same> model=<same> endpoint=<same> adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=<same> tool_identity=<same> recorded=<UTC-RFC3339-second>
@@ -396,7 +430,7 @@ m0 lane=current candidate=<C> gate_sha256=<M0 digest> command=bash:scripts/check
 ```
 
 The self-contained bound verifier checks exact grammar/cardinality, pair and
-command identity, numeric fields, all six M1 metadata digests against both `C`
+command identity, numeric fields, all seven M1 metadata digests against both `C`
 and the current bytes, all three capture rows' exact OS/toolchain and
 runtime-bound real-path identities, independently valid architecture and limits,
 identity equality across lanes except for observation time, the immutable M0

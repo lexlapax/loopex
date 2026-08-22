@@ -20,13 +20,14 @@ defmodule Loopex.M1EvidenceVerifier do
   @version ~r/\A[0-9]+(?:\.[0-9]+)*\z/u
 
   @identity_fields ~w(provider model endpoint adapter_build executor_build executor_identity tool_identity recorded)
-  @metadata_fields ~w(candidate gate_sha256 runner_sha256 exunit_runner_sha256 deps_budget_sha256 verifier_sha256 tool_versions_sha256 command)
+  @metadata_fields ~w(candidate gate_sha256 runner_sha256 launcher_sha256 exunit_runner_sha256 deps_budget_sha256 verifier_sha256 tool_versions_sha256 command)
   @capture_fields ~w(lane candidate gate_sha256 command elixir otp erts seed executed verdict exit wall os arch limits provider model endpoint adapter_build executor_build executor_identity tool_identity recorded)
   @m0_fields ~w(lane candidate gate_sha256 command elixir otp provider model endpoint verdict exit)
 
   @bound_artifacts [
     {"gate_sha256", "docs/plans/M1-gate.md"},
     {"runner_sha256", "scripts/check-m1-gate.sh"},
+    {"launcher_sha256", "scripts/m1-gate-launcher.escript"},
     {"exunit_runner_sha256", "scripts/m1-exunit-runner.exs"},
     {"deps_budget_sha256", "apps/loopex/lib/mix/tasks/loopex.deps_budget.ex"},
     {"verifier_sha256", "scripts/m1-evidence-verifier.exs"},

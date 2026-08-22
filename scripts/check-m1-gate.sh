@@ -29,11 +29,11 @@ fail() {
   builtin exit 1
 }
 
-# The accepted command starts a fresh privileged Bash. Capture only controls the
-# gate actually needs, then destroy ambient mutable shell state and export a
-# closed environment. This removes unknown credential aliases, proxy settings,
-# Git/Mix/BEAM controls, BASH_ENV, and unrelated secrets even when the canonical
-# provider key is absent.
+# The outer role performs no ordinary child work. It captures the few controls
+# the gate needs, derives an absolute OTP launcher, scrubs imported shell names,
+# and sends all private bytes to that launcher through stdin. The launcher owns
+# the only child-environment construction; shell code never changes the incoming
+# search-path value or its export attribute.
 find_tool_directory() {
   local tool="$1" entry
   loopex_m1_found_tool_directory=""
@@ -50,7 +50,7 @@ find_tool_directory() {
   return 1
 }
 
-append_safe_path() {
+append_safe_tool_path() {
   local entry="$1"
   case ":$loopex_m1_safe_path:" in
     *":$entry:"*) ;;
@@ -58,22 +58,61 @@ append_safe_path() {
   esac
 }
 
-sanitize_environment() {
+validate_m0_absence_root() {
+  local root="$1" entry base line1 line2 line3 extra core seen=" "
+  local physical
+  [ -d "$root" ] && [ ! -L "$root" ] \
+    || fail "the leading M0 absence root is not an ordinary directory"
+  physical="$(builtin cd -P -- "$root" 2>/dev/null && builtin pwd -P)" \
+    || fail "the leading M0 absence root could not be resolved physically"
+  [ -n "$physical" ] || fail "the leading M0 absence root resolved empty"
+
+  builtin shopt -s nullglob dotglob
+  for entry in "$physical"/*; do
+    [ -f "$entry" ] && [ ! -L "$entry" ] && [ -x "$entry" ] \
+      || fail "M0 absence root contains a non-ordinary executable"
+    base="${entry##*/}"
+    case "$base" in
+      python | python2 | python3 | jq | xcrun | uv | pyenv | pipx | poetry | conda | \
+        python[0-9] | python[0-9].[0-9] | python[0-9].[0-9][0-9]) ;;
+      *) fail "M0 absence root contains an unexpected entry" ;;
+    esac
+    {
+      IFS= builtin read -r line1 &&
+        IFS= builtin read -r line2 &&
+        IFS= builtin read -r line3 &&
+        ! IFS= builtin read -r extra
+    } < "$entry" || fail "M0 absence root contains a noncanonical stub"
+    [ "$line1" = '#!/bin/sh' ] &&
+      [ "$line2" = "echo \"$base is retired; outcome 8 requires its absence\" >&2" ] &&
+      [ "$line3" = 'exit 127' ] \
+      || fail "M0 absence root contains a noncanonical stub"
+    seen="$seen$base "
+  done
+  builtin shopt -u nullglob dotglob
+  for core in python python2 python3 jq xcrun uv pyenv pipx poetry conda; do
+    case "$seen" in
+      *" $core "*) ;;
+      *) fail "M0 absence root is missing a core retired-name stub" ;;
+    esac
+  done
+  loopex_m1_absence_root="$physical"
+}
+
+outer_launch() {
   local loopex_m1_value loopex_m1_name loopex_m1_env_capture
-  local loopex_m1_env_output loopex_m1_env_status loopex_m1_env_rest loopex_m1_line
-  local loopex_m1_path_rest loopex_m1_path_entry loopex_m1_path_done
-  local loopex_m1_declaration
-  local loopex_m1_path_count=0 loopex_m1_home_count=0 loopex_m1_lang_count=0
-  local loopex_m1_lc_count=0 loopex_m1_git_count=0 loopex_m1_under_count=0
+  local loopex_m1_env_status loopex_m1_path_rest loopex_m1_path_entry
+  local loopex_m1_path_done loopex_m1_first_path_entry loopex_m1_launcher
+  local loopex_m1_escript loopex_m1_status
 
   provider_key_value="${LOOPEX_PROVIDER_API_KEY-}"
   loopex_m1_real_home_input="${HOME-}"
   loopex_m1_task_tmp_input="${TMPDIR:-/tmp}"
   loopex_m1_source_mix_home_input="${MIX_HOME:-${HOME-}/.mix}"
   loopex_m1_gate_seed_input="${LOOPEX_GATE_SEED-}"
-  loopex_m1_original_path="${PATH-}"
+  loopex_m1_original_tool_path="${PATH-}"
   loopex_m1_original_path_entries=()
-  loopex_m1_path_rest="$loopex_m1_original_path"
+  loopex_m1_path_rest="$loopex_m1_original_tool_path"
   loopex_m1_path_done=0
   while [ "$loopex_m1_path_done" -eq 0 ]; do
     case "$loopex_m1_path_rest" in
@@ -98,15 +137,30 @@ sanitize_environment() {
   loopex_m1_elixir_directory="$loopex_m1_found_tool_directory"
   find_tool_directory erl || fail "erl is not available on the incoming toolchain path"
   loopex_m1_erl_directory="$loopex_m1_found_tool_directory"
+  loopex_m1_escript="$loopex_m1_erl_directory/escript"
+  [ -f "$loopex_m1_escript" ] && [ -x "$loopex_m1_escript" ] \
+    || fail "escript is not executable beside erl"
 
   loopex_m1_safe_path=""
-  append_safe_path /usr/bin
-  append_safe_path /bin
-  append_safe_path /usr/sbin
-  append_safe_path /sbin
-  append_safe_path "$loopex_m1_mix_directory"
-  append_safe_path "$loopex_m1_elixir_directory"
-  append_safe_path "$loopex_m1_erl_directory"
+  loopex_m1_absence_root=""
+  loopex_m1_first_path_entry="${loopex_m1_original_path_entries[0]}"
+  case "$loopex_m1_first_path_entry" in
+    */loopex-m0-absence.*)
+      validate_m0_absence_root "$loopex_m1_first_path_entry"
+      append_safe_tool_path "$loopex_m1_absence_root"
+      ;;
+  esac
+  append_safe_tool_path /usr/bin
+  append_safe_tool_path /bin
+  append_safe_tool_path /usr/sbin
+  append_safe_tool_path /sbin
+  append_safe_tool_path "$loopex_m1_mix_directory"
+  append_safe_tool_path "$loopex_m1_elixir_directory"
+  append_safe_tool_path "$loopex_m1_erl_directory"
+
+  loopex_m1_launcher="$PWD/scripts/m1-gate-launcher.escript"
+  [ -f "$loopex_m1_launcher" ] && [ ! -L "$loopex_m1_launcher" ] \
+    || fail "the bound M1 gate launcher is unavailable"
 
   for loopex_m1_value in \
     "$loopex_m1_real_home_input" \
@@ -128,136 +182,191 @@ sanitize_environment() {
     fi
   done
 
-  # Expansion happens before the loop starts. Every mutable name not explicitly
-  # retained for the runner is unset. Interpreter-owned readonly variables vary
-  # by Bash release, so they are detected from their attributes rather than from
-  # a version-specific list, made non-exported where Bash permits it, and then
-  # proved absent by the exact first-child environment check below.
-  loopex_m1_all_names=(
-    ${!A@} ${!B@} ${!C@} ${!D@} ${!E@} ${!F@} ${!G@} ${!H@} ${!I@} ${!J@}
-    ${!K@} ${!L@} ${!M@} ${!N@} ${!O@} ${!P@} ${!Q@} ${!R@} ${!S@} ${!T@}
-    ${!U@} ${!V@} ${!W@} ${!X@} ${!Y@} ${!Z@}
-    ${!a@} ${!b@} ${!c@} ${!d@} ${!e@} ${!f@} ${!g@} ${!h@} ${!i@} ${!j@}
-    ${!k@} ${!l@} ${!m@} ${!n@} ${!o@} ${!p@} ${!q@} ${!r@} ${!s@} ${!t@}
-    ${!u@} ${!v@} ${!w@} ${!x@} ${!y@} ${!z@} ${!_@}
-  )
-  for loopex_m1_name in "${loopex_m1_all_names[@]}"; do
+  # Imported Bash identifiers are removed generically after the required values
+  # have been copied into private variables. The incoming search path is the one
+  # explicit exception: it is read-only toolchain authority until env -i replaces
+  # this process. A raw execve name Bash cannot represent remains visible to the
+  # inspector and is refused before the launcher.
+  loopex_m1_environment_names=( $(builtin compgen -e) )
+  for loopex_m1_name in "${loopex_m1_environment_names[@]}"; do
     case "$loopex_m1_name" in
       "" | [!A-Za-z_]* | *[!A-Za-z0-9_]*)
         fail "ambient environment contains a non-identifier shell name"
         ;;
     esac
     case "$loopex_m1_name" in
-      provider_key_value | loopex_m1_real_home_input | loopex_m1_task_tmp_input | \
-        loopex_m1_source_mix_home_input | loopex_m1_gate_seed_input | \
-        loopex_m1_original_path | loopex_m1_original_path_entries | \
-        loopex_m1_path_rest | loopex_m1_path_entry | loopex_m1_path_done | \
-        loopex_m1_found_tool_directory | loopex_m1_mix_directory | \
-        loopex_m1_elixir_directory | loopex_m1_erl_directory | \
-        loopex_m1_safe_path | loopex_m1_value | loopex_m1_name | \
-        loopex_m1_env_capture | loopex_m1_env_output | loopex_m1_env_status | \
-        loopex_m1_env_rest | loopex_m1_declaration | \
-        loopex_m1_line | loopex_m1_path_count | loopex_m1_home_count | \
-        loopex_m1_lang_count | loopex_m1_lc_count | loopex_m1_git_count | \
-        loopex_m1_under_count | loopex_m1_all_names)
-        builtin export -n "$loopex_m1_name" 2>/dev/null \
-          || fail "a retained shell variable could not be made private"
-        ;;
+      PATH) ;;
       *)
         if ! builtin unset -v "$loopex_m1_name" 2>/dev/null; then
-          loopex_m1_declaration="$(builtin declare -p "$loopex_m1_name" 2>/dev/null)" \
-            || fail "ambient shell state could not be classified"
-          case "$loopex_m1_declaration" in
-            declare\ -*)
-              builtin export -n "$loopex_m1_name" 2>/dev/null \
-                || fail "shell-owned state could not be made private"
-              ;;
-            *) fail "ambient mutable shell state could not be cleared" ;;
-          esac
+          builtin export -n "$loopex_m1_name" 2>/dev/null \
+            || fail "ambient shell state could not be made private"
         fi
         ;;
     esac
   done
-  builtin unset -v loopex_m1_all_names loopex_m1_name loopex_m1_original_path_entries \
-    loopex_m1_path_rest loopex_m1_path_entry loopex_m1_path_done loopex_m1_declaration
-  builtin export -n _ PIPESTATUS 2>/dev/null \
-    || fail "dynamic shell metadata could not be made private"
-
-  IFS=$' \t\n'
-  builtin unset -v CDPATH ENV BASH_ENV GLOBIGNORE POSIXLY_CORRECT OPTARG 2>/dev/null \
-    || fail "ambient shell controls could not be cleared"
-  OPTIND=1
-  builtin unalias -a 2>/dev/null || fail "ambient aliases could not be cleared"
-  builtin hash -r
-  builtin set +a +b +C +e +f +h +k +m +n +t +u +v +x
-  builtin set -B
-  builtin set +o posix
-  builtin set +o pipefail
-  builtin shopt -u cdable_vars cdspell dotglob execfail expand_aliases extdebug extglob \
-    failglob nocaseglob nocasematch nullglob sourcepath xpg_echo
-  builtin shopt -s extquote
-  builtin umask 077
-
-  PATH="$loopex_m1_safe_path"
-  HOME=/
-  LANG=C.UTF-8
-  LC_ALL=C.UTF-8
-  GIT_OPTIONAL_LOCKS=0
-  builtin export PATH HOME LANG LC_ALL GIT_OPTIONAL_LOCKS
-
-  # `/usr/bin/env` is the first external child. A terminal status record prevents command
-  # substitution's trailing-LF removal from changing the inspected byte stream.
   loopex_m1_env_capture="$(
     /usr/bin/env
     loopex_m1_env_status=$?
     builtin printf 'LOOPEX_M1_ENV_STATUS=%s' "$loopex_m1_env_status"
   )"
-  case "$loopex_m1_env_capture" in
-    *$'\nLOOPEX_M1_ENV_STATUS=0')
-      loopex_m1_env_output="${loopex_m1_env_capture%$'\nLOOPEX_M1_ENV_STATUS=0'}"
-      ;;
-    *) fail "the canonical child environment could not be inspected" ;;
-  esac
-
-  loopex_m1_env_rest="$loopex_m1_env_output"
+  loopex_m1_env_rest="${loopex_m1_env_capture%$'\nLOOPEX_M1_ENV_STATUS=0'}"
+  loopex_m1_path_count=0
+  loopex_m1_under_count=0
   while [ -n "$loopex_m1_env_rest" ]; do
     case "$loopex_m1_env_rest" in
       *$'\n'*)
         loopex_m1_line="${loopex_m1_env_rest%%$'\n'*}"
         loopex_m1_env_rest="${loopex_m1_env_rest#*$'\n'}"
         ;;
-      *)
-        loopex_m1_line="$loopex_m1_env_rest"
-        loopex_m1_env_rest=""
-        ;;
+      *) loopex_m1_line="$loopex_m1_env_rest"; loopex_m1_env_rest="" ;;
     esac
-    case "$loopex_m1_line" in
-      "PATH=$PATH") loopex_m1_path_count=$((loopex_m1_path_count + 1)) ;;
-      "HOME=/") loopex_m1_home_count=$((loopex_m1_home_count + 1)) ;;
-      "LANG=C.UTF-8") loopex_m1_lang_count=$((loopex_m1_lang_count + 1)) ;;
-      "LC_ALL=C.UTF-8") loopex_m1_lc_count=$((loopex_m1_lc_count + 1)) ;;
-      "GIT_OPTIONAL_LOCKS=0") loopex_m1_git_count=$((loopex_m1_git_count + 1)) ;;
-      "_=/usr/bin/env") loopex_m1_under_count=$((loopex_m1_under_count + 1)) ;;
-      *) fail "the first child received an ambient or invalid environment entry" ;;
+    loopex_m1_env_name="${loopex_m1_line%%=*}"
+    loopex_m1_env_value="${loopex_m1_line#*=}"
+    case "$loopex_m1_env_name" in
+      PATH)
+        [ "$loopex_m1_env_value" = "$loopex_m1_original_tool_path" ] \
+          || fail "the incoming search path changed during environment inspection"
+        loopex_m1_path_count=$((loopex_m1_path_count + 1))
+        ;;
+      _)
+        [ "$loopex_m1_env_value" = /usr/bin/env ] \
+          || fail "ambient environment contains an invalid dynamic entry"
+        loopex_m1_under_count=$((loopex_m1_under_count + 1))
+        ;;
+      *) fail "ambient environment contains a non-identifier shell name" ;;
     esac
   done
-  [ "$loopex_m1_path_count" -eq 1 ] &&
-    [ "$loopex_m1_home_count" -eq 1 ] &&
-    [ "$loopex_m1_lang_count" -eq 1 ] &&
-    [ "$loopex_m1_lc_count" -eq 1 ] &&
-    [ "$loopex_m1_git_count" -eq 1 ] &&
-    [ "$loopex_m1_under_count" -eq 1 ] \
-    || fail "the first child did not receive exactly the canonical environment"
+  [ "$loopex_m1_path_count" -eq 1 ] && [ "$loopex_m1_under_count" -eq 1 ] \
+    || fail "the scrubbed outer environment was incomplete"
 
-  builtin unset -v loopex_m1_env_capture loopex_m1_env_output loopex_m1_env_status \
-    loopex_m1_env_rest \
-    loopex_m1_line loopex_m1_value loopex_m1_name loopex_m1_path_count \
-    loopex_m1_home_count loopex_m1_lang_count loopex_m1_lc_count loopex_m1_git_count \
-    loopex_m1_under_count loopex_m1_original_path loopex_m1_found_tool_directory \
-    loopex_m1_safe_path
+  {
+    builtin printf '%s\0' \
+      LOOPEX_M1_LAUNCHER_V1 \
+      "$loopex_m1_real_home_input" \
+      "$loopex_m1_task_tmp_input" \
+      "$loopex_m1_source_mix_home_input" \
+      "$loopex_m1_gate_seed_input" \
+      "$loopex_m1_safe_path" \
+      "$provider_key_value"
+  } | /usr/bin/env -i \
+    ERL_CRASH_DUMP=/dev/null \
+    ERL_CRASH_DUMP_SECONDS=0 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    "$loopex_m1_escript" "$loopex_m1_launcher" "$@"
+  loopex_m1_status=$?
+  builtin exit "$loopex_m1_status"
 }
 
-sanitize_environment
+if [ "${1-}" != --loopex-m1-sealed-inner ]; then
+  outer_launch "$@"
+fi
+shift
+
+read_sealed_field() {
+  IFS= builtin read -r -d '' "$1" \
+    || fail "sealed launcher input is unavailable"
+}
+
+read_sealed_field loopex_m1_inner_header
+read_sealed_field loopex_m1_real_home_input
+read_sealed_field loopex_m1_task_tmp_input
+read_sealed_field loopex_m1_source_mix_home_input
+read_sealed_field loopex_m1_gate_seed_input
+read_sealed_field loopex_m1_safe_path_input
+read_sealed_field provider_key_value
+[ "$loopex_m1_inner_header" = LOOPEX_M1_SEALED_INNER_V1 ] \
+  || fail "sealed launcher input is malformed"
+[ "$PATH" = "$loopex_m1_safe_path_input" ] \
+  || fail "sealed child search path does not match launcher authority"
+
+builtin unset -v PWD OLDPWD SHLVL _ 2>/dev/null \
+  || fail "Bash-created child state could not be removed"
+IFS=$' \t\n'
+builtin unset -v CDPATH ENV BASH_ENV GLOBIGNORE POSIXLY_CORRECT OPTARG 2>/dev/null \
+  || fail "ambient shell controls could not be cleared"
+OPTIND=1
+builtin unalias -a 2>/dev/null || fail "ambient aliases could not be cleared"
+builtin hash -r
+builtin set +a +b +C +e +f +h +k +m +n +t +u +v +x
+builtin set -B
+builtin set +o posix
+builtin set +o pipefail
+builtin shopt -u cdable_vars cdspell dotglob execfail expand_aliases extdebug extglob \
+  failglob nocaseglob nocasematch nullglob sourcepath xpg_echo
+builtin shopt -s extquote
+builtin umask 077
+
+loopex_m1_env_capture="$(
+  /usr/bin/env
+  loopex_m1_env_status=$?
+  builtin printf 'LOOPEX_M1_ENV_STATUS=%s' "$loopex_m1_env_status"
+)"
+case "$loopex_m1_env_capture" in
+  *$'\nLOOPEX_M1_ENV_STATUS=0')
+    loopex_m1_env_output="${loopex_m1_env_capture%$'\nLOOPEX_M1_ENV_STATUS=0'}"
+    ;;
+  *) fail "the canonical child environment could not be inspected" ;;
+esac
+loopex_m1_path_count=0
+loopex_m1_home_count=0
+loopex_m1_lang_count=0
+loopex_m1_lc_count=0
+loopex_m1_git_count=0
+loopex_m1_under_count=0
+loopex_m1_env_rest="$loopex_m1_env_output"
+while [ -n "$loopex_m1_env_rest" ]; do
+  case "$loopex_m1_env_rest" in
+    *$'\n'*)
+      loopex_m1_line="${loopex_m1_env_rest%%$'\n'*}"
+      loopex_m1_env_rest="${loopex_m1_env_rest#*$'\n'}"
+      ;;
+    *) loopex_m1_line="$loopex_m1_env_rest"; loopex_m1_env_rest="" ;;
+  esac
+  loopex_m1_env_name="${loopex_m1_line%%=*}"
+  loopex_m1_env_value="${loopex_m1_line#*=}"
+  case "$loopex_m1_env_name:$loopex_m1_env_value" in
+    PATH:"$PATH") loopex_m1_path_count=$((loopex_m1_path_count + 1)) ;;
+    HOME:/) loopex_m1_home_count=$((loopex_m1_home_count + 1)) ;;
+    LANG:C.UTF-8) loopex_m1_lang_count=$((loopex_m1_lang_count + 1)) ;;
+    LC_ALL:C.UTF-8) loopex_m1_lc_count=$((loopex_m1_lc_count + 1)) ;;
+    GIT_OPTIONAL_LOCKS:0) loopex_m1_git_count=$((loopex_m1_git_count + 1)) ;;
+    _:/usr/bin/env) loopex_m1_under_count=$((loopex_m1_under_count + 1)) ;;
+    *) fail "the first child received an ambient or invalid environment entry" ;;
+  esac
+done
+[ "$loopex_m1_path_count" -eq 1 ] &&
+  [ "$loopex_m1_home_count" -eq 1 ] &&
+  [ "$loopex_m1_lang_count" -eq 1 ] &&
+  [ "$loopex_m1_lc_count" -eq 1 ] &&
+  [ "$loopex_m1_git_count" -eq 1 ] &&
+  [ "$loopex_m1_under_count" -eq 1 ] \
+  || fail "the first child did not receive exactly the canonical environment"
+
+loopex_m1_original_path_entries=()
+loopex_m1_path_rest="$PATH"
+loopex_m1_path_done=0
+while [ "$loopex_m1_path_done" -eq 0 ]; do
+  case "$loopex_m1_path_rest" in
+    *:*)
+      loopex_m1_path_entry="${loopex_m1_path_rest%%:*}"
+      loopex_m1_path_rest="${loopex_m1_path_rest#*:}"
+      ;;
+    *)
+      loopex_m1_path_entry="$loopex_m1_path_rest"
+      loopex_m1_path_rest=""
+      loopex_m1_path_done=1
+      ;;
+  esac
+  loopex_m1_original_path_entries+=("$loopex_m1_path_entry")
+done
+find_tool_directory mix || fail "mix is unavailable in the sealed child"
+loopex_m1_mix_directory="$loopex_m1_found_tool_directory"
+find_tool_directory elixir || fail "elixir is unavailable in the sealed child"
+loopex_m1_elixir_directory="$loopex_m1_found_tool_directory"
+find_tool_directory erl || fail "erl is unavailable in the sealed child"
+loopex_m1_erl_directory="$loopex_m1_found_tool_directory"
+
 builtin set -euo pipefail
 
 # Every later BEAM child, including read-only project inspection before task-root
@@ -872,18 +981,22 @@ require_bound_artifact() {
 
 selector_runner_source="scripts/m1-exunit-runner.exs"
 evidence_verifier_source="scripts/m1-evidence-verifier.exs"
+gate_launcher_source="scripts/m1-gate-launcher.escript"
 deps_budget_source="apps/loopex/lib/mix/tasks/loopex.deps_budget.ex"
+require_bound_artifact "$gate_launcher_source" \
+  d29358ad791436eefb677fc04077ddd720b521a77d3a8f708c11fd76db17e2ba \
+  "bound sealed gate launcher"
 require_bound_artifact "$selector_runner_source" \
   954ff0e05521ac1b59e2438ba4e0f836f5137d44175eefdb85d509e3aa37aaa4 \
   "bound standalone selector runner"
 require_bound_artifact "$evidence_verifier_source" \
-  131a96c3b860f13d9085d4524bc9349c1104d4ff895a8f9fbcda6507db86e5b3 \
+  0e67f7bec0edeb1296a64c9fecec9fa1486fe18f98154c2ca11fdf220abb23dc \
   "bound M1 evidence verifier"
 require_bound_artifact apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861 \
   "bound dependency-direction reader"
 require_bound_artifact apps/loopex/test/m1_gate_evidence_test.exs \
-  cf7cee235208fbbe166f300f4457aa77251858e3e243fc095f0d406c899233ea \
+  2d1af9e9ea5e79a8fc1e1492214a5444d5476f96476a1eec25646868e344e2b7 \
   "bound M1 mechanics corpus"
 require_bound_artifact apps/loopex/test/m1_exunit_runner_test.exs \
   662ca1cd0838ca8f5689697181a04e0e137a07fd017e207c1689fb7941bec20b \

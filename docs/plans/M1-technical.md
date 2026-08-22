@@ -34,10 +34,19 @@ pre-start boundary.
 
 No product implementation is authorized until the maintainer or a recorded
 delegate accepts both normative envelopes and the gate's canonical bytes
-together. Acceptance authorizes only the eight outcomes and their three named
-boundary behaviours. Any deferral, gate weakening, evidence waiver, fourth
-product boundary behaviour, new persistence decision, or public compatibility
-claim requires its ordinary explicit disposition; none is implicit here.
+together. Before that Acceptance record may be completed, the exact clean
+candidate must produce the declared M1 opening red on every opening platform
+lane and independently keep the immutable M0 gate green on both locked
+toolchain pairs, including its real-provider role. The two M0 runs are
+out-of-band acceptance evidence: they are never pasted into a gate input,
+nested inside the M1 runner, or replaced by bootstrap, status, a credential-free
+subset, or a run at another SHA. Missing provider authority makes that evidence
+unavailable and blocks acceptance rather than becoming a skip.
+
+Acceptance authorizes only the eight outcomes and their three named boundary
+behaviours. Any deferral, gate weakening, evidence waiver, fourth product
+boundary behaviour, new persistence decision, or public compatibility claim
+requires its ordinary explicit disposition; none is implicit here.
 
 <a id="technical-plan-ownership"></a>
 ### Ownership, Decision Owners, and Rejoin Barriers
@@ -414,17 +423,22 @@ There is no installed base and no released artifact. M0 journals and retained
 evidence are not migrated; M1 tests and demonstrations create isolated M1 data
 roots. No PostgreSQL, SQLite, or other external store migration is claimed.
 
-Before M1 first becomes green, every checkpoint keeps bootstrap green while the
-M1 runner reaches its next truthful missing-behavior red. The accepted opening
-checkpoint remains the complete repository rollback target: reverting
-unintegrated M1 work to it restores the accepted red condition without rewriting
-durable user data. After a complete M1 candidate first becomes green, each later
-checkpoint must keep M1 green or be reverted to the last reviewed green
-checkpoint. The closed M0 gate remains immutable and is re-proved independently
-exactly once on each locked pair at source candidate `C` under the retained
-evidence obligation above. The direct `C→E→T` chain carries those same-source
-proofs through closure; another proof is required only when a new `C` is
-required. M0 is never nested inside the M1 runner.
+Before M1 first becomes green, every checkpoint offered for integration or
+review keeps bootstrap and both exact M0 lanes green while the M1 runner reaches
+its next truthful missing-behavior red. The accepted opening checkpoint remains
+the complete repository rollback target: reverting unintegrated M1 work to it
+restores the accepted red condition without rewriting durable user data. After
+a complete M1 candidate first becomes green, each later checkpoint must keep M1
+and both M0 lanes green or be reverted to the last reviewed green checkpoint.
+Ordinary local red-green work between checkpoints is not represented as an
+integration candidate.
+
+The closed M0 gate remains immutable. Its two pre-acceptance runs establish the
+green base for the accepted opening SHA; it is then re-proved independently
+exactly once on each locked pair at every new source candidate `C` under the
+retained evidence obligation above. The direct `C→E→T` chain carries those
+same-source proofs through closure; another proof is required whenever a new
+`C` is required. M0 is never nested inside the M1 runner.
 
 The branch does not merge while M1 is red. No rollback claim extends to a data
 root written by a different source revision, because this milestone accepts no
@@ -541,9 +555,16 @@ The working trace is the unit of value. Focused tests, retained evidence, and
 repository checks support it but cannot satisfy an outcome in its place. Gate
 work before acceptance is limited to direct portable enforcement that measures
 the accepted obligations honestly: the outer gate runner, one standalone M1
-ExUnit runner, one self-contained M1 evidence verifier, and the single dynamic
-dependency authority above. They remain repository tooling outside the product
-boundary and create no product mechanism or generalized evidence framework.
+ExUnit runner, one self-contained M1 evidence verifier, one bound OTP
+environment launcher, and the single dynamic dependency authority above. The
+launcher exists because preserving an ambient search path would weaken M1's
+credential and command containment, while assigning one in shell would break
+the immutable M0 gate. It only clears and replaces the sealed runner's process
+environment, preserves an exact incoming M0 absence-stub root ahead of the
+derived toolchain path, conveys private controls over stdin, and returns the
+child's bytes and exit status. It is not a general command runner. These tools
+remain repository tooling outside the product boundary and create no product
+mechanism or generalized evidence framework.
 
 Exactly three product boundary behaviours are permitted:
 
