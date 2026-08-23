@@ -134,7 +134,7 @@ defmodule Loopex.ToolCallReaderTest do
       assert {"e 😀", 0} =
                feed(reader, ["tool_input", "command"], document,
                  env: [
-                   {"LC_ALL", "en_US.UTF-8"},
+                   {"LC_ALL", "C.UTF-8"},
                    {"PATH", bin <> ":" <> System.fetch_env!("PATH")}
                  ]
                )
