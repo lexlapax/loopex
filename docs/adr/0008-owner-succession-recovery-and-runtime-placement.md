@@ -66,12 +66,15 @@ Technical depth: [The two information and authority gaps](0008-owner-succession-
   three outcomes and compare-and-set semantics in the same session mutation
   domain as `advance_owner`. It mutates only private recovery identity and its
   terminal staging resolution — never the owner head, journal version, private
-  session journal, outbox, or a public plane. A lost staging reply is recovered
-  by exact re-presentation while the caller retains its bindings; after caller
-  loss, a successor uses the index only to discover the candidate before the
-  ADR 0006 status/head/fresh-CAS sequence. Contenders for the same prior attempt
-  generation cannot both install candidates. Every implementation must cover
-  its declared pre-linearization, post-linearization, and recovery fault points.
+  session journal, outbox, or a public plane. On the first attempt it atomically
+  creates the exact command binding, its open state, generation 1, the candidate,
+  and the staging resolution; no separate bind mutation exists. A lost staging
+  reply is recovered by exact re-presentation while the caller retains its
+  bindings; after caller loss, a successor uses the index only to discover the
+  candidate before the ADR 0006 status/head/fresh-CAS sequence. Contenders for
+  the same absent entry or prior attempt generation cannot both install
+  candidates. Every implementation must cover its declared pre-linearization,
+  post-linearization, and recovery fault points.
 - **Recovery always discovers before it supersedes.** A completed logical
   succession returns its original durable command result and never stages or
   advances ownership again. An open succession reads its indexed candidate and

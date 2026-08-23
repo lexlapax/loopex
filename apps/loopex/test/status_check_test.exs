@@ -906,6 +906,19 @@ defmodule Loopex.StatusCheckTest do
     assert in_progress["Next transition"] =~ "In review"
   end
 
+  test "accepted M1 truthfully derives its implementation-time ADR blocker" do
+    path = "docs/adr/0008-owner-succession-recovery-and-runtime-placement.md"
+
+    proposed = Register.expected_capsule("Accepted", "M1", %{path => "Proposed"})
+    accepted = Register.expected_capsule("Accepted", "M1", %{path => "Accepted"})
+
+    assert proposed["Blockers"] =~ "ADR 0008"
+    assert proposed["Blockers"] =~ "Workstream A"
+    assert proposed["Next maintainer decision"] == "Accept or reject ADR 0008"
+    assert proposed["Authorized work"] == accepted["Authorized work"]
+    assert accepted["Blockers"] == "None; `M1` is accepted and implementation may proceed"
+  end
+
   test "a milestone state with no derived capsule fails closed" do
     assert "In review" in Register.delivery_states()
 

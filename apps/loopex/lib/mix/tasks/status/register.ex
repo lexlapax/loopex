@@ -67,6 +67,8 @@ defmodule Loopex.Checks.Register do
     "docs/adr/0007-local-executor-grant-job-receipt.md" => "ADR 0007"
   }
 
+  @m1_implementation_adr "docs/adr/0008-owner-succession-recovery-and-runtime-placement.md"
+
   @seed_blocked %{
     "Integrated phase" => "Pre-implementation planning",
     "Last closed product checkpoint" => @seed_checkpoint,
@@ -443,14 +445,35 @@ defmodule Loopex.Checks.Register do
     )
   end
 
+  def expected_capsule("Accepted", "M1", adr_statuses) do
+    case Map.fetch!(adr_statuses, @m1_implementation_adr) do
+      "Accepted" ->
+        accepted_values("M1")
+
+      _unresolved ->
+        accepted_values("M1")
+        |> Map.put(
+          "Blockers",
+          "[ADR 0008](../adr/0008-owner-succession-recovery-and-runtime-placement.md#concept) " <>
+            "must be accepted before Workstream A is revised and Workstream B is completed"
+        )
+        |> Map.put("Next maintainer decision", "Accept or reject ADR 0008")
+        |> Map.put(
+          "Next transition",
+          "After ADR 0008 is accepted, revise Workstream A, rejoin Workstream B, and turn " <>
+            "the locked gate green"
+        )
+    end
+  end
+
   def expected_capsule("Accepted", name, _adr_statuses), do: accepted_values(name)
 
   def expected_capsule(
         {delivery_name, "Accepted"},
         {lookahead_name, "Open"},
-        _adr_statuses
+        adr_statuses
       ) do
-    expected_capsule("Accepted", delivery_name, %{})
+    expected_capsule("Accepted", delivery_name, adr_statuses)
     |> Map.put(
       "Blockers",
       "None for `#{delivery_name}` delivery; `#{lookahead_name}` acceptance, integration, " <>

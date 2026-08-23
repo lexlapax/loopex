@@ -107,15 +107,23 @@ authoritative observation.
 behaviour, not a fourth behaviour. It is a private session-ownership recovery
 mutation in the same session mutation domain as `advance_owner`, serialized with
 that domain's status reads, ownership-head reads, staging resolutions, and owner
-compare-and-sets. It binds the key above, the prior attempt generation or
-explicit absence, a fresh stage transaction ID, a fresh candidate transaction
-ID, and the candidate's complete canonical bytes and digest. Its unknown-ID path
-atomically compares the exact command binding, requires `logical_status = open`,
-installs exactly the next generation and candidate, and retains its terminal
-resolution. A stale expected generation or completed logical command is a
-terminal non-commit for that new staging transaction. Exact re-presentation of a
-known staging transaction validates every immutable scalar, exact byte string,
-and digest before returning its retained outcome.
+compare-and-sets. It carries the key and exact command binding above, an expected
+state of either explicit absence or an open prior attempt generation, a fresh
+stage transaction ID, a fresh candidate transaction ID, and the candidate's
+complete canonical bytes and digest.
+
+On an unknown staging transaction ID, the explicit-absence branch requires that
+no logical entry exists for the command key and atomically creates the exact
+command binding, `logical_status = open`, generation 1, the candidate, and the
+staging transaction's committed resolution. There is no earlier or uncatalogued
+command-binding mutation. The present-entry branch first validates the complete
+command binding, then requires `logical_status = open` and the exact expected
+generation before it atomically installs the next generation and candidate and
+retains the staging resolution. A now-present entry, changed binding, stale
+expected generation, or completed logical command is a terminal non-commit for
+that new staging transaction. Exact re-presentation of a known staging
+transaction validates every immutable scalar, exact byte string, and digest
+before returning its retained outcome.
 
 Staging changes only the private attempt index and the staging transaction's
 terminal resolution. It does not advance `owner_epoch`, `journal_version`, or
@@ -145,9 +153,12 @@ disjoint branches:
   fenced until the serialized staging/index history permits the next
   generation.
 
-Two delayed staging requests that observed the same generation cannot both
-install candidates. A caller whose candidate lost the staging compare-and-set
-never submits that candidate to `advance_owner`.
+Two delayed staging requests that observed the same absence or generation cannot
+both install candidates. This includes competing first stages with the same
+command binding and a changed binding reusing the same command key: one exact
+absent-state transaction may create the entry, while every loser receives its
+own retained terminal non-commit. A caller whose candidate lost the staging
+compare-and-set never submits that candidate to `advance_owner`.
 
 Only one unresolved succession candidate may fence a session mutation domain at
 a time, regardless of how many different command IDs could derive different
@@ -187,9 +198,10 @@ the earlier command's result is known.
 
 ### Recovery algorithm
 
-Initial acquisition with no indexed command entry first binds the exact logical
-command, reads the ownership head, constructs a fresh candidate, stages
-generation 1, and submits it only after staging is confirmed.
+Initial acquisition with no indexed command entry reads the ownership head,
+constructs a fresh candidate, and asks `stage_owner_attempt` to atomically create
+the exact logical-command binding together with generation 1 and that candidate.
+It submits the candidate only after staging is confirmed.
 
 Recovery uses this loop:
 
@@ -230,6 +242,11 @@ observed transition/fault pairs remains required. Store conformance adds:
 - loss before staging linearization, after staging linearization, and during
   staging-result recovery;
 - two candidates contending for one expected attempt generation;
+- two first stages contending for one absent command entry, proving exactly one
+  atomically creates the binding, open state, generation 1, candidate, and
+  staging resolution;
+- a changed command binding presented from the same observed absence, proving it
+  cannot alter or replace the winning first-stage entry;
 - exact staging re-presentation and changed-binding conflict;
 - command identity isolation by runtime, plus conflict when the same command ID
   is re-presented with another kind, session, domain, bytes, or digest;
