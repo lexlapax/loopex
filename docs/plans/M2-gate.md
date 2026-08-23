@@ -64,9 +64,11 @@ executor, and its own observing model adapter — starts it through
 `Loopex.start_link/1`, creates a session, submits one prompt through the public
 facade, waits for the session to settle, and reports five observations: how many
 model requests the loop staged, whether the last staged request carried the
-committed conversation or one synthesized user message, how many items reached
-the progress plane during the run, whether the model and executor ports expose
-the arity that carries a progress function at all, and whether the runtime
+committed conversation or one synthesized user message, how many items reached the
+probe process during the run, which is a mailbox count rather than a filtered
+progress-plane count and is therefore a floor, whether the model and executor
+ports declare the arity that carries a progress function — a shape check that
+accompanies the behavioural ones rather than an observation — and whether the runtime
 accepted a named active tool set or only one hand-written definition. It asks for
 the `M2` shape first and falls back to the `M1` shape, so one program observes
 either tree and a refusal is itself one of the observations.
