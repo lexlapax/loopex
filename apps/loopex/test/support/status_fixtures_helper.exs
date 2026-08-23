@@ -32,7 +32,14 @@ defmodule Loopex.StatusFixtures do
 
   @open_summary "**Revision status:** Pre-implementation planning; active milestone `M0` is open; no next candidate is recorded."
 
-  @closed_summary "**Revision status:** Pre-implementation planning; no milestone is active; no next candidate is recorded."
+  # Concept: a register carrying a `Closed` row derives the closed phase, so the
+  # sentence a closed fixture must carry differs from the seed sentence in the
+  # phase as well as in the milestone clauses.
+  @closed_phase "Closed milestone product baseline"
+
+  @closed_summary "**Revision status:** #{@closed_phase}; no milestone is active; no next candidate is recorded."
+
+  @planning_phase_cell "| Integrated phase | Pre-implementation planning |"
 
   @gate """
   # Gate
@@ -77,6 +84,24 @@ defmodule Loopex.StatusFixtures do
   def summary, do: @summary
   def open_summary, do: @open_summary
   def closed_summary, do: @closed_summary
+
+  @doc """
+  ## Concept
+
+  Rewrites a fixture document's Integrated phase cell to the phase a register
+  carrying a `Closed` row derives.
+
+  ## Technical depth
+
+  The phase is owned by `Register.integrated_phase/2` rather than by the derived
+  capsule, so a fixture that closes a milestone has to move this cell explicitly.
+  A test that forgets to gets the phase owner's failure, which is the behaviour
+  being fixtured, not a fixture bug.
+  """
+  def closed_phase_cell(text) do
+    String.replace(text, @planning_phase_cell, "| Integrated phase | #{@closed_phase} |")
+  end
+
   def gate, do: @gate
   def gate_separators, do: @gate_separators
   def adr_paths, do: @adr_paths
@@ -107,7 +132,7 @@ defmodule Loopex.StatusFixtures do
 
     | Field | Value |
     | --- | --- |
-    | Integrated phase | Pre-implementation planning |
+    #{@planning_phase_cell}
     | Last closed product checkpoint | Seed bootstrap — 2026-08-15 |
     #{@blockers_cell}
     | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
@@ -571,11 +596,15 @@ defmodule Loopex.StatusFixtures do
 
   Written by the transition that first recorded `Closed`, which is what the
   register's catch-all demands rather than permitting the check to be relaxed.
-  Rewrites exactly the four fields the Closed derivation changes; the checkpoint
-  is left alone because `Register.closed_product_checkpoint/2` owns that field.
+  Rewrites the four fields the Closed derivation changes, plus the phase, which
+  `Register.integrated_phase/2` owns and which a `Closed` row moves off its
+  planning value. The checkpoint is left alone because
+  `Register.closed_product_checkpoint/2` owns that field and derives it from the
+  milestone's identity and date rather than from the lifecycle state.
   """
   def closed_capsule(text) do
     text
+    |> closed_phase_cell()
     |> String.replace(
       @blockers_cell,
       "| Blockers | None; `M0` is closed and its governance row is recorded |"

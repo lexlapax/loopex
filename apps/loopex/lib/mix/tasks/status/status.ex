@@ -98,7 +98,9 @@ defmodule Loopex.Checks.Status do
       rows
     )
 
-    expected_summary = Register.summary(Map.fetch!(values, "Integrated phase"), rows)
+    phase = Register.integrated_phase(Map.fetch!(values, "Integrated phase"), rows)
+
+    expected_summary = Register.summary(phase, rows)
 
     if summary_line != expected_summary do
       raise Invalid, "#{@index}: Revision status is not derived from phase and register"
@@ -176,6 +178,24 @@ defmodule Loopex.Checks.Status do
   # capsule ever was for this field.
   @checkpoint_field "Last closed product checkpoint"
 
+  # Concept: the same rule, applied to the field naming the kind of state the
+  # repository is in.
+  #
+  # Technical depth: `Integrated phase` was the second field the capsule owned
+  # twice, and it lost the argument the same way and for longer. `@seed_blocked`
+  # assigned it once, no builder overrode it for any state, and this comparison
+  # then required both primary records to keep saying "Pre-implementation
+  # planning" after M0 and M1 had closed with product on `main`. The two records
+  # agreed with each other, which is exactly why nothing caught it.
+  # `Register.integrated_phase/2` owns the field now and derives it from the
+  # register's `Closed` rows. Excluding it here is again stricter, not looser: the
+  # capsule could only ever demand one constant for every lifecycle state, while
+  # the owner demands the value the register implies and refuses the other one.
+  @phase_field "Integrated phase"
+
+  # Concept: the fields whose owners live outside the lifecycle capsule.
+  @derived_fields [@checkpoint_field, @phase_field]
+
   # Concept: the capsule describes the current delivery milestone and its one
   # permitted Open successor.
   #
@@ -213,9 +233,9 @@ defmodule Loopex.Checks.Status do
         {nil, nil, nil, []} ->
           raise Invalid, "#{@index}: milestone register is empty"
       end
-      |> Map.delete(@checkpoint_field)
+      |> Map.drop(@derived_fields)
 
-    if Map.delete(values, @checkpoint_field) != expected do
+    if Map.drop(values, @derived_fields) != expected do
       raise Invalid, "#{@index}: the register state requires its exact derived status capsule"
     end
   end

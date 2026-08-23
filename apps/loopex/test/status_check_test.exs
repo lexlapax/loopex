@@ -351,7 +351,15 @@ defmodule Loopex.StatusCheckTest do
 
     for later <- [in_progress, in_review] do
       assert Map.fetch!(later, "Authorized work") == Map.fetch!(accepted, "Authorized work")
-      assert Map.fetch!(later, "Integrated phase") == Map.fetch!(accepted, "Integrated phase")
+    end
+
+    # The capsule no longer carries a phase at all. It used to, as a constant no
+    # lifecycle state overrode, and this pair of assertions read as proof that the
+    # phase was stable across states when it was only proof that a literal equals
+    # itself. `Register.integrated_phase/1` owns the field and is exercised where
+    # it can actually vary: against the register.
+    for capsule <- [accepted, in_progress, in_review] do
+      refute Map.has_key?(capsule, "Integrated phase")
     end
 
     # In review hands the next decision back to the maintainer; In progress does not.
@@ -370,6 +378,86 @@ defmodule Loopex.StatusCheckTest do
     refute Map.fetch!(closed, "Authorized work") == Map.fetch!(accepted, "Authorized work")
     assert Map.fetch!(closed, "Authorized work") =~ "no product implementation"
     assert Map.fetch!(closed, "Next transition") =~ "next milestone"
+  end
+
+  # Concept: the phase states which side of the first closure the repository is
+  # on, and nothing else.
+  #
+  # Technical depth: nothing protected this field before. `@seed_blocked` assigned
+  # it once, every capsule builder inherited the constant, and the capsule
+  # comparison then required the document to keep the seed value for every
+  # representable lifecycle state — so both primary records still read
+  # "Pre-implementation planning" after M0 and M1 closed with product integrated,
+  # and agreed with each other while doing it. These cases pin the value to the
+  # register instead of to a constant, in both directions.
+  test "the integrated phase is derived from the register's closed rows" do
+    planning = "Pre-implementation planning"
+    closed = "Closed milestone product baseline"
+
+    assert Register.integrated_phase([]) == planning
+
+    for state <- Register.states() -- ["Closed"] do
+      assert Register.integrated_phase([{"M0", state}]) == planning
+    end
+
+    assert Register.integrated_phase([{"M0", "Closed"}]) == closed
+
+    for state <- Register.states() do
+      assert Register.integrated_phase([{"M0", "Closed"}, {"M1", state}]) == closed
+    end
+
+    assert Register.integrated_phase([{"M0", "Closed"}, {"M1", "Closed"}, {"M2", "Open"}]) ==
+             closed
+
+    # Two values, not a ladder: every representable register derives one of them.
+    values =
+      for rows <- [
+            [],
+            [{"a", "Blocked"}],
+            [{"a", "Open"}],
+            [{"a", "Accepted"}, {"b", "Open"}],
+            [{"a", "Closed"}],
+            [{"a", "Closed"}, {"b", "In review"}]
+          ],
+          do: Register.integrated_phase(rows)
+
+    assert MapSet.new(values) == MapSet.new([planning, closed])
+
+    # The phase names the kind of state. Identity and date belong to
+    # `Last closed product checkpoint`, and authority to `Authorized work`.
+    refute closed =~ ~r/`|[0-9]{4}-[0-9]{2}-[0-9]{2}/
+    refute closed =~ ~r/authori[sz]/i
+
+    # Fail closed. Closed rows are history and precede every later state, so a
+    # Closed row behind a live one is a register shape the lifecycle does not
+    # represent — not a phase to be guessed.
+    for state <- Register.states() -- ["Closed"] do
+      assert_raise Invalid, ~r/Closed milestones must precede/, fn ->
+        Register.integrated_phase([{"M0", state}, {"M1", "Closed"}])
+      end
+    end
+  end
+
+  test "a status document cannot carry a phase its register does not derive" do
+    # No Closed row, so the closed phase is not merely different prose: it is a
+    # claim the register refutes.
+    Fixture.documents()
+    |> replace(
+      "docs/plans/README.md",
+      "| Integrated phase | Pre-implementation planning |",
+      "| Integrated phase | Closed milestone product baseline |"
+    )
+    |> assert_invalid("Integrated phase")
+
+    # Rewriting every record together used to be enough, because the sentence was
+    # composed from whatever cell the document carried. It is composed from the
+    # register now, so the records agreeing with each other no longer settles it.
+    Fixture.documents()
+    |> Map.new(fn {path, text} ->
+      {path,
+       String.replace(text, "Pre-implementation planning", "Closed milestone product baseline")}
+    end)
+    |> assert_invalid("Integrated phase")
   end
 
   test "the JSON reader decodes unicode escapes so hooks still match" do
@@ -894,7 +982,6 @@ defmodule Loopex.StatusCheckTest do
     in_progress = Register.expected_capsule("In progress", "M0", %{})
 
     assert accepted["Authorized work"] == in_progress["Authorized work"]
-    assert accepted["Integrated phase"] == in_progress["Integrated phase"]
     assert accepted["Next maintainer decision"] == in_progress["Next maintainer decision"]
 
     changed =
@@ -1888,6 +1975,28 @@ defmodule Loopex.StatusCheckTest do
             "| Next maintainer decision | Disposition ADR 0001 and ADR 0002 |"
           )
           |> assert_invalid("exact derived status capsule")
+
+          # A closed register cannot keep describing the repository as
+          # pre-implementation. Both primary records carried that sentence for two
+          # closed milestones because the capsule pinned a constant; restoring the
+          # constant here must now fail in both documents.
+          for path <- ["docs/plans/README.md", "README.md"] do
+            closed
+            |> replace(
+              path,
+              "Closed milestone product baseline",
+              "Pre-implementation planning"
+            )
+            |> assert_invalid()
+          end
+
+          closed
+          |> replace(
+            "docs/plans/README.md",
+            "| Integrated phase | Closed milestone product baseline |",
+            "| Integrated phase | Pre-implementation planning |"
+          )
+          |> assert_invalid("Integrated phase")
       end
     end
   end
@@ -1917,22 +2026,30 @@ defmodule Loopex.StatusCheckTest do
       |> assert_invalid()
     end
 
+    # The phase moved out of the derived capsule and into its own owner, so this
+    # case is retargeted rather than dropped: it still proves a document cannot
+    # award itself implementation authority through the phase cell, and it now
+    # names the check that refuses it. The other four fields remain capsule
+    # fields and keep the capsule's message.
     authority_cases = [
-      {"phase", "Pre-implementation planning", "Product implementation authorized"},
+      {"phase", "Pre-implementation planning", "Product implementation authorized",
+       "Integrated phase"},
       {"blockers",
        "must be accepted before M0 opens; a replacement requires a governed guard change",
-       "are optional"},
-      {"authorized work", "no product implementation", "product implementation is authorized"},
-      {"decision", "Disposition ADR 0001 and ADR 0002", "Begin product implementation"},
+       "are optional", "exact derived status capsule"},
+      {"authorized work", "no product implementation", "product implementation is authorized",
+       "exact derived status capsule"},
+      {"decision", "Disposition ADR 0001 and ADR 0002", "Begin product implementation",
+       "exact derived status capsule"},
       {"transition", "the maintainer explicitly opens `M0` gate-first",
-       "implementation begins immediately"}
+       "implementation begins immediately", "exact derived status capsule"}
     ]
 
-    for {label, old, new} <- authority_cases do
+    for {label, old, new, fragment} <- authority_cases do
       documents =
         Map.new(Fixture.documents(), fn {path, text} -> {path, String.replace(text, old, new)} end)
 
-      assert_invalid(documents, "exact derived status capsule")
+      assert_invalid(documents, fragment)
       assert label != nil
     end
 
@@ -2213,6 +2330,16 @@ defmodule Loopex.StatusCheckTest do
   test "an open milestone beside a closed one derives the open one's capsule" do
     rename = &String.replace(&1, "M0", "M2")
 
+    # The sentence is composed from the register rather than from the open
+    # fixture's, because the closed row moves the phase and only the milestone
+    # clauses come from the open one.
+    rows = [{"M0", "Closed"}, {"M2", "Open"}]
+    summary = Register.summary(Register.integrated_phase(rows), rows)
+
+    assert summary ==
+             "**Revision status:** Closed milestone product baseline; active milestone `M2` " <>
+               "is open; no next candidate is recorded."
+
     documents =
       Fixture.documents()
       |> Map.new(fn {path, text} ->
@@ -2225,7 +2352,7 @@ defmodule Loopex.StatusCheckTest do
              "| `M2` | Open | [concept](M2.md) | [technical depth](M2-technical.md) | " <>
              "[gate](M2-gate.md) |"
          )
-         |> String.replace(Fixture.summary(), rename.(Fixture.open_summary()))}
+         |> String.replace(Fixture.summary(), summary)}
       end)
       |> Map.put("docs/plans/M0.md", Fixture.plan(governed: true, closed: true))
       |> Map.put("docs/plans/M0-technical.md", Fixture.technical_plan())
@@ -2234,6 +2361,7 @@ defmodule Loopex.StatusCheckTest do
       |> Map.put("docs/plans/M2-technical.md", rename.(Fixture.technical_plan()))
       |> Map.put("docs/plans/M2-gate.md", rename.(Fixture.gate()))
       |> replace("docs/plans/README.md", "Seed bootstrap — 2026-08-15", "`M0` — 2026-08-15")
+      |> Map.update!("docs/plans/README.md", &Fixture.closed_phase_cell/1)
       |> Map.update!("docs/plans/README.md", &capsule(&1, "Open", "M2"))
 
     assert [] == Fixture.checked(documents)
@@ -2247,7 +2375,11 @@ defmodule Loopex.StatusCheckTest do
     successor = &String.replace(&1, "M0", "M2")
 
     rows = [{"M0", "Accepted"}, {"M2", "Open"}]
-    summary = Register.summary("Pre-implementation planning", rows)
+
+    # The phase is derived rather than named here, so this literal also pins the
+    # other half of the derivation: a register with no Closed row stays
+    # pre-implementation however far its delivery milestone has advanced.
+    summary = Register.summary(Register.integrated_phase(rows), rows)
 
     assert summary ==
              "**Revision status:** Pre-implementation planning; active milestone `M0` is " <>

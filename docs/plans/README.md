@@ -16,11 +16,11 @@ integrated product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Pre-implementation planning; active milestone `M2` is open; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M2` is open; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
-| Integrated phase | Pre-implementation planning |
+| Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M1` — 2026-08-23 |
 | Blockers | `M2` is open and not accepted; the recorded acceptance authority must accept both normative envelopes and the gate |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
@@ -43,10 +43,17 @@ The gate-opening procedure verifies the exact base, and the mandatory
 base-to-transition review verifies integration eligibility. This field states
 only the product fact the register can derive.
 
-While `M0` is the sole blocked candidate, the repository status check derives
-the complete capsule from the two founding ADR records. The phase, seed
-checkpoint, authorized-work boundary, and validation command stay fixed. These
-three fields change exactly as disposition advances:
+`Integrated phase` is derived from the same rows by the same standard, and has
+exactly two values. It reads `Pre-implementation planning` while the register
+records no `Closed` milestone, and `Closed milestone product baseline` once one
+exists. It names the kind of state, never the milestone: the checkpoint above
+already identifies that row, and neither field claims a merge the checked-out
+bytes cannot prove.
+
+While `M0` was the sole blocked candidate, the repository status check derived
+the complete capsule from the two founding ADR records. The authorized-work
+boundary and validation command stayed fixed, and these three fields changed
+exactly as disposition advanced:
 
 | Accepted records | Blockers | Next maintainer decision | Next transition |
 | --- | --- | --- | --- |
