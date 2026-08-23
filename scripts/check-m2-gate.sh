@@ -1415,6 +1415,16 @@ run_selector mechanics apps/loopex/test/deps_budget_test.exs default 27 zero \
   "passed=the M2 planned inventory admits exactly seven applications with their declared roles" \
   "passed=a client composes the edge applications it depends on and declares no external package"
 
+run_selector mechanics apps/loopex/test/status_check_test.exs default 42 zero \
+  "passed=a Closed milestone's gate is amended by an accepted generation, not a rebind" \
+  "passed=a gate generation table fails closed on every malformed shape" \
+  "passed=a gate generations table is append-only in both admitted directions" \
+  "passed=the integrated phase is derived from the register's closed rows"
+
+run_selector mechanics apps/loopex/test/history_anchoring_test.exs default 16 zero \
+  "passed=a Closed milestone's gate generation is one atomic proposal and one rebind" \
+  "passed=recorded gate generations are append-only across reachable history"
+
 run_locked "the credential-free suite does not pass at the gate seed" \
   env MIX_ENV=test mix test --exclude real_provider --seed "$gate_seed"
 

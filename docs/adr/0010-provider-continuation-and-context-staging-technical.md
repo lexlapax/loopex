@@ -64,14 +64,20 @@ Each `tools` entry carries the complete immutable definition, not a pointer to
 one:
 
 ```text
-tool_id, version, definition_digest   generation identity
-name, description, parameter_schema   the exact canonical definition bytes
+tool_id, tool_version, definition_digest   generation identity
+name, description, parameter_schema        the provider-facing definition bytes
+result_shape, effect_class,
+idempotency_class, budgets                 the remaining definition record fields
 ```
 
-The definition bytes are canonicalized by the same protocol-versioned function
-and are covered by the request digest. `definition_digest` binds the entry to
-the generation the registry held at staging time and is verified against those
-bytes; it does not replace them. Consequently the staged request is fully
+The entry carries every field of ADR 0009's tool definition record, not only the
+three a provider request renders. That is what makes `definition_digest`
+checkable here: ADR 0009 canonicalizes and digests the whole nine-field record,
+so an entry carrying a subset could be compared against nothing. The bytes are
+canonicalized by the same protocol-versioned function and are covered by the
+request digest. `definition_digest` binds the entry to the generation the
+registry held at staging time and is verified against those bytes; it does not
+replace them. Consequently the staged request is fully
 reconstructible and independently verifiable from the journal alone, with no
 registry read, after the tool has been edited, version-bumped, or removed
 entirely. Projection and replay never consult the registry.
@@ -191,9 +197,12 @@ source that produced it.
 
 `bound_reached` is a member of the vision's closed run terminal set, not a
 category of `failed(category, retryable?)`. It therefore carries no failure
-category and no `retryable?` flag. Its payload is the bound name — `:max_turns`,
-`:token_budget`, or `:deadline` — the observed value against the declared limit,
-and the accounting source that produced that value. A retryable flag would be
+category and no `retryable?` flag. Its payload is the vision's exact
+`bound_reached(bound, observed)`: the bound name — `:max_turns`,
+`:token_budget`, or `:deadline` — and the observed value against the declared
+limit. The accounting source that produced that value is retained beside the
+outcome in the run's terminal record rather than inside the outcome, so the
+algebra's shape stays the one the vision fixes. A retryable flag would be
 the wrong shape as well as the wrong grouping: the bounds are committed with the
 run, so a retry under the same run identity re-evaluates the same committed
 limits against the same committed counters and stops again without a provider

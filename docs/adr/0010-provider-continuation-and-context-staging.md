@@ -79,7 +79,7 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
 - **The staged request carries complete tool-definition bytes, not references to
   them.** Each active tool contributes its full immutable definition — name,
   description, and parameter schema, canonicalized exactly as it is dispatched —
-  carried together with its `{tool_id, version, digest}` generation identity. A
+  carried together with its `{tool_id, tool_version, definition_digest}` generation identity. A
   staged request is therefore reconstructible and verifiable from the journal
   alone: a later registry edit, version bump, or removal changes neither the
   bytes that were dispatched nor the digest that covers them. Committing only
@@ -257,10 +257,18 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   receipt shape carries provider and revision identity now so that landing the
   pipeline does not migrate it.
 - **Compaction, branching, and forking stay out of scope.** `M2` projects full
-  lineage. A session that outgrows its budget ends a run at its declared bound
-  rather than dropping or summarizing history, and compaction checkpoints remain
-  a decision for the milestone whose long-lived sessions produce the measured
-  token curve that justifies one.
+  lineage and never drops or summarizes history to fit, and compaction
+  checkpoints remain a decision for the milestone whose long-lived sessions
+  produce the measured token curve that justifies one.
+- **A reached bound and a staging fault are different endings.** A run stopped
+  by one of its three declared bounds — turns, tokens, deadline — ends
+  `bound_reached`, because it stopped where its operator configured it to stop.
+  A context assembly that cannot be built inside its declared total ends the run
+  `failed`, because nothing about that is a configured stopping point: it means
+  the staged context could not be assembled, which is a fault to fix rather than
+  a limit to raise. Recording it as a reached bound would hide a configuration
+  defect inside the outcome an operator reads as a bounded run finishing
+  normally, which is the whole reason `bound_reached` exists.
 - **The prompt budget is measured, not asserted.** The reference system prompt
   plus the active bootstrap tool definitions must measure under 1,000 tokens
   before project context, computed from the exact canonical bytes with a

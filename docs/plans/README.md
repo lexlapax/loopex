@@ -434,7 +434,7 @@ byte-immutable — they record what was accepted, and what was reviewed and clos
 At `R` that row becomes:
 
 ```markdown
-| 7 | Maintainer | [disposition](<durable-pointer>) | candidate `<40-hex>`; gate `sha256:<64-hex>` |
+| 7 | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m1-generation-7) | candidate `<40-hex>`; gate `sha256:<64-hex>` |
 ```
 
 Proposal `A` is one atomic revision carrying the amended gate, that gate's next
@@ -444,10 +444,17 @@ Splitting the artifact change from the generation row across two revisions
 invalidates history permanently, because each reachable revision is judged
 against the generation current at that revision. The row carries its gate digest
 at `A` but not its candidate, for the same reason v1 needs two revisions: a
-commit cannot name its own hash. After exact-SHA review and explicit acceptance,
+commit cannot name its own hash. A pending row means the current gate binds bytes
+no authority has accepted, so binding validation, bootstrap, and every inherited
+gate that invokes them are red at `A`, exactly as they are at a v1 proposal.
+After exact-SHA review and explicit acceptance,
 `R` completes that row's authority, evidence, and the candidate it binds, which
-is exact `A`. The table's highest generation always equals the gate's amendment
-count, and only a `Closed` plan may carry one.
+is exact `A`. The evidence cell is one new amendment-specific anchor in an
+existing durable document, written as a local link carrying that fragment; it did
+not exist at `A`, appears exactly once at `R`, and never reuses or edits an
+earlier disposition. A fragmentless pointer is refused. The table's highest
+generation always equals the gate's amendment count, and only a `Closed` plan may
+carry one.
 Current artifacts are validated against the latest accepted generation and
 historical revisions against the generation current there, so no Closed milestone
 is exempt and no earlier generation stops governing the revisions it covered. A

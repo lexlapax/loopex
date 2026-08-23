@@ -286,6 +286,18 @@ tool_progress    {turn_id, tool_call_id, progress_sequence,
                   base_event_sequence, stream, byte_offset, chunk}
 ```
 
+One `tool_progress` kind carries a `stream` discriminant rather than reproducing
+§11.5's three named kinds `tool.stdout_delta`, `tool.stderr_delta`, and
+`tool.progress`. That is a deliberate narrowing and is recorded as one: the three
+differ only in which stream a chunk came from, they share one
+`(operation_id, attempt)` sequence domain, and they carry the identical identity,
+epoch, digest, and fence tuple that must be validated before any of them is
+projected. Three kinds would mean three shapes validated three ways and three
+independent gap analyses over one ordered byte stream. §11.5 opens its list with
+"transient progress begins with", so the set is extensible; this ADR spends that
+room on a discriminant rather than on kinds, and a surface that wants the vision's
+three names projects them from `stream` without another decision.
+
 Each domain is closed on the same plane it streamed on, by one item that carries
 no content:
 
@@ -337,13 +349,16 @@ Rules:
 ### Cancellation mid-stream
 
 ```text
-abort admitted (ADR 0009 admission, unchanged)
+abort admitted through the facade and committed, also resolving any queued
+                steer and follow-up (M1 admission, extended by this ADR)
   -> cooperative cancel to the supervised model task
   -> adapter stops emitting deltas
   -> no assistant_message element is committed for this turn
   -> model operation: cancelled, with delta_count and observed bytes as
                       attempt evidence; usage recorded as unknown
-  -> run: cancelled
+  -> run: ADR 0009's derived outcome — cancelled only when every owned
+          operation reached a validated terminal fact and every owned process
+          tree was confirmed cleaned, otherwise outcome_unknown
   -> a later complete reply for that attempt is retained as attempt evidence
      and never becomes a canonical assistant message
 ```
@@ -351,8 +366,12 @@ abort admitted (ADR 0009 admission, unchanged)
 There is no partial assistant message and no partial content block. A turn is
 durable in full or not at all, which is what keeps ADR 0010's projection a
 function of complete elements. Unknown usage for the cancelled attempt is
-accounted conservatively from the committed canonical request bytes under ADR
-0010's estimation rule, so cancelling a run does not make its tokens free.
+accounted under ADR 0010's rule for an incomplete turn, which charges the
+committed canonical request bytes plus that turn's committed `max_tokens`
+allowance in full, marked `estimated`. The observed byte count above is attempt
+evidence and never the charge: charging what was observed would make a
+generation cancelled at the last moment cost about what an empty turn costs, and
+a run could then stay inside a token budget indefinitely by aborting every turn.
 
 ### Provider conformance
 

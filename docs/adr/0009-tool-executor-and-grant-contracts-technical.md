@@ -197,6 +197,27 @@ executor's existing `tool_id`, `tool_version`, and `effect_class` binding
 comparisons are unchanged; their expected values now come from the recorded
 generation rather than from an executor-owned constant.
 
+### The executor port change ADR 0011 makes
+
+`M2` changes the `Loopex.Executor` behaviour in exactly one way, and
+[ADR 0011](0011-session-input-algebra-and-streaming.md#concept) decides it rather
+than this ADR: `execute/4` becomes `execute/5`, gaining a bounded in-VM progress
+function in the trailing position, and the retained receipt gains a private
+`final_progress_sequence` closing that operation's progress domain. It is
+recorded here because this ADR owns the executor, tool, and grant contract, and
+an obligation on the executor that its owning document does not acknowledge is
+the same defect ADR 0011 was revised to remove.
+
+Nothing else at this boundary moves. Grant bindings, the job request, the rest of
+the receipt schema, deduplication, the cancellation sequence, and the terminal
+algebra are unchanged, and an executor that emits no progress is conformant
+exactly as a model adapter that emits no deltas is. ADR 0011 also extends the
+port-level conformance suite named below with its progress-validation cases; that
+is one suite gaining cases, not a second suite. Rollback composes in one
+direction only: this ADR's rollback removes the lease, epoch, and fence machinery
+ADR 0011's progress validation depends on, so the progress path is removed before
+or with this one, never after it.
+
 ### The seven shared behaviours
 
 Each rule below is normative for every bootstrap tool and is exercised by one
@@ -451,7 +472,8 @@ The sequence then implements the vision's acknowledged cancellation protocol
 without adding to it:
 
 ```text
-abort admitted through the facade and committed (M1 admission, unchanged)
+abort admitted through the facade and committed (M1 admission, extended by
+                ADR 0011 to resolve the queued steer and follow-up)
   -> coordinator stops scheduling new work for the run
   -> cooperative cancel to the in-flight model task or executor job
   -> declared bounded grace period elapses
@@ -787,7 +809,8 @@ together with its model-visible name mapping, the per-call generation triple on
 each tool-operation intent, the durable denial record and its bounded policy
 context, the artifact reference carried on a tool result and its receipt, and the
 cancellation evidence retained with a terminal operation and run outcome,
-including the reconciliation reference an unknown run outcome carries. All are bounded plain
+including the reconciliation reference an unknown run outcome carries, and the
+private `final_progress_sequence` ADR 0011 adds to the retained receipt. All are bounded plain
 data in the session mutation domain and none crosses into a public plane except
 through the existing bounded tool-call events.
 

@@ -311,9 +311,15 @@ register and plan index.
   history, because artifact validation judges each reachable revision against the
   generation current at that revision. The row carries its gate digest at `A` but
   not its candidate, for the same reason v1 needs two revisions: a commit cannot
-  name its own hash. After exact-SHA review and explicit acceptance, `R`
+  name its own hash. At `A` the pending row means the current gate binds bytes no
+  authority has accepted, so binding validation, bootstrap, and every inherited
+  gate that invokes them are red there, exactly as they are at a v1 proposal.
+  After exact-SHA review and explicit acceptance, `R`
   completes that row's authority, disposition, and the candidate it binds, which
-  is exact `A`. Current
+  is exact `A`. As in v1, the disposition is one new amendment-specific anchor in
+  an existing durable document, written as a local link carrying that fragment;
+  it did not exist at `A`, it appears exactly once at `R`, and `R` never reuses,
+  completes, or edits an earlier disposition. Current
   bound artifacts are validated against the latest accepted generation, and each
   historical revision against the generation current there. No Closed milestone is
   exempted from artifact validation, and no earlier generation stops being
