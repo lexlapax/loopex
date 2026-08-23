@@ -21,7 +21,7 @@
 ## Outcome 6: final executor validation
 
 ```json
-{"mechanism_disabled":"executor_final_prestart_validation","selector":"apps/loopex_executor_local/test/executor_test.exs","observed_failure":"a missing grant binding started the controlled tool and one locked case failed","candidate":"115095c955565c782425697a0666d36324742467","artifact":"apps/loopex_executor_local/lib/executor.ex","restored_sha256":"sha256:ac5d1e3867a7b3ef9bcce5d1cddd1403ec6b037bcacd0a215f2b549d2a7afd16"}
+{"mechanism_disabled":"executor_final_prestart_validation","selector":"apps/loopex_executor_local/test/executor_test.exs","observed_failure":"a missing grant binding started the controlled tool and one locked case failed","candidate":"170da5084cf2088c565544eda1ee9c270a67099c","artifact":"apps/loopex_executor_local/lib/executor.ex","restored_sha256":"sha256:80fe9c61a2d7017d010cf3b0f0c0ad6676dd463362e3135b8321a31012ab7037"}
 ```
 
 ## Outcome 8: no-blind-retry transition
