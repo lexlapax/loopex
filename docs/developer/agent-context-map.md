@@ -606,6 +606,29 @@ closure obligation. It authorizes this direct administrative rebind and the
 remaining M1 closure proof; it does not authorize a merge to `main`, closure,
 release, or any gate weakening.
 
+<a id="disposition-m1-amendment-6-2026-08-23"></a>
+### M1 Amendment 6 acceptance — 2026-08-23
+
+The maintainer's standing explicit acceptance applies to the `M1` Amendment 6
+proposal at candidate `0ccda57f34ccaf5682987c3adc7d1638659e2f44`
+because its independently reviewed portability repair preserves Loopex's
+product-feature and architecture zoom-out shape. The independent exact-candidate
+review reported APPROVE with no findings. Acceptance binds the unchanged Concept
+envelope at
+`sha256:dad88ff975fd5f9a418a279c58f321d41b92cc52842775465daac190eb0bcf62`,
+the unchanged Technical depth envelope at
+`sha256:163275593815b801ca0dd13e4b34f57cd426134ee1354695393fae6fa7b8a73b`,
+and the amended gate at
+`sha256:bfc61ad1441f997ad81dbb10bd44396a6c8912d2a996cba8c3a896ada0f4e58b`.
+
+This acceptance makes the protected cross-VM receipt inspection portable to
+the locked OTP 26 floor while retaining safe external-term decoding and every
+recovery assertion. It changes no M1 product outcome, receipt schema, scope,
+public contract, selector identity, role, minimum, exclusion, evidence class,
+or closure obligation. It authorizes this direct administrative rebind and the
+remaining M1 closure proof; it does not authorize a merge to `main`, closure,
+release, or any gate weakening.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
