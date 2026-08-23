@@ -48,11 +48,20 @@ an aborted run's owned model call and owned OS process keep running. The vision
 requires that cancellation stop owned work and report what was observed; `M1`
 implemented the recording half and none of the stopping half.
 
+Oversized output has the same shape of gap. The two demonstration tools write a
+fixed small file, so nothing has ever exceeded a ceiling. `bash` running a test
+suite exceeds one on its first real invocation, and §12.6 of the technical
+vision assigns that overflow to an `ArtifactStore` port that no application
+currently owns. Spill is not a rendering nicety: the bytes that do not reach the
+model still have to exist somewhere addressable, because a receipt that names
+them must stay reconstructable.
+
 These are one decision because they share one path. A tool definition supplies
 the identity a grant binds, host policy decides whether that grant exists, the
-executor validates it, and cancellation is what makes the resulting effect
-stoppable and its outcome truthful. Deciding any one of them alone would fix the
-others by implication without evidence.
+executor validates it, oversized output leaves that path through the artifact
+seam, and cancellation is what makes the resulting effect stoppable and its
+outcome truthful. Deciding any one of them alone would fix the others by
+implication without evidence.
 
 Technical depth: [What M1 supplies and what the tool surface requires](0009-tool-executor-and-grant-contracts-technical.md#technical-adr-0009-context).
 
@@ -91,6 +100,15 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   minimum that closes the vision's five verbs, because `bash` can express search
   and navigation while `grep`, `find`, and `ls` cannot express mutation or
   execution.
+- **`M1`'s two demonstration tools are retained as registered generations and
+  excluded from every active tool profile.** `loopex.demo.write` and
+  `loopex.demo.wait_write` keep their exact identities, versions, and behaviour,
+  because `M1`'s locked protected case for the credential-free OS tool and its
+  retained receipt must keep passing unchanged and a renamed or deleted tool
+  would break it. They are registered like any other definition and are never
+  members of the active set a session offers a model, so no legacy fixture
+  reaches a real conversation. Nothing in the reference distribution selects
+  them; only a test composition does.
 - **`grep`, `find`, and `ls` are deferred with a named acceptance point.** They
   are not implemented in `M2` and the reference default profile stays unfixed.
   `M2` must retain the measured prompt and schema cost of the bootstrap four as
@@ -111,6 +129,37 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   before the tool-operation intent commits. `deny` commits a durable denial,
   produces a truthful `denied` terminal fact for that tool call, returns a
   bounded closed-category reason to the model, and dispatches nothing.
+- **`Loopex.Policy` is a fourth product boundary behaviour, and it is a narrow
+  host-control port rather than a replaceable infrastructure port.** Store,
+  Model, and Executor each replace a mechanism; Policy replaces nobody's
+  mechanism, because §6.4 of the technical vision assigns the decision itself to
+  the host and Loopex owns only the seam. It is admitted as a port and not as a
+  configuration option for one reason: the decision it carries is per call, and
+  a host that cannot see this path, this command, and this effect class cannot
+  make it. It unifies two concrete implementations in `M2` — the documented
+  permissive local policy the reference command names, and the refusing policy
+  the negative-authority selectors drive — and it is what a hosted product
+  supplies without forking core. It runs the reusable policy conformance suite
+  §23.2 already requires of every policy adapter.
+- **Oversized tool output leaves through a fifth behaviour, `ArtifactStore`,
+  with the smallest local adapter.** The artifact-spill rule below cannot be
+  honest without a place to put the bytes, and §12.6 assigns that place to a
+  port whose adapter and host own location, encryption, access control,
+  retention, and collection. `M2` ships one filesystem adapter under the
+  resolved state root and the in-memory adapter the conformance suite drives,
+  and both run the reusable artifact-store suite §23.2 already requires. Direct
+  code is insufficient because the bytes are produced at the hand and referenced
+  by the brain: a hand that later runs in isolation or on another machine must
+  spill through its own adapter without changing what the receipt means. The
+  port is reached through an explicit reference supplied at composition, never a
+  global name, and no application depends sideways on another edge to obtain it.
+- **An artifact reference is bounded plain data and the bytes never re-enter
+  context implicitly.** A reference carries the content digest, media type,
+  size, and logical role plus an opaque retrieval reference, exactly as §12.6
+  requires. `M2` ships no model-facing tool that reads an artifact back; that
+  tool belongs to the same successor decision that fixes the reference tool
+  profile, so the model cannot defeat the output ceiling by reading its own
+  spill.
 - **Failure and malformed input deny; they never fall through to allow.** A
   policy timeout, crash, unknown return, or malformed decision resolves to a
   denial with an unavailability category. There is no configuration that turns a
@@ -119,14 +168,21 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   contract names `defer` so no successor has to widen it, and an `M2` policy
   that returns `defer` is refused fail-closed as a denial rather than executed.
   The durable suspended interaction, exact-response matching, expiry, and
-  resume-after-restart evidence that make `defer` honest are a prerequisite of
-  the durable-service milestone, which is where multi-client attachment supplies
-  the evidence.
-- **The core has no default policy, and `AllowAll` is a named, visible reference
-  choice.** Starting a runtime with effectful tools and no configured policy is
-  refused. The reference CLI may select the documented `AllowAll` policy for a
-  trusted local developer, must name it in configuration rather than inherit it,
-  and must state on use that this is permissive local authority and not a
+  resume-after-restart evidence that make `defer` honest must be accepted before
+  the headless session-protocol milestone claims the interaction request and
+  response round trip its transport contract already lists, and that milestone
+  is where the round trip first has a client on the other end of it.
+  Multi-client attachment in the daemon milestone then supplies the reconnect
+  and takeover cases, not the first evidence.
+- **The core has no default policy, and the permissive policy is a named,
+  visible edge choice.** Starting a runtime with effectful tools and no
+  configured policy is refused. `Loopex.Policy.AllowAll` ships in the
+  trusted-local executor edge, beside the executor that already runs with the
+  user's own operating-system authority, so that the negative-authority
+  selectors, the refusal-to-start selector, and the reference command can all
+  reach it without any application depending on a client. It must be named
+  explicitly in configuration, is never an implicit fallback, and emits one
+  visible notice stating that this is permissive local authority and not a
   permission model.
 - **Nothing but a policy `allow` mints a grant.** Model output, tool metadata,
   the registry entry, a definition digest, prompt text, project resources, and
@@ -134,6 +190,18 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   the shape `M2` gives it and changes none of its ten bindings, its final
   pre-start validation boundary, its one digest identity, or its independent
   oracle.
+- **`M2` admits cancellation in process, through the public facade.** The abort
+  command is submitted on the same attachment the run was submitted on, by the
+  same operating-system process, and the reference command's own interrupt
+  handler is what submits it when an operator presses Ctrl-C. This is not a
+  stylistic choice: `M2` has no daemon, no socket, and no second client, and
+  [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept)
+  permits one live Runtime Control per Store identity and `runtime_id`, so a
+  second operating-system process cannot reach the live coordinator at all.
+  Cancelling a run from another process — and therefore any command surface that
+  offers to stop a session it is not itself running — requires the daemon
+  milestone's socket transport and controller model. Nothing about the algebra
+  below depends on which process admitted the abort.
 - **Cancellation stops owned work and reports what was observed.** A durably
   admitted abort stops scheduling new work, cooperatively cancels the in-flight
   model or executor operation, waits a declared bounded grace period, then
@@ -160,10 +228,13 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
 This decision changes nothing in
 [ADR 0006](0006-store-transaction-and-owner-epoch.md#concept) or
 [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept).
-Tool definitions, policy decisions, and cancellation records are ordinary
-session-domain content written by the one serial session owner under the same
-owner-epoch and journal-version fencing, and the registry is runtime-scoped
-state that adds no placement claim.
+Tool definitions, policy decisions, artifact references, and cancellation
+records are ordinary session-domain content written by the one serial session
+owner under the same owner-epoch and journal-version fencing, and the registry
+is runtime-scoped state that adds no placement claim. The policy and artifact
+references are composition inputs held beside the existing Store, Model, and
+Executor references; neither is discoverable by name and neither carries
+placement authority.
 
 Technical depth: [Exact definition, registry, behaviour, and cancellation contract](0009-tool-executor-and-grant-contracts-technical.md#technical-adr-0009-decision).
 
@@ -191,9 +262,9 @@ hold, and spend it before anything has measured what `bash` already covers.
 and a hosted product needs it. It is not recommended here: a suspended
 interaction needs a durable interaction record, exact-response matching, expiry,
 abort interaction with cancellation, and resume-after-restart evidence, which is
-a milestone's worth of work whose natural evidence arrives with multi-client
-attachment. Deferring it is safe only because an unimplemented `defer` denies
-rather than allows.
+a milestone's worth of work whose first client-side evidence arrives with the
+headless session protocol. Deferring it is safe only because an unimplemented
+`defer` denies rather than allows.
 
 **A per-tool boolean allowlist in configuration instead of a policy port.** It
 is smaller and it would satisfy the immediate need to say no. It is not
@@ -201,6 +272,42 @@ recommended: it is a policy language pretending to be configuration, it cannot
 express the per-call facts that matter — which path, which command, which effect
 class — and it relocates authority from the host into Loopex, which the
 ownership map forbids.
+
+**Spill oversized output into the private journal or straight onto the local
+store's files instead of an `ArtifactStore` port.** It is the smallest possible
+change and it needs no new behaviour. It is not recommended: it makes the
+journal grow with test logs and build output, which is exactly what §12.6
+separates, and it hard-codes the assumption that the process producing the bytes
+can write the brain's storage. That assumption is false the first time a hand
+runs in isolation or on another machine, and by then every receipt in every
+retained journal names a reference whose meaning would have to change.
+
+**Ship the artifact seam as a helper module in core rather than a port.** A
+plain module with two functions would satisfy `M2` completely, since `M2` has
+exactly one place bytes are produced. It is not recommended because the second
+implementation is not speculative: §23.2 already lists artifact-store adapters
+among the adapters that must run a reusable conformance suite, and the hosted
+retention, encryption, and access-control duties §12.6 assigns are host duties
+that a core helper would have to grow into. The suite is the part that makes it
+a port; without it the behaviour would be one implementation wearing a
+behaviour's clothes.
+
+**Delete or rename `M1`'s demonstration tools.** Renaming would give them
+identities that suggest continuity, and deleting them is superficially tidier
+than carrying two fixtures forward. It is not recommended: `M1`'s locked
+protected case starts one credential-free operating-system tool and asserts its
+retained receipt, and that case names these exact identities. Retaining them as
+registered generations that no active profile offers keeps the inherited
+protected behaviour green without letting a fixture reach a real conversation.
+
+**Let a second operating-system process admit an abort by writing to the
+Store.** It would give `M2` a `cancel` command that works from another terminal
+today. It is rejected rather than weighed: the session coordinator is the sole
+serial writer of that session's durable truth, a second writer would need the
+owner epoch it cannot hold, and ADR 0008 already refuses two live Runtime
+Controls over one Store identity and `runtime_id`. Cross-process cancellation is
+a transport and controller problem, and it is solved where the transport and the
+controller exist.
 
 **Signed or portable grants, and OS isolation, in `M2`.** Not recommended and
 not reopened: ADR 0007 already placed both at the first isolated or remote hand,
@@ -248,6 +355,24 @@ is made. Confirmed cleanup before committing `cancelled` also means an abort is
 not instantaneous, and the declared grace period is a visible operator-facing
 value rather than a hidden constant.
 
+Two new boundary behaviours are a permanent widening of what an embedder must
+supply and what every future adapter must satisfy. A host now composes five
+references rather than three, two more conformance suites must stay green in
+every lane, and the reference composition module has two more lines it cannot
+drop. That cost is accepted because the alternative in each case relocates a
+host duty into core: a policy expressed as configuration would put
+authorization inside Loopex, and an artifact helper inside core would put
+retention, encryption, and access control there too. Neither port may grow a
+second responsibility later without a successor decision, because the narrowness
+is the whole justification.
+
+Retaining `M1`'s demonstration tools costs two definitions that will never be
+offered to a model and one rule — active profile membership — that must be
+enforced rather than assumed. The alternative was breaking an inherited
+protected case, which is not available. The rule earns its keep beyond the
+fixtures: it is the same rule that will keep an extension-contributed generation
+out of a session that did not select it.
+
 The registry is a new core concept and must justify itself against the
 minimalism budget. It unifies four concrete built-in definitions today, it is
 the exact seam §14.3 requires, and direct code cannot express "the generation
@@ -260,22 +385,29 @@ Technical depth: [Operational consequences](0009-tool-executor-and-grant-contrac
 <a id="concept-adr-0009-compatibility"></a>
 ## Compatibility, Migration, and Rollback
 
-No released surface exists and no installed base exists. Version 0.1.0 is a
-tagged source version with no Hex publication, so nothing about a tool schema,
-policy contract, or grant shape is promised across versions, and the
-compatibility contract's freeze machinery is not engaged.
+No released surface exists and no installed base exists. `M2` tags no version:
+`VERSION` stays `0.0.0` and the first version number is reserved for the
+headless session-protocol milestone. Nothing about a tool schema, the policy
+contract, an artifact reference, or a grant shape is promised across versions,
+and the compatibility contract's freeze machinery is not engaged by anything in
+this decision.
 
-`M1` journals are not migrated. `M1`'s two demonstration tools are removed
-rather than renamed, because renaming them would imply a continuity of meaning
-that never existed, and `M1`-owned test roots are discarded.
+`M1` journals are not migrated and `M1`-owned test roots are discarded. `M1`'s
+two demonstration tools are retained at their exact identities and versions,
+because an inherited locked protected case names them; they are registered
+generations that no active profile offers, so retention costs two fixtures and
+changes no conversation.
 
 Rollback before closure removes the registry, the four bootstrap tools, the
-policy port, and the cancellation path together, returning the runtime to
-`M1`'s single-tool option. There is no partial rollback that keeps the registry
-and drops the policy port, because the grant path depends on both, and none
-that keeps cancellation without the executor's process-ownership capture. After
-0.1.0 is tagged, changing a built-in's `tool_id`, effect class, or parameter
-schema is a new version of that definition rather than an edit to the old one.
+policy port, the artifact port, and the cancellation path together, returning
+the runtime to `M1`'s single-tool option. There is no partial rollback that
+keeps the registry and drops the policy port, because the grant path depends on
+both; none that keeps cancellation without the executor's process-ownership
+capture; and none that keeps the bounded-output rule without the artifact port,
+because truncation without a spill target loses bytes a receipt claims. Once a
+version is published, changing a built-in's `tool_id`, effect class, or
+parameter schema is a new version of that definition rather than an edit to the
+old one.
 
 Technical depth: [Format, migration, and rollback mechanics](0009-tool-executor-and-grant-contracts-technical.md#technical-adr-0009-compatibility).
 
@@ -285,6 +417,9 @@ Technical depth: [Format, migration, and rollback mechanics](0009-tool-executor-
   and receipt contract this decision supplies identities for and does not change
 - [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) — the
   paired decision that turns a tool result into the next turn's context
+- [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) — the input
+  algebra that admits the abort this decision acts on, and the transient
+  progress plane a running tool reports through
 - [ADR 0006](0006-store-transaction-and-owner-epoch.md#concept) — the
   transaction and owner-epoch contract these records are written under
 - [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept) —
