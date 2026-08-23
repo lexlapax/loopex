@@ -917,6 +917,29 @@ defmodule Loopex.StatusCheckTest do
     assert proposed["Next maintainer decision"] == "Accept or reject ADR 0008"
     assert proposed["Authorized work"] == accepted["Authorized work"]
     assert accepted["Blockers"] == "None; `M1` is accepted and implementation may proceed"
+
+    lookahead_proposed =
+      Register.expected_capsule({"M1", "Accepted"}, {"M2", "Open"}, %{
+        path => "Proposed"
+      })
+
+    lookahead_accepted =
+      Register.expected_capsule({"M1", "Accepted"}, {"M2", "Open"}, %{
+        path => "Accepted"
+      })
+
+    assert lookahead_proposed["Blockers"] =~ "ADR 0008"
+    assert lookahead_proposed["Blockers"] =~ "`M2` acceptance"
+    assert lookahead_proposed["Next maintainer decision"] =~ "Accept or reject ADR 0008"
+    assert lookahead_accepted["Blockers"] =~ "None for `M1` delivery"
+
+    for state <- ["In progress", "In review"] do
+      assert_raise Invalid, ~r/ADR 0008/, fn ->
+        Register.expected_capsule(state, "M1", %{path => "Proposed"})
+      end
+
+      assert is_map(Register.expected_capsule(state, "M1", %{path => "Accepted"}))
+    end
   end
 
   test "a milestone state with no derived capsule fails closed" do

@@ -446,11 +446,11 @@ defmodule Loopex.Checks.Register do
   end
 
   def expected_capsule("Accepted", "M1", adr_statuses) do
-    case Map.fetch!(adr_statuses, @m1_implementation_adr) do
-      "Accepted" ->
+    case m1_implementation_accepted?(adr_statuses) do
+      true ->
         accepted_values("M1")
 
-      _unresolved ->
+      false ->
         accepted_values("M1")
         |> Map.put(
           "Blockers",
@@ -473,13 +473,9 @@ defmodule Loopex.Checks.Register do
         {lookahead_name, "Open"},
         adr_statuses
       ) do
-    expected_capsule("Accepted", delivery_name, adr_statuses)
-    |> Map.put(
-      "Blockers",
-      "None for `#{delivery_name}` delivery; `#{lookahead_name}` acceptance, integration, " <>
-        "and product implementation wait until `#{delivery_name}` closes and the Open " <>
-        "candidate is refreshed and independently reviewed on that closed base"
-    )
+    delivery = expected_capsule("Accepted", delivery_name, adr_statuses)
+
+    delivery
     |> Map.put(
       "Authorized work",
       "Implementation inside the accepted `#{delivery_name}` envelopes and locked gate on " <>
@@ -487,16 +483,7 @@ defmodule Loopex.Checks.Register do
         "`#{lookahead_name}`; no milestone product bytes integrate before closure and no " <>
         "`#{lookahead_name}` product implementation"
     )
-    |> Map.put(
-      "Next maintainer decision",
-      "None until `#{delivery_name}` is ready for independent review; `#{lookahead_name}` " <>
-        "cannot be accepted before `#{delivery_name}` closes"
-    )
-    |> Map.put(
-      "Next transition",
-      "Turn the locked `#{delivery_name}` gate green and close it; then refresh and " <>
-        "independently review `#{lookahead_name}` on that closed base"
-    )
+    |> lookahead_values(delivery_name, lookahead_name, adr_statuses)
   end
 
   def expected_capsule({_delivery_name, state}, {_lookahead_name, "Open"}, _adr_statuses) do
@@ -504,12 +491,12 @@ defmodule Loopex.Checks.Register do
           "#{@index}: an Open successor requires an Accepted predecessor, not #{state}"
   end
 
-  def expected_capsule("In progress", name, _adr_statuses) do
-    name
-    |> accepted_values()
-    |> Map.put("Blockers", "None; `#{name}` is in progress against its locked gate")
-    |> Map.put("Next transition", "Turn the locked gate green, then move `#{name}` to In review")
+  def expected_capsule("In progress", "M1", adr_statuses) do
+    require_m1_implementation_accepted!("In progress", adr_statuses)
+    in_progress_values("M1")
   end
+
+  def expected_capsule("In progress", name, _adr_statuses), do: in_progress_values(name)
 
   # Concept: the milestone awaits an independent verdict, and the register states
   # that lifecycle fact rather than any claim about a run.
@@ -525,22 +512,12 @@ defmodule Loopex.Checks.Register do
   # to retained evidence at a named candidate. The first correction removed the
   # claim from the record and left it in the comment directly above -- which is the
   # same defect, in the place the next reader looks first.
-  def expected_capsule("In review", name, _adr_statuses) do
-    name
-    |> accepted_values()
-    |> Map.put(
-      "Blockers",
-      "None; `#{name}` awaits independent review of its closure candidate"
-    )
-    |> Map.put(
-      "Next maintainer decision",
-      "Close `#{name}` or reject its closure candidate on the review findings"
-    )
-    |> Map.put(
-      "Next transition",
-      "Record the closure governance row and move `#{name}` to Closed"
-    )
+  def expected_capsule("In review", "M1", adr_statuses) do
+    require_m1_implementation_accepted!("In review", adr_statuses)
+    in_review_values("M1")
   end
+
+  def expected_capsule("In review", name, _adr_statuses), do: in_review_values(name)
 
   # Concept: a closed milestone authorises nothing until the next one opens.
   #
@@ -571,6 +548,90 @@ defmodule Loopex.Checks.Register do
           "#{@index}: milestone state #{inspect(state)} has no derived status capsule; " <>
             "the transition that first records it must add lifecycle enforcement rather " <>
             "than relax this check"
+  end
+
+  defp in_progress_values(name) do
+    name
+    |> accepted_values()
+    |> Map.put("Blockers", "None; `#{name}` is in progress against its locked gate")
+    |> Map.put("Next transition", "Turn the locked gate green, then move `#{name}` to In review")
+  end
+
+  defp in_review_values(name) do
+    name
+    |> accepted_values()
+    |> Map.put(
+      "Blockers",
+      "None; `#{name}` awaits independent review of its closure candidate"
+    )
+    |> Map.put(
+      "Next maintainer decision",
+      "Close `#{name}` or reject its closure candidate on the review findings"
+    )
+    |> Map.put(
+      "Next transition",
+      "Record the closure governance row and move `#{name}` to Closed"
+    )
+  end
+
+  defp lookahead_values(capsule, "M1", lookahead_name, adr_statuses) do
+    if m1_implementation_accepted?(adr_statuses) do
+      generic_lookahead_values(capsule, "M1", lookahead_name)
+    else
+      capsule
+      |> Map.put(
+        "Blockers",
+        capsule["Blockers"] <>
+          "; `#{lookahead_name}` acceptance, integration, and product implementation also " <>
+          "wait until `M1` closes and the Open candidate is refreshed and independently " <>
+          "reviewed on that closed base"
+      )
+      |> Map.put(
+        "Next maintainer decision",
+        "Accept or reject ADR 0008; `#{lookahead_name}` cannot be accepted before `M1` closes"
+      )
+      |> Map.put(
+        "Next transition",
+        "After ADR 0008 is accepted, revise Workstream A, rejoin Workstream B, turn the " <>
+          "locked `M1` gate green, and close it; then refresh and independently review " <>
+          "`#{lookahead_name}` on that closed base"
+      )
+    end
+  end
+
+  defp lookahead_values(capsule, delivery_name, lookahead_name, _adr_statuses) do
+    generic_lookahead_values(capsule, delivery_name, lookahead_name)
+  end
+
+  defp generic_lookahead_values(capsule, delivery_name, lookahead_name) do
+    capsule
+    |> Map.put(
+      "Blockers",
+      "None for `#{delivery_name}` delivery; `#{lookahead_name}` acceptance, integration, " <>
+        "and product implementation wait until `#{delivery_name}` closes and the Open " <>
+        "candidate is refreshed and independently reviewed on that closed base"
+    )
+    |> Map.put(
+      "Next maintainer decision",
+      "None until `#{delivery_name}` is ready for independent review; `#{lookahead_name}` " <>
+        "cannot be accepted before `#{delivery_name}` closes"
+    )
+    |> Map.put(
+      "Next transition",
+      "Turn the locked `#{delivery_name}` gate green and close it; then refresh and " <>
+        "independently review `#{lookahead_name}` on that closed base"
+    )
+  end
+
+  defp require_m1_implementation_accepted!(state, adr_statuses) do
+    unless m1_implementation_accepted?(adr_statuses) do
+      raise Invalid,
+            "#{@index}: M1 cannot move to #{state} before ADR 0008 is accepted"
+    end
+  end
+
+  defp m1_implementation_accepted?(adr_statuses) do
+    Map.fetch!(adr_statuses, @m1_implementation_adr) == "Accepted"
   end
 
   # Concept: acceptance is the only transition that widens authorized work, and it
