@@ -27,25 +27,31 @@ These accepted decisions are consumed unchanged and are not reopened:
 - **ADR 0006** fixes the store transaction contract, commit-time owner-epoch and
   incarnation fencing, transaction resolution, and durable record requirements.
   Every new durable fact this milestone commits — a conversation turn, a tool
-  definition generation, a cancellation, a denial — enters through one
-  catalogued production transition.
+  definition generation, an artifact descriptor, a denial, a steer, a
+  cancellation — enters through one catalogued production transition.
 - **ADR 0007** fixes the trusted-local executor grant, job, receipt, final
   pre-start validation, and independent binding oracle. The four coding tools
   are ordinary jobs under that contract; none of them widens it.
 - **ADR 0008** fixes owner-succession recovery and runtime placement. Its
-  constraints are load-bearing for Outcomes 6 and 7 and are restated as
+  constraints are load-bearing for Outcomes 9, 10, and 11 and are restated as
   ownership invariants below.
 
-Two decisions must carry recorded acceptance before this plan pair and gate are
-accepted and before any implementation begins:
+Three decisions must carry recorded acceptance before this plan pair and gate
+are accepted and before any implementation begins:
 
 - **ADR 0009 — Tool, executor, and grant contracts.** The loop cannot dispatch
-  an effect before the tool definition, job, receipt, and grant shape exist.
-  Outcomes 2, 3, 4, and 9 depend on it.
+  an effect before the tool definition, job, receipt, grant shape, and the
+  `Loopex.Policy` port exist. Outcomes 4, 5, 6, 7, and 13 depend on it.
 - **ADR 0010 — Provider continuation and exact context staging.** A model call
-  dispatches only the exact canonical context committed with its intent, and a
+  dispatches only the exact canonical context committed with its intent, a
   continuation binding is what makes turn two a continuation rather than a new
-  conversation. Outcomes 1, 5, and 9 depend on it.
+  conversation, and the three declared bounds and the fixed project-resource
+  stage are fixed there. Outcomes 1, 8, 9, and 13 depend on it.
+- **ADR 0011 — Session input algebra and streaming progress.** The prompt,
+  steer, and follow-up queue semantics and the canonical delta algebra with its
+  single durable reconstruction are one decision, because a steer is admitted
+  against a run whose current turn is still streaming. Outcomes 2, 3, 9, and 13
+  depend on it.
 
 Deferred decisions and their named acceptance points:
 
@@ -53,14 +59,16 @@ Deferred decisions and their named acceptance points:
 | --- | --- |
 | Context pipeline contracts — registered providers, transformers, selectors, and observers | Before the first registered context provider or extension-contributed transformer exists. M2 implements only the initial local-kernel stage ADR 0010 fixes: canonical history, a fixed reference project-resource stage, trust admission, total budget enforcement, and exact receipts |
 | The reference default active-tool profile | After M2's measured prompt cost and task utility. M2 ships `read`, `write`, `edit`, `bash` and measures; it does not fix a reference default |
-| Interactive `defer` approval and the interaction round trip | Before the first surface that can ask an operator a mid-run question. `allow` and `deny` are complete in M2 |
+| Interactive `defer` approval and the mid-run interaction round trip | Before the first surface that can ask an operator a mid-run question. `allow` and `deny` are complete in M2 |
+| JSONL RPC framing, DTO vectors, and independent sample clients | The headless session-protocol milestone that follows M2, which is where a wire contract first has a proven client to serve |
+| A reference daemon, controller leases, multi-client attachment, and cross-process cancellation | The durable multi-client daemon milestone after that |
 | Store selection and migrations | Durable service rung, as the roadmap records |
 | Name, trademark, domain, and Hex clearance | Before public packaging, which this milestone does not do |
-| JSONL RPC, a reference daemon, and multi-client attachment | The rung after durable local truth, per the vision's serial barriers |
 
-Three decisions are disposed by accepting this plan pair itself, in the way ADR
-0008 was disposed by accepting an existing plan's requirement for it. None is
-implicit; each is named so acceptance is a decision rather than a side effect.
+**Two decisions are disposed by accepting this plan pair itself,** in the way
+ADR 0008 was disposed by accepting an existing plan's requirement for it.
+Neither is implicit; each is named so acceptance is a decision rather than a
+side effect.
 
 **One. A seventh application and a widened client rule.** `apps/loopex_cli` is
 added with role `:client`. A `:client` application may declare a production
@@ -68,48 +76,99 @@ dependency on `:loopex`, optionally on `:loopex_protocol`, and production
 dependencies on the in-umbrella `:edge` applications it composes. It may declare
 no external dependency and no dependency on another `:client`. The widening is
 required rather than convenient: a shipped composition must name concrete Store,
-Model, and Executor implementations to build an `escript`, core may depend only
-on the protocol, and an edge may not import a concrete sibling, so the
-composition can live only in a client application. Dependency direction is
-unchanged — every edge remains inward — and the composition's reach is bounded
-by the exact-inspection rule in Ownership below.
+Model, Executor, Policy, and ArtifactStore implementations to build an
+`escript`, core may depend only on the protocol, and an edge may not import a
+concrete sibling, so the composition can live only in a client application.
+Dependency direction is unchanged — every edge remains inward — and the
+composition's reach is bounded by the exact-inspection rule in Ownership below.
 
-**Two. `0.1.0` with labelled surfaces and no publication.** The root `VERSION`
-moves from `0.0.0` to `0.1.0`, so every application in the single version train
-reports `0.1.0`. Every public surface is labelled `experimental`. No package,
-archive, or release artifact is produced or published.
+**Two. Two narrow ports join the three M1 boundary behaviours.** `Loopex.Policy`
+is created by ADR 0009 and required by the founding vision's host policy port;
+it replaces the literal `{:host_policy, :allow}` term with `allow/1`, `deny/1`,
+and a `defer/1` clause that M2 declares and refuses rather than implements. An
+`ArtifactStore` port owns oversized tool output, which the vision assigns to it
+and which M2 must produce the moment `bash` runs a real test suite. Each ships
+with exactly one local adapter and one reusable conformance suite, inside an
+existing application. No third new port, and no generic layer above the five, is
+authorized by this acceptance.
 
-**Three. The closed M1 gate is carried forward behaviourally, not by byte
-identity.** The closed M0 gate remains an inherited required gate and is
-re-proved on both locked pairs at every M2 source candidate; nothing in M2
-touches a byte M0 binds. The closed M1 gate cannot be inherited the same way,
-and pretending otherwise would make this milestone unsatisfiable rather than
-protected:
+**A prerequisite this plan pair names but cannot dispose: an accepted M1 gate
+amendment.** M1's closed gate binds nine paths by SHA-256, and M2 must change
+two of them:
 
-- M1's Bound Artifacts bind `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` by
-  SHA-256, and that file's planned-inventory constant freezes the repository at
-  exactly six applications with the reference client as the only `:client`. A
-  seventh application fails it, and so does the widened client rule.
-- M1's retained matrix binds `adapter_build=loopex_llm_reqllm@0.0.0` and
-  `executor_build=loopex_executor_local@0.0.0`. Version `0.1.0` changes both.
+| Bound path | Why M2 must change it |
+| --- | --- |
+| `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` | Its planned-inventory constant freezes the repository at exactly six applications with the reference client as the only `:client`. A seventh application fails it, and so does the widened client rule |
+| `apps/loopex/test/deps_budget_test.exs` | Its adversarial corpus asserts the M1 inventory and the narrow client rule, and must gain the two cases that prove the M2 inventory and the widened rule |
 
-No M2 that delivers its Purpose can leave those bytes unchanged, and M1's gate
-is immutable, so re-running it would be an unsatisfiable obligation rather than
-a protection. M1 is `Closed`: its outcomes are proved history, not a live
-commitment. M2 therefore carries M1's protection forward behaviourally. The M2
-gate re-runs all eight M1 protected outcome selectors through the same bound
-`scripts/m1-exunit-runner.exs`, at their exact locked test identities, states,
-and minima, as an inherited table beside M2's own, and re-runs M1's locked
-selector-runner mechanics corpus unchanged. If implementation shows that an M1
-locked identity cannot survive an accepted M2 outcome, that is a blocking
-finding requiring an explicit maintainer disposition, never a silent rename or a
-quietly dropped row.
+Those digests are not enforced only by `scripts/check-m1-gate.sh`.
+`Mix.Tasks.Loopex.Status` verifies every plan's declared bound artifacts against
+the current working tree on every invocation, and its history pass repeats that
+at every revision reachable from `HEAD`. Neither exempts a `Closed` milestone.
+The observable consequence of changing either file without an accepted
+amendment, at that same revision, is:
 
-Accepting this plan pair authorizes only the nine outcomes and the three named
-boundary behaviours. Any further deferral, gate weakening, evidence waiver,
-fourth product boundary behaviour, new persistence decision, external
-dependency, publication, or public compatibility claim requires its ordinary
-explicit disposition.
+```text
+** (Mix) docs/plans/M1-gate.md: bound artifact apps/loopex/lib/mix/tasks/loopex.deps_budget.ex does not match its locked digest
+```
+
+That failure propagates. `mix loopex.status` and `bash scripts/check-bootstrap.sh`
+are both locked M2 gate commands, bootstrap runs the status check, and
+`scripts/check-m0-gate.sh` runs bootstrap, so the closed M0 gate goes red
+transitively. Rebinding the digest in the same commit does not help, because a
+completed gate governance record is immutable outside its amendment path and
+`require_binding_persists!` refuses to let a declared artifact path be dropped:
+
+```text
+** (Mix) docs/plans/M1-gate.md: completed accepted gate governance record changed
+```
+
+The only conforming path is an amendment to `docs/plans/M1-gate.md` under its
+existing `amendment-transaction-v1` marker, declaring the next consecutive
+generation and rebinding exactly those two artifacts to the M2 bytes. Its shape
+is fixed here so acceptance sees its whole cost:
+
+- **Decision owner.** The maintainer. This is a baseline exception against a
+  closed, immutable gate and is explicitly non-delegable. Accepting the M2 plan
+  pair does not imply it, authorize it, or schedule it.
+- **Rejoin position.** Amendment proposal `A` lands atomically with, or as the
+  immediate successor of, the workstream E commit that changes those two files.
+  It cannot land earlier, because at `A` the amended gate must be proved against
+  a tree that already carries the M2 bytes it rebinds. No other M2 commit may
+  sit between the byte change and `A`.
+- **Transaction.** Two direct one-parent revisions. At `A` the prior M1
+  Acceptance row and `Closed` lifecycle state are retained, so binding
+  validation, bootstrap, and the M0 gate fail there only for the stale binding.
+  Its immediate child `R` rebinds M1's Acceptance to exact `A`, adds one new
+  amendment-specific disposition anchor to an existing durable document, and
+  changes no envelope, portable-enforcement, or product byte. Only `R` is
+  integration-eligible.
+- **The declared truthful reproof.** The amendment must state, and its proposal
+  must demonstrate, what `bash scripts/check-m1-gate.sh` actually reports at an
+  M2 revision. M1's retained matrix names an M1 source candidate, and the M2
+  tree differs from it by product bytes, so M1's own gate is red there for that
+  stated reason at both `A` and `R`. The amendment declares that exact state
+  rather than claiming a green M1 gate on an M2 tree. M1's gate is not an
+  inherited required gate for M2: M2 inherits M0 and re-runs M1's protected
+  selectors behaviourally, which is what the Inherited section of the M2 gate
+  exists to do.
+- **The alternative, and why this plan does not recommend it.** The enforcement
+  could instead be changed so the status check exempts a `Closed` milestone's
+  bound artifacts. That is one edit instead of a transaction, and it is worse:
+  it silently retires digest protection for every closed gate, forever, to avoid
+  one named exception. It is also portable-enforcement weakening and therefore
+  equally non-delegable. The amendment keeps the protection and pays only for
+  the change it needs.
+
+Until `R` is accepted and integrated, M0, the bootstrap aggregate, and the
+status check are red, and no M2 product checkpoint that changes those two files
+is an integration candidate.
+
+Accepting this plan pair authorizes only the thirteen outcomes and the five
+named boundary behaviours. Any further deferral, gate weakening, evidence
+waiver, sixth boundary behaviour, new persistence decision, external dependency,
+publication, or public compatibility claim requires its ordinary explicit
+disposition.
 
 <a id="technical-plan-ownership"></a>
 ### Ownership, Decision Owners, and Rejoin Barriers
@@ -117,26 +176,48 @@ explicit disposition.
 Concept: [Milestone scope](M2.md#concept-plan-scope).
 
 One integrator owns rejoin, conflicts, the candidate SHA, and post-rejoin
-verification. The maintainer owns plan and gate acceptance, scope deferral, gate
-weakening, evidence waiver, blocking-finding disposition, closure, the `0.1.0`
-tag, and every decision class the development contract reserves.
+verification. The maintainer owns plan and gate acceptance, the M1 gate
+amendment above, scope deferral, gate weakening, evidence waiver,
+blocking-finding disposition, closure, and every decision class the development
+contract reserves.
 
 **Session truth stays where M1 put it.** The session coordinator remains the
 sole serial writer of its session's durable truth. The tool registry is
 runtime-scoped read-mostly data reached through the explicit runtime reference;
-it registers no global name and stores no session state. The model adapter and
-executor return evidence; neither mutates session truth nor publishes a durable
-fact. Conversation history is a projection of committed durable records, never a
-second store: a turn is not part of the conversation until its record commits.
+it registers no global name and stores no session state. The model adapter, the
+artifact store, the policy implementation, and the executor return evidence;
+none of them mutates session truth or publishes a durable fact. Conversation
+history is a projection of committed durable records, never a second store: a
+turn is not part of the conversation until its record commits.
+
+**Deltas are not truth.** A streamed text, reasoning, tool-call, or
+tool-progress delta is transient progress on the progress plane. Exactly one
+reconstructed assistant message per turn becomes durable, and it becomes durable
+before its stable public event. No delta is journaled, replayed, or projected; a
+reconnecting or resuming caller sees the committed message, never a partial one.
+A stream that ends without a complete message commits nothing, and the turn
+fails truthfully.
 
 **The command surface owns nothing durable.** `loopex_cli` calls only the public
-`Loopex` facade for every session operation. Exactly one module in that
-application — the shipped composition — may name concrete Store, Model, and
-Executor implementations, and it may do so only to build the runtime options
-passed to `Loopex.start_link/1`. No other module in the application may
-reference a coordinator, journal, outbox, store, adapter, or executor module,
-hold a cursor as truth, or make an authority decision. The gate proves this by
-source inspection, exactly as M1 proved it for the reference client.
+`Loopex` facade for every session operation, including the interrupt path.
+Exactly one module in that application — the shipped composition — may name
+concrete Store, Model, Executor, Policy, and ArtifactStore implementations, and
+it may do so only to build the runtime options passed to `Loopex.start_link/1`.
+No other module in the application may reference a coordinator, journal, outbox,
+store, adapter, executor, policy, or artifact-store module, hold a cursor as
+truth, or make an authority decision. The gate proves this by source inspection,
+exactly as M1 proved it for the reference client.
+
+**Cancellation is same-process by construction.** The foreground command traps
+the interrupt signal and calls the public abort operation on the session it is
+running. It does not signal another process, write a control file, or open a
+channel. `loopex cancel <session>` is a distinct, narrower operation: it applies
+only where no live Runtime Control holds the session's placement key, acquires
+ownership through a fresh resume command identity under the session's durable
+`runtime_id`, and drives the session from durable evidence to `cancelled` or
+`outcome_unknown`. Against a live owner it is refused by ADR 0008 mutual
+exclusion with an explicit message, and that refusal is a locked case rather
+than an accident.
 
 **ADR 0008 placement is an invariant of the operator experience, not a detail.**
 The command surface must obey all four consequences:
@@ -164,20 +245,24 @@ Rejoin barriers are serial and exact:
 1. **A — Tool contract and registry rejoins first.** The tool definition shape
    in `loopex_protocol` and the runtime-scoped registry in core are integrated
    before any caller names a tool.
-2. **B — Loop, committed history, and continuation rejoins second.** The turn
-   machine, canonical history projection, per-turn exact staging, and the
-   continuation binding build on A. No tool implementation is integrated before
-   B proves a turn dispatches only its committed bytes.
-3. **C — Coding tools and host policy rejoins third.** `loopex_executor_local`
-   implements the four tools against A's contract, gains the `deny` path, and
-   gains owned-process termination. It imports no concrete sibling adapter.
+2. **B — Loop, bounds, streaming, input algebra, and staging rejoins second.**
+   The turn machine, canonical history projection, per-turn exact staging, the
+   three declared bounds, the delta algebra, the input queue, and the
+   project-resource stage build on A. No tool implementation is integrated
+   before B proves a turn dispatches only its committed bytes.
+3. **C — Coding tools, artifacts, and host policy rejoins third.**
+   `loopex_executor_local` implements the four tools against A's contract and
+   gains the `deny` path and owned-process termination, and `loopex_store_local`
+   gains the artifact-store adapter. Neither imports a concrete sibling adapter.
 4. **D — Cancellation and the session directory rejoins fourth.** Cancellation
    needs C's termination evidence and B's turn machine. The session directory
    needs the resolved state root and ADR 0008 placement identity.
 5. **E — Operator surface and demonstration rejoins last.** `loopex_cli` builds
-   only on the integrated A–D paths through the public facade. A private client
-   loop, substitute store, fake provider, or bypass executor is not a
-   demonstration of this milestone.
+   only on the integrated A–D paths through the public facade. Its first commit
+   carries the seventh-application inventory change, and the M1 gate amendment
+   above lands with it or immediately after it. A private client loop,
+   substitute store, fake provider, or bypass executor is not a demonstration of
+   this milestone.
 
 Core is a serial ownership chain across A, B, and D rather than parallel
 writers, because those workstreams touch the same coordinator and session-state
@@ -196,8 +281,8 @@ The outcome selectors are necessary but not separable substitutes for the
 Purpose. Closure requires one retained attended demonstration in which a real
 provider drives the shipped `loopex` command through a genuine multi-tool coding
 task in a real Git repository, using the same product runtime, store, model,
-executor, tool registry, executor tools, embedded API, and command code the
-focused selectors exercise. Deterministic tests are supporting coverage and
+executor, policy, artifact store, tool registry, embedded API, and command code
+the focused selectors exercise. Deterministic tests are supporting coverage and
 cannot stand in for it.
 
 Every protected selector runs through the bound `scripts/m1-exunit-runner.exs`,
@@ -212,13 +297,25 @@ reuses that channel rather than building a second one, and reuses its
 `LOOPEX_M1_SELECTOR_V1` nonce frame as the only path a provider credential takes
 into a selector VM.
 
+That script is bound at exactly the bytes M1 closed with, so its retained
+real-path identity contract is fixed rather than negotiable. Its `model` profile
+seals provider, model, endpoint, and adapter build; its `combined` profile seals
+those plus executor build, executor identity, and tool identity; and both refuse
+a report whose key set differs, whose adapter build is not
+`loopex_llm_reqllm@0.0.0`, or whose executor build is not
+`loopex_executor_local@0.0.0`. M2 keeps `VERSION` at `0.0.0`, so those literals
+hold. No additional field can enter a sealed real-path report without changing
+an immutable artifact, which is why the provider-reported input-token count in
+the prompt budget below is retained evidence for review rather than a second
+gate-enforced ceiling.
+
 The ordinary full suite and every credential-free control remain
 credential-free. The gate runner refuses `LOOPEX_PROVIDER_API_KEY` in its
 initial environment and accepts an optional credential only through a bounded
 `LOOPEX_M2_PROVIDER_V1` stdin frame, held in one unexported holder and forwarded
-only to the explicitly tagged real-provider role. Absence is evidence
-unavailable and fails that role rather than skipping it. Gate-owned output is
-compared against the literal key before emission. This is containment at the
+only to the explicitly tagged real-provider roles. Absence is evidence
+unavailable and fails those roles rather than skipping them. Gate-owned output
+is compared against the literal key before emission. This is containment at the
 runner boundary; M2 does not rebuild M1's sealed-environment apparatus and makes
 no claim to defend against a hostile already-running shell.
 
@@ -226,15 +323,19 @@ Outcome-specific obligations are:
 
 | # | Obligation |
 | --- | --- |
-| 1 | Generate legal multi-turn histories and prove the run continues while the model requests tools and ends when it does not, with a declared bounded turn ceiling that ends the run truthfully rather than stopping silently; prove every request after the first contains the original prompt, the model's own prior assistant message including its tool call, and the real tool result rather than a synthesized string; prove the canonical request bytes and digest committed before each dispatch are exactly the bytes the adapter receives; prove a provider continuation binding is carried, and that an incompatible model or provider change invalidates it rather than reusing it; assert complete derived fault coverage over every new durable transition |
-| 2 | Resolve a tool by ID and version through a runtime-scoped registry; refuse an unknown ID and refuse a conflicting registration with an explicit reason; prove two runtimes in one VM carry independent registries and that no global registration, application-environment value, or persistent term supplies one; prove each model request records the exact definition generation used, and that an in-flight operation's semantics cannot change because the registry changed |
-| 3 | Run one shared conformance suite over `read`, `write`, `edit`, and `bash`, covering bounded and truncation-reporting output, workspace-root resolution, refusal of every path that escapes the root through traversal, a symlink, or a link chain, exact edit preconditions with a mismatch diagnostic that names what differed, explicit shell-versus-argv semantics, ownership and termination of the whole child process tree, and artifact spill when output exceeds its declared bound; each tool executes as a real controlled OS process under ADR 0007 with a credential-free environment |
-| 4 | Prove a host-policy `deny` decision issues no grant, that no operating-system process starts, and that the refusal is a committed durable fact the operator can read; prove the run continues or terminates truthfully after a denial and never retries the refused call; prove model output, tool metadata, IDs, and ordinary client input cannot mint or widen a grant; prove the trusted-local `AllowAll` implementation is explicit configuration documented as a developer default rather than an implicit fallback that would hide a missing decision |
-| 5 | Prove cancellation is the acknowledged protocol: the request is durably recorded, scheduling stops, the in-flight model call and executor job receive a cooperative cancel, a bounded grace period elapses, the owned process tree is terminated, and `cancelled` commits only after cleanup is confirmed; prove a validated terminal tool fact that committed before the abort is preserved and is not overwritten by `cancelled`; prove insufficient effect evidence commits immutable `outcome_unknown` with no blind retry; prove an aborted model response never becomes a canonical assistant message; prove the operator observes both what was cancelled and what actually happened |
-| 6 | List sessions from a state root resolved from `LOOPEX_HOME` in a fresh operating-system process with no inherited runtime; prove the state root is never read from application environment; prove a session resumes under its creating `runtime_id`, that a different `runtime_id` is refused with an explicit reason, that a repeated resume command identity returns its historical result without advancing the owner epoch, and that a fresh identity acquires live ownership; prove the placement identity survives restart because it is persisted and re-presented rather than regenerated |
-| 7 | Drive `run`, `sessions`, `resume`, and `cancel` end to end through the embedded API; replace or instrument that facade so the test fails if any module outside the single shipped composition reaches a coordinator, store, model, executor, journal, outbox, or cursor internal or owns a second state machine; measure the base system prompt plus active tool definitions with the documented deterministic estimator and require the result under one thousand tokens before project context; prove argument parsing and terminal output use only the standard library and that the application declares no external dependency; prove no wire or line-framing contract is introduced |
-| 8 | Start a runtime, create a session, submit a prompt, and consume events using only the shipped composition module; measure that module and require at most sixty effective lines, counting neither blank lines nor comments; prove the `loopex` command uses that same composition rather than a second one; prove the composition resolves its state root explicitly and reads none from application environment |
-| 9 | In one attended real-provider run of the shipped command against a disposable Git repository created inside the gate's own task root, complete a task that requires at least three turns and at least three distinct tools including one `edit` and one `bash`; count turns, tool calls, and effects outside the runtime; include one host-policy refusal and prove the transcript reports it and the task continues truthfully; prove the resulting file bytes on disk; retain non-secret provider, model, endpoint, executor, tool, and prompt-measurement identity from the successful role, and prove that a zero-executed, skipped, or credential-free run cannot pass this role |
+| 1 | Generate legal multi-turn histories and prove the run continues while the model requests tools and ends when it does not; prove every request after the first contains the original prompt, the model's own prior assistant message including its tool call, and the real tool result rather than a synthesized string; prove the canonical request bytes and digest committed before each dispatch are exactly the bytes the adapter receives; prove each of the maximum-turn, cumulative-token, and wall-clock bounds is evaluated before staging, terminates the run as budget exhaustion naming the bound and the observed value, costs no provider call, and fabricates no assistant message; prove `max_tokens` and every other sampling bound is a declared committed value with no implicit fallback anywhere in the path; prove a provider continuation binding is carried and that an incompatible model or provider change invalidates it rather than reusing it; assert complete derived fault coverage over every new durable transition |
+| 2 | Run one shared streaming conformance suite over every model adapter; prove each of the four canonical delta kinds is bounded plain data carrying no provider struct, pid, function, module atom, exception, terminal escape, or credential; prove replaying an adapter's emitted deltas in order reproduces byte-identical content to the reply it returned; prove the per-turn sequence is gapless and monotonic and that the reply's delta count makes coalescing, dropping, or loss detectable rather than silent; prove the committed assistant message is built from the adapter's return value and never assembled from deltas, and that no delta is journaled, published as a durable event, or replayed on reconnect; prove a cancelled stream commits no `assistant_message` element at all and that a late reply for an aborted attempt is retained truthfully and never becomes canonical; prove an adapter that emits no deltas is conformant and declares that it does not stream |
+| 3 | Prove a prompt is admitted only while the session is settled and is refused with an explicit reason while a run is active; prove a steer names one active run, that a steer naming a different run or naming none while a run is active is rejected rather than retargeted, and that the runtime never infers which input class an input is; prove an admitted steer is applied after the current tool batch completes and before the next model request is staged, commits as a user-role conversation element in admission order, and does not attempt to reverse an effect already started; prove a follow-up is queued and starts a new run only after the active run and its steering settle; prove a steer whose run reaches a terminal outcome first commits as unapplied with its reason rather than being discarded or promoted; prove at most one unapplied steer per run and at most one queued follow-up exist, and that both queue states are durable and survive owner succession; prove a durably admitted abort resolves any unapplied steer and any queued follow-up as cancelled |
+| 4 | Resolve a tool by ID and version through a runtime-scoped registry; refuse an unknown ID and refuse a conflicting registration with an explicit reason; prove two runtimes in one VM carry independent registries and that no global registration, application-environment value, or persistent term supplies one; prove each model request records the exact definition generation used, and that an in-flight operation's semantics cannot change because the registry changed |
+| 5 | Run one shared conformance suite over `read`, `write`, `edit`, and `bash`, covering bounded and truncation-reporting output, workspace-root resolution, refusal of every path that escapes the root through traversal, a symlink, or a link chain, exact edit preconditions with a mismatch diagnostic that names what differed, explicit shell-versus-argv semantics, and ownership and termination of the whole child process tree; each tool executes as a real controlled OS process under ADR 0007 with a credential-free environment |
+| 6 | Run one reusable `ArtifactStore` conformance suite over the local adapter, covering put, get, absent, and repeated-digest cases; prove output beyond a tool's declared bound spills to an artifact rather than truncating silently, that the durable event carries content digest, media type, size, logical role, and an opaque retrieval reference, and that the reference is opaque rather than a filesystem path the model can steer; prove the model-facing result stays under its bound and names what was truncated; prove the artifact round-trips byte-exactly and that a corrupted or missing artifact is reported as unavailable rather than as empty content |
+| 7 | Run one reusable policy-port conformance suite; prove a `deny` decision issues no grant, that no operating-system process starts, and that the refusal is a committed durable fact the operator can read; prove the run continues or terminates truthfully after a denial and never retries the refused call; prove a policy that raises, times out, or returns a malformed value fails closed into denial rather than falling through to allow; prove `defer` is declared and refused in M2 rather than silently treated as allow or deny; prove model output, tool metadata, IDs, injected context, and ordinary client input cannot mint or widen a grant; prove the trusted-local `AllowAll` implementation is explicit configuration documented as a developer default rather than an implicit fallback |
+| 8 | Prove discovery resolves a deterministic canonical ordered resource set for a workspace, that the order is stable across platforms and filesystem enumeration order, and that a per-path, per-file-size, or total-size limit refuses the excess resource explicitly rather than silently dropping it; prove the operator is presented every resolved path, its provenance class, its trust class, and the manifest digest before deciding; prove a positive decision binds canonical workspace identity, revision, resolved set, and digests, and that changing any of them invalidates it and requires a new decision; prove a headless run with no matching positive decision fails closed and stages no project block; prove an admitted block changes no active tool set, policy decision, declared bound, or grant, and that typed delimiters are input structure rather than an authority boundary; prove the staging receipt records the final ordered block descriptors |
+| 9 | Prove cancellation is the acknowledged protocol: the request is durably recorded, scheduling stops, the in-flight model call and executor job receive a cooperative cancel, a bounded grace period elapses, the owned process tree is terminated, and `cancelled` commits only after cleanup is confirmed; prove the interrupt path reaches the run through the public facade and through no private path; prove a validated terminal tool fact that committed before the abort is preserved and is not overwritten by `cancelled`; prove insufficient effect evidence commits immutable `outcome_unknown` with no blind retry; prove an aborted model response never becomes a canonical assistant message; prove a second interrupt reports what is still being cleaned up rather than abandoning the session; prove the operator observes both what was cancelled and what actually happened |
+| 10 | List sessions from a state root resolved from `LOOPEX_HOME` in a fresh operating-system process with no inherited runtime; prove the state root is never read from application environment; prove a session resumes under its creating `runtime_id`, that a different `runtime_id` is refused with an explicit reason, that a repeated resume command identity returns its historical result without advancing the owner epoch, and that a fresh identity acquires live ownership; prove the placement identity survives restart because it is persisted and re-presented rather than regenerated |
+| 11 | Drive `run`, `sessions`, `resume`, and `cancel` end to end through the embedded API; deliver a real interrupt signal to a real running command process and prove the task is cancelled through the public facade and that what was observed is printed; prove `cancel` against a live owner is refused by placement mutual exclusion with an explicit message and that against a dead owner it reconciles the session to a truthful terminal state; prove `--policy` selects the governing host policy and that a run under a refusing policy reports the refusal and continues or terminates truthfully; prove the project-resource trust decision is presented and taken at the terminal and that a non-interactive invocation without a matching decision fails closed; replace or instrument the facade so the test fails if any module outside the single shipped composition reaches a coordinator, store, model, executor, policy, artifact store, journal, outbox, or cursor internal or owns a second state machine; measure the base system prompt plus active tool definitions with the documented deterministic estimator and require the result under one thousand tokens before project context; prove argument parsing and terminal output use only the standard library and that the application declares no external dependency; prove no wire or line-framing contract is introduced |
+| 12 | Start the OTP application tree, a runtime, and a session, submit a prompt, and consume events using only the shipped composition module; measure that module and require at most eighty effective lines, counting neither blank lines nor comments; prove the `loopex` command uses that same composition rather than a second one; prove the composition resolves its state root explicitly and reads none from application environment |
+| 13 | In one attended real-provider run of the shipped command against a disposable Git repository created inside the gate's own task root, complete a task that requires at least three turns and at least three distinct tools including one `edit` and one `bash`; count turns, tool calls, and effects outside the runtime; prove the answer was streamed and reconstructed once per turn; include one host-policy refusal and prove the transcript reports it and the task continues truthfully; prove the resulting file bytes on disk; retain non-secret provider, model, endpoint, adapter, executor, and tool identity from the successful role through the bound runner's sealed `combined` profile, and prove that a zero-executed, skipped, or credential-free run cannot pass this role |
 
 Durable fault coverage stays structural, as M1 established. Every new logical
 operation that can change durable session truth enters through one production
@@ -244,26 +345,37 @@ declared, injected, and observed `{transition_id, fault_point_id}` key sets. A
 new production transition without a derived injected and observed case fails
 that equality assertion rather than silently escaping the catalogue.
 
-Required mutation evidence is five ordered, independently restored records in
+Required mutation evidence is eight ordered, independently restored records in
 `docs/evidence/M2-negative-demonstrations.md`. Each starts from its own named
-clean candidate, identifies the exact path and candidate blob digest, disables
-only that mechanism, runs the named protected selector that must fail for the
-named reason, restores the artifact from `git show <candidate>:<path>`, and
-verifies the restored SHA-256 and whole-tree cleanliness before the next record:
+clean candidate, identifies the exact tracked path and candidate blob digest,
+disables only that mechanism, runs the named protected selector that must fail
+for the named reason, restores the artifact from `git show <candidate>:<path>`,
+and records the restored SHA-256, which the gate compares against the current
+tracked bytes:
 
 1. Outcome 1 / `committed_history_projection` /
    `apps/loopex/test/agent_loop_test.exs`
-2. Outcome 2 / `tool_definition_generation_binding` /
+2. Outcome 2 / `stream_delta_reconstruction` /
+   `apps/loopex_llm_reqllm/test/streaming_conformance_test.exs`
+3. Outcome 4 / `tool_definition_generation_binding` /
    `apps/loopex/test/tool_registry_test.exs`
-3. Outcome 3 / `workspace_path_scope_containment` /
+4. Outcome 5 / `workspace_path_scope_containment` /
    `apps/loopex_executor_local/test/coding_tools_test.exs`
-4. Outcome 4 / `host_policy_deny_prestart_refusal` /
+5. Outcome 7 / `host_policy_deny_prestart_refusal` /
    `apps/loopex_executor_local/test/host_policy_test.exs`
-5. Outcome 5 / `cancellation_cleanup_confirmation` /
+6. Outcome 8 / `project_resource_trust_admission` /
+   `apps/loopex/test/project_resource_trust_test.exs`
+7. Outcome 9 / `cancellation_cleanup_confirmation` /
    `apps/loopex/test/cancellation_test.exs`
+8. Outcome 11 / `command_surface_facade_only` /
+   `apps/loopex_cli/test/cli_test.exs`
 
-No record stands in for two mechanisms, and a failure observed from a dirty or
-previously mutated baseline is no evidence.
+The last record covers the milestone's headline structural claim. Introducing a
+client application is exactly when "session before surface" is most at risk, so
+the mechanism that fails a build where a second module reaches past the facade
+carries a mutation record of its own rather than resting on source inspection
+alone. No record stands in for two mechanisms, and a failure observed from a
+dirty or previously mutated baseline is no evidence.
 
 Execution evidence has three non-self-referential full M2 captures — Darwin at
 the exact floor pair, Darwin at the exact current pair, and Linux at the exact
@@ -285,19 +397,20 @@ The ordinary gate runs at `E` on all three lanes and alone may emit final GREEN.
 Closure transition `T` is the unique commit that first completes M2's canonical
 Closure record and is the direct one-parent child of `E`.
 
-Mechanical and judgment authority stay separate:
+Mechanical and judgment authority stay separate, and the gate document
+enumerates exactly what the runner checks so no reader infers more:
 
 | Authority | Owns |
 | --- | --- |
-| `bash scripts/check-m2-gate.sh` | Bound artifact digests, protected and inherited selector identities, states and minima, locked command exit status, evidence record structure and candidate reachability, the credential boundary, and user-state containment |
-| `mix loopex.status` | Live consistency among M2's governance rows, register state, root README status capsule, indexes, links, and the current revision's lifecycle claims |
-| Independent review | Whether tests assert what their names promise, whether mutations and cancellations were honestly injected, whether retained fields match actual captured output, whether the attended demonstration was a genuine task rather than a scripted one, whether the closure documents are current, and whether the operator experience satisfies the Purpose |
+| `bash scripts/check-m2-gate.sh` | Bound artifact digests, protected and inherited selector identities, states and minima, locked command exit status, the matrix marker set, its single reachable candidate, its per-lane toolchain and platform fields, its cross-lane identity agreement, its four self-describing digests against the files they name, negative-demonstration record shape, key order, selector pairing, tracked-path safety, and each restored digest against current bytes, the credential boundary, and user-state containment |
+| `mix loopex.status` | Live consistency among M2's governance rows, register state, root README status capsule, indexes, links, and the current revision's lifecycle claims, and every plan's declared bound artifacts against the working tree and reachable history |
+| Independent review | Whether tests assert what their names promise, whether mutations, interrupts, and cancellations were honestly injected, whether one clean-baseline mechanism was disabled and caused each named failure, whether retained fields match actual captured process output, whether the attended demonstration was a genuine task rather than a scripted one, whether the provider-reported input-token count agrees with the estimator, whether the closure documents are current, and whether the operator experience satisfies the Purpose |
 
 One canonical decimal gate seed from `0` through `999999` is supplied to every
 M2 protected selector role, every inherited M1 selector role, the provider
 default-exclusion control, and the ordinary final full suite in that gate run.
 `protected_executed` is the sum of authoritative executed test counts assigned
-to the nine M2 Outcomes across their locked selector roles; a test reported
+to the thirteen M2 Outcomes across their locked selector roles; a test reported
 excluded never counts, and inherited, mechanics, bootstrap, and full-suite
 executions are excluded from that sum.
 
@@ -306,31 +419,33 @@ executions are excluded from that sum.
 
 Concept: [Milestone scope](M2.md#concept-plan-scope).
 
-No public contract, protocol, storage format, or package is frozen. `0.1.0` is a
-version number on a source tree, and the vision's seventh compatibility surface
-— released package names, their contents, and the constraints they declare —
-stays inert because nothing is published.
+No public contract, protocol, storage format, package, or version is frozen,
+labelled for release, or given a compatibility promise. `VERSION` stays `0.0.0`,
+nothing is tagged, and the vision's seventh compatibility surface — released
+package names, their contents, and the constraints they declare — stays inert
+because nothing is published.
 
-Under the 0.x policy every public surface carries a label. M2 labels five, all
-`experimental`: the embedded Elixir API, the `loopex` command surface, the
-private journal and store schema, the executor job and receipt protocol, and the
-tool contract. An experimental surface may break in a later minor release with
-explicit migration notes. Internal process topology, process messages, and
-private structs are not public API and carry no label. No surface becomes a
-release candidate here, because none of them has schemas, independent consumers,
-vectors, or migration evidence.
+Every surface M2 touches is therefore unstable and may change without notice
+until a milestone publishes one: the embedded Elixir API, the `loopex` command
+surface, the private journal and store schema, the executor job and receipt
+protocol, the tool contract, the policy port, and the artifact-store port.
+`docs/developer/compatibility-surfaces.md` records that list and says plainly
+that no label, deprecation window, or migration note is owed for any of them
+yet. Internal process topology, process messages, and private structs are not
+public API. No surface becomes a release candidate here, because none of them
+has schemas, independent consumers, vectors, or migration evidence.
 
 The private journal and store schema changes in this milestone: conversation
-turns, tool definition generations, denials, and cancellations are new durable
-records. A session data root written by an M1-era revision is therefore not
-readable by M2. That is stated plainly in the operator documentation rather than
-worked around, because M1 accepted no installed-store compatibility contract and
-M2 accepts none either.
+turns, tool definition generations, artifact descriptors, denials, steers,
+follow-ups, and cancellations are new durable records. A session data root
+written by an M1-era revision is therefore not readable by M2. That is stated
+plainly in the operator documentation rather than worked around, because M1
+accepted no installed-store compatibility contract and M2 accepts none either.
 
 Milestone execution remains portable across the three locked lanes: Darwin
 floor, Darwin current, and Linux current. Each lane runs the same source, gate
 runner, protected selectors, inherited selectors, credential-free suite,
-real-provider role, coding tools, and demonstration. The floor lane is the
+real-provider roles, coding tools, and demonstration. The floor lane is the
 binding constraint on implementation technique, not a reduced smoke test: with
 neither `:json` nor `JSON` available there, any JSON encoding or decoding this
 milestone needs is repository-owned code proved on that lane. The Linux lane
@@ -345,17 +460,25 @@ Concept: [Milestone scope](M2.md#concept-plan-scope).
 There is no installed base and no released artifact. M0 and M1 journals and
 retained evidence are not migrated; M2 tests, demonstrations, and gate runs
 create isolated M2 data roots. No PostgreSQL, SQLite, or other external store
-migration is claimed.
+migration is claimed. No tag is created, so there is no tag to roll back.
 
 Before M2 first becomes green, every product checkpoint offered for review keeps
 the bootstrap aggregate and both exact M0 lanes green while the M2 runner
-reaches its next truthful missing-feature red. The accepted opening checkpoint
-is the complete repository rollback target for unintegrated M2 product work:
-reverting the designated milestone branch to it restores the accepted red
-condition without rewriting durable user data. After a complete M2 candidate
-first becomes green, each later checkpoint must keep M2 and both M0 lanes green
-or be reverted to the last reviewed green checkpoint. Ordinary local red-green
-work between checkpoints is not an integration candidate.
+reaches its next truthful missing-feature red. The single declared exception is
+the M1 gate amendment window named in Prerequisites: from the workstream E
+commit that changes the two bound artifacts until amendment revision `R` is
+accepted and integrated, bootstrap, the status check, and the M0 gate are red
+for that one stated reason, and no checkpoint inside that window is an
+integration candidate. The window closes because `R` lands, never because a
+waiver excuses it.
+
+The accepted opening checkpoint is the complete repository rollback target for
+unintegrated M2 product work: reverting the designated milestone branch to it
+restores the accepted red condition without rewriting durable user data. After a
+complete M2 candidate first becomes green, each later checkpoint must keep M2
+and both M0 lanes green or be reverted to the last reviewed green checkpoint.
+Ordinary local red-green work between checkpoints is not an integration
+candidate.
 
 The accepted governance checkpoint is the one integration exception before M2
 closure. After its exact transition is independently reviewed and the maintainer
@@ -377,11 +500,9 @@ directly at `A`. Its immediate child `R` rebinds Acceptance to exact `A`, adds
 one new amendment-specific disposition anchor to an existing durable document,
 and changes no envelope, gate, portable-enforcement, or product byte. Only `R`
 is integration-eligible, and evidence always names the revision where it ran.
-
-The `v0.1.0` tag is applied by the maintainer at closure and only at closure. It
-is a name for a reviewed commit, not release authority, and it publishes
-nothing. Rolling it back means deleting a tag; no external consumer depends on
-it, because none exists.
+The same transaction shape governs the M1 gate amendment, which is a separate
+transaction against a separate plan and never shares a revision with an M2 plan
+amendment.
 
 No M2 product implementation merges while M2 is red or before closure. No
 rollback claim extends to a data root written by a different source revision.
@@ -391,8 +512,8 @@ rollback claim extends to a data root written by a different source revision.
 
 Concept: [Milestone scope](M2.md#concept-plan-scope).
 
-No package is published or installed. ADR 0001's umbrella direction and ADR
-0002's runtime floor are unchanged.
+No package is published or installed, and no version is tagged. ADR 0001's
+umbrella direction and ADR 0002's runtime floor are unchanged.
 
 The planned inventory becomes exactly seven applications with exact roles:
 `loopex_protocol` as `:contract`, `loopex` as `:core`, `loopex_store_local`,
@@ -409,36 +530,50 @@ The planned inventory becomes exactly seven applications with exact roles:
   applications it composes, may declare no external dependency, and may not
   depend on another `:client`.
 
+Neither new port adds an application. The `Loopex.Policy` and `ArtifactStore`
+behaviours are declared in core, their reusable conformance suites live with the
+applications that implement them, the local artifact-store adapter lives in
+`loopex_store_local`, and the trusted-local `AllowAll` policy stays in a client
+application where ADR 0009 places it.
+
 This changes the repository's own dependency check. `mix loopex.deps_budget` and
-its bound source, `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`, are product
-code this milestone edits: the planned inventory grows from six named
-applications to seven and the client rule widens as above. The M2 gate states
-that plainly rather than claiming M2 adds or changes no check, and the M2 gate
-does not bind that file's bytes, because binding bytes the milestone must change
-would lock a digest that acceptance already knows is wrong. The command itself
-stays locked, its adversarial corpus in `apps/loopex/test/deps_budget_test.exs`
-grows two cases for the new inventory and the new client rule, and the M0 gate —
-which locks the command but not its bytes — must still pass.
+its source, `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`, are product code
+this milestone edits: the planned inventory grows from six named applications to
+seven and the client rule widens as above. Its adversarial corpus in
+`apps/loopex/test/deps_budget_test.exs` grows two cases for the new inventory and
+the new client rule, raising its locked minimum from M1's 25 to 27. Both files
+are bound by the closed M1 gate, which is why the amendment in Prerequisites is
+a prerequisite rather than a note. The M2 gate does not bind either file's
+bytes, because binding bytes the milestone must change would lock a digest
+acceptance already knows is wrong; it locks the command and both corpus
+identities instead. The M0 gate locks the command without binding its bytes and
+must still pass.
 
 `loopex_llm_reqllm` remains the only application permitted a direct external
 dependency, exactly `{:req_llm, "~> 1.17.1"}` without source options. Core
 remains Elixir/Erlang standard-library and OTP only. `loopex_cli` declares
 production dependencies on `:loopex`, `:loopex_store_local`,
 `:loopex_llm_reqllm`, and `:loopex_executor_local`, and no external dependency
-in any environment; its argument parsing and terminal output are standard
-library only.
+in any environment; its argument parsing, signal handling, and terminal output
+are standard library and OTP only.
 
 The operator entrypoint is an `escript`. `apps/loopex_cli/mix.exs` declares an
 `escript` main module, `mix escript.build` produces an executable named `loopex`
-in that application, and `loopex --version` reports `0.1.0`. The escript must
-build and run on all three locked lanes. It is not installed, signed, archived,
-attached to a release, or published, and the gate produces it inside its own
-owned task root.
+in that application, and `loopex --version` reports the single version train's
+value. The escript must build and run on all three locked lanes. Because an
+escript starts with no application tree, the shipped composition is responsible
+for starting one — `:ssl`, the HTTP client stack `req_llm` pulls in, telemetry,
+and the Loopex applications — and that work counts against the composition
+ceiling below. The escript is not installed, signed, archived, attached to a
+release, or published, and the gate produces it inside its own owned task root.
 
-The root `VERSION` file moves from `0.0.0` to `0.1.0`. Every application reads
-that file at compile time, so there is one edit and one source;
-`mix loopex.version_train` continues to prove the single train and now proves
-`0.1.0`.
+The root `VERSION` file stays `0.0.0`. Every application reads that file at
+compile time, and `mix loopex.version_train` continues to prove the single
+train. Keeping it is not only a scope decision: the bound
+`scripts/m1-exunit-runner.exs` refuses any sealed real-path report whose adapter
+build is not `loopex_llm_reqllm@0.0.0` or whose executor build is not
+`loopex_executor_local@0.0.0`, so a version bump would make every real-provider
+role in this gate unsatisfiable without amending another immutable artifact.
 
 <a id="technical-plan-minimalism"></a>
 ### Proportional Minimalism Budget
@@ -448,55 +583,77 @@ Concept: [Milestone scope](M2.md#concept-plan-scope).
 The operator experience is the unit of value. Focused tests, retained evidence,
 and repository checks support it and cannot satisfy an outcome in its place.
 
-**No fourth product boundary behaviour.** Store, Model, and Executor remain the
-only three, exactly as M1 accepted them. The tool registry is runtime-scoped
-data plus resolution rules inside core; it defines no replaceable
-implementation, has no conformance suite of its own, and adds no behaviour
-module. Host policy stays the small explicit decision function ADR 0007 already
-requires. A fourth boundary behaviour, or a generic layer above the three,
-requires an accepted plan amendment naming the concrete current implementations
-it unifies and why direct code is insufficient.
+**Five boundary behaviours, each justified by the concrete implementations that
+exist when the milestone ships.** The count is not the argument; the
+implementations are.
+
+| Port | Concrete implementations at ship | Why direct code is insufficient |
+| --- | --- | --- |
+| Store | In-memory and durable local | Accepted in M1; two implementations already share one conformance suite |
+| Model | Deterministic and ReqLLM | Accepted in M1; Outcome 2's streaming suite is the second contract both must satisfy |
+| Executor | Trusted-local | Accepted in M1 under ADR 0007; the isolated executor is the named second implementation the protocol exists for |
+| Policy | Trusted-local `AllowAll` and the refusing policy the demonstration selects | ADR 0009 creates it and the founding vision requires it. Host authority cannot stay a literal term inside core, because the decision belongs to the host and must be able to fail closed |
+| ArtifactStore | Local filesystem adapter | The vision assigns oversized tool output here. `bash` running a real test suite produces it on the first genuine task, and a bounded model-facing result that discards the remainder is a defect rather than a bound |
+
+A sixth boundary behaviour, or a generic layer above these five, requires an
+accepted plan amendment naming the concrete current implementations it unifies
+and why direct code is insufficient. The tool registry is not one: it is
+runtime-scoped data plus resolution rules inside core, defines no replaceable
+implementation, and adds no behaviour module.
 
 **The registry unifies six concrete tool implementations, all of which exist in
-this repository when it ships:** `read`, `write`, `edit`, and `bash`, plus the
-two retained demonstration tools `loopex.demo.write` and
-`loopex.demo.wait_write`. The demonstration tools remain registered rather than
-deleted, because M1's inherited protected executor and recovery selectors
-exercise them and the registry must prove it resolves more than one generation
-of definition. Six implementations behind one resolution rule is why the
-registry is not a speculative layer; four of them are new in this milestone.
+this repository when it ships:** `read`, `write`, `edit`, and `bash`, plus M1's
+two demonstration tools `loopex.demo.write` and `loopex.demo.wait_write`. The
+demonstration tools are retained as registered generations that no active tool
+profile offers, because M1's inherited protected executor and recovery selectors
+exercise them and the registry must prove it resolves definitions outside the
+active profile. Four of the six are new in this milestone. Retaining the other
+two costs two definition records and no prompt tokens; deleting them would break
+inherited protection to save nothing.
 
 **The command surface is a client application, not a boundary.** It defines no
 behaviour, no callback, and no replaceable implementation. It is permitted
 exactly one composition module that names concrete adapters, and that module has
-a hard ceiling: at most sixty effective lines, counting neither blank lines nor
+a hard ceiling: at most eighty effective lines, counting neither blank lines nor
 comments, measured by a protected test. That ceiling is the executable form of
 the vision's requirement that one page of code can start a runtime, create a
 session, submit a prompt, and consume events — a budget the repository currently
-fails, because the only such composition is test support.
+fails, because the only such composition is test support. Eighty rather than
+sixty, because the same module must also start the OTP application tree an
+escript does not start for it and must name five concrete implementations rather
+than three; a ceiling low enough to force compression buys a smaller number by
+hiding work, which is the opposite of what the budget is for.
 
-**The reference prompt has a measured ceiling.** The base system prompt plus
-active built-in tool definitions must measure under one thousand tokens before
-project context. The measurement is deterministic and dependency-free: a
-documented conservative estimator over the exact UTF-8 bytes, asserted by a
-protected credential-free test, and the attended real-provider role additionally
-records the provider's own reported input-token count for the same prompt. Both
-must be under the ceiling. A measurement that needs a tokenizer dependency is
-out of budget.
+**The reference prompt has one measured ceiling.** The base system prompt plus
+the active built-in tool definitions must measure under one thousand tokens
+before project context. The measurement is deterministic and dependency-free: a
+documented conservative estimator over the exact UTF-8 bytes, with a recorded
+estimator identity and version, asserted by a protected credential-free test,
+and reported whether it passes or fails. A measurement that needs a tokenizer
+dependency is out of budget. The attended real-provider demonstration record
+additionally reports the provider's own input-token count for the same prompt,
+which review compares against the estimator; it is not a second gate-enforced
+ceiling, because the bound `scripts/m1-exunit-runner.exs` seals a fixed
+real-path field set and cannot carry an additional field without amending an
+immutable artifact.
 
 **Explicitly forbidden in this milestone,** whether or not something would find
 them convenient: a transport behaviour, a daemon, a socket, a wire protocol or
 line framing, a controller lease, a broker, a policy engine, a generic event
 bus, a plugin macro system, a context-provider or transformer registry, an
-alternate session engine, a second composition module, and any built-in
-sub-agent, plan, objective, background job, team workflow, or social channel.
-The last group is a standing vision constraint, not an M2 preference.
+alternate session engine, a second composition module, a terminal
+user-interface framework, and any built-in sub-agent, plan, objective,
+background job, team workflow, or social channel. The last group is a standing
+vision constraint, not an M2 preference.
 
 **Gate machinery is limited to two files:** the new `scripts/check-m2-gate.sh`
 and the reused, already-proved `scripts/m1-exunit-runner.exs`. M2 adds no
-evidence verifier, no environment launcher, and no generalized evidence
-framework. Where M2 needs a check M1 already proved, it invokes M1's machinery
-instead of writing a second one.
+separate evidence verifier program, no environment launcher, and no generalized
+evidence framework. The retained-evidence validation M2 does perform lives
+inside that one runner, and the gate document enumerates exactly which checks it
+runs and which judgments remain review's, so no reader infers enforcement that
+does not exist. Where M2 needs a check M1 already proved, it invokes M1's
+machinery instead of writing a second one.
 
 Raw line count is recorded at closure as a review signal, never a pass
 threshold, except for the two scope-specific ceilings above, which the gate
