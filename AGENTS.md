@@ -49,6 +49,11 @@ When normative sources conflict:
    [Technical depth](docs/vision-technical.md#technical-depth).
 5. Historical material.
 
+The vision's product purpose, feature direction, and architecture are the
+zoom-out north star for what Loopex should become and what progress means.
+Governance remains binding, but serves as the guardrail that keeps delivery
+aligned, evidenced, and authorized; it is not a substitute product objective.
+
 Sequence authority lives in the vision pair and this contract, never the
 roadmap. The [delivery strategy](docs/vision.md#concept-vision-delivery-strategy)
 sets capability purpose, the
@@ -157,10 +162,17 @@ explanations and progress may be updated.
 Record reversible choices in the nearest existing code, test, plan progress, or
 subsystem document—never a new ADR or sidecar diary merely to log activity.
 
-Resolve reversible in-scope ambiguity with the smallest safe assumption. Ask
-only when plausible answers materially change scope, public behavior, authority,
-security, migration, cost, or external state; bundle questions into one
-evidence-backed decision packet.
+Resolve reversible in-scope ambiguity with the smallest safe assumption, and
+research mechanics, evidence, and safe alternatives autonomously. Ask only when
+plausible answers require a material operator decision about purpose, scope,
+observable behavior, cost, or external state; a material developer decision
+about architecture, public contracts, trust, security, persistence, or
+migration; or authority or execution permission that policy requires. Bundle
+required questions into one evidence-backed decision packet. Concise questions
+and status lead with operator consequence, developer consequence, the achievable
+current-milestone outcome and non-normative roadmap implication, and an honest
+wall-clock or remaining-iteration range; then give only the governance and
+technical facts needed to act.
 
 Report decisions, not discoveries. A report states what was decided and done, or
 puts a decision the maintainer owns in front of them with options, evidence, and
