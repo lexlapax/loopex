@@ -665,11 +665,13 @@ defmodule Loopex.M1Gate.SelectorRunner do
   defp app_spec(path, expected) do
     case :file.consult(String.to_charlist(path)) do
       {:ok, [{:application, ^expected, properties}]} when is_list(properties) ->
-        dependencies = Keyword.get(properties, :applications, [])
+        applications = Keyword.get(properties, :applications, [])
+        included_applications = Keyword.get(properties, :included_applications, [])
 
-        if is_list(dependencies) and Enum.all?(dependencies, &is_atom/1),
-          do: {:ok, dependencies},
-          else: {:error, "compiled application has an invalid dependency closure"}
+        if is_list(applications) and Enum.all?(applications, &is_atom/1) and
+             is_list(included_applications) and Enum.all?(included_applications, &is_atom/1),
+           do: {:ok, Enum.uniq(applications ++ included_applications)},
+           else: {:error, "compiled application has an invalid dependency closure"}
 
       _ ->
         {:error, "compiled application identity does not match its owner"}

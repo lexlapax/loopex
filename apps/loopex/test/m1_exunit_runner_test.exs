@@ -1,4 +1,6 @@
-Code.require_file(Path.expand("../../../scripts/m1-exunit-runner.exs", __DIR__))
+unless Code.ensure_loaded?(Loopex.M1Gate.SelectorRunner) do
+  Code.require_file(Path.expand("../../../scripts/m1-exunit-runner.exs", __DIR__))
+end
 
 defmodule Loopex.M1ExUnitRunnerTest do
   use ExUnit.Case, async: false
@@ -387,7 +389,8 @@ defmodule Loopex.M1ExUnitRunnerTest do
   test "only the declared internal dependency closure is reachable and startup never receives the provider key" do
     fixture =
       fixture_repo(
-        applications: [:kernel, :stdlib, :elixir, :declared_dep],
+        applications: [:kernel, :stdlib, :elixir],
+        included_applications: [:declared_dep],
         internal: [:fixture_app, :declared_dep, :undeclared_dep],
         allowed: [:fixture_app, :declared_dep]
       )
@@ -546,7 +549,8 @@ defmodule Loopex.M1ExUnitRunnerTest do
     git!(root, ["config", "user.name", "Loopex Test"])
     git!(root, ["config", "user.email", "loopex-test@example.invalid"])
     applications = Keyword.get(options, :applications, [:kernel, :stdlib, :elixir])
-    write_app!(build, :fixture_app, applications)
+    included_applications = Keyword.get(options, :included_applications, [])
+    write_app!(build, :fixture_app, applications, nil, nil, included_applications)
     startup_probe = Path.join(root, "startup-probe")
     on_exit(fn -> File.rm_rf(root) end)
 
@@ -618,10 +622,23 @@ defmodule Loopex.M1ExUnitRunnerTest do
     }
   end
 
-  defp write_app!(build, app, applications, module \\ nil, declared_app \\ nil) do
+  defp write_app!(
+         build,
+         app,
+         applications,
+         module \\ nil,
+         declared_app \\ nil,
+         included_applications \\ []
+       ) do
     ebin = Path.join([build, "lib", Atom.to_string(app), "ebin"])
     File.mkdir_p!(ebin)
     properties = [applications: applications]
+
+    properties =
+      if included_applications == [],
+        do: properties,
+        else: Keyword.put(properties, :included_applications, included_applications)
+
     properties = if module, do: Keyword.put(properties, :mod, {module, []}), else: properties
     spec = {:application, declared_app || app, properties}
     File.write!(Path.join(ebin, "#{app}.app"), :io_lib.format("~p.~n", [spec]))

@@ -148,13 +148,13 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `625b6d67fb5c34dd809dbcdf362df9a9e225fe7fb66a45b0785eec68420a8c49` | `scripts/check-m1-gate.sh` |
+| `5bf3fc51a129a94d4eb1aeda315de501c1d0ca30d429c8d8378c6bed1d39a0e3` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
-| `6aa177be0672179cb0713a7e73ccf54a52fa4dc957d5e7d00e3e514d5015f8c2` | `scripts/m1-exunit-runner.exs` |
+| `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c` | `scripts/m1-evidence-verifier.exs` |
 | `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
 | `b3789f57e8c57216f48d62a9bec38156d18d1a42ccffe009d0567ede7ab11453` | `apps/loopex/test/m1_gate_evidence_test.exs` |
-| `558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
+| `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 
@@ -856,3 +856,45 @@ current product frontier. After independent exact-SHA review and explicit
 maintainer acceptance, immediate child `R` adds one new disposition anchor and
 rebinds Acceptance to `A`; no product, portable-enforcement, envelope, or gate
 byte may change in `R`.
+
+<a id="amendment-5"></a>
+## Amendment 5 — Make the Selector-Runner Corpus Consumable
+
+**Acceptance: OUTSTANDING.** This section declares generation 5 and corrects
+two self-consumption defects in the bound standalone-selector path. The standalone
+runner compiles that corpus as a protected selector after the runner modules are
+already loaded. The corpus previously required the same executable script
+unconditionally at its first line. Under the standalone path, that import
+re-entered the active runner with the unchanged CLI arguments and blocked before
+any of the five locked tests could execute. Ordinary `mix test` did not expose
+the defect because it completed the import before starting the suite.
+
+The corpus now requires the script only when
+`Loopex.M1Gate.SelectorRunner` is not already loaded. The runner also now derives
+the compiled closure from both OTP `applications` and `included_applications`.
+ReqLLM intentionally includes `llm_db` and starts it inside its own application;
+omitting included applications left the real adapter and reference client unable
+to start even though their accepted dependency shape was valid. The existing
+closure corpus now proves included-application reachability while retaining its
+undeclared-sibling refusal.
+
+The five corpus test identities, minimum, exclusion policy, isolated child
+processes, credential checks, and adversarial cases are unchanged. The amendment
+updates only the conditional import, included-application traversal and its
+assertion, their bound digests, and this explanation. It changes no product byte,
+outcome, scope item, public contract, command, evidence class, provider path,
+toolchain lane, closure document, budget, or transition shape; it removes no
+check and grants no retry or timeout exception.
+
+This proposal follows Amendment 4's settled direct `A→R` transaction. At
+proposal `A`, the generation-4 Acceptance row and lifecycle remain unchanged,
+so status, bootstrap, and inherited M0 gates stop only at the stale binding.
+Binding-independent checks and the amended five-test standalone selector must
+pass. The standalone runner directly executes the locked product selectors at
+`A`, including the real-provider roles, and must report the product tree's
+truthful state; the aggregate M1 gate must stop only at the deliberately stale
+binding before those selectors. After independent exact-SHA review and explicit
+maintainer acceptance, immediate child `R` adds one new disposition anchor and
+rebinds Acceptance to `A`; no product, portable-enforcement, corpus, gate, or
+envelope byte may change in `R`. The aggregate M1 gate then proves the rebound
+tree through its ordinary and capture roles.
