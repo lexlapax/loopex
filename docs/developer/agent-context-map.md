@@ -518,6 +518,30 @@ and its closed-history migration boundary as implemented by that exact
 candidate. It authorizes the direct administrative rebind and governance-only
 merge to `main`; it does not authorize M1 product implementation.
 
+<a id="disposition-adr-0008-acceptance-2026-08-22"></a>
+### ADR 0008 acceptance — 2026-08-22
+
+The maintainer explicitly accepted
+[ADR 0008](../adr/0008-owner-succession-recovery-and-runtime-placement.md#concept)
+as the Proposed pair existing at candidate
+`720b7e9007b580dd36d6592a3f22f3b6603a87e6` after receiving an independent
+exact-candidate APPROVE verdict with no findings and the two binding digests.
+Acceptance binds the Concept file at
+`sha256:72f93bbf3fad9bc9ba88a9c8edced02355c04b2add2ccd62f01bc9658cfc047c`
+and the Technical depth file at
+`sha256:3ec1e35596a10890650752f04436b43168ce2d2724dd9bb2a336d85b3faddd4c`.
+
+This acceptance settles the private durable succession-attempt index and M1's
+active-passive runtime-placement prerequisite. It authorizes revising Workstream
+A inside the accepted M1 envelope and then rejoining Workstream B. It does not
+amend M1, weaken its gate, authorize active-active placement, authorize a merge
+to `main`, or authorize a release.
+
+This record is the maintainer's disposition evidence, not the independent
+review. The administrative acceptance transition still changes only the ADR
+status and governance row plus the plans register's derived status capsule, and
+it still requires an independent read-only exact-diff review.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
