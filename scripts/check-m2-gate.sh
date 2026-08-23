@@ -181,7 +181,8 @@ lane_os() {
 # conjuncts hold: turns is at least three, history is committed_conversation,
 # progress_messages is greater than zero, ports is progress_capable, tool_set
 # is named_set, staged is non-empty, and no element of staged is a
-# loopex.demo.* tool — any staged demonstration tool is refused, not only a set
+# demonstration tool under either its dot-segmented identity or its model-visible
+# name — any staged demonstration tool is refused, not only a set
 # composed wholly of them.
 # ---------------------------------------------------------------------------
 

@@ -140,7 +140,7 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `f3a601ecd5660b1a45c22d4e6f071b5efd6e5d9181e42ff2cc48f654ef223048` | `scripts/check-m2-gate.sh` |
+| `e77bca8bc5eddc6ee753741f0c2eeecfd535a7ac2b5da37241e68e6496d2c0fe` | `scripts/check-m2-gate.sh` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
