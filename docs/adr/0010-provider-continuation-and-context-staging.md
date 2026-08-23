@@ -137,7 +137,12 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   half the work it owns is advertising a claim. A long `bash` dispatched shortly
   before expiry would otherwise run past the instant an operator declared, and
   the run could not finish while it held an unresolved owned operation, so the
-  number every surface prints would be one the runtime does not honour.
+  number every surface prints would be one the runtime does not honour. The
+  instant this decision commits is what the job canonicalizes and what ADR 0007's
+  `canonical_request_digest` therefore covers, because it is immutable for the
+  run; the effective deadline ADR 0009 derives per attempt is carried alongside
+  that digested request and never inside it, since a per-attempt value in the
+  digest would give every retry a different identity to reconcile against.
 - **A reached deadline commits only after the run's owned work is confirmed
   stopped, and an unprovable outcome outranks it.** `bound_reached(:deadline, observed)`
   says the run stopped where its operator configured it to stop, so it commits
@@ -425,12 +430,16 @@ anything or leaving a hole.
 **Dispatch the tool calls of a reply that beat the deadline, under their own
 budgets.** The reply committed inside the bound, so its calls arguably inherit
 that admission, and this is what an implementation does by default if nobody
-decides otherwise. It is rejected. The run deadline has passed by then, so each
-such job's effective deadline is already in the past and its grant would carry an
-expiry the executor refuses at its pre-start boundary: the dispatch is incoherent
-as well as unbounded. It is also the original defect returning through the race,
-since work admitted after expiry is precisely what makes the advertised bound
-untrue.
+decides otherwise. It is rejected, and the reason is that the alternative
+describes a dispatch that has no admission path rather than one the executor
+would later refuse. Dispatch legality is decided exactly once, at the
+tool-operation intent commit, against the run deadline: past that instant no
+intent commits, so no grant is minted and there is no job to dispatch. The call
+takes its truthful `cancelled` terminal fact there instead. Nothing further down
+the path is consulted, and nothing needs to be — the grant this alternative
+imagines the executor refusing is one that is never created. It is also the
+original defect returning through the race, since work admitted after expiry is
+precisely what makes the advertised bound untrue.
 
 **Refuse dispatch below a minimum remaining time.** A rule like "do not start a
 tool with under thirty seconds left" avoids starting work that is about to be

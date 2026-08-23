@@ -23,7 +23,7 @@ provides.
 | Host policy owns `allow`, `deny`, `defer` | The literal term `{:host_policy, :allow}`, validated to be exactly that | There is no decision point; every reachable path ends in a grant |
 | Failure never falls through to allow | Vacuous — there is no failure path | A property with no reachable counterexample is untested |
 | Cancellation stops owned work | Abort is admitted and journaled; the coordinator never reads it | The model call and the OS process both keep running after an acknowledged abort |
-| An executor job is bounded by the run's wall-clock deadline | No run bound exists at all, and the two demonstration tools finish immediately | The moment `M2` declares a run deadline, a `bash` dispatched near expiry outlives it unless the deadline reaches the job |
+| An executor job is bounded by the run's wall-clock deadline | No run bound exists at all; the only bound on a demonstration job is `loopex.demo.wait_write`'s caller-supplied `delay_ms` of 1..30,000, which is the tool's own argument rather than a run bound | The moment `M2` declares a run deadline, a `bash` dispatched near expiry outlives it unless the deadline reaches the job |
 | Bounded output, path containment, edit preconditions, shell semantics, process ownership, artifact spill | The two demonstration tools write a fixed bounded file | No shared behaviour exists to conform to |
 | Oversized output becomes an artifact with a digest and a retrieval reference | Nothing produces oversized output, so nothing stores it | Bounded output is a promise to keep the bytes the model does not see; with no store behind it, it is a promise to lose them |
 | An abort reaches the live coordinator | `Loopex.command/2` on the attachment that submitted the run | Correct for one in-process caller and unreachable from any other process, which is a limit to state rather than a gap to close here |
@@ -474,12 +474,15 @@ wall-clock bound quietly stops applying.
 
 Every `JobRequest` carries the run's committed absolute deadline instant — the
 same instant [ADR 0010](0010-provider-continuation-and-context-staging.md#concept)
-commits with the run and propagates into the supervised model call. There is no
-job that omits it, including a `read_only` one, for the same structural reason
-policy has no exemption predicate: a field that is present only sometimes needs
-a rule for when, and that rule is where the bound goes missing.
+commits with the run and propagates into the supervised model call. That instant
+is the canonicalized request field, and it is immutable for the life of the run.
+There is no job that omits it, including a `read_only` one, for the same
+structural reason policy has no exemption predicate: a field that is present only
+sometimes needs a rule for when, and that rule is where the bound goes missing.
 
-The effective bound on a job is a minimum, never a choice:
+Alongside that digested request, each dispatch carries one derived attempt-local
+value, `effective_job_deadline`. The effective bound on a job is a minimum, never
+a choice:
 
 ```text
 effective_job_deadline = min(run_deadline, dispatch_instant + tool.budgets.wall_time)
@@ -494,7 +497,7 @@ plain:
 
 | Observation at intent commit | Resolution |
 | --- | --- |
-| `now < run_deadline` | The intent commits, the grant is minted, and the job carries `effective_job_deadline` |
+| `now < run_deadline` | The intent commits, the grant is minted, and the job carries `run_deadline` as its canonicalized request field together with the `effective_job_deadline` derived for this attempt |
 | `now >= run_deadline` | No intent commits, no grant is minted, no job is built; the logical tool call takes a terminal `cancelled` fact with no owned process tree and therefore trivially confirmed cleanup |
 
 There is deliberately no minimum-remaining-time heuristic. A rule of the form
@@ -505,17 +508,38 @@ then cancelled a hundred milliseconds later by the machinery below, which is one
 path rather than two.
 
 The grant's `expiry` is a different field answering a different question, and
-neither substitutes for the other:
+none of the three substitutes for another:
 
 | Field | Owner | Question | Checked |
 | --- | --- | --- | --- |
 | `expiry` (grant, ADR 0007) | Grant binding, one of the locked ten | May this job *start*? | Once, at the executor's final serialized pre-start boundary |
-| `effective_job_deadline` (`JobRequest`) | Job field; not a grant binding | How long may a started job *run*? | Armed at start and live for the job's whole life |
+| `run_deadline` (`JobRequest`) | Canonicalized job field; not a grant binding | Until when may this run's owned work exist at all? | Committed once with the run and immutable for it; read at each tool-operation intent commit |
+| `effective_job_deadline` (attempt-local job state) | Derived at dispatch; neither a grant binding nor a canonicalized field | How long may *this attempt* of a started job run? | Armed at start and live for that attempt's whole life |
 
 ADR 0007's ten bindings, its independent completeness oracle, its one digest
 identity, and its final pre-start validation boundary are all unchanged. The
-deadline is a canonicalized `JobRequest` field, so it is covered by the existing
-`canonical_request_digest` and needs no second digest and no eleventh binding.
+digest boundary runs between the two deadline values, and which side each falls
+on is load-bearing rather than editorial:
+
+- `run_deadline` **is** covered by the existing `canonical_request_digest`. It is
+  canonicalized into the `JobRequest` because it qualifies as one of the
+  immutable semantic request fields ADR 0007 scopes that canonicalization to: the
+  run commits the instant once and it never changes, so every attempt of an
+  operation canonicalizes the same value and recomputes the same digest.
+- `effective_job_deadline` is **not** covered by the digest and is not a
+  canonicalized request field. It is derived at dispatch from `dispatch_instant`,
+  which differs on every attempt, so canonicalizing it would give each retry of
+  one operation a different `canonical_request_digest`. That would break
+  ADR 0007's single reconciliation identity, which compares one digest across
+  attempts of the same operation and refuses a mismatch. It is attempt-local
+  operational state carried alongside the digested request, in the same spirit as
+  ADR 0007 carrying `attempt` as its own binding rather than folding a
+  per-attempt value into the digest, and the executor arms it without it ever
+  entering the digest.
+
+So the deadline needs no second digest and no eleventh grant binding: the
+immutable instant is bound and tamper-evident inside the one existing digest, and
+the per-attempt derivation stays outside it where it cannot disturb identity.
 
 At expiry the executor enters the cancellation sequence below at the cooperative
 step — it is not a separate path:
@@ -593,6 +617,18 @@ operator, with `bound_reached(:deadline, observed)` standing where `cancelled`
 stands in the first two rows. The third row is unchanged and unconditional: one
 `outcome_unknown` among the owned operations finishes the run
 `outcome_unknown`, whatever asked it to stop.
+
+The table decides an ending; it never replaces one. A validated terminal fact is
+never overwritten, at the operation level or at the run level, which is the same
+rule [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) states
+for the deadline race. Two consequences follow, and both are needed to read the
+first row correctly. An operation that already committed `completed`, `failed`,
+or `denied` keeps that fact; the table reads those committed facts to derive the
+run outcome rather than restating them. And a run that has already committed a
+validated terminal outcome — a no-tool final reply that finished it `completed`,
+for instance — keeps that outcome, and a deadline or an abort arriving afterwards
+is a no-op rather than a rewrite to `bound_reached` or `cancelled`. The table
+applies only to a run that has not yet reached a terminal fact of its own.
 
 Cleanup that is not confirmed is insufficient evidence, not a slower success. If
 the grace period elapses, the owned tree is terminated by its captured kill
@@ -690,7 +726,11 @@ Claim-proportional evidence for this decision:
   `cancelled` only after that confirmation, with its bounded partial output and
   any spilled artifact retained; a tool call whose run deadline had already
   passed at intent commit never journals an intent, never mints a grant, and
-  dispatches nothing; and ADR 0007's ten-binding completeness oracle still passes
+  dispatches nothing; two attempts of one operation dispatched at different
+  instants recompute the same `canonical_request_digest` while carrying different
+  `effective_job_deadline` values, proving the per-attempt derivation stayed
+  outside the digest and ADR 0007's reconciliation identity survives a retry; and
+  ADR 0007's ten-binding completeness oracle still passes
   unchanged, proving the deadline was added to the job rather than to the grant;
 - a deadline-terminated job whose cleanup cannot be confirmed, driven by
   injected unconfirmability rather than timing luck: the operation ends
@@ -853,9 +893,12 @@ transcribes exactly ten names, so widening it edits an accepted decision rather
 than extending this one. And the semantics do not fit: a grant binding is
 compared once before the effect starts, while a deadline must remain live for
 the job's whole life, so a single field would have to mean both "may start" and
-"may continue" and a refusal could not say which one fired. A canonicalized
-`JobRequest` field is already covered by the one `canonical_request_digest`, so
-the deadline is bound and tamper-evident without touching the ten.
+"may continue" and a refusal could not say which one fired. The run's absolute
+deadline instant is instead a canonicalized `JobRequest` field already covered by
+the one `canonical_request_digest`, so it is bound and tamper-evident without
+touching the ten; the per-attempt `effective_job_deadline` derived from it stays
+outside both the ten and the digest, because a value that changes on every
+attempt cannot sit inside a single reconciliation identity.
 
 **Committing the bounded stop at the moment the deadline fires.** It reports
 faster, and cleanup would follow. It reproduces the exact defect the run-level
@@ -979,8 +1022,10 @@ Concept: [Compatibility, migration, and rollback](0009-tool-executor-and-grant-c
 The durable format gains the active-set record committed at session start
 together with its model-visible name mapping, the per-call generation triple on
 each tool-operation intent, the durable denial record and its bounded policy
-context, the effective job deadline carried on each `JobRequest` and covered by
-the existing `canonical_request_digest`,
+context, the run's committed absolute deadline instant canonicalized into each
+`JobRequest` and therefore covered by the existing `canonical_request_digest`
+together with the per-attempt `effective_job_deadline` derived at dispatch and
+carried alongside that digested request rather than inside it,
 the artifact reference carried on a tool result and its receipt, and the
 cancellation evidence retained with a terminal operation and run outcome,
 including the reconciliation reference an unknown run outcome carries, and the

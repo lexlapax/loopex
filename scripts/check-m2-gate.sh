@@ -22,8 +22,10 @@
 # The primary part is a behavioural probe. It composes a runtime from shipped
 # modules through the public Loopex facade inside an isolated evidence root
 # outside the checkout, submits one prompt, and observes what the loop actually
-# did: how many turns it staged, what each staged request carried, whether
-# anything reached the progress plane, and which tool set the runtime accepted.
+# did: how many turns it staged, what each staged request carried, how many
+# messages reached the probe process — a coarse mailbox floor, not proof a
+# delta reached the progress plane — which tool set the runtime accepted, and
+# which tool identities it staged.
 # The declared red is emitted from those observations rather than from the
 # presence or absence of a file, because a file check is satisfied by writing a
 # file.
@@ -156,23 +158,31 @@ lane_os() {
 # through Loopex.start_link/1, creates a session, submits one prompt through the
 # public facade, waits for the session to settle, and reports what the loop did.
 #
-# It reports five observations:
+# It emits one observation line carrying six fields: five behavioural
+# observations and one disclosed shape check.
 #
 #   turns             how many model requests the loop staged
 #   history           whether the last staged request carried the committed
 #                     conversation, or one synthesized user message
-#   deltas            how many items reached the progress plane during the run
-#   ports             whether the model and executor ports expose the arity that
-#                     carries a progress function at all
+#   progress_messages how many items reached the probe process during the run;
+#                     a mailbox count, not a filtered progress-plane count, and
+#                     therefore only a floor
 #   tool_set          whether the runtime accepted a named tool set, or only one
 #                     hand-written demonstration definition
+#   staged            the sorted tool identities the first staged request
+#                     actually carried
+#
+# The sixth field, ports, is the disclosed shape check that accompanies those
+# observations rather than one of them: whether the model and executor ports
+# expose the arity that carries a progress function at all.
 #
 # The probe asks for the M2 shape first and falls back to the M1 shape, so the
-# same program observes either tree. M2 is present only when the loop ran past
-# turn two while the model kept asking for tools, the last request carried an
-# assistant message and a real tool result, at least one delta reached the
-# progress plane through ports that can carry one, and the runtime accepted a
-# named tool set whose staged definitions are not all demonstration tools.
+# same program observes either tree. M2 is present only when all seven
+# conjuncts hold: turns is at least three, history is committed_conversation,
+# progress_messages is greater than zero, ports is progress_capable, tool_set
+# is named_set, staged is non-empty, and no element of staged is a
+# loopex.demo.* tool — any staged demonstration tool is refused, not only a set
+# composed wholly of them.
 # ---------------------------------------------------------------------------
 
 probe_verdict="unavailable"
@@ -291,13 +301,13 @@ defmodule Loopex.M2Probe do
       })
 
     settle(runtime, session_id, 600)
-    {requests, deltas} = drain([], 0)
+    {requests, progress_messages} = drain([], 0)
     Loopex.stop(runtime)
 
     %{
       turns: length(requests),
       history: history_shape(List.last(requests)),
-      deltas: deltas,
+      progress_messages: progress_messages,
       ports: port_shape(),
       tool_set: tool_set,
       staged: staged_tools(List.first(requests))
@@ -372,12 +382,12 @@ defmodule Loopex.M2Probe do
     end
   end
 
-  defp drain(requests, deltas) do
+  defp drain(requests, progress_messages) do
     receive do
-      {:probe_model_request, request} -> drain([request | requests], deltas)
-      _other -> drain(requests, deltas + 1)
+      {:probe_model_request, request} -> drain([request | requests], progress_messages)
+      _other -> drain(requests, progress_messages + 1)
     after
-      0 -> {Enum.reverse(requests), deltas}
+      0 -> {Enum.reverse(requests), progress_messages}
     end
   end
 
@@ -413,7 +423,7 @@ case Loopex.M2Probe.run(root) do
   %{} = observed ->
     IO.puts(
       "LOOPEX_M2_PROBE turns=#{observed.turns} history=#{observed.history} " <>
-        "progress_messages=#{observed.deltas} ports=#{observed.ports} " <>
+        "progress_messages=#{observed.progress_messages} ports=#{observed.ports} " <>
         "tool_set=#{observed.tool_set} staged=#{Enum.join(observed.staged, "+")}"
     )
 end
@@ -422,7 +432,7 @@ LOOPEX_M2_PROBE_PROGRAM
 
 run_opening_probe() {
   local probe_root="" program output field
-  local turns history deltas ports tool_set staged
+  local turns history progress_messages ports tool_set staged
 
   probe_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m2-probe.XXXXXX" 2>/dev/null)" || probe_root=""
   if [ -z "$probe_root" ] || [ ! -d "$probe_root" ] || [ ! -w "$probe_root" ]; then
@@ -487,12 +497,12 @@ run_opening_probe() {
 
   turns="$(probe_field "$probe_report" turns)"
   history="$(probe_field "$probe_report" history)"
-  deltas="$(probe_field "$probe_report" progress_messages)"
+  progress_messages="$(probe_field "$probe_report" progress_messages)"
   ports="$(probe_field "$probe_report" ports)"
   tool_set="$(probe_field "$probe_report" tool_set)"
   staged="$(probe_field "$probe_report" staged)"
 
-  if [[ ! "$turns" =~ ^[0-9]+$ ]] || [[ ! "$deltas" =~ ^[0-9]+$ ]]; then
+  if [[ ! "$turns" =~ ^[0-9]+$ ]] || [[ ! "$progress_messages" =~ ^[0-9]+$ ]]; then
     probe_unavailable_reason="the probe observation line is malformed"
     probe_report=""
     return 0
@@ -500,11 +510,11 @@ run_opening_probe() {
 
   if [ "$turns" -ge 3 ] \
     && [ "$history" = "committed_conversation" ] \
-    && [ "$deltas" -gt 0 ] \
+    && [ "$progress_messages" -gt 0 ] \
     && [ "$ports" = "progress_capable" ] \
     && [ "$tool_set" = "named_set" ] \
     && [ -n "$staged" ] \
-    && ! printf '%s' "$staged" | grep -qE '(^|\+)loopex\.demo\.[^+]*(\+|$)'; then
+    && ! printf '%s' "$staged" | grep -qE '(^|\+)loopex[._]demo[._][^+]*(\+|$)'; then
     probe_verdict="m2_present"
   else
     probe_verdict="m1_shape"
@@ -563,6 +573,8 @@ require_feature \
   "the maximum turn bound ends the run bound reached before another provider call" \
   "the cumulative token budget ends the run bound reached before another provider call" \
   "the wall clock deadline ends the run bound reached before another provider call" \
+  "two attempts of one operation dispatched at different instants recompute the same request digest" \
+  "a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" \
   "the committed absolute deadline is propagated into the model call rather than an independent per call timeout" \
   "a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" \
   "a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated" \
@@ -576,7 +588,7 @@ require_feature \
   "a text delta is observable while its operation is still incomplete rather than after the reply returns" \
   "replaying an adapter's emitted deltas reproduces the reply it returned byte identically" \
   "the model and executor progress domains carry separate sequences each closed by its own content free item" \
-  "a gapless turn sequence and the reply's delta count make lost progress detectable" \
+  "a gapless sequence within one stream domain and its closing total make lost progress detectable" \
   "a provider retry opens a second stream domain under one turn and neither domain reports the other as loss" \
   "a retried executor operation attempt opens its own stream domain closed by its own final sequence" \
   "the committed assistant message is built from the reply and never assembled from deltas" \
@@ -1201,7 +1213,7 @@ run_selector() {
   fi
 }
 
-run_selector 1 apps/loopex/test/agent_loop_test.exs default 13 zero \
+run_selector 1 apps/loopex/test/agent_loop_test.exs default 15 zero \
   "passed=a prompt runs until the model stops requesting tools rather than after a fixed number of turns" \
   "passed=every model request carries the committed conversation history including the original prompt" \
   "passed=an assistant tool call and its real tool result are committed and replayed to the model" \
@@ -1211,6 +1223,8 @@ run_selector 1 apps/loopex/test/agent_loop_test.exs default 13 zero \
   "passed=the maximum turn bound ends the run bound reached before another provider call" \
   "passed=the cumulative token budget ends the run bound reached before another provider call" \
   "passed=the wall clock deadline ends the run bound reached before another provider call" \
+  "passed=two attempts of one operation dispatched at different instants recompute the same request digest" \
+  "passed=a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" \
   "passed=the committed absolute deadline is propagated into the model call rather than an independent per call timeout" \
   "passed=a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" \
   "passed=a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated" \
@@ -1222,7 +1236,7 @@ run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs defaul
   "passed=a text delta is observable while its operation is still incomplete rather than after the reply returns" \
   "passed=replaying an adapter's emitted deltas reproduces the reply it returned byte identically" \
   "passed=the model and executor progress domains carry separate sequences each closed by its own content free item" \
-  "passed=a gapless turn sequence and the reply's delta count make lost progress detectable" \
+  "passed=a gapless sequence within one stream domain and its closing total make lost progress detectable" \
   "passed=a provider retry opens a second stream domain under one turn and neither domain reports the other as loss" \
   "passed=a retried executor operation attempt opens its own stream domain closed by its own final sequence" \
   "passed=the committed assistant message is built from the reply and never assembled from deltas" \

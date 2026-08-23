@@ -62,25 +62,38 @@ what the probe sees, and the checkout is never written to. The program composes 
 runtime from shipped modules only — the durable local store, the trusted-local
 executor, and its own observing model adapter — starts it through
 `Loopex.start_link/1`, creates a session, submits one prompt through the public
-facade, waits for the session to settle, and reports five observations: how many
-model requests the loop staged, whether the last staged request carried the
-committed conversation or one synthesized user message, how many items reached the
+facade, waits for the session to settle, and emits one observation line carrying
+six fields: five behavioural observations and one disclosed shape check.
+
+The five observations are `turns`, how many model requests the loop staged;
+`history`, whether the last staged request carried the committed conversation or
+one synthesized user message; `progress_messages`, how many items reached the
 probe process during the run, which is a mailbox count rather than a filtered
-progress-plane count and is therefore a floor, whether the model and executor
-ports declare the arity that carries a progress function — a shape check that
-accompanies the behavioural ones rather than an observation — and whether the runtime
-accepted a named active tool set or only one hand-written definition. It asks for
-the `M2` shape first and falls back to the `M1` shape, so one program observes
+progress-plane count and is therefore only a floor; `tool_set`, whether the
+runtime accepted a named active tool set or only one hand-written definition;
+and `staged`, the sorted tool identities the first staged request actually
+carried. The sixth field, `ports`, is the disclosed shape check that accompanies
+those observations rather than being one of them: whether the model and executor
+ports declare the arity that carries a progress function. The probe asks for the
+`M2` shape first and falls back to the `M1` shape, so one program observes
 either tree and a refusal is itself one of the observations.
 
-`M2` is present only when all five hold at once: the loop ran past turn two while
-the model kept asking for tools, the last staged request carried an assistant
-message and a real tool result, at least one item reached the probe process during
-the run — a coarse mailbox floor, not proof a delta reached the progress plane,
-which the locked streaming selector owns —
-both ports can carry progress, and the accepted tool set is named and is not
-composed only of demonstration tools. Anything else is the declared red, emitted
-together with the observation line that produced it.
+`M2` is present only when all seven conjuncts hold at once: `turns` is at least
+three, so the loop ran past turn two while the model kept asking for tools;
+`history` is `committed_conversation`, so the last staged request carried an
+assistant message and a real tool result; `progress_messages` is greater than
+zero, so at least one item reached the probe process during the run — a coarse
+mailbox floor, not proof a delta reached the progress plane, which the locked
+streaming selector owns; `ports` is `progress_capable`, so both the model and
+the executor port can carry progress; `tool_set` is `named_set`; `staged` is
+non-empty, so the accepted set actually reached a staged request; and no element
+of `staged` names a demonstration tool under either its dot-segmented identity
+or its model-visible name, which refuses any staged demonstration tool rather
+than only a set composed wholly of them. Both forms are matched because a staged
+entry reports its `tool_id` where one is present and its `name` otherwise, and a
+refusal that saw only one form would pass the other. Anything else is the
+declared red, emitted with the observation line that produced it appended to it
+parenthetically on the same line.
 
 The probe's model adapter is a harness. Nothing it observes is a real-path claim,
 and it satisfies no outcome and no closure obligation.
@@ -127,7 +140,7 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `3833b05258991d8d5c6baba87247feb3fc17edb5f9e5777ec734e879a2874d5e` | `scripts/check-m2-gate.sh` |
+| `f3a601ecd5660b1a45c22d4e6f071b5efd6e5d9181e42ff2cc48f654ef223048` | `scripts/check-m2-gate.sh` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -285,8 +298,8 @@ equal the named excluded identities.
 
 | Outcome | Selector / role | Minimum | Locked names and required states |
 | --- | --- | --- | --- |
-| 1 | `apps/loopex/test/agent_loop_test.exs` / default | 13 | passed: `a prompt runs until the model stops requesting tools rather than after a fixed number of turns`; `every model request carries the committed conversation history including the original prompt`; `an assistant tool call and its real tool result are committed and replayed to the model`; `each turn dispatches exactly the canonical request bytes and digest committed before it`; `a staged request carries complete tool definition bytes and its generation triple and is reconstructible from the journal alone`; `every turn after the first is canonical history replay and the reserved continuation field stays empty`; `the maximum turn bound ends the run bound reached before another provider call`; `the cumulative token budget ends the run bound reached before another provider call`; `the wall clock deadline ends the run bound reached before another provider call`; `the committed absolute deadline is propagated into the model call rather than an independent per call timeout`; `a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only`; `a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated`; `every sampling bound is a declared committed value with no implicit default` |
-| 2 | `apps/loopex_llm_reqllm/test/streaming_conformance_test.exs` / default | 11 | passed: `every model adapter satisfies one streaming conformance suite`; `each canonical delta kind is bounded plain data carrying no provider or host term`; `a text delta is observable while its operation is still incomplete rather than after the reply returns`; `replaying an adapter's emitted deltas reproduces the reply it returned byte identically`; `the model and executor progress domains carry separate sequences each closed by its own content free item`; `a gapless turn sequence and the reply's delta count make lost progress detectable`; `a provider retry opens a second stream domain under one turn and neither domain reports the other as loss`; `a retried executor operation attempt opens its own stream domain closed by its own final sequence`; `the committed assistant message is built from the reply and never assembled from deltas`; `a cancelled stream commits no assistant message and a late reply never becomes canonical`; `an adapter that emits no deltas is conformant and declares that it does not stream` |
+| 1 | `apps/loopex/test/agent_loop_test.exs` / default | 15 | passed: `a prompt runs until the model stops requesting tools rather than after a fixed number of turns`; `every model request carries the committed conversation history including the original prompt`; `an assistant tool call and its real tool result are committed and replayed to the model`; `each turn dispatches exactly the canonical request bytes and digest committed before it`; `a staged request carries complete tool definition bytes and its generation triple and is reconstructible from the journal alone`; `every turn after the first is canonical history replay and the reserved continuation field stays empty`; `the maximum turn bound ends the run bound reached before another provider call`; `the cumulative token budget ends the run bound reached before another provider call`; `the wall clock deadline ends the run bound reached before another provider call`; `two attempts of one operation dispatched at different instants recompute the same request digest`; `a tool call whose run deadline already passed is not dispatched and still commits a terminal fact`; `the committed absolute deadline is propagated into the model call rather than an independent per call timeout`; `a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only`; `a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated`; `every sampling bound is a declared committed value with no implicit default` |
+| 2 | `apps/loopex_llm_reqllm/test/streaming_conformance_test.exs` / default | 11 | passed: `every model adapter satisfies one streaming conformance suite`; `each canonical delta kind is bounded plain data carrying no provider or host term`; `a text delta is observable while its operation is still incomplete rather than after the reply returns`; `replaying an adapter's emitted deltas reproduces the reply it returned byte identically`; `the model and executor progress domains carry separate sequences each closed by its own content free item`; `a gapless sequence within one stream domain and its closing total make lost progress detectable`; `a provider retry opens a second stream domain under one turn and neither domain reports the other as loss`; `a retried executor operation attempt opens its own stream domain closed by its own final sequence`; `the committed assistant message is built from the reply and never assembled from deltas`; `a cancelled stream commits no assistant message and a late reply never becomes canonical`; `an adapter that emits no deltas is conformant and declares that it does not stream` |
 | 3 | `apps/loopex/test/input_algebra_test.exs` / default | 8 | passed: `a prompt starts a run only while the session is settled and is otherwise refused`; `the runtime never infers whether new input is steering or follow up and a steer must name its active run`; `a steer joins the active run after the current tool batch and before the next model request`; `a steer is recorded applied only when a committed request carried it`; `a follow up starts a new run only after the active run and its steering settle`; `a steer that arrives after its run is terminal commits unapplied with a reason and is never promoted`; `at most one unapplied steer and one queued follow up exist and both survive owner succession`; `an abort resolves any unapplied steer and queued follow up as cancelled` |
 | 4 | `apps/loopex_executor_local/test/coding_tools_test.exs` / default | 8 | passed: `read returns bounded chunked content and reports truncation`; `write creates or replaces a file only beneath the workspace root`; `edit applies an exact match change and names what differed on a mismatch`; `bash runs an argv command and an explicit raw shell command with distinct semantics`; `every tool refuses a path that escapes the workspace root through traversal or a symlink`; `executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted`; `a tool child process tree is owned and terminated with its job`; `a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound` |
 | 5 | `apps/loopex_store_local/test/artifact_store_conformance_test.exs` / default | 6 | passed: `every artifact store implementation satisfies one conformance suite`; `tool output beyond its declared bound spills to an artifact instead of truncating silently`; `the durable artifact event carries digest media type size role and an opaque reference`; `the model facing result stays under its bound and names what was truncated`; `the operator retrieves a spilled artifact by its opaque reference through the public facade`; `an artifact round trips byte exactly and a missing artifact reports unavailable` |
@@ -680,13 +693,18 @@ continued.
 
 ### Declared Red Condition
 
-At the accepted opening checkpoint the runner emits exactly:
+At the accepted opening checkpoint the runner emits a single line on standard
+error. Its immutable declared-red text is:
 
 ```text
 M2 gate RED: an operator cannot run a coding task from the command line; the session loop still stops after two turns, sends the model no conversation history, never streams, and offers only two demonstration tools
 ```
 
-followed, in the ordinary case, by the observation line the probe produced.
+In the ordinary case the probe's observation line is appended to that same line
+parenthetically, as `(observed through the public facade: <observation line>)`.
+It is not a second line. Where the probe could not run, the additional condition
+reaches the same declared red with no parenthetical, after a note on standard
+output naming why the probe was unavailable.
 
 That is the truthful state of the product this gate opens against, and it is
 what the probe observes rather than what a file list implies. The loop is

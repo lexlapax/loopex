@@ -233,9 +233,11 @@ run_deadline (absolute instant, committed with the run)
   -> carried in the staged request and passed to the supervised model call
        -> the supervising process arms an abort at that instant
        -> the adapter receives the same instant and bounds its own transport wait
-  -> carried on every JobRequest the run dispatches
-       -> the job's effective deadline is min(run_deadline,
-          dispatch_instant + tool.budgets.wall_time)
+  -> canonicalized into every JobRequest the run dispatches, and therefore
+     covered by the one canonical_request_digest
+       -> the attempt's effective deadline is derived at dispatch as
+          min(run_deadline, dispatch_instant + tool.budgets.wall_time)
+          and carried alongside the digested request, never inside it
        -> at expiry ADR 0009's cancellation sequence terminates and confirms
           the owned process tree
 ```
@@ -255,7 +257,7 @@ A run's owned work is therefore bounded in both directions:
 | Owned operation | Bounded by | Ended at expiry by |
 | --- | --- | --- |
 | Supervised model call | The committed instant carried in the staged request | The supervising process arming an abort; no assistant message is written |
-| Executor job | `min(run_deadline, dispatch_instant + tool wall-time budget)` carried on the `JobRequest` | ADR 0009's cancellation sequence: cooperative cancel, declared grace period, owned process-tree termination, confirmed cleanup |
+| Executor job | `run_deadline` canonicalized into the `JobRequest`, and the attempt-local `min(run_deadline, dispatch_instant + tool wall-time budget)` derived at dispatch and carried alongside it | ADR 0009's cancellation sequence: cooperative cancel, declared grace period, owned process-tree termination, confirmed cleanup |
 | A tool call whose run deadline already passed at intent commit | Not dispatched at all | Terminal `cancelled` with no owned tree; cleanup is confirmed trivially |
 
 `bound_reached(:deadline, observed)` commits only after every owned operation
@@ -645,9 +647,11 @@ row and one more selector.
 anyway.** The two opposite shortcuts for the middle case. Discarding the reply
 removes a fact the provider produced and was billed for, leaving the last
 committed turn absent from a history whose purpose is replay. Dispatching its
-calls admits effectful work after the instant the run declared, with grants whose
-expiry the executor would refuse at its pre-start boundary anyway. Keeping the
-message and cancelling its calls is the only option that neither fabricates
+calls admits effectful work after the instant the run declared, and there is no
+path by which it could happen: dispatch legality is decided once at the
+tool-operation intent commit, and past the deadline no intent commits, so no
+grant is minted and no job exists for the executor to accept or refuse. Keeping
+the message and cancelling its calls is the only option that neither fabricates
 history nor admits unbounded work.
 
 **A minimum-remaining-time threshold before dispatch.** Refusing to start a tool
@@ -864,10 +868,16 @@ synthesized second-turn record has no successor form, and `M1`-owned test roots
 are discarded.
 
 The run's committed absolute deadline also reaches durable form outside this
-decision's records: it is carried in the staged request here and on every
-`JobRequest` under
+decision's records: it is carried in the staged request here and canonicalized
+into every `JobRequest` under
 [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept), where it is
-covered by the existing `canonical_request_digest` and adds no grant binding.
+covered by the existing `canonical_request_digest` and adds no grant binding. It
+qualifies because it is immutable for the run. The effective job deadline
+ADR 0009 derives per attempt is durable operational state carried alongside that
+digested request and is deliberately outside the digest: it is computed from the
+dispatch instant, so canonicalizing it would change the digest on every retry and
+break the single reconciliation identity ADR 0007 compares across attempts of one
+operation.
 
 Rollback before closure removes the conversation elements, the projection, the
 bounds, the deadline's propagation into the supervised model call and onto every

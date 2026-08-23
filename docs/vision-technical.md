@@ -932,7 +932,7 @@ stateDiagram-v2
     awaiting_tools --> awaiting_tools: next serial call or safe batch
     awaiting_tools --> preparing: ordered results committed
     awaiting_tools --> suspended: host interaction required
-    awaiting_tools --> run_terminal: cancellation / unrecoverable failure
+    awaiting_tools --> run_terminal: cancellation / unrecoverable failure / bound reached
     suspended --> awaiting_tools: exact interaction resolved
     suspended --> run_terminal: denied / expired / aborted
     run_terminal --> preparing: follow-up queued

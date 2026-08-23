@@ -275,6 +275,20 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   deadline has already passed is not dispatched at all — no tool-operation
   intent commits, no grant is minted, and the call takes a terminal `cancelled`
   fact with no owned process tree to clean up.
+- **The request digest covers the run's absolute instant and not the derived
+  per-attempt bound.** The two values the job carries fall on opposite sides of
+  ADR 0007's canonicalization. The run's committed absolute deadline instant is a
+  canonicalized `JobRequest` field and is therefore covered by the existing
+  `canonical_request_digest`: it is immutable for the life of the run, so it is
+  one of the immutable semantic request fields that canonicalization is scoped
+  to. The effective job deadline is not, and must not be. It is derived at
+  dispatch from the dispatch instant, so it differs on every attempt, and a
+  per-attempt value inside the digest would give every retry of one operation a
+  different `canonical_request_digest` — which would break ADR 0007's single
+  reconciliation identity, since reconciliation compares one digest across
+  attempts of the same operation. The effective deadline is therefore
+  attempt-local operational state carried alongside the digested request rather
+  than inside it. There is still no second digest and no eleventh grant binding.
 - **A job that reaches its effective deadline is cancelled and cleaned up by
   the machinery an abort already uses, and its truth follows the same
   algebra.** At expiry the executor cooperatively cancels, waits the declared
@@ -487,7 +501,11 @@ one. The semantics differ too: `expiry` is validated once at the final pre-start
 boundary and authorizes a job to *start*, while the deadline governs how long a
 started job may *run* and must therefore be live for the job's whole life. Two
 different questions in one field would make an expired grant and an exhausted
-deadline indistinguishable in a refusal.
+deadline indistinguishable in a refusal. The run's absolute instant reaches the
+job as a canonicalized field inside the one existing request digest instead, and
+the per-attempt effective deadline stays outside both the ten bindings and the
+digest, so nothing about the deadline widens the locked set or the identity a
+retry must reproduce.
 
 **Commit the run's bounded stop when the deadline fires and clean up
 afterwards.** It makes the terminal outcome prompt, which is what an operator
