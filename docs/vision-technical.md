@@ -975,6 +975,24 @@ the core.
 while retries, reconciliation, compaction, or queued follow-up work keep the
 session from being settled.
 
+A run's typed terminal outcome is exactly one of `completed`, `bound_reached`,
+`failed`, `cancelled`, or `outcome_unknown`. The set is closed; a sixth requires
+the same kind of decision that introduced `bound_reached`.
+
+`bound_reached` is the outcome of a run stopped by a bound declared and committed
+with it — the maximum turn count, the cumulative token budget, or the absolute
+wall-clock deadline. It names which bound stopped the run and the observed value.
+It is not a failure: nothing malfunctioned, no invariant broke, and the committed
+conversation is complete and resumable, so a later run may continue it under a
+new bound. It is not `completed` either, because the model did not stop on its
+own and the task is not known to be done. Encoding it as a failure category was
+considered and rejected: every consumer grouping by terminal value would then see
+a configured stop and a genuine breakage in one bucket, distinguishable only by
+reading a reason, which is precisely the distinction an operator needs most. A
+bound is checked before a request is staged, so reaching one costs no provider
+call. Bounds are enforced per run; a run that already committed a validated
+terminal fact keeps it, exactly as cancellation never overwrites one.
+
 ### 10.3 Input queues
 
 0.x defines four explicit input paths:

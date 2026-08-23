@@ -104,6 +104,66 @@ defmodule Loopex.StatusFixtures do
 
   def gate, do: @gate
   def gate_separators, do: @gate_separators
+
+  @doc """
+  ## Concept
+
+  A gate that declares the additive amendment transaction and carries numbered
+  amendments up to one generation.
+
+  ## Technical depth
+
+  The marker and the amendment sections are both required before a gate
+  generation is admissible, so the fixture builds them together rather than
+  letting a case pass with only one of them present.
+  """
+  def amended_gate(generation, base \\ @gate) do
+    header = String.trim_trailing(base, "\n") <> "\n\n<a id=\"amendment-transaction-v2\"></a>\n"
+
+    Enum.reduce(1..generation//1, header, fn number, text ->
+      text <> "\n<a id=\"amendment-#{number}\"></a>\n## Amendment #{number}\n"
+    end)
+  end
+
+  @doc """
+  ## Concept
+
+  One `## Gate Generations` table, or nothing when a plan records no generation.
+
+  ## Technical depth
+
+  Rows are supplied as their exact inner cells, so a case can state a malformed
+  numbering, a second proposal, or a rewritten record directly rather than
+  rebuilding the table around it.
+  """
+  def generations_section([]), do: ""
+
+  def generations_section(rows) do
+    "\n## Gate Generations\n\n" <>
+      "| Generation | Authority | Authority evidence | Bound bytes |\n" <>
+      "| --- | --- | --- | --- |\n" <> Enum.map_join(rows, "", &("| " <> &1 <> " |\n"))
+  end
+
+  @doc """
+  ## Concept
+
+  The inner cells of one accepted, or one proposed, gate generation row.
+
+  ## Technical depth
+
+  A proposal names the gate bytes it introduces and nothing else, because the
+  revision carrying it cannot name its own hash; the rebind adds the authority,
+  its disposition, and the exact candidate that was reviewed.
+  """
+  def accepted_generation(number, candidate, gate_text, disposition) do
+    "#{number} | Maintainer | [disposition](#{disposition}) | " <>
+      "candidate `#{candidate}`; gate `sha256:#{Markdown.digest(gate_text)}`"
+  end
+
+  def proposed_generation(number, gate_text) do
+    "#{number} | — | — | gate `sha256:#{Markdown.digest(gate_text)}`"
+  end
+
   def adr_paths, do: @adr_paths
   def blocked_row, do: @blocked_row
   def blockers_text, do: @blockers_text
@@ -429,6 +489,7 @@ defmodule Loopex.StatusFixtures do
     governed = Keyword.get(options, :governed, false)
     closed = Keyword.get(options, :closed, false)
     gate_text = Keyword.get(options, :gate, @gate)
+    generations = Keyword.get(options, :generations, [])
     progress = Keyword.get(options, :progress) || if(closed, do: "Proved", else: "Open")
 
     empty = "— | — | —"
@@ -457,7 +518,7 @@ defmodule Loopex.StatusFixtures do
         false -> empty
       end
 
-    plan_text(acceptance, closure, progress)
+    plan_text(acceptance, closure, progress) <> generations_section(generations)
   end
 
   defp plan_text(acceptance, closure, progress_state) do
@@ -572,6 +633,7 @@ defmodule Loopex.StatusFixtures do
     historical_gate = Keyword.get(options, :historical_gate, @gate)
     plan_history = Keyword.get(options, :plan_history, [])
     read_artifact = Keyword.get(options, :read_artifact)
+    resolve_file = Keyword.get(options, :resolve_file) || resolve(historical_gate)
 
     {snapshots, head} =
       Enum.reduce(plan_history, {[{"fixture-root", [], %{}}], "fixture-root"}, fn {revision,
@@ -581,7 +643,7 @@ defmodule Loopex.StatusFixtures do
       end)
 
     Status.validate(documents,
-      resolve_file: resolve(historical_gate),
+      resolve_file: resolve_file,
       plan_history: fn -> {head, snapshots} end,
       read_artifact: read_artifact
     )

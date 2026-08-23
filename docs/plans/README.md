@@ -428,15 +428,26 @@ byte-immutable — they record what was accepted, and what was reviewed and clos
 
 | Generation | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
+| 7 | — | — | gate `sha256:<64-hex>` |
+```
+
+At `R` that row becomes:
+
+```markdown
 | 7 | Maintainer | [disposition](<durable-pointer>) | candidate `<40-hex>`; gate `sha256:<64-hex>` |
 ```
 
-Proposal `A` is one atomic revision carrying the amended gate, its new row with
-an empty authority and evidence, and every bound artifact the amendment rebinds.
+Proposal `A` is one atomic revision carrying the amended gate, that gate's next
+consecutively numbered amendment section, its new row with an empty authority,
+evidence, and candidate, and every bound artifact the amendment rebinds.
 Splitting the artifact change from the generation row across two revisions
 invalidates history permanently, because each reachable revision is judged
-against the generation current at that revision. After exact-SHA review and
-explicit acceptance, `R` completes only that row's authority and evidence.
+against the generation current at that revision. The row carries its gate digest
+at `A` but not its candidate, for the same reason v1 needs two revisions: a
+commit cannot name its own hash. After exact-SHA review and explicit acceptance,
+`R` completes that row's authority, evidence, and the candidate it binds, which
+is exact `A`. The table's highest generation always equals the gate's amendment
+count, and only a `Closed` plan may carry one.
 Current artifacts are validated against the latest accepted generation and
 historical revisions against the generation current there, so no Closed milestone
 is exempt and no earlier generation stops governing the revisions it covered. A

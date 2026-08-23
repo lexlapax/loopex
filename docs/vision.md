@@ -188,6 +188,12 @@ model input, model output, ordered tool calls, complete tool results, and a
 single terminal outcome. Steering affects the active run; follow-up work waits
 in durable order.
 
+Reaching a declared bound is its own ending, not a failure. A run stopped by its
+turn ceiling, token budget, or wall-clock deadline did what its operator
+configured it to do, and an operator reading a list of sessions must be able to
+tell that apart from a run that broke without inspecting a reason code. The
+conversation stays durable and resumable either way.
+
 Technical depth: [State machine, queues, ordering, concurrency, and payload rules](vision-technical.md#technical-vision-loop-semantics)
 
 Tools execute serially by default. Any later concurrency must preserve source

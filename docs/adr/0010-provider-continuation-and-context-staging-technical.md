@@ -178,9 +178,9 @@ Checked in this order before staging the next request:
 
 ```text
 last assistant message has no tool calls -> run completed
-turn_number + 1 > max_turns              -> failed(:budget_exhausted, false), :max_turns
-cumulative tokens >= token_budget        -> failed(:budget_exhausted, false), :token_budget
-now >= run_deadline                      -> failed(:budget_exhausted, false), :deadline
+turn_number + 1 > max_turns              -> bound_reached, :max_turns
+cumulative tokens >= token_budget        -> bound_reached, :token_budget
+now >= run_deadline                      -> bound_reached, :deadline
 otherwise                                -> stage and dispatch
 ```
 
@@ -222,8 +222,8 @@ Both orders are defined and both are truthful:
 
 | Journal order | Turn | Run | Late evidence |
 | --- | --- | --- | --- |
-| Complete validated reply commits before the deadline abort is admitted | `completed`; the assistant message becomes canonical history and its usage is accounted normally | Terminates at the next pre-staging check as `failed(:budget_exhausted, false)` naming `:deadline` | None; the reply is the committed fact |
-| Deadline abort is admitted first | No assistant message is written; the attempt is retained as evidence with its abort reason | `failed(:budget_exhausted, false)` naming `:deadline`, with the committed instant and the observed instant | A reply arriving after admission is retained truthfully as attempt evidence and never becomes a canonical assistant message |
+| Complete validated reply commits before the deadline abort is admitted | `completed`; the assistant message becomes canonical history and its usage is accounted normally | Terminates at the next pre-staging check as `bound_reached` naming `:deadline` | None; the reply is the committed fact |
+| Deadline abort is admitted first | No assistant message is written; the attempt is retained as evidence with its abort reason | `bound_reached` naming `:deadline`, with the committed instant and the observed instant | A reply arriving after admission is retained truthfully as attempt evidence and never becomes a canonical assistant message |
 
 Partial or streamed output never becomes a canonical assistant message under
 either order, so the race cannot produce a half-message in canonical history.
@@ -261,7 +261,7 @@ measurement records, and its declared direction is conservative: for the
 canonical byte encoding it must never return fewer tokens than a provider would
 charge for the same content. The run's cumulative counter is a sum over
 committed turns, so it is recoverable rather than held in process state, and a
-run that mixes sources keeps both subtotals. A `failed(:budget_exhausted, false)`
+run that mixes sources keeps both subtotals. A `bound_reached`
 outcome naming `:token_budget` records the cumulative value, the limit, and
 whether any turn was estimated. Nothing anywhere disables the bound: there is no
 configuration, provider capability, or adapter return that makes the token check
@@ -290,7 +290,7 @@ inherits committed state and the other must not.
 A resumed run therefore cannot gain time, turns, or tokens by being interrupted,
 and a new run cannot be charged for a previous one. The one case operators will
 notice is a run whose deadline expired while its host was down: recovery commits
-`failed(:budget_exhausted, false)` naming `:deadline`, with the committed
+`bound_reached` naming `:deadline`, with the committed
 instant and the observed recovery instant, and the operator's remedy is a new
 run over the same durable conversation.
 
@@ -406,7 +406,7 @@ set, the policy decision, the bounds, or a grant, and typed delimiters around
 untrusted blocks are input structure rather than a security boundary.
 
 Total budget is enforced before dispatch. Over-budget fails closed as
-`failed(:budget_exhausted, false)` at staging time rather than dropping history,
+`bound_reached` at staging time rather than dropping history,
 because silently dropping a message would make the projection non-deterministic
 and break the property the receipt exists to prove.
 
@@ -435,7 +435,7 @@ visible as a trend rather than discovered at the threshold.
 - Source-order properties: results committed out of completion order still
   commit in call order; staging is refused while a call lacks a result; a
   malformed tool call never becomes an element.
-- Each bound reached in isolation, asserting `failed(:budget_exhausted, false)`
+- Each bound reached in isolation, asserting `bound_reached`
   with the named bound and observed value, that no provider call was made for
   the refused turn, that no assistant message was fabricated, and that the
   outcome is a member of the vision's closed algebra rather than a new terminal
@@ -463,7 +463,7 @@ visible as a trend rather than discovered at the threshold.
 - A run interrupted and resumed, asserting the same `run_id`, the same committed
   bounds, the same staged bytes, and a token counter that continues rather than
   restarts; and a run whose committed deadline elapsed while its owner was down,
-  asserting `failed(:budget_exhausted, false)` naming `:deadline` on recovery
+  asserting `bound_reached` naming `:deadline` on recovery
   with no provider call.
 - A completed session prompted again, asserting a new run identity, freshly
   committed bounds, a zeroed token counter, refusal while a run is still active,
@@ -627,7 +627,7 @@ Concept: [Consequences](0010-provider-continuation-and-context-staging.md#concep
 - Token cost per run grows quadratically in turn count, because each turn sends
   the whole conversation. The bounds make it finite, not cheap. Measuring the
   real curve is the input to the eventual compaction decision.
-- Long sessions end rather than degrade. `failed(:budget_exhausted, false)` is
+- Long sessions end rather than degrade. `bound_reached` is
   the honest outcome and it will be experienced as a limitation; documentation
   must say so plainly rather than describe it as a safeguard. Because it is a
   failure category, every consumer that groups runs by terminal outcome shows a
@@ -668,7 +668,7 @@ Concept: [Consequences](0010-provider-continuation-and-context-staging.md#concep
   considerably less. Over-charging is the deliberate direction and the
   `estimated` marker keeps it inspectable, but operators comparing Loopex's
   counter with a provider invoice will see the gap.
-- `failed(:budget_exhausted, false)` also means budget exhaustion inherits every
+- `bound_reached` also means budget exhaustion inherits every
   rule that already applies to `failed`: it is terminal for the run, it does not
   rewrite any tool-call outcome, and a reconciliation fact about an in-flight
   effect still appends rather than replacing it.

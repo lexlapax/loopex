@@ -11,14 +11,16 @@ The one ordinary gate command is:
 bash scripts/check-m2-gate.sh
 ```
 
-The runner catches mechanical accident and drift: a feature whose executable
-definition does not exist, a command that stops passing, a protected case
-renamed or skipped, a dependency creeping in, an evidence record that does not
-describe the bytes it claims. Independent review still judges whether a test
-asserts what its name promises, whether cancellations, interrupts, and mutations
-were honestly injected, whether the attended demonstration was a genuine coding
-task rather than a scripted one, whether the closure documents are current, and
-whether the operator experience satisfies the Purpose.
+The runner opens by observing the shipped loop itself, and then catches
+mechanical accident and drift: a feature whose executable definition does not
+exist, a command that stops passing, a protected case renamed or skipped, a
+dependency creeping in, a real path that ran against a different provider or
+build than the others, an evidence record that does not describe the bytes it
+claims. Independent review still judges whether a test asserts what its name
+promises, whether cancellations, interrupts, and mutations were honestly
+injected, whether the attended demonstration was a genuine coding task rather
+than a scripted one, whether the closure documents are current, and whether the
+operator experience satisfies the Purpose.
 
 This gate is not `M1`'s. It runs plain `bash` rather than privileged `bash`, it
 binds four artifacts rather than nine, and it builds no sealed-environment
@@ -37,37 +39,90 @@ Acceptance row and lifecycle state, and its immediate one-parent child `R`
 rebinds Acceptance to exact `A` and adds one new disposition anchor. Amendment
 sections appear below in physical document order with consecutive numbers.
 
-## Read-Only Opening Condition
+## Opening Condition
 
-Before reading provider input, spawning any child for product work, creating any
-directory, or running Mix, the runner:
+Before reading provider input and before the product state root exists, the
+runner refuses `LOOPEX_PROVIDER_API_KEY` when it is present in the initial
+environment, disables automatic export, resolves the repository root through
+Git, and accepts only the bounded role grammar
+`[--preflight | --capture <lane>]`. It then runs the opening condition, which
+has a primary part and an additional part, in that order.
 
-1. refuses `LOOPEX_PROVIDER_API_KEY` when it is present in the initial
-   environment, disables automatic export, resolves the repository root through
-   Git, and accepts only the bounded role grammar
-   `[--preflight | --capture <lane>]`;
-2. checks the thirteen `M2` operator features in order. Each check names the
-   feature an operator would miss and requires that feature's protected selector
-   to exist as a readable file containing every locked case identity. The first
-   failure is the declared red;
-3. checks the nine inherited `M1` outcome selector files, the reused
+### The behavioural probe is primary
+
+The declared red below names a missing operator capability. A check that a file
+exists cannot honestly emit it, because writing a file would satisfy the check
+without changing what the product does. The runner therefore observes the loop
+before it looks at any selector.
+
+The probe is one Elixir program the runner writes into an isolated evidence root
+outside the checkout. Compilation goes to a build root inside that evidence root
+rather than the checkout's, so neither a stale nor an absent `_build` can change
+what the probe sees, and the checkout is never written to. The program composes a
+runtime from shipped modules only — the durable local store, the trusted-local
+executor, and its own observing model adapter — starts it through
+`Loopex.start_link/1`, creates a session, submits one prompt through the public
+facade, waits for the session to settle, and reports five observations: how many
+model requests the loop staged, whether the last staged request carried the
+committed conversation or one synthesized user message, how many items reached
+the progress plane during the run, whether the model and executor ports expose
+the arity that carries a progress function at all, and whether the runtime
+accepted a named active tool set or only one hand-written definition. It asks for
+the `M2` shape first and falls back to the `M1` shape, so one program observes
+either tree and a refusal is itself one of the observations.
+
+`M2` is present only when all five hold at once: the loop ran past turn two while
+the model kept asking for tools, the last staged request carried an assistant
+message and a real tool result, at least one delta reached the progress plane,
+both ports can carry progress, and the accepted tool set is named and is not
+composed only of demonstration tools. Anything else is the declared red, emitted
+together with the observation line that produced it.
+
+The probe's model adapter is a harness. Nothing it observes is a real-path claim,
+and it satisfies no outcome and no closure obligation.
+
+### The locked definitions are the additional condition
+
+After the probe, and never in place of it, the runner:
+
+1. checks the eleven `M2` operator features, the supporting tool-registry
+   mechanism, and the attended demonstration in order. Each check names what an
+   operator or the closure evidence would be missing and requires that
+   definition to exist as a readable file containing every locked case identity;
+2. checks the nine inherited `M1` outcome selector files, the reused
    selector-runner mechanics corpus, and the dependency corpus at their exact
    locked case identities;
-4. verifies the bound artifacts below against the files they name, selecting a
+3. verifies the bound artifacts below against the files they name, selecting a
    validated `shasum` or `sha256sum` dialect;
-5. requires every closure document to exist as a tracked ordinary file;
-6. requires Darwin or Linux and a wholly clean source tree.
+4. requires every closure document to exist as a tracked ordinary file;
+5. requires Darwin or Linux and a wholly clean source tree.
 
-No write may move above that condition. A read-only reviewer with no writable
-root therefore reaches the declared red. The `--preflight` role stops exactly
-there and prints `M2 preflight OK`; it allocates nothing, invokes no Mix or
-product selector, and can print neither `capture` nor `M2 gate GREEN`.
+### When the probe cannot run
+
+The probe produces artifacts, so it owns an explicit isolated evidence root and
+belongs to the writable evidence lane; the development contract keeps that lane
+separate from the inspection-only checks a read-only reviewer must be able to
+run. It is hoisted to the front because the declared red must be an observation,
+not because the read-only lane depends on it.
+
+A reviewer under a no-file-writes profile, or with no usable temporary
+directory, therefore cannot allocate the evidence root, and nothing in the
+inspection lane requires one. The probe reports itself unavailable with its
+reason, the additional condition reaches the same declared red from the locked
+definitions, and the run is refused before the task root is allocated: an
+opening condition that could not observe the loop is evidence unavailable, which
+is never a pass. Green is therefore impossible without a probe observation, in
+every role including `--preflight`.
+
+The `--preflight` role stops exactly here and prints `M2 preflight OK`; beyond
+its own evidence root it allocates nothing, runs no product selector, and can
+print neither `capture` nor `M2 gate GREEN`.
 
 ## Bound Artifacts
 
 | SHA-256 | Path |
 | --- | --- |
-| `4599d3166200d9372d9d4d873caabe1c13e75c3c94faab52964f1d060db12f10` | `scripts/check-m2-gate.sh` |
+| `fd23337bac93d8a6135bd7329255d38736859501b9bd6fe94a8daa3a12578bf0` | `scripts/check-m2-gate.sh` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -106,9 +161,12 @@ The closed `M1` gate binds those same two paths and freezes the
 six-application inventory, so no milestone that ships an operator command can
 inherit it unchanged. Changing either file makes `mix loopex.status` fail, which
 makes `bash scripts/check-bootstrap.sh` fail, which makes the closed `M0` gate
-fail. The accepted plan pair names the required `M1` gate amendment, its
-non-delegable decision owner, and its exact rejoin position; until that
-amendment's rebind revision lands, `M0`, bootstrap, and the status check are
+fail. `M1` is `Closed`, so its Acceptance and Closure rows bind the same gate
+digest and the ordinary amendment cannot reach it; the rebinding is an
+`amendment-transaction-v2` gate generation appended to the closed plan, with both
+authority rows left byte-immutable. The accepted plan pair names that generation,
+its non-delegable decision owner, and its exact rejoin position; until its rebind
+revision lands, `M0`, bootstrap, and the status check are
 red. `M2` carries `M1`'s protection forward behaviourally in the meantime: all
 eleven of its protected outcome roles are re-run here at their exact locked
 identities. The closed `M0` gate binds neither path — it locks the command
@@ -117,7 +175,7 @@ both locked pairs at every `M2` source candidate.
 
 ## Repository Commands and Owned State
 
-After the read-only condition passes, the runner reads the optional provider
+After the opening condition passes, the runner reads the optional provider
 frame, then allocates one physically resolved task root under a resolved
 temporary directory and owns `LOOPEX_HOME`, `TMPDIR`, the Mix build root, and a
 workspace beneath it. It refuses a task root that resolves inside the operator's
@@ -152,7 +210,7 @@ Every command below must exit zero.
 | 12 | `mix loopex.status` | Live governance, indexes, links, lifecycle state, and every plan's bound artifacts validate |
 | 13 | `bash scripts/check-bootstrap.sh` | The portable aggregate remains green |
 | 14 | the root `VERSION` file | Reports exactly `0.0.0` |
-| 15 | the thirteen protected `M2` outcomes through the standalone channel | Exact names, states, and minima below hold |
+| 15 | the eleven protected `M2` outcomes, the supporting registry role, and both demonstration roles through the standalone channel | Exact names, states, and minima below hold |
 | 16 | the eleven inherited `M1` outcome roles and the two mechanics corpora through the standalone channel | `M1`'s proved behaviour still holds |
 | 17 | `MIX_ENV=test mix test --exclude real_provider --seed <gate-seed>` | The complete credential-free suite passes at the same seed |
 | 18 | retained evidence validation | Negative demonstrations always; the toolchain matrix in ordinary mode only |
@@ -173,9 +231,10 @@ exactly:
 M2 gate GREEN seed=<N> protected_executed=<M>
 ```
 
-`protected_executed` sums executed cases assigned to Outcomes 1–13 only.
-Excluded tests never count, and inherited, mechanics, bootstrap, and full-suite
-executions are excluded from that sum.
+`protected_executed` sums executed cases in `M2`'s own locked roles: Outcomes
+1–11, the supporting registry role, and both demonstration roles. Excluded tests
+never count, and inherited, mechanics, bootstrap, and full-suite executions are
+excluded from that sum.
 
 ## Authoritative ExUnit Channel
 
@@ -221,30 +280,65 @@ equal the named excluded identities.
 
 | Outcome | Selector / role | Minimum | Locked names and required states |
 | --- | --- | --- | --- |
-| 1 | `apps/loopex/test/agent_loop_test.exs` / default | 9 | passed: `a prompt runs until the model stops requesting tools rather than after a fixed number of turns`; `every model request carries the committed conversation history including the original prompt`; `an assistant tool call and its real tool result are committed and replayed to the model`; `each turn dispatches exactly the canonical request bytes and digest committed before it`; `the maximum turn bound ends the run as budget exhaustion before another provider call`; `the cumulative token budget ends the run as budget exhaustion before another provider call`; `the wall clock deadline ends the run as budget exhaustion before another provider call`; `every sampling bound is a declared committed value with no implicit default`; `a provider continuation binding is carried and an incompatible model change invalidates it` |
-| 2 | `apps/loopex_llm_reqllm/test/streaming_conformance_test.exs` / default | 7 | passed: `every model adapter satisfies one streaming conformance suite`; `each canonical delta kind is bounded plain data carrying no provider or host term`; `replaying an adapter's emitted deltas reproduces the reply it returned byte identically`; `a gapless turn sequence and the reply's delta count make lost progress detectable`; `the committed assistant message is built from the reply and never assembled from deltas`; `a cancelled stream commits no assistant message and a late reply never becomes canonical`; `an adapter that emits no deltas is conformant and declares that it does not stream` |
-| 3 | `apps/loopex/test/input_algebra_test.exs` / default | 7 | passed: `a prompt starts a run only while the session is settled and is otherwise refused`; `the runtime never infers whether new input is steering or follow up and a steer must name its active run`; `a steer joins the active run after the current tool batch and before the next model request`; `a follow up starts a new run only after the active run and its steering settle`; `a steer that arrives after its run is terminal commits unapplied with a reason and is never promoted`; `at most one unapplied steer and one queued follow up exist and both survive owner succession`; `an abort resolves any unapplied steer and queued follow up as cancelled` |
-| 4 | `apps/loopex/test/tool_registry_test.exs` / default | 4 | passed: `a runtime-scoped registry resolves a tool id and version and refuses an unknown id`; `two runtimes carry independent tool registries with no global registration`; `a conflicting tool id and version registration is refused with an explicit reason`; `a model request records the exact tool definition generation it used` |
-| 5 | `apps/loopex_executor_local/test/coding_tools_test.exs` / default | 6 | passed: `read returns bounded chunked content and reports truncation`; `write creates or replaces a file only beneath the workspace root`; `edit applies an exact match change and names what differed on a mismatch`; `bash runs an argv command and an explicit raw shell command with distinct semantics`; `every tool refuses a path that escapes the workspace root through traversal or a symlink`; `a tool child process tree is owned and terminated with its job` |
-| 6 | `apps/loopex_store_local/test/artifact_store_conformance_test.exs` / default | 5 | passed: `every artifact store implementation satisfies one conformance suite`; `tool output beyond its declared bound spills to an artifact instead of truncating silently`; `the durable artifact event carries digest media type size role and an opaque reference`; `the model facing result stays under its bound and names what was truncated`; `an artifact round trips byte exactly and a missing artifact reports unavailable` |
-| 7 | `apps/loopex_executor_local/test/host_policy_test.exs` / default | 7 | passed: `every host policy implementation satisfies one policy port conformance suite`; `a host policy deny decision issues no grant and starts no operating system process`; `a denied tool call commits a truthful denied outcome the operator can read`; `the run continues or terminates truthfully after a denial and never retries the refused call`; `a policy that raises times out or returns a malformed value fails closed into denial`; `defer is declared and refused in this milestone rather than treated as allow or deny`; `the trusted local allow all policy is explicit configuration rather than an implicit fallback` |
-| 8 | `apps/loopex/test/project_resource_trust_test.exs` / default | 6 | passed: `discovery resolves a canonical ordered resource set under declared path size and total limits`; `the operator is shown every resolved path its provenance and the manifest digest`; `an explicit trust decision binds workspace revision manifest and digests`; `a changed workspace revision manifest or content invalidates the decision`; `a headless run without a matching positive decision fails closed and stages no project block`; `an admitted project block changes no tool set policy decision bound or grant` |
-| 9 | `apps/loopex/test/cancellation_test.exs` / default | 7 | passed: `an interrupt reaches the run through the public facade and through no private path`; `an abort admitted during a model call cancels the run and schedules no new work`; `an abort admitted during a tool call cancels the executor job and confirms cleanup before committing cancelled`; `a validated terminal tool fact committed before the abort is preserved and not overwritten`; `an effect without sufficient evidence ends outcome unknown and is never blindly retried`; `a second interrupt reports what is still being cleaned up rather than abandoning the session`; `the operator observes what was cancelled and what actually happened` |
-| 10 | `apps/loopex/test/session_directory_test.exs` / default | 5 | passed: `a fresh operating system process lists the sessions in a resolved state root`; `the state root resolves from LOOPEX_HOME and never from application environment`; `a session resumes under the durable runtime placement identity that created it`; `resuming a session through a different runtime identity is refused with an explicit reason`; `a repeated resume command identity returns its historical result while a fresh identity acquires ownership` |
-| 11 | `apps/loopex_cli/test/cli_test.exs` / default | 10 | passed: `loopex run submits a prompt and streams the answer with its tool calls and results`; `the operator steers a running task and queues a follow-up from the same terminal`; `loopex sessions lists the operator's sessions and loopex resume continues one`; `an interrupt signal delivered to a running loopex process cancels the task through the public facade`; `loopex cancel reconciles a session left behind by a dead process and is refused against a live owner`; `the policy option selects the governing host policy and a refusal is reported in the transcript`; `project resource trust is decided at the terminal and a non interactive run without a decision fails closed`; `the command surface drives only the public facade and owns no loop store cursor or authority`; `the base system prompt and active tool definitions measure under one thousand tokens`; `argument parsing and terminal output use only the standard library` |
-| 12 | `apps/loopex_cli/test/kernel_composition_test.exs` / default | 3 | passed: `one page of shipped code starts the application tree a runtime a session a prompt and its events`; `the shipped composition is the same one the loopex command uses`; `the composition resolves its state root explicitly and never through application environment` |
-| 13a | `apps/loopex_cli/test/coding_task_test.exs` / default | 4 | passed: `a multi tool task reads edits and verifies a file in a disposable repository`; `the task transcript shows every tool call decision and result`; `a denied tool call inside a multi tool task is reported and the task continues truthfully`; `the demonstration workspace is disposable and never the operator's own repository`; excluded: the real case below |
-| 13b | same file / real-only, `combined` profile | 1 | passed: `one real provider task streams edits a real repository across several turns and the operator sees the committed result`; excluded: the four deterministic names above |
+| 1 | `apps/loopex/test/agent_loop_test.exs` / default | 13 | passed: `a prompt runs until the model stops requesting tools rather than after a fixed number of turns`; `every model request carries the committed conversation history including the original prompt`; `an assistant tool call and its real tool result are committed and replayed to the model`; `each turn dispatches exactly the canonical request bytes and digest committed before it`; `a staged request carries complete tool definition bytes and its generation triple and is reconstructible from the journal alone`; `every turn after the first is canonical history replay and the reserved continuation field stays empty`; `the maximum turn bound ends the run failed budget exhausted before another provider call`; `the cumulative token budget ends the run failed budget exhausted before another provider call`; `the wall clock deadline ends the run failed budget exhausted before another provider call`; `the committed absolute deadline is propagated into the model call rather than an independent per call timeout`; `a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only`; `a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated`; `every sampling bound is a declared committed value with no implicit default` |
+| 2 | `apps/loopex_llm_reqllm/test/streaming_conformance_test.exs` / default | 9 | passed: `every model adapter satisfies one streaming conformance suite`; `each canonical delta kind is bounded plain data carrying no provider or host term`; `a text delta is observable while its operation is still incomplete rather than after the reply returns`; `replaying an adapter's emitted deltas reproduces the reply it returned byte identically`; `the model and executor progress domains carry separate sequences each closed by its own content free item`; `a gapless turn sequence and the reply's delta count make lost progress detectable`; `the committed assistant message is built from the reply and never assembled from deltas`; `a cancelled stream commits no assistant message and a late reply never becomes canonical`; `an adapter that emits no deltas is conformant and declares that it does not stream` |
+| 3 | `apps/loopex/test/input_algebra_test.exs` / default | 8 | passed: `a prompt starts a run only while the session is settled and is otherwise refused`; `the runtime never infers whether new input is steering or follow up and a steer must name its active run`; `a steer joins the active run after the current tool batch and before the next model request`; `a steer is recorded applied only when a committed request carried it`; `a follow up starts a new run only after the active run and its steering settle`; `a steer that arrives after its run is terminal commits unapplied with a reason and is never promoted`; `at most one unapplied steer and one queued follow up exist and both survive owner succession`; `an abort resolves any unapplied steer and queued follow up as cancelled` |
+| 4 | `apps/loopex_executor_local/test/coding_tools_test.exs` / default | 7 | passed: `read returns bounded chunked content and reports truncation`; `write creates or replaces a file only beneath the workspace root`; `edit applies an exact match change and names what differed on a mismatch`; `bash runs an argv command and an explicit raw shell command with distinct semantics`; `every tool refuses a path that escapes the workspace root through traversal or a symlink`; `executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted`; `a tool child process tree is owned and terminated with its job` |
+| 5 | `apps/loopex_store_local/test/artifact_store_conformance_test.exs` / default | 6 | passed: `every artifact store implementation satisfies one conformance suite`; `tool output beyond its declared bound spills to an artifact instead of truncating silently`; `the durable artifact event carries digest media type size role and an opaque reference`; `the model facing result stays under its bound and names what was truncated`; `the operator retrieves a spilled artifact by its opaque reference through the public facade`; `an artifact round trips byte exactly and a missing artifact reports unavailable` |
+| 6a | `apps/loopex_executor_local/test/host_policy_test.exs` / default | 8 | passed: `every host policy implementation satisfies one policy port conformance suite`; `a host policy deny decision issues no grant and starts no operating system process`; `a denied tool call commits a truthful denied outcome the operator can read`; `the run continues or terminates truthfully after a denial and never retries the refused call`; `a policy that raises times out or returns a malformed value fails closed into denial`; `defer is declared and refused in this milestone rather than treated as allow or deny`; `every executor backed tool requires a policy decision including a read only tool`; `a permissive policy applies only when it is named and omitting the policy option refuses runtime start` |
+| 6b | `apps/loopex_reference_client/test/allow_all_policy_test.exs` / default | 2 | passed: `the shipped allow all policy allows every decision it is asked`; `the shipped allow all policy emits exactly one permissive authority notice` |
+| 7 | `apps/loopex/test/project_resource_trust_test.exs` / default | 7 | passed: `discovery resolves a canonical ordered resource set under declared path size and total limits`; `the operator is shown every resolved path its provenance and the manifest digest`; `an explicit trust decision binds workspace revision manifest and digests`; `a changed workspace revision manifest or content invalidates the decision`; `a headless run without a matching positive decision fails closed and stages no project block`; `an ordinary workspace read stays a policy governed tool effect and is never context staging`; `an admitted project block changes no tool set policy decision bound or grant` |
+| 8 | `apps/loopex/test/cancellation_test.exs` / default | 8 | passed: `an interrupt reaches the run through the public facade and through no private path`; `an abort admitted during a model call cancels the run and schedules no new work`; `an abort admitted during a tool call cancels the executor job and confirms cleanup before committing cancelled`; `a run finishes cancelled only when every owned operation is validated terminal and every owned process tree is confirmed cleaned`; `a validated terminal tool fact committed before the abort is preserved and not overwritten`; `an effect without sufficient evidence ends outcome unknown and is never blindly retried`; `a second interrupt reports what is still being cleaned up rather than abandoning the session`; `the operator observes what was cancelled and what actually happened` |
+| 9 | `apps/loopex/test/session_directory_test.exs` / default | 5 | passed: `a fresh operating system process lists the sessions in a resolved state root`; `the state root resolves from LOOPEX_HOME and never from application environment`; `a session resumes under the durable runtime placement identity that created it`; `resuming a session through a different runtime identity is refused with an explicit reason`; `a repeated resume command identity returns its historical result while a fresh identity acquires ownership` |
+| 10 | `apps/loopex_cli/test/cli_test.exs` / default | 14 | passed: `loopex run submits a prompt and streams the answer with its tool calls and results`; `the operator steers a running task and queues a follow-up from the same terminal`; `prompt steer follow up and abort have distinct explicit affordances and input naming neither is refused`; `tool progress from a running executor job reaches the operator's terminal before the tool finishes`; `loopex sessions lists the operator's sessions and loopex resume continues one`; `an interrupt signal delivered to a running loopex process cancels the task through the public facade`; `an interrupt whose cleanup cannot be confirmed reports outcome unknown with its reconciliation reference`; `loopex cancel reconciles a session left behind by a dead process and is refused against a live owner`; `the policy option selects the governing host policy and a refusal is reported in the transcript`; `loopex artifact retrieves a spilled artifact by its opaque reference`; `project resource trust is decided at the terminal and a non interactive run without a decision fails closed`; `the command surface drives only the public facade and owns no loop store cursor or authority`; `the base system prompt and active tool definitions measure under one thousand tokens`; `argument parsing and terminal output use only the standard library` |
+| 11 | `apps/loopex_cli/test/kernel_composition_test.exs` / default | 3 | passed: `one page of shipped code starts the application tree a runtime a session a prompt and its events`; `the shipped composition is the same one the loopex command uses`; `the composition resolves its state root explicitly and never through application environment` |
 
-Outcome 13's real case itself proves the attended claim: a real provider drove
-the shipped command through several turns and several distinct tools including
-one `edit` and one `bash`, the answer streamed and reconstructed once per turn,
-one host-policy refusal was reported and the task continued truthfully, and the
-resulting bytes exist on disk in a disposable repository created inside the
-gate's own task root. The deterministic cases support that claim and never
-substitute for it. Outcome 11's facade-only case must fail if any module outside
-the single shipped composition reaches a coordinator, store, model, executor,
-policy, artifact store, journal, outbox, or cursor internal.
+Outcome 10's facade-only case must fail if any module outside the single shipped
+composition reaches a coordinator, store, model, executor, policy, artifact
+store, journal, outbox, or cursor internal. Outcome 6 is split across two roles
+because the two halves prove different things: the executor edge proves the
+runtime property that a permissive policy applies only when a host names it,
+using the selector's own in-file fixtures and importing nothing from a client,
+while the reference client's lane proves what its own shipped `AllowAll` module
+does. Neither role may be satisfied by the other.
+
+## Locked Supporting Mechanism Selector
+
+The tool registry is the internal mechanism Outcomes 1 and 4 both resolve
+through. It is not an operator capability and is not an outcome, so it is locked
+here rather than in the table above; its executed cases still count toward
+`protected_executed`, and its role is protected exactly as an outcome's is.
+
+`apps/loopex/test/tool_registry_test.exs` / default, minimum 5, all passed:
+
+- `a runtime-scoped registry resolves a tool id and version and refuses an unknown id`
+- `two runtimes carry independent tool registries with no global registration`
+- `a conflicting tool id and version registration is refused with an explicit reason`
+- `a session binds one active model visible name to one generation and refuses a name conflict at start`
+- `a model request records the exact tool definition generation it used`
+
+## Mandatory Closure Evidence
+
+One attended real-provider demonstration is required for closure. It is not an
+outcome, because completing one demonstration is not a capability an operator
+asks for; it is the evidence that the eleven outcomes add up to a coding agent
+rather than to eleven passing selectors. That makes it more binding, not less: a
+closure candidate without it is refused, and its real-provider role is locked
+here exactly as an outcome's role is.
+
+| Role | Selector / role | Minimum | Locked names and required states |
+| --- | --- | --- | --- |
+| Da | `apps/loopex_cli/test/coding_task_test.exs` / default | 4 | passed: `a multi tool task reads edits and verifies a file in a disposable repository`; `the task transcript shows every tool call decision and result`; `a denied tool call inside a multi tool task is reported and the task continues truthfully`; `the demonstration workspace is disposable and never the operator's own repository`; excluded: the real case below |
+| Db | same file / real-only, `combined` profile | 1 | passed: `one real provider task streams edits a real repository across several turns and the operator sees the committed result`; excluded: the four deterministic names above |
+
+Role `Db` proves the attended claim itself: a real provider drove the shipped
+command through several turns and several distinct tools including one `edit` and
+one `bash`, the answer streamed and reconstructed once per turn, one host-policy
+refusal was reported and the task continued truthfully, and the resulting bytes
+exist on disk in a disposable repository created inside the gate's own task root.
+The deterministic cases in `Da` support that claim and never substitute for it.
+Its retained record is `docs/evidence/M2-coding-demonstration.md`, and the
+identity fields it seals are the ones the capture record carries.
 
 ## Inherited M1 Protection
 
@@ -296,7 +390,7 @@ names:
 The minimum rises from `M1`'s 25 because the inventory change and the widened
 client rule each require their own adversarial case. Removing a case to reach
 the number is a gate weakening and requires the ordinary authority. This file is
-one of the two `M1`-bound artifacts the accepted plan pair's amendment
+one of the two `M1`-bound artifacts the accepted plan pair's gate-generation
 prerequisite rebinds.
 
 ## Toolchain Capture and Retained Matrix
@@ -371,17 +465,17 @@ this order, each one one-line JSON object in its own `json` fence:
    `apps/loopex/test/agent_loop_test.exs`
 2. Outcome 2 / `stream_delta_reconstruction` /
    `apps/loopex_llm_reqllm/test/streaming_conformance_test.exs`
-3. Outcome 4 / `tool_definition_generation_binding` /
+3. Tool registry / `tool_definition_generation_binding` /
    `apps/loopex/test/tool_registry_test.exs`
-4. Outcome 5 / `workspace_path_scope_containment` /
+4. Outcome 4 / `workspace_path_scope_containment` /
    `apps/loopex_executor_local/test/coding_tools_test.exs`
-5. Outcome 7 / `host_policy_deny_prestart_refusal` /
+5. Outcome 6 / `host_policy_deny_prestart_refusal` /
    `apps/loopex_executor_local/test/host_policy_test.exs`
-6. Outcome 8 / `project_resource_trust_admission` /
+6. Outcome 7 / `project_resource_trust_admission` /
    `apps/loopex/test/project_resource_trust_test.exs`
-7. Outcome 9 / `cancellation_cleanup_confirmation` /
+7. Outcome 8 / `cancellation_cleanup_confirmation` /
    `apps/loopex/test/cancellation_test.exs`
-8. Outcome 11 / `command_surface_facade_only` /
+8. Outcome 10 / `command_surface_facade_only` /
    `apps/loopex_cli/test/cli_test.exs`
 
 The eighth record covers the milestone's headline structural claim. Introducing
@@ -420,7 +514,7 @@ optional credential enters only through the bounded stdin frame
 an interactive stdin or an immediate end of file means no key, and any other
 input, missing terminator, extra field, or oversized key is refused. The key is
 held in one unexported holder and is forwarded only to the three explicitly
-tagged real-provider roles — Outcome 13b, inherited 5c, and inherited 8b —
+tagged real-provider roles — demonstration `Db`, inherited 5c, and inherited 8b —
 through the selector runner's own `LOOPEX_M1_SELECTOR_V1\0<nonce>\0<key>\0`
 frame. It never appears in argv, in a child environment, in a file, in a
 fixture, in an evidence field, or in retained output. Every gate-owned
@@ -434,8 +528,17 @@ compilation, repository commands, and the final suite never receive the key.
 This is containment at the runner boundary. `M2` does not rebuild `M1`'s sealed
 empty-environment re-exec, its bound OTP launcher, or its core-limit sealing,
 and claims no defence against a hostile already-running shell or a privileged
-host crash collector. Outcomes 5, 7, and 13 separately require every controlled
-tool child to receive an explicit credential-free environment.
+host crash collector. Outcomes 4 and 6 and the attended demonstration separately
+require every controlled tool child to receive an explicit credential-free
+environment.
+
+All three real-provider roles must agree on `provider`, `model`, `endpoint`, and
+`adapter_build`. `M1` pinned exactly those four across its two real roles so one
+green real path could not stand in for another run against a different provider
+or build, and `M2` keeps that agreement rather than discarding it while claiming
+to carry `M1`'s protection forward. The first real role observed sets the
+reference identity and every later one must match it; a disagreement fails the
+run.
 
 ## User-State Containment
 
@@ -445,8 +548,10 @@ beneath the task root, and removes the task root on exit. It fingerprints the
 operator's real product state by entry path, type, mode, ownership, size, and
 link target before allocation and again after the run, and fails if the
 fingerprint changed. Missing product state is recorded as absent rather than
-treated as outside. The demonstration in Outcome 13 creates its Git repository
-inside the task root and never in the operator's own repository.
+treated as outside. The attended demonstration creates its Git repository inside
+the task root and never in the operator's own repository. The opening probe owns
+a separate evidence root of its own, allocated and removed before the task root
+exists, and writes nowhere else.
 
 ## Documentation Obligations
 
@@ -465,14 +570,27 @@ freshness, completeness, and consistency with the implemented behaviour.
 | Changelog | `CHANGELOG.md` |
 
 `docs/operator/coding-sessions.md` documents running, streaming, steering,
-resuming, and stopping a coding session, the narrow meaning of `loopex cancel`,
-the project-resource trust prompt, and states plainly that an `M1`-era session
-data root is not readable by `M2`. `docs/operator/tools-and-policy.md` documents
-the four bootstrap tools, what local execution can reach, how `--policy` selects
-a host policy, and that the `AllowAll` default is for a trusted developer rather
-than a permission model. `docs/developer/compatibility-surfaces.md` records that
-every surface `M2` touches is unstable, that none is labelled or frozen, and
-what that means for an embedder.
+resuming, and stopping a coding session; the four distinct input affordances;
+the narrow meaning of `loopex cancel`; the project-resource trust prompt; and
+states plainly that an `M1`-era session data root is not readable by `M2`. It
+also states plainly what stopping does and does not promise: an interrupt ends a
+run `cancelled` only where every owned operation was proved terminal and every
+owned process tree was confirmed cleaned, and otherwise reports
+`outcome_unknown` with a reconciliation reference. No operator document in this
+milestone says an interrupt always ends a run cleanly.
+
+`docs/operator/tools-and-policy.md` documents the four bootstrap tools, what
+local execution can reach, how `--policy` selects a host policy, that a
+permissive policy is a host's own named choice rather than a permission model,
+and that omitting the policy refuses to start. It documents `loopex artifact`:
+what a spilled artifact is, how a reference reaches the operator, and how to
+read one back. It also discloses that the local store keeps session records and
+artifact bytes unencrypted on the local disk under the resolved state root, so
+an operator can decide what to let a session read.
+
+`docs/developer/compatibility-surfaces.md` records that every surface `M2`
+touches is unstable, that none is labelled or frozen, and what that means for an
+embedder.
 
 ## Closure Document Set
 
@@ -531,16 +649,21 @@ At the accepted opening checkpoint the runner emits exactly:
 M2 gate RED: an operator cannot run a coding task from the command line; the session loop still stops after two turns, sends the model no conversation history, never streams, and offers only two demonstration tools
 ```
 
-That is the truthful state of the product this gate opens against. The loop is
-hardwired to exactly two turns: turn one forces the single configured tool, and
-every later turn is sent an empty tool list and a `none` tool choice, so turn
-two always terminates. No conversation history exists — each request is built
-from one user message, and the second turn's content is a synthesized string
-about the tool rather than the model's own prior message and the tool's real
-output. Nothing streams; the model adapter exposes a single non-streaming
-completion. Two demonstration tools exist as hardcoded clauses, one per session,
-with no registry. There is no `loopex` command.
+followed, in the ordinary case, by the observation line the probe produced.
 
-Adding a checker, a document, an evidence record, a status row, or a new
-repository check cannot move this condition. Only the working loop, the working
-tools, and the working command can.
+That is the truthful state of the product this gate opens against, and it is
+what the probe observes rather than what a file list implies. The loop is
+hardwired to exactly two turns: turn one forces the single configured tool, and
+every later turn is staged with an empty tool list and a `none` tool choice, so
+turn two always terminates. No conversation history exists — each request is
+built from one user message, and the second turn's content is a synthesized
+string about the tool rather than the model's own prior message and the tool's
+real output. Nothing streams; neither the model port nor the executor port has a
+parameter a progress item could travel through, and nothing reaches the progress
+plane during a run. There is no named tool set: the runtime accepts one
+hand-written definition, the two demonstration tools exist as hardcoded clauses,
+and there is no registry. There is no `loopex` command.
+
+Adding a checker, a document, an evidence record, a status row, a new repository
+check, or a test file cannot move this condition. Only the working loop, the
+working tools, and the working command can.

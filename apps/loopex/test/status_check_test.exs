@@ -21,6 +21,7 @@ defmodule Loopex.StatusCheckTest do
   alias Loopex.Checks.Git
   alias Loopex.Checks.Invalid
   alias Loopex.Checks.History
+  alias Loopex.Checks.Markdown
   alias Loopex.Checks.Plan
   alias Mix.Tasks.Loopex.Matrix
   alias Loopex.Checks.Register
@@ -2576,5 +2577,270 @@ defmodule Loopex.StatusCheckTest do
 
   defp append(documents, path, suffix) do
     Map.update!(documents, path, &(&1 <> suffix))
+  end
+
+  # The additive transaction a Closed milestone uses. The Acceptance and Closure
+  # rows keep binding the original gate at the candidates they name; only the
+  # generations table moves the current gate forward.
+  defp generation_acceptance, do: String.duplicate("a", 40)
+  defp generation_closure, do: String.duplicate("c", 40)
+  defp generation_candidate, do: String.duplicate("b", 40)
+  defp generation_disposition, do: "../developer/agent-context-map.md#gate-generation-1"
+
+  defp generation_resolver(amended) do
+    original = Fixture.gate()
+
+    fn sha, path ->
+      cond do
+        String.ends_with?(path, "M0-technical.md") ->
+          Fixture.technical_plan()
+
+        String.ends_with?(path, "M0-gate.md") and sha == generation_candidate() ->
+          amended
+
+        String.ends_with?(path, "M0-gate.md") and
+            sha in [generation_acceptance(), generation_closure()] ->
+          original
+
+        String.ends_with?(path, "M0.md") and sha == generation_acceptance() ->
+          Fixture.plan()
+
+        String.ends_with?(path, "M0.md") and sha == generation_closure() ->
+          Fixture.plan(governed: true, progress: "Proved")
+
+        true ->
+          nil
+      end
+    end
+  end
+
+  defp closed_plan(generations) do
+    Fixture.plan(governed: true, closed: true, generations: generations)
+  end
+
+  defp governed_generations(plan, gate, state \\ "Closed") do
+    Plan.governance(plan, Fixture.technical_plan(), gate, "M0", state, generation_resolver(gate))
+  end
+
+  test "a Closed milestone's gate is amended by an accepted generation, not a rebind" do
+    amended = Fixture.amended_gate(1)
+
+    accepted =
+      Fixture.accepted_generation(1, generation_candidate(), amended, generation_disposition())
+
+    # A plan that records no generation is unchanged by this transaction: it has
+    # no table, and its rows still bind the gate beside it.
+    assert [] == Plan.gate_generations(Fixture.plan(governed: true), "docs/plans/M0.md")
+    assert :ok == governed_generations(closed_plan([]), Fixture.gate())
+
+    # One accepted generation makes the amended gate the current one while both
+    # immutable authority rows keep binding the gate they were reviewed against.
+    assert :ok == governed_generations(closed_plan([accepted]), amended)
+
+    # The proposal state is deliberately not a passing state: it records bytes
+    # that no authority has accepted yet.
+    proposed = Fixture.proposed_generation(1, amended)
+
+    assert_raise Invalid, ~r/is proposed and not accepted/, fn ->
+      governed_generations(closed_plan([proposed]), amended)
+    end
+
+    # An accepted generation whose reviewed candidate carries different bytes at
+    # the same generation leaves the working tree binding unaccepted ones.
+    variant = Fixture.amended_gate(1, Fixture.gate() <> "\nAn alternate gate body.\n")
+
+    stale =
+      Fixture.accepted_generation(1, generation_candidate(), variant, generation_disposition())
+
+    assert_raise Invalid, ~r/latest accepted gate generation must bind the current gate/, fn ->
+      Plan.governance(
+        closed_plan([stale]),
+        Fixture.technical_plan(),
+        amended,
+        "M0",
+        "Closed",
+        generation_resolver(variant)
+      )
+    end
+
+    # The table and the gate's declared transaction imply each other.
+    assert_raise Invalid, ~r/requires the gate to declare amendment transaction v2/, fn ->
+      governed_generations(closed_plan([accepted]), Fixture.gate())
+    end
+
+    assert_raise Invalid, ~r/must record its accepted gate generations/, fn ->
+      governed_generations(closed_plan([]), amended)
+    end
+
+    # A generation adds no scope and reopens no lifecycle state, so an active
+    # milestone cannot use it in place of amending its accepted plan pair. The
+    # gate declares both transactions here, so the case reaches the lifecycle
+    # rule rather than stopping at the active-gate marker requirement.
+    active_gate = amended <> "\n<a id=\"amendment-transaction-v1\"></a>\n"
+
+    assert_raise Invalid, ~r/amend a Closed milestone's gate/, fn ->
+      governed_generations(
+        Fixture.plan(governed: true, generations: [accepted]),
+        active_gate,
+        "Accepted"
+      )
+    end
+  end
+
+  test "a gate generation table fails closed on every malformed shape" do
+    amended = Fixture.amended_gate(1)
+    two = Fixture.amended_gate(2)
+    path = "docs/plans/M0.md"
+
+    accepted =
+      Fixture.accepted_generation(1, generation_candidate(), amended, generation_disposition())
+
+    proposed = Fixture.proposed_generation(1, amended)
+
+    malformed = [
+      {"a half-filled row", ["1 | Maintainer | — | gate `sha256:#{Markdown.digest(amended)}`"],
+       ~r/neither a complete accepted record nor a proposal/},
+      {"a bound cell that is not a digest", ["1 | — | — | gate `sha256:deadbeef`"],
+       ~r/neither a complete accepted record nor a proposal/},
+      {"a non-numeric generation",
+       [String.replace(accepted, "1 | Maintainer", "one | Maintainer", global: false)],
+       ~r/positive decimal number/},
+      {"two proposals at once", [proposed, Fixture.proposed_generation(2, two)],
+       ~r/only one gate generation may await/},
+      {"a proposal that is not the highest generation",
+       [
+         proposed,
+         Fixture.accepted_generation(2, generation_candidate(), two, generation_disposition())
+       ], ~r/must be the highest generation recorded/},
+      {"a gap in the numbering",
+       [
+         accepted,
+         Fixture.accepted_generation(3, generation_candidate(), two, generation_disposition())
+       ], ~r/consecutively and strictly increasing/},
+      {"a repeated generation", [accepted, accepted], ~r/consecutively and strictly increasing/}
+    ]
+
+    for {label, rows, expected} <- malformed do
+      assert_raise Invalid, expected, fn -> Plan.gate_generations(closed_plan(rows), path) end
+      assert label != nil
+    end
+
+    # A table is one contiguous structure; prose beside it does not qualify a
+    # record, and an empty one records nothing.
+    assert_raise Invalid, ~r/one contiguous table and nothing else/, fn ->
+      Plan.gate_generations(closed_plan([accepted]) <> "\nSee the amendment for context.\n", path)
+    end
+
+    assert_raise Invalid, ~r/one contiguous table and nothing else/, fn ->
+      Plan.gate_generations(
+        closed_plan([]) <>
+          Fixture.generations_section([]) <> "\n## Gate Generations\n\nNone yet.\n",
+        path
+      )
+    end
+
+    # Generations continue from the generation the Acceptance record bound, and
+    # each accepted row must describe the candidate it names.
+    detached =
+      Fixture.accepted_generation(
+        2,
+        generation_candidate(),
+        Fixture.amended_gate(2),
+        generation_disposition()
+      )
+
+    assert_raise Invalid, ~r/must continue from the generation the Acceptance record bound/, fn ->
+      governed_generations(closed_plan([detached]), Fixture.amended_gate(2))
+    end
+
+    unreachable =
+      Fixture.accepted_generation(1, String.duplicate("f", 40), amended, generation_disposition())
+
+    assert_raise Invalid, ~r/is unavailable/, fn ->
+      governed_generations(closed_plan([unreachable]), amended)
+    end
+
+    # The candidate resolves, but its gate declares a different generation than
+    # the row claims, so the record does not describe what a reviewer would open.
+    mismatched =
+      Fixture.accepted_generation(1, generation_candidate(), two, generation_disposition())
+
+    assert_raise Invalid, ~r/declares a different amendment generation/, fn ->
+      Plan.governance(
+        closed_plan([mismatched]),
+        Fixture.technical_plan(),
+        amended,
+        "M0",
+        "Closed",
+        generation_resolver(two)
+      )
+    end
+  end
+
+  test "a gate generations table is append-only in both admitted directions" do
+    proposal = ["1\t\t\t\tgate-one"]
+    accepted = ["1\tMaintainer\t[disposition](x.md#y)\t#{generation_candidate()}\tgate-one"]
+    second = ["2\t\t\t\tgate-two"]
+
+    # The two admitted transitions: propose one row, then complete exactly it.
+    assert Plan.supersedes?("gate generations", nil, Enum.join(proposal, "\n"))
+
+    assert Plan.supersedes?(
+             "gate generations",
+             Enum.join(proposal, "\n"),
+             Enum.join(accepted, "\n")
+           )
+
+    assert Plan.supersedes?(
+             "gate generations",
+             Enum.join(accepted, "\n"),
+             Enum.join(accepted ++ second, "\n")
+           )
+
+    # Rewriting an accepted row is not a supersession, whether it is restated,
+    # dropped, or reordered behind a new one.
+    rewritten = [
+      "1\tDelegate: Reviewer\t[disposition](x.md#y)\t#{generation_candidate()}\tgate-one"
+    ]
+
+    refute Plan.supersedes?(
+             "gate generations",
+             Enum.join(accepted, "\n"),
+             Enum.join(rewritten ++ second, "\n")
+           )
+
+    refute Plan.supersedes?(
+             "gate generations",
+             Enum.join(accepted ++ second, "\n"),
+             Enum.join(accepted, "\n")
+           )
+
+    refute Plan.supersedes?(
+             "gate generations",
+             Enum.join(accepted, "\n"),
+             Enum.join(rewritten, "\n")
+           )
+
+    # A second generation cannot start while the first is unsettled, and a row
+    # cannot arrive already accepted.
+    refute Plan.supersedes?(
+             "gate generations",
+             Enum.join(proposal, "\n"),
+             Enum.join(proposal ++ second, "\n")
+           )
+
+    refute Plan.supersedes?("gate generations", nil, Enum.join(accepted, "\n"))
+
+    # A rebind records who accepted the proposal, never what was proposed.
+    for changed <- [
+          ["1\tMaintainer\t[disposition](x.md#y)\t#{generation_candidate()}\tgate-other"],
+          ["2\tMaintainer\t[disposition](x.md#y)\t#{generation_candidate()}\tgate-one"]
+        ] do
+      refute Plan.supersedes?(
+               "gate generations",
+               Enum.join(proposal, "\n"),
+               Enum.join(changed, "\n")
+             )
+    end
   end
 end

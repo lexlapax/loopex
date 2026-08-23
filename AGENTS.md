@@ -304,12 +304,16 @@ register and plan index.
   rewritten, whose rows carry a consecutive generation number, the accepting
   authority, durable evidence of that authority's explicit disposition, the
   candidate SHA, and the new gate digest. Proposal `A` is one atomic revision
-  carrying the amended gate, its new generation row with an empty authority and
-  disposition, and every bound artifact the amendment rebinds; splitting the
+  carrying the amended gate, that gate's next consecutively numbered amendment
+  section, its new generation row with an empty authority, disposition, and
+  candidate, and every bound artifact the amendment rebinds; splitting the
   artifact change and the generation row across revisions permanently invalidates
   history, because artifact validation judges each reachable revision against the
-  generation current at that revision. After exact-SHA review and explicit
-  acceptance, `R` completes only that row's authority and disposition. Current
+  generation current at that revision. The row carries its gate digest at `A` but
+  not its candidate, for the same reason v1 needs two revisions: a commit cannot
+  name its own hash. After exact-SHA review and explicit acceptance, `R`
+  completes that row's authority, disposition, and the candidate it binds, which
+  is exact `A`. Current
   bound artifacts are validated against the latest accepted generation, and each
   historical revision against the generation current there. No Closed milestone is
   exempted from artifact validation, and no earlier generation stops being

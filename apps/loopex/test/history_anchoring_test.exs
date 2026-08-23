@@ -786,4 +786,297 @@ defmodule Loopex.HistoryAnchoringTest do
       History.governance_history(sibling_rebind_snapshot, merged_history)
     end
   end
+
+  # The additive transaction a Closed milestone must use, because its Closure row
+  # binds the same gate digest its Acceptance row binds, so rebinding one of the
+  # two would leave the other naming bytes that no longer exist.
+  @disposition "../developer/agent-context-map.md#gate-generation-1"
+  @index_path "docs/plans/README.md"
+  @context_path "docs/developer/agent-context-map.md"
+
+  defp mutated_artifact_gate do
+    artifact_gate() <> "| `#{Markdown.digest(@bad)}` | `#{@runner}` |\n"
+  end
+
+  defp closed_index(state) do
+    Fixture.documents()
+    |> Map.fetch!(@index_path)
+    |> String.replace(
+      Fixture.blocked_row(),
+      "| `M0` | #{state} | [concept](M0.md) | " <>
+        "[technical depth](M0-technical.md) | [gate](M0-gate.md) |"
+    )
+  end
+
+  defp context_before, do: "# Context map\n"
+
+  defp context_after do
+    context_before() <>
+      "\n<a id=\"gate-generation-1\"></a>\n## Gate generation 1\n\nMaintainer accepted it.\n"
+  end
+
+  defp generation_snapshot(plan, gate, artifact, context, state \\ "Closed") do
+    plan
+    |> Fixture.plan_snapshot(gate)
+    |> Map.put(@index_path, closed_index(state))
+    |> Map.put(@context_path, context)
+    |> Map.put(@runner, artifact)
+  end
+
+  defp generation_resolver(snapshots) do
+    files = Map.new(snapshots, fn {revision, _parents, contents} -> {revision, contents} end)
+    fn revision, path -> files |> Map.get(revision, %{}) |> Map.get(path) end
+  end
+
+  defp generation_history(snapshots) do
+    {head, _parents, files} = List.last(snapshots)
+    History.governance_history(files, {head, snapshots}, generation_resolver(snapshots))
+  end
+
+  test "a Closed milestone's gate generation is one atomic proposal and one rebind" do
+    original_gate = one_artifact_gate()
+    amended_gate = Fixture.amended_gate(1, mutated_artifact_gate())
+
+    closed = Fixture.plan(governed: true, closed: true, gate: original_gate)
+
+    proposal_plan =
+      Fixture.plan(
+        governed: true,
+        closed: true,
+        gate: original_gate,
+        generations: [Fixture.proposed_generation(1, amended_gate)]
+      )
+
+    rebind_plan = fn candidate ->
+      Fixture.plan(
+        governed: true,
+        closed: true,
+        gate: original_gate,
+        generations: [Fixture.accepted_generation(1, candidate, amended_gate, @disposition)]
+      )
+    end
+
+    origin = sha("a")
+    proposal = sha("1")
+    rebind = sha("2")
+
+    opening = [
+      {"root", [], %{}},
+      {origin, ["root"],
+       generation_snapshot(Fixture.plan(), original_gate, @good, context_before(), "Open")}
+    ]
+
+    base =
+      opening ++
+        [
+          {"closed", [origin],
+           generation_snapshot(closed, original_gate, @good, context_before())},
+          {proposal, ["closed"],
+           generation_snapshot(proposal_plan, amended_gate, @bad, context_before())}
+        ]
+
+    valid =
+      base ++
+        [
+          {rebind, [proposal],
+           generation_snapshot(rebind_plan.(proposal), amended_gate, @bad, context_after())}
+        ]
+
+    assert :ok == generation_history(valid)
+
+    # The split this transaction exists to make fatal. The middle revision moves
+    # the artifact and rebinds it in the amended gate together, which is
+    # everything the artifact walk asks for, and leaves the generation record for
+    # the next revision. The artifact walk is satisfied at every revision here;
+    # only the generation coupling refuses it, and no descendant heals it.
+    undeclared_gate =
+      mutated_artifact_gate() <> "\n<a id=\"amendment-1\"></a>\n## Amendment 1\n"
+
+    for {split_gate, expected} <- [
+          {amended_gate, ~r/must record its accepted gate generations/},
+          {undeclared_gate, ~r/no longer matches its Closure record/}
+        ] do
+      split =
+        opening ++
+          [
+            {"closed", [origin],
+             generation_snapshot(closed, original_gate, @good, context_before())},
+            {"split", ["closed"],
+             generation_snapshot(closed, split_gate, @bad, context_before())},
+            {proposal, ["split"],
+             generation_snapshot(proposal_plan, amended_gate, @bad, context_before())}
+          ]
+
+      assert :ok == History.artifact_history({proposal, split})
+
+      assert_raise Invalid, expected, fn -> generation_history(split) end
+    end
+
+    # A rebind records who accepted the proposal it descends from and nothing
+    # else; binding another revision would let one review stand for other bytes.
+    wrong_parent =
+      base ++
+        [
+          {rebind, [proposal],
+           generation_snapshot(rebind_plan.(origin), amended_gate, @bad, context_after())}
+        ]
+
+    assert_raise Invalid, ~r/must bind its sole proposal parent/, fn ->
+      generation_history(wrong_parent)
+    end
+
+    # An acceptance is a record written after reviewing this proposal, so its
+    # disposition is absent at the proposal and appears exactly once at the
+    # rebind.
+    reused =
+      base ++
+        [
+          {rebind, [proposal],
+           generation_snapshot(rebind_plan.(proposal), amended_gate, @bad, context_before())}
+        ]
+
+    assert_raise Invalid, ~r/must first appear exactly once at rebind/, fn ->
+      generation_history(reused)
+    end
+
+    stale_disposition =
+      opening ++
+        [
+          {"closed", [origin],
+           generation_snapshot(closed, original_gate, @good, context_after())},
+          {proposal, ["closed"],
+           generation_snapshot(proposal_plan, amended_gate, @bad, context_after())},
+          {rebind, [proposal],
+           generation_snapshot(rebind_plan.(proposal), amended_gate, @bad, context_after())}
+        ]
+
+    assert_raise Invalid, ~r/already existed at proposal/, fn ->
+      generation_history(stale_disposition)
+    end
+
+    # A gate generation reopens no lifecycle state.
+    reopened =
+      base ++
+        [
+          {rebind, [proposal],
+           generation_snapshot(
+             rebind_plan.(proposal),
+             amended_gate,
+             @bad,
+             context_after(),
+             "In progress"
+           )}
+        ]
+
+    assert_raise Invalid, ~r/gate generation rebind.*changed lifecycle state/, fn ->
+      generation_history(reopened)
+    end
+  end
+
+  test "recorded gate generations are append-only across reachable history" do
+    original_gate = one_artifact_gate()
+    amended_gate = Fixture.amended_gate(1, mutated_artifact_gate())
+    second_gate = Fixture.amended_gate(2, mutated_artifact_gate())
+
+    closed = Fixture.plan(governed: true, closed: true, gate: original_gate)
+
+    generations = fn rows ->
+      Fixture.plan(governed: true, closed: true, gate: original_gate, generations: rows)
+    end
+
+    proposed = Fixture.proposed_generation(1, amended_gate)
+    origin = sha("a")
+    proposal = sha("1")
+    rebind = sha("2")
+    accepted = Fixture.accepted_generation(1, proposal, amended_gate, @disposition)
+
+    base = [
+      {"root", [], %{}},
+      {origin, ["root"],
+       generation_snapshot(Fixture.plan(), original_gate, @good, context_before(), "Open")},
+      {"closed", [origin], generation_snapshot(closed, original_gate, @good, context_before())},
+      {proposal, ["closed"],
+       generation_snapshot(generations.([proposed]), amended_gate, @bad, context_before())},
+      {rebind, [proposal],
+       generation_snapshot(generations.([accepted]), amended_gate, @bad, context_after())}
+    ]
+
+    assert :ok == generation_history(base)
+
+    # An accepted row is immutable. The transaction shape refuses a restatement
+    # or a deletion; the merge below proves the anchor refuses it independently.
+    rewritten = String.replace(accepted, "Maintainer |", "Delegate: Reviewer |", global: false)
+
+    for {plan, expected} <- [
+          {generations.([rewritten]),
+           ~r/completes exactly the proposed row|completed gate generations/},
+          {closed, ~r/must record its accepted gate generations/}
+        ] do
+      assert_raise Invalid, expected, fn ->
+        generation_history(
+          base ++
+            [
+              {sha("3"), [rebind], generation_snapshot(plan, amended_gate, @bad, context_after())}
+            ]
+        )
+      end
+    end
+
+    # Two generations cannot be in flight at once, and a generation never
+    # arrives already accepted: it is proposed, reviewed, then recorded.
+    assert_raise Invalid, ~r/only one gate generation may await/, fn ->
+      generation_history(
+        base ++
+          [
+            {sha("3"), [proposal],
+             generation_snapshot(
+               generations.([proposed, Fixture.proposed_generation(2, second_gate)]),
+               second_gate,
+               @bad,
+               context_before()
+             )}
+          ]
+      )
+    end
+
+    assert_raise Invalid, ~r/appends exactly one proposed row/, fn ->
+      generation_history(
+        base ++
+          [
+            {sha("3"), [rebind],
+             generation_snapshot(
+               generations.([
+                 accepted,
+                 Fixture.accepted_generation(2, sha("3"), second_gate, @disposition)
+               ]),
+               second_gate,
+               @bad,
+               context_after()
+             )}
+          ]
+      )
+    end
+
+    # Two branches accepting the same generation against different candidates is
+    # a conflict rather than a merge: the gate bytes agree, so only the record
+    # differs, and neither record supersedes the other.
+    sibling_proposal = sha("4")
+    sibling_rebind = sha("5")
+    sibling = Fixture.accepted_generation(1, sibling_proposal, amended_gate, @disposition)
+
+    merged =
+      base ++
+        [
+          {sibling_proposal, ["closed"],
+           generation_snapshot(generations.([proposed]), amended_gate, @bad, context_before())},
+          {sibling_rebind, [sibling_proposal],
+           generation_snapshot(generations.([sibling]), amended_gate, @bad, context_after())},
+          {sha("6"), [rebind, sibling_rebind],
+           generation_snapshot(generations.([accepted]), amended_gate, @bad, context_after())}
+        ]
+
+    assert_raise Invalid, ~r/conflicting completed gate generations/, fn ->
+      generation_history(merged)
+    end
+  end
 end

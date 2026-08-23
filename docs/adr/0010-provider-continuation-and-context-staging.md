@@ -158,7 +158,7 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   implicit: an unstated `max_tokens` would leave an aborted turn with no
   conservative number to charge.
 - **Reaching a bound terminates the run inside the vision's closed outcome
-  algebra.** The run commits `failed(:budget_exhausted, false)`, and the
+  algebra.** The run commits `bound_reached`, and the
   terminal record names which bound was reached, the observed value against the
   declared limit, and how that value was obtained. `budget_exhausted` is a
   category of `failed(category, retryable?)` rather than a sixth terminal value:
@@ -173,7 +173,7 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   redispatched as a new attempt under the same operation identity, nothing is
   recomputed, and the wall-clock deadline is the absolute instant committed with
   the run, so a run whose deadline passed while its owner was down commits
-  `failed(:budget_exhausted, false)` naming `:deadline` on recovery, without a
+  `bound_reached` naming `:deadline` on recovery, without a
   provider call and without redispatching the staged bytes. Submitting a new
   prompt to a completed session starts a new run with a new identity, its own
   freshly committed bounds, and a projection over the whole retained lineage; it
@@ -461,7 +461,7 @@ hard turn starts a new session and loses the conversation, which is the sort of
 friction that makes people paste context by hand.
 
 Estimated token accounting is a permanent second class of number in the durable
-record. A `failed(:budget_exhausted, false)` outcome naming `:token_budget` now
+record. A `bound_reached` outcome naming `:token_budget` now
 has to say how its value was obtained, every consumer that renders a token count
 has to render the distinction, and a run that mixes reported and estimated turns
 carries both. That is the cost of never letting a committed bound become

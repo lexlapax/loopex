@@ -24,6 +24,14 @@ defmodule Loopex.Checks.Plan do
   The same generation then permits the administrative Acceptance rebind. This
   is the mechanical form of "the accepted commitment is immutable, and an
   accepted amendment is the only exception".
+
+  A `Closed` plan cannot use that rebind, because its Closure row binds the same
+  gate digest its Acceptance row binds and rebinding one leaves the other naming
+  bytes that no longer exist. Such a plan records the amendment additively
+  instead, in an append-only `## Gate Generations` table outside both envelopes.
+  Both authority rows then stay byte-immutable and keep being validated against
+  the candidates they bind, while the current gate is validated against the
+  latest accepted generation.
   """
 
   alias Loopex.Checks.Git
@@ -91,6 +99,13 @@ defmodule Loopex.Checks.Plan do
 
   @amendment_anchor ~r/\A<a id="amendment-([0-9]+)"><\/a>\z/u
   @amendment_transaction_v1 ~s(<a id="amendment-transaction-v1"></a>)
+  @amendment_transaction_v2 ~s(<a id="amendment-transaction-v2"></a>)
+
+  @generations_heading "## Gate Generations"
+  @generation_columns ["Generation", "Authority", "Authority evidence", "Bound bytes"]
+  @generation_accepted ~r/\Acandidate `([0-9a-f]{40})`; gate `sha256:([0-9a-f]{64})`\z/u
+  @generation_proposed ~r/\Agate `sha256:([0-9a-f]{64})`\z/u
+  @generation_empty "—"
 
   @doc """
   ## Concept
@@ -188,15 +203,182 @@ defmodule Loopex.Checks.Plan do
 
   @doc false
   def amendment_transaction_v1?(text, path) do
+    marker_declared?(text, path, @amendment_transaction_v1)
+  end
+
+  @doc false
+  def amendment_transaction_v2?(text, path) do
+    marker_declared?(text, path, @amendment_transaction_v2)
+  end
+
+  defp marker_declared?(text, path, marker) do
     lines = Markdown.lines(text, path)
 
     count =
       text
       |> Markdown.visible_line_numbers(path)
-      |> Enum.count(&(Enum.at(lines, &1) == @amendment_transaction_v1))
+      |> Enum.count(&(Enum.at(lines, &1) == marker))
 
     count == 1
   end
+
+  @doc """
+  ## Concept
+
+  The append-only gate generations a plan records, or an empty list when it
+  records none.
+
+  ## Technical depth
+
+  The table is optional and additive: a plan that never amended a closed gate
+  carries no section and validates exactly as it did before this transaction
+  existed. When the section is present it is one contiguous table and nothing
+  else, its generations are consecutive and increasing, and every row is either a
+  complete accepted record or the single trailing proposal awaiting its rebind.
+
+  A proposal names the gate bytes it introduces but not the candidate that
+  carries them, because no revision can name its own hash — the same constraint
+  that makes an amendment two revisions rather than one. The rebind adds the
+  authority, its disposition, and the exact candidate it reviewed.
+  """
+  @spec gate_generations(String.t(), String.t()) :: [map()]
+  def gate_generations(text, path) do
+    lines = Markdown.lines(text, path)
+    visible = Markdown.visible_line_numbers(text, path)
+
+    case Markdown.matching_indices(lines, visible, @generations_heading) do
+      [] -> []
+      _found -> parse_generations!(text, path)
+    end
+  end
+
+  defp parse_generations!(text, path) do
+    {body, _start} = Markdown.section_body(text, path, @generations_heading)
+
+    unless body != [] and Enum.all?(body, &String.starts_with?(&1, "|")) do
+      raise Invalid, "#{path}: Gate Generations must be one contiguous table and nothing else"
+    end
+
+    rows = Markdown.table(body, @generation_columns, "#{path} Gate Generations")
+
+    if rows == [] do
+      raise Invalid, "#{path}: Gate Generations must record at least one generation"
+    end
+
+    parsed = Enum.map(rows, &generation_row!(&1, path))
+
+    require_consecutive_generations!(parsed, path)
+    require_single_trailing_proposal!(parsed, path)
+
+    parsed
+  end
+
+  # Concept: a generation row is either an accepted record or the one proposal
+  # awaiting acceptance, and never a half-filled state in between.
+  #
+  # Technical depth: the two shapes are distinguished by the bound-bytes cell
+  # rather than by the authority columns alone, so a row cannot claim reviewed
+  # candidate bytes while naming no authority, and a row cannot name an authority
+  # while binding no candidate. The em dash is the repository's one empty cell,
+  # matching the governance rows, because the table reader rejects a blank cell.
+  defp generation_row!([generation, authority, evidence, bound], path) do
+    number =
+      case Integer.parse(generation) do
+        {number, ""} when number > 0 -> number
+        _other -> raise Invalid, "#{path}: a gate generation must be a positive decimal number"
+      end
+
+    accepted = Regex.run(@generation_accepted, bound)
+    proposed = Regex.run(@generation_proposed, bound)
+
+    cond do
+      accepted != nil and Records.authority?(authority) and Records.evidence?(evidence) ->
+        [_all, candidate, gate] = accepted
+
+        %{
+          generation: number,
+          authority: authority,
+          evidence: evidence,
+          candidate: candidate,
+          gate: gate
+        }
+
+      proposed != nil and authority == @generation_empty and evidence == @generation_empty ->
+        [_all, gate] = proposed
+        %{generation: number, authority: nil, evidence: nil, candidate: nil, gate: gate}
+
+      true ->
+        raise Invalid,
+              "#{path}: gate generation #{number} is neither a complete accepted record nor a " <>
+                "proposal awaiting its acceptance rebind"
+    end
+  end
+
+  defp require_consecutive_generations!(rows, path) do
+    numbers = Enum.map(rows, & &1.generation)
+    first = hd(numbers)
+
+    if numbers != Enum.to_list(first..(first + length(numbers) - 1)//1) do
+      raise Invalid,
+            "#{path}: gate generations must be numbered consecutively and strictly increasing"
+    end
+
+    :ok
+  end
+
+  defp require_single_trailing_proposal!(rows, path) do
+    case Enum.filter(rows, &(&1.candidate == nil)) do
+      [] ->
+        :ok
+
+      [proposal] ->
+        if proposal != List.last(rows) do
+          raise Invalid,
+                "#{path}: a proposed gate generation must be the highest generation recorded"
+        end
+
+        :ok
+
+      _several ->
+        raise Invalid, "#{path}: only one gate generation may await its acceptance rebind"
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  The history anchor for a plan's gate generations, or `nil` when it records
+  none.
+
+  ## Technical depth
+
+  Tab separated because no governed cell can contain a tab: the authority,
+  disposition, candidate, and digest grammars all exclude it, so the encoding is
+  reversible and equality is a single comparison. Encoding the parsed rows rather
+  than the document bytes means indentation or spacing changes cannot read as a
+  rewritten record, and a rewritten record cannot hide behind them either.
+  """
+  @spec generations_anchor([map()]) :: String.t() | nil
+  def generations_anchor([]), do: nil
+
+  def generations_anchor(rows) do
+    Enum.map_join(rows, "\n", fn row ->
+      Enum.join(
+        [row.generation, row.authority || "", row.evidence || "", row.candidate || "", row.gate],
+        "\t"
+      )
+    end)
+  end
+
+  @doc false
+  def decode_generations(nil), do: []
+
+  def decode_generations(value) do
+    value |> String.split("\n") |> Enum.map(&String.split(&1, "\t"))
+  end
+
+  @doc false
+  def generation_proposal?(row), do: Enum.at(row, 3) == ""
 
   @doc """
   ## Concept
@@ -306,6 +488,7 @@ defmodule Loopex.Checks.Plan do
       lines,
       text,
       [depth_heading, title] ++ sections_expected ++ trailing,
+      trailing != [],
       path
     )
 
@@ -362,11 +545,24 @@ defmodule Loopex.Checks.Plan do
     :ok
   end
 
-  defp require_document_headings!(lines, text, expected, path) do
+  # Concept: the Concept plan may carry one optional trailing Gate Generations
+  # section; every other heading sequence is exact.
+  #
+  # Technical depth: optional and last, so the governed sequence still pins the
+  # order of everything that states a commitment. The technical half admits no
+  # such section: it carries nothing outside its envelope, and its own placement
+  # check already refuses trailing content.
+  defp require_document_headings!(lines, text, expected, generations_allowed, path) do
     visible = Markdown.visible_line_numbers(text, path)
     found = headings(lines, visible, path, "a plan document")
 
-    if found != expected do
+    permitted =
+      case generations_allowed do
+        true -> [expected, expected ++ [@generations_heading]]
+        false -> [expected]
+      end
+
+    if found not in permitted do
       raise Invalid, "#{path}: plan document headings must be exactly the governed plan sequence"
     end
 
@@ -564,6 +760,26 @@ defmodule Loopex.Checks.Plan do
   and its candidate chain must terminate at an empty-governance original.
   """
   @spec supersedes?(String.t(), String.t() | nil, String.t() | nil) :: boolean()
+  # Concept: a gate generations table grows in exactly two ways, and every other
+  # difference between two versions of it is a rewrite.
+  #
+  # Technical depth: append-only is not "the new one is longer". Both admitted
+  # transitions preserve every accepted row byte for byte: a proposal appends one
+  # row that names no candidate, and a rebind completes that one row while
+  # keeping its generation and the gate bytes it proposed. A rewritten accepted
+  # row, a second concurrent proposal, a dropped row, a re-proposed generation,
+  # and two branches proposing different bytes at the same generation all fail
+  # here, which is what makes the merge reconciliation refuse them as conflicts
+  # rather than picking one.
+  def supersedes?("gate generations", anchor, value) when is_binary(value) do
+    old = decode_generations(anchor)
+    new = decode_generations(value)
+
+    generation_proposal_appended?(old, new) or generation_proposal_completed?(old, new)
+  end
+
+  def supersedes?("gate generations", _anchor, _value), do: false
+
   def supersedes?(label, anchor, value) do
     with generation when is_integer(generation) <- generation_of(value),
          prior when is_integer(prior) <- generation_of(anchor) do
@@ -574,6 +790,33 @@ defmodule Loopex.Checks.Plan do
       # edit, a sibling jump, a rewrite at the same generation, and a rollback
       # are all rejected.
       generation > prior and lineage_supersedes?(label, anchor, value)
+    else
+      _other -> false
+    end
+  end
+
+  @doc false
+  def generation_proposal_appended?(old, new) do
+    not Enum.any?(old, &generation_proposal?/1) and
+      length(new) == length(old) + 1 and
+      Enum.take(new, length(old)) == old and
+      generation_proposal?(List.last(new))
+  end
+
+  @doc false
+  def generation_proposal_completed?(old, new) do
+    with [_ | _] <- old,
+         true <- length(new) == length(old),
+         true <- Enum.drop(new, -1) == Enum.drop(old, -1),
+         proposal when proposal != nil <- List.last(old),
+         completed when completed != nil <- List.last(new),
+         true <- generation_proposal?(proposal),
+         false <- generation_proposal?(completed) do
+      # The generation and the gate bytes are the proposal's substance; the
+      # rebind records who accepted it, not what it was. Allowing either to move
+      # would let a review of one proposal be recorded against another.
+      Enum.at(proposal, 0) == Enum.at(completed, 0) and
+        Enum.at(proposal, 4) == Enum.at(completed, 4)
     else
       _other -> false
     end
@@ -869,6 +1112,20 @@ defmodule Loopex.Checks.Plan do
       raise Invalid, "#{path}: governance records do not match #{state} lifecycle state"
     end
 
+    generations = gate_generations(text, path)
+
+    verify_gate_generations!(%{
+      generations: generations,
+      gate_text: gate_text,
+      gate_path: gate_path,
+      path: path,
+      state: state,
+      gate_digest: current_gate_digest,
+      gate_generation: generation,
+      bound: bound,
+      resolve_file: resolve_file
+    })
+
     candidates =
       resolve_candidates!(
         bound,
@@ -877,6 +1134,7 @@ defmodule Loopex.Checks.Plan do
           technical_path: technical_path,
           gate_path: gate_path,
           gate_digest: current_gate_digest,
+          amended_after_closure: generations != [],
           concept_digest: envelope_digest(envelope),
           technical_digest: envelope_digest(technical)
         },
@@ -909,6 +1167,167 @@ defmodule Loopex.Checks.Plan do
 
     documentation_obligations(gate_text, gate_path, name, state)
     reject_second_status_surface!(text, path)
+  end
+
+  # Concept: the optional generations table and the gate's own declared
+  # transaction must agree, and the current gate must be the latest generation
+  # some authority actually accepted.
+  #
+  # Technical depth: the marker and the table imply each other in both
+  # directions. Requiring the table when the marker is present stops a gate from
+  # declaring the transaction and then recording nothing; requiring the marker
+  # when the table is present stops a later revision from dropping the marker to
+  # escape the coupling, because the table itself cannot be dropped once history
+  # anchors it. A plan with neither is the pre-existing shape and is checked
+  # exactly as before.
+  defp verify_gate_generations!(%{generations: []} = context) do
+    if amendment_transaction_v2?(context.gate_text, context.gate_path) do
+      raise Invalid,
+            "#{context.gate_path}: a gate declaring amendment transaction v2 must record its " <>
+              "accepted gate generations"
+    end
+
+    :ok
+  end
+
+  defp verify_gate_generations!(context) do
+    cond do
+      not amendment_transaction_v2?(context.gate_text, context.gate_path) ->
+        raise Invalid,
+              "#{context.gate_path}: a recorded gate generation requires the gate to declare " <>
+                "amendment transaction v2"
+
+      context.state != "Closed" ->
+        raise Invalid,
+              "#{context.path}: gate generations amend a Closed milestone's gate; an active " <>
+                "milestone amends its accepted plan pair instead"
+
+      true ->
+        verify_generation_chain!(context)
+    end
+  end
+
+  defp verify_generation_chain!(context) do
+    generations = context.generations
+    latest = List.last(generations)
+
+    if latest.generation != context.gate_generation do
+      raise Invalid,
+            "#{context.path}: the highest gate generation must be the amendment generation the " <>
+              "gate itself declares"
+    end
+
+    accepted = acceptance_bound_generation!(context)
+
+    if hd(generations).generation != accepted + 1 do
+      raise Invalid,
+            "#{context.path}: gate generations must continue from the generation the Acceptance " <>
+              "record bound"
+    end
+
+    generations
+    |> Enum.filter(&(&1.candidate != nil))
+    |> Enum.each(&verify_generation_candidate!(&1, context))
+
+    verify_latest_generation!(latest, context)
+  end
+
+  defp acceptance_bound_generation!(context) do
+    case Enum.at(context.bound, 0) do
+      {revision, _concept, _technical, _gate} ->
+        gate_generation(
+          resolve_gate!(revision, context, "Acceptance candidate"),
+          "#{context.gate_path} at #{revision}"
+        )
+
+      nil ->
+        raise Invalid,
+              "#{context.path}: gate generations require a complete Acceptance record to " <>
+                "continue from"
+    end
+  end
+
+  # Concept: an accepted generation names bytes a reviewer could open.
+  # Technical depth: resolving the candidate proves both halves of the row — that
+  # the recorded digest is the digest of the gate that revision carried, and that
+  # the revision carried exactly the amendment generation the row claims. A row
+  # whose candidate cannot be resolved is unavailable evidence, not a pass.
+  defp verify_generation_candidate!(row, context) do
+    gate_text = resolve_gate!(row.candidate, context, "gate generation #{row.generation}")
+    historical_path = "#{context.gate_path} at #{row.candidate}"
+
+    if gate_digest(gate_text, historical_path) != row.gate do
+      raise Invalid,
+            "#{context.path}: gate generation #{row.generation} does not match the gate at the " <>
+              "candidate it binds"
+    end
+
+    if gate_generation(gate_text, historical_path) != row.generation do
+      raise Invalid,
+            "#{context.path}: gate generation #{row.generation} binds a candidate whose gate " <>
+              "declares a different amendment generation"
+    end
+
+    :ok
+  end
+
+  defp verify_latest_generation!(%{candidate: nil} = latest, context) do
+    if latest.gate != context.gate_digest do
+      raise Invalid,
+            "#{context.path}: a proposed gate generation must name the gate bytes beside it"
+    end
+
+    raise Invalid,
+          "#{context.path}: gate generation #{latest.generation} is proposed and not accepted; " <>
+            "the current gate binds bytes no authority has accepted"
+  end
+
+  defp verify_latest_generation!(latest, context) do
+    if latest.gate != context.gate_digest do
+      raise Invalid,
+            "#{context.path}: the latest accepted gate generation must bind the current gate bytes"
+    end
+
+    :ok
+  end
+
+  defp resolve_gate!(revision, context, subject) do
+    case context.resolve_file && context.resolve_file.(revision, context.gate_path) do
+      nil ->
+        raise Invalid,
+              "#{context.path}: the gate at #{subject} candidate #{revision} is unavailable"
+
+      text ->
+        text
+    end
+  end
+
+  @doc false
+  def validate_generation_disposition!(evidence, path, proposal, record, resolve_file) do
+    {target, fragment} = amendment_disposition_target!(evidence, path)
+    proposal_text = resolve_file && resolve_file.(proposal, target)
+
+    if proposal_text == nil do
+      raise Invalid,
+            "#{path}: gate generation disposition target #{target} is unavailable at proposal " <>
+              proposal
+    end
+
+    if visible_anchor_count(proposal_text, target, fragment) > 0 do
+      raise Invalid,
+            "#{path}: gate generation disposition #{target}##{fragment} already existed at " <>
+              "proposal #{proposal}; the rebind must add a new record"
+    end
+
+    record_text = resolve_file && resolve_file.(record, target)
+
+    if record_text == nil or visible_anchor_count(record_text, target, fragment) != 1 do
+      raise Invalid,
+            "#{path}: gate generation disposition #{target}##{fragment} must first appear " <>
+              "exactly once at rebind #{record}"
+    end
+
+    :ok
   end
 
   defp resolve_candidates!(bound, context, resolve_file) do
@@ -945,7 +1364,18 @@ defmodule Loopex.Checks.Plan do
       historical_gate_digest =
         gate_digest(historical_gate, "#{context.gate_path} at #{revision}")
 
-      if bound_gate != context.gate_digest or bound_gate != historical_gate_digest do
+      # Concept: an authority row always binds the gate at the candidate it
+      # names; it binds the current gate only while no later generation exists.
+      #
+      # Technical depth: dropping the current comparison for an amended closed
+      # gate is not a relaxation. Acceptance and Closure keep proving they
+      # describe real reviewed bytes at their own candidates, which is what makes
+      # them immutable records, and `verify_gate_generations!/1` separately
+      # requires the current gate to be exactly the latest accepted generation.
+      # Keeping the comparison instead would make an amended closed gate
+      # permanently invalid, which is the defect this transaction exists to fix.
+      if bound_gate != historical_gate_digest or
+           (not context.amended_after_closure and bound_gate != context.gate_digest) do
         raise Invalid,
               "#{context.path}: governance gate digest does not match current and historical gate text"
       end
