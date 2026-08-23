@@ -250,6 +250,12 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
 
     assert Path.wildcard(Path.join(ledger, "*.receipt")) == [receipt_path(ledger, job_id)]
 
+    # Concept: The local executor owns the private retained-receipt schema inspected
+    # across this VM boundary.
+    # Technical depth: Load its schema atoms before safe ETF decoding; OTP 26
+    # refuses atoms created only by the child VM.
+    assert Code.ensure_loaded?(Local)
+
     receipt =
       ledger
       |> receipt_path(job_id)

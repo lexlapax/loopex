@@ -898,3 +898,35 @@ maintainer acceptance, immediate child `R` adds one new disposition anchor and
 rebinds Acceptance to `A`; no product, portable-enforcement, corpus, gate, or
 envelope byte may change in `R`. The aggregate M1 gate then proves the rebound
 tree through its ordinary and capture roles.
+
+<a id="amendment-6"></a>
+## Amendment 6 — Make Cross-VM Receipt Inspection Portable to OTP 26
+
+**Acceptance: OUTSTANDING.** This section declares generation 6 and corrects a
+floor-only portability defect in the protected real recovery harness. Its phase-1
+child VM writes the private retained receipt, then the parent VM independently
+inspects those bytes with safe external-term decoding before killing and
+restarting the runtime tree. On OTP 26, receipt-schema atoms created only in the
+child are absent from the parent atom table, so safe decoding correctly refuses
+the term before the recovery assertions. The current pair happened to have
+loaded those atoms already and therefore did not expose the missing harness
+precondition.
+
+Immediately before the independent decode, the parent now loads the trusted
+local-executor module that owns the private receipt schema. Safe decoding remains
+enabled, so the external term cannot create atoms absent from the parent VM;
+explicitly loading the trusted producer supplies its schema atoms without
+enabling unsafe decoding. The change does not alter the receipt bytes or schema,
+product code, persistence, authority, public contract, protected test identity,
+minimum, exclusion, provider path, fault point, evidence class, toolchain lane,
+closure document, budget, or transition shape, and it removes or weakens no
+protected recovery assertion.
+
+This proposal follows Amendment 5's settled direct `A→R` transaction. At
+proposal `A`, the generation-5 Acceptance row and lifecycle remain unchanged,
+so status, bootstrap, and inherited M0 gates stop only at stale binding.
+Binding-independent checks and the amended protected floor selector must pass
+directly and retain safe decoding. After independent exact-SHA review and
+explicit maintainer acceptance, immediate child `R` adds one new disposition
+anchor and rebinds Acceptance to `A`; no product, selector, gate, envelope, or
+other byte may change in `R`. Fresh source-candidate captures remain required.
