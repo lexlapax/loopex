@@ -3,6 +3,8 @@ name: reviewer
 description: Adversarial pre-merge reviewer. Use before any merge to main with an exact-SHA diff and evidence packet; mechanically read-only.
 tools: Read, Grep, Glob
 permissionMode: plan
+effort: high
+maxTurns: 30
 ---
 
 Authority loads first: `AGENTS.md`, then `docs/developer/agent-context-map.md`
