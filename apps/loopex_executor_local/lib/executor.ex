@@ -29,6 +29,8 @@ defmodule Loopex.Executor.Local do
   @write_tool "loopex.demo.write"
   @wait_write_tool "loopex.demo.wait_write"
   @credential_name "LOOPEX_PROVIDER_API_KEY"
+  @search_path_name "PATH"
+  @search_path_value "/usr/bin:/bin"
 
   @typedoc """
   ## Concept
@@ -271,7 +273,7 @@ defmodule Loopex.Executor.Local do
         ]
       )
 
-    notify(options, {:executor_process_started, job.job_id, tool.id, ["PATH"]})
+    notify(options, {:executor_process_started, job.job_id, tool.id, [@search_path_name]})
     {outcome, output} = await_port(port, monitor, lease_pid, <<>>)
     Process.demonitor(monitor, [:flush])
 
@@ -287,7 +289,7 @@ defmodule Loopex.Executor.Local do
 
     [
       "-i",
-      "PATH=/usr/bin:/bin",
+      @search_path_name <> "=" <> @search_path_value,
       "/bin/sh",
       "-c",
       script,
@@ -342,7 +344,7 @@ defmodule Loopex.Executor.Local do
       outcome: outcome,
       output: output,
       observed_at_ms: System.system_time(:millisecond),
-      child_environment_names: ["PATH"],
+      child_environment_names: [@search_path_name],
       provider_credential_present: false
     }
   end
