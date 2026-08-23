@@ -41,8 +41,10 @@ the exact document set its milestone must update.
   events, completes a second real model call, and reaches a durable terminal
   result. Missing receipt evidence ends `outcome_unknown` and never retries.
 - Operator and developer guides for the M1 source-tree runtime, including
-  explicit composition, credential boundaries, event truth, shutdown, and crash
-  recovery. M1 remains unreleased and carries no public compatibility freeze.
+  the explicit feature boundary, credential-free and real-provider working-loop
+  commands, composition, credential boundaries, event truth, shutdown, and
+  crash recovery. M1 remains unreleased and carries no public compatibility
+  freeze.
 - First product code. An Elixir umbrella with two applications per ADR 0001:
   `loopex_protocol` carries no dependency and `loopex` depends on it and nothing
   else. Both read one version from the root `VERSION` file at compile time, so

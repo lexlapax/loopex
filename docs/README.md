@@ -66,8 +66,9 @@ whose path or explicit fragment does not resolve.
   Technical depth plan, and executable gate.
 - [Development setup](../DEVELOPMENT.md) — local prerequisites and validation
   commands.
-- [Runtime operations](operator/runtime.md#concept) — current source-tree
-  operating envelope, credentials, events, shutdown, and recovery.
+- [Runtime operations and first run](operator/runtime.md#concept) — current
+  source-tree features, exact working-loop demonstrations, credentials, events,
+  shutdown, and recovery.
 - [Runtime and embedding](developer/runtime-and-embedding.md#concept) — M1
   composition, commit ordering, embedded API, and recovery mechanics.
 - [Context map](developer/agent-context-map.md) — task-oriented routing into

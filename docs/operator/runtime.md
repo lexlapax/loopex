@@ -16,6 +16,62 @@ executor, distribution, or production credential manager.
 
 Developer composition details: [Runtime and embedding](../developer/runtime-and-embedding.md#technical-depth).
 
+<a id="operator-runtime-available"></a>
+## What M1 Delivers
+
+M1 is a runnable, headless Loopex loop. A host can start the runtime, submit a
+prompt, call a model, authorize and execute the registered local tool, observe
+durable events, stop, and resume from retained state. The reference client uses
+the same embedded API available to a host; it does not own a test-only or
+alternate loop.
+
+| Operator capability | M1 state |
+| --- | --- |
+| Run the complete loop from this source tree | Available |
+| Use a deterministic model for a credential-free demonstration | Available |
+| Use the ReqLLM adapter with a real supported provider | Available |
+| Execute the registered controlled workspace tool in a separate OS process | Available |
+| Retain sessions, events, tool receipts, and resume after process loss | Available |
+| Install a released package or invoke a `loopex` CLI | Not provided in M1 |
+| Run a daemon, remote executor, network client, or multi-client service | Not provided in M1 |
+
+The missing surfaces are not alternate ways to reach hidden functionality.
+Loopex is deliberately embedded first: a later CLI, IDE, daemon, or web host
+must drive this same runtime contract rather than introduce another loop.
+
+<a id="operator-runtime-first-run"></a>
+## Run the Working Loop
+
+From the repository root, the quickest credential-free run is:
+
+```bash
+MIX_ENV=test mix test apps/loopex_reference_client/test/reference_client_test.exs --seed 0 --trace
+```
+
+This starts an isolated runtime and durable local Store, submits a prompt
+through the reference client, receives a deterministic model tool call,
+executes the controlled workspace-write tool in a child OS process, consumes
+the durable event sequence through `run.finished`, checks the resulting file,
+and removes its temporary state. Success ends with `2 passed`.
+
+To exercise the same session-integrated path through the real ReqLLM adapter,
+place the provider key in `LOOPEX_PROVIDER_API_KEY` using the host's secret
+mechanism, then run:
+
+```bash
+MIX_ENV=test mix test apps/loopex_reference_client/test/real_model_session_test.exs --only real_provider --seed 0 --trace
+```
+
+That role makes two real model calls around one controlled tool effect and
+checks that both calls use the canonical request bytes already committed by the
+session. Do not put the credential value in the command, repository, Store,
+workspace, logs, fixtures, or retained evidence. Unset the environment variable
+after the run if the host does not manage its lifetime.
+
+These commands are source-tree demonstrations, not a public CLI contract. To
+embed Loopex in a host, follow the
+[developer runtime and embedding guide](../developer/runtime-and-embedding.md#concept).
+
 <a id="operator-runtime-prerequisites"></a>
 ## Before Starting
 

@@ -35,7 +35,8 @@ embedded runtime, durable local Store, canonical model boundary, trusted-local
 executor, thin reference client, durable events, and receipt reconciliation
 across a real runtime-process crash. It remains source-tree milestone work, not
 an installable package, release, or frozen public API. Start with the
-[operator runtime guide](docs/operator/runtime.md#concept) to run it or the
+[operator runtime guide](docs/operator/runtime.md#concept) to see the current
+feature boundary and run the complete source-tree loop, or use the
 [developer embedding guide](docs/developer/runtime-and-embedding.md#concept) to
 understand the composition and commit ordering.
 

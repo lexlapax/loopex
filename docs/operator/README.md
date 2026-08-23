@@ -7,10 +7,12 @@ runtime. Part of the [documentation index](../README.md).
 
 | Document | Purpose |
 | --- | --- |
-| [Runtime operations](runtime.md#concept) | Current M1 operating envelope, lifecycle, credentials, event observation, shutdown, and crash recovery. |
+| [Runtime operations and first run](runtime.md#concept) | What M1 can run, exact source-tree demonstrations, lifecycle, credentials, event observation, shutdown, and crash recovery. |
 
 Loopex is not packaged or released yet. These runbooks describe the source-tree
-M1 runtime and do not create a public compatibility or support promise.
+M1 runtime and do not create a public compatibility or support promise. Start
+with [what M1 delivers](runtime.md#operator-runtime-available), then
+[run the working loop](runtime.md#operator-runtime-first-run).
 
 ## Related
 
