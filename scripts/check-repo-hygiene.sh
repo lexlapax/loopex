@@ -46,6 +46,11 @@ if git rev-parse --verify --quiet "$integration" >/dev/null; then
     # A detached worktree has no branch, so compare its commit directly.
     # Skipping it would let landed work hide behind a detached HEAD.
     wt_branch="$(git -C "$wt_path" symbolic-ref --quiet --short HEAD || true)"
+    # The integration branch is never residue: a worktree on it is the checkout
+    # an integrator works from. The branch scan above already exempts main, but
+    # this loop did not, so running the check from any linked worktree reported
+    # the primary checkout as landed work and offered to delete it.
+    [ "$wt_branch" = "main" ] && continue
     if [ -n "$wt_branch" ]; then
       wt_ref="$wt_branch"
       wt_label="$wt_branch"
