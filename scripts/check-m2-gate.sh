@@ -413,7 +413,7 @@ case Loopex.M2Probe.run(root) do
   %{} = observed ->
     IO.puts(
       "LOOPEX_M2_PROBE turns=#{observed.turns} history=#{observed.history} " <>
-        "deltas=#{observed.deltas} ports=#{observed.ports} " <>
+        "progress_messages=#{observed.deltas} ports=#{observed.ports} " <>
         "tool_set=#{observed.tool_set} staged=#{Enum.join(observed.staged, "+")}"
     )
 end
@@ -487,7 +487,7 @@ run_opening_probe() {
 
   turns="$(probe_field "$probe_report" turns)"
   history="$(probe_field "$probe_report" history)"
-  deltas="$(probe_field "$probe_report" deltas)"
+  deltas="$(probe_field "$probe_report" progress_messages)"
   ports="$(probe_field "$probe_report" ports)"
   tool_set="$(probe_field "$probe_report" tool_set)"
   staged="$(probe_field "$probe_report" staged)"
@@ -577,6 +577,8 @@ require_feature \
   "replaying an adapter's emitted deltas reproduces the reply it returned byte identically" \
   "the model and executor progress domains carry separate sequences each closed by its own content free item" \
   "a gapless turn sequence and the reply's delta count make lost progress detectable" \
+  "a provider retry opens a second stream domain under one turn and neither domain reports the other as loss" \
+  "a retried executor operation attempt opens its own stream domain closed by its own final sequence" \
   "the committed assistant message is built from the reply and never assembled from deltas" \
   "a cancelled stream commits no assistant message and a late reply never becomes canonical" \
   "an adapter that emits no deltas is conformant and declares that it does not stream"
@@ -614,7 +616,8 @@ require_feature \
   "bash runs an argv command and an explicit raw shell command with distinct semantics" \
   "every tool refuses a path that escapes the workspace root through traversal or a symlink" \
   "executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted" \
-  "a tool child process tree is owned and terminated with its job"
+  "a tool child process tree is owned and terminated with its job" \
+  "a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound"
 
 require_feature \
   "oversized tool output has nowhere to go; there is no artifact store and a long result is simply lost" \
@@ -699,7 +702,7 @@ require_feature \
   "an embedder cannot start the kernel in one page; the only composition is test support" \
   apps/loopex_cli/test/kernel_composition_test.exs \
   "one page of shipped code starts the application tree a runtime a session a prompt and its events" \
-  "the shipped composition is the same one the loopex command uses" \
+  "an independent embedder fixture composes the kernel without depending on the command application" \
   "the composition resolves its state root explicitly and never through application environment"
 
 # The attended real-provider demonstration is mandatory closure evidence rather
@@ -1213,13 +1216,15 @@ run_selector 1 apps/loopex/test/agent_loop_test.exs default 13 zero \
   "passed=a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated" \
   "passed=every sampling bound is a declared committed value with no implicit default"
 
-run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs default 9 zero \
+run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs default 11 zero \
   "passed=every model adapter satisfies one streaming conformance suite" \
   "passed=each canonical delta kind is bounded plain data carrying no provider or host term" \
   "passed=a text delta is observable while its operation is still incomplete rather than after the reply returns" \
   "passed=replaying an adapter's emitted deltas reproduces the reply it returned byte identically" \
   "passed=the model and executor progress domains carry separate sequences each closed by its own content free item" \
   "passed=a gapless turn sequence and the reply's delta count make lost progress detectable" \
+  "passed=a provider retry opens a second stream domain under one turn and neither domain reports the other as loss" \
+  "passed=a retried executor operation attempt opens its own stream domain closed by its own final sequence" \
   "passed=the committed assistant message is built from the reply and never assembled from deltas" \
   "passed=a cancelled stream commits no assistant message and a late reply never becomes canonical" \
   "passed=an adapter that emits no deltas is conformant and declares that it does not stream"
@@ -1234,14 +1239,15 @@ run_selector 3 apps/loopex/test/input_algebra_test.exs default 8 zero \
   "passed=at most one unapplied steer and one queued follow up exist and both survive owner succession" \
   "passed=an abort resolves any unapplied steer and queued follow up as cancelled"
 
-run_selector 4 apps/loopex_executor_local/test/coding_tools_test.exs default 7 zero \
+run_selector 4 apps/loopex_executor_local/test/coding_tools_test.exs default 8 zero \
   "passed=read returns bounded chunked content and reports truncation" \
   "passed=write creates or replaces a file only beneath the workspace root" \
   "passed=edit applies an exact match change and names what differed on a mismatch" \
   "passed=bash runs an argv command and an explicit raw shell command with distinct semantics" \
   "passed=every tool refuses a path that escapes the workspace root through traversal or a symlink" \
   "passed=executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted" \
-  "passed=a tool child process tree is owned and terminated with its job"
+  "passed=a tool child process tree is owned and terminated with its job" \
+  "passed=a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound"
 
 run_selector 5 apps/loopex_store_local/test/artifact_store_conformance_test.exs default 6 zero \
   "passed=every artifact store implementation satisfies one conformance suite" \
@@ -1310,7 +1316,7 @@ run_selector 10 apps/loopex_cli/test/cli_test.exs default 15 zero \
 
 run_selector 11 apps/loopex_cli/test/kernel_composition_test.exs default 3 zero \
   "passed=one page of shipped code starts the application tree a runtime a session a prompt and its events" \
-  "passed=the shipped composition is the same one the loopex command uses" \
+  "passed=an independent embedder fixture composes the kernel without depending on the command application" \
   "passed=the composition resolves its state root explicitly and never through application environment"
 
 # The tool registry is the internal mechanism the loop and the tools resolve
@@ -1423,9 +1429,12 @@ run_selector mechanics apps/loopex/test/status_check_test.exs default 42 zero \
   "passed=a gate generations table is append-only in both admitted directions" \
   "passed=the integrated phase is derived from the register's closed rows"
 
-run_selector mechanics apps/loopex/test/history_anchoring_test.exs default 16 zero \
+run_selector mechanics apps/loopex/test/history_anchoring_test.exs default 19 zero \
   "passed=a Closed milestone's gate generation is one atomic proposal and one rebind" \
-  "passed=recorded gate generations are append-only across reachable history"
+  "passed=recorded gate generations are append-only across reachable history" \
+  "passed=a gate generation rebind cannot bind an interposed revision that changes nothing" \
+  "passed=a gate generation rebind cannot bind an interposed revision carrying unrelated bytes" \
+  "passed=a gate generation rebind cannot bind a merge or a revision behind one"
 
 run_locked "the credential-free suite does not pass at the gate seed" \
   env MIX_ENV=test mix test --exclude real_provider --seed "$gate_seed"
