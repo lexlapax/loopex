@@ -126,7 +126,7 @@ defmodule Loopex.M1GateEvidenceTest do
     )
   end
 
-  defp run_gate_without_input(args, env) do
+  defp run_gate_without_input(args, env, root \\ repo_root()) do
     System.cmd(
       "/bin/bash",
       [
@@ -135,10 +135,26 @@ defmodule Loopex.M1GateEvidenceTest do
         "exec /bin/bash -p scripts/check-m1-gate.sh \"$@\" </dev/null",
         "m1-no-provider-input" | args
       ],
-      cd: repo_root(),
+      cd: root,
       env: [{"LOOPEX_PROVIDER_API_KEY", nil} | env],
       stderr_to_stdout: true
     )
+  end
+
+  defp opening_red_fixture! do
+    root =
+      Path.join(System.tmp_dir!(), "m1-opening-red-#{System.unique_integer([:positive])}")
+
+    candidate = repo_root() |> git!(["rev-parse", "HEAD"]) |> String.trim()
+    git!(repo_root(), ["clone", "--quiet", "--no-hardlinks", "--no-checkout", repo_root(), root])
+    git!(root, ["checkout", "--quiet", "--detach", candidate])
+
+    selector = "apps/loopex/test/runtime_test.exs"
+    git!(root, ["update-index", "--assume-unchanged", "--", selector])
+    File.rm!(Path.join(root, selector))
+
+    on_exit(fn -> File.rm_rf(root) end)
+    root
   end
 
   defp provider_frame(key), do: @provider_input_header <> <<0>> <> key <> <<0>>
@@ -1888,10 +1904,13 @@ defmodule Loopex.M1GateEvidenceTest do
       File.rm_rf(unwritable_tmp)
     end)
 
+    opening_root = opening_red_fixture!()
+
     {output, status} =
       run_gate_without_input(
         [],
-        [{"HOME", account_home!()}, {"TMPDIR", unwritable_tmp}]
+        [{"HOME", account_home!()}, {"TMPDIR", unwritable_tmp}],
+        opening_root
       )
 
     assert status != 0

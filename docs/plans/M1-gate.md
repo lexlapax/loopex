@@ -148,12 +148,12 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `4f2e4f56f78ae7db7eca22c68b874a4d91659186ab9adf0c35aabd96c65b3597` | `scripts/check-m1-gate.sh` |
+| `7a36c88ef6f2886a933d33c347dea2e155bdd695c86a5b05311cd60090bed39a` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `6aa177be0672179cb0713a7e73ccf54a52fa4dc957d5e7d00e3e514d5015f8c2` | `scripts/m1-exunit-runner.exs` |
 | `360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c` | `scripts/m1-evidence-verifier.exs` |
 | `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `87172408ac43f325d0e13e5228fd2cec41a4d193d5359e0838a47a8140b67a7d` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `b3789f57e8c57216f48d62a9bec38156d18d1a42ccffe009d0567ede7ab11453` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `558544b6ac08c8fe814d00e315594e33a07eeee2220aad0f8659b909371cd00b` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -756,3 +756,41 @@ Only `R` is integration-eligible.
 Every result names the revision where it ran. No green `R` result is attributed
 to `A`, and these governance-integration runs do not replace the later exact-`C`
 M0 evidence required by the retained `C→E→T` closure chain.
+
+<a id="amendment-3"></a>
+## Amendment 3 — Preserve the Historical Opening-Red Proof
+
+**Acceptance: OUTSTANDING.** This section declares generation 3 and changes
+only the bound mechanics proof for the read-only opening condition. It supplies
+no authority by itself. The current product tree now truthfully contains
+`apps/loopex/test/runtime_test.exs`, so invoking the current runner in that tree
+can no longer reproduce the accepted opening checkpoint's first missing
+selector. Requiring that result forever would make the gate unsatisfiable as
+soon as Outcome 1 exists.
+
+The existing protected mechanics test keeps its exact name, role, and count. It
+still proves statically that selector validation precedes writable task-root
+allocation. For the dynamic proof, it creates an isolated no-hardlink local
+clone of the exact current candidate, checks out that candidate detached, hides
+only `apps/loopex/test/runtime_test.exs` from the clone's worktree while retaining
+a clean candidate index, and invokes the unchanged accepted gate command there
+with an unwritable task root. The runner must emit the exact historical
+missing-selector red, and the unwritable root must remain empty. The source
+checkout and user state are never modified.
+
+This correction changes no product command, selector, protected test identity,
+minimum, exclusion rule, credential boundary, environment preflight, writable
+lane, evidence class, lane schema, outcome, scope item, non-goal, or closure
+document. It does not replace the gate's current truthful product frontier: at
+proposal `A` and rebind `R`, the direct runner must still stop at the first
+currently missing required selector or behavior. The amendment updates only the
+mechanics corpus, its bound digest in the runner, the runner digest in this gate,
+and this explanation.
+
+This proposal follows Amendment 2's direct `A→R` transaction. At `A`, the prior
+Acceptance row and lifecycle state remain unchanged, so status and bootstrap
+must fail only for the stale generation-2 binding while binding-independent
+checks and the amended mechanics selector pass. After independent exact-SHA
+review and explicit maintainer acceptance, immediate child `R` adds one new
+disposition anchor and rebinds Acceptance to `A`; no product byte or further
+gate byte may change in `R`.
