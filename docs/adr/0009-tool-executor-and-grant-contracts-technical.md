@@ -23,6 +23,7 @@ provides.
 | Host policy owns `allow`, `deny`, `defer` | The literal term `{:host_policy, :allow}`, validated to be exactly that | There is no decision point; every reachable path ends in a grant |
 | Failure never falls through to allow | Vacuous — there is no failure path | A property with no reachable counterexample is untested |
 | Cancellation stops owned work | Abort is admitted and journaled; the coordinator never reads it | The model call and the OS process both keep running after an acknowledged abort |
+| An executor job is bounded by the run's wall-clock deadline | No run bound exists at all, and the two demonstration tools finish immediately | The moment `M2` declares a run deadline, a `bash` dispatched near expiry outlives it unless the deadline reaches the job |
 | Bounded output, path containment, edit preconditions, shell semantics, process ownership, artifact spill | The two demonstration tools write a fixed bounded file | No shared behaviour exists to conform to |
 | Oversized output becomes an artifact with a digest and a retrieval reference | Nothing produces oversized output, so nothing stores it | Bounded output is a promise to keep the bytes the model does not see; with no store behind it, it is a promise to lose them |
 | An abort reaches the live coordinator | `Loopex.command/2` on the attachment that submitted the run | Correct for one in-process caller and unreachable from any other process, which is a limit to state rather than a gap to close here |
@@ -319,11 +320,23 @@ adapter runs the same cases:
 - Pinning is explicit for the operation's retry and recovery window. Collection
   is a host and adapter duty and `M2` collects nothing automatically.
 
-`M2` supplies two adapters. The filesystem adapter writes digest-addressed
+`M2` ships one adapter and one fixture, and the distinction is a scope
+statement rather than a packaging detail:
+
+| Implementation | Home | Status |
+| --- | --- | --- |
+| Filesystem artifact store | `loopex_store_local` | The one shipped adapter: product surface, composed by the reference composition, documented for operators, and the subject of the reusable conformance suite |
+| In-memory artifact store | Test lane only | A test fixture: not product surface, not package surface, not documented as an adapter, and not composable by a host |
+
+The filesystem adapter writes digest-addressed
 immutable files under the resolved state root, using the same temporary-write
 and rename discipline the local store already uses, and is what the reference
-composition wires. The in-memory adapter exists for the suite and for core tests
-that must not touch a real root. The trusted-local executor receives its
+composition wires. The in-memory implementation exists so that core tests need
+not touch a real state root; running the same reusable suite over it is a
+fixture-honesty check inside the test lane, and it neither adds a shipped
+adapter nor creates a support obligation. Any document that describes `M2` as
+supplying two artifact-store adapters is wrong about this milestone's scope.
+The trusted-local executor receives its
 artifact reference at start, like its lease and ledger configuration; it does
 not depend on a store application to obtain one, so no edge depends sideways on
 another edge.
@@ -453,6 +466,87 @@ than defaulting to it, and the dependency-budget check proves that no applicatio
 acquired a client, sideways edge, or external dependency in the course of this
 arrangement.
 
+### Job deadline
+
+§15.1's `JobRequest` already reserves a `deadline and resource budgets` slot.
+This decision makes it exact, because an unspecified slot is where a run's
+wall-clock bound quietly stops applying.
+
+Every `JobRequest` carries the run's committed absolute deadline instant — the
+same instant [ADR 0010](0010-provider-continuation-and-context-staging.md#concept)
+commits with the run and propagates into the supervised model call. There is no
+job that omits it, including a `read_only` one, for the same structural reason
+policy has no exemption predicate: a field that is present only sometimes needs
+a rule for when, and that rule is where the bound goes missing.
+
+The effective bound on a job is a minimum, never a choice:
+
+```text
+effective_job_deadline = min(run_deadline, dispatch_instant + tool.budgets.wall_time)
+```
+
+The tool's declared wall-time budget can only make a job end sooner. It can
+never extend one past `run_deadline`, so a ten-minute `bash` dispatched one
+minute before expiry is bounded at one minute, not at ten.
+
+Pre-dispatch is checked once, at the tool-operation intent, and the boundary is
+plain:
+
+| Observation at intent commit | Resolution |
+| --- | --- |
+| `now < run_deadline` | The intent commits, the grant is minted, and the job carries `effective_job_deadline` |
+| `now >= run_deadline` | No intent commits, no grant is minted, no job is built; the logical tool call takes a terminal `cancelled` fact with no owned process tree and therefore trivially confirmed cleanup |
+
+There is deliberately no minimum-remaining-time heuristic. A rule of the form
+"do not dispatch with less than *n* remaining" would be a new configured knob
+with no evidence behind its value, and it would create a second reason a call
+does not run. A call admitted with a hundred milliseconds left is dispatched and
+then cancelled a hundred milliseconds later by the machinery below, which is one
+path rather than two.
+
+The grant's `expiry` is a different field answering a different question, and
+neither substitutes for the other:
+
+| Field | Owner | Question | Checked |
+| --- | --- | --- | --- |
+| `expiry` (grant, ADR 0007) | Grant binding, one of the locked ten | May this job *start*? | Once, at the executor's final serialized pre-start boundary |
+| `effective_job_deadline` (`JobRequest`) | Job field; not a grant binding | How long may a started job *run*? | Armed at start and live for the job's whole life |
+
+ADR 0007's ten bindings, its independent completeness oracle, its one digest
+identity, and its final pre-start validation boundary are all unchanged. The
+deadline is a canonicalized `JobRequest` field, so it is covered by the existing
+`canonical_request_digest` and needs no second digest and no eleventh binding.
+
+At expiry the executor enters the cancellation sequence below at the cooperative
+step — it is not a separate path:
+
+```text
+effective_job_deadline reached
+  -> cooperative cancel to the running job
+  -> declared bounded grace period elapses
+  -> owned process tree terminated by its captured kill identity
+  -> cleanup confirmed
+  -> operation: cancelled when cleanup and effect truth are confirmed
+              | outcome_unknown when either is not
+```
+
+The receipt reports the ending the executor can prove. A deadline-terminated
+job whose cleanup is confirmed yields `cancelled` with its bounded partial
+output and any spilled artifact retained; one whose owned tree cannot be
+confirmed dead, or whose effect cannot be proved either way, yields
+`indeterminate_evidence` at the executor and the brain commits
+`outcome_unknown(reconciliation_ref)` under ADR 0007's unchanged reconciliation
+path. Nothing about expiry lets a `cancelled` fact commit over an unconfirmed
+tree.
+
+The run-level consequence is stated in the concept and repeated here because it
+is the rule the ordering depends on: `bound_reached(:deadline, observed)`
+commits only after every owned operation reached a validated terminal fact and
+every owned process tree was confirmed cleaned. A single `outcome_unknown`
+among them finishes the run `outcome_unknown` instead, carrying that
+reconciliation reference. `outcome_unknown` takes precedence over
+`bound_reached` exactly as it takes precedence over `cancelled`.
+
 ### Cancellation
 
 Admission first. `M2` admits an abort exactly where `M1` does: through
@@ -493,6 +587,12 @@ the fact that an abort was admitted:
 | Validated `completed`, `failed`, or `denied`, with no owned process tree left unconfirmed | `cancelled` |
 | `cancelled` with confirmed cleanup | `cancelled` |
 | At least one `outcome_unknown` | `outcome_unknown(reconciliation_ref)` referencing that operation and attempt |
+
+The same table decides a run stopped by its deadline rather than by an
+operator, with `bound_reached(:deadline, observed)` standing where `cancelled`
+stands in the first two rows. The third row is unchanged and unconditional: one
+`outcome_unknown` among the owned operations finishes the run
+`outcome_unknown`, whatever asked it to stop.
 
 Cleanup that is not confirmed is insufficient evidence, not a slower success. If
 the grace period elapses, the owned tree is terminated by its captured kill
@@ -562,8 +662,9 @@ Claim-proportional evidence for this decision:
   `policy_unavailable` and reaches no grant;
 - artifact-store conformance covering content-addressed idempotent `put`,
   byte-exact `fetch`, digest mismatch as an integrity error, unknown reference,
-  over-ceiling refusal, and an opaque locator core never parses, run against
-  both the filesystem and in-memory adapters;
+  over-ceiling refusal, and an opaque locator core never parses, run against the
+  shipped filesystem adapter, with the in-memory test fixture exercised by the
+  same suite in the test lane to prove the suite is adapter-neutral;
 - one ceiling-crossing `bash` invocation whose bounded model-facing content
   carries a truncation marker and an artifact reference, whose spilled bytes are
   byte-identical to the untruncated output, and whose receipt stays
@@ -579,6 +680,22 @@ Claim-proportional evidence for this decision:
 - abort during a model call and abort during an executor effect, each admitted
   through the facade, each proving owned work stopped, cleanup confirmed, the
   terminal fact truthful, and no late result projected into model context;
+- job-deadline evidence, driven by a real long-running executor job rather than
+  by a stub: every `JobRequest` including a `read_only` one carries the run's
+  committed absolute deadline; a job whose tool budget exceeds the remaining run
+  deadline is bounded at the run deadline; a real job that would run past its
+  effective deadline is cooperatively cancelled, its owned process tree is
+  terminated by its captured kill identity, and termination is confirmed by
+  observing that no descendant of the captured group survives; the operation ends
+  `cancelled` only after that confirmation, with its bounded partial output and
+  any spilled artifact retained; a tool call whose run deadline had already
+  passed at intent commit never journals an intent, never mints a grant, and
+  dispatches nothing; and ADR 0007's ten-binding completeness oracle still passes
+  unchanged, proving the deadline was added to the job rather than to the grant;
+- a deadline-terminated job whose cleanup cannot be confirmed, driven by
+  injected unconfirmability rather than timing luck: the operation ends
+  `outcome_unknown`, the run ends `outcome_unknown` with a reconciliation
+  reference rather than `bound_reached`, and the operator-facing output says so;
 - an abort whose owned effect cannot be proved: the operation ends
   `outcome_unknown`, the run ends `outcome_unknown` with a reconciliation
   reference rather than `cancelled`, the operator-facing output says so, and the
@@ -718,6 +835,47 @@ visible trigger. Keeping `outcome_unknown` at the run level costs one branch in
 the reference command's output and one more case per surface, and it is what the
 vision's algebra already specifies.
 
+**A per-tool budget with no run deadline on the job.** Mechanically this is
+already built: every definition declares a wall-time budget, so a job has a
+bound without any new field. The failure is arithmetic. Two independent budgets
+compose by addition, not by minimum, so the worst case for a run is its deadline
+plus the longest tool budget it can still dispatch — and the run cannot even
+finish while that job is outstanding, because a run holds its owned operations
+to a terminal fact. Every document that states the run's wall-clock bound would
+then be stating a number the system does not honour. Taking the minimum makes
+the two budgets compose the way a reader assumes they do.
+
+**An eleventh grant binding for the deadline.** The executor's fail-closed
+validator already checks ten bindings at the final pre-start boundary, and
+adding the deadline there would reuse that machinery for free. It is rejected on
+two grounds. The set is locked with an independent completeness oracle that
+transcribes exactly ten names, so widening it edits an accepted decision rather
+than extending this one. And the semantics do not fit: a grant binding is
+compared once before the effect starts, while a deadline must remain live for
+the job's whole life, so a single field would have to mean both "may start" and
+"may continue" and a refusal could not say which one fired. A canonicalized
+`JobRequest` field is already covered by the one `canonical_request_digest`, so
+the deadline is bound and tamper-evident without touching the ten.
+
+**Committing the bounded stop at the moment the deadline fires.** It reports
+faster, and cleanup would follow. It reproduces the exact defect the run-level
+`outcome_unknown` exists to prevent, one level up: a committed
+`bound_reached(:deadline, observed)` states that the run stopped where it was
+configured to stop, and a run whose owned process tree is still alive has not
+stopped. Terminal outcomes are immutable, so a premature one cannot be corrected
+by later evidence — it can only be appended to. Waiting for confirmed cleanup
+costs the declared grace period; committing early costs the outcome its meaning.
+
+**A shipped in-memory artifact adapter.** Zero implementation cost, since the
+fixture exists for the test lane regardless. The cost is downstream and
+permanent: a shipped adapter is documented, conformance-maintained, and
+composable, and once a host composes it, removing it is a breaking change rather
+than deleting a fixture. It is also the wrong shape to offer as a default,
+because it loses every artifact a receipt names on restart, which turns the
+bounded-output promise into a lie for anyone who picks it. `M2`'s scope
+authorizes one shipped local adapter; the fixture stays a fixture and promotion
+stays available as an additive later decision.
+
 **Signed or portable grants.** Unchanged from ADR 0007: `M2` still has one
 machine, one attached caller, and an in-VM executor, so a signature would secure
 a boundary that is not crossed. The first isolated or remote hand is the trigger.
@@ -751,6 +909,17 @@ Concept: [Consequences](0009-tool-executor-and-grant-contracts.md#concept-adr-00
 - The executor's accept path becomes heavier and platform-specific. Capturing
   process-group identity before accepting a job is required for honest cleanup
   and ties the local executor to POSIX semantics.
+- Every job gains a deadline field and every effectful job gains an armed timer,
+  so the accept path carries one more piece of state alongside the captured kill
+  identity. A tool's declared wall-time budget stops being the whole story about
+  how long it may run, and a definition author cannot compute a job's maximum
+  duration from the definition alone.
+- A deadline can now cancel work in progress. A long `bash` near the end of a
+  run is terminated with output half-written, and the run reports its bounded
+  stop only after that termination is confirmed — so a deadline, like an abort,
+  is bounded rather than instantaneous, and in the worst case it ends the run
+  `outcome_unknown` instead. Documentation must not describe a deadline as a
+  clean stop any more than it may describe Ctrl-C as one.
 - Abort becomes bounded rather than instantaneous. Operators see a grace period
   and, in the worst case, a run that finishes `outcome_unknown` and names a
   reconciliation reference rather than a comfortable false `cancelled`. Every
@@ -792,6 +961,9 @@ Concept: [Consequences](0009-tool-executor-and-grant-contracts.md#concept-adr-00
 - Without a policy port, the first real `bash` against a real repository ships
   with no reachable refusal, and any later port must be threaded through call
   sites written on the assumption that authority always exists.
+- Without the job deadline, the run's wall-clock bound governs model calls only,
+  so a tool dispatched shortly before expiry runs past the instant the run
+  advertised and the bound becomes a claim rather than a bound.
 - Without cancellation, an acknowledged abort leaves an owned OS process running
   and a run with no terminal outcome, which contradicts a founding requirement
   and makes the durability work `M1` closed less useful rather than more.
@@ -807,7 +979,9 @@ Concept: [Compatibility, migration, and rollback](0009-tool-executor-and-grant-c
 The durable format gains the active-set record committed at session start
 together with its model-visible name mapping, the per-call generation triple on
 each tool-operation intent, the durable denial record and its bounded policy
-context, the artifact reference carried on a tool result and its receipt, and the
+context, the effective job deadline carried on each `JobRequest` and covered by
+the existing `canonical_request_digest`,
+the artifact reference carried on a tool result and its receipt, and the
 cancellation evidence retained with a terminal operation and run outcome,
 including the reconciliation reference an unknown run outcome carries, and the
 private `final_progress_sequence` ADR 0011 adds to the retained receipt. All are bounded plain
@@ -825,15 +999,19 @@ demonstration tool definitions are retained unchanged, outside every active
 profile, so that its locked executor case keeps passing.
 
 Rollback before closure removes the registry, the four bootstrap tools, the
-policy port, the artifact port, the denial record, and the cancellation path
+policy port, the artifact port, the denial record, the job deadline, and the
+cancellation path
 together, and returns the runtime to the `M1` single-tool option. Partial
 rollback is not available: the grant path depends on both resolution and policy,
-cancellation depends on the executor capturing kill identity at accept time, and
+cancellation depends on the executor capturing kill identity at accept time, the
+job deadline depends on that same cancellation path for anything to terminate,
+and
 bounded output depends on a spill target. Once a version is published, changing
 a built-in's `tool_id`, model-visible name, effect class, or parameter schema is
 a new `tool_version` under the additive registration rule; the old generation
 stays resolvable for any journal that names it. Removing a reason category,
 widening the schema subset, widening the `policy_context` shape, changing the
-artifact reference fields, changing how a model-visible name resolves, or making
+artifact reference fields, changing how a model-visible name resolves, changing
+how a job's effective deadline is computed, or making
 `defer` executable each require a successor decision, because each changes what a
-recorded decision, name, or receipt meant.
+recorded decision, name, deadline, or receipt meant.

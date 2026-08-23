@@ -85,6 +85,9 @@ queued    -> promoted    follow-up became a new run at the terminal transition
 
 `applied` commits only in the same transaction as the request that carries the
 steer, so the slot is never `applied` on the strength of an intention.
+`promoted` commits only in the same transaction as the successor run's complete
+configuration, so the slot is never `promoted` toward a run whose bounds and
+deadline are still undecided.
 
 Every transition is a committed record naming the `command_id`, the reason, and
 the run it was bound to. No transition is inferred at read time, so a successor
@@ -129,7 +132,7 @@ owner, so exactly one order is durable. The rule follows the journal:
 | Durable order | Outcome |
 | --- | --- |
 | Steer admitted, then a request carrying it commits at step 4 | `applied`, in that same transaction |
-| Steer admitted, then the run commits a terminal outcome with no further staging | `unapplied(run_terminal)` |
+| Steer admitted, then the run commits a terminal outcome with no further staging | `unapplied(run_terminal)`, in that same terminal transaction |
 | Steer admitted, then step 2 ends the run on a bound | `unapplied(max_turns)`, `unapplied(token_budget)`, or `unapplied(deadline)` |
 | Steer admitted, then step 4 fails closed and the run reaches a terminal outcome | `unapplied` with that terminal reason |
 | Steer admitted after the terminal outcome commits | `{:error, :no_active_run}` at admission |
@@ -150,18 +153,48 @@ One transaction commits:
 ```text
 terminal outcome for the run
 run.finished public fact
-  + follow-up queued    -> promotion record: command_id, new run_id
+steer slot resolution, if that run still held a queued steer
+  + follow-up queued    -> promotion record
+  |                         command_id        the follow-up being promoted
+  |                         run_id            new, allocated in this commit
+  |                         max_turns         the successor run's bound
+  |                         token_budget      the successor run's bound
+  |                         deadline_instant  absolute, computed at this commit
   + no follow-up queued -> session.settled public fact
 ```
+
+The promotion record is the successor run's complete configuration, not a
+placeholder for one. Everything a later transaction could otherwise have decided
+about that run — which bounds it is judged by, when its deadline expires, and
+whether the previous run's steer is still open — is decided here, in the same
+transaction that ends the previous run:
+
+| Decided at promotion | Left to staging |
+| --- | --- |
+| The successor `run_id` and the `promoted` transition of its `command_id` | Nothing about identity |
+| `max_turns`, `token_budget`, `deadline_instant` | Nothing about bounds |
+| The finished run's steer resolution (`unapplied(run_terminal)`, or `cancelled` where an abort drove the terminal outcome) | Nothing about the previous run |
+| — | Projecting, canonicalizing, digesting, and committing the staged request, which ADR 0010 already defines as a function of committed elements |
 
 The promoted run's request is staged afterwards in the ordinary way, so
 `run.started` still commits with the staged bytes and the model intent as §10.2
 step 4 requires. Recovery covers the window between them: a promoted run with no
 committed staged request is staged by the recovering owner under the same
-`run_id`, and because promotion is a durable transition of one committed
-`command_id`, a replayed recovery cannot start a second run for it. A promoted
-run whose staging fails closed reaches a terminal outcome like any other run and
-the session settles.
+`run_id` and under exactly the bounds and deadline the promotion committed, and
+because promotion is a durable transition of one committed `command_id`, a
+replayed recovery cannot start a second run for it. Staging is the only step
+left, and it is deterministic, so two owners recovering the same promotion
+produce the same run. A promoted run whose staging fails closed reaches a
+terminal outcome like any other run and the session settles.
+
+The deadline is the load-bearing case. It is an absolute instant, and ADR 0010
+already requires downtime to count against a committed one, so a recovering
+owner that computed it at staging time would extend the run by however long the
+crash lasted, and two owners recovering at different moments would give the same
+`run_id` different lifetimes. Committing it with the promotion makes that
+unrepresentable rather than forbidden. A promoted run whose deadline has already
+elapsed when the recovering owner reaches it terminates on that bound before any
+provider call, exactly as ADR 0010 requires of any run with an elapsed deadline.
 
 `run.finished` and `session.settled` stay distinct exactly as the vision
 requires: a finished run whose follow-up was promoted publishes no settled fact.
@@ -185,7 +218,12 @@ what happens to work that had not started.
 The progress function is an ordinary in-VM function reference supplied by the
 coordinator's supervised model task. It is not boundary data: it never enters a
 journal, a public event, a snapshot, or an executor job, and the deltas it
-carries are plain bounded data. An adapter calls it zero or more times and then
+carries are plain bounded data. It is created for exactly one model attempt and
+closes over that attempt's `stream_domain_id`, so the domain a projected delta
+carries comes from the coordinator that dispatched the attempt and never from
+the adapter; a function held past its attempt cannot stamp the live attempt's
+domain, which is the model-side counterpart of the fail-closed validation the
+executor boundary performs. An adapter calls it zero or more times and then
 returns the complete reply. The reply gains two statistics:
 
 ```text
@@ -197,9 +235,9 @@ Both describe one model attempt. They are retained on that private attempt
 record beside its usage and timing, and they are **not** fields of the
 `assistant_message` element ADR 0010 commits: the canonical durable element
 carries conversation content only. `delta_count` is what lets a consumer prove
-it saw the whole stream without core ever reconstructing anything, and it
-reaches that consumer as the closing progress item defined below rather than as
-a field of a durable element.
+it saw the whole of that attempt's stream without core ever reconstructing
+anything, and it reaches that consumer as the closing progress item defined
+below rather than as a field of a durable element.
 
 ### The executor port
 
@@ -262,27 +300,104 @@ ADR 0007's receipt discipline with a weaker consequence, because progress
 carries no authority: a superseded executor cannot make a client render its
 bytes, and it also cannot make the coordinator commit anything.
 
+The event carries no `stream_domain_id` and an executor never computes one. The
+coordinator derives the domain from the `(operation_id, attempt)` it dispatched
+and journaled, after validation has already proved the event belongs to that
+attempt, so a projected item's domain is a statement by the coordinator about
+what it dispatched rather than a claim the event made about itself. A refused
+event is never projected and therefore never labelled at all.
+
 The retained receipt gains one additive private field,
 `final_progress_sequence`, the last sequence the executor emitted for that
-attempt. It bounds the progress
-domain the same way `delta_count` bounds the model domain, so a consumer detects
-a truncated tail rather than only an interior gap.
+attempt. It bounds that attempt's progress domain the same way `delta_count`
+bounds a model attempt's domain, so a consumer detects a truncated tail rather
+than only an interior gap.
+
+### Stream domains
+
+A stream domain is one attempt's progress stream. Every delta and every closure
+carries the `stream_domain_id` of the attempt that produced it, and every
+sequence, every count, and every closure is meaningful only inside one.
+
+```text
+stream_domain_id = lowercase hex of the first 16 bytes of sha256(domain_tuple)
+                   exactly 32 ASCII characters
+
+domain_tuple     = "loopex.stream_domain.v1"  <0x00>
+                   domain_kind                <0x00>   "model" | "executor"
+                   session_id                 <0x00>
+                   operation_id               <0x00>
+                   decimal(attempt)
+```
+
+| Property | Rule |
+| --- | --- |
+| Shape | A fixed-width 32-byte ASCII binary of lowercase hex. Bounded plain data, carrying no pid, reference, function, struct, atom from untrusted input, or implementation type |
+| Meaning to a client | Opaque, and closed under equality only. Two items belong to one domain exactly when the labels are equal. Nothing else is derivable and nothing else may be assumed |
+| Who computes it | The coordinator, from committed identity it already holds. Never an adapter, never an executor, never a value read off an event |
+| Model domain | `domain_kind` `model`, with the `(operation_id, attempt)` of the model-call intent ADR 0010 journals before dispatch |
+| Executor domain | `domain_kind` `executor`, with the `(operation_id, attempt)` of the executor operation ADR 0007 binds a grant, a job, and a receipt to |
+| Stability | A pure function of committed identity, so a successor owner, a re-projection, and a replay all produce the same label for the same attempt. No domain state is journaled to achieve this |
+
+`domain_kind` keeps the two namespaces disjoint even where a model operation and
+an executor operation were numbered alike, and `session_id` keeps labels
+distinct for a consumer multiplexing several sessions. The digest is a naming
+device, not a security control: it carries no authority, guards nothing, and is
+truncated only to keep the label short enough to render.
+
+A new attempt is a new domain, without exception:
+
+| Event | Domain |
+| --- | --- |
+| First model attempt of a turn | New model domain |
+| Provider retry against the same staged bytes — a new recorded attempt under the same operation identity, as ADR 0010 requires | New model domain |
+| Run resumed after recovery: same `run_id`, same `operation_id`, next attempt | New model domain |
+| First executor attempt of a tool call | New executor domain |
+| Retried executor operation attempt | New executor domain |
+| Same attempt, more output | Same domain, next sequence |
+
+The consumer rules follow from that and are exhaustive:
+
+- Sequence continuity, `delta_count` agreement, `final_progress_sequence`
+  agreement, and closure are evaluated **within one `stream_domain_id`**. No
+  comparison is defined between two domains, including two domains of the same
+  kind under one turn.
+- Several domains under one `turn_id` are the normal shape of a retried turn.
+  A consumer renders them as separate streams and never concatenates them; a
+  turn is not a stream and never was.
+- A superseded attempt's domain may end without a closure. That is not loss: it
+  is an attempt that was abandoned, and the durable assistant message comes from
+  the attempt that returned a reply. A consumer reports loss only for a domain
+  that received a closure whose total exceeds what it saw, or that has an
+  interior gap.
+- A domain identifies an attempt, not an outcome. Seeing a domain says an
+  attempt streamed, never that it succeeded; the durable record says that.
+
+Without the label the loss property is not merely weaker, it is wrong. Two
+attempts of one turn both begin at sequence 0, so a per-turn consumer reads the
+second attempt's first delta as a repeat, the abandoned attempt's absent tail as
+a gap in the live stream, and whichever closure arrives first as authoritative
+for both — reporting corruption in healthy runs while masking it in retried
+ones.
 
 ### Delta shapes
 
 The client-facing deltas are projections. They carry the anchors a consumer
 needs and none of the administrative material validation consumed, because
 leases, epochs, receipts, and fences are private or administrative in the public
-vocabulary:
+vocabulary. `stream_domain_id` is an anchor rather than an exception to that: it
+is opaque, it names no operation and no attempt number a client could read, and
+its only defined use is equality against another item's label.
 
 ```text
-text_delta       {turn_id, model_sequence, base_event_sequence,
-                  content_index, text}
-reasoning_delta  {turn_id, model_sequence, base_event_sequence,
-                  content_index, text}
-tool_call_delta  {turn_id, model_sequence, base_event_sequence, call_index,
+text_delta       {turn_id, stream_domain_id, model_sequence,
+                  base_event_sequence, content_index, text}
+reasoning_delta  {turn_id, stream_domain_id, model_sequence,
+                  base_event_sequence, content_index, text}
+tool_call_delta  {turn_id, stream_domain_id, model_sequence,
+                  base_event_sequence, call_index,
                   tool_call_id | nil, name | nil, arguments_fragment | nil}
-tool_progress    {turn_id, tool_call_id, progress_sequence,
+tool_progress    {turn_id, stream_domain_id, tool_call_id, progress_sequence,
                   base_event_sequence, stream, byte_offset, chunk}
 ```
 
@@ -302,10 +417,15 @@ Each domain is closed on the same plane it streamed on, by one item that carries
 no content:
 
 ```text
-model_stream_closed  {turn_id, base_event_sequence, delta_count}
-tool_stream_closed   {turn_id, tool_call_id, base_event_sequence,
-                      final_progress_sequence}
+model_stream_closed  {turn_id, stream_domain_id, base_event_sequence,
+                      delta_count}
+tool_stream_closed   {turn_id, stream_domain_id, tool_call_id,
+                      base_event_sequence, final_progress_sequence}
 ```
+
+A closure closes the domain it names and no other. A turn that retried its model
+call publishes two `model_stream_closed` items under one `turn_id`, one per
+domain, and neither describes the other.
 
 These are stream closures, not content deltas, and they are how a client learns
 a total it must not read from a durable element: the reply's `delta_count` and
@@ -317,19 +437,25 @@ gap.
 
 Rules:
 
+- `stream_domain_id` is present on every delta and every closure, and is the
+  scope of every rule below. No sequence, count, or closure is compared across
+  two labels.
 - `model_sequence` starts at 0 for each model attempt and increases by one per
-  emitted delta across the three model kinds, so one counter orders that reply.
-  The reply's `delta_count` closes it.
+  emitted delta across the three model kinds, so one counter orders that
+  attempt's reply. The reply's `delta_count` closes that attempt's domain.
 - `progress_sequence` starts at 0 for each `(operation_id, attempt)` and
   increases by one per emitted executor progress event for that attempt. The
-  receipt's `final_progress_sequence` closes it. It is the executor's own
-  sequence, carried through the projection unchanged, so a consumer's gap is the
-  same gap the coordinator would see.
-- The two domains are independent. A model attempt's stream is complete or lossy
-  regardless of any operation's progress, and no order is promised between them
-  beyond `base_event_sequence`. One shared per-turn counter is not available:
-  the reply publishes `delta_count` before the turn's first tool is dispatched,
-  so a shared counter could only reserve numbers that may never be used.
+  receipt's `final_progress_sequence` closes that attempt's domain. It is the
+  executor's own sequence, carried through the projection unchanged, so a
+  consumer's gap is the same gap the coordinator would see.
+- The domains are independent, both across kinds and within one. A model
+  attempt's stream is complete or lossy regardless of any operation's progress
+  and regardless of any other attempt of the same turn, and no order is promised
+  between any two of them beyond `base_event_sequence`. One shared per-turn
+  counter is not available: the reply publishes `delta_count` before the turn's
+  first tool is dispatched, so a shared counter could only reserve numbers that
+  may never be used — and a retried turn would additionally have to renumber a
+  domain whose total was already published.
 - `base_event_sequence` is the public event sequence the progress is anchored
   to, as §11.2 requires of the progress plane.
 - Each payload is bounded by a declared ceiling; a producer that would exceed it
@@ -381,10 +507,17 @@ The suite is the same reusable one every model adapter runs, extended with:
   adapter would return with a no-op progress function;
 - emitted deltas, replayed in order, reconstruct byte-identical content to the
   returned reply's content blocks and tool calls;
-- `delta_count` equals the number of deltas actually emitted, and equals the
-  count in the attempt's `model_stream_closed` item;
-- `model_sequence` is gapless, starts at 0, and never appears on a committed
-  `assistant_message`, which carries no stream statistic at all;
+- `delta_count` equals the number of deltas actually emitted by that attempt,
+  and equals the count in that attempt's own `model_stream_closed` item;
+- `model_sequence` is gapless from 0 within one `stream_domain_id`, every delta
+  of an attempt carries that attempt's label, and neither the sequence nor the
+  label appears on a committed `assistant_message`, which carries no stream
+  statistic at all;
+- a provider retry against the same staged bytes opens a second domain under one
+  `turn_id`: the two labels differ, each sequence is gapless from 0 in its own
+  domain, each domain is closed by its own `model_stream_closed`, and no item of
+  one domain carries the other's label — including where the first attempt was
+  abandoned without a closure;
 - a non-streaming adapter emits zero deltas, returns the complete reply, and
   reports `streamed: false`;
 - cancellation mid-stream stops emission and returns a cancellation error, with
@@ -410,7 +543,12 @@ The reusable executor suite gains, and every executor implementation runs:
 - `progress_sequence` is gapless from 0 per `(operation_id, attempt)` and
   `byte_offset` is contiguous per stream;
 - `final_progress_sequence` on the receipt equals the last sequence emitted, and
-  equals the value in the operation's `tool_stream_closed` item;
+  equals the value in that attempt's own `tool_stream_closed` item;
+- a retried operation attempt projects under a second domain for the same
+  `tool_call_id`: the two labels differ, each sequence is gapless from 0 and
+  each `byte_offset` contiguous within its own domain, each domain is closed by
+  its own `tool_stream_closed`, and the abandoned attempt's short tail is not a
+  gap in the domain that produced the receipt;
 - no progress event is emitted after the terminal receipt for its attempt;
 - no progress event carries a credential, a workspace absolute path outside the
   declared output policy, an unbounded payload, a pid, or a provider or host
@@ -422,7 +560,10 @@ single binding altered to a present, well-formed, wrong value — another
 executor's identity, the previous attempt, a superseded fence, a stale executor
 epoch, another request's digest, a tool call from an earlier turn — is refused
 individually, the refusal names that binding, and the covered set equals the set
-the schema requires so two guards cannot mask each other.
+the schema requires so two guards cannot mask each other. Each negative also
+asserts that no item carrying the live attempt's `stream_domain_id` was
+projected from the refused event, which is what keeps a superseded executor's
+bytes out of the domain an operator is reading.
 
 ### Evidence
 
@@ -446,10 +587,16 @@ the schema requires so two guards cannot mask each other.
 - Second steer and second follow-up refused with their exact reasons, with the
   first still intact.
 - A queued follow-up promoted at the terminal transition, asserting one
-  transaction for outcome, `run.finished`, and promotion, and no
-  `session.settled`.
+  transaction for outcome, `run.finished`, the finished run's steer resolution,
+  and a promotion record carrying the new `run_id`, both bounds, and an absolute
+  deadline instant, and no `session.settled`.
 - A coordinator killed between promotion and staging, asserting recovery stages
-  the same `run_id` once and that a replayed recovery starts no second run.
+  the same `run_id` once, that a replayed recovery starts no second run, that
+  the staged run's bounds and deadline equal the committed promotion's byte for
+  byte after an injected delay across the crash, and that the finished run's
+  steer is already resolved when the successor starts. This is the determinism
+  property: recovery has nothing left to decide, so the run an operator gets
+  after a crash is the run promotion committed.
 - An abort cancelling a `queued` steer and a queued follow-up, asserting each
   `command_id` resolves `cancelled`, that no run starts afterwards, and that ADR
   0009's cleanup and terminal algebra are unchanged.
@@ -464,6 +611,20 @@ the schema requires so two guards cannot mask each other.
   gap and a tail short of `tool_stream_closed` — that the durable assistant
   message is complete, and that no delta or closure was journaled or published
   as a durable event.
+- Two attempts under one turn, once for each domain kind, and this is the pair
+  Outcome 2 must lock: a provider retry against the same staged bytes, and a
+  retried executor operation attempt for one `tool_call_id`. Each asserts that
+  two distinct `stream_domain_id` labels appear under one `turn_id`, that each
+  domain's sequence is gapless from 0 and closed by its own closure item, that
+  the abandoned domain's short or absent tail is not reported as loss in the
+  domain that produced the reply or the receipt, and that a consumer counting
+  per turn instead of per domain would have reported a fault where none exists.
+  The plan and gate that own the streaming selectors carry this obligation; this
+  ADR states it rather than writing it there.
+- A domain label reproduced across recovery, asserting that the same attempt
+  projects the same `stream_domain_id` before and after an owner change, that a
+  model and an executor domain never collide, and that no label is journaled or
+  published as a durable event.
 - Executor progress from a superseded executor, a stale executor epoch, a
   previous attempt, and a mismatched digest, each asserting that the event is
   refused, counted as refused progress, and never projected to a client, and
@@ -471,8 +632,9 @@ the schema requires so two guards cannot mask each other.
 - Source inspection proving core never reconstructs an assistant message from
   deltas, that no delta type appears in a durable or public payload, that no
   client-facing delta carries executor identity, an epoch, a digest, or a fence,
-  and that `delta_count` and `streamed` appear on no committed conversation
-  element.
+  that `delta_count`, `streamed`, and `stream_domain_id` appear on no committed
+  conversation element, and that every delta and closure type declares
+  `stream_domain_id` as required rather than optional.
 - The reference command admitting all four inputs from one foreground process:
   a `steer` and a `follow_up` typed while a run streams, each reaching the
   public facade with its kind named by the operator, the refusal of a second
@@ -545,6 +707,34 @@ indistinguishable from a lost item, which is precisely the property the sequence
 exists to provide. Two domains, each closed by its own producer's terminal
 statement, keep gaplessness meaning one thing.
 
+**An implicit domain.** The shape without `stream_domain_id` is wrong in a way
+that appears only under retry. `turn_id` and `tool_call_id` identify the work,
+not the attempt, while the sequence resets per attempt, so the anchors and the
+counter disagree about what they scope the moment a provider retry or an
+executor retry happens — and ADR 0010 makes a provider retry an ordinary
+recorded attempt against the same staged bytes, so this is a routine path rather
+than a corner. The damage is two-directional and silent: a duplicate reported
+where an attempt restarted, a gap reported where an attempt was abandoned, and a
+closure applied to an attempt that did not produce it. A loss detector that
+fires on healthy runs is worse than none, because an operator learns to ignore
+it.
+
+**Keying the domain on `(operation_id, attempt)` in the clear.** It is the same
+information and more legible. It also moves operation identity and attempt
+numbering into the public vocabulary, where this ADR has already refused to put
+executor identity, epochs, digests, and fences. A consumer would key rendering
+and reconnect logic on how Loopex numbers retries, which is internal and
+expected to move; the plane needs an equality, not a decomposition. The opaque
+label costs one digest per attempt and forecloses that dependency.
+
+**A fresh random label per attempt.** Unique, trivially correct while a process
+lives, and wrong across a restart. The label would exist only in coordinator
+memory, so a successor owner would relabel the same attempt and the projection
+would stop being a function of committed state — the same objection this ADR
+raises against inferring queue state at read time. Deriving the label from the
+attempt's committed identity yields uniqueness and stability from one rule and
+journals nothing to do it.
+
 **Executor progress out of scope.** Dropping the delta kind is the smallest
 change and leaves the executor port untouched. It also makes the milestone's
 longest silences the ones the operator most wants to watch: a build or a test
@@ -570,6 +760,24 @@ streamed run would differ in bytes that mean nothing semantically, and ADR
 0010's projection would carry a field no request may include. The attempt record
 already exists, already holds usage and timing, and is private, which is the
 plane evidence about a call belongs on.
+
+**Promotion as pre-run state, with a recovery invariant instead.** The
+alternative is real and nearly symmetric: commit that the follow-up became a run
+and nothing more, then let the ordinary admission path fix bounds, deadline, and
+the previous run's steer, guarded by an invariant that a recovering owner
+adopts committed values rather than deriving new ones. It shares one code path
+with `prompt`, which is genuinely attractive. It fails on the deadline. The
+deadline is an absolute instant, and the only value a recovering owner could
+derive is one computed from its own clock — which returns the run the time it
+spent crashed and gives the same `run_id` a different lifetime depending on when
+recovery happened, against ADR 0010's rule that downtime counts against a
+committed deadline. The invariant would therefore have to say "adopt a value
+that was never committed", which is not an invariant but a hole. Committing the
+configuration makes re-deciding unrepresentable instead of forbidden, which is
+the difference between a property a test can prove by construction and a rule
+every future admission path must remember. The residual cost is that a promoted
+run can exhaust its deadline before its first model call; that is the honest
+consequence of an absolute deadline and it terminates truthfully on the bound.
 
 **Abort preserving the queue.** The argument for it is real: an operator may be
 stopping one run, not the session. The argument against is what an abort means
@@ -634,6 +842,14 @@ Concept: [Consequences](0011-session-input-algebra-and-streaming.md#concept-adr-
   negative corpus grows with the progress tuple.
 - Clients render two loss checks rather than one, and a complete model stream
   implies nothing about whether an operation's output arrived whole.
+- Every consumer groups progress by `stream_domain_id` before counting anything,
+  and treats several domains under one turn as a retried turn rather than a
+  defect. A renderer that concatenates domains, or counts per turn, manufactures
+  faults on exactly the runs that were already having trouble.
+- Promotion becomes a complete decision. The successor run's bounds and absolute
+  deadline start at the previous run's terminal transition, so an outage between
+  promotion and staging is counted against the promoted run, and a promoted run
+  can terminate on its deadline having made no provider call.
 
 ### If rejected
 
@@ -650,6 +866,12 @@ Concept: [Consequences](0011-session-input-algebra-and-streaming.md#concept-adr-
   whatever the first executor implementation does, most likely unvalidated,
   which puts a superseded executor's output on an operator's terminal with no
   decision anywhere saying it should not be.
+- Sequences that reset per attempt while their anchors identify a turn produce a
+  loss check that reports faults on every retried turn and hides real loss on
+  the abandoned one, which discredits the check rather than the retry.
+- A promotion that commits a name without a configuration leaves a recovering
+  owner to invent a deadline, so the same queued follow-up becomes a different
+  run depending on when the process came back.
 
 <a id="technical-adr-0011-compatibility"></a>
 ## Format, Migration, and Rollback Mechanics
@@ -658,24 +880,30 @@ Concept: [Compatibility, migration, and rollback](0011-session-input-algebra-and
 
 The durable format gains the `steer` and `follow_up` command records, the queue
 slot states and their transitions, the applied steer conversation element, the
-unapplied record, and the promotion record. All are bounded plain data in the
-session mutation domain. The committed `assistant_message` element gains
+unapplied record, and the promotion record with the successor run's `run_id`,
+bounds, and absolute deadline instant. All are bounded plain data in the session
+mutation domain. The committed `assistant_message` element gains
 nothing: `delta_count`, `streamed`, refused-progress counts, and
-`final_progress_sequence` are private attempt and receipt evidence. The public
+`final_progress_sequence` are private attempt and receipt evidence, and
+`stream_domain_id` is a projection-time label that is journaled nowhere and
+derivable from committed identity when needed. The public
 taxonomy gains the queue events additively; no delta enters a durable or public
 payload.
 
 There is no installed base and no published package, and `M2` tags no version:
 `VERSION` stays `0.0.0` and the first version number belongs to the headless
 session-protocol milestone. Command shapes, queue states, delta kinds, the
+`stream_domain_id` derivation and its `loopex.stream_domain.v1` tuple prefix,
+the promotion record's committed configuration, the
 executor progress event and its validation, and the `complete/3` and `execute/5`
 signatures freeze nothing. `M1` journals are neither read nor
 migrated and its test roots are discarded, so no queue state and no delta
 history exist to convert.
 
 Rollback before closure removes `steer` and `follow_up` admission, the queue
-records and transitions, the unapplied record, the promotion path, and the
-progress emission together, and returns the Model behaviour to `complete/2` and
+records and transitions, the unapplied record, the promotion path and its
+committed run configuration, and the progress emission with its domain labels
+together, and returns the Model behaviour to `complete/2` and
 the Executor behaviour to `execute/4`, dropping `final_progress_sequence` from
 the receipt.
 Partial rollback is not available: the run-terminal transition reads the queue,
@@ -683,6 +911,7 @@ abort's truthful resolution depends on the queue states it cancels, and the
 cancellation rule for a partially streamed turn only has meaning where a turn
 can stream. Once a version is published, adding a command type or a delta kind
 is additive with fixtures, while changing the application point, a queue depth,
-the reconstruction obligation, the progress validation rule, or the rule that a
-cancelled turn commits nothing changes what a recorded run meant and requires a
-successor decision.
+the reconstruction obligation, the progress validation rule, the scope a
+sequence is gapless in, what the promotion transaction commits, or the rule that
+a cancelled turn commits nothing changes what a recorded run meant and requires
+a successor decision.

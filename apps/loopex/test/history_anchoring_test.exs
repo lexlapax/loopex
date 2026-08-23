@@ -1079,4 +1079,191 @@ defmodule Loopex.HistoryAnchoringTest do
       generation_history(merged)
     end
   end
+
+  # Concept: the amendment transaction reduced to the three revisions the
+  # interposition cases below vary.
+  #
+  # Technical depth: the plan binds the original gate in both governance rows
+  # throughout, because the additive transaction exists precisely so a Closed
+  # milestone need not rebind them. Only the gate file, the artifact it binds,
+  # and the generations table move.
+  defp amendment_fixtures do
+    original_gate = one_artifact_gate()
+    amended_gate = Fixture.amended_gate(1, mutated_artifact_gate())
+
+    %{
+      original_gate: original_gate,
+      amended_gate: amended_gate,
+      closed: Fixture.plan(governed: true, closed: true, gate: original_gate),
+      proposal_plan:
+        Fixture.plan(
+          governed: true,
+          closed: true,
+          gate: original_gate,
+          generations: [Fixture.proposed_generation(1, amended_gate)]
+        ),
+      rebind_plan: fn candidate ->
+        Fixture.plan(
+          governed: true,
+          closed: true,
+          gate: original_gate,
+          generations: [Fixture.accepted_generation(1, candidate, amended_gate, @disposition)]
+        )
+      end
+    }
+  end
+
+  defp amendment_base(fixtures, proposal) do
+    origin = sha("a")
+
+    [
+      {"root", [], %{}},
+      {origin, ["root"],
+       generation_snapshot(
+         Fixture.plan(),
+         fixtures.original_gate,
+         @good,
+         context_before(),
+         "Open"
+       )},
+      {"closed", [origin],
+       generation_snapshot(fixtures.closed, fixtures.original_gate, @good, context_before())},
+      {proposal, ["closed"],
+       generation_snapshot(fixtures.proposal_plan, fixtures.amended_gate, @bad, context_before())}
+    ]
+  end
+
+  defp carries_proposal(fixtures, revision, parents, plan \\ nil) do
+    {revision, parents,
+     generation_snapshot(
+       plan || fixtures.proposal_plan,
+       fixtures.amended_gate,
+       @bad,
+       context_before()
+     )}
+  end
+
+  defp amendment_rebind(fixtures, revision, parents, candidate) do
+    {revision, parents,
+     generation_snapshot(
+       fixtures.rebind_plan.(candidate),
+       fixtures.amended_gate,
+       @bad,
+       context_after()
+     )}
+  end
+
+  @interposed ~r/must bind the one-parent revision that first proposed the generation/
+
+  # Concept: the substitution the atomic-transaction case above cannot see. A
+  # rebind that binds its sole parent is not yet binding the revision anyone
+  # reviewed.
+  #
+  # Technical depth: every revision in `A -> P -> R` is individually well
+  # formed. `A` appends the proposal; `P` changes no governed field, so the
+  # change-set walk admits it unconditionally; `R` completes the row and binds
+  # its sole parent `P`. Only requiring the bound parent to be the revision where
+  # the pending row came into existence separates the reviewed `A` from the
+  # unreviewed `P`. Each case first asserts the direct transaction passes, so a
+  # failure means the interposition was refused rather than the fixture drifting.
+  test "a gate generation rebind cannot bind an interposed revision that changes nothing" do
+    fixtures = amendment_fixtures()
+    proposal = sha("1")
+    interposed = sha("2")
+    rebind = sha("3")
+    base = amendment_base(fixtures, proposal)
+
+    assert :ok ==
+             generation_history(
+               base ++ [amendment_rebind(fixtures, rebind, [proposal], proposal)]
+             )
+
+    empty =
+      base ++
+        [
+          carries_proposal(fixtures, interposed, [proposal]),
+          amendment_rebind(fixtures, rebind, [interposed], interposed)
+        ]
+
+    assert_raise Invalid, @interposed, fn -> generation_history(empty) end
+  end
+
+  test "a gate generation rebind cannot bind an interposed revision carrying unrelated bytes" do
+    fixtures = amendment_fixtures()
+    proposal = sha("1")
+    interposed = sha("2")
+    rebind = sha("3")
+    base = amendment_base(fixtures, proposal)
+
+    assert :ok ==
+             generation_history(
+               base ++ [amendment_rebind(fixtures, rebind, [proposal], proposal)]
+             )
+
+    # Ungoverned prose inside the plan itself, plus a file no walk anchors: `P`
+    # is an ordinary commit someone could land between review and rebind, and it
+    # still changes no governed field.
+    restated =
+      String.replace(
+        fixtures.proposal_plan,
+        "One direct workstream.",
+        "One direct workstream, restated."
+      )
+
+    refute restated == fixtures.proposal_plan
+
+    {^interposed, parents, files} = carries_proposal(fixtures, interposed, [proposal], restated)
+
+    unrelated =
+      base ++
+        [
+          {interposed, parents, Map.put(files, "lib/unrelated.ex", @other)},
+          amendment_rebind(fixtures, rebind, [interposed], interposed)
+        ]
+
+    assert_raise Invalid, @interposed, fn -> generation_history(unrelated) end
+  end
+
+  test "a gate generation rebind cannot bind a merge or a revision behind one" do
+    fixtures = amendment_fixtures()
+    proposal = sha("1")
+    merge = sha("2")
+    rebind = sha("3")
+    side = sha("4")
+    behind = sha("5")
+
+    sibling =
+      {side, ["closed"],
+       generation_snapshot(fixtures.closed, fixtures.original_gate, @good, context_before())}
+
+    base = amendment_base(fixtures, proposal)
+
+    # The merge's own tree is the proposal's tree, so it changes no governed
+    # field and the walk admits it. Binding it would let a merge — which no
+    # single revision is accountable for — stand in for the reviewed one.
+    merged = base ++ [sibling, carries_proposal(fixtures, merge, [proposal, side])]
+
+    assert_raise Invalid, @interposed, fn ->
+      generation_history(merged ++ [amendment_rebind(fixtures, rebind, [merge], merge)])
+    end
+
+    # A merge further back is the same substitution with one more hop.
+    assert_raise Invalid, @interposed, fn ->
+      generation_history(
+        merged ++
+          [
+            carries_proposal(fixtures, behind, [merge]),
+            amendment_rebind(fixtures, rebind, [behind], behind)
+          ]
+      )
+    end
+
+    # A rebind that is itself a merge is refused by the one-parent rule the
+    # strict transaction already carries, so no descendant can launder one.
+    assert_raise Invalid, ~r/require one direct parent/, fn ->
+      generation_history(
+        base ++ [sibling, amendment_rebind(fixtures, rebind, [proposal, side], proposal)]
+      )
+    end
+  end
 end

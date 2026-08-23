@@ -500,11 +500,12 @@ defmodule Loopex.Checks.History do
   # Concept: the additive rebind. It records who accepted the proposal and the
   # exact revision they reviewed, and changes nothing else.
   #
-  # Technical depth: the completed row must bind the sole parent, because that
-  # parent is the proposal whose bytes were reviewed. Requiring a new disposition
-  # anchor that did not exist at the proposal is the same rule the rebinding
-  # transaction uses: an acceptance is a record someone wrote after reviewing,
-  # not a pointer reused from an earlier one.
+  # Technical depth: the completed row must bind the sole parent, and that parent
+  # must be the revision where the proposal came into existence rather than any
+  # later revision carrying it. Requiring a new disposition anchor that did not
+  # exist at the proposal is the same rule the rebinding transaction uses: an
+  # acceptance is a record someone wrote after reviewing, not a pointer reused
+  # from an earlier one.
   defp validate_plan_change_set!(
          [4],
          path,
@@ -514,7 +515,7 @@ defmodule Loopex.Checks.History do
          from,
          current,
          by_revision,
-         _parents_by_revision,
+         parents_by_revision,
          resolve_file
        ) do
     proposed = Plan.decode_generations(Enum.at(from, 4))
@@ -533,6 +534,8 @@ defmodule Loopex.Checks.History do
             "#{path}: gate generation rebind at #{revision} must bind its sole proposal parent " <>
               parent
     end
+
+    require_generation_proposal!(path, revision, parent, by_revision, parents_by_revision)
 
     require_same_lifecycle!(
       path,
@@ -616,6 +619,56 @@ defmodule Loopex.Checks.History do
         raise Invalid,
               "#{path}: amendment proposal #{candidate} must be a one-parent revision"
     end
+  end
+
+  # Concept: the additive rebind binds the revision that proposed the generation,
+  # meaning the revision a reviewer actually read — not merely some later
+  # revision that carries the pending row unchanged.
+  #
+  # Technical depth: a revision changing no governed field is admitted
+  # unconditionally, so binding the sole parent alone leaves `A -> P -> R` open:
+  # the row still reads as pending at `P`, `P` is still `R`'s only parent, and
+  # the unreviewed `P` silently replaces the reviewed `A`. Anchoring on the
+  # append closes it. The parent must be a one-parent revision whose recorded
+  # generations append exactly the pending row relative to its own parent, which
+  # identifies where the proposal came into existence. An interposed revision, a
+  # merge parent, a revision behind a merge, a root with no parent, and a parent
+  # or grandparent whose plan bytes are unavailable therefore all fail closed;
+  # the same rule the v1 rebind applies through require_amendment_proposal!/4.
+  #
+  # The generations table is read from each revision's own document rather than
+  # the propagated anchor, because the anchor exists only where a plan's
+  # Acceptance is complete, and the question here is which revision wrote the
+  # row. A milestone recording no generation never reaches this clause at all,
+  # since field 4 stays nil and cannot appear in a change set.
+  defp require_generation_proposal!(path, revision, parent, by_revision, parents_by_revision) do
+    with [grandparent] <- Map.get(parents_by_revision, parent, []),
+         proposal when is_binary(proposal) <- revision_document(by_revision, parent, path),
+         prior when is_binary(prior) <- revision_document(by_revision, grandparent, path),
+         true <-
+           Plan.generation_proposal_appended?(
+             recorded_generations(prior, path, grandparent),
+             recorded_generations(proposal, path, parent)
+           ) do
+      :ok
+    else
+      _other ->
+        raise Invalid,
+              "#{path}: gate generation rebind at #{revision} must bind the one-parent " <>
+                "revision that first proposed the generation; #{parent} carries the proposal " <>
+                "without appending it"
+    end
+  end
+
+  defp revision_document(by_revision, revision, path) do
+    by_revision |> Map.get(revision, %{}) |> Map.get(path)
+  end
+
+  defp recorded_generations(text, path, revision) do
+    text
+    |> Plan.gate_generations("#{path} at #{revision}")
+    |> Plan.generations_anchor()
+    |> Plan.decode_generations()
   end
 
   defp require_settled_amendment_parent!(

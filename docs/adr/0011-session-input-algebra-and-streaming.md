@@ -125,11 +125,27 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   prompt, and the two commands stay distinguishable rather than convenient.
 - **The run-terminal transition is atomic and recoverable.** When a run reaches
   its terminal outcome the owner commits, in one transaction, the terminal
-  outcome, the `run.finished` fact, and either the promotion of the queued
-  follow-up to a new run identity or `session.settled`. A coordinator lost
-  between promotion and staging recovers a promoted-but-unstaged run and stages
-  it; the follow-up is neither lost nor started twice, because promotion is a
-  durable idempotent transition of a committed command.
+  outcome, the `run.finished` fact, the resolution of the finished run's own
+  `queued` steer, and either the promotion of the queued follow-up to a new run
+  identity or `session.settled`. A coordinator lost between promotion and
+  staging recovers a promoted-but-unstaged run and stages it; the follow-up is
+  neither lost nor started twice, because promotion is a durable idempotent
+  transition of a committed command.
+- **Promotion commits the whole successor run, not merely its name.** The
+  promotion record carries the new `run_id` and the complete configuration that
+  run will be judged by — its maximum turn count, its cumulative token budget,
+  and its absolute deadline instant, computed at that commit — together with the
+  finished run's steer resolution. Nothing about the promoted run is left for a
+  later transaction to settle, so a successor owner recovering between promotion
+  and staging has exactly one thing left to do: stage the request ADR 0010
+  already derives from committed elements. It re-decides neither a bound, nor a
+  deadline, nor the fate of a steer. A recovering owner must never recompute an
+  absolute deadline from its own clock, because that hands the promoted run back
+  the downtime it slept through, contradicting ADR 0010's rule that downtime
+  counts against a committed deadline; and the finished run's steer must not
+  still be open once its successor has started, because an operator would then
+  watch a steer being resolved against a run that ended beside a run that had
+  already begun.
 - **An abort cancels the queues as well as the run.** A durably admitted abort
   resolves any `queued` steer and any queued follow-up as cancelled, each
   recorded truthfully against its own `command_id`. Work an operator queued
@@ -183,25 +199,54 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   provider struct, pid, function, module atom, exception, terminal escape, or
   credential. Tool-progress deltas are projections of executor progress rather
   than model output, and ride the same plane and envelope.
-- **Progress has two sequence domains, not one.** A model-stream sequence is
-  owned by one model reply and orders that reply's text, reasoning, and
-  tool-call deltas; an executor-operation progress sequence is owned per
-  executor operation attempt and orders that operation's output. They are not
-  merged, because they cannot be: the model reply supplies its own delta total
-  when it returns, which is before the first tool of that turn has even been
-  dispatched, so no single per-turn counter can be gapless across both without
-  one side reserving numbers it may never use.
+- **Progress has two kinds of sequence domain, not one.** A model-stream
+  sequence is owned by one model attempt and orders that attempt's text,
+  reasoning, and tool-call deltas; an executor-operation progress sequence is
+  owned by one executor operation attempt and orders that attempt's output. Both
+  are owned by an attempt rather than by a turn, and a turn may contain several
+  of either. They are not merged, because they cannot be: the model reply
+  supplies its own delta total when it returns, which is before the first tool
+  of that turn has even been dispatched, so no single per-turn counter can be
+  gapless across both without one side reserving numbers it may never use.
+- **Every delta and every closure names the attempt domain it belongs to.** Each
+  carries a `stream_domain_id`: bounded opaque plain data — a fixed-width label,
+  not a structure a client takes apart — identifying the one attempt whose
+  domain that item belongs to. The coordinator derives it deterministically from
+  the committed identity of that attempt, a model attempt and an executor
+  operation attempt alike, so a replay or a successor owner projects the same
+  label for the same attempt. An adapter never supplies it, and it is never read
+  off an executor's event: it is stamped from the state the coordinator already
+  holds for the attempt it dispatched, which is the same discipline that governs
+  every other binding on this plane. Gaplessness and closure are therefore
+  evaluated **within one `stream_domain_id`** and never across a turn: sequences
+  from two domains are never compared, concatenated, or checked for gaps against
+  one another.
+- **A retry opens a new domain, and two domains under one turn are normal.** A
+  provider retry against the same staged bytes is a new model attempt and so a
+  new domain; a retried executor operation attempt is a new domain in the same
+  way. A client seeing a second domain under one `turn_id` is watching a retried
+  turn, not a fault: the abandoned domain may simply end short of its closure,
+  and its unfinished sequence is never evidence of loss in the domain that
+  succeeded. This is what makes the loss property true rather than nearly true.
+  Both attempts of a retried turn start at sequence zero under the same
+  `turn_id`, so without the domain a consumer would read the second attempt's
+  first delta as a duplicate, the first attempt's missing tail as a gap, and
+  either closure as the closure of the other attempt. `M2` must accordingly lock
+  one provider-retry case and one executor-retry case in which two domains
+  appear under one turn; the plan and gate that own those selectors carry the
+  obligation.
 - **Each domain proves its own loss, in its own terms, and each closes itself on
-  the progress plane.** Model deltas carry a sequence that starts at zero for an
-  attempt and increases by one per emitted delta across all three model kinds.
-  Executor progress carries a sequence that starts at zero for an operation
-  attempt and increases by one per emitted progress event, plus a contiguous
-  per-stream byte offset. Each domain then ends with one closing progress item
-  stating its total, projected from the reply and the receipt respectively, so
-  both an interior gap and a truncated tail are detectable in both without any
-  total appearing on a durable element. Every delta also carries the turn it
-  belongs to and the public event sequence it is anchored to; beyond those
-  anchors no order is promised between the two domains. Coalescing and dropping
+  the progress plane.** Model deltas carry a sequence that starts at zero for
+  each model attempt and increases by one per emitted delta across all three
+  model kinds. Executor progress carries a sequence that starts at zero for each
+  operation attempt and increases by one per emitted progress event, plus a
+  contiguous per-stream byte offset. Each domain then ends with one closing
+  progress item naming that domain and stating its total, projected from the
+  reply and the receipt respectively, so both an interior gap and a truncated
+  tail are detectable in both without any total appearing on a durable element.
+  Every delta also carries the turn it belongs to and the public event sequence
+  it is anchored to; beyond those anchors no order is promised between the two
+  domains, and none between two domains of the same kind. Coalescing and dropping
   under backpressure stay permitted in both, closures included; the sequences
   are what make them visible instead of silent.
 - **Executor progress is emitted as a complete executor event and validated
@@ -335,6 +380,34 @@ executor may never fill — making gaplessness meaningless — or renumber execu
 progress against a total that is already published. Two domains with two
 independent gaplessness properties cost one extra field and are provable.
 
+**Leave the domain implicit and let a client assume one attempt streams at a
+time.** Only one model attempt and one executor operation attempt are ever live
+per turn, so the turn and tool-call anchors look sufficient. It is rejected: a
+retry makes two attempts share one turn, both starting at sequence zero, and
+nothing in the item says which one it came from. A consumer would read the second
+attempt's opening delta as a duplicate, the abandoned attempt's missing tail as
+loss in the live one, and either closure as authoritative for both — so the
+loss detection this milestone promises would report faults that did not happen
+and miss ones that did.
+
+**Key the domain by the operation identity and attempt directly.** A client
+could then see which operation and which attempt it is watching, which is more
+informative than an opaque label. It is not recommended, for the reason this ADR
+already refuses to hand a client an executor identity, epoch, digest, or fence:
+operation identity and attempt numbering are administrative vocabulary, a
+consumer that keys on them begins depending on how retries and operations are
+numbered, and the only thing the plane actually needs is a label two items can
+be compared on. An opaque fixed-width label supplies exactly that and nothing a
+client can build a wrong assumption from.
+
+**Give each domain a fresh random identifier at attempt start.** It is the
+simplest thing that is unique. It is rejected: a label that exists only in the
+streaming coordinator's memory cannot be reproduced by a successor owner or a
+replay, so the same attempt would carry different labels before and after a
+restart, and a projection would stop being a function of committed state. A
+label derived from the attempt's own committed identity is unique for the same
+reason and stable as well.
+
 **Leave executor progress out of `M2` and drop the tool-progress delta kind.**
 Honest, smaller, and it avoids touching the executor port at all. It is not
 recommended: a coding harness whose longest waits are a test suite and a build
@@ -364,6 +437,23 @@ rejected: a canonical durable element would then carry transport metadata, two
 adapters producing identical text would commit different bytes, and a replay
 would have to explain a chunk count that has nothing to do with what was said.
 The private attempt record is where evidence about a call belongs.
+
+**Promote a follow-up as pre-run state and let the later admission transaction
+fix its bounds, its deadline, and the old run's steer.** The promotion
+transaction stays small, and the run's configuration is decided where a prompt's
+would be decided, by one code path shared with `prompt`. It is not recommended:
+the run's absolute deadline is an instant, and the only honest instant is the
+one at which the run was admitted, so a successor owner recovering after an
+outage would compute a later one and silently return the run the time it spent
+crashed — the opposite of ADR 0010's rule that downtime counts against a
+committed deadline. Making it an invariant that recovery may not re-decide is
+possible but weaker than not offering the choice: the invariant would have to be
+stated, tested, and re-stated at every future admission path, while committing
+the configuration makes re-deciding unrepresentable. It also leaves one
+operator-visible fact — this follow-up became this run under these limits, and
+that steer is now closed — spread across two transactions with a window between
+them, which is precisely the window the atomic terminal transition exists to
+close.
 
 **Let an abort keep the queued follow-up.** Defensible — the operator might be
 stopping only this run. It is not recommended: an abort is what an operator
@@ -452,6 +542,22 @@ and neither implies the other: a complete model stream says nothing about
 whether a tool's output arrived whole. The alternative was one number that could
 not be gapless, which is worse than two that are.
 
+The loss check is scoped to an attempt, not to a turn, and every client inherits
+that. A renderer must group items by `stream_domain_id` before it counts
+anything, keep a domain's partial output distinguishable when a retry supersedes
+it, and treat an unclosed domain beside a closed one as a retried turn rather
+than as a defect to report. A client that ignores the field and counts per turn
+will manufacture gaps on every retried turn — a failure mode more misleading
+than no loss detection at all, because it accuses a healthy stream.
+
+Promotion becomes the moment a follow-up's run is fully decided. Its bounds and
+its absolute deadline start running from the terminal transition of the run
+before it, not from whenever a coordinator gets around to staging, so an
+operator whose queued follow-up is promoted moments before a crash sees the
+outage counted against that run's deadline. That is the honest reading of a
+committed deadline and it is a real cost: a promoted run can reach its deadline
+having made no model call at all, and it terminates truthfully on that bound.
+
 Technical depth: [Operational consequences](0011-session-input-algebra-and-streaming-technical.md#technical-adr-0011-consequences).
 
 <a id="concept-adr-0011-compatibility"></a>
@@ -462,7 +568,8 @@ No released surface exists and no installed base exists. `M2` tags no version:
 headless session-protocol milestone. The command shapes, queue states, delta
 kinds, the executor progress event, and the `complete/3` and `execute/5`
 signatures are all experimental and freeze nothing, and the compatibility
-contract's freeze machinery is not engaged.
+contract's freeze machinery is not engaged. The `stream_domain_id` and the
+promoted run's committed configuration are experimental on the same terms.
 
 `M1` journals are not migrated. `M1` recorded only `prompt` and `abort` and its
 test roots are discarded, so there is no queue state to upgrade and no delta
@@ -476,8 +583,9 @@ usage together, returning `complete/3` to `complete/2`, `execute/5` to
 `prompt` and `abort`. It cannot be partial: the run-terminal transition reads
 the queue, and abort's truthful outcome depends on the queue states it cancels.
 Once a version is published, adding a command type or a delta kind is additive,
-while changing an application point, a queue depth, or the reconstruction
-obligation changes what a recorded run meant and requires a successor decision.
+while changing an application point, a queue depth, the reconstruction
+obligation, the scope a sequence is gapless in, or what promotion commits
+changes what a recorded run meant and requires a successor decision.
 
 Technical depth: [Format, migration, and rollback mechanics](0011-session-input-algebra-and-streaming-technical.md#technical-adr-0011-compatibility).
 

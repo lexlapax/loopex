@@ -179,9 +179,16 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   with the smallest local adapter.** The artifact-spill rule below cannot be
   honest without a place to put the bytes, and §12.6 assigns that place to a
   port whose adapter and host own location, encryption, access control,
-  retention, and collection. `M2` ships one filesystem adapter under the
-  resolved state root and the in-memory adapter the conformance suite drives,
-  and both run the reusable artifact-store suite §23.2 already requires. Direct
+  retention, and collection. **`M2` ships exactly one adapter**: a filesystem
+  adapter that writes digest-addressed immutable objects under the resolved
+  state root. It is what the reference composition wires, what an embedder
+  gets, and what runs the reusable artifact-store suite §23.2 already requires.
+  The in-memory implementation is **a test-only fixture and not a second
+  shipped adapter**: it exists so core tests need not touch a real state root,
+  it lives in the test lane, and it is neither product surface nor package
+  surface. No reader should conclude that `M2` ships two adapters — it ships
+  one adapter and one fixture, and only the adapter is supported, documented,
+  or composable by a host. Direct
   code is insufficient because the bytes are produced at the hand and referenced
   by the brain: a hand that later runs in isolation or on another machine must
   spill through its own adapter without changing what the receipt means. The
@@ -251,6 +258,36 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   evidence; an effect that cannot be proved ends `outcome_unknown` and reaches
   ADR 0007's receipt and reconciliation path unchanged. A cancelled run never
   feeds a late tool result back to the model.
+- **The run's committed absolute deadline rides on every executor job, and a
+  job's effective deadline is the earlier of that instant and the tool's own
+  declared wall-time budget.** A run that advertises a wall-clock bound has to
+  hold that bound over the work it owns, not only over its model calls.
+  Every `JobRequest` therefore carries the absolute deadline instant
+  [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) commits
+  with the run, and the effective bound on the job is the minimum of that
+  instant and the instant the tool's declared wall-time budget implies — never
+  the tool budget alone. Without the minimum, a long `bash` dispatched shortly
+  before expiry outlives the bound its run advertised, and the bound is a claim
+  about model calls wearing the name of a run-wide guarantee. This is a
+  `JobRequest` field, not an eleventh grant binding: ADR 0007's `expiry`
+  authorizes a job to *start* and its ten bindings are unchanged, while the job
+  deadline bounds how long a started job may *run*. A tool call whose run
+  deadline has already passed is not dispatched at all — no tool-operation
+  intent commits, no grant is minted, and the call takes a terminal `cancelled`
+  fact with no owned process tree to clean up.
+- **A job that reaches its effective deadline is cancelled and cleaned up by
+  the machinery an abort already uses, and its truth follows the same
+  algebra.** At expiry the executor cooperatively cancels, waits the declared
+  grace period, terminates the owned process tree by its captured kill
+  identity, and confirms termination. A deadline-terminated job ends
+  `cancelled` only after confirmed cleanup; where the effect or the cleanup
+  cannot be proved it ends `outcome_unknown` and reaches ADR 0007's receipt and
+  reconciliation path unchanged. Expiry introduces no second cancellation path,
+  no second grace period, and no second terminal algebra, so there is nothing
+  for the two paths to disagree about. The evidence obligation this creates is
+  a real long-running executor job that crosses its deadline, with confirmed
+  process-tree cleanup and a truthful terminal fact; the accepted plan and gate
+  own the selectors that carry it.
 - **The run outcome can say unknown too, and it must whenever the tool outcome
   did.** A run finishes `cancelled` only when every operation it owned reached a
   validated terminal fact and every owned process tree was confirmed cleaned up.
@@ -262,7 +299,16 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   the exact false comfort the unknown outcome exists to prevent, and it would
   leave the reconciliation the tool outcome demands with no visible reason to
   perform it. Both outcomes are terminal and immutable, and an aborted run
-  reaches one of them without operator intervention.
+  reaches one of them without operator intervention. The same precedence holds
+  whatever asked the run to stop. A run stopped by its deadline rather than by
+  an operator commits the `bound_reached` outcome
+  [ADR 0010](0010-provider-continuation-and-context-staging.md#concept) defines
+  only when every owned operation reached a validated terminal fact and every
+  owned process tree was confirmed cleaned up; an unprovable effect or an
+  unconfirmed tree finishes that run `outcome_unknown` instead.
+  `outcome_unknown` outranks `cancelled` and `bound_reached` alike, because an
+  unprovable effect reported as a clean bounded stop is the same false comfort
+  in a different word.
 - **`M2` adds no external dependency and no JSON codec.** Parameter schemas are
   plain Elixir data in the declared subset. Wire encoding belongs to the
   provider adapter at the edge, never to the core and never to the reference
@@ -381,6 +427,18 @@ that a core helper would have to grow into. The suite is the part that makes it
 a port; without it the behaviour would be one implementation wearing a
 behaviour's clothes.
 
+**Ship the in-memory artifact store as a second supported adapter.** The code
+exists either way, it is the cheapest adapter imaginable, and an embedder
+running an ephemeral or test workload would plausibly reach for one. It is not
+recommended for `M2`. A shipped adapter is a support and package obligation: it
+must be documented, kept conformant, and carried through every later change to
+the port, and a store that loses every artifact on restart is the wrong thing
+for anyone to find while reaching for a default. One shipped local adapter is
+what this milestone's scope authorizes, and a test fixture that is honestly
+labelled a fixture costs nothing and promises nothing. Promoting it to a
+supported adapter later is additive; unshipping one that hosts have composed is
+not.
+
 **Delete or rename `M1`'s demonstration tools.** Renaming would give them
 identities that suggest continuity, and deleting them is superficially tidier
 than carrying two fixtures forward. It is not recommended: `M1`'s locked
@@ -406,6 +464,40 @@ owned process tree could not be proved dead would report the same clean stop as
 one that was proved dead. The vision's algebra ends a run `cancelled` or
 `outcome_unknown` for that reason, and the run outcome is the one an operator
 reads.
+
+**Bound an executor job by its tool budget alone and let the run deadline cover
+model calls only.** This is the smaller contract and it is what a per-tool
+budget already expresses: each tool declares how long it may run, and the run
+deadline stops the loop between turns. It is not recommended, and it is the
+defect this revision closes. The two budgets are independent, so a `bash` whose
+declared budget is ten minutes, dispatched one minute before a run's deadline,
+runs nine minutes past the instant the run advertised as its wall-clock bound —
+with the run unable to finish, because it still owns an operation. A bound that
+holds over one kind of owned work and not the other is not a run bound; taking
+the minimum costs one propagated field and reuses the cancellation machinery
+that already exists.
+
+**Make the job deadline an eleventh grant binding.** The grant is already the
+validated envelope for a job's authority, it already carries `expiry`, and one
+more binding would put the deadline where the executor's fail-closed validator
+would check it for free. It is rejected rather than weighed. ADR 0007's ten
+bindings are a locked set with an independent completeness oracle, and widening
+that set is a change to an accepted decision rather than an addition to this
+one. The semantics differ too: `expiry` is validated once at the final pre-start
+boundary and authorizes a job to *start*, while the deadline governs how long a
+started job may *run* and must therefore be live for the job's whole life. Two
+different questions in one field would make an expired grant and an exhausted
+deadline indistinguishable in a refusal.
+
+**Commit the run's bounded stop when the deadline fires and clean up
+afterwards.** It makes the terminal outcome prompt, which is what an operator
+watching a clock expects, and cleanup would still happen. It is not
+recommended, and it is the same mistake as reporting `cancelled` over an
+unproved effect: a committed `bound_reached` says the run stopped where it was
+configured to stop, and a run whose owned `bash` is still alive has not stopped.
+Waiting for confirmed cleanup costs the operator the declared grace period and
+buys the outcome its meaning; where cleanup cannot be confirmed the honest
+answer is `outcome_unknown`, not a faster `bound_reached`.
 
 **Signed or portable grants, and OS isolation, in `M2`.** Not recommended and
 not reopened: ADR 0007 already placed both at the first isolated or remote hand,
@@ -463,6 +555,18 @@ effect could not be proved and names a reconciliation reference. Every surface
 that renders a run outcome must render the second one, and no document may claim
 that aborting a run guarantees a clean stop.
 
+Carrying the run deadline on every job makes an executor job's lifetime a
+property of the run rather than of the tool. A tool's declared wall-time budget
+becomes a ceiling that the run can lower but never raise, so a tool author can
+no longer reason about a job's maximum duration from the definition alone, and
+an operator who shortens a run deadline shortens every tool call inside it. The
+visible cost is that a long `bash` near the end of a run is cancelled with work
+in progress rather than allowed to finish, and the run reports a bounded stop
+only once that cancellation is confirmed — so a deadline is not instantaneous
+for the same reason an abort is not. The compensating property is the one the
+bound is for: the wall-clock number an operator declares is the number the run
+actually respects, over model calls and over OS processes alike.
+
 Unique model-visible names become part of what a session commits. The mapping is
 journaled with the active set, so replay resolves the exact name the run used,
 renaming a tool between sessions is free, and renaming one inside a session is
@@ -515,11 +619,14 @@ generations that no active profile offers, so retention costs two fixtures and
 changes no conversation.
 
 Rollback before closure removes the registry, the four bootstrap tools, the
-policy port, the artifact port, and the cancellation path together, returning
+policy port, the artifact port, the job deadline, and the cancellation path
+together, returning
 the runtime to `M1`'s single-tool option. There is no partial rollback that
 keeps the registry and drops the policy port, because the grant path depends on
 both; none that keeps cancellation without the executor's process-ownership
-capture; and none that keeps the bounded-output rule without the artifact port,
+capture; none that keeps the job deadline without that same cancellation path,
+because expiry has nothing to terminate the owned tree with; and none that keeps
+the bounded-output rule without the artifact port,
 because truncation without a spill target loses bytes a receipt claims. Once a
 version is published, changing a built-in's `tool_id`, effect class, or
 parameter schema is a new version of that definition rather than an edit to the

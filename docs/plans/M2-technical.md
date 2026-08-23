@@ -103,6 +103,19 @@ an implicit fallback, and both carry a locked case. Widening the client rule to
 permit a client-to-client dependency was the alternative and would undercut
 decision one.
 
+**A second prerequisite this plan pair names but cannot dispose: the recorded
+disposition of the `bound_reached` vision change.** M2 and ADR 0010 both depend
+on a run being able to end at a declared bound without that ending being a
+failure. That member was added to the vision's closed run terminal algebra by an
+explicit maintainer decision, and the algebra is a founding boundary. Accepting
+ADR 0010, or this plan pair, does not dispose it and must not be read as doing
+so: a founding boundary change carries its own record, naming the principle, the
+evidence, the compatibility impact, and the migration path — which is empty here,
+because nothing is released and no session record exists. If that disposition is
+not recorded, ADR 0010 and Outcome 1 rest on an algebra member no authority
+accepted, and the honest correction is to record it, not to reinterpret the
+outcome.
+
 **A prerequisite this plan pair names but cannot dispose: an accepted M1 gate
 generation.** M1's closed gate binds nine paths by SHA-256, and M2 must change
 two of them:

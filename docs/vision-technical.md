@@ -928,7 +928,7 @@ stateDiagram-v2
     preparing --> awaiting_model: model intent committed
     awaiting_model --> awaiting_tools: complete valid tool calls
     awaiting_model --> run_terminal: complete answer without tools
-    awaiting_model --> run_terminal: error / abort / budget exhausted
+    awaiting_model --> run_terminal: error / abort / bound reached
     awaiting_tools --> awaiting_tools: next serial call or safe batch
     awaiting_tools --> preparing: ordered results committed
     awaiting_tools --> suspended: host interaction required

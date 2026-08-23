@@ -117,25 +117,65 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   cumulative token budget across the run, and a wall-clock deadline each have a
   configured value with a default. Every bound is checked before the next
   request is staged, so exceeding one costs no provider call.
-- **The deadline is enforced inside the model call as well as between turns.**
-  The run's committed absolute deadline instant is propagated into the
+- **The deadline bounds every operation the run owns, not only the gaps between
+  turns.** The run's committed absolute deadline instant is propagated into the
   supervised model call and bounds that call, so one long generation cannot
   outlive the bound an operator declared. A between-turns check alone is not a
   wall-clock bound: it lets a run exceed its deadline by as long as a provider
   holds a single connection open, which is exactly the stalled-provider case the
   bound exists to catch. There is no separate per-call timeout that may exceed
   the run deadline, so the two enforcement points can never disagree.
-- **The deadline race is decided by committed journal order, and the committed
-  outcome is the truthful one.** If a complete validated reply commits before
-  the deadline abort is admitted, that turn is completed, its assistant message
-  is canonical history, and the deadline then ends the run before the next
-  request is staged. If the abort is admitted first, the model call is
-  cancelled, no assistant message is written, and a reply arriving afterwards is
-  retained truthfully as attempt evidence without becoming canonical history.
-  Partial or streamed output never becomes a canonical assistant message under
-  either order. This is the same completion/cancellation ordering rule the
-  vision already fixes; the deadline is one more thing that can request the
-  abort.
+- **A run owns executor jobs as well as model calls, and the deadline binds
+  those identically.** The same committed instant is carried on every executor
+  job, and
+  [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) owns the job,
+  cancellation, and receipt mechanics that make it real: a job's effective
+  deadline is the earlier of the run deadline and the tool's own declared
+  wall-time budget, and at expiry the executor cancels and cleans up the owned
+  process tree through the cancellation machinery that decision already fixes.
+  This decision states why: a run that advertises a wall-clock bound over only
+  half the work it owns is advertising a claim. A long `bash` dispatched shortly
+  before expiry would otherwise run past the instant an operator declared, and
+  the run could not finish while it held an unresolved owned operation, so the
+  number every surface prints would be one the runtime does not honour.
+- **A reached deadline commits only after the run's owned work is confirmed
+  stopped, and an unprovable outcome outranks it.** `bound_reached(:deadline, observed)`
+  says the run stopped where its operator configured it to stop, so it commits
+  only once every owned operation has reached a validated terminal fact and
+  every owned process tree has been confirmed cleaned. Where an effect's truth
+  or a tree's cleanup cannot be proved, the run finishes `outcome_unknown`
+  carrying that reconciliation reference instead. `outcome_unknown` takes
+  precedence over `bound_reached` for the same reason it takes precedence over
+  `cancelled` in the paired decision: an unprovable effect reported as a clean
+  bounded stop is the report an operator acts on by doing nothing. A deadline is
+  therefore bounded rather than instantaneous, exactly as an abort is, and no
+  document may describe reaching one as a guaranteed clean stop.
+- **The deadline race is decided by committed journal order, and a validated
+  terminal fact is never overwritten.** The committed journal order decides
+  which fact is true, and the three cases are different endings rather than one:
+  a no-tool final reply that commits first ends the run `completed`, and the
+  deadline firing afterwards is a no-op that never rewrites it; a tool-calling
+  reply that commits first keeps its assistant message in canonical history
+  while the passed deadline stops any of its calls from being dispatched; and a
+  deadline admission that commits first writes no assistant message at all and
+  keeps a late reply as attempt evidence only. Partial or streamed output never
+  becomes a canonical assistant message under any of the three. This is the same
+  completion-against-cancellation ordering rule the vision already fixes — a run
+  that already committed a validated terminal fact keeps it — and the deadline
+  is one more thing that can request the abort.
+- **A tool call is dispatched only while the run deadline is still in the
+  future, and a call that cannot be dispatched still gets a terminal fact.** The
+  boundary is checked once, when the tool-operation intent would commit: with
+  time remaining the intent commits and the job carries its effective deadline;
+  with the deadline already passed no intent commits, no grant is minted, and
+  nothing is dispatched. Such a call takes a terminal `cancelled` fact — it has
+  no owned process tree, so its cleanup is confirmed trivially — which keeps the
+  invariant that every committed tool call has a committed terminal result and
+  leaves no hole in canonical history. There is deliberately no
+  minimum-remaining-time threshold below which dispatch is refused: that would
+  be a configured value with no evidence behind it and a second reason a call
+  never ran, where the effective job deadline already cancels a
+  just-dispatched call by the one path that exists.
 - **A committed bound is always enforceable; a missing provider usage report
   never disables one.** Provider-reported usage is preferred whenever it exists.
   Where a turn's reply carries no usage, that turn is accounted conservatively
@@ -176,7 +216,10 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   recomputed, and the wall-clock deadline is the absolute instant committed with
   the run, so a run whose deadline passed while its owner was down commits
   `bound_reached` naming `:deadline` on recovery, without a
-  provider call and without redispatching the staged bytes. Submitting a new
+  provider call and without redispatching the staged bytes — and it does so
+  under the same precedence as any other reached deadline: once every operation
+  that run owned has reached a validated terminal fact through the ordinary
+  recovery path, and `outcome_unknown` instead when one of them cannot. Submitting a new
   prompt to a completed session starts a new run with a new identity, its own
   freshly committed bounds, and a projection over the whole retained lineage; it
   is admitted only while the session is settled, and it requires live ownership
@@ -346,6 +389,58 @@ its declared deadline by hours while every between-turn check passed. Bounding
 the supervised call with the same absolute instant costs one propagated field
 and one explicit race rule.
 
+**Bound the model call by the deadline and leave executor jobs to their own tool
+budgets.** Each tool already declares a wall-time budget, so every job has a
+bound without propagating anything, and the model call is where a run stalls
+longest. It is not recommended. The two budgets add rather than compose: the
+worst case becomes the run deadline plus the longest tool budget still
+dispatchable, and the run cannot finish in the meantime because it holds an
+unresolved owned operation. That makes the declared wall-clock number a statement
+about model calls wearing the name of a run bound, which is the failure this
+decision closes. Carrying the same instant onto every job and taking the minimum
+costs one field and reuses cancellation machinery the paired decision already
+builds.
+
+**Let every reply that loses the deadline race become `bound_reached`.** One rule
+for one race is easy to state and easy to render: the deadline fired, so the run
+ended on the deadline. It is rejected. A no-tool final reply that committed first
+is a validated terminal fact — the model stopped on its own and the run
+completed — and rewriting it as a bounded stop would overwrite a true outcome
+with a false one, in a set whose members are immutable. It would also be visibly
+incoherent: the transcript would show a final answer under a run outcome saying
+the run was cut short. The committed journal order already decides which fact is
+true; the only work left is to say so per case instead of collapsing three
+endings into one.
+
+**Refuse to commit a tool-calling reply that arrives once the deadline has
+passed.** It would keep canonical history free of an assistant message whose tool
+calls never ran, and it makes the race table uniform again. It is not
+recommended: the reply is a validated fact the provider produced and was billed
+for, and discarding it would leave the run's last committed turn missing from a
+history whose whole purpose is replay. Keeping the message and giving each of its
+calls a truthful `cancelled` terminal result records what actually happened — the
+model asked, and the run had no time left to answer — without fabricating
+anything or leaving a hole.
+
+**Dispatch the tool calls of a reply that beat the deadline, under their own
+budgets.** The reply committed inside the bound, so its calls arguably inherit
+that admission, and this is what an implementation does by default if nobody
+decides otherwise. It is rejected. The run deadline has passed by then, so each
+such job's effective deadline is already in the past and its grant would carry an
+expiry the executor refuses at its pre-start boundary: the dispatch is incoherent
+as well as unbounded. It is also the original defect returning through the race,
+since work admitted after expiry is precisely what makes the advertised bound
+untrue.
+
+**Refuse dispatch below a minimum remaining time.** A rule like "do not start a
+tool with under thirty seconds left" avoids starting work that is about to be
+killed, and it reads as good manners toward the workspace. It is not recommended:
+the threshold is a configured number with no evidence behind its value, it would
+have to be justified per tool to mean anything, and it creates a second reason a
+call never ran that an operator must then distinguish from the first. Dispatching
+while time remains and cancelling through the one existing path keeps the rule
+stateable in a sentence.
+
 **Encode a reached bound as a `budget_exhausted` category of
 `failed(category, retryable?)`.** It leaves the terminal set untouched, which
 matters because every consumer, event projection, and conformance vector will
@@ -505,6 +600,24 @@ provider has already been billed for it. When the abort commits first, the run
 gets no assistant message from a call the operator paid for, and the attempt
 evidence records exactly that. The alternative was a bound that does not bind.
 
+The deadline now reaches OS processes as well as provider connections, so it can
+kill work in progress. A long `bash` near the end of a run is terminated with its
+output half-written, and an operator who shortens a run deadline shortens every
+tool call inside that run — a tool's declared budget becomes a ceiling the run
+can lower but never raise. Because the bounded stop waits for confirmed cleanup,
+a deadline is not instantaneous, and in the worst case a run that hit its
+deadline finishes `outcome_unknown` naming a reconciliation reference rather than
+`bound_reached`. Every surface that renders a run outcome therefore carries the
+deadline's second ending as well as the abort's, and no documentation may promise
+that a deadline stops a run cleanly.
+
+A run can end with an assistant message whose tool calls all read `cancelled`.
+That is the honest shape of the case where the model asked for tools with no time
+left, and it is what keeps the record complete — but it will look, to a reader
+skimming a transcript, like a run that failed to do anything. The run outcome is
+what distinguishes it, which is one more reason a consumer that groups by
+terminal value has to have a case for `bound_reached`.
+
 Discovery narrow enough to display honestly is discovery narrow enough to
 disappoint. One file at the workspace root will not match what operators expect
 from tools they already use, and the gap will be reported as a missing feature
@@ -543,6 +656,8 @@ successor form, because a synthesized string is not a degraded version of a real
 tool result, and `M1`-owned test roots are discarded.
 
 Rollback before closure removes the conversation elements, the bounds, the
+deadline's propagation into the supervised model call and onto every executor
+job, the
 `bound_reached` outcome, and the context receipt together, returning to `M1`'s
 single-message request. It cannot be partial: the termination condition depends
 on the assistant message shape, and the assistant message shape exists only

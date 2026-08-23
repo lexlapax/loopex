@@ -195,6 +195,17 @@ call and commits no partial request. The terminal record names which bound was
 reached, the observed value against the declared limit, and the accounting
 source that produced it.
 
+The order is load-bearing at the top as well as the bottom. The no-tool check
+precedes every bound check, so a run whose model stopped on its own is
+`completed` and stays `completed`; a bound evaluated afterwards has nothing left
+to decide. Below it, `:max_turns` and `:token_budget` are decided from committed
+counters and can commit as soon as they are observed, because no owned work is in
+flight at a pre-staging check. `:deadline` is different only in that it can also
+fire while owned work *is* in flight, and then it waits: the run commits
+`bound_reached` after every owned operation reaches a validated terminal fact and
+every owned process tree is confirmed cleaned, or commits `outcome_unknown`
+instead when one of those cannot be proved.
+
 `bound_reached` is a member of the vision's closed run terminal set, not a
 category of `failed(category, retryable?)`. It therefore carries no failure
 category and no `retryable?` flag. Its payload is the vision's exact
@@ -210,39 +221,83 @@ call, leaving the flag nothing to say. The operator's remedy is a new run, which
 is a new identity with freshly committed bounds over the same durable
 conversation rather than a retry.
 
-### Deadline enforcement inside the model call
+### Deadline enforcement over every owned operation
 
-The pre-staging check bounds the gaps between calls; it cannot bound a call. The
-same committed absolute instant is therefore propagated into the supervised
-model call:
+The pre-staging check bounds the gaps between calls; it cannot bound a call, and
+it cannot bound a tool. The same committed absolute instant therefore reaches
+both kinds of owned work:
 
 ```text
 run_deadline (absolute instant, committed with the run)
   -> checked before staging the next request
   -> carried in the staged request and passed to the supervised model call
-  -> the supervising process arms an abort at that instant
-  -> the adapter receives the same instant and bounds its own transport wait
+       -> the supervising process arms an abort at that instant
+       -> the adapter receives the same instant and bounds its own transport wait
+  -> carried on every JobRequest the run dispatches
+       -> the job's effective deadline is min(run_deadline,
+          dispatch_instant + tool.budgets.wall_time)
+       -> at expiry ADR 0009's cancellation sequence terminates and confirms
+          the owned process tree
 ```
 
-There is no independent per-call timeout. Any adapter-level or transport-level
-bound is the minimum of its own configuration and the run deadline, so no
-mechanism can extend a call past the instant the operator declared and the two
-enforcement points cannot disagree about when the run ends.
+There is no independent per-call timeout and no independent per-tool timeout
+that can outlast the run. Any adapter-level, transport-level, or tool-level bound
+is the minimum of its own configuration and the run deadline, so no mechanism can
+extend owned work past the instant the operator declared and no two enforcement
+points can disagree about when the run ends.
+[ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) owns the job field,
+the minimum rule, the executor's expiry behaviour, and the receipt; this decision
+owns why the instant must arrive there at all and what the run does with the
+result.
 
-The completion race is decided by the coordinator's committed journal order,
-which is the rule the vision already fixes for completion against cancellation.
-Both orders are defined and both are truthful:
+A run's owned work is therefore bounded in both directions:
 
-| Journal order | Turn | Run | Late evidence |
+| Owned operation | Bounded by | Ended at expiry by |
+| --- | --- | --- |
+| Supervised model call | The committed instant carried in the staged request | The supervising process arming an abort; no assistant message is written |
+| Executor job | `min(run_deadline, dispatch_instant + tool wall-time budget)` carried on the `JobRequest` | ADR 0009's cancellation sequence: cooperative cancel, declared grace period, owned process-tree termination, confirmed cleanup |
+| A tool call whose run deadline already passed at intent commit | Not dispatched at all | Terminal `cancelled` with no owned tree; cleanup is confirmed trivially |
+
+`bound_reached(:deadline, observed)` commits only after every owned operation
+above has reached a validated terminal fact and every owned process tree has been
+confirmed cleaned. One `outcome_unknown` among them finishes the run
+`outcome_unknown` with that reconciliation reference instead; the precedence is
+unconditional and matches the paired decision's rule for `cancelled`.
+
+### The deadline race
+
+The race is decided by the coordinator's committed journal order, which is the
+rule the vision already fixes for completion against cancellation: a run that has
+committed a validated terminal fact keeps it. Three cases follow, and they are
+three different endings rather than one:
+
+| Committed first | Turn | Run | Late evidence |
 | --- | --- | --- | --- |
-| Complete validated reply commits before the deadline abort is admitted | `completed`; the assistant message becomes canonical history and its usage is accounted normally | Terminates at the next pre-staging check as `bound_reached` naming `:deadline` | None; the reply is the committed fact |
-| Deadline abort is admitted first | No assistant message is written; the attempt is retained as evidence with its abort reason | `bound_reached` naming `:deadline`, with the committed instant and the observed instant | A reply arriving after admission is retained truthfully as attempt evidence and never becomes a canonical assistant message |
+| A complete validated reply **with no tool calls** | `completed`; the assistant message becomes canonical history and its usage is accounted normally | `completed`. The no-tool check precedes every bound check, so the run has already reached its terminal fact; a deadline firing afterwards is a no-op and never rewrites it | None; the reply is the committed fact and the run is terminal |
+| A complete validated reply **with tool calls** | `completed`; the assistant message and its complete tool calls become canonical history | Each call is dispatched only if the run deadline is still in the future at its intent commit; a call whose deadline has passed commits no intent, mints no grant, and takes a terminal `cancelled` fact. Once every call has a committed terminal result, the run commits `bound_reached` naming `:deadline` — or `outcome_unknown` if any call's effect or cleanup could not be proved | A late receipt for a cancelled call is retained truthfully and projected into no next turn |
+| The **deadline admission** | No assistant message is written; the attempt is retained as evidence with its abort reason | `bound_reached` naming `:deadline`, with the committed instant and the observed instant, after cleanup is confirmed | A reply arriving after admission is retained truthfully as attempt evidence and never becomes a canonical assistant message |
 
-Partial or streamed output never becomes a canonical assistant message under
-either order, so the race cannot produce a half-message in canonical history.
-The run's terminal outcome is `:deadline` in both rows; what differs is whether
-the last turn's reply is part of the durable conversation, and the journal
-answers that without ambiguity.
+Partial or streamed output never becomes a canonical assistant message under any
+of the three, so the race cannot produce a half-message in canonical history.
+
+The governing principle is one sentence, and both defects this table replaced
+were violations of it: **the committed journal order decides, and a validated
+terminal fact is never overwritten.** A run that completed because the model
+stopped on its own stays `completed` no matter what fires afterwards. A turn that
+committed a tool-calling reply keeps that message, because the reply is a fact
+the provider produced, and the deadline governs what may still be *dispatched*
+rather than what may be *remembered*. Only the third case — where nothing was
+committed for the turn — leaves the conversation without an assistant message,
+and that is exactly the case where the model produced none inside the bound.
+
+The second row is the one that needed a rule rather than an implication. Its
+boundary is checked once, at intent commit, with no minimum-remaining-time
+threshold: with time left the call is dispatched under its effective job
+deadline, and with the deadline passed it is not dispatched at all. Both branches
+end in a committed terminal result for every call, which preserves the ordering
+invariant that no next turn may be staged while a call lacks one — vacuously here,
+since there is no next turn — and keeps every committed call element paired with
+a result element.
 
 ### Token accounting
 
@@ -305,7 +360,12 @@ and a new run cannot be charged for a previous one. The one case operators will
 notice is a run whose deadline expired while its host was down: recovery commits
 `bound_reached` naming `:deadline`, with the committed
 instant and the observed recovery instant, and the operator's remedy is a new
-run over the same durable conversation.
+run over the same durable conversation. The precedence rule applies here as
+everywhere else — recovery reaches `bound_reached` only once every operation
+that run owned has a validated terminal fact, so a run whose in-flight executor
+effect cannot be resolved through ADR 0007's reconciliation path finishes
+`outcome_unknown` on recovery rather than reporting a bounded stop over an
+effect nobody can prove.
 
 ### Provenance, trust, and budget
 
@@ -459,12 +519,26 @@ visible as a trend rather than discovered at the threshold.
   was made for the refused turn; that no assistant message was fabricated; and
   that the committed outcome is neither `failed` nor `completed` and carries no
   failure category or retryable flag.
-- The deadline firing while a reply is in flight, run in both journal orders: a
-  reply committed before the abort is admitted becomes canonical history and the
-  run ends on the deadline at the next check; an abort admitted first leaves no
-  assistant message, and a reply delivered afterwards is retained as attempt
-  evidence without entering canonical history. The supervised call is asserted to
-  end at the committed instant rather than when the provider chooses to.
+- The deadline firing while a reply is in flight, run in all three journal
+  orders. A **no-tool** reply committed before the abort is admitted ends the run
+  `completed`, and the later deadline firing is asserted to be a no-op that
+  neither rewrites the outcome nor emits a second terminal event. A
+  **tool-calling** reply committed first keeps its assistant message and complete
+  tool calls in canonical history, dispatches no call whose intent would commit
+  after the deadline, gives every such call a terminal `cancelled` result, and
+  ends the run `bound_reached` naming `:deadline`. An **abort admitted first**
+  leaves no assistant message, and a reply delivered afterwards is retained as
+  attempt evidence without entering canonical history. The supervised call is
+  asserted to end at the committed instant rather than when the provider chooses
+  to.
+- The run deadline reaching executor jobs, driven by a real long-running job
+  rather than a stub: the committed instant appears on every `JobRequest`; a job
+  whose tool wall-time budget exceeds the remaining run deadline is bounded at
+  the run deadline; the job is cancelled at that instant and its owned process
+  tree is confirmed cleaned; the run commits `bound_reached` naming `:deadline`
+  only after that confirmation; and the same case with cleanup made unconfirmable
+  by injection commits `outcome_unknown` with a reconciliation reference instead,
+  proving the precedence rather than assuming it.
 - A turn aborted after dispatch, asserting that the cumulative counter grows by
   the request bytes plus the full committed `max_tokens` allowance, that the
   value is marked `estimated`, and that repeated aborts therefore exhaust the
@@ -547,6 +621,41 @@ its declared instant by an arbitrary margin with every check reporting complianc
 Propagating the instant costs one field in the staged request, one armed abort in
 the supervising process, and one explicit race rule; the alternative costs the
 bound its meaning.
+
+**Bounding the model call but not the executor job.** Half the plumbing for most
+of the benefit: the model call is where a run stalls longest, and tools already
+declare wall-time budgets. The arithmetic defeats it. Independent budgets add
+rather than compose, so the run's worst case is its deadline plus the longest
+tool budget still dispatchable, and during that overrun the run cannot reach a
+terminal outcome at all, because it holds an unresolved owned operation. The
+observable result is a run whose printed wall-clock bound is not the bound it
+respects — precisely the defect the in-call enforcement above was added to fix,
+surviving in the other half of the run's owned work. The minimum rule costs one
+field on the job and reuses ADR 0009's cancellation sequence unchanged.
+
+**One race rule: whatever the deadline catches becomes `bound_reached`.** It
+keeps the table to two rows and needs no case analysis. It is rejected because it
+overwrites validated terminal facts. A no-tool final reply that committed first
+is a completed run; restating it as a bounded stop contradicts the immutability
+the terminal set depends on, and produces a transcript whose final answer sits
+under an outcome saying the run was cut short. Splitting the cases costs one more
+row and one more selector.
+
+**Discarding a post-deadline tool-calling reply, or dispatching its calls
+anyway.** The two opposite shortcuts for the middle case. Discarding the reply
+removes a fact the provider produced and was billed for, leaving the last
+committed turn absent from a history whose purpose is replay. Dispatching its
+calls admits effectful work after the instant the run declared, with grants whose
+expiry the executor would refuse at its pre-start boundary anyway. Keeping the
+message and cancelling its calls is the only option that neither fabricates
+history nor admits unbounded work.
+
+**A minimum-remaining-time threshold before dispatch.** Refusing to start a tool
+with less than some margin left avoids obviously doomed work. The margin is the
+problem: any value is an unevidenced constant, per-tool values multiply the
+decision, and the rule adds a second reason a call never ran that operators would
+have to tell apart from the first. Checking `now < run_deadline` at intent commit
+and bounding whatever is admitted keeps one rule and one code path.
 
 **Encoding a reached bound as a `budget_exhausted` category of `failed`.** It
 leaves the terminal set alone, it is additive inside a set conformance vectors
@@ -685,6 +794,19 @@ Concept: [Consequences](0010-provider-continuation-and-context-staging.md#concep
   discarded after the provider has billed for it, and the supervised call gains
   one more abort path with its own crash cases. The alternative was a wall-clock
   bound that does not bound the only part of a run that is slow.
+- The deadline also reaches every executor job, so it can kill OS work in
+  progress. A tool's declared wall-time budget becomes a ceiling the run can
+  lower but never raise, a definition no longer determines a job's maximum
+  duration on its own, and shortening a run deadline shortens every tool call
+  inside it. Because the bounded stop waits for confirmed cleanup, a deadline is
+  not instantaneous, and a run that hit its deadline can finish
+  `outcome_unknown`. Every surface rendering a run outcome carries that second
+  deadline ending, and no documentation may describe a deadline as a clean stop.
+- A run can end with an assistant message whose tool calls all read `cancelled`.
+  It is the honest record of a model asking for tools with no time left, and it
+  costs a transcript that reads like a run which did nothing until the reader
+  reaches the run outcome. That is one more consumer obligation on
+  `bound_reached` rather than a new one.
 - An aborted turn is charged its whole `max_tokens` allowance, so a run with
   several cancellations can exhaust its token budget having been billed for
   considerably less. Over-charging is the deliberate direction and the
@@ -741,8 +863,16 @@ the set as it now stands. `M1` journals are neither read nor migrated; the `M1`
 synthesized second-turn record has no successor form, and `M1`-owned test roots
 are discarded.
 
+The run's committed absolute deadline also reaches durable form outside this
+decision's records: it is carried in the staged request here and on every
+`JobRequest` under
+[ADR 0009](0009-tool-executor-and-grant-contracts.md#concept), where it is
+covered by the existing `canonical_request_digest` and adds no grant binding.
+
 Rollback before closure removes the conversation elements, the projection, the
-bounds, the `bound_reached` outcome, and the context receipt together, restoring
+bounds, the deadline's propagation into the supervised model call and onto every
+executor job, the `bound_reached` outcome, and the context receipt together,
+restoring
 `M1`'s single-message request and its two-turn arithmetic. It cannot be partial,
 because the termination condition reads the assistant message shape and the
 assistant message shape exists only as a conversation element.
