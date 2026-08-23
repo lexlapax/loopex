@@ -78,6 +78,17 @@ defmodule Loopex.Checks.Plan do
   @outcome_columns ["#", "Outcome", "Evidence class", "Gate selector"]
   @progress_states ["Open", "Proved", "Accepted limitation", "Accepted deferral"]
 
+  @documentation_categories [
+    "Operator-facing documentation",
+    "Operator README",
+    "Developer-facing documentation",
+    "Developer README",
+    "Documentation README",
+    "Root README",
+    "Changelog"
+  ]
+  @documentation_optional MapSet.new(Enum.take(@documentation_categories, 4))
+
   @amendment_anchor ~r/\A<a id="amendment-([0-9]+)"><\/a>\z/u
   @amendment_transaction_v1 ~s(<a id="amendment-transaction-v1"></a>)
 
@@ -896,6 +907,7 @@ defmodule Loopex.Checks.Plan do
       technical_path
     )
 
+    documentation_obligations(gate_text, gate_path, name, state)
     reject_second_status_surface!(text, path)
   end
 
@@ -1241,4 +1253,174 @@ defmodule Loopex.Checks.Plan do
       end
     end)
   end
+
+  # Concept: every milestone makes its public documentation disposition visible
+  # before implementation and carries it through closure.
+  #
+  # Technical depth: M0 closed before this contract existed and is the sole
+  # migration exception. Every active and future gate has exactly seven ordered
+  # rows. The first four may be an accepted N/A; the three repository-wide
+  # summaries always name their exact file. Acceptance of the gate is the
+  # maintainer disposition for any N/A, so an N/A cannot be introduced later.
+  defp documentation_obligations(_gate_text, _gate_path, "M0", "Closed"), do: :ok
+
+  defp documentation_obligations(gate_text, gate_path, _name, _state) do
+    {body, body_start} =
+      Markdown.section_body(gate_text, gate_path, "## Documentation Obligations")
+
+    visible = Markdown.visible_line_numbers(gate_text, gate_path)
+
+    rows =
+      documentation_table!(body, body_start, visible, gate_path)
+
+    if Enum.map(rows, &hd/1) != @documentation_categories do
+      raise Invalid,
+            "#{gate_path}: documentation obligations must contain the exact seven ordered categories"
+    end
+
+    paths =
+      Enum.flat_map(rows, fn [category, disposition] ->
+        validate_documentation_disposition!(category, disposition, gate_path)
+      end)
+
+    validate_documentation_path_set!(paths, gate_path)
+  end
+
+  defp documentation_table!(body, body_start, visible, gate_path) do
+    header = "| Category | Required closure disposition |"
+    table_length = 2 + length(@documentation_categories)
+
+    header_offsets =
+      body
+      |> Enum.with_index()
+      |> Enum.filter(fn {line, offset} ->
+        line == header and MapSet.member?(visible, body_start + offset)
+      end)
+
+    case header_offsets do
+      [{_header, offset}] ->
+        table_body = Enum.slice(body, offset, table_length)
+        table_offsets = offset..(offset + table_length - 1)
+        table_indices = Enum.map(table_offsets, &(body_start + &1))
+
+        visible_pipe_offsets =
+          body
+          |> Enum.with_index()
+          |> Enum.filter(fn {line, line_offset} ->
+            String.starts_with?(line, "|") and
+              MapSet.member?(visible, body_start + line_offset)
+          end)
+          |> Enum.map(&elem(&1, 1))
+
+        if length(table_body) != table_length or
+             Enum.any?(table_indices, &(not MapSet.member?(visible, &1))) or
+             visible_pipe_offsets != Enum.to_list(table_offsets) do
+          raise Invalid,
+                "#{gate_path}: documentation obligations must be one visible contiguous table"
+        end
+
+        Markdown.table(
+          table_body,
+          ["Category", "Required closure disposition"],
+          "#{gate_path} Documentation Obligations"
+        )
+
+      _other ->
+        raise Invalid,
+              "#{gate_path}: documentation obligations must be one visible contiguous table"
+    end
+  end
+
+  defp validate_documentation_disposition!(category, "N/A — " <> reason, gate_path) do
+    if not MapSet.member?(@documentation_optional, category) or String.trim(reason) == "" do
+      raise Invalid,
+            "#{gate_path}: #{category} may use N/A only as an explicit accepted limitation"
+    end
+
+    []
+  end
+
+  defp validate_documentation_disposition!(category, disposition, gate_path) do
+    paths =
+      disposition
+      |> String.split(", ", trim: false)
+      |> Enum.map(fn token ->
+        case Regex.run(~r/\A`([^`\r\n]+\.md)`\z/u, token) do
+          [_all, path] -> path
+          _other -> raise Invalid, "#{gate_path}: #{category} must name exact Markdown paths"
+        end
+      end)
+
+    if paths == [] or Enum.any?(paths, &(not canonical_documentation_path?(&1))) or
+         length(paths) != length(Enum.uniq(paths)) or
+         not documentation_paths_match?(category, paths) do
+      raise Invalid, "#{gate_path}: #{category} names an invalid documentation path set"
+    end
+
+    paths
+  end
+
+  # Concept: a category applies to the repository location the path actually
+  # names, not to a misleading textual prefix.
+  #
+  # Technical depth: equality with the repository's POSIX normal form rejects
+  # absolute, dotted, traversing, and empty-component spellings. Backslashes
+  # are rejected explicitly because they are host-dependent separators rather
+  # than portable repository path bytes.
+  defp canonical_documentation_path?(path) do
+    path == Paths.normalise(path) and
+      not String.starts_with?(path, ["/", "../"]) and
+      not String.contains?(path, "\\") and
+      not documentation_control_character?(path)
+  end
+
+  defp documentation_control_character?(path) do
+    path
+    |> String.to_charlist()
+    |> Enum.any?(fn codepoint -> codepoint < 0x20 or codepoint in 0x7F..0x9F end)
+  end
+
+  defp validate_documentation_path_set!(paths, gate_path) do
+    folded = Enum.map(paths, &String.downcase/1)
+
+    collision? = length(folded) != length(Enum.uniq(folded))
+
+    ancestor_conflict? =
+      Enum.any?(folded, fn path ->
+        Enum.any?(folded, fn other ->
+          path != other and String.starts_with?(path, other <> "/")
+        end)
+      end)
+
+    if collision? or ancestor_conflict? do
+      raise Invalid,
+            "#{gate_path}: documentation obligations name a colliding or impossible path set"
+    end
+  end
+
+  defp documentation_paths_match?("Operator-facing documentation", paths) do
+    Enum.all?(paths, fn path ->
+      String.starts_with?(path, "docs/operator/") and
+        String.downcase(path) != "docs/operator/readme.md"
+    end)
+  end
+
+  defp documentation_paths_match?("Operator README", paths),
+    do: paths == ["docs/operator/README.md"]
+
+  defp documentation_paths_match?("Developer-facing documentation", paths) do
+    Enum.all?(paths, fn path ->
+      String.starts_with?(path, "docs/developer/") and
+        String.downcase(path) != "docs/developer/readme.md"
+    end)
+  end
+
+  defp documentation_paths_match?("Developer README", paths),
+    do: paths == ["docs/developer/README.md"]
+
+  defp documentation_paths_match?("Documentation README", paths),
+    do: paths == ["docs/README.md"]
+
+  defp documentation_paths_match?("Root README", paths), do: paths == ["README.md"]
+  defp documentation_paths_match?("Changelog", paths), do: paths == ["CHANGELOG.md"]
 end

@@ -2117,11 +2117,16 @@ for closure_document in \
   CHANGELOG.md \
   README.md \
   DEVELOPMENT.md \
+  docs/README.md \
   docs/plans/README.md \
   docs/plans/M1.md \
   docs/evidence/M1-toolchain-matrix.md \
   docs/evidence/M1-negative-demonstrations.md \
   docs/evidence/README.md \
+  docs/operator/runtime.md \
+  docs/operator/README.md \
+  docs/developer/runtime-and-embedding.md \
+  docs/developer/README.md \
   docs/developer/agent-context-map.md
 do
   if [ "$gate_role" = capture ] && \

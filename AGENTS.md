@@ -323,6 +323,15 @@ register and plan index.
   `docs/` indexes, and any technical guidance that must be changed or cleared.
   Each gate locks that milestone's exact document set, since the set differs by
   milestone; documentation drift blocks closure like any other unmet outcome.
+  Every active and future milestone gate carries one exact seven-row
+  Documentation Obligations table covering operator-facing documentation,
+  `docs/operator/README.md`, developer-facing documentation,
+  `docs/developer/README.md`, `docs/README.md`, root `README.md`, and
+  `CHANGELOG.md`. Each row names the exact files created or materially updated.
+  Only the first four rows may instead state an explicit `N/A` limitation, and
+  accepting the gate is the maintainer approval of that limitation. The last
+  three repository-wide summaries are always named. Closed M0 predates this
+  contract and is the sole migration exception.
 
 A retry is diagnostic, not a pass. A same-SHA/seed/environment failure that
 disappears is a blocking flake until fixed or explicitly dispositioned.

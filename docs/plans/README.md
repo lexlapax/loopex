@@ -416,6 +416,31 @@ live flat and numbered in [docs/adr/](../adr/); the living implementation design
 belongs in the paired `docs/architecture.md` and
 `docs/architecture-technical.md` when they exist.
 
+Every active and future gate includes this exact ordered documentation table.
+The disposition cell names one or more exact canonical repository-relative
+POSIX Markdown paths separated by comma and space; absolute, dotted, traversing,
+empty-component, backslash, control-byte, case-colliding, and
+file/ancestor-conflicting spellings are invalid. The table is one visibly
+governed contiguous structure; fenced, commented, fragmented, or malformed-list
+content does not count. The first four rows may use `N/A — <reason>` only when
+the accepted gate makes that absence an explicit maintainer-approved limitation.
+The final three rows never use `N/A`. Closed M0 predates this rule and is the
+sole migration exception.
+
+```markdown
+## Documentation Obligations
+
+| Category | Required closure disposition |
+| --- | --- |
+| Operator-facing documentation | <exact `docs/operator/` paths, excluding its README, or explicit N/A> |
+| Operator README | `docs/operator/README.md` or explicit N/A |
+| Developer-facing documentation | <exact `docs/developer/` paths, excluding its README, or explicit N/A> |
+| Developer README | `docs/developer/README.md` or explicit N/A |
+| Documentation README | `docs/README.md` |
+| Root README | `README.md` |
+| Changelog | `CHANGELOG.md` |
+```
+
 ## How a Milestone Runs
 
 A gate is the executable definition of done, written before implementation and

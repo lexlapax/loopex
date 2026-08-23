@@ -148,7 +148,7 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `7a36c88ef6f2886a933d33c347dea2e155bdd695c86a5b05311cd60090bed39a` | `scripts/check-m1-gate.sh` |
+| `625b6d67fb5c34dd809dbcdf362df9a9e225fe7fb66a45b0785eec68420a8c49` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `6aa177be0672179cb0713a7e73ccf54a52fa4dc957d5e7d00e3e514d5015f8c2` | `scripts/m1-exunit-runner.exs` |
 | `360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c` | `scripts/m1-evidence-verifier.exs` |
@@ -640,6 +640,22 @@ inventories never follow symlinks; retained matrix and closure documents must be
 tracked ordinary files. Containment is the primary control; the fingerprint
 detects drift and does not substitute for relocation.
 
+## Documentation Obligations
+
+Every row names files that M1 must create or materially update before closure.
+The gate proves their tracked presence; independent closure review proves their
+freshness, completeness, and consistency with the implemented behavior.
+
+| Category | Required closure disposition |
+| --- | --- |
+| Operator-facing documentation | `docs/operator/runtime.md` |
+| Operator README | `docs/operator/README.md` |
+| Developer-facing documentation | `docs/developer/runtime-and-embedding.md` |
+| Developer README | `docs/developer/README.md` |
+| Documentation README | `docs/README.md` |
+| Root README | `README.md` |
+| Changelog | `CHANGELOG.md` |
+
 ## Closure Document Set
 
 Every path below must exist before green. Review, not existence alone, proves
@@ -649,11 +665,16 @@ freshness and completeness.
 CHANGELOG.md
 README.md
 DEVELOPMENT.md
+docs/README.md
 docs/plans/README.md
 docs/plans/M1.md
 docs/evidence/M1-toolchain-matrix.md
 docs/evidence/M1-negative-demonstrations.md
 docs/evidence/README.md
+docs/operator/runtime.md
+docs/operator/README.md
+docs/developer/runtime-and-embedding.md
+docs/developer/README.md
 docs/developer/agent-context-map.md
 ```
 
@@ -794,3 +815,44 @@ checks and the amended mechanics selector pass. After independent exact-SHA
 review and explicit maintainer acceptance, immediate child `R` adds one new
 disposition anchor and rebinds Acceptance to `A`; no product byte or further
 gate byte may change in `R`.
+
+<a id="amendment-4"></a>
+## Amendment 4 — Make Documentation Closure Explicit
+
+**Acceptance: OUTSTANDING.** This section declares generation 4 and implements
+the maintainer's documentation-closure direction. Every active and future
+milestone gate must carry the same seven ordered categories: operator-facing
+documentation, the operator README, developer-facing documentation, the
+developer README, the documentation README, the root README, and the changelog.
+The first four may use an explicit `N/A` only when accepting the gate approves
+that limitation; the last three always name their repository-wide files. Closed
+M0 predates this contract and is the sole migration exception.
+
+M1 uses no `N/A`. Its closure set adds a runtime operator guide, an operator
+index, a runtime-and-embedding developer guide, the existing developer index,
+and the documentation index. Root `README.md` and `CHANGELOG.md` remain required.
+The runner proves that every declared M1 closure file is a tracked ordinary
+file before green; independent closure review continues to own semantic
+freshness and completeness.
+
+Portable status enforcement validates the exact seven-row structure and the
+category-specific path classes for every non-M0 active or future gate. It
+rejects missing, reordered, duplicated, malformed, noncanonical, or ineligible
+`N/A` rows. Documentation paths are canonical repository-relative POSIX paths;
+absolute, dotted, traversing, empty-component, backslash, control-byte,
+case-colliding, and file/ancestor-conflicting spellings fail. Only one visibly
+governed contiguous table counts; fenced, commented, fragmented, or malformed
+path-list content cannot supply obligations.
+This amendment changes no product outcome, scope item, selector, minimum,
+exclusion, credential boundary, evidence lane, toolchain matrix, public product
+contract, or closure-transition shape. It adds documentation obligations and
+the smallest generic validation needed to keep them durable.
+
+This proposal follows Amendment 3's settled direct `A→R` transaction. At
+proposal `A`, the generation-3 Acceptance row and lifecycle remain unchanged,
+so status, bootstrap, and inherited M0 gates stop only at stale binding while
+binding-independent checks pass and the direct M1 gate retains the same truthful
+current product frontier. After independent exact-SHA review and explicit
+maintainer acceptance, immediate child `R` adds one new disposition anchor and
+rebinds Acceptance to `A`; no product, portable-enforcement, envelope, or gate
+byte may change in `R`.

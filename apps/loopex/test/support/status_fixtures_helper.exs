@@ -34,7 +34,21 @@ defmodule Loopex.StatusFixtures do
 
   @closed_summary "**Revision status:** Pre-implementation planning; no milestone is active; no next candidate is recorded."
 
-  @gate "# Gate\n"
+  @gate """
+  # Gate
+
+  ## Documentation Obligations
+
+  | Category | Required closure disposition |
+  | --- | --- |
+  | Operator-facing documentation | N/A — no operator behavior changes |
+  | Operator README | N/A — no operator documentation set |
+  | Developer-facing documentation | N/A — no developer behavior changes |
+  | Developer README | N/A — no developer documentation set |
+  | Documentation README | `docs/README.md` |
+  | Root README | `README.md` |
+  | Changelog | `CHANGELOG.md` |
+  """
 
   @gate_separators [
     "\r\n",

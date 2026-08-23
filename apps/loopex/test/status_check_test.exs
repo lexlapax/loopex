@@ -1109,6 +1109,177 @@ defmodule Loopex.StatusCheckTest do
     assert [] == Fixture.checked(documents)
   end
 
+  test "active milestone gates declare the seven documentation obligations" do
+    valid = Fixture.open_milestone_documents(Fixture.gate())
+    assert [] == Fixture.checked(valid)
+
+    valid
+    |> Map.update!("docs/plans/M0-gate.md", fn gate ->
+      String.replace(gate, "| Changelog | `CHANGELOG.md` |\n", "")
+    end)
+    |> assert_invalid("one visible contiguous table")
+
+    valid
+    |> Map.update!("docs/plans/M0-gate.md", fn gate ->
+      String.replace(gate, "| Root README | `README.md` |", "| Root README | N/A — no change |")
+    end)
+    |> assert_invalid("may use N/A only")
+
+    valid
+    |> Map.update!("docs/plans/M0-gate.md", fn gate ->
+      String.replace(
+        gate,
+        "| Operator-facing documentation | N/A — no operator behavior changes |",
+        "| Operator-facing documentation | `docs/developer/runtime.md` |"
+      )
+    end)
+    |> assert_invalid("invalid documentation path set")
+  end
+
+  test "documentation obligations are one visible contiguous table" do
+    gate = Fixture.gate()
+
+    table = """
+    | Category | Required closure disposition |
+    | --- | --- |
+    | Operator-facing documentation | N/A — no operator behavior changes |
+    | Operator README | N/A — no operator documentation set |
+    | Developer-facing documentation | N/A — no developer behavior changes |
+    | Developer README | N/A — no developer documentation set |
+    | Documentation README | `docs/README.md` |
+    | Root README | `README.md` |
+    | Changelog | `CHANGELOG.md` |
+    """
+
+    for hidden <- ["```text\n#{table}```\n", "<!--\n#{table}-->\n"] do
+      gate
+      |> String.replace(table, hidden)
+      |> then(&Fixture.open_milestone_documents/1)
+      |> assert_invalid("one visible contiguous table")
+    end
+
+    gate
+    |> String.replace(
+      "| Operator README | N/A — no operator documentation set |",
+      "| Operator-facing documentation continued below |\n" <>
+        "| Operator README | N/A — no operator documentation set |"
+    )
+    |> then(&Fixture.open_milestone_documents/1)
+    |> assert_invalid("one visible contiguous table")
+
+    (gate <> "\n" <> table)
+    |> Fixture.open_milestone_documents()
+    |> assert_invalid("one visible contiguous table")
+
+    (String.trim_trailing(gate) <> "\n| Extra | `docs/extra.md` |\n")
+    |> Fixture.open_milestone_documents()
+    |> assert_invalid("one visible contiguous table")
+  end
+
+  test "documentation paths are canonical portable repository paths" do
+    valid = Fixture.open_milestone_documents(Fixture.gate())
+
+    for {category, original, directory, other_directory} <- [
+          {
+            "Operator-facing documentation",
+            "N/A — no operator behavior changes",
+            "docs/operator",
+            "docs/developer"
+          },
+          {
+            "Developer-facing documentation",
+            "N/A — no developer behavior changes",
+            "docs/developer",
+            "docs/operator"
+          }
+        ],
+        adversarial_path <- [
+          "/#{directory}/runtime.md",
+          "#{directory}/../#{other_directory |> String.split("/") |> List.last()}/runtime.md",
+          "#{directory}/../../runtime.md",
+          "#{directory}/./runtime.md",
+          "#{directory}//runtime.md",
+          "#{directory}/sub\\runtime.md",
+          "#{directory}/run" <> <<0>> <> "book.md",
+          "#{directory}/run" <> <<9>> <> "book.md"
+        ] do
+      valid
+      |> Map.update!("docs/plans/M0-gate.md", fn gate ->
+        String.replace(
+          gate,
+          "| #{category} | #{original} |",
+          "| #{category} | `#{adversarial_path}` |"
+        )
+      end)
+      |> assert_invalid("invalid documentation path set")
+    end
+  end
+
+  test "documentation path lists and the complete path set are satisfiable" do
+    valid = Fixture.open_milestone_documents(Fixture.gate())
+    original = "N/A — no operator behavior changes"
+
+    for {malformed, expected} <- [
+          {", `docs/operator/runtime.md`", "must name exact Markdown paths"},
+          {"`docs/operator/runtime.md`, ", "malformed table row"},
+          {"`docs/operator/runtime.md`, , `docs/operator/recovery.md`",
+           "must name exact Markdown paths"},
+          {"`docs/operator/runtime.md`, `docs/operator/runtime.md`",
+           "invalid documentation path set"}
+        ] do
+      valid
+      |> Map.update!("docs/plans/M0-gate.md", fn gate ->
+        String.replace(gate, original, malformed)
+      end)
+      |> assert_invalid(expected)
+    end
+
+    for impossible <- [
+          "`docs/operator/Guide.md`, `docs/operator/guide.md`",
+          "`docs/operator/guide.md`, `docs/operator/guide.md/child.md`"
+        ] do
+      valid
+      |> Map.update!("docs/plans/M0-gate.md", fn gate ->
+        String.replace(gate, original, impossible)
+      end)
+      |> assert_invalid("colliding or impossible path set")
+    end
+
+    for {category, original_guide, impossible_guide, readme_category, readme_original,
+         readme_path} <- [
+          {
+            "Operator-facing documentation",
+            "N/A — no operator behavior changes",
+            "docs/operator/README.md/runtime.md",
+            "Operator README",
+            "N/A — no operator documentation set",
+            "docs/operator/README.md"
+          },
+          {
+            "Developer-facing documentation",
+            "N/A — no developer behavior changes",
+            "docs/developer/README.md/runtime.md",
+            "Developer README",
+            "N/A — no developer documentation set",
+            "docs/developer/README.md"
+          }
+        ] do
+      valid
+      |> Map.update!("docs/plans/M0-gate.md", fn gate ->
+        String.replace(
+          gate,
+          "| #{category} | #{original_guide} |",
+          "| #{category} | `#{impossible_guide}` |"
+        )
+        |> String.replace(
+          "| #{readme_category} | #{readme_original} |",
+          "| #{readme_category} | `#{readme_path}` |"
+        )
+      end)
+      |> assert_invalid("colliding or impossible path set")
+    end
+  end
+
   test "markdown classification rejects ambiguous paths" do
     for {path, fragment} <- [
           {"docs/unknown.md", "paired technical document is missing"},

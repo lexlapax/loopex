@@ -37,19 +37,24 @@ defmodule Loopex.HistoryAnchoringTest do
   @gate_path "docs/plans/M0-gate.md"
 
   defp one_artifact_gate do
-    "# Gate\n\n## Bound Artifacts\n\n| SHA-256 | Path |\n| --- | --- |\n" <>
+    artifact_gate() <>
       "| `#{Markdown.digest(@good)}` | `#{@runner}` |\n"
   end
 
   defp two_artifact_gate do
-    "# Gate\n\n## Bound Artifacts\n\n| SHA-256 | Path |\n| --- | --- |\n" <>
+    artifact_gate() <>
       "| `#{Markdown.digest(@good)}` | `#{@runner}` |\n" <>
       "| `#{Markdown.digest(@other)}` | `#{@config}` |\n"
   end
 
   defp config_only_gate do
-    "# Gate\n\n## Bound Artifacts\n\n| SHA-256 | Path |\n| --- | --- |\n" <>
+    artifact_gate() <>
       "| `#{Markdown.digest(@other)}` | `#{@config}` |\n"
+  end
+
+  defp artifact_gate do
+    String.trim_trailing(Fixture.gate()) <>
+      "\n\n## Bound Artifacts\n\n| SHA-256 | Path |\n| --- | --- |\n"
   end
 
   defp sha(letter), do: String.duplicate(letter, 40)
