@@ -583,6 +583,29 @@ noncanonical, colliding, or impossible declarations. It authorizes this direct
 administrative rebind and continued M1 implementation; it does not authorize a
 merge to `main`, closure, release, or any gate weakening.
 
+<a id="disposition-m1-amendment-5-2026-08-23"></a>
+### M1 Amendment 5 acceptance — 2026-08-23
+
+The maintainer's standing explicit acceptance applies to the `M1` Amendment 5
+proposal at candidate `80a9bc60e44be3e8507314c7da6cda75944be885`
+because its independently reviewed repair preserves Loopex's product-feature
+and architecture zoom-out shape. The independent exact-candidate review
+reported APPROVE with no findings. Acceptance binds the unchanged Concept
+envelope at
+`sha256:dad88ff975fd5f9a418a279c58f321d41b92cc52842775465daac190eb0bcf62`,
+the unchanged Technical depth envelope at
+`sha256:163275593815b801ca0dd13e4b34f57cd426134ee1354695393fae6fa7b8a73b`,
+and the amended gate at
+`sha256:9f56a94e2712baacd7b87a5b62833f79e6f4a23c38a946326d58ec1dbd86bb35`.
+
+This acceptance makes the locked selector corpus consumable by the standalone
+runner and admits OTP included applications only through the already accepted
+source-derived dependency closure. It changes no M1 product outcome, scope,
+public contract, command, selector identity, minimum, evidence class, or
+closure obligation. It authorizes this direct administrative rebind and the
+remaining M1 closure proof; it does not authorize a merge to `main`, closure,
+release, or any gate weakening.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
