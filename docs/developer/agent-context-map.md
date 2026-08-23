@@ -542,6 +542,26 @@ review. The administrative acceptance transition still changes only the ADR
 status and governance row plus the plans register's derived status capsule, and
 it still requires an independent read-only exact-diff review.
 
+<a id="disposition-m1-amendment-3-2026-08-22"></a>
+### M1 Amendment 3 acceptance — 2026-08-22
+
+The maintainer explicitly accepted the `M1` Amendment 3 proposal at candidate
+`267a771dfa888a30a6f5a303588337067415c5cb` after receiving an independent
+exact-candidate APPROVE verdict with no findings. Acceptance binds the unchanged
+Concept envelope at
+`sha256:dad88ff975fd5f9a418a279c58f321d41b92cc52842775465daac190eb0bcf62`,
+the unchanged Technical depth envelope at
+`sha256:163275593815b801ca0dd13e4b34f57cd426134ee1354695393fae6fa7b8a73b`,
+and the amended gate at
+`sha256:64f581a1af94bc646b2a4c19a3e8c5d539a1f973643b2ed207adcd745400afa9`.
+
+This acceptance preserves the historical opening-red proof through an isolated
+no-hardlink clone while allowing the current implementation tree to advance to
+later protected selectors. It changes no M1 product outcome, scope, command,
+selector, minimum, evidence class, closure document, or public obligation. It
+authorizes this direct administrative rebind; it does not authorize a merge to
+`main`, closure, release, or any gate weakening.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
