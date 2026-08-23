@@ -22,10 +22,10 @@ integrated product baseline.
 | --- | --- |
 | Integrated phase | Pre-implementation planning |
 | Last closed product checkpoint | `M0` — 2026-08-21 |
-| Blockers | [ADR 0008](../adr/0008-owner-succession-recovery-and-runtime-placement.md#concept) must be accepted before Workstream A is revised and Workstream B is completed |
+| Blockers | None; `M1` is accepted and implementation may proceed |
 | Authorized work | Implementation inside the accepted `M1` envelopes and its locked gate on the designated milestone branch; no milestone product bytes integrate before closure |
-| Next maintainer decision | Accept or reject ADR 0008 |
-| Next transition | After ADR 0008 is accepted, revise Workstream A, rejoin Workstream B, and turn the locked gate green |
+| Next maintainer decision | None until `M1` is ready for independent review |
+| Next transition | Turn the locked gate green, then move `M1` to In progress and In review |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 

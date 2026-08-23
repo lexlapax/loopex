@@ -5,7 +5,7 @@
 
 Technical depth: [Recovery index and placement mechanics](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-22
 - **Decision owner:** Maintainer
 - **Prerequisite for:** revising `M1` Workstream A's Store catalogue and
@@ -15,7 +15,7 @@ Technical depth: [Recovery index and placement mechanics](0008-owner-succession-
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adr-0008-acceptance-2026-08-22) | candidate `720b7e9007b580dd36d6592a3f22f3b6603a87e6`; concept `sha256:72f93bbf3fad9bc9ba88a9c8edced02355c04b2add2ccd62f01bc9658cfc047c`; technical `sha256:3ec1e35596a10890650752f04436b43168ce2d2724dd9bb2a336d85b3faddd4c` |
 
 <a id="concept-adr-0008-context"></a>
 ## Context
