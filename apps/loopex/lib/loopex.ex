@@ -218,4 +218,33 @@ defmodule Loopex do
   """
   @spec session_status(Runtime.t(), binary()) :: {:ok, map()} | {:error, term()}
   def session_status(runtime, session_id), do: Runtime.session_status(runtime, session_id)
+
+  @doc """
+  ## Concept
+
+  Opens the current recovery question for an effect whose durable intent has no
+  committed fact.
+
+  ## Technical depth
+
+  The query is transient and owner-scoped. It carries the complete values a
+  response must echo and does not dispatch or retry the effect.
+  """
+  @spec reconciliation_query(Attachment.t()) :: {:ok, map()} | {:error, term()}
+  def reconciliation_query(attachment), do: Runtime.reconciliation_query(attachment)
+
+  @doc """
+  ## Concept
+
+  Offers retained executor evidence—or explicit insufficient evidence—to the
+  current session owner.
+
+  ## Technical depth
+
+  Only a response to the current solicited query can commit a receipt fact or
+  `outcome_unknown`. The caller supplies evidence; the runtime validates and
+  owns the durable transition.
+  """
+  @spec reconcile(Attachment.t(), map()) :: :ok | {:error, term()}
+  def reconcile(attachment, response), do: Runtime.reconcile(attachment, response)
 end

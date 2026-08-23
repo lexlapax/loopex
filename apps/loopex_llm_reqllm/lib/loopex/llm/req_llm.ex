@@ -102,7 +102,10 @@ defmodule Loopex.LLM.ReqLLM do
   @type reply :: %{
           text: String.t(),
           identity: identity(),
-          usage: %{input_tokens: non_neg_integer() | nil, output_tokens: non_neg_integer() | nil}
+          usage: %{input_tokens: non_neg_integer() | nil, output_tokens: non_neg_integer() | nil},
+          tool_calls: [map()],
+          canonical_request_bytes: binary(),
+          canonical_request_digest: binary()
         }
 
   @doc """
@@ -194,8 +197,10 @@ defmodule Loopex.LLM.ReqLLM do
     with :ok <- Model.validate_request(request),
          {:ok, prompt} <- user_text(request),
          {:ok, credential} <- credential(),
-         {:ok, identity} <- identity(request.model) do
-      dispatch(request.model, prompt, credential, identity, request.max_tokens)
+         {:ok, identity} <- identity(request.model),
+         {:ok, tools} <- provider_tools(request.tools),
+         {:ok, tool_choice} <- provider_tool_choice(request.tool_choice) do
+      dispatch(request, prompt, credential, identity, tools, tool_choice)
     end
   end
 
@@ -208,14 +213,24 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
-  defp dispatch(model_spec, prompt, credential, identity, max_tokens) do
-    case ReqLLM.generate_text(model_spec, prompt, api_key: credential, max_tokens: max_tokens) do
+  defp dispatch(request, prompt, credential, identity, tools, tool_choice) do
+    options = [
+      api_key: credential,
+      max_tokens: request.max_tokens,
+      tools: tools,
+      tool_choice: tool_choice
+    ]
+
+    case ReqLLM.generate_text(request.model, prompt, options) do
       {:ok, response} ->
         {:ok,
          %{
            text: ReqLLM.Response.text(response),
            identity: identity,
-           usage: usage(response)
+           usage: usage(response),
+           tool_calls: Enum.map(ReqLLM.Response.tool_calls(response), &ReqLLM.ToolCall.to_map/1),
+           canonical_request_bytes: request.canonical_request_bytes,
+           canonical_request_digest: request.canonical_request_digest
          }}
 
       {:error, error} ->
@@ -228,6 +243,47 @@ defmodule Loopex.LLM.ReqLLM do
        do: {:ok, content}
 
   defp user_text(_request), do: {:error, :unsupported_model_request}
+
+  defp provider_tools(tools) when is_list(tools) do
+    Enum.reduce_while(tools, {:ok, []}, fn definition, {:ok, built} ->
+      case provider_tool(definition) do
+        {:ok, tool} -> {:cont, {:ok, [tool | built]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, built} -> {:ok, Enum.reverse(built)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp provider_tool(%{
+         "name" => name,
+         "description" => description,
+         "input_schema" => input_schema
+       })
+       when is_binary(name) and is_binary(description) and is_map(input_schema) do
+    case ReqLLM.Tool.new(
+           name: name,
+           description: description,
+           parameter_schema: input_schema,
+           callback: fn _arguments -> {:error, :executor_boundary_required} end
+         ) do
+      {:ok, tool} -> {:ok, tool}
+      {:error, _reason} -> {:error, :invalid_model_tool}
+    end
+  end
+
+  defp provider_tool(_definition), do: {:error, :invalid_model_tool}
+
+  defp provider_tool_choice("auto"), do: {:ok, :auto}
+  defp provider_tool_choice("none"), do: {:ok, :none}
+  defp provider_tool_choice("required"), do: {:ok, :required}
+
+  defp provider_tool_choice(%{"type" => "tool", "name" => name}) when is_binary(name),
+    do: {:ok, %{type: "tool", name: name}}
+
+  defp provider_tool_choice(_choice), do: {:error, :invalid_model_tool_choice}
 
   # Concept: usage crosses the boundary as two counts, not as a provider type.
   defp usage(response) do

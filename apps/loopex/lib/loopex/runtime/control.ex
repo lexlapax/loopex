@@ -81,6 +81,11 @@ defmodule Loopex.Runtime.Control do
        runtime_id: Keyword.fetch!(options, :runtime_id),
        store: Keyword.fetch!(options, :store),
        attachment_capacity: Keyword.fetch!(options, :attachment_capacity),
+       model: Keyword.fetch!(options, :model),
+       executor: Keyword.fetch!(options, :executor),
+       tool: Keyword.fetch!(options, :tool),
+       grant_decision: Keyword.fetch!(options, :grant_decision),
+       fault_to: Keyword.fetch!(options, :fault_to),
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
        sessions: %{},
        monitor_to_session: %{},
@@ -93,7 +98,9 @@ defmodule Loopex.Runtime.Control do
     if token == state.token do
       configuration = %{
         runtime_id: state.runtime_id,
-        attachment_capacity: state.attachment_capacity
+        attachment_capacity: state.attachment_capacity,
+        model_configured: is_map(state.model),
+        executor_identity: if(is_map(state.executor), do: state.executor.identity, else: nil)
       }
 
       {:reply, {:ok, configuration}, state}
@@ -317,7 +324,8 @@ defmodule Loopex.Runtime.Control do
   end
 
   defp do_start_owner(state, session_id, succession_id) do
-    with {:ok, %{sessions: session_supervisor}} <- RuntimeSupervisor.children(state.root) do
+    with {:ok, %{sessions: session_supervisor, workers: workers}} <-
+           RuntimeSupervisor.children(state.root) do
       counter = state.generation_counter + 1
       generation = fresh_id("generation", state.runtime_id, counter)
 
@@ -336,7 +344,13 @@ defmodule Loopex.Runtime.Control do
         session_id: session_id,
         generation: generation,
         succession_id: succession_id,
-        prior_tx_id: prior_tx_id
+        prior_tx_id: prior_tx_id,
+        workers: workers,
+        model: state.model,
+        executor: state.executor,
+        tool: state.tool,
+        grant_decision: state.grant_decision,
+        fault_to: state.fault_to
       ]
 
       case DynamicSupervisor.start_child(session_supervisor, {SessionCoordinator, options}) do

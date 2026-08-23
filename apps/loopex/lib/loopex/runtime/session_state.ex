@@ -304,6 +304,90 @@ defmodule Loopex.Runtime.SessionState do
     |> Enum.sort_by(&Map.fetch!(&1, :run_id))
   end
 
+  @doc false
+  @spec propose_model_request(t(), binary(), Loopex.Model.request()) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_model_request(%__MODULE__{} = state, run_id, request)
+      when is_binary(run_id) and is_map(request) do
+    work = Map.get(state.pending_work, run_id, %{})
+    turn_number = Map.get(work, :turn_number, 1)
+
+    record = %{
+      "run_id" => run_id,
+      "turn_id" => stable_id("turn", run_id, turn_number),
+      "request" => encode_plain(request),
+      kind: "model_request_committed"
+    }
+
+    internal_proposal(
+      state,
+      stable_id("model-request", run_id, request.canonical_request_digest),
+      record
+    )
+  end
+
+  @doc false
+  @spec propose_model_result(t(), binary(), map()) :: {:ok, proposal()} | {:error, term()}
+  def propose_model_result(%__MODULE__{} = state, run_id, reply)
+      when is_binary(run_id) and is_map(reply) do
+    record = %{
+      "run_id" => run_id,
+      "reply" => encode_plain(reply),
+      kind: "model_result_committed"
+    }
+
+    internal_proposal(
+      state,
+      stable_id("model-result", run_id, reply.canonical_request_digest),
+      record
+    )
+  end
+
+  @doc false
+  @spec propose_effect_intent(
+          t(),
+          binary(),
+          Loopex.Executor.job_request(),
+          Loopex.Executor.grant()
+        ) :: {:ok, proposal()} | {:error, term()}
+  def propose_effect_intent(%__MODULE__{} = state, run_id, job, grant)
+      when is_binary(run_id) and is_map(job) and is_map(grant) do
+    record = %{
+      "run_id" => run_id,
+      "job" => encode_plain(job),
+      "grant" => encode_plain(grant),
+      kind: "effect_intent_committed"
+    }
+
+    internal_proposal(state, stable_id("effect-intent", run_id, job.job_id), record)
+  end
+
+  @doc false
+  @spec propose_executor_fact(t(), binary(), map()) :: {:ok, proposal()} | {:error, term()}
+  def propose_executor_fact(%__MODULE__{} = state, run_id, receipt)
+      when is_binary(run_id) and is_map(receipt) do
+    record = %{
+      "run_id" => run_id,
+      "receipt" => encode_plain(receipt),
+      kind: "executor_receipt_committed"
+    }
+
+    internal_proposal(state, stable_id("executor-fact", run_id, receipt.job_id), record)
+  end
+
+  @doc false
+  @spec propose_outcome_unknown(t(), binary(), binary()) :: {:ok, proposal()} | {:error, term()}
+  def propose_outcome_unknown(%__MODULE__{} = state, run_id, reconciliation_ref)
+      when is_binary(run_id) and is_binary(reconciliation_ref) do
+    record = %{
+      "run_id" => run_id,
+      "reconciliation_ref" => reconciliation_ref,
+      kind: "outcome_unknown_committed"
+    }
+
+    internal_proposal(state, stable_id("outcome-unknown", run_id, reconciliation_ref), record)
+  end
+
   defp propose_new(%__MODULE__{active_run_id: nil} = state, %{type: :prompt} = command, digest) do
     run_id = stable_id("run", state.session_id, command.command_id)
     reply = {:accepted, command.command_id}
@@ -460,6 +544,41 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  defp replay_record(
+         state,
+         %{
+           journal_version: version,
+           owner_epoch: owner_epoch,
+           owner_incarnation_id: incarnation,
+           payload: %{kind: kind} = record
+         }
+       )
+       when kind in [
+              "model_request_committed",
+              "model_result_committed",
+              "effect_intent_committed",
+              "executor_receipt_committed",
+              "outcome_unknown_committed"
+            ] do
+    if version == state.journal_version + 1 and owner_epoch == state.owner_epoch and
+         incarnation == state.owner_incarnation_id and is_binary(incarnation) do
+      case apply_internal_record(state, record) do
+        {:ok, next, events} ->
+          {:ok,
+           %{
+             next
+             | journal_version: version,
+               expected_events: state.expected_events ++ events
+           }}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:error, :invalid_internal_owner_stamp}
+    end
+  end
+
   defp replay_record(_state, _record), do: {:error, :invalid_private_history}
 
   defp apply_command_record(state, record) do
@@ -495,7 +614,14 @@ defmodule Loopex.Runtime.SessionState do
        ) do
     with {:ok, run_id} <- record_binary(record, "run_id"),
          {:ok, content} <- record_binary(record, "content") do
-      work = %{type: "model", run_id: run_id, command_id: command_id, content: content}
+      work = %{
+        type: "model",
+        stage: "model_pending",
+        run_id: run_id,
+        command_id: command_id,
+        content: content,
+        turn_number: 1
+      }
 
       expected_events =
         state.expected_events ++ prompt_events(state.session_id, command_id, run_id, content)
@@ -549,6 +675,296 @@ defmodule Loopex.Runtime.SessionState do
 
   defp command_effect(_state, _record, _command_type, _admission, _command_id),
     do: {:error, :invalid_command_transition}
+
+  defp internal_proposal(state, tx_id, record) do
+    with {:ok, next, events} <- apply_internal_record(state, record) do
+      next = %{next | expected_events: state.expected_events ++ events}
+      {:ok, proposal(tx_id, record, events, next, {:accepted, tx_id})}
+    end
+  end
+
+  defp apply_internal_record(state, %{
+         "run_id" => run_id,
+         "turn_id" => turn_id,
+         "request" => request,
+         kind: "model_request_committed"
+       }) do
+    with {:ok, request} <- decode_request(request),
+         %{stage: "model_pending"} = work <- Map.get(state.pending_work, run_id),
+         :ok <- Loopex.Model.validate_request(request),
+         true <- turn_id == stable_id("turn", run_id, work.turn_number) do
+      next_work =
+        Map.merge(work, %{stage: "model_dispatched", turn_id: turn_id, request: request})
+
+      {:ok, put_pending(state, run_id, next_work), []}
+    else
+      _other -> {:error, :invalid_model_request_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{
+         "run_id" => run_id,
+         "reply" => reply,
+         kind: "model_result_committed"
+       }) do
+    with {:ok, reply} <- decode_reply(reply),
+         %{stage: "model_dispatched", request: request} = work <-
+           Map.get(state.pending_work, run_id),
+         true <- reply.canonical_request_bytes == request.canonical_request_bytes,
+         true <- reply.canonical_request_digest == request.canonical_request_digest,
+         true <- is_binary(reply.text),
+         true <- is_list(reply.tool_calls) do
+      apply_model_reply(state, work, reply)
+    else
+      _other -> {:error, :invalid_model_result_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{
+         "run_id" => run_id,
+         "job" => job,
+         "grant" => grant,
+         kind: "effect_intent_committed"
+       }) do
+    with {:ok, job} <- decode_job(job),
+         {:ok, grant} <- decode_grant(grant),
+         %{stage: "effect_pending", tool_call: call, turn_id: turn_id} = work <-
+           Map.get(state.pending_work, run_id),
+         :ok <- Loopex.Executor.validate_job(job),
+         true <- job.run_id == run_id and job.turn_id == turn_id,
+         true <- job.tool_call_id == call.id,
+         true <- is_map(grant) do
+      next_work = Map.merge(work, %{stage: "effect_dispatched", job: job, grant: grant})
+
+      {:ok, put_pending(state, run_id, next_work), [tool_started_event(state.session_id, job)]}
+    else
+      _other -> {:error, :invalid_effect_intent_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{
+         "run_id" => run_id,
+         "receipt" => receipt,
+         kind: "executor_receipt_committed"
+       }) do
+    with {:ok, receipt} <- decode_receipt(receipt),
+         %{stage: "effect_dispatched", job: job, tool_call: call} = work <-
+           Map.get(state.pending_work, run_id),
+         :ok <- receipt_matches_job(receipt, job),
+         true <- receipt.outcome == :completed do
+      next_work =
+        work
+        |> Map.merge(%{
+          stage: "model_pending",
+          content: "Tool #{call.name} completed: completed",
+          turn_number: work.turn_number + 1
+        })
+        |> Map.drop([:job, :grant, :request, :turn_id, :tool_call])
+
+      {:ok, put_pending(state, run_id, next_work),
+       [tool_finished_event(state.session_id, job, "completed")]}
+    else
+      _other -> {:error, :invalid_executor_receipt_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{
+         "run_id" => run_id,
+         "reconciliation_ref" => reconciliation_ref,
+         kind: "outcome_unknown_committed"
+       }) do
+    with %{stage: "effect_dispatched", job: job} <- Map.get(state.pending_work, run_id),
+         true <- is_binary(reconciliation_ref) and byte_size(reconciliation_ref) > 0 do
+      events = [
+        tool_finished_event(state.session_id, job, "outcome_unknown"),
+        run_finished_event(state.session_id, run_id, "outcome_unknown", reconciliation_ref)
+      ]
+
+      {:ok, %{state | active_run_id: nil, pending_work: Map.delete(state.pending_work, run_id)},
+       events}
+    else
+      _other -> {:error, :invalid_outcome_unknown_transition}
+    end
+  end
+
+  defp apply_internal_record(_state, _record), do: {:error, :invalid_internal_transition}
+
+  defp apply_model_reply(state, work, %{tool_calls: []} = reply) do
+    events = [
+      assistant_event(state.session_id, work.run_id, work.turn_id, reply.text),
+      run_finished_event(state.session_id, work.run_id, "completed", nil)
+    ]
+
+    {:ok,
+     %{state | active_run_id: nil, pending_work: Map.delete(state.pending_work, work.run_id)},
+     events}
+  end
+
+  defp apply_model_reply(state, work, %{tool_calls: [call]} = reply) when is_map(call) do
+    with %{id: id, name: name, arguments: arguments} <- call,
+         true <-
+           is_binary(id) and byte_size(id) > 0 and is_binary(name) and
+             byte_size(name) > 0 and is_map(arguments) do
+      event = assistant_event(state.session_id, work.run_id, work.turn_id, reply.text)
+      next_work = Map.merge(work, %{stage: "effect_pending", tool_call: call})
+      {:ok, put_pending(state, work.run_id, next_work), [event]}
+    else
+      _other -> {:error, :invalid_model_tool_call}
+    end
+  end
+
+  defp apply_model_reply(_state, _work, _reply), do: {:error, :invalid_model_tool_batch}
+
+  defp receipt_matches_job(receipt, job) do
+    fields = [
+      :job_id,
+      :operation_id,
+      :attempt,
+      :session_id,
+      :run_id,
+      :turn_id,
+      :tool_call_id,
+      :canonical_request_digest,
+      :fencing_token
+    ]
+
+    valid =
+      Enum.all?(fields, &(Map.get(receipt, &1) == Map.get(job, &1))) and
+        receipt.session_epoch_at_dispatch == job.origin_session_epoch and
+        receipt.executor_epoch == job.origin_executor_epoch and
+        receipt.executor_identity == job.executor_identity
+
+    if valid, do: :ok, else: {:error, :receipt_identity_mismatch}
+  end
+
+  defp put_pending(state, run_id, work),
+    do: %{state | pending_work: Map.put(state.pending_work, run_id, work)}
+
+  defp encode_plain(value) when value in [nil, true, false], do: value
+  defp encode_plain(value) when is_atom(value), do: Atom.to_string(value)
+  defp encode_plain(value) when is_binary(value) or is_integer(value), do: value
+  defp encode_plain(value) when is_list(value), do: Enum.map(value, &encode_plain/1)
+
+  defp encode_plain(value) when is_map(value) do
+    Map.new(value, fn {key, nested} ->
+      encoded_key = if is_atom(key), do: Atom.to_string(key), else: key
+      {encoded_key, encode_plain(nested)}
+    end)
+  end
+
+  defp decode_request(encoded) do
+    fields = [
+      :protocol_version,
+      :model,
+      :messages,
+      :tools,
+      :tool_choice,
+      :max_tokens,
+      :canonical_request_bytes,
+      :canonical_request_digest
+    ]
+
+    decode_top(encoded, fields)
+  end
+
+  defp decode_reply(encoded) do
+    fields = [
+      :text,
+      :identity,
+      :usage,
+      :tool_calls,
+      :canonical_request_bytes,
+      :canonical_request_digest
+    ]
+
+    with {:ok, reply} <- decode_top(encoded, fields),
+         {:ok, calls} <- decode_tool_calls(reply.tool_calls) do
+      {:ok, %{reply | tool_calls: calls}}
+    end
+  end
+
+  defp decode_tool_calls(calls) when is_list(calls) do
+    Enum.reduce_while(calls, {:ok, []}, fn call, {:ok, decoded} ->
+      case decode_top(call, [:id, :name, :arguments]) do
+        {:ok, found} -> {:cont, {:ok, [found | decoded]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, decoded} -> {:ok, Enum.reverse(decoded)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp decode_tool_calls(_calls), do: {:error, :invalid_plain_record}
+
+  defp decode_job(encoded) do
+    decode_top(
+      encoded,
+      Loopex.Executor.job_fields() ++ [:canonical_request_bytes, :canonical_request_digest]
+    )
+  end
+
+  defp decode_grant(encoded) do
+    fields = Loopex.Executor.required_grant_bindings() ++ [:issued_by, :policy_context]
+
+    with {:ok, grant} <- decode_top(encoded, fields),
+         "host_policy_allow" <- grant.issued_by do
+      {:ok, %{grant | issued_by: :host_policy_allow}}
+    else
+      _other -> {:error, :invalid_plain_grant}
+    end
+  end
+
+  defp decode_receipt(encoded) do
+    fields = [
+      :protocol_version,
+      :job_id,
+      :operation_id,
+      :attempt,
+      :session_id,
+      :run_id,
+      :turn_id,
+      :tool_call_id,
+      :session_epoch_at_dispatch,
+      :executor_epoch,
+      :executor_identity,
+      :canonical_request_digest,
+      :fencing_token,
+      :tool_id,
+      :tool_version,
+      :outcome,
+      :output,
+      :observed_at_ms,
+      :child_environment_names,
+      :provider_credential_present
+    ]
+
+    with {:ok, receipt} <- decode_top(encoded, fields),
+         {:ok, outcome} <- decode_receipt_outcome(receipt.outcome) do
+      {:ok, %{receipt | outcome: outcome}}
+    else
+      _other -> {:error, :invalid_plain_receipt}
+    end
+  end
+
+  defp decode_receipt_outcome("completed"), do: {:ok, :completed}
+
+  defp decode_receipt_outcome("cancelled_workspace_lease_lost"),
+    do: {:ok, :cancelled_workspace_lease_lost}
+
+  defp decode_receipt_outcome(_outcome), do: {:error, :invalid_plain_receipt}
+
+  defp decode_top(encoded, fields) when is_map(encoded) do
+    Enum.reduce_while(fields, {:ok, %{}}, fn field, {:ok, decoded} ->
+      case Map.fetch(encoded, Atom.to_string(field)) do
+        {:ok, value} -> {:cont, {:ok, Map.put(decoded, field, value)}}
+        :error -> {:halt, {:error, :invalid_plain_record}}
+      end
+    end)
+  end
+
+  defp decode_top(_encoded, _fields), do: {:error, :invalid_plain_record}
 
   defp record_binary(record, key) do
     case Map.fetch(record, key) do
@@ -667,6 +1083,49 @@ defmodule Loopex.Runtime.SessionState do
         kind: "run.started"
       }
     ]
+  end
+
+  defp assistant_event(session_id, run_id, turn_id, content) do
+    %{
+      "run_id" => run_id,
+      "turn_id" => turn_id,
+      "content" => content,
+      event_id: stable_id("event-assistant", session_id, turn_id),
+      kind: "assistant.message_appended"
+    }
+  end
+
+  defp tool_started_event(session_id, job) do
+    %{
+      "run_id" => job.run_id,
+      "turn_id" => job.turn_id,
+      "tool_call_id" => job.tool_call_id,
+      "operation_id" => job.operation_id,
+      event_id: stable_id("event-tool-started", session_id, job.tool_call_id),
+      kind: "tool.started"
+    }
+  end
+
+  defp tool_finished_event(session_id, job, outcome) do
+    %{
+      "run_id" => job.run_id,
+      "turn_id" => job.turn_id,
+      "tool_call_id" => job.tool_call_id,
+      "operation_id" => job.operation_id,
+      "outcome" => outcome,
+      event_id: stable_id("event-tool-finished", session_id, job.tool_call_id),
+      kind: "tool.finished"
+    }
+  end
+
+  defp run_finished_event(session_id, run_id, outcome, reconciliation_ref) do
+    %{
+      "run_id" => run_id,
+      "outcome" => outcome,
+      "reconciliation_ref" => reconciliation_ref,
+      event_id: stable_id("event-run-finished", session_id, run_id),
+      kind: "run.finished"
+    }
   end
 
   defp abort_event(session_id, command_id, run_id) do

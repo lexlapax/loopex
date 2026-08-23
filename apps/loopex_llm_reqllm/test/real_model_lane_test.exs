@@ -15,7 +15,10 @@ defmodule Loopex.LLM.ReqLLM.RealModelLaneTest do
          %{
            text: "deterministic:" <> content,
            identity: %{provider: "deterministic", model: request.model, endpoint: "in-process"},
-           usage: %{input_tokens: nil, output_tokens: nil}
+           usage: %{input_tokens: nil, output_tokens: nil},
+           tool_calls: [],
+           canonical_request_bytes: request.canonical_request_bytes,
+           canonical_request_digest: request.canonical_request_digest
          }}
       else
         {:error, reason} -> {:error, reason}
@@ -56,6 +59,8 @@ defmodule Loopex.LLM.ReqLLM.RealModelLaneTest do
 
   defp plain_reply?(reply) do
     is_binary(reply.text) and is_map(reply.identity) and is_map(reply.usage) and
+      is_list(reply.tool_calls) and is_binary(reply.canonical_request_bytes) and
+      is_binary(reply.canonical_request_digest) and
       Enum.all?([reply.identity, reply.usage], fn map ->
         Enum.all?(map, fn {key, value} -> is_atom(key) and plain?(value) end)
       end)

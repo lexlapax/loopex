@@ -16,7 +16,7 @@ defmodule Loopex.Model do
   """
 
   @protocol_version 1
-  @semantic_fields [:protocol_version, :model, :messages, :tools, :max_tokens]
+  @semantic_fields [:protocol_version, :model, :messages, :tools, :tool_choice, :max_tokens]
 
   @typedoc """
   ## Concept
@@ -34,6 +34,7 @@ defmodule Loopex.Model do
           required(:model) => binary(),
           required(:messages) => [map()],
           required(:tools) => [map()],
+          required(:tool_choice) => binary() | map(),
           required(:max_tokens) => pos_integer(),
           required(:canonical_request_bytes) => binary(),
           required(:canonical_request_digest) => binary()
@@ -52,7 +53,10 @@ defmodule Loopex.Model do
   @type reply :: %{
           required(:text) => binary(),
           required(:identity) => map(),
-          required(:usage) => map()
+          required(:usage) => map(),
+          required(:tool_calls) => [map()],
+          required(:canonical_request_bytes) => binary(),
+          required(:canonical_request_digest) => binary()
         }
 
   @callback complete(request(), keyword()) :: {:ok, reply()} | {:error, term()}
@@ -73,6 +77,7 @@ defmodule Loopex.Model do
   def request(model, messages, options)
       when is_binary(model) and is_list(messages) and is_list(options) do
     tools = Keyword.get(options, :tools, [])
+    tool_choice = Keyword.get(options, :tool_choice, "auto")
     max_tokens = Keyword.get(options, :max_tokens, 64)
 
     semantic = %{
@@ -80,6 +85,7 @@ defmodule Loopex.Model do
       model: model,
       messages: messages,
       tools: tools,
+      tool_choice: tool_choice,
       max_tokens: max_tokens
     }
 
@@ -134,7 +140,7 @@ defmodule Loopex.Model do
   guessing how to flatten them for a provider.
   """
   @spec single_user_text(request()) :: {:ok, binary()} | {:error, term()}
-  def single_user_text(%{messages: [%{role: "user", content: content}]})
+  def single_user_text(%{messages: [%{"role" => "user", "content" => content}]})
       when is_binary(content) and byte_size(content) > 0,
       do: {:ok, content}
 
@@ -145,13 +151,16 @@ defmodule Loopex.Model do
          model: model,
          messages: messages,
          tools: tools,
+         tool_choice: tool_choice,
          max_tokens: max_tokens
        })
        when is_binary(model) and byte_size(model) > 0 and byte_size(model) <= 512 and
               is_list(messages) and length(messages) > 0 and length(messages) <= 1_024 and
               is_list(tools) and length(tools) <= 256 and is_integer(max_tokens) and
               max_tokens > 0 and max_tokens <= 1_000_000 do
-    if plain?(messages) and plain?(tools), do: :ok, else: {:error, :invalid_model_request}
+    if plain?(messages) and plain?(tools) and plain?(tool_choice),
+      do: :ok,
+      else: {:error, :invalid_model_request}
   end
 
   defp validate_semantics(_semantic), do: {:error, :invalid_model_request}
