@@ -16,9 +16,13 @@ defmodule Loopex.Checks.Register do
 
   The register is an exact table whose link cells are determined by state: a
   Blocked milestone has no plan files yet and therefore no links, and every other
-  state must link all three. The revision-status sentence is recomputed from the
-  integrated phase and the register rows and compared byte for byte, in both the
-  plans index and the README, so a stale summary cannot survive a transition.
+  state must link all three. Two fields are derived from the register's `Closed`
+  rows by their own rule rather than by the lifecycle capsule — the integrated
+  phase and the last closed product checkpoint — because the capsule derives from
+  one milestone's state and those two describe the history behind it. The
+  revision-status sentence is recomputed from that derived phase and the register
+  rows and compared byte for byte, in both the plans index and the README, so a
+  stale summary cannot survive a transition.
 
   Authorised work widens only at acceptance. The blocked, open, accepted, and
   in-progress capsules inherit that boundary explicitly rather than each
@@ -48,6 +52,23 @@ defmodule Loopex.Checks.Register do
   @seed_checkpoint "Seed bootstrap — 2026-08-15"
   @validation "`bash scripts/check-bootstrap.sh`"
 
+  # Concept: the repository is either still before its first closed milestone or
+  # past it. Those are the only two phases the register can prove, so those are
+  # the only two this vocabulary has.
+  #
+  # Technical depth: a `Closed` row is the one product fact the checked-out bytes
+  # carry. Anything finer — which branch integrated what, whether a release
+  # followed, how much of the product is live — is a Git or publication fact this
+  # checker deliberately does not claim, for the reason recorded in
+  # `Loopex.Checks.Status`. The closed value names the kind of state and stops
+  # there: the milestone's identity and date belong to
+  # `Last closed product checkpoint`, so the two fields never restate each other,
+  # and it says nothing about what may now be done, which `Authorized work` owns
+  # alone. "Baseline" is the plans index's own word for what a Closed row
+  # identifies, so the phase and the index it heads speak one vocabulary.
+  @planning_phase "Pre-implementation planning"
+  @closed_product_phase "Closed milestone product baseline"
+
   @bootstrap_adrs [
     "docs/adr/0001-repository-and-application-layout.md",
     "docs/adr/0002-bootstrap-runtime-floor.md"
@@ -69,8 +90,15 @@ defmodule Loopex.Checks.Register do
 
   @m1_implementation_adr "docs/adr/0008-owner-succession-recovery-and-runtime-placement.md"
 
+  # Concept: the base every derived capsule starts from.
+  #
+  # Technical depth: `Integrated phase` is deliberately absent. It used to be
+  # assigned here, no builder ever overrode it, and the comparison in
+  # `Loopex.Checks.Status` therefore required the document to keep the seed value
+  # for every representable lifecycle state, Closed included. A constant no
+  # derivation can move does not belong in a derived capsule, so the field now has
+  # a dedicated owner and no base value to inherit.
   @seed_blocked %{
-    "Integrated phase" => "Pre-implementation planning",
     "Last closed product checkpoint" => @seed_checkpoint,
     "Blockers" =>
       "[ADR 0001](../adr/0001-repository-and-application-layout.md#concept) and " <>
@@ -364,6 +392,63 @@ defmodule Loopex.Checks.Register do
 
         :ok
     end
+  end
+
+  @doc """
+  ## Concept
+
+  The phase the register implies: `Pre-implementation planning` until a milestone
+  closes, and `Closed milestone product baseline` once one has.
+
+  ## Technical depth
+
+  Derived from the `Closed` rows and nothing else, which is what makes the value
+  checkable: no prose, no branch, and no run is consulted. `Closed` rows are
+  history and must precede every later state, so a `Closed` row after a
+  non-Closed one is not a register whose phase is merely unknown — it is a
+  register shape the lifecycle does not represent, and it raises here rather than
+  being counted into a friendly answer.
+  """
+  @spec integrated_phase([{String.t(), String.t()}]) :: String.t()
+  def integrated_phase(rows) do
+    {closed, tail} = Enum.split_while(rows, fn {_name, state} -> state == "Closed" end)
+
+    if Enum.any?(tail, fn {_name, state} -> state == "Closed" end) do
+      raise Invalid,
+            "#{@index}: Closed milestones must precede every later milestone state"
+    end
+
+    case closed do
+      [] -> @planning_phase
+      [_ | _] -> @closed_product_phase
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Checks the Integrated phase field against the register and returns the derived
+  phase the revision-status sentence is composed from.
+
+  ## Technical depth
+
+  Mirrors `closed_product_checkpoint/2`: one field, one owner, and the document's
+  value compared against a derivation rather than against a constant. Returning
+  the phase rather than `:ok` is what anchors the sentence — the summary is
+  composed from what the register implies, so the cell and the sentence cannot
+  agree with each other while both disagree with the register.
+  """
+  @spec integrated_phase(String.t(), [{String.t(), String.t()}]) :: String.t()
+  def integrated_phase(value, rows) do
+    expected = integrated_phase(rows)
+
+    if value != expected do
+      raise Invalid,
+            "#{@index}: Integrated phase must be #{inspect(expected)}, derived from the " <>
+              "register's Closed rows"
+    end
+
+    expected
   end
 
   @doc """
