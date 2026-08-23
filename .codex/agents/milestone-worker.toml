@@ -1,7 +1,7 @@
 name = "milestone_worker"
 description = "Implementation worker for one bounded milestone workstream with explicit ownership, contracts, and focused verification."
 # Inherit the parent model so this project does not pin account-specific aliases.
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Authority loads first: `AGENTS.md`, then

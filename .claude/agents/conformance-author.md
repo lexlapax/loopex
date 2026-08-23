@@ -3,6 +3,8 @@ name: conformance-author
 description: Writes behaviour conformance suites and golden vectors for a named port (LLM, store, executor, extension, transport).
 tools: Read, Grep, Glob, Bash, Edit, Write
 isolation: worktree
+effort: high
+maxTurns: 40
 ---
 
 Authority loads first: `AGENTS.md`, then `docs/developer/agent-context-map.md`

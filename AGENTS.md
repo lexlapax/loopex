@@ -354,11 +354,23 @@ neither authorizes acceptance by itself.
 
 ## Parallel Work and Portable Enforcement
 
-Parallelize independent exploration, tests, log analysis, and review freely.
-Parallel writes require declared non-overlapping ownership, distinct branch and
-checkpoint namespaces, and separate working directories and state roots such as
-one worktree or clone per writer. Otherwise serialize writes. One integrator
-owns rejoin, conflicts, the candidate SHA, and post-rejoin verification.
+Single-agent execution is the default. Delegate only when independent work can
+proceed concurrently, or when a bounded, noisy investigation is worth isolating
+from the parent context. Do not delegate sequential work, status checks, or work
+the parent can finish in one focused pass. Reuse a live child for follow-up
+instead of spawning another, and prefer a named specialized role over a
+general-purpose worker. Every delegation names one deliverable, its owned paths
+and state root, the required capability class, a completion check, and a stop or
+escalation condition. Ordinary fan-out stays at three live children besides the
+integrator, and a child creates no descendants unless the parent assigned
+multilevel decomposition explicitly.
+
+Within those limits, parallelize independent exploration, tests, log analysis,
+and review freely. Parallel writes require declared non-overlapping ownership,
+distinct branch and checkpoint namespaces, and separate working directories and
+state roots such as one worktree or clone per writer. Otherwise serialize
+writes. One integrator owns rejoin, conflicts, the candidate SHA, and
+post-rejoin verification.
 
 Workers preserve unrelated edits and avoid destructive Git operations. A
 subagent's scope is a subset of the parent request; spawning agents grants no
@@ -378,6 +390,15 @@ map; the caller selects and verifies the required class before invocation,
 because a role label is not proof of effective capability. Missing required
 deep capability is unavailable evidence. Shared policy never depends on a
 provider name or account-specific alias.
+
+A deep parent never implicitly promotes an unrelated child. Capability is
+selected per delegation by the caller, not inherited by default, because
+inheritance silently spends a deep profile on scans, inventories, and extraction
+that an efficient one answers as well. Repository role definitions stay
+model-neutral and pin no account-specific alias; where a client resolves a
+child's profile only by inheritance, the caller states the class at the call
+site. Escalate the decision-bearing workstream alone, and de-escalate once the
+decision is recorded.
 
 Landed work leaves no residue. Once a change is pushed and contained in the
 integration branch, the integrator deletes its branch and removes its worktree;
@@ -517,6 +538,16 @@ artifacts, and short decision/evidence pointers. Client memory, transcripts,
 task queues, worker summaries, and schedules are caches—not project state,
 authority, or acceptance evidence. Scheduled remediation inherits ordinary
 authority and otherwise produces a proposal.
+
+Because that context is a cache, compacting or restarting it loses nothing that
+was recorded properly. Compaction preserves the objective and acceptance
+criteria, exact base and candidate SHAs, the active plan, gate, and ADR
+references, authority and lifecycle state, owned and changed paths, and the
+decisions, blockers, commands, seeds, and evidence results reached so far. It
+discards raw logs, repeated policy prose, completed exploration, and historical
+plan material. Anything that must outlive the session belongs in git before
+compaction, not in a longer transcript; start a fresh session for unrelated
+work rather than carrying one context across milestones.
 
 Coding-agent ecosystem behavior is an input to this contract, not authority
 over it. When a coding agent or adjacent client changes features that may affect
