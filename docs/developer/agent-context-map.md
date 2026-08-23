@@ -562,6 +562,27 @@ selector, minimum, evidence class, closure document, or public obligation. It
 authorizes this direct administrative rebind; it does not authorize a merge to
 `main`, closure, release, or any gate weakening.
 
+<a id="disposition-m1-amendment-4-2026-08-22"></a>
+### M1 Amendment 4 acceptance — 2026-08-22
+
+The maintainer explicitly accepted the `M1` Amendment 4 proposal at candidate
+`771d847ab5b186f4552f294f78ffb63e5c7fca72` after receiving an independent
+exact-candidate APPROVE verdict with no findings. Acceptance binds the unchanged
+Concept envelope at
+`sha256:dad88ff975fd5f9a418a279c58f321d41b92cc52842775465daac190eb0bcf62`,
+the unchanged Technical depth envelope at
+`sha256:163275593815b801ca0dd13e4b34f57cd426134ee1354695393fae6fa7b8a73b`,
+and the amended gate at
+`sha256:618ab2256db05f689d7513bccde5dafa5e22f59b6d14880ddcdd6876dec8c482`.
+
+This acceptance makes the exact seven documentation-obligation categories a
+standing active-and-future milestone-gate contract, with Closed M0 as the sole
+migration exception. It binds M1 to all seven named documentation outcomes and
+accepts the generic portable enforcement that rejects hidden, malformed,
+noncanonical, colliding, or impossible declarations. It authorizes this direct
+administrative rebind and continued M1 implementation; it does not authorize a
+merge to `main`, closure, release, or any gate weakening.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
