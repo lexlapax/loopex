@@ -53,6 +53,10 @@ defmodule Loopex.LLM.ReqLLM do
   empty key.
   """
 
+  @behaviour Loopex.Model
+
+  alias Loopex.Model
+
   @credential_variable "LOOPEX_PROVIDER_API_KEY"
 
   # Concept: the pinned reference model. A provider-neutral credential name
@@ -160,24 +164,38 @@ defmodule Loopex.LLM.ReqLLM do
   @doc """
   ## Concept
 
-  Completes one model call and returns the assistant text with the identity and
-  usage it carried.
+  Completes one model call from either the canonical request boundary or the
+  retained M0 prompt convenience form, returning normalized text and identity.
 
   ## Technical depth
 
-  Fails before dispatch when the credential is absent or the specification does
-  not resolve, so neither condition reaches a provider. A provider failure is
-  returned as a bounded string with the credential substituted out.
+  Canonical bytes and digest are validated before the credential is read or a
+  provider is contacted. M1 supports one non-streaming user message. The M0
+  convenience clause first constructs that same canonical request. Provider
+  failures are returned as bounded strings with the credential substituted out.
   """
+  @impl Loopex.Model
   @spec complete(String.t(), String.t()) ::
           {:ok, reply()}
           | {:error, {:credential_unset, String.t()}}
           | {:error, {:unresolved_model, String.t(), term()}}
           | {:error, {:provider_call_failed, String.t()}}
   def complete(model_spec, prompt) when is_binary(model_spec) and is_binary(prompt) do
-    with {:ok, credential} <- credential(),
-         {:ok, identity} <- identity(model_spec) do
-      dispatch(model_spec, prompt, credential, identity)
+    with {:ok, request} <-
+           Model.request(model_spec, [%{"role" => "user", "content" => prompt}],
+             max_tokens: @max_tokens
+           ) do
+      complete(request, [])
+    end
+  end
+
+  @spec complete(Model.request(), keyword()) :: {:ok, reply()} | {:error, term()}
+  def complete(request, options) when is_map(request) and is_list(options) do
+    with :ok <- Model.validate_request(request),
+         {:ok, prompt} <- user_text(request),
+         {:ok, credential} <- credential(),
+         {:ok, identity} <- identity(request.model) do
+      dispatch(request.model, prompt, credential, identity, request.max_tokens)
     end
   end
 
@@ -190,8 +208,8 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
-  defp dispatch(model_spec, prompt, credential, identity) do
-    case ReqLLM.generate_text(model_spec, prompt, api_key: credential, max_tokens: @max_tokens) do
+  defp dispatch(model_spec, prompt, credential, identity, max_tokens) do
+    case ReqLLM.generate_text(model_spec, prompt, api_key: credential, max_tokens: max_tokens) do
       {:ok, response} ->
         {:ok,
          %{
@@ -204,6 +222,12 @@ defmodule Loopex.LLM.ReqLLM do
         {:error, {:provider_call_failed, scrub(error, credential)}}
     end
   end
+
+  defp user_text(%{messages: [%{"role" => "user", "content" => content}]})
+       when is_binary(content) and byte_size(content) > 0,
+       do: {:ok, content}
+
+  defp user_text(_request), do: {:error, :unsupported_model_request}
 
   # Concept: usage crosses the boundary as two counts, not as a provider type.
   defp usage(response) do

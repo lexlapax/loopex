@@ -23,7 +23,7 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
   end
 
   # Concept: the reference model adapter named in the vision. It depends outward
-  # on ReqLLM for provider transport and inward on the contract application; the
+  # on ReqLLM for provider transport and inward on core's Model behaviour; the
   # edge runs one way, and nothing in the umbrella depends on this application.
   #
   # Technical depth: the range is pinned rather than open so a provider-library
@@ -34,6 +34,7 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
   defp deps do
     [
       {:req_llm, "~> 1.17.1"},
+      {:loopex, in_umbrella: true},
       {:loopex_protocol, in_umbrella: true}
     ]
   end
