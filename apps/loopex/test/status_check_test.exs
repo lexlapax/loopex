@@ -449,9 +449,11 @@ defmodule Loopex.StatusCheckTest do
     )
     |> assert_invalid("Integrated phase")
 
-    # Rewriting every record together used to be enough, because the sentence was
-    # composed from whatever cell the document carried. It is composed from the
-    # register now, so the records agreeing with each other no longer settles it.
+    # The old capsule refused this one too, but only by luck of direction: its
+    # constant happened to be the right value while nothing had closed, and was
+    # the wrong one ever after. The hole it left was one-sided, and the closed
+    # register below is where it opened. This pins the property in every state,
+    # which one constant could not do in any.
     Fixture.documents()
     |> Map.new(fn {path, text} ->
       {path,

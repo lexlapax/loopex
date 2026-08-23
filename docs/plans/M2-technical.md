@@ -115,13 +115,10 @@ amendment, at that same revision, is:
 That failure propagates. `mix loopex.status` and `bash scripts/check-bootstrap.sh`
 are both locked M2 gate commands, bootstrap runs the status check, and
 `scripts/check-m0-gate.sh` runs bootstrap, so the closed M0 gate goes red
-transitively. Rebinding the digest in the same commit does not help, because a
-completed gate governance record is immutable outside its amendment path and
-`require_binding_persists!` refuses to let a declared artifact path be dropped:
-
-```text
-** (Mix) docs/plans/M1-gate.md: completed accepted gate governance record changed
-```
+transitively. Rebinding the digest outside the amendment path does not help
+either: a completed gate governance record is immutable, and the retained
+Acceptance row still names the prior bytes, so binding validation refuses the
+edit rather than adopting it.
 
 The only conforming path is an amendment to `docs/plans/M1-gate.md` under its
 existing `amendment-transaction-v1` marker, declaring the next consecutive
@@ -131,11 +128,13 @@ is fixed here so acceptance sees its whole cost:
 - **Decision owner.** The maintainer. This is a baseline exception against a
   closed, immutable gate and is explicitly non-delegable. Accepting the M2 plan
   pair does not imply it, authorize it, or schedule it.
-- **Rejoin position.** Amendment proposal `A` lands atomically with, or as the
-  immediate successor of, the workstream E commit that changes those two files.
-  It cannot land earlier, because at `A` the amended gate must be proved against
-  a tree that already carries the M2 bytes it rebinds. No other M2 commit may
-  sit between the byte change and `A`.
+- **Rejoin position.** Amendment proposal `A` is the same revision as the
+  workstream E commit that changes those two files. Not the successor of it:
+  `artifact_history/1` validates every reachable revision against its own gate
+  declaration, so a revision that changes a bound artifact without rebinding it
+  in that same commit fails at every descendant forever, and no later amendment
+  heals it. It cannot land earlier either, because at `A` the amended gate must
+  be proved against a tree that already carries the M2 bytes it rebinds.
 - **Transaction.** Two direct one-parent revisions. At `A` the prior M1
   Acceptance row and `Closed` lifecycle state are retained, so binding
   validation, bootstrap, and the M0 gate fail there only for the stale binding.
@@ -250,6 +249,16 @@ Rejoin barriers are serial and exact:
    three declared bounds, the delta algebra, the input queue, and the
    project-resource stage build on A. No tool implementation is integrated
    before B proves a turn dispatches only its committed bytes.
+
+   B also owns the Model port arity change. ADR 0011 makes `complete/2` into
+   `complete/3`, which touches every adapter at once and reaches three inherited
+   M1 roles: 5a `real_model_lane_test.exs`, and the real-provider roles 5b and
+   5c on `real_model_session_test.exs`. None of those files is a bound artifact,
+   so their bytes may change, but their locked case names and asserted behaviour
+   are reproduced exactly at M1's identities and states. B carries the migration
+   of the deterministic adapter, the ReqLLM adapter, and those three roles in one
+   rejoin rather than leaving it to whichever workstream trips over it, and it
+   re-runs 5b and 5c under the credential rule before C begins.
 3. **C — Coding tools, artifacts, and host policy rejoins third.**
    `loopex_executor_local` implements the four tools against A's contract and
    gains the `deny` path and owned-process termination, and `loopex_store_local`
@@ -533,8 +542,11 @@ The planned inventory becomes exactly seven applications with exact roles:
 Neither new port adds an application. The `Loopex.Policy` and `ArtifactStore`
 behaviours are declared in core, their reusable conformance suites live with the
 applications that implement them, the local artifact-store adapter lives in
-`loopex_store_local`, and the trusted-local `AllowAll` policy stays in a client
-application where ADR 0009 places it.
+`loopex_store_local`, and the trusted-local `AllowAll` policy ships in
+`loopex_executor_local` where ADR 0009 places it. That edge placement is forced
+rather than chosen: no application may depend on a `:client`, and Outcome 7's
+selector lives in the executor edge, so a client home would make its own locked
+case unimplementable.
 
 This changes the repository's own dependency check. `mix loopex.deps_budget` and
 its source, `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`, are product code

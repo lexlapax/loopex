@@ -51,9 +51,9 @@ already identifies that row, and neither field claims a merge the checked-out
 bytes cannot prove.
 
 While `M0` was the sole blocked candidate, the repository status check derived
-the complete capsule from the two founding ADR records. The authorized-work
-boundary and validation command stayed fixed, and these three fields changed
-exactly as disposition advanced:
+the complete capsule from the two founding ADR records. The seed checkpoint,
+authorized-work boundary, and validation command stayed fixed, and these three
+fields changed exactly as disposition advanced:
 
 | Accepted records | Blockers | Next maintainer decision | Next transition |
 | --- | --- | --- | --- |

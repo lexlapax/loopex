@@ -127,16 +127,17 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   (`queued`, `promoted`, `applied`, `unapplied`, `cancelled`), and terminal
   outcomes are durable and survive restart. A client's typed buffer, its pending
   indicator, and every streamed delta are not.
-- **The kernel proves all four inputs; the terminal surface may expose fewer.**
-  `M2` must prove admission, ordering, fencing, idempotency, the single
+- **The kernel proves all four inputs, and the terminal surface exposes all
+  four.** `M2` must prove admission, ordering, fencing, idempotency, the single
   application point, the unapplied-steer record, the promotion transition,
   restart recovery of a queued follow-up, and abort's cancellation of both
-  queues, through the embedded facade. The reference command must expose
-  `prompt` and `abort`. Exposing `steer` and `follow_up` to an operator may wait
-  for the headless session-protocol milestone, whose command families already
-  include both and whose transport gives a client a way to send one while a run
-  streams. That is a deferral of surface, not of semantics: the kernel behaviour
-  is proved here or it is not accepted here.
+  queues, through the embedded facade. The reference command exposes `prompt`,
+  `steer`, `follow_up`, and `abort`. None of the last three needs a transport:
+  the run streams in the operator's own foreground process, so that process
+  already owns the terminal a steering line arrives on and admits it through the
+  same public facade. Withholding the surface would leave an operator watching a
+  run they cannot redirect while the kernel underneath already accepts the
+  redirection, which is the promise this milestone exists to keep.
 
 ### Streaming progress
 
