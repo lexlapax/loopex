@@ -16,16 +16,16 @@ integrated product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Pre-implementation planning; active milestone `M1` is accepted; no next candidate is recorded.
+**Revision status:** Pre-implementation planning; active milestone `M1` is in review; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Pre-implementation planning |
 | Last closed product checkpoint | `M0` — 2026-08-21 |
-| Blockers | None; `M1` is accepted and implementation may proceed |
+| Blockers | None; `M1` awaits independent review of its closure candidate |
 | Authorized work | Implementation inside the accepted `M1` envelopes and its locked gate on the designated milestone branch; no milestone product bytes integrate before closure |
-| Next maintainer decision | None until `M1` is ready for independent review |
-| Next transition | Turn the locked gate green, then move `M1` to In progress and In review |
+| Next maintainer decision | Close `M1` or reject its closure candidate on the review findings |
+| Next transition | Record the closure governance row and move `M1` to Closed |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -122,7 +122,7 @@ representable.
 | Milestone | State | Concept | Technical depth | Gate |
 | --- | --- | --- | --- | --- |
 | `M0` | Closed | [concept](M0.md) | [technical depth](M0-technical.md) | [gate](M0-gate.md) |
-| `M1` | Accepted | [concept](M1.md) | [technical depth](M1-technical.md) | [gate](M1-gate.md) |
+| `M1` | In review | [concept](M1.md) | [technical depth](M1-technical.md) | [gate](M1-gate.md) |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept, Technical depth, and Gate columns link their

@@ -27,6 +27,7 @@ load only the sections a task needs rather than reading it end to end.
 | Document | Purpose |
 | --- | --- |
 | [Development charter](development-charter.md#concept) · [technical](development-charter-technical.md#technical-depth) | Clarity before mechanism, traceable depth, proportional documentation, capability routing. |
+| [Runtime and embedding](runtime-and-embedding.md#concept) | M1 application shape, explicit runtime composition, commit ordering, embedded API, recovery, and verification entrypoints. |
 | [Agent context map](agent-context-map.md) | Task-oriented routing into Concept first and exact Technical depth second; current client-ecosystem facts. |
 | [Adapter smoke evidence](agent-adapter-smoke.md) | Retained proof that development clients load the canonical contract and skills. |
 
@@ -38,4 +39,5 @@ records; they are deliberately unpaired and may link both depths.
 
 - [Decisions](../adr/README.md) — accepted and proposed architecture decisions.
 - [Plans](../plans/README.md) — milestone register and lifecycle.
+- [Operator documentation](../operator/README.md) — runtime operation and recovery runbooks.
 - [Archive](../archive/README.md) — non-normative historical inputs.

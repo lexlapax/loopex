@@ -21,6 +21,28 @@ the exact document set its milestone must update.
 
 ### Added
 
+- The M1 single-machine working loop: explicit supervised runtime references,
+  Store-backed session creation and owner succession, one serial active run,
+  committed canonical model requests, host-granted controlled effects, durable
+  public events, and a direct embedded API.
+- A durable local Store edge with reusable ADR 0006 conformance, transaction
+  resolution, owner/version fencing, consecutive journal and outbox positions,
+  replay, torn-tail repair, corruption visibility, and deliberate stale-writer
+  recovery after the prior runtime tree is known dead.
+- Provider-neutral Model and Executor behaviours. The ReqLLM edge maps canonical
+  committed requests and provider-supported forced tool selection; the
+  trusted-local executor independently validates the complete ADR 0007 grant and
+  JobRequest binding, holds a workspace lease, starts a fixed OS tool with only
+  `PATH`, and durably retains a terminal receipt.
+- A thin reference client and two-process recovery demonstration. The real
+  Anthropic trace kills the first BEAM process with `SIGKILL` after executor
+  receipt retention but before the session fact, resumes under fresh ownership,
+  reconciles the retained receipt without redispatch, preserves acknowledged
+  events, completes a second real model call, and reaches a durable terminal
+  result. Missing receipt evidence ends `outcome_unknown` and never retries.
+- Operator and developer guides for the M1 source-tree runtime, including
+  explicit composition, credential boundaries, event truth, shutdown, and crash
+  recovery. M1 remains unreleased and carries no public compatibility freeze.
 - First product code. An Elixir umbrella with two applications per ADR 0001:
   `loopex_protocol` carries no dependency and `loopex` depends on it and nothing
   else. Both read one version from the root `VERSION` file at compile time, so

@@ -1,10 +1,11 @@
 # Development
 
-Loopex has closed its M0 feasibility milestone and is preparing the M1 working
-loop. Product implementation is authorized only after M1 carries recorded
-acceptance. This document describes how to validate and work on the repository,
-and it owns the commands, not the milestone state. There is no installable
-package and no public product surface.
+Loopex has closed its M0 feasibility milestone and has implemented the M1
+working-loop closure candidate on the designated milestone branch. M1 remains
+unclosed until its retained multi-toolchain evidence, exact gate, independent
+review, and maintainer closure disposition are complete. This document describes
+how to validate and work on the repository, and it owns the commands, not the
+milestone state. There is no installable package and no public product surface.
 
 The canonical status for the checked-out revision, including currently
 authorized work and the next maintainer decision, is in
@@ -105,11 +106,12 @@ privileged-Bash flag is part of the command: the runner refuses an ordinary Bash
 because inherited functions and `BASH_ENV` would otherwise precede its
 environment boundary.
 
-Before implementation begins, the M1 gate is deliberately red and must report
-the declared missing runtime selector before allocating a state root. The plan
-pair and gate gain implementation authority only through exact-SHA independent
-review and explicit recorded maintainer acceptance; the declared red is opening
-proof, not implementation authority.
+The accepted opening M1 gate was deliberately red before implementation and its
+historical absence proof remains locked. The current candidate must instead run
+the complete selectors, both real-provider roles, closure documents, and full
+credential-free suite. A green run is required evidence, not closure authority;
+the exact candidate still needs retained toolchain records, independent review,
+and the maintainer's explicit closure disposition.
 
 After the protected product selectors exist, M1's two explicitly tagged
 real-provider selectors require `LOOPEX_PROVIDER_API_KEY`. The runner removes

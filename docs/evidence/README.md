@@ -18,6 +18,8 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M0 negative demonstrations](M0-negative-demonstrations.md) | For each constitutional outcome, that its protected test fails when the mechanism it covers is disabled. |
 | [M0 self-hosting report](M0-self-hosting.md) | Measured size of the Elixir replacement and the behaviors it dropped from the retired bridge. |
 | [M0 toolchain matrix](M0-toolchain-matrix.md) | Every gate run of the two locked toolchain pairs, in both orders and each after itself, with the revision they were taken at. |
+| [M1 negative demonstrations](M1-negative-demonstrations.md) | Five required safeguards disabled one at a time, each with its locked selector failure and exact restored artifact digest. |
+| [M1 toolchain matrix](M1-toolchain-matrix.md) | Source-candidate metadata, Darwin floor/current and Linux-current M1 captures, and inherited M0 floor/current proofs. |
 
 ## Related
 

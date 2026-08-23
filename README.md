@@ -25,10 +25,19 @@ while the session lives; a session "brain" can coordinate local or remote
 <!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-**Revision status:** Pre-implementation planning; active milestone `M1` is accepted; no next candidate is recorded.
+**Revision status:** Pre-implementation planning; active milestone `M1` is in review; no next candidate is recorded.
 
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
+
+M1 now has a closure candidate for the first coherent working loop: an explicit
+embedded runtime, durable local Store, canonical model boundary, trusted-local
+executor, thin reference client, durable events, and receipt reconciliation
+across a real runtime-process crash. It remains source-tree milestone work, not
+an installable package, release, or frozen public API. Start with the
+[operator runtime guide](docs/operator/runtime.md#concept) to run it or the
+[developer embedding guide](docs/developer/runtime-and-embedding.md#concept) to
+understand the composition and commit ordering.
 
 The [roadmap](docs/roadmap.md#concept) is non-normative capability guidance;
 [CHANGELOG.md](CHANGELOG.md) records what changed.

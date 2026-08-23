@@ -34,7 +34,8 @@ defmodule Loopex.Checks.Documents do
   @exact_exceptions [
     "docs/README.md",
     "docs/developer/agent-context-map.md",
-    "docs/developer/agent-adapter-smoke.md"
+    "docs/developer/agent-adapter-smoke.md",
+    "docs/developer/runtime-and-embedding.md"
   ]
 
   @unpaired_prefixes [
