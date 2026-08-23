@@ -36,7 +36,9 @@ itself, so the bindings are correct and prove nothing about resolution. The
 moment a runtime holds more than one definition, "the version of that tool's
 definition" needs an owner, and §14.3 of the technical vision names one: a
 runtime-scoped registry with explicit conflict rules, and a request that records
-the exact definition generation it used.
+the exact definition generation it used. Resolution has a second half `M1` never
+had to face: a provider call names a tool by its model-visible name, and with one
+tool in the options there was never a name to look up.
 
 The v0.1 rung raises the stakes rather than the polish. `read`, `write`, `edit`,
 and `bash` run against a developer's real repository. A policy seam that can
@@ -76,9 +78,23 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   module, pid, or host concept. Its canonical bytes have a digest, and the
   triple of `tool_id`, `tool_version`, and that digest is the **definition
   generation**.
+- **The model-visible name is unique, and a session binds exactly one active
+  generation to it.** A provider call names a tool by its model-visible name, not
+  by `tool_id`, so the name is what a model's call actually has to resolve and
+  resolving by internal identity alone would leave the real lookup undefined. A
+  session commits one name-to-generation mapping together with its active set at
+  start, and every call for that run resolves through that one mapping. Two
+  active generations claiming one name — two versions of a `tool_id`, or two
+  different `tool_id`s — refuse session start as a conflict rather than being
+  ordered, preferred, aliased, or silently renamed, because a silent winner would
+  let a later selection change which code a familiar name reaches. `tool_id`,
+  `tool_version`, and the digest remain the durable identity a grant and a
+  journal bind; the name is a per-session presentation binding and carries no
+  authority.
 - **Every tool call records the definition generation it resolved.** Resolution
-  happens once per call, before argument validation and before host policy is
-  asked. The resolved generation is journaled with the tool-operation intent and
+  happens once per call, from the model-visible name through the run's committed
+  mapping, before argument validation and before host policy is asked. The
+  resolved generation is journaled with the tool-operation intent and
   is covered by the canonical request digest ADR 0007 binds. Validation and
   dispatch use that recorded generation for the life of the operation, so a
   registry change cannot alter an in-flight operation's semantics.
@@ -129,6 +145,24 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   before the tool-operation intent commits. `deny` commits a durable denial,
   produces a truthful `denied` terminal fact for that tool call, returns a
   bounded closed-category reason to the model, and dispatches nothing.
+- **Every executor-backed tool call takes a policy decision, `read_only`
+  included.** There is no effect class, no tool, and no argument shape that
+  skips the port. A `read` is still an effect: it crosses the executor boundary
+  under a workspace lease, reads bytes out of a real repository, and puts them
+  into model context and therefore into a provider request, and which workspace
+  and which path a host will permit is a host decision by the same ownership rule
+  that makes a write one. The stronger reason is structural: "effectful" is not a
+  predicate anything can evaluate identically twice. It would have to be decided
+  somewhere, its false branch would be a dispatch path with no policy call on it,
+  and every later tool would arrive arguing about which side of the predicate it
+  sits on. A universal decision point has no false branch to audit.
+- **A policy decision carries bounded plain data in both directions.** The
+  request is bounded plain data, and so is anything an `allow` returns for the
+  grant to transport: a bounded opaque host reference the host itself resolves,
+  plus a small bounded map of serializable scalars. No arbitrary Erlang term
+  crosses the port in either direction, so a host cannot put a pid, a function, a
+  credential, or an unbounded structure into a grant that ADR 0007 retains and an
+  executor keeps. A return outside that shape is malformed and denies.
 - **`Loopex.Policy` is a fourth product boundary behaviour, and it is a narrow
   host-control port rather than a replaceable infrastructure port.** Store,
   Model, and Executor each replace a mechanism; Policy replaces nobody's
@@ -175,12 +209,18 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   Multi-client attachment in the daemon milestone then supplies the reconnect
   and takeover cases, not the first evidence.
 - **The core has no default policy, and the permissive policy is a named,
-  visible edge choice.** Starting a runtime with effectful tools and no
-  configured policy is refused. `Loopex.Policy.AllowAll` ships in the
-  trusted-local executor edge, beside the executor that already runs with the
-  user's own operating-system authority, so that the negative-authority
-  selectors, the refusal-to-start selector, and the reference command can all
-  reach it without any application depending on a client. It must be named
+  visible host choice.** Starting a runtime with any executor-backed tool active
+  and no configured policy is refused. `Loopex.Policy.AllowAll` ships in the
+  reference client, the `:client` application that is Loopex's reference host,
+  and not in the trusted-local executor edge. Hosts own policy: a permissive
+  default is a host's decision to trust its own workspace, so it belongs to the
+  reference host that makes it. An edge that shipped a permissive policy would
+  hand that decision to every embedder that composes the trusted-local executor,
+  which is exactly the relocation of authority into Loopex the ownership map
+  forbids, and it would also travel to the first isolated or remote hand as an
+  inherited `AllowAll`. Nothing in an edge imports it: the executor edge's
+  deny and refusal selectors define their own fixture policies in their own test
+  file, so no application depends on a `:client` to reach one. It must be named
   explicitly in configuration, is never an implicit fallback, and emits one
   visible notice stating that this is permissive local authority and not a
   permission model.
@@ -209,9 +249,20 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   cancellation algebra exactly: an already-validated `completed`, `failed`, or
   `denied` fact is preserved; `cancelled` commits only after confirmed cleanup
   evidence; an effect that cannot be proved ends `outcome_unknown` and reaches
-  ADR 0007's receipt and reconciliation path unchanged. The run finishes
-  `cancelled` in each case and never feeds a late tool result back to the model.
-  An aborted run reaches a terminal outcome without operator intervention.
+  ADR 0007's receipt and reconciliation path unchanged. A cancelled run never
+  feeds a late tool result back to the model.
+- **The run outcome can say unknown too, and it must whenever the tool outcome
+  did.** A run finishes `cancelled` only when every operation it owned reached a
+  validated terminal fact and every owned process tree was confirmed cleaned up.
+  If any owned operation ends `outcome_unknown` — an unprovable effect, or a
+  process tree whose termination could not be confirmed within the grace period —
+  the run finishes `outcome_unknown` carrying that reconciliation reference, and
+  the operator-facing surface reports it as unknown rather than as a stop. A run
+  that reported a clean `cancelled` over an effect nobody could prove would be
+  the exact false comfort the unknown outcome exists to prevent, and it would
+  leave the reconciliation the tool outcome demands with no visible reason to
+  perform it. Both outcomes are terminal and immutable, and an aborted run
+  reaches one of them without operator intervention.
 - **`M2` adds no external dependency and no JSON codec.** Parameter schemas are
   plain Elixir data in the declared subset. Wire encoding belongs to the
   provider adapter at the edge, never to the core and never to the reference
@@ -250,6 +301,16 @@ seam would then be retrofitted during the extension milestone, under the load of
 namespaced contributions and activation ordering, which is the worst moment to
 introduce it.
 
+**Resolve model calls by `tool_id`, or by name with a precedence rule.** Using
+`tool_id` alone is the smaller contract, and letting the highest version or the
+last selection win a name collision never refuses anything. Neither is
+recommended. A provider call carries a model-visible name, so `tool_id`-only
+resolution leaves the actual lookup undefined and pushes an ad-hoc name mapping
+into whichever adapter builds the request first. A precedence rule is worse than
+a refusal: it makes the code a familiar name reaches depend on selection order,
+which is invisible in a transcript and changes under an operator's feet the first
+time a profile or an extension adds a second claimant.
+
 **Ship all seven tools now.** This is tempting because the seven are already
 named and none is hard. It is not recommended for `M2`: the vision makes the
 reference profile evidence-selected, and shipping all seven before the
@@ -272,6 +333,34 @@ recommended: it is a policy language pretending to be configuration, it cannot
 express the per-call facts that matter — which path, which command, which effect
 class — and it relocates authority from the host into Loopex, which the
 ownership map forbids.
+
+**Consult policy only for effectful tools and let read-only tools through.** It
+saves a decision per `read` and it matches an intuition that reading is harmless.
+It is not recommended: the intuition is wrong, because a read crosses the
+executor boundary under a workspace lease and moves repository bytes into model
+context and out to a provider, and the classification is worse than the exemption
+it grants. Whatever computes "effectful" becomes an authority-bearing predicate
+inside Loopex, and its false branch is a dispatch path with no policy call on it
+— which is precisely the shape an unpoliced path takes when someone later
+declares one more tool cheap enough to skip.
+
+**Let an `allow` return an uninterpreted host term for the grant to carry.** It
+is the most flexible thing the port could offer and it asks nothing of hosts. It
+is rejected rather than weighed: durable and executor-facing contracts carry
+bounded serializable data, and an arbitrary term would put a pid, a function, a
+closure over host state, or an unbounded structure into a grant that is retained,
+digested, and validated. A bounded opaque reference gives a host the same
+indirection without moving anything Loopex cannot canonicalize.
+
+**Ship `AllowAll` in the trusted-local executor edge.** The executor already runs
+with the user's own operating-system authority, so a permissive policy beside it
+looks like a matched pair, and it would keep every policy selector in one
+application. It is not recommended: policy belongs to the host, and an edge that
+ships a permissive policy makes that host decision on behalf of every embedder
+who composes that executor, including one that never wanted it. The dependency
+worry that motivated the placement is not real — the executor edge's deny and
+refusal selectors need a refusing fixture and a permissive fixture, both of which
+are three lines in the test file, and neither needs the shipped client module.
 
 **Spill oversized output into the private journal or straight onto the local
 store's files instead of an `ArtifactStore` port.** It is the smallest possible
@@ -308,6 +397,15 @@ owner epoch it cannot hold, and ADR 0008 already refuses two live Runtime
 Controls over one Store identity and `runtime_id`. Cross-process cancellation is
 a transport and controller problem, and it is solved where the transport and the
 controller exist.
+
+**Finish every aborted run as `cancelled`.** One terminal outcome for one
+operator gesture is simpler to explain, simpler to render, and it is what an
+operator pressing Ctrl-C expects to see. It is not recommended: it would make the
+run outcome unable to express what the tool outcome already knows, so a run whose
+owned process tree could not be proved dead would report the same clean stop as
+one that was proved dead. The vision's algebra ends a run `cancelled` or
+`outcome_unknown` for that reason, and the run outcome is the one an operator
+reads.
 
 **Signed or portable grants, and OS isolation, in `M2`.** Not recommended and
 not reopened: ADR 0007 already placed both at the first isolated or remote hand,
@@ -348,12 +446,29 @@ measurement debt: if it is never paid, the reference profile gets chosen by
 inertia rather than by evidence, which is exactly the outcome the vision's
 evidence-selected profile exists to prevent.
 
+Consulting policy for every executor-backed call, `read_only` included, is a
+permanent per-call cost on the hot path of the cheapest tool there is, and every
+host implementation now has to answer a read as well as a write. That cost is
+accepted because the alternative is a classification inside Loopex whose false
+branch dispatches without asking anyone.
+
 Cancellation costs are concrete and platform-shaped. The executor must capture
 process-group and kill identity before it accepts an effectful job, which makes
 the accept path heavier and ties it to POSIX process semantics; no Windows claim
 is made. Confirmed cleanup before committing `cancelled` also means an abort is
 not instantaneous, and the declared grace period is a visible operator-facing
-value rather than a hidden constant.
+value rather than a hidden constant. It also means Ctrl-C has two honest endings
+rather than one: an operator can be told the run stopped, or told the run's owned
+effect could not be proved and names a reconciliation reference. Every surface
+that renders a run outcome must render the second one, and no document may claim
+that aborting a run guarantees a clean stop.
+
+Unique model-visible names become part of what a session commits. The mapping is
+journaled with the active set, so replay resolves the exact name the run used,
+renaming a tool between sessions is free, and renaming one inside a session is
+not possible. The refusal on a duplicate name is a real constraint on later
+profile and extension work: two contributors who both want the name `search` will
+find out at session start rather than by discovering which one won.
 
 Two new boundary behaviours are a permanent widening of what an embedder must
 supply and what every future adapter must satisfy. A host now composes five
@@ -387,8 +502,9 @@ Technical depth: [Operational consequences](0009-tool-executor-and-grant-contrac
 
 No released surface exists and no installed base exists. `M2` tags no version:
 `VERSION` stays `0.0.0` and the first version number is reserved for the
-headless session-protocol milestone. Nothing about a tool schema, the policy
-contract, an artifact reference, or a grant shape is promised across versions,
+headless session-protocol milestone. Nothing about a tool schema, a model-visible
+name, the policy contract, an artifact reference, or a grant shape is promised
+across versions,
 and the compatibility contract's freeze machinery is not engaged by anything in
 this decision.
 

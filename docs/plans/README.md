@@ -415,6 +415,34 @@ same-generation edits, higher-numbered sibling forks, interposed or overlapping
 transactions, lifecycle changes during A-to-R, rollback, divergent merges, and
 any Closure rewrite fail closed.
 
+That transaction cannot amend a `Closed` plan. A Closed plan's Closure row binds
+the same gate digest its Acceptance row binds, so rebinding Acceptance alone
+leaves Closure naming bytes that no longer exist, and the plan never returns to a
+valid state. Amending a Closed milestone's gate uses the additive transaction
+marked `<a id="amendment-transaction-v2"></a>`. Both authority rows stay
+byte-immutable — they record what was accepted, and what was reviewed and closed
+— and the plan gains one append-only table outside both envelopes:
+
+```markdown
+## Gate Generations
+
+| Generation | Authority | Authority evidence | Bound bytes |
+| --- | --- | --- | --- |
+| 7 | Maintainer | [disposition](<durable-pointer>) | candidate `<40-hex>`; gate `sha256:<64-hex>` |
+```
+
+Proposal `A` is one atomic revision carrying the amended gate, its new row with
+an empty authority and evidence, and every bound artifact the amendment rebinds.
+Splitting the artifact change from the generation row across two revisions
+invalidates history permanently, because each reachable revision is judged
+against the generation current at that revision. After exact-SHA review and
+explicit acceptance, `R` completes only that row's authority and evidence.
+Current artifacts are validated against the latest accepted generation and
+historical revisions against the generation current there, so no Closed milestone
+is exempt and no earlier generation stops governing the revisions it covered. A
+generation adds no scope, changes no outcome, and reopens no lifecycle state;
+anything needing those is a new milestone.
+
 Evidence links live in the Concept plan's Progress and Evidence table or in
 gate-defined artifacts; the locked Outcomes rows name their evidence class and
 selector. Do not add an evidence sidecar beside plans: every flat

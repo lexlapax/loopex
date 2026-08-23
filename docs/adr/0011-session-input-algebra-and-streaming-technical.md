@@ -25,6 +25,8 @@ command can wait.
 | §10.3 Loopex never guesses steer versus follow-up | Vacuous — there is one input | The guess becomes tempting exactly when two inputs exist |
 | §13.1 canonical streamed call deltas and complete streamed messages | `complete/2` returns a whole reply | A minutes-long run prints nothing until it ends |
 | §11.2 deltas are transient and the complete message is durable | No delta exists to misclassify | Adding streaming without the boundary makes progress durable by accident |
+| §11.5 lists `tool.stdout_delta`, `tool.stderr_delta`, and `tool.progress` as transient progress | `execute/4` returns one receipt and has no progress channel | A tool-progress delta kind has no producer until a decision gives it one |
+| §15.1 every executor event echoes the complete identity and fence | Only the receipt carries the tuple, and only the receipt is validated | Progress from a superseded executor would be unrefusable |
 
 The `M1` shapes that already exist are the ones this decision builds on rather
 than replaces. Command admission is idempotent on `(session_id, command_id)`,
@@ -55,8 +57,8 @@ exhaustive and durable:
 | --- | --- | --- |
 | `prompt` | settled | accepted; run starts |
 | `prompt` | run active | `{:error, :run_active}`, durably recorded as today |
-| `steer` | run active, `run_id` matches, no unapplied steer | accepted; queued for the single application point |
-| `steer` | run active, `run_id` matches, one steer already unapplied | `{:error, :steer_pending}` |
+| `steer` | run active, `run_id` matches, no `queued` steer | accepted; queued for the single application point |
+| `steer` | run active, `run_id` matches, one steer already `queued` | `{:error, :steer_pending}` |
 | `steer` | run active, `run_id` does not match | `{:error, :run_mismatch}` |
 | `steer` | settled | `{:error, :no_active_run}` |
 | `follow_up` | run active, no follow-up queued | accepted; queued |
@@ -75,11 +77,14 @@ One steer slot per run and one follow-up slot per session, each holding a
 committed command in exactly one state:
 
 ```text
-queued    -> applied     steer reached its application point
-queued    -> unapplied   run reached a terminal outcome first
+queued    -> applied     a committed staged request carries the steer
+queued    -> unapplied   the run ended with no request carrying it
 queued    -> cancelled   abort admitted
 queued    -> promoted    follow-up became a new run at the terminal transition
 ```
+
+`applied` commits only in the same transaction as the request that carries the
+steer, so the slot is never `applied` on the strength of an intention.
 
 Every transition is a committed record naming the `command_id`, the reason, and
 the run it was bound to. No transition is inferred at read time, so a successor
@@ -91,29 +96,47 @@ Per turn, in order:
 
 1. All tool results of the latest assistant message commit, in the assistant's
    call order, under ADR 0010's ordering invariants.
-2. If a steer is `queued` for this run, commit it as `applied` together with a
-   user-role conversation element carrying its exact bytes.
-3. Evaluate ADR 0010's termination and bound checks.
-4. Stage and dispatch the next request, whose projection now contains the
-   applied element.
+2. Evaluate ADR 0010's termination and bound checks. If the model requested no
+   tool, or the maximum turn count, the cumulative token budget, or the
+   wall-clock deadline is exhausted, the run ends here and any `queued` steer
+   resolves `unapplied` with that exact reason.
+3. Otherwise build the next request: project the committed conversation, append
+   a `queued` steer's exact bytes as a user-role element, canonicalize, and
+   digest.
+4. Commit, in **one** transaction, the steer's `applied` transition, its
+   user-role conversation element, and the staged request bytes and digest. If
+   that transaction does not commit, neither does the element: the steer stays
+   `queued` and resolves `unapplied` when the run reaches its terminal outcome.
+5. Dispatch exactly the staged bytes.
 
-Steps 2 and 3 are ordered deliberately: an applied steer is part of the
-conversation even when the immediately following bound check ends the run, so a
-replay shows the steer that was accepted rather than losing it to a limit. A
-steer admitted while step 1 is still in progress is applied at step 2 of that
-same turn. A steer admitted after step 4 waits for the next turn's step 2 —
-unless the run ends first, which is the unapplied case below.
+Steps 2 and 4 are ordered deliberately, and the order is the opposite of the
+convenient one. `applied` means a model call carried the steer, not that it
+reached a projection, so nothing commits applied before the request that carries
+it commits with it. A steer admitted while step 1 is still in progress is
+applied at step 4 of that same turn. A steer admitted after step 5 waits for the
+next turn — unless the run ends first, which is an unapplied case below.
 
-### The unapplied race
+The atomicity is what removes the window. There is no interval in which the
+element is committed and the request that carries it is not, so a successor
+owner never recovers an applied steer no request carried, and no operator is
+ever told a steer landed that no model call saw.
 
-Admission and terminal commit are both serialized by the one session owner, so
-exactly one order is durable. The rule follows the journal:
+### The unapplied cases
+
+Admission, staging, and terminal commit are all serialized by the one session
+owner, so exactly one order is durable. The rule follows the journal:
 
 | Durable order | Outcome |
 | --- | --- |
-| Steer admitted, then at least one further request staged | `applied` at that turn's step 2 |
+| Steer admitted, then a request carrying it commits at step 4 | `applied`, in that same transaction |
 | Steer admitted, then the run commits a terminal outcome with no further staging | `unapplied(run_terminal)` |
+| Steer admitted, then step 2 ends the run on a bound | `unapplied(max_turns)`, `unapplied(token_budget)`, or `unapplied(deadline)` |
+| Steer admitted, then step 4 fails closed and the run reaches a terminal outcome | `unapplied` with that terminal reason |
 | Steer admitted after the terminal outcome commits | `{:error, :no_active_run}` at admission |
+
+`applied` is therefore true of exactly the steers some committed canonical
+request carries, and every other admitted steer of that run is `unapplied`,
+`cancelled`, or still `queued`. There is no third reading of the record.
 
 An `unapplied` steer emits a public event carrying its `command_id`, the run it
 named, and the reason. It never enters a projection, is never auto-promoted to a
@@ -163,38 +186,145 @@ The progress function is an ordinary in-VM function reference supplied by the
 coordinator's supervised model task. It is not boundary data: it never enters a
 journal, a public event, a snapshot, or an executor job, and the deltas it
 carries are plain bounded data. An adapter calls it zero or more times and then
-returns the complete reply. The reply gains two fields:
+returns the complete reply. The reply gains two statistics:
 
 ```text
-delta_count   number of deltas emitted for this turn
+delta_count   number of deltas this attempt emitted
 streamed      whether this adapter emitted any
 ```
 
-`delta_count` is what lets a consumer prove it saw everything without core ever
-reconstructing anything.
+Both describe one model attempt. They are retained on that private attempt
+record beside its usage and timing, and they are **not** fields of the
+`assistant_message` element ADR 0010 commits: the canonical durable element
+carries conversation content only. `delta_count` is what lets a consumer prove
+it saw the whole stream without core ever reconstructing anything, and it
+reaches that consumer as the closing progress item defined below rather than as
+a field of a durable element.
+
+### The executor port
+
+```text
+@callback execute(reference(), job_request(), grant(), keyword(),
+                  (executor_progress_event() -> :ok)) ::
+            {:ok, receipt()} | {:error, term()}
+```
+
+`execute/4` becomes `execute/5` and gains nothing else. The fifth argument is
+the same shape of in-VM bounded function the Model port receives, supplied by
+the dispatching coordinator for exactly one job; it is not boundary data, never
+enters a journal, a public event, a snapshot, or a job request, and is invalid
+once that job reaches a terminal receipt. An executor that emits nothing is
+conformant. ADR 0009's and ADR 0007's grant bindings, job request, receipt
+schema, deduplication rule, cancellation sequence, and terminal algebra are
+unchanged, with one additive private field named under executor progress below.
+
+### Executor progress events
+
+The executor emits complete executor events, echoing the identity and fence the
+vision requires of every executor event:
+
+```text
+executor_progress_event
+  protocol_version
+  job_id
+  operation_id / attempt
+  session_id / run_id / turn_id / tool_call_id
+  origin_session_epoch / origin_executor_epoch
+  executor_identity
+  canonical_request_digest
+  fencing_token
+  progress_sequence
+  stream            stdout | stderr | progress
+  byte_offset       per stream, contiguous
+  chunk             bounded bytes, or a bounded structured payload
+```
+
+Before projecting anything narrower, the coordinator validates each binding
+against state it already holds for the live attempt, never against the event:
+
+| Binding | Validated against |
+| --- | --- |
+| `job_id`, `operation_id`, `attempt` | The operation attempt this coordinator dispatched and journaled |
+| `canonical_request_digest` | The digest journaled for that attempt |
+| `session_id` / `run_id` / `turn_id` / `tool_call_id` | The live run's current turn and one of its committed tool calls |
+| `origin_session_epoch` | The current session epoch |
+| `origin_executor_epoch` | The executor epoch recorded for this dispatch |
+| `executor_identity` | The executor this job was dispatched to |
+| `fencing_token` | The current fence for that workspace lease |
+| `progress_sequence` | The next expected sequence for that operation attempt |
+
+Validation is fail-closed in both directions and identical in consequence: a
+missing binding and a present, well-formed, wrong binding are both refused. A
+refused event is dropped and counted on the attempt's private record as refused
+progress with the binding that failed. It is never projected, never journaled,
+never published, and never affects an outcome, a bound, or a receipt. This is
+ADR 0007's receipt discipline with a weaker consequence, because progress
+carries no authority: a superseded executor cannot make a client render its
+bytes, and it also cannot make the coordinator commit anything.
+
+The retained receipt gains one additive private field,
+`final_progress_sequence`, the last sequence the executor emitted for that
+attempt. It bounds the progress
+domain the same way `delta_count` bounds the model domain, so a consumer detects
+a truncated tail rather than only an interior gap.
 
 ### Delta shapes
 
+The client-facing deltas are projections. They carry the anchors a consumer
+needs and none of the administrative material validation consumed, because
+leases, epochs, receipts, and fences are private or administrative in the public
+vocabulary:
+
 ```text
-text_delta       {turn_id, sequence, base_event_sequence, content_index, text}
-reasoning_delta  {turn_id, sequence, base_event_sequence, content_index, text}
-tool_call_delta  {turn_id, sequence, base_event_sequence, call_index,
+text_delta       {turn_id, model_sequence, base_event_sequence,
+                  content_index, text}
+reasoning_delta  {turn_id, model_sequence, base_event_sequence,
+                  content_index, text}
+tool_call_delta  {turn_id, model_sequence, base_event_sequence, call_index,
                   tool_call_id | nil, name | nil, arguments_fragment | nil}
-tool_progress    {turn_id, sequence, base_event_sequence, tool_call_id,
-                  operation_id, attempt, stream, byte_offset, chunk}
+tool_progress    {turn_id, tool_call_id, progress_sequence,
+                  base_event_sequence, stream, byte_offset, chunk}
 ```
+
+Each domain is closed on the same plane it streamed on, by one item that carries
+no content:
+
+```text
+model_stream_closed  {turn_id, base_event_sequence, delta_count}
+tool_stream_closed   {turn_id, tool_call_id, base_event_sequence,
+                      final_progress_sequence}
+```
+
+These are stream closures, not content deltas, and they are how a client learns
+a total it must not read from a durable element: the reply's `delta_count` and
+the receipt's `final_progress_sequence` are private evidence, and the
+coordinator projects each as one closing item after the attempt or operation
+terminates. A closure is itself progress and may be dropped; a consumer that
+never receives one falls back to the durable message exactly as it does for a
+gap.
 
 Rules:
 
-- `sequence` starts at 0 for each turn and increases by one per emitted delta,
-  across all kinds, so one counter orders the whole turn.
+- `model_sequence` starts at 0 for each model attempt and increases by one per
+  emitted delta across the three model kinds, so one counter orders that reply.
+  The reply's `delta_count` closes it.
+- `progress_sequence` starts at 0 for each `(operation_id, attempt)` and
+  increases by one per emitted executor progress event for that attempt. The
+  receipt's `final_progress_sequence` closes it. It is the executor's own
+  sequence, carried through the projection unchanged, so a consumer's gap is the
+  same gap the coordinator would see.
+- The two domains are independent. A model attempt's stream is complete or lossy
+  regardless of any operation's progress, and no order is promised between them
+  beyond `base_event_sequence`. One shared per-turn counter is not available:
+  the reply publishes `delta_count` before the turn's first tool is dispatched,
+  so a shared counter could only reserve numbers that may never be used.
 - `base_event_sequence` is the public event sequence the progress is anchored
   to, as §11.2 requires of the progress plane.
-- Each payload is bounded by a declared ceiling; an adapter that would exceed it
-  splits into more deltas rather than emitting one large item.
-- `stream` for tool progress is a closed enumeration of `stdout` and `stderr`,
-  and `byte_offset` is the executor-side offset so a consumer detects a dropped
-  chunk the same way it detects a dropped delta.
+- Each payload is bounded by a declared ceiling; a producer that would exceed it
+  splits into more items rather than emitting one large one.
+- `stream` is a closed enumeration of `stdout`, `stderr`, and `progress`, and
+  `byte_offset` is contiguous per stream, so a consumer detects a dropped chunk
+  within a stream as well as a dropped event.
 - `reasoning_delta` carries summary text only. No signature, token blob, or
   provider continuation material is admitted, because nothing in `M2` retains
   it and a value that cannot be retained must not be transported.
@@ -232,8 +362,10 @@ The suite is the same reusable one every model adapter runs, extended with:
   adapter would return with a no-op progress function;
 - emitted deltas, replayed in order, reconstruct byte-identical content to the
   returned reply's content blocks and tool calls;
-- `delta_count` equals the number of deltas actually emitted;
-- `sequence` is gapless and starts at 0;
+- `delta_count` equals the number of deltas actually emitted, and equals the
+  count in the attempt's `model_stream_closed` item;
+- `model_sequence` is gapless, starts at 0, and never appears on a committed
+  `assistant_message`, which carries no stream statistic at all;
 - a non-streaming adapter emits zero deltas, returns the complete reply, and
   reports `streamed: false`;
 - cancellation mid-stream stops emission and returns a cancellation error, with
@@ -247,14 +379,48 @@ fixed chunk boundaries, a fixed count, and fixed content, so ordering,
 reconstruction, gap detection, and cancellation are exact and do not depend on a
 provider's chunking.
 
+### Executor conformance
+
+The reusable executor suite gains, and every executor implementation runs:
+
+- an executor that emits no progress is conformant, returns the same receipt,
+  and reports `final_progress_sequence` as the empty domain;
+- emitted progress events carry every binding in the tuple above, checked
+  against a literal expected set so a field omitted from an implementation is
+  detectable;
+- `progress_sequence` is gapless from 0 per `(operation_id, attempt)` and
+  `byte_offset` is contiguous per stream;
+- `final_progress_sequence` on the receipt equals the last sequence emitted, and
+  equals the value in the operation's `tool_stream_closed` item;
+- no progress event is emitted after the terminal receipt for its attempt;
+- no progress event carries a credential, a workspace absolute path outside the
+  declared output policy, an unbounded payload, a pid, or a provider or host
+  struct.
+
+Coordinator-side negatives are separate, because they test the validator rather
+than the executor: for each binding, an otherwise-valid progress event with that
+single binding altered to a present, well-formed, wrong value — another
+executor's identity, the previous attempt, a superseded fence, a stale executor
+epoch, another request's digest, a tool call from an earlier turn — is refused
+individually, the refusal names that binding, and the covered set equals the set
+the schema requires so two guards cannot mask each other.
+
 ### Evidence
 
 - Admission conformance for all four commands across every row of the
   resolution table, each asserting the exact durable resolution and that a
   re-presented `command_id` returns it unchanged.
 - A steer applied at the single application point, asserting that the element
-  commits after the last tool result of its turn and before the staged request,
-  and that the staged request's projection contains it.
+  commits after the last tool result of its turn, in the same transaction as the
+  staged request, and that the staged request's projection contains it.
+- A steer queued for a turn whose bound check ends the run, once per bound,
+  asserting `unapplied(max_turns)`, `unapplied(token_budget)`, and
+  `unapplied(deadline)`, that no conversation element was committed, and that no
+  request was staged. This is the ordering property: an operator is never told a
+  steer applied when no model call carried it.
+- A coordinator killed at the application point, asserting that the applied
+  transition, the conversation element, and the staged request are all present
+  or all absent, and that the all-absent recovery resolves the steer truthfully.
 - A steer admitted during an in-flight last turn that ends without further
   staging, asserting `unapplied(run_terminal)`, the public event, an unchanged
   projection, and no auto-promotion.
@@ -265,7 +431,7 @@ provider's chunking.
   `session.settled`.
 - A coordinator killed between promotion and staging, asserting recovery stages
   the same `run_id` once and that a replayed recovery starts no second run.
-- An abort cancelling an unapplied steer and a queued follow-up, asserting each
+- An abort cancelling a `queued` steer and a queued follow-up, asserting each
   `command_id` resolves `cancelled`, that no run starts afterwards, and that ADR
   0009's cleanup and terminal algebra are unchanged.
 - Model conformance for streaming and non-streaming adapters, including
@@ -273,11 +439,26 @@ provider's chunking.
   cancellation.
 - A cancelled stream committing no `assistant_message` element, with the
   attempt evidence retained and the usage accounted as estimated.
-- A progress consumer that drops deltas under backpressure, asserting that the
-  gap is detectable, that the durable assistant message is complete, and that
-  no delta was journaled or published as a durable event.
+- A progress consumer that drops deltas under backpressure, asserting in each
+  domain separately that the gap is detectable — an interior `model_sequence`
+  gap and a tail short of `model_stream_closed`, an interior `progress_sequence`
+  gap and a tail short of `tool_stream_closed` — that the durable assistant
+  message is complete, and that no delta or closure was journaled or published
+  as a durable event.
+- Executor progress from a superseded executor, a stale executor epoch, a
+  previous attempt, and a mismatched digest, each asserting that the event is
+  refused, counted as refused progress, and never projected to a client, and
+  that the live operation's outcome is unchanged.
 - Source inspection proving core never reconstructs an assistant message from
-  deltas and that no delta type appears in a durable or public payload.
+  deltas, that no delta type appears in a durable or public payload, that no
+  client-facing delta carries executor identity, an epoch, a digest, or a fence,
+  and that `delta_count` and `streamed` appear on no committed conversation
+  element.
+- The reference command admitting all four inputs from one foreground process:
+  a `steer` and a `follow_up` typed while a run streams, each reaching the
+  public facade with its kind named by the operator, the refusal of a second
+  queued item rendered, an `unapplied` outcome rendered, and an input naming
+  neither kind refused rather than inferred.
 
 <a id="technical-adr-0011-alternatives"></a>
 ## Alternative Analysis
@@ -317,6 +498,59 @@ depend on arrival timing rather than commit order.
 one record. It also removes the only evidence that the operator tried. The
 durable `unapplied` record plus its event is two fields and one event type, and
 it converts an invisible race into a visible outcome.
+
+**Applying before the bound check.** The argument is that the steer is already
+accepted and the conversation should show it. The consequence is that `applied`
+stops meaning anything an operator can use. A run that exhausts its turn budget
+immediately after committing the element reports the steer applied, the operator
+reads that as "the model was told", and the model was never called again. Making
+the element and the request one transaction costs nothing beyond writing them
+together — they are already written in the same turn, to the same domain, by the
+same serial owner — and it makes the record's two states exhaustive: carried by
+a request, or not.
+
+**Kernel-only exposure of `steer` and `follow_up`.** The technical argument for
+it disappears once the foreground shape is fixed. There is no transport to
+implement, no daemon, no second process, and no attachment negotiation: the
+process that renders the stream is the process that reads the keyboard and holds
+the facade reference. The residual work is concurrent input handling in one
+command and two distinct affordances, which is smaller than the documentation
+required to explain why a proved capability is unreachable.
+
+**One sequence domain.** It fails on an ordering fact, not on taste. The model
+reply returns with `delta_count` fixed, and the turn's tool dispatch happens
+after that. A shared per-turn counter would have to publish a total before the
+executor's contribution exists, so either the total is not a total or the
+executor renumbers into reserved space it may not fill — and a reserved gap is
+indistinguishable from a lost item, which is precisely the property the sequence
+exists to provide. Two domains, each closed by its own producer's terminal
+statement, keep gaplessness meaning one thing.
+
+**Executor progress out of scope.** Dropping the delta kind is the smallest
+change and leaves the executor port untouched. It also makes the milestone's
+longest silences the ones the operator most wants to watch: a build or a test
+suite streams nothing while the model's prose streams fully. And the kind would
+return later against a protocol whose delta taxonomy, sequence semantics, and
+executor callback had all frozen without it, which is a versioned change instead
+of one parameter.
+
+**Unvalidated projection of executor progress.** Progress commits nothing, so
+the temptation is to treat a stale chunk as harmless noise. It is not harmless:
+it is another operation's bytes rendered as this one's, at the moment an
+operator is deciding whether to abort. Every binding needed to refuse it already
+rides on the event because the vision requires every executor event to echo the
+identity and fence, and the coordinator already holds the state to compare
+against. Refusing costs a comparison; rendering costs the operator's trust in
+what the terminal shows.
+
+**Stream statistics on the committed message.** Putting `delta_count` and
+`streamed` on the `assistant_message` makes one record self-describing at the
+cost of making the canonical element depend on transport. Two adapters returning
+identical content would commit different elements, a non-streaming replay of a
+streamed run would differ in bytes that mean nothing semantically, and ADR
+0010's projection would carry a field no request may include. The attempt record
+already exists, already holds usage and timing, and is private, which is the
+plane evidence about a call belongs on.
 
 **Abort preserving the queue.** The argument for it is real: an operator may be
 stopping one run, not the session. The argument against is what an abort means
@@ -372,8 +606,15 @@ Concept: [Consequences](0011-session-input-algebra-and-streaming.md#concept-adr-
 - Cancellation gets simpler and more honest at the same time. A cancelled turn
   commits nothing, so there is no partial message to reconcile, and the cost is
   that a nearly complete answer is lost rather than salvaged.
-- Deferring the operator-facing steer and follow-up surface leaves proven kernel
-  semantics unreachable from the shipped command. Documentation must say so.
+- The foreground command reads operator input for the whole length of a run
+  while it renders deltas, and keeps `steer` and `follow_up` distinguishable at
+  the keyboard. Every input path it offers must name its kind, because the
+  runtime refuses to infer one.
+- The Executor port gains one parameter that every implementation accepts,
+  including those that emit nothing, and the coordinator gains a validator whose
+  negative corpus grows with the progress tuple.
+- Clients render two loss checks rather than one, and a complete model stream
+  implies nothing about whether an operation's output arrived whole.
 
 ### If rejected
 
@@ -386,6 +627,10 @@ Concept: [Consequences](0011-session-input-algebra-and-streaming.md#concept-adr-
 - A cancelled stream with no rule about partial messages produces the worst
   available outcome: a conversation containing half an assistant turn that
   replay cannot distinguish from a complete one.
+- Tool progress without a decided emission path and validation rule arrives as
+  whatever the first executor implementation does, most likely unvalidated,
+  which puts a superseded executor's output on an operator's terminal with no
+  decision anywhere saying it should not be.
 
 <a id="technical-adr-0011-compatibility"></a>
 ## Format, Migration, and Rollback Mechanics
@@ -394,25 +639,31 @@ Concept: [Compatibility, migration, and rollback](0011-session-input-algebra-and
 
 The durable format gains the `steer` and `follow_up` command records, the queue
 slot states and their transitions, the applied steer conversation element, the
-unapplied record, the promotion record, and the `delta_count` and `streamed`
-fields on a committed assistant message. All are bounded plain data in the
-session mutation domain. The public taxonomy gains the queue events additively;
-no delta enters a durable or public payload.
+unapplied record, and the promotion record. All are bounded plain data in the
+session mutation domain. The committed `assistant_message` element gains
+nothing: `delta_count`, `streamed`, refused-progress counts, and
+`final_progress_sequence` are private attempt and receipt evidence. The public
+taxonomy gains the queue events additively; no delta enters a durable or public
+payload.
 
 There is no installed base and no published package, and `M2` tags no version:
 `VERSION` stays `0.0.0` and the first version number belongs to the headless
-session-protocol milestone. Command shapes, queue states, delta kinds, and the
-`complete/3` signature freeze nothing. `M1` journals are neither read nor
+session-protocol milestone. Command shapes, queue states, delta kinds, the
+executor progress event and its validation, and the `complete/3` and `execute/5`
+signatures freeze nothing. `M1` journals are neither read nor
 migrated and its test roots are discarded, so no queue state and no delta
 history exist to convert.
 
 Rollback before closure removes `steer` and `follow_up` admission, the queue
 records and transitions, the unapplied record, the promotion path, and the
-progress emission together, and returns the Model behaviour to `complete/2`.
+progress emission together, and returns the Model behaviour to `complete/2` and
+the Executor behaviour to `execute/4`, dropping `final_progress_sequence` from
+the receipt.
 Partial rollback is not available: the run-terminal transition reads the queue,
 abort's truthful resolution depends on the queue states it cancels, and the
 cancellation rule for a partially streamed turn only has meaning where a turn
 can stream. Once a version is published, adding a command type or a delta kind
 is additive with fixtures, while changing the application point, a queue depth,
-the reconstruction obligation, or the rule that a cancelled turn commits nothing
-changes what a recorded run meant and requires a successor decision.
+the reconstruction obligation, the progress validation rule, or the rule that a
+cancelled turn commits nothing changes what a recorded run meant and requires a
+successor decision.

@@ -293,6 +293,29 @@ register and plan index.
   back-projected onto `A` and does not replace later same-source product-candidate
   evidence. The exact `A` to `R` review also proves that only the allowed
   transition bytes changed. Only `R` is eligible for integration.
+  A Closed plan cannot use that transaction, because its Closure row binds the
+  same gate digest its Acceptance row binds, and rebinding only Acceptance leaves
+  Closure naming bytes that no longer exist. Amending a Closed milestone's gate
+  therefore uses the additive transaction versioned by the visible
+  `<a id="amendment-transaction-v2"></a>` marker. Acceptance and Closure both stay
+  byte-immutable: they record what was accepted and what was reviewed and closed,
+  and neither is made retroactively false. The Closed plan instead gains one
+  `## Gate Generations` table outside both envelopes, appended to and never
+  rewritten, whose rows carry a consecutive generation number, the accepting
+  authority, durable evidence of that authority's explicit disposition, the
+  candidate SHA, and the new gate digest. Proposal `A` is one atomic revision
+  carrying the amended gate, its new generation row with an empty authority and
+  disposition, and every bound artifact the amendment rebinds; splitting the
+  artifact change and the generation row across revisions permanently invalidates
+  history, because artifact validation judges each reachable revision against the
+  generation current at that revision. After exact-SHA review and explicit
+  acceptance, `R` completes only that row's authority and disposition. Current
+  bound artifacts are validated against the latest accepted generation, and each
+  historical revision against the generation current there. No Closed milestone is
+  exempted from artifact validation, and no earlier generation stops being
+  enforced for the revisions it governed. A gate generation adds no scope, changes
+  no outcome, and reopens no lifecycle state; a change needing any of those is a
+  new milestone.
   After that review, an explicitly approved governance-only Acceptance checkpoint
   may integrate to `main` while its exact accepted opening gate remains red. It
   may contain the accepted plan/gate machinery, governance, derived status and

@@ -19,6 +19,7 @@ provides.
 | Tool IDs and versions resolve through a runtime-scoped registry | Two function clauses in the local executor, one fixed `tool_version` constant | There is no resolution step, so there is nothing to make runtime-scoped and nothing a second definition could conflict with |
 | A request records the exact definition generation it used | The session holds one `tool` map from runtime options | The journal cannot say which schema accepted an argument, so replay cannot reproduce validation |
 | Explicit conflict rules | None | Two definitions claiming one identity is currently unrepresentable rather than refused |
+| A provider call resolves the model-visible name it was given | One tool map in runtime options; the name is whatever that map says and is never looked up | With one tool there is nothing to resolve, so no rule exists for the name a real provider call actually carries |
 | Host policy owns `allow`, `deny`, `defer` | The literal term `{:host_policy, :allow}`, validated to be exactly that | There is no decision point; every reachable path ends in a grant |
 | Failure never falls through to allow | Vacuous — there is no failure path | A property with no reachable counterexample is untested |
 | Cancellation stops owned work | Abort is admitted and journaled; the coordinator never reads it | The model call and the OS process both keep running after an acknowledged abort |
@@ -49,7 +50,7 @@ A definition is a bounded plain-data record:
 ```text
 tool_id                  bounded ASCII, dot-segmented, "loopex." reserved
 tool_version             semantic version, exact string
-name                     model-visible name
+name                     model-visible name, ^[a-z][a-z0-9_]{0,63}$
 description              bounded model-visible text
 parameter_schema         declared JSON Schema-compatible subset
 result_shape             model-facing normalized result descriptor
@@ -82,6 +83,54 @@ digests the result. The definition generation is:
 Equal digests never admit different bytes: the registry retains the exact
 canonical bytes and compares them, not only the digest.
 
+`name` is inside those canonical bytes, so changing a tool's model-visible name
+produces a different digest and therefore a different generation. A rename is a
+new `tool_version` under the additive registration rule, never an edit to a
+registered one. The character set is narrower than `tool_id`'s on purpose: it
+sits inside the tool-name constraints of the providers this milestone targets,
+which is a claim `M2` checks against each adapter it ships rather than assumes,
+and a dot-segmented `tool_id` is not portable as a provider tool name at all.
+
+### Model-visible names and the session name mapping
+
+A provider request lists tools by `name` and a model's tool call names one back.
+`tool_id` never appears on that wire, so name resolution is the real lookup and
+this decision specifies it rather than leaving it to whichever adapter builds a
+request first.
+
+Names are unique per active set, not per registry. The registry may legitimately
+hold `read` at `1.0.0` and `read` at `2.0.0`, and a namespaced extension
+contribution may later register a second `tool_id` whose definition also calls
+itself `read`. Neither is a registration conflict, because neither is yet offered
+to a model.
+
+Composition of the active set at session start therefore does three things in
+order:
+
+1. Resolve each selected entry to one generation.
+2. Build the name mapping `name -> {tool_id, tool_version, definition_digest}`.
+3. Refuse the session if any name is claimed twice, with
+   `{:error, {:duplicate_tool_name, name}}` naming both claiming generations.
+
+There is no precedence, no ordering rule, no last-writer-wins, and no automatic
+disambiguation suffix. The refusal is at composition, before any provider request
+is built, so a session either has an unambiguous mapping or does not start.
+
+The mapping is committed with the active-set record and is immutable for the
+session. Registering a definition mid-run cannot add, remove, or repoint a name,
+so the name a transcript shows resolves to the same generation on replay as it
+did live. A model call naming something absent from the mapping is a terminal
+`failed` tool call with reason `unknown_tool`; the name is never fuzzy-matched,
+never lowercased into a neighbour, and never resolved against the registry
+behind the mapping's back.
+
+`M1`'s demonstration tools are the first case that exercises the separation.
+Their `tool_id`, `tool_version`, and behaviour are retained exactly, and the
+retained definitions carry conforming model-visible names because registration
+requires one — `M1` had no name field to preserve. Since no reference profile
+selects them, those names enter no session mapping and no provider request, so
+the added field changes nothing a model or an executor sees.
+
 ### Registry contract
 
 The registry is a runtime-scoped structure reached only through the explicit
@@ -95,14 +144,17 @@ configuration. Its operations and outcomes are:
 | `register` with the same `tool_id` and `tool_version` and different bytes | `{:error, :tool_definition_conflict}` |
 | `register` with a new `tool_version` of a known `tool_id` | `:ok`, admitted additively |
 | `register` under the `loopex.` prefix from outside the reference distribution | `{:error, :reserved_tool_namespace}` |
+| `register` with a `name` outside the declared character set | `{:error, :invalid_tool_name}` |
+| `register` with a `name` another registered generation already uses | `:ok`; a duplicate name is refused where it matters, at active-set composition |
 | `resolve(runtime, tool_id)` | highest registered semantic version at resolution time |
 | `resolve(runtime, tool_id, tool_version)` | that exact generation, or `{:error, :unknown_tool_generation}` |
 | `resolve` for an unregistered `tool_id` | `{:error, :unknown_tool}` |
 
 There is no unregistration and no in-place replacement in `M2`. The active set
 offered to the model is a bounded list of generations selected at session start
-and committed with the session, so a registration that happens mid-run cannot
-change what the current run may call.
+and committed with the session together with its name mapping, so a registration
+that happens mid-run cannot change what the current run may call or what any of
+its names mean.
 
 Registration and active-set membership are therefore separate facts, and `M1`'s
 demonstration tools are the first case that depends on the difference.
@@ -126,14 +178,16 @@ environment rather than asserted.
 
 Per tool call, in this order:
 
-1. Resolve the generation named by the model's call against the run's committed
-   active set. An unresolvable name is a terminal `failed` tool call with reason
-   `unknown_tool`; it is never guessed and never dispatched.
+1. Look the model-visible name from the model's call up in the run's committed
+   name mapping. An unresolvable name is a terminal `failed` tool call with
+   reason `unknown_tool`; it is never guessed and never dispatched.
 2. Validate arguments against that generation's `parameter_schema`. A validation
    failure is a terminal `failed` tool call with a bounded diagnostic and no
    policy consultation.
 3. Ask host policy, with the resolved generation, the validated arguments, the
-   effect class, and the workspace lease reference.
+   effect class, and the workspace lease reference. This step is unconditional:
+   every executor-backed tool call reaches it, `read_only` calls included, and no
+   effect class, tool identity, or argument shape routes around it.
 4. On `allow`, journal the tool-operation intent including the generation
    triple, then build the `JobRequest` and grant that ADR 0007 governs.
 
@@ -207,8 +261,12 @@ recovery window so a receipt that names it stays reconstructable.
 ```
 
 The handle is the explicit composition reference; it is edge-private placement
-state and never enters a journal, a public event, or an executor job. The
-reference is bounded plain data and is the only thing that does:
+state and never enters a journal, a public event, or an executor job, which is
+the same convention `Loopex.Store` and `Loopex.Executor` already use for an
+in-VM composition reference. The error term is likewise an in-process return that
+is categorized before anything durable records it. Neither is transported, which
+is what separates them from a policy decision's context. The artifact reference
+is bounded plain data and is the only thing here that does cross:
 
 ```text
 digest        lowercase hexadecimal SHA-256 of the exact stored bytes
@@ -260,7 +318,7 @@ and the receipt shape is unchanged.
 
 ```text
 @callback decide(request :: policy_request()) ::
-            {:allow, policy_context :: term() | nil}
+            {:allow, policy_context() | nil}
             | {:deny, reason_category()}
             | {:defer, interaction_request()}
 ```
@@ -268,8 +326,43 @@ and the receipt shape is unchanged.
 `policy_request` is bounded plain data: session and run identity, the resolved
 generation triple, validated arguments, effect class, idempotency class, and the
 workspace lease reference. It carries no pid, no credential, and no provider
-value. The returned `policy_context` is opaque to Loopex and is transported into
-the grant exactly as ADR 0007 already permits, uninterpreted.
+value.
+
+`policy_context` is bounded plain data too, and the boundary rule runs in both
+directions because what an `allow` returns is transported into the grant, and a
+grant is durable, digested, executor-facing data:
+
+```text
+decision_ref   opaque bounded binary the host assigns and only the host resolves,
+               <= 256 bytes, never parsed, joined, or interpreted by Loopex
+attributes     bounded map, binary keys, values binary | integer | boolean,
+               <= 16 entries, <= 1 KiB canonical encoding
+```
+
+Both fields are optional and `nil` is a complete decision context. Nothing else
+is admitted: no arbitrary Erlang term, no pid, port, reference, function, atom
+from host input, nested structure, or unbounded binary. A host that needs to
+carry richer state carries it behind `decision_ref` and resolves that reference
+itself, which is what the opaque reference exists for. A returned context outside
+this shape is a malformed return and resolves to `{:deny, :policy_unavailable}`
+by the table below, so an over-permissive host cannot widen the boundary by
+returning something bigger.
+
+This is what ADR 0007's `optional bounded policy context` means concretely.
+Loopex still interprets none of it — the host's user, role, and approval
+semantics stay the host's — but "uninterpreted" was never a licence to transport
+an arbitrary term across a durable boundary.
+
+Consultation is universal. Every executor-backed tool call reaches `decide`,
+including every `read_only` one, and the port has no exemption predicate. Two
+reasons, and the second is the load-bearing one. A read is an effect: it crosses
+the executor boundary under a workspace lease and lifts repository bytes into
+model context and from there into a provider request, so which workspace and
+which path a host permits is the host's decision by the ownership rule that also
+covers writes. And an "effectful" predicate would be authority-bearing code
+inside Loopex whose false branch is a dispatch path with no policy call on it. A
+universal call site has no such branch, which is why the fail-closed table below
+can be exhaustive: it enumerates policy answers, not tools.
 
 `reason_category` is a closed enumeration — at minimum `policy_denied`,
 `effect_class_not_permitted`, `workspace_not_permitted`,
@@ -280,36 +373,64 @@ Fail-closed resolution is exhaustive:
 
 | Observation | Resolution |
 | --- | --- |
-| `{:allow, context}` | grant issued under ADR 0007 |
+| `{:allow, context}` with a context inside the bounded shape, or `nil` | grant issued under ADR 0007 |
+| `{:allow, context}` with a context outside the bounded shape | `{:deny, :policy_unavailable}`; nothing unbounded reaches a grant |
 | `{:deny, category}` | durable denial, `denied` tool call, no dispatch |
 | `{:defer, _}` in `M2` | `{:deny, :interaction_unsupported}` |
 | Callback raises, exits, or times out | `{:deny, :policy_unavailable}` |
 | Any other return shape | `{:deny, :policy_unavailable}` |
-| No policy configured and any effectful tool active | runtime start refused |
+| No policy configured and any executor-backed tool active, `read_only` included | runtime start refused |
 
 A denial commits before it is reported, so an aborted or crashed coordinator
 cannot lose the fact that a call was refused, and the `denied` outcome is the
 validated terminal fact the cancellation algebra must preserve.
 
-`Loopex.Policy.AllowAll` ships in `loopex_executor_local`, the `:edge`
-application that owns the trusted-local executor. That placement is forced by
-dependency direction rather than chosen for tidiness. The reference command is a
-`:client` and no application may depend on a client; the deny-outcome selectors
-and the refusal-to-start selector live with the executor edge, which may depend
-only inward on core; and an edge may not depend sideways on another edge. Core
-itself is excluded because a permissive policy inside core would be a default in
-everything but name. Placing it beside the executor that already runs with the
-user's own operating-system authority also puts the permissive choice where the
-authority it is permissive about actually lives, and leaves a future isolated or
-remote hand without an inherited `AllowAll`.
+`Loopex.Policy.AllowAll` ships in `loopex_reference_client`, the `:client`
+application that is Loopex's reference host. The placement follows ownership, not
+convenience: §6.4 assigns the authorization decision to the host, and deciding to
+trust one's own workspace is exactly such a decision. The reference host makes
+that decision for itself, names the module in its own configuration, and prints
+the notice that says what it means.
 
-The alternative shape — a seventh application holding one module — was rejected
-against the minimalism budget: it would add a project, a dependency record, and
-an inventory row to give one module a home it already has.
+Core is excluded because a permissive policy in core is a default in everything
+but name. The trusted-local executor edge is excluded for the stronger reason:
+an edge that shipped `AllowAll` would make the host's decision on behalf of every
+embedder who composes that executor, including embedders who compose it precisely
+because they intend to police it, and the permissive module would then be
+inherited by the first isolated or remote hand that reuses the edge's
+composition. An edge supplies a mechanism; it does not get to answer the host's
+question.
+
+The dependency direction is settled by the test fixtures rather than by
+placement. `apps/loopex_executor_local/test/host_policy_test.exs` owns Outcome 7's
+deny, fail-closed, and refusal-to-start selectors, and it defines its own policy
+fixtures inside the test file: one refusing module returning `{:deny, category}`,
+one permitting module returning `{:allow, nil}`, and the raising, sleeping, and
+malformed-return modules the fail-closed cases need. It imports nothing from the
+reference client. That is not a workaround for a placement problem; it is the
+correct arrangement independently, because those selectors are testing the port's
+behaviour under a decision, not testing the shipped permissive module. No
+application depends on a `:client`, no edge depends sideways on another edge, and
+no reader can conclude from this ADR that an edge imports a client.
+
+The explicitness obligation splits along the same line. That a permissive policy
+applies only when it is named in configuration, and that omitting the option
+refuses runtime start rather than falling back to permission, is a property of
+the runtime and is proved in the executor edge's selectors with its permissive
+fixture — no shipped module required. That `Loopex.Policy.AllowAll` in
+particular allows every decision and emits exactly one visible
+permissive-authority notice is a property of that module and is proved in the
+reference client's own test lane, where the module lives.
+
+Two alternative homes were rejected against the minimalism budget. A seventh
+application holding one module would add a project, a dependency record, and an
+inventory row to give one module a home it already has. Core would make the
+permissive choice invisible, which is the one property it must not have.
 
 A selector proves that omitting the policy option refuses runtime start rather
-than defaulting to it, and the dependency-budget check proves that no
-application acquired a client or sideways edge dependency to reach `AllowAll`.
+than defaulting to it, and the dependency-budget check proves that no application
+acquired a client, sideways edge, or external dependency in the course of this
+arrangement.
 
 ### Cancellation
 
@@ -339,28 +460,62 @@ abort admitted through the facade and committed (M1 admission, unchanged)
   -> operation: retain a validated completed / failed / denied fact
               | cancelled when cancellation caused termination
               | outcome_unknown when effect evidence is insufficient
-  -> run: cancelled
+  -> run: cancelled | outcome_unknown(reconciliation_ref)
 ```
+
+The run outcome is derived from the owned operation outcomes, never assumed from
+the fact that an abort was admitted:
+
+| Every owned operation ended | Run outcome |
+| --- | --- |
+| Validated `completed`, `failed`, or `denied`, with no owned process tree left unconfirmed | `cancelled` |
+| `cancelled` with confirmed cleanup | `cancelled` |
+| At least one `outcome_unknown` | `outcome_unknown(reconciliation_ref)` referencing that operation and attempt |
+
+Cleanup that is not confirmed is insufficient evidence, not a slower success. If
+the grace period elapses, the owned tree is terminated by its captured kill
+identity, and termination still cannot be confirmed, the operation ends
+`outcome_unknown` and the run ends `outcome_unknown` with it. There is no path
+that commits `cancelled` over an unproved effect or an unconfirmed process tree,
+because a clean `cancelled` is precisely the report an operator would act on by
+doing nothing.
+
+The run's `outcome_unknown` carries the reconciliation reference of the first
+unknown operation and enumerates the rest in its retained evidence, so an
+operator reading only the run outcome — which is the outcome the reference
+command prints — still learns that something needs reconciling. Both outcomes are
+terminal and immutable: a later reconciliation appends a fact referencing the
+original operation and attempt and never rewrites the emitted `run.finished`.
 
 Ordering follows the committed journal. If a validated completion commits before
 abort admission, the abort is acknowledged as already terminal. If abort
 admission commits first, no new work is scheduled and any later evidence is
 handled only through that operation kind's reconciliation rules. A late executor
 receipt for a cancelled run is retained truthfully and is not projected into the
-next model turn, because there is no next turn. `outcome_unknown` reaches ADR
-0007's reconciliation path unchanged, including its solicited-response and
-fencing requirements.
+next model turn, because there is no next turn. A validated late `completed` or
+`failed` leaves that operation truthful and still finishes the run `cancelled`;
+only an unprovable one moves the run to `outcome_unknown`. `outcome_unknown`
+reaches ADR 0007's reconciliation path unchanged, including its
+solicited-response and fencing requirements.
 
 The grace period is a declared session configuration value with a default and is
 reported in the terminal outcome's evidence, so an operator can distinguish a
-clean cooperative stop from a forced kill.
+clean cooperative stop, a forced kill that was confirmed, and a termination that
+could not be confirmed at all.
 
 ### Evidence
 
 Claim-proportional evidence for this decision:
 
 - registry conflict, idempotent re-registration, additive versioning, reserved
-  namespace, and unknown-generation resolution, each with its exact reason;
+  namespace, invalid name, and unknown-generation resolution, each with its exact
+  reason;
+- name-mapping evidence: a session whose active set claims one name twice refuses
+  to start with `duplicate_tool_name` naming both generations, a provider request
+  built from the mapping lists each name exactly once, a model call resolves by
+  name to the exact recorded generation, an unmapped name is a terminal
+  `unknown_tool` that dispatches nothing, and a registration performed mid-run
+  changes neither the mapping nor what a name resolves to;
 - two runtimes in one VM with disjoint tool sets, plus inspection proving no
   VM-global name or application-environment key was created;
 - a recorded generation that survives a restart and is used for validation and
@@ -370,9 +525,19 @@ Claim-proportional evidence for this decision:
   escape by symlinked component, zero-match and multi-match edits, mode misuse
   in `bash`, ceiling-crossing output with artifact spill, and descendant process
   cleanup;
-- policy conformance covering allow, deny, defer-in-`M2`, timeout, crash, and
-  malformed return, each asserting the exact resolution above and asserting that
-  no job was dispatched for every non-allow case;
+- policy conformance covering allow, deny, defer-in-`M2`, timeout, crash,
+  malformed return, and an out-of-shape `allow` context, each asserting the exact
+  resolution above and asserting that no job was dispatched for every non-allow
+  case;
+- a policy decision taken for a `read_only` call as well as for each effectful
+  class, with a denied `read` proving no job was dispatched and no bytes reached
+  model context, and a call-site assertion that the number of policy
+  consultations equals the number of resolved tool calls for a run mixing all
+  four effect classes;
+- a `policy_context` boundary case: an `allow` returning the maximum admitted
+  context is transported into the grant and retained unchanged, and one returning
+  a pid, a function, a nested structure, or an over-ceiling binary denies with
+  `policy_unavailable` and reaches no grant;
 - artifact-store conformance covering content-addressed idempotent `put`,
   byte-exact `fetch`, digest mismatch as an integrity error, unknown reference,
   over-ceiling refusal, and an opaque locator core never parses, run against
@@ -384,13 +549,18 @@ Claim-proportional evidence for this decision:
 - `M1`'s locked executor case passing unchanged at its exact identity, beside a
   reference-profile session that refuses a model call naming either
   demonstration tool with `unknown_tool`;
-- refusal to start a runtime with effectful tools and no configured policy, and
-  a dependency-budget run proving `AllowAll` is reachable from the executor edge
-  and from the reference composition without a client or sideways edge
-  dependency;
+- refusal to start a runtime with any executor-backed tool active and no
+  configured policy, including a `read_only`-only active set; a dependency-budget
+  run proving no application acquired a client, sideways edge, or external
+  dependency; and reference-client selectors proving `AllowAll` applies only when
+  named explicitly and emits exactly one permissive-authority notice;
 - abort during a model call and abort during an executor effect, each admitted
   through the facade, each proving owned work stopped, cleanup confirmed, the
   terminal fact truthful, and no late result projected into model context;
+- an abort whose owned effect cannot be proved: the operation ends
+  `outcome_unknown`, the run ends `outcome_unknown` with a reconciliation
+  reference rather than `cancelled`, the operator-facing output says so, and the
+  case is driven by injected unprovability rather than by timing luck;
 - the retained prompt and schema cost measurement for the bootstrap four, which
   is the deferred profile decision's input.
 
@@ -406,6 +576,18 @@ against whatever the code says today. That is invisible while there is one
 version of everything and silently wrong on the first change. Retrofitting it
 during the extension milestone means introducing resolution at the same moment
 namespaced contributions, activation ordering, and rollback arrive.
+
+**`tool_id`-only resolution, or a name precedence rule.** Resolving by
+`tool_id` needs no mapping and no conflict rule, and a precedence rule needs the
+mapping but never refuses. `tool_id`-only fails first: a dot-segmented identity
+is not a portable provider tool name, so an adapter would have to invent a
+name-to-identity translation anyway, and it would do so privately, per adapter,
+with no journaled record of what the model actually saw. A precedence rule fails
+differently and worse. It resolves the ambiguity by a rule nobody reads — highest
+version, or selection order — so the code behind a familiar name changes when a
+profile gains a claimant, the transcript still shows one word, and the
+before-and-after are indistinguishable in evidence. Refusing at composition costs
+one error message and makes the collision impossible to miss.
 
 **All seven tools now.** No technical obstacle; three more schemas and three
 more conformance runs. The objection is evidentiary. The vision makes the
@@ -430,6 +612,41 @@ real cases — this path, this command, this effect class, this workspace — so
 every real host would immediately need an escape hatch, and the escape hatch is
 the port. It also places the decision inside Loopex, contradicting the ownership
 map's assignment of authorization to the host.
+
+**A read-only exemption from policy.** Skipping `decide` for `read_only` saves a
+per-call decision on the most frequent tool in a coding session, and reads feel
+like the safe case. Two objections. The behavioural one: a read under a workspace
+lease is an executor effect that moves repository bytes into model context and
+therefore into a provider request, and whether this host permits this workspace
+and this path is the same host question a write asks. The structural one decides
+it: the exemption requires a predicate, the predicate is authority-bearing code
+inside Loopex, and its false branch is a reachable dispatch path with no policy
+consultation on it. Every subsequent tool then arrives as an argument about which
+side of the predicate it belongs on, and the first one argued wrong is unpoliced
+in production. Universal consultation removes the branch instead of auditing it.
+
+**An uninterpreted host term in the grant.** The maximally flexible `allow`
+returns `term()` and Loopex promises not to look. It is rejected on the plain
+boundary data rule rather than weighed: the value is transported into a grant
+that is durable, canonicalized into a digest, retained in a receipt, and
+validated by an executor. A pid or a function there is meaningless after a
+restart, an unbounded structure defeats the boundedness every other field
+maintains, and an atom from host input is a well-known table-exhaustion hazard.
+The opaque `decision_ref` gives a host precisely the indirection the term was
+wanted for, at the cost of the host resolving its own reference — which is where
+that resolution belonged.
+
+**`AllowAll` in the trusted-local executor edge.** It puts the permissive module
+beside the executor that already carries the user's operating-system authority,
+and it keeps the policy selectors and the permissive module in one application.
+It is not recommended. Placement of a policy is an ownership statement: an edge
+that ships a permissive policy has answered the host's question for every
+embedder that composes it, and a future isolated or remote hand reusing that
+composition inherits an `AllowAll` nobody chose for it. The dependency argument
+that made this placement look forced does not survive inspection either. The
+executor edge's selectors need policy fixtures, not the shipped module, and
+in-file fixtures are both smaller and a better test: they exercise the port under
+a decision instead of asserting the reference host's default twice.
 
 **Spill into the journal or straight onto the store's files.** Mechanically
 trivial: the executor already writes a receipt file and the coordinator already
@@ -468,6 +685,17 @@ cancellation it would implement, and ADR 0008 refuses two live Controls over one
 Store identity and `runtime_id` regardless. The in-process facade admission is
 not a compromise; it is the only correct admission path this milestone has.
 
+**A single `cancelled` run outcome.** Collapsing the run outcome to `cancelled`
+removes a case from every renderer and gives an operator one answer to one
+gesture. It is not recommended, and the reason is not symmetry with the tool
+outcome — it is that the run outcome is the one an operator reads. A run reported
+`cancelled` while its owned effect stayed unprovable tells the operator the
+system is at rest, which is the single most expensive wrong statement this
+milestone could make: the reconciliation the tool outcome demands then has no
+visible trigger. Keeping `outcome_unknown` at the run level costs one branch in
+the reference command's output and one more case per surface, and it is what the
+vision's algebra already specifies.
+
 **Signed or portable grants.** Unchanged from ADR 0007: `M2` still has one
 machine, one attached caller, and an in-VM executor, so a signature would secure
 a boundary that is not crossed. The first isolated or remote hand is the trigger.
@@ -502,8 +730,23 @@ Concept: [Consequences](0009-tool-executor-and-grant-contracts.md#concept-adr-00
   process-group identity before accepting a job is required for honest cleanup
   and ties the local executor to POSIX semantics.
 - Abort becomes bounded rather than instantaneous. Operators see a grace period
-  and, in the worst case, an `outcome_unknown` that requires reconciliation
-  rather than a comfortable false `cancelled`.
+  and, in the worst case, a run that finishes `outcome_unknown` and names a
+  reconciliation reference rather than a comfortable false `cancelled`. Every
+  surface that renders a run outcome carries that second ending, and no
+  documentation may promise that Ctrl-C guarantees a clean stop.
+- Model-visible names become committed session state. The name mapping is
+  journaled with the active set, replay resolves the exact name the run used, and
+  a duplicate name refuses session start. Later profile and extension work
+  inherits that refusal: two contributors claiming `search` collide visibly at
+  composition instead of resolving by a precedence rule nobody reads.
+- Policy is consulted on every executor-backed call, so a `read`-heavy session
+  pays one host decision per read and every host implementation must answer reads
+  as well as writes. The removed alternative — an exemption predicate with an
+  unpoliced false branch — is what that cost buys.
+- The permissive policy lives with the reference host. An embedder who composes
+  the trusted-local executor gets a mechanism and no policy, and must name one,
+  which is the intended friction. The reference client keeps one module and one
+  notice that its own tests own.
 - Cancellation stays inside the process that owns the session. An operator with
   two terminals cannot stop a run from the second one, and a command surface
   that offers such a subcommand would be offering something the runtime cannot
@@ -539,10 +782,12 @@ Concept: [Consequences](0009-tool-executor-and-grant-contracts.md#concept-adr-00
 
 Concept: [Compatibility, migration, and rollback](0009-tool-executor-and-grant-contracts.md#concept-adr-0009-compatibility).
 
-The durable format gains the active-set record committed at session start, the
-per-call generation triple on each tool-operation intent, the durable denial
-record, the artifact reference carried on a tool result and its receipt, and the
-cancellation evidence retained with a terminal outcome. All are bounded plain
+The durable format gains the active-set record committed at session start
+together with its model-visible name mapping, the per-call generation triple on
+each tool-operation intent, the durable denial record and its bounded policy
+context, the artifact reference carried on a tool result and its receipt, and the
+cancellation evidence retained with a terminal operation and run outcome,
+including the reconciliation reference an unknown run outcome carries. All are bounded plain
 data in the session mutation domain and none crosses into a public plane except
 through the existing bounded tool-call events.
 
@@ -550,7 +795,8 @@ There is no installed base and no published package, and `M2` tags no version:
 `VERSION` stays `0.0.0` and the first version number belongs to the headless
 session-protocol milestone. The tool definition shape, the policy callback, the
 reason categories, the artifact reference, and the active-set record are all
-experimental and freeze nothing. `M1` journals are neither read nor migrated and
+experimental and freeze nothing, as are the name mapping and the bounded
+`policy_context` shape. `M1` journals are neither read nor migrated and
 `M1`-owned test roots are discarded rather than upgraded; `M1`'s two
 demonstration tool definitions are retained unchanged, outside every active
 profile, so that its locked executor case keeps passing.
@@ -561,9 +807,10 @@ together, and returns the runtime to the `M1` single-tool option. Partial
 rollback is not available: the grant path depends on both resolution and policy,
 cancellation depends on the executor capturing kill identity at accept time, and
 bounded output depends on a spill target. Once a version is published, changing
-a built-in's `tool_id`, effect class, or parameter schema is a new
-`tool_version` under the additive registration rule; the old generation stays
-resolvable for any journal that names it. Removing a reason category, widening
-the schema subset, changing the artifact reference fields, or making `defer`
-executable each require a successor decision, because each changes what a
-recorded decision or receipt meant.
+a built-in's `tool_id`, model-visible name, effect class, or parameter schema is
+a new `tool_version` under the additive registration rule; the old generation
+stays resolvable for any journal that names it. Removing a reason category,
+widening the schema subset, widening the `policy_context` shape, changing the
+artifact reference fields, changing how a model-visible name resolves, or making
+`defer` executable each require a successor decision, because each changes what a
+recorded decision, name, or receipt meant.

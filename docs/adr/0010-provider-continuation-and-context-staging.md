@@ -55,11 +55,13 @@ quietly absorb the rest.
 
 One part of that seam cannot be left abstract. §16.2 requires an explicit
 deterministic admission decision for project-local resources, but a decision
-needs something exact to decide about: which files were resolved, in what order,
-at what sizes, under which digests, and what the operator saw before answering.
-Without those fixed, "an explicit trust decision" is a sentence rather than a
-mechanism, and the first implementation would fix them by accident. They are
-founding trust requirements and belong in this decision.
+needs something exact to decide about: which resources were resolved, in what
+order, at what sizes, under which digests, who resolved them, and what the
+operator saw before answering. Without those fixed, "an explicit trust decision"
+is a sentence rather than a mechanism, and the first implementation would fix
+them by accident — most likely by having core open a file, which §15.2 does not
+permit it to do. They are founding trust requirements and belong in this
+decision.
 
 Technical depth: [What M1 commits today and the three defects](0010-provider-continuation-and-context-staging-technical.md#technical-adr-0010-context).
 
@@ -68,12 +70,22 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
 
 - **A turn's canonical model request is one immutable ordered value, committed
   before dispatch.** It carries exact model identity, the ordered message list,
-  the ordered active tool-definition generations, the explicit sampling bounds,
-  and the continuation binding. It is canonicalized by a protocol-versioned
+  the ordered active tool definitions, the explicit sampling bounds, and the
+  reserved continuation field. It is canonicalized by a protocol-versioned
   function, digested, and committed in the same transaction as the model-call
   intent and its context receipt. Only after that commit may the adapter receive
   the request, and it receives exactly those bytes. `M1`'s real-provider
   assertion is widened from one message to the whole request, never relaxed.
+- **The staged request carries complete tool-definition bytes, not references to
+  them.** Each active tool contributes its full immutable definition — name,
+  description, and parameter schema, canonicalized exactly as it is dispatched —
+  carried together with its `{tool_id, version, digest}` generation identity. A
+  staged request is therefore reconstructible and verifiable from the journal
+  alone: a later registry edit, version bump, or removal changes neither the
+  bytes that were dispatched nor the digest that covers them. Committing only
+  the generation triple would leave a recorded digest depending on a mutable
+  registry to mean anything, and would make replay after a tool is retired
+  impossible.
 - **No implicit sampling default.** `max_tokens` is a declared committed value.
   The `M1` fallback of 128 is removed, and a session configured without a bound
   is refused at start rather than silently truncated at dispatch.
@@ -105,6 +117,25 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   cumulative token budget across the run, and a wall-clock deadline each have a
   configured value with a default. Every bound is checked before the next
   request is staged, so exceeding one costs no provider call.
+- **The deadline is enforced inside the model call as well as between turns.**
+  The run's committed absolute deadline instant is propagated into the
+  supervised model call and bounds that call, so one long generation cannot
+  outlive the bound an operator declared. A between-turns check alone is not a
+  wall-clock bound: it lets a run exceed its deadline by as long as a provider
+  holds a single connection open, which is exactly the stalled-provider case the
+  bound exists to catch. There is no separate per-call timeout that may exceed
+  the run deadline, so the two enforcement points can never disagree.
+- **The deadline race is decided by committed journal order, and the committed
+  outcome is the truthful one.** If a complete validated reply commits before
+  the deadline abort is admitted, that turn is completed, its assistant message
+  is canonical history, and the deadline then ends the run before the next
+  request is staged. If the abort is admitted first, the model call is
+  cancelled, no assistant message is written, and a reply arriving afterwards is
+  retained truthfully as attempt evidence without becoming canonical history.
+  Partial or streamed output never becomes a canonical assistant message under
+  either order. This is the same completion/cancellation ordering rule the
+  vision already fixes; the deadline is one more thing that can request the
+  abort.
 - **A committed bound is always enforceable; a missing provider usage report
   never disables one.** Provider-reported usage is preferred whenever it exists.
   Where a turn's reply carries no usage, that turn is accounted conservatively
@@ -115,22 +146,38 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   instead was rejected: usage reporting is observable only after a reply, so a
   start-time refusal would turn a budget into a provider allowlist and would
   exclude local and OpenAI-compatible endpoints that are otherwise usable.
-- **Reaching a bound is its own truthful terminal outcome.** It commits as
-  budget exhaustion in the closed outcome algebra, naming which bound was
-  reached, the observed value, and how that value was obtained. It is never
-  reported as completion, and no assistant message the model did not produce is
-  ever written into canonical history. The partial conversation stays durable
-  and a new run may continue from it.
+- **A turn that produced no complete reply is charged its committed maximum
+  output allowance, not zero.** Counting only the request bytes would make a
+  cancelled or deadline-aborted long generation almost free against the token
+  budget, and that is the case where a run can burn the most while recording the
+  least. Partial streamed output is transient progress rather than durable
+  truth, so there is no retained observed output count to charge; the committed
+  `max_tokens` value is the most output that turn was authorized to produce, it
+  is already committed with the request, and it is therefore charged in full and
+  marked estimated. That is a second reason the sampling bound may not be
+  implicit: an unstated `max_tokens` would leave an aborted turn with no
+  conservative number to charge.
+- **Reaching a bound terminates the run inside the vision's closed outcome
+  algebra.** The run commits `failed(:budget_exhausted, false)`, and the
+  terminal record names which bound was reached, the observed value against the
+  declared limit, and how that value was obtained. `budget_exhausted` is a
+  category of `failed(category, retryable?)` rather than a sixth terminal value:
+  the run did not achieve its purpose, and it is not retryable, because retrying
+  the same run under the same committed bounds re-exhausts them without a
+  provider call. It is never reported as completion, and no assistant message
+  the model did not produce is ever written into canonical history. The partial
+  conversation stays durable and a new run may continue from it.
 - **Resuming an interrupted run and prompting a completed session are different
   operations with different rules.** Resuming an interrupted run keeps the run's
   identity, its committed bounds, and its staged bytes: the same request is
   redispatched as a new attempt under the same operation identity, nothing is
   recomputed, and the wall-clock deadline is the absolute instant committed with
-  the run, so a run whose deadline passed while its owner was down terminates as
-  budget exhaustion on recovery without a provider call. Submitting a new prompt
-  to a completed session starts a new run with a new identity, its own freshly
-  committed bounds, and a projection over the whole retained lineage; it is
-  admitted only while the session is settled, and it requires live ownership
+  the run, so a run whose deadline passed while its owner was down commits
+  `failed(:budget_exhausted, false)` naming `:deadline` on recovery, without a
+  provider call and without redispatching the staged bytes. Submitting a new
+  prompt to a completed session starts a new run with a new identity, its own
+  freshly committed bounds, and a projection over the whole retained lineage; it
+  is admitted only while the session is settled, and it requires live ownership
   acquired through a fresh resume command identity under
   [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept).
   Neither operation ever inherits the other's bounds.
@@ -141,45 +188,60 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   digest, provenance class, trust class, and byte and token cost, and the
   receipt records the final ordered block descriptors. Per-class and total
   budgets are enforced before dispatch.
+- **Core never resolves, holds, or reads a filesystem path; discovery belongs to
+  the hand that owns the workspace.** Core holds the opaque workspace reference
+  and nothing more, exactly as it does for tool execution. The host, or the hand
+  that interprets that reference, performs the lookup and returns bounded plain
+  data: one manifest entry per resolved resource carrying a workspace-relative
+  label, a byte size, and a content digest, plus the bounded content bytes of
+  each resource. Core verifies supplied content against its supplied digest and
+  size, enforces the declared ceilings, and treats the relative label as a
+  display string it never joins, resolves, or opens. Containment is enforced
+  where the filesystem actually is, under the same rule
+  [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) applies to tool
+  paths, and reaches core as reported evidence; an entry the supplier does not
+  report as contained within the workspace is refused rather than admitted. A
+  core that resolved a real path would need brain-local filesystem access and a
+  POSIX path, which is precisely what the opaque workspace reference exists to
+  prevent and what would break the moment the hand is remote.
 - **Project-resource discovery is fixed, shallow, and content-independent.** The
-  reference stage resolves exactly one path: `AGENTS.md` in the canonical
-  workspace root. There is no recursion, no globbing, no user-level or
+  reference stage names exactly one resource: `AGENTS.md` at the root of the
+  canonical workspace. There is no recursion, no globbing, no user-level or
   home-directory resource, no repository-history-derived resource, and no
-  configured path list. Content never extends the resolved set: an import,
-  include, or link inside an admitted resource is inert text, because a rule
-  that let admitted content name the next file would let untrusted data choose
-  what else gets trusted.
+  configured path list. The rule is stated to the supplier and verified by core
+  against what comes back: a manifest carrying anything other than that one
+  permitted label is refused whole. Content never extends the resolved set: an
+  import, include, or link inside an admitted resource is inert text, because a
+  rule that let admitted content name the next file would let untrusted data
+  choose what else gets trusted.
 - **The resolved set is presented as an ordered manifest with a digest, and
   refused rather than trimmed when it exceeds its limits.** The manifest lists
-  each resource by its exact path relative to the canonical workspace root, its
-  byte size, and its content digest, in canonical path order, and carries one
-  manifest digest computed over the manifest together with the canonical
-  workspace identity. A resource above its declared byte ceiling, or a class
-  total above the declared ceiling, fails closed with the observed sizes; it is
-  never truncated into context, because a truncated instruction file is a
-  different instruction file. A resolved path whose real path leaves the
-  workspace root is refused under the same containment rule
-  [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) applies to
-  tools.
+  each resource by its workspace-relative label, its byte size, and its content
+  digest, in canonical label order, and carries one manifest digest computed
+  over the manifest together with the opaque canonical workspace identity. A
+  resource above its declared byte ceiling, or a class total above the declared
+  ceiling, fails closed with the observed sizes; it is never truncated into
+  context, because a truncated instruction file is a different instruction
+  file.
 - **A project-local resource enters context only through an explicit
   deterministic trust decision, and Loopex owns the binding while the host owns
   the decision.** Core exposes the resolved manifest and its digest for display
   without admitting anything; the decision is supplied at session start and
-  binds canonical workspace identity, repository origin and revision where
-  available, the manifest digest, trust scope, decision source, issuance,
-  expiry, and revocation state. The interactive reference command shows the
-  path, size, and digest of every resource and the manifest digest, then asks
-  once; a headless run with no supplied decision matching the exact current
-  binding stages the class empty and journals a declined receipt entry rather
-  than refusing the session, so failing closed withholds content instead of
-  withholding the runtime. `M2` writes no expiry and no revocation beyond the
-  absence of a decision, but records both fields so a host-owned lifecycle lands
-  without migrating a retained receipt.
-- **Any change to the binding invalidates it.** A different workspace root real
-  path, a different repository revision where one is available, a resource added
-  or removed from the resolved set, or any changed content digest produces a
-  different manifest digest, and a decision bound to the old digest admits
-  nothing. A previously trusted directory name is never itself a grant.
+  binds the opaque canonical workspace identity, host-supplied repository origin
+  and revision where available, the manifest digest, trust scope, decision
+  source, issuance, expiry, and revocation state. The interactive reference
+  command shows the label, size, and digest of every resource and the manifest
+  digest, then asks once; a headless run with no supplied decision matching the
+  exact current binding stages the class empty and journals a declined receipt
+  entry rather than refusing the session, so failing closed withholds content
+  instead of withholding the runtime. `M2` writes no expiry and no revocation
+  beyond the absence of a decision, but records both fields so a host-owned
+  lifecycle lands without migrating a retained receipt.
+- **Any change to the binding invalidates it.** A different canonical workspace
+  identity, a different repository revision where one is available, a resource
+  added or removed from the resolved set, or any changed content digest produces
+  a different manifest digest, and a decision bound to the old digest admits
+  nothing. A previously trusted workspace identity is never itself a grant.
 - **Nothing in any injected block changes the active tool set, tool policy,
   budgets, bounds, or grants.** Typed delimiters are input structure, not an
   authority boundary.
@@ -203,15 +265,23 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   recorded tokenizer identity. The measurement is retained evidence and the
   number is reported whether it passes or fails; a review reading is not
   evidence.
-- **`M2` claims provider-neutral replay and a continuation-ready binding, not
-  provider-native continuation.** Core carries portable canonical history only.
-  The request's continuation binding is present in the canonical shape and is
-  empty in every `M2` request, so a later sidecar lands without changing what a
-  recorded digest covers. `M2` stores no sidecar, reads none, and no adapter may
-  require one. The claim this milestone may make is that a conversation replays
-  identically from committed records; it may not claim that a provider's own
-  continuation state, reasoning signatures, or response identifiers survive
-  anything, because none are retained.
+- **What `M2` builds is canonical-history continuation, and the name is used
+  consistently.** A turn continues its predecessor because the whole
+  conversation is replayed from committed records: turn two is a continuation of
+  canonical history, produced by projection, and of nothing else. Every claim
+  this decision supports is a claim about replay from committed elements. No
+  claim anywhere — plan, gate, evidence, or reference client — may call `M2`
+  provider-native continuation, because nothing in `M2` retains a provider's
+  continuation state, reasoning signatures, or response identifiers.
+- **The continuation field is reserved, always empty, and carries no meaning in
+  `M2`.** It is structurally present in the canonical request so that a later
+  adapter-private sidecar lands without changing what a recorded digest covers,
+  and it is empty in every `M2` request. It makes no turn a continuation, it is
+  not a binding to anything, `M2` stores no sidecar and reads none, and no
+  adapter may require one. Because the model is fixed at session scope, `M2`
+  also has no model-change event for such a binding to be invalidated by: there
+  is nothing carried and nothing to invalidate, and the reserved field must not
+  be evidenced as though there were.
 - **The model is fixed for the life of a session.** Exact model identity is
   committed when the session is created and every run of that session stages it.
   `M2` admits no `set_model` command, so the model changes neither within a run
@@ -219,7 +289,7 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   This is stated at session scope rather than run scope because the reason is
   the same in both places: cross-model replay of a canonical history is a
   compatibility claim, and `M2` retains no evidence for one. The `/model` flow
-  the vision expects of a reference client waits for the continuation
+  the vision expects of a reference client waits for the provider-continuation
   compatibility decision that accompanies the sidecar.
 
 This decision changes nothing in
@@ -258,6 +328,34 @@ It is not recommended: cheap tool-call cycles can spin for a very long time
 inside a token budget, turn count is the bound a user reasons about, and
 wall-clock is the bound that protects an operator from a stalled provider.
 
+**Check the deadline only between turns.** It is the smallest possible rule and
+it costs no plumbing into the model call. It is not recommended: a bound that is
+only sampled between calls is not a wall-clock bound at all, because the single
+place a run stalls longest is inside one provider call, and a run could exceed
+its declared deadline by hours while every between-turn check passed. Bounding
+the supervised call with the same absolute instant costs one propagated field
+and one explicit race rule.
+
+**Add `budget_exhausted` to the terminal algebra as a sixth outcome.** It reads
+better than `failed`, since a run that stopped exactly where it was configured to
+stop is not obviously a failure. It is not recommended: the vision's terminal
+algebra is closed and public, every consumer, event projection, and conformance
+vector treats it as exhaustive, and widening it would be a vision boundary change
+requiring its own decision, evidence, and migration story for a case
+`failed(category, retryable?)` already expresses truthfully. Adding a failure
+category is additive within the closed algebra; adding a terminal value is not.
+The cost accepted instead is a naming one, and the bound named in the terminal
+record is what keeps the record honest.
+
+**Charge a cancelled or aborted turn only for what it demonstrably produced.**
+It is the most accurate-sounding rule and it never over-charges. It is not
+recommended: partial streamed output is transient progress that no durable record
+retains, so "what it produced" is a number Loopex cannot recover after a restart,
+and where nothing was observed the charge is zero — which makes aborting every
+turn the cheapest way to run indefinitely inside a token budget. Charging the
+committed `max_tokens` allowance is recoverable from committed bytes, never below
+what the provider could bill, and visible as estimated.
+
 **Fabricate a closing assistant message when a bound is reached.** It produces a
 tidier transcript. It is rejected: a message the model never produced would be
 indistinguishable from a real one on replay, and canonical history would then
@@ -279,6 +377,17 @@ run the operator already paid for. It would also exclude local and
 OpenAI-compatible endpoints for a reporting gap rather than a behavioural one.
 Conservative accounting keeps the bound live and marks the number as estimated;
 what is never acceptable is the third option, silently dropping the bound.
+
+**Let core resolve the workspace path and read the resources itself.** It is by
+far the shortest path to a working reference stage, because the brain and the
+hand share a filesystem in the single-machine `M2` topology and core could simply
+open the file. It is not recommended: it makes core depend on a POSIX path and
+brain-local filesystem access, which contradicts the opaque workspace reference
+the whole executor topology is built on, and it breaks the first time a hand is a
+container, a remote checkout, or a volume snapshot. It would also put path
+containment in the one component that cannot enforce it honestly. Having the hand
+supply bounded manifest entries and content evidence costs one more boundary
+crossing and keeps core free of filesystem authority.
 
 **Discover project resources by a configured glob or a recursive walk.** More
 useful on day one, and every comparable tool does something like it. It is not
@@ -314,6 +423,13 @@ every committed digest, so the version tag must be recorded with each staged
 request from day one and a change becomes a versioned migration with fixtures
 rather than an edit. This is permanent.
 
+Staging complete tool-definition bytes makes every staged request larger by the
+full size of the active definitions, on every turn, and that size is charged
+against the token budget each time. The compensation is that a staged request
+means something without the registry: it can be verified, replayed, and audited
+years later, including after the tool that produced it is gone. Keeping tool
+descriptions and schemas terse becomes a cost decision rather than a style one.
+
 Durable session size becomes proportional to tool output. Complete tool results
 are journaled, which is what makes replay honest and what makes storage grow.
 The bounded-output and artifact-spill rules in
@@ -345,10 +461,30 @@ hard turn starts a new session and loses the conversation, which is the sort of
 friction that makes people paste context by hand.
 
 Estimated token accounting is a permanent second class of number in the durable
-record. A `budget_exhausted(:token_budget)` outcome now has to say how its value
-was obtained, every consumer that renders a token count has to render the
-distinction, and a run that mixes reported and estimated turns carries both.
-That is the cost of never letting a committed bound become silently inert.
+record. A `failed(:budget_exhausted, false)` outcome naming `:token_budget` now
+has to say how its value was obtained, every consumer that renders a token count
+has to render the distinction, and a run that mixes reported and estimated turns
+carries both. That is the cost of never letting a committed bound become
+silently inert.
+
+Charging an aborted turn its full `max_tokens` allowance over-charges most of
+the time, because a call cancelled early rarely generated its whole allowance.
+That direction is deliberate — a bound should err toward ending early rather
+than toward being evadable — but it means a run with several cancellations can
+exhaust its token budget having been billed by the provider for considerably
+less. The estimated marker is what keeps that visible instead of mysterious.
+
+Every run that stops at a declared bound is recorded as a failure. Operators and
+dashboards that group by terminal outcome will see `failed` for runs that did
+exactly what they were configured to do, and only the named bound in the
+terminal record distinguishes those from real failures. Consumers therefore have
+to read the category, not just the outcome. That is the cost of not widening a
+closed public algebra for a naming preference.
+
+Bounding the model call by the deadline means a reply can be discarded after the
+provider has already been billed for it. When the abort commits first, the run
+gets no assistant message from a call the operator paid for, and the attempt
+evidence records exactly that. The alternative was a bound that does not bind.
 
 Discovery narrow enough to display honestly is discovery narrow enough to
 disappoint. One file at the workspace root will not match what operators expect
@@ -356,6 +492,13 @@ from tools they already use, and the gap will be reported as a missing feature
 rather than as a trust decision. Widening it is additive; the reason to start
 here is that the operator can read the entire thing they are being asked to
 trust.
+
+Moving discovery out of core means core can no longer see a workspace at all.
+The reference stage yields nothing unless a host or hand supplies a manifest,
+so the reference CLI and the local hand each grow a small responsibility that a
+direct file read would have hidden, and a host that supplies nothing gets an
+empty class rather than an error. That is the price of core holding an opaque
+workspace identity, and it is the same price already paid for tool execution.
 
 Technical depth: [Operational consequences](0010-provider-continuation-and-context-staging-technical.md#technical-adr-0010-consequences).
 
@@ -366,7 +509,10 @@ No released surface exists and no installed base exists. `M2` tags no version:
 `VERSION` stays `0.0.0` and the first version number is reserved for the
 headless session-protocol milestone. The canonical request format, the
 conversation element shapes, the context receipt, the trust binding, and the
-bound outcomes are all experimental and freeze nothing.
+bound outcomes are all experimental and freeze nothing. The vision's terminal
+algebra is the one thing here that is not experimental, and `M2` does not touch
+it: budget exhaustion is a new category inside `failed(category, retryable?)`,
+which is additive, rather than a new terminal value, which would not be.
 
 `M1` journals are not migrated. `M1`'s synthesized second-turn record has no
 successor form, because a synthesized string is not a degraded version of a real
@@ -399,6 +545,8 @@ Technical depth: [Format, migration, and rollback mechanics](0010-provider-conti
 - [ADR 0007](0007-local-executor-grant-job-receipt.md#concept) — the one
   canonical request digest identity this decision extends to a full request
 - [Vision model and context boundary](../vision.md#concept-vision-model-boundary) — the governed pipeline and what belongs to hosts
+- [Vision executor protocol and brain/hand topology](../vision.md#concept-vision-executor-protocol) — the opaque workspace reference core never resolves
+- [Vision recovery truth](../vision-technical.md#technical-vision-recovery-truth) — §9.5's closed outcome algebra, which budget exhaustion is encoded inside
 - [Vision loop semantics](../vision-technical.md#technical-vision-loop-semantics) — one run, input queues, and the split payload rule
 - [AGENTS.md](../../AGENTS.md) — durability and recovery truth, truth planes,
   credentials and context, and the smallest sufficient system

@@ -45,7 +45,11 @@ canonical types Loopex owns. §11.2 puts those deltas on the transient progress
 plane, where they may be dropped and need not replay, while the complete
 assistant message is durable truth a reconnecting client is owed. Adding
 streaming without deciding that boundary first is how progress becomes truth by
-accident.
+accident. The same gap runs through the other end of a turn: §11.5 names tool
+output deltas as progress and §15.1 requires every executor event to echo the
+complete identity and fence, while the executor port returns exactly one receipt
+and offers no channel for anything in between. A delta kind whose producer no
+decision names is an obligation on whoever implements first.
 
 These two belong in one decision because they are the same question asked at two
 ends of a turn: what may enter a running run, and what may leave it. Both are
@@ -83,24 +87,34 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   run is active and must name it. A steer naming a different run, or naming none
   while a run is active, is rejected rather than retargeted, so a steer typed
   for a run that has already finished can never land silently in the next one.
-- **Steering has exactly one application point.** An admitted steer is applied
-  after every tool result of the current assistant message has committed and
-  before the next request is staged, which is §10.2 step 11 and nowhere else.
-  Applied steers commit as user-role conversation elements in admission order,
-  immediately before the staged request that first carries them, so
+- **Steering has exactly one application point, and it is inside the transaction
+  that stages the next request.** An admitted steer is applied after every tool
+  result of the current assistant message has committed, and after
   [ADR 0010](0010-provider-continuation-and-context-staging.md#concept)'s
-  projection stays a deterministic function of committed elements and a replay
-  shows exactly what the model saw and when.
+  termination and bound checks have decided that another request will actually
+  be staged. That is §10.2 step 11 and nowhere else. The applied steer element
+  and the staged request that carries it commit in one transaction, so ADR
+  0010's projection stays a deterministic function of committed elements and a
+  replay shows exactly what the model saw and when.
+- **A steer is never recorded applied unless a request carried it.** Eligibility
+  and bounds are checked before anything commits applied. If the maximum turn
+  count, the token budget, or the wall-clock deadline ends the run at that
+  point, or if staging itself fails closed, the steer commits `unapplied` with
+  that exact reason instead. There is no window in which an operator is told
+  their steer landed while no model call ever carried it, because the element
+  and the request that carries it are the same commit.
 - **Queues are one-at-a-time, and a full queue refuses rather than coalesces.**
-  At most one unapplied steer exists per run and at most one follow-up is queued
+  At most one `queued` steer exists per run and at most one follow-up is queued
   per session. A second is rejected with an explicit reason. Deliver-all
   batching is the vision's later session option and needs an ordering proof this
   milestone does not have; dropping or merging an accepted input instead would
   make the refusal silent.
-- **A steer that arrives too late is recorded, never discarded and never
-  promoted.** If the run reaches a terminal outcome before the steer's
-  application point, the steer commits as unapplied with the reason, emits a
-  public event saying so, and never enters the conversation projection. Loopex
+- **A steer that no request carried is recorded, never discarded and never
+  promoted.** If the run reaches a terminal outcome without staging a request
+  that carries the steer — because the run ended before the application point,
+  because a bound was exhausted at it, or because staging failed closed — the
+  steer commits as unapplied with that exact reason, emits a public event saying
+  so, and never enters the conversation projection. Loopex
   does not convert it into a follow-up, because that would be the guess §10.3
   forbids; the operator resubmits it as a follow-up under a new `command_id` if
   that is what they want.
@@ -117,7 +131,7 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   it; the follow-up is neither lost nor started twice, because promotion is a
   durable idempotent transition of a committed command.
 - **An abort cancels the queues as well as the run.** A durably admitted abort
-  resolves any unapplied steer and any queued follow-up as cancelled, each
+  resolves any `queued` steer and any queued follow-up as cancelled, each
   recorded truthfully against its own `command_id`. Work an operator queued
   before stopping the task never starts after it. This is a real capability
   cost, taken because the alternative — a new run beginning moments after the
@@ -137,7 +151,11 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   already owns the terminal a steering line arrives on and admits it through the
   same public facade. Withholding the surface would leave an operator watching a
   run they cannot redirect while the kernel underneath already accepts the
-  redirection, which is the promise this milestone exists to keep.
+  redirection, which is the promise this milestone exists to keep. Because the
+  runtime never guesses which of the two an input is, the surface must not guess
+  either: `steer` and `follow_up` get distinct explicit affordances, and input
+  that names neither is refused rather than resolved from the state of the
+  session.
 
 ### Streaming progress
 
@@ -152,18 +170,67 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   durable event, and never replayed on reconnect; a reconnecting client is owed
   the complete message, as §11.2 requires. This is structural rather than a
   rule to remember: core has nothing to assemble from.
+- **A reply's stream statistics are attempt evidence, not message content.** How
+  many deltas an attempt emitted, and whether the adapter streamed at all,
+  describe one model attempt and are retained on that private attempt record.
+  They are not fields of the committed assistant message, which carries
+  conversation content and nothing else: whether the same bytes arrived in one
+  piece or four hundred is not part of what was said, and a canonical durable
+  element must not carry transport-shaped metadata a replay would have to
+  explain.
 - **Four canonical delta kinds, all bounded plain data.** Text, reasoning,
   tool-call, and tool-progress deltas each have an exact shape carrying no
   provider struct, pid, function, module atom, exception, terminal escape, or
-  credential. Tool-progress deltas come from the executor rather than the model
-  and ride the same plane and envelope.
-- **Deltas are ordered within one turn and detectably lossy.** Each carries the
-  turn it belongs to, a gapless monotonic sequence within that turn, and the
-  public event sequence it is based on. The reply reports how many deltas were
-  emitted. A consumer that sees a gap, or a count that disagrees with the reply,
-  knows it lost progress and falls back to the durable message. Coalescing and
-  dropping under backpressure stay permitted; the sequence is what makes them
-  visible instead of silent.
+  credential. Tool-progress deltas are projections of executor progress rather
+  than model output, and ride the same plane and envelope.
+- **Progress has two sequence domains, not one.** A model-stream sequence is
+  owned by one model reply and orders that reply's text, reasoning, and
+  tool-call deltas; an executor-operation progress sequence is owned per
+  executor operation attempt and orders that operation's output. They are not
+  merged, because they cannot be: the model reply supplies its own delta total
+  when it returns, which is before the first tool of that turn has even been
+  dispatched, so no single per-turn counter can be gapless across both without
+  one side reserving numbers it may never use.
+- **Each domain proves its own loss, in its own terms, and each closes itself on
+  the progress plane.** Model deltas carry a sequence that starts at zero for an
+  attempt and increases by one per emitted delta across all three model kinds.
+  Executor progress carries a sequence that starts at zero for an operation
+  attempt and increases by one per emitted progress event, plus a contiguous
+  per-stream byte offset. Each domain then ends with one closing progress item
+  stating its total, projected from the reply and the receipt respectively, so
+  both an interior gap and a truncated tail are detectable in both without any
+  total appearing on a durable element. Every delta also carries the turn it
+  belongs to and the public event sequence it is anchored to; beyond those
+  anchors no order is promised between the two domains. Coalescing and dropping
+  under backpressure stay permitted in both, closures included; the sequences
+  are what make them visible instead of silent.
+- **Executor progress is emitted as a complete executor event and validated
+  before anything narrower is projected.** The dispatching coordinator passes a
+  bounded progress function with the job, and the executor uses it to emit
+  ordinary executor progress events that echo the complete identity and fence —
+  job, operation and attempt, session/run/turn/tool-call identity, origin
+  session and executor epochs, executor identity, the canonical request digest,
+  and the fencing token. The coordinator validates every one of those against
+  what it independently holds for the live attempt before it projects the narrow
+  client-facing delta, which carries none of that administrative material.
+  Progress that fails validation is dropped and counted as refused; it is never
+  projected, never journaled, and never a reason to change a durable outcome.
+  This is the fencing discipline ADR 0007 and
+  [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept)
+  apply to receipts, and progress from a superseded executor must be refusable
+  for the same reason a receipt from one is. Its consequence is one step weaker
+  only because progress carries no authority and commits nothing.
+- **The emission path is decided here, so it is not an obligation nobody owns.**
+  The Executor port takes the same bounded progress function the Model port
+  takes, in the same trailing position: `execute/4` becomes `execute/5`. That
+  one parameter is the whole executor-boundary change. The grant bindings, the
+  job request, the receipt, the deduplication rule, and the terminal algebra
+  [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept) and
+  [ADR 0007](0007-local-executor-grant-job-receipt.md#concept) define are
+  untouched, and an executor that emits nothing is conformant exactly as a model
+  adapter that streams nothing is. The alternative was to keep a tool-progress
+  delta kind whose producer no decision described, which is how an obligation
+  becomes whatever the first implementation does.
 - **Reconstruction is a conformance obligation, not a runtime dependency.**
   Replaying an adapter's emitted deltas in order must reproduce byte-identical
   content to the reply it returned. The suite asserts it. Core never performs
@@ -193,13 +260,14 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   reuses the same staged digest, and no delta is ever an input to the next
   request.
 
-This decision changes nothing in
+This decision changes no rule in
 [ADR 0006](0006-store-transaction-and-owner-epoch.md#concept),
-[ADR 0007](0007-local-executor-grant-job-receipt.md#concept), or
-[ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept).
-Every new command and queue transition is ordinary session-domain content
-written by the one serial session owner under the same fencing, and the progress
-plane is the transient sink `M1` already carries on an attachment.
+ADR 0007, or ADR 0008. Every new command and queue transition is ordinary
+session-domain content written by the one serial session owner under the same
+fencing, and the progress plane is the transient sink `M1` already carries on an
+attachment. Its one addition at the executor boundary is the progress function
+and the events it carries, which are validated against those ADRs' identity and
+fence rather than exempted from them.
 
 Technical depth: [Exact command, queue, transition, and delta contract](0011-session-input-algebra-and-streaming-technical.md#technical-adr-0011-decision).
 
@@ -238,6 +306,64 @@ is ambiguous. One application point is what makes the projection deterministic.
 **Discard an unapplied steer silently.** Simplest, and the race is rare. It is
 rejected: the operator would believe they redirected a run that never saw a word
 of it, and there would be no durable record to contradict them.
+
+**Commit the steer applied first, then evaluate bounds.** It reads well — the
+steer is part of the conversation the moment the tool results are in, and a
+replay shows the operator's last word even when a limit ended the run. It is
+rejected: `applied` would then mean "committed into the projection", not
+"carried to the model", and a run that exhausts its turn budget at exactly that
+point would report a steer applied that no model call ever saw. An operator
+cannot act on a distinction that fine, so the record must mean the stronger
+thing. The steer is still retained and still visible, as `unapplied` with the
+bound that stopped it.
+
+**Prove all four inputs in the kernel and expose only `prompt` and `abort` from
+the reference command.** It is a smaller command surface and the kernel semantic
+would still be proved. It is rejected: `M2`'s purpose is an operator redirecting
+a run from their own terminal, and a foreground run already streams in the
+operator's process, which therefore already owns the terminal a steering line
+arrives on. There is no transport to build and no daemon to wait for, so the
+only thing withholding buys is a milestone that proves a capability nobody can
+use, described in documentation as unreachable.
+
+**Keep one sequence domain across model deltas and executor progress.** One
+counter per turn is simpler to explain and gives a consumer a single ordering.
+It is rejected as unimplementable rather than merely awkward: the model reply
+states its delta total when it returns, which is before the turn's first tool is
+dispatched, so a shared counter would have to either reserve a range the
+executor may never fill — making gaplessness meaningless — or renumber executor
+progress against a total that is already published. Two domains with two
+independent gaplessness properties cost one extra field and are provable.
+
+**Leave executor progress out of `M2` and drop the tool-progress delta kind.**
+Honest, smaller, and it avoids touching the executor port at all. It is not
+recommended: a coding harness whose longest waits are a test suite and a build
+would stream the model's prose and go silent for exactly the minutes the
+operator most wants to watch, and the delta kind would return in the next
+milestone anyway with a protocol already frozen around its absence. The cost of
+including it is one parameter on one callback.
+
+**Project executor progress into a client delta without validating the full
+tuple.** Progress commits nothing, so a stale chunk looks harmless. It is
+rejected: a superseded executor's output rendered as the current operation's is
+a lie told to the operator at exactly the moment they are deciding whether to
+abort, and the identity, epochs, digest, and fence needed to refuse it are
+already on every executor event. Validating them costs a comparison against
+state the coordinator already holds.
+
+**Carry the executor identity, epochs, digest, and fence through to the client
+delta.** It would let a client check the same things the coordinator checked. It
+is not recommended: leases, epochs, receipts, and fences are private or
+administrative in the public vocabulary, a client that re-derives trust from
+them starts depending on internals, and the check belongs where the independent
+state to compare against lives.
+
+**Put the delta count and the streamed flag on the committed assistant
+message.** They are cheap fields and it makes one record self-describing. It is
+rejected: a canonical durable element would then carry transport metadata, two
+adapters producing identical text would commit different bytes, and a replay
+would have to explain a chunk count that has nothing to do with what was said.
+The private attempt record is where evidence about a call belongs.
 
 **Let an abort keep the queued follow-up.** Defensible — the operator might be
 stopping only this run. It is not recommended: an abort is what an operator
@@ -307,10 +433,24 @@ whose continuation depends on reasoning signatures cannot be continued natively.
 That stays with the sidecar ADR 0010 defers, and this decision does not create a
 place to retain such material.
 
-Deferring the steer and follow-up surface means `M2` ships a kernel semantic no
-operator can reach from the reference command. That is honest only if it is
-stated plainly in the documentation the milestone ships; an unreachable feature
-described as available is worse than one described as pending.
+Exposing all four inputs makes the foreground command do two things at once. It
+must render deltas and read operator input in the same process for the whole
+length of a run, and it must keep `steer` and `follow_up` distinguishable at the
+keyboard without guessing. That is a real cost in the command's input handling,
+and it is the cost of the milestone's own purpose: an operator who can only
+watch and abort does not have a coding agent they can work with.
+
+The executor port grows a progress parameter, which every executor
+implementation — the local one and any future remote hand — must accept even
+when it emits nothing. Progress from an executor is now something the
+coordinator validates and can refuse, so a superseded executor's output is
+dropped rather than rendered, and a client sees a sequence gap rather than
+another operation's bytes.
+
+Two sequence domains mean every client renders two loss checks rather than one,
+and neither implies the other: a complete model stream says nothing about
+whether a tool's output arrived whole. The alternative was one number that could
+not be gapless, which is worse than two that are.
 
 Technical depth: [Operational consequences](0011-session-input-algebra-and-streaming-technical.md#technical-adr-0011-consequences).
 
@@ -320,8 +460,9 @@ Technical depth: [Operational consequences](0011-session-input-algebra-and-strea
 No released surface exists and no installed base exists. `M2` tags no version:
 `VERSION` stays `0.0.0` and the first version number is reserved for the
 headless session-protocol milestone. The command shapes, queue states, delta
-kinds, and the `complete/3` signature are all experimental and freeze nothing,
-and the compatibility contract's freeze machinery is not engaged.
+kinds, the executor progress event, and the `complete/3` and `execute/5`
+signatures are all experimental and freeze nothing, and the compatibility
+contract's freeze machinery is not engaged.
 
 `M1` journals are not migrated. `M1` recorded only `prompt` and `abort` and its
 test roots are discarded, so there is no queue state to upgrade and no delta
@@ -330,7 +471,8 @@ additively.
 
 Rollback before closure removes `steer` and `follow_up` admission, the queue
 records, the unapplied record, the promotion transition, and the delta plane
-usage together, returning `complete/3` to `complete/2` and the session to
+usage together, returning `complete/3` to `complete/2`, `execute/5` to
+`execute/4`, and the session to
 `prompt` and `abort`. It cannot be partial: the run-terminal transition reads
 the queue, and abort's truthful outcome depends on the queue states it cancels.
 Once a version is published, adding a command type or a delta kind is additive,
@@ -350,8 +492,9 @@ Technical depth: [Format, migration, and rollback mechanics](0011-session-input-
   epoch and journal version every admitted command is fenced by
 - [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept) —
   the succession a queued follow-up must survive without starting twice
-- [ADR 0007](0007-local-executor-grant-job-receipt.md#concept) — the operation
-  and attempt identity a tool-progress delta references
+- [ADR 0007](0007-local-executor-grant-job-receipt.md#concept) — the identity,
+  digest, and fence an executor progress event echoes and the coordinator
+  validates before projecting a delta
 - [Vision loop semantics](../vision-technical.md#technical-vision-loop-semantics) — one run, the four input paths, and the split payload rule
 - [Vision public protocol](../vision-technical.md#technical-vision-public-protocol) — the four stream planes and what a reconnecting client is owed
 - [Vision model and context boundary](../vision.md#concept-vision-model-boundary) — the canonical types and the provider conformance obligation
