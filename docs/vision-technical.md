@@ -844,7 +844,12 @@ denied
 failed(category, retryable?)
 unavailable(category)
 outcome_unknown(reconciliation_ref)
+bound_reached(bound, observed)        runs only
 ```
+
+`bound_reached` belongs to runs alone, because only a run carries declared
+bounds; a logical tool call has none to reach. The algebra is closed, and a
+further member requires the same kind of decision that introduced this one.
 
 `needs_interaction` is a suspended state, not a successful or terminal
 outcome.
@@ -975,9 +980,8 @@ the core.
 while retries, reconciliation, compaction, or queued follow-up work keep the
 session from being settled.
 
-A run's typed terminal outcome is exactly one of `completed`, `bound_reached`,
-`failed`, `cancelled`, or `outcome_unknown`. The set is closed; a sixth requires
-the same kind of decision that introduced `bound_reached`.
+A run's typed terminal outcome is one member of the closed algebra in §9.5,
+which `bound_reached` joined for exactly this ending.
 
 `bound_reached` is the outcome of a run stopped by a bound declared and committed
 with it — the maximum turn count, the cumulative token budget, or the absolute

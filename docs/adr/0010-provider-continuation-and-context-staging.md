@@ -157,16 +157,18 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   marked estimated. That is a second reason the sampling bound may not be
   implicit: an unstated `max_tokens` would leave an aborted turn with no
   conservative number to charge.
-- **Reaching a bound terminates the run inside the vision's closed outcome
-  algebra.** The run commits `bound_reached`, and the
-  terminal record names which bound was reached, the observed value against the
-  declared limit, and how that value was obtained. `budget_exhausted` is a
-  category of `failed(category, retryable?)` rather than a sixth terminal value:
-  the run did not achieve its purpose, and it is not retryable, because retrying
-  the same run under the same committed bounds re-exhausts them without a
-  provider call. It is never reported as completion, and no assistant message
-  the model did not produce is ever written into canonical history. The partial
-  conversation stays durable and a new run may continue from it.
+- **Reaching a bound is the run's own terminal outcome, not a failure.** The run
+  commits `bound_reached`, the member the vision's closed run terminal set holds
+  for exactly this case, and the terminal record names which bound was reached,
+  the observed value against the declared limit, and how that value was
+  obtained. It carries no failure category and no retryable flag, because
+  nothing malfunctioned and no invariant broke: the run stopped where its
+  operator configured it to stop, and the committed conversation is complete.
+  It is not `completed` either, since the model did not stop on its own and the
+  task is not known to be done. It is never reported as completion, and no
+  assistant message the model did not produce is ever written into canonical
+  history. The partial conversation stays durable and a new run may continue
+  from it under freshly committed bounds.
 - **Resuming an interrupted run and prompting a completed session are different
   operations with different rules.** Resuming an interrupted run keeps the run's
   identity, its committed bounds, and its staged bytes: the same request is
@@ -255,7 +257,7 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   receipt shape carries provider and revision identity now so that landing the
   pipeline does not migrate it.
 - **Compaction, branching, and forking stay out of scope.** `M2` projects full
-  lineage. A session that outgrows its budget ends a run on budget exhaustion
+  lineage. A session that outgrows its budget ends a run at its declared bound
   rather than dropping or summarizing history, and compaction checkpoints remain
   a decision for the milestone whose long-lived sessions produce the measured
   token curve that justifies one.
@@ -336,16 +338,21 @@ its declared deadline by hours while every between-turn check passed. Bounding
 the supervised call with the same absolute instant costs one propagated field
 and one explicit race rule.
 
-**Add `budget_exhausted` to the terminal algebra as a sixth outcome.** It reads
-better than `failed`, since a run that stopped exactly where it was configured to
-stop is not obviously a failure. It is not recommended: the vision's terminal
-algebra is closed and public, every consumer, event projection, and conformance
-vector treats it as exhaustive, and widening it would be a vision boundary change
-requiring its own decision, evidence, and migration story for a case
-`failed(category, retryable?)` already expresses truthfully. Adding a failure
-category is additive within the closed algebra; adding a terminal value is not.
-The cost accepted instead is a naming one, and the bound named in the terminal
-record is what keeps the record honest.
+**Encode a reached bound as a `budget_exhausted` category of
+`failed(category, retryable?)`.** It leaves the terminal set untouched, which
+matters because every consumer, event projection, and conformance vector will
+treat a closed set as exhaustive; a new failure category is additive where a new
+terminal value is not; and the fact still reaches anyone who reads the category
+and the named bound. It is rejected:
+every consumer grouping by terminal value would then see a configured stop and a
+genuine breakage in one bucket, distinguishable only by reading a reason code,
+and that is exactly the distinction an operator scanning a list of sessions needs
+most. Grouping by outcome is the cheapest and most common thing done with a run
+outcome, so an encoding that is only truthful to a consumer who looks one level
+deeper is a public value that misleads by default. `retryable?` would also carry
+no honest content here: the bounds are committed with the run, so a retry under
+the same identity re-evaluates the same limits and stops again without a provider
+call.
 
 **Charge a cancelled or aborted turn only for what it demonstrably produced.**
 It is the most accurate-sounding rule and it never over-charges. It is not
@@ -440,7 +447,7 @@ the other leaves a real hole.
 Every turn sends the whole conversation, so token cost per run grows with the
 square of the turn count. The turn, token, and time bounds make that finite but
 do not make it cheap. Measuring it is what will later justify compaction, and
-until then long sessions end on budget exhaustion rather than degrading — a real
+until then long sessions end at a declared bound rather than degrading — a real
 v0.1 usability limit that documentation must state rather than soften.
 
 Refusing implicit defaults makes the runtime harder to start. A session now
@@ -474,12 +481,16 @@ than toward being evadable — but it means a run with several cancellations can
 exhaust its token budget having been billed by the provider for considerably
 less. The estimated marker is what keeps that visible instead of mysterious.
 
-Every run that stops at a declared bound is recorded as a failure. Operators and
-dashboards that group by terminal outcome will see `failed` for runs that did
-exactly what they were configured to do, and only the named bound in the
-terminal record distinguishes those from real failures. Consumers therefore have
-to read the category, not just the outcome. That is the cost of not widening a
-closed public algebra for a naming preference.
+`bound_reached` is a terminal value every consumer has to handle. A run outcome
+is a closed set that callers switch on exhaustively, so the reference client,
+retained evidence, the operator documentation, and every event projection the
+headless session protocol later publishes each need a case for it; a consumer
+written against the set without it is incomplete rather than merely unpolished,
+and that obligation lands on every future protocol surface, not only on `M2`.
+The set also stays closed with one more member inside it. Each new way a run can
+stop will make a further terminal value look reasonable, and holding the line
+means the next one has to earn the same explicit vision decision this one
+received rather than arriving as an implementation detail.
 
 Bounding the model call by the deadline means a reply can be discarded after the
 provider has already been billed for it. When the abort commits first, the run
@@ -509,17 +520,22 @@ No released surface exists and no installed base exists. `M2` tags no version:
 `VERSION` stays `0.0.0` and the first version number is reserved for the
 headless session-protocol milestone. The canonical request format, the
 conversation element shapes, the context receipt, the trust binding, and the
-bound outcomes are all experimental and freeze nothing. The vision's terminal
-algebra is the one thing here that is not experimental, and `M2` does not touch
-it: budget exhaustion is a new category inside `failed(category, retryable?)`,
-which is additive, rather than a new terminal value, which would not be.
+bound outcomes are all experimental and freeze nothing. The vision's run
+terminal set is the one thing here that is not experimental, and it changed by
+explicit maintainer decision: it gained `bound_reached` in the vision pair, and
+this ADR implements that decision rather than making it. The widening migrates
+nothing. No version is released, no public protocol yet carries a run outcome,
+and no session record exists anywhere in which a reached bound was written as
+something else, so there is no consumer to update and no journal to project
+forward. The set stays closed with `bound_reached` in it, and a further member
+needs the same kind of decision, with its own evidence and consumer analysis.
 
 `M1` journals are not migrated. `M1`'s synthesized second-turn record has no
 successor form, because a synthesized string is not a degraded version of a real
 tool result, and `M1`-owned test roots are discarded.
 
 Rollback before closure removes the conversation elements, the bounds, the
-budget outcome, and the context receipt together, returning to `M1`'s
+`bound_reached` outcome, and the context receipt together, returning to `M1`'s
 single-message request. It cannot be partial: the termination condition depends
 on the assistant message shape, and the assistant message shape exists only
 because the conversation record does. Once a version is published, a change to
@@ -546,7 +562,7 @@ Technical depth: [Format, migration, and rollback mechanics](0010-provider-conti
   canonical request digest identity this decision extends to a full request
 - [Vision model and context boundary](../vision.md#concept-vision-model-boundary) — the governed pipeline and what belongs to hosts
 - [Vision executor protocol and brain/hand topology](../vision.md#concept-vision-executor-protocol) — the opaque workspace reference core never resolves
-- [Vision recovery truth](../vision-technical.md#technical-vision-recovery-truth) — §9.5's closed outcome algebra, which budget exhaustion is encoded inside
-- [Vision loop semantics](../vision-technical.md#technical-vision-loop-semantics) — one run, input queues, and the split payload rule
+- [Vision recovery truth](../vision-technical.md#technical-vision-recovery-truth) — §9.5's outcome immutability and reconciliation rules, which a `bound_reached` run terminal obeys like any other
+- [Vision loop semantics](../vision-technical.md#technical-vision-loop-semantics) — one run, the closed run terminal set `bound_reached` belongs to, input queues, and the split payload rule
 - [AGENTS.md](../../AGENTS.md) — durability and recovery truth, truth planes,
   credentials and context, and the smallest sufficient system
