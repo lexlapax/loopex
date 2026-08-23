@@ -68,7 +68,7 @@ Deferred decisions and their named acceptance points:
 | Store selection and migrations | Durable service rung, as the roadmap records |
 | Name, trademark, domain, and Hex clearance | Before public packaging, which this milestone does not do |
 
-**Two decisions are disposed by accepting this plan pair itself,** in the way
+**Three decisions are disposed by accepting this plan pair itself,** in the way
 ADR 0008 was disposed by accepting an existing plan's requirement for it.
 Neither is implicit; each is named so acceptance is a decision rather than a
 side effect.
@@ -94,6 +94,14 @@ and which M2 must produce the moment `bash` runs a real test suite. Each ships
 with exactly one local adapter and one reusable conformance suite, inside an
 existing application. No third new port, and no generic layer above the five, is
 authorized by this acceptance.
+
+**Three. Two shipped permissive policies rather than one.** A `:client` may not
+depend on another `:client`, so `apps/loopex_cli` cannot reach the reference
+client's `AllowAll` and names its own. Both are permission-granting modules an
+operator selects explicitly, both print the same single notice, neither is ever
+an implicit fallback, and both carry a locked case. Widening the client rule to
+permit a client-to-client dependency was the alternative and would undercut
+decision one.
 
 **A prerequisite this plan pair names but cannot dispose: an accepted M1 gate
 generation.** M1's closed gate binds nine paths by SHA-256, and M2 must change
@@ -151,12 +159,20 @@ fixed here so acceptance sees its whole cost:
   heals it. It cannot land earlier either, because at `A` the amended gate must
   be proved against a tree that already carries the M2 bytes it rebinds.
 - **Transaction.** `A` is one atomic revision. It carries the amended M1 gate
-  document, its new generation row with an empty authority and evidence, and
-  both rebound artifacts together. Splitting the artifact change from the
-  generation row across two revisions permanently invalidates history and is not
-  a recoverable mistake. After exact-SHA review and explicit acceptance, the
-  immediate child `R` completes only that row's authority and evidence. Only `R`
-  is integration-eligible.
+  document, that gate's next consecutively numbered amendment section, the
+  `<a id="amendment-transaction-v2"></a>` marker the amended gate must acquire
+  because `docs/plans/M1-gate.md` carries only the v1 marker today, its new
+  generation row with an empty authority, evidence, and candidate, and both
+  rebound artifacts together. Splitting the artifact change from the generation
+  row across two revisions permanently invalidates history and is not a
+  recoverable mistake. The row carries its gate digest at `A` but not its
+  candidate, because a commit cannot name its own hash. After exact-SHA review
+  and explicit acceptance, the immediate child `R` completes that row's
+  authority, evidence, and the candidate it binds, which is exact `A`; the
+  evidence is one new amendment-specific anchor, written as a local link
+  carrying its fragment, that did not exist at `A`. An `R` that leaves the
+  candidate empty is refused by binding validation, and by the rule above that
+  is not recoverable either. Only `R` is integration-eligible.
 - **The declared truthful reproof.** The amendment must state, and its proposal
   must demonstrate, what `bash scripts/check-m1-gate.sh` actually reports at an
   M2 revision. M1's retained matrix names an M1 source candidate, and the M2
@@ -175,7 +191,7 @@ fixed here so acceptance sees its whole cost:
   earlier generation governing the revisions it covered, and pays only for the
   change it needs.
 
-Until `R` is accepted and integrated, M0, the bootstrap aggregate, and the
+Until `R` is accepted, M0, the bootstrap aggregate, and the
 status check are red, and no M2 product checkpoint that changes those two files
 is an integration candidate. A gate generation adds no scope, changes no M1
 outcome, and reopens no lifecycle state.
@@ -671,8 +687,9 @@ is integration-eligible, and evidence always names the revision where it ran.
 The M1 gate generation is a different transaction against a different plan, and
 the difference is not cosmetic. M1 is `Closed`, so it uses
 `amendment-transaction-v2`: one atomic proposal `A` carrying the amended gate,
-its appended generation row, and both rebound artifacts together, and a child
-`R` that completes only that row's authority and evidence. It never shares a
+its next numbered amendment section and the v2 marker, its appended generation
+row, and both rebound artifacts together, and a child `R` that completes that
+row's authority, evidence, and the candidate it binds. It never shares a
 revision with an M2 plan amendment.
 
 No M2 product implementation merges while M2 is red or before closure. No

@@ -560,9 +560,9 @@ require_feature \
   "each turn dispatches exactly the canonical request bytes and digest committed before it" \
   "a staged request carries complete tool definition bytes and its generation triple and is reconstructible from the journal alone" \
   "every turn after the first is canonical history replay and the reserved continuation field stays empty" \
-  "the maximum turn bound ends the run failed budget exhausted before another provider call" \
-  "the cumulative token budget ends the run failed budget exhausted before another provider call" \
-  "the wall clock deadline ends the run failed budget exhausted before another provider call" \
+  "the maximum turn bound ends the run bound reached before another provider call" \
+  "the cumulative token budget ends the run bound reached before another provider call" \
+  "the wall clock deadline ends the run bound reached before another provider call" \
   "the committed absolute deadline is propagated into the model call rather than an independent per call timeout" \
   "a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" \
   "a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated" \
@@ -688,6 +688,7 @@ require_feature \
   "an interrupt whose cleanup cannot be confirmed reports outcome unknown with its reconciliation reference" \
   "loopex cancel reconciles a session left behind by a dead process and is refused against a live owner" \
   "the policy option selects the governing host policy and a refusal is reported in the transcript" \
+  "the command ships its own permissive policy that is named explicitly, prints one notice, and is never an implicit fallback" \
   "loopex artifact retrieves a spilled artifact by its opaque reference" \
   "project resource trust is decided at the terminal and a non interactive run without a decision fails closed" \
   "the command surface drives only the public facade and owns no loop store cursor or authority" \
@@ -1204,9 +1205,9 @@ run_selector 1 apps/loopex/test/agent_loop_test.exs default 13 zero \
   "passed=each turn dispatches exactly the canonical request bytes and digest committed before it" \
   "passed=a staged request carries complete tool definition bytes and its generation triple and is reconstructible from the journal alone" \
   "passed=every turn after the first is canonical history replay and the reserved continuation field stays empty" \
-  "passed=the maximum turn bound ends the run failed budget exhausted before another provider call" \
-  "passed=the cumulative token budget ends the run failed budget exhausted before another provider call" \
-  "passed=the wall clock deadline ends the run failed budget exhausted before another provider call" \
+  "passed=the maximum turn bound ends the run bound reached before another provider call" \
+  "passed=the cumulative token budget ends the run bound reached before another provider call" \
+  "passed=the wall clock deadline ends the run bound reached before another provider call" \
   "passed=the committed absolute deadline is propagated into the model call rather than an independent per call timeout" \
   "passed=a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" \
   "passed=a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated" \
@@ -1290,7 +1291,7 @@ run_selector 9 apps/loopex/test/session_directory_test.exs default 5 zero \
   "passed=resuming a session through a different runtime identity is refused with an explicit reason" \
   "passed=a repeated resume command identity returns its historical result while a fresh identity acquires ownership"
 
-run_selector 10 apps/loopex_cli/test/cli_test.exs default 14 zero \
+run_selector 10 apps/loopex_cli/test/cli_test.exs default 15 zero \
   "passed=loopex run submits a prompt and streams the answer with its tool calls and results" \
   "passed=the operator steers a running task and queues a follow-up from the same terminal" \
   "passed=prompt steer follow up and abort have distinct explicit affordances and input naming neither is refused" \
@@ -1300,6 +1301,7 @@ run_selector 10 apps/loopex_cli/test/cli_test.exs default 14 zero \
   "passed=an interrupt whose cleanup cannot be confirmed reports outcome unknown with its reconciliation reference" \
   "passed=loopex cancel reconciles a session left behind by a dead process and is refused against a live owner" \
   "passed=the policy option selects the governing host policy and a refusal is reported in the transcript" \
+  "passed=the command ships its own permissive policy that is named explicitly, prints one notice, and is never an implicit fallback" \
   "passed=loopex artifact retrieves a spilled artifact by its opaque reference" \
   "passed=project resource trust is decided at the terminal and a non interactive run without a decision fails closed" \
   "passed=the command surface drives only the public facade and owns no loop store cursor or authority" \
