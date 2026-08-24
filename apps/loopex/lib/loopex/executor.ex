@@ -118,6 +118,65 @@ defmodule Loopex.Executor do
   @doc """
   ## Concept
 
+  Stops one running job and says whether its cleanup could be confirmed.
+
+  ## Technical depth
+
+  The narrowest cancellation an executor can offer: it names one job, so an
+  abort ends the work the operator asked to stop and leaves every other job and
+  the workspace itself usable. M1's only cancellation signal was workspace-lease
+  loss, which is coarser — revoking a lease ends every job on that workspace and
+  leaves the runtime unable to run more work there, which is a heavy consequence
+  for one interrupt.
+
+  The return says what actually happened rather than what was attempted.
+  `{:ok, :cleaned}` means no member of the job's owned process tree remains;
+  `{:ok, :unconfirmed}` means the executor could not establish that, and the run
+  must then finish `outcome_unknown` rather than claiming a clean stop. A job
+  that was never running, or already finished, is trivially clean.
+
+  Optional, because an executor with nothing to cancel — one that performs only
+  in-VM work — has nothing to implement. A caller treats its absence as
+  `{:ok, :cleaned}` for the same reason.
+  """
+  @callback cancel(reference :: term(), job_id :: binary()) ::
+              {:ok, :cleaned} | {:ok, :unconfirmed} | {:error, term()}
+
+  @optional_callbacks cancel: 2
+
+  @doc """
+  ## Concept
+
+  Asks an executor to stop a job, tolerating one that cannot.
+
+  ## Technical depth
+
+  An executor that does not implement `cancel/2` has no operating-system work to
+  leave behind, so its cleanup is confirmed by construction. Anything the call
+  raises or returns outside the two admitted shapes is treated as unconfirmed:
+  the safe reading of "I could not tell you" is that something may still be
+  running, and a run must not claim `cancelled` on that basis.
+  """
+  @spec cancel(module(), term(), binary()) :: {:ok, :cleaned} | {:ok, :unconfirmed}
+  def cancel(module, reference, job_id) when is_atom(module) and is_binary(job_id) do
+    if function_exported?(module, :cancel, 2) do
+      case module.cancel(reference, job_id) do
+        {:ok, :cleaned} -> {:ok, :cleaned}
+        {:ok, :unconfirmed} -> {:ok, :unconfirmed}
+        _other -> {:ok, :unconfirmed}
+      end
+    else
+      {:ok, :cleaned}
+    end
+  rescue
+    _error -> {:ok, :unconfirmed}
+  catch
+    _kind, _value -> {:ok, :unconfirmed}
+  end
+
+  @doc """
+  ## Concept
+
   A progress function that discards everything, for a caller that wants no
   stream.
 

@@ -9,6 +9,40 @@ authority that disposed it. An independent reviewer reads these as declared
 limitations rather than as undiscovered defects; nothing here authorises work or
 changes a commitment.
 
+## Executor cancellation callback
+
+**Rule.**
+[ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept) states that
+apart from the progress parameter, "nothing else at this boundary moves", and
+names the cancellation sequence among the things that are unchanged. M1's only
+cancellation signal is workspace-lease loss: the executor watches the lease
+process and terminates the job when it dies.
+
+**What this milestone does instead.** `Loopex.Executor` gains one optional
+callback, `cancel/2`, which stops a single named job and reports whether its
+cleanup could be confirmed.
+
+**Why.** Outcome 8 requires an abort to cancel the in-flight executor job and
+confirm cleanup before committing `cancelled`, and lease loss cannot express
+that. A lease is per workspace, so revoking it ends every job using that
+workspace and leaves the runtime unable to run further work there — a heavy and
+surprising consequence for one interrupt. The coordinator also does not own the
+lease; the host does. Without a per-job signal, an abort during a tool call
+could only ever commit `outcome_unknown`, which fails the locked case and leaves
+a real operating-system process running on the operator's machine after they
+pressed Ctrl-C.
+
+**Observable consequence.** The boundary is wider by one optional callback. An
+executor that does not implement it is treated as having nothing to leave
+behind, so existing implementations remain conformant without change. The
+isolated executor named as the second implementation will have to satisfy it.
+
+**Disposition.** Maintainer, 2026-08-24: add `cancel/2` to the executor
+behaviour. The alternatives considered and not taken were routing cancellation
+through lease revocation, refactoring the local executor to non-blocking
+execution first, and cancelling only the BEAM side while always reporting
+`outcome_unknown`.
+
 ## Promoted follow-up deadline instant
 
 **Rule.** [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept)

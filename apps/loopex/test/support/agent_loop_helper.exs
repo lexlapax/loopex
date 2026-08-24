@@ -91,12 +91,30 @@ defmodule Loopex.AgentLoopTestExecutor do
 
   @behaviour Loopex.Executor
 
-  def start(outcomes \\ %{}, delay_ms \\ 0) do
-    {:ok, pid} = Agent.start_link(fn -> %{outcomes: outcomes, jobs: [], delay_ms: delay_ms} end)
+  def start(outcomes \\ %{}, delay_ms \\ 0, cleanup \\ :cleaned) do
+    {:ok, pid} =
+      Agent.start_link(fn ->
+        %{outcomes: outcomes, jobs: [], delay_ms: delay_ms, cleanup: cleanup}
+      end)
+
     pid
   end
 
   def jobs(pid), do: Agent.get(pid, & &1.jobs) |> Enum.reverse()
+
+  # Concept: an executor that can be told to stop, and can be told it could not
+  # confirm that it did.
+  #
+  # Technical depth: the unconfirmed answer is what drives a run to
+  # `outcome_unknown` rather than `cancelled`, so a case about that precedence
+  # needs an executor that can actually give it.
+  @impl Loopex.Executor
+  def cancel(pid, _job_id) do
+    case Agent.get(pid, &Map.get(&1, :cleanup, :cleaned)) do
+      :unconfirmed -> {:ok, :unconfirmed}
+      _cleaned -> {:ok, :cleaned}
+    end
+  end
 
   @impl Loopex.Executor
   def execute(pid, job, _grant, _options, progress \\ nil) do
@@ -213,7 +231,11 @@ defmodule Loopex.AgentLoopFixture do
     model_pid = Loopex.AgentLoopTestModel.start(script)
 
     executor_pid =
-      Loopex.AgentLoopTestExecutor.start(outcomes, Keyword.get(options, :tool_delay_ms, 0))
+      Loopex.AgentLoopTestExecutor.start(
+        outcomes,
+        Keyword.get(options, :tool_delay_ms, 0),
+        Keyword.get(options, :cleanup, :cleaned)
+      )
 
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop")
 

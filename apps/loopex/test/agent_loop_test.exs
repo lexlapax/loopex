@@ -514,15 +514,25 @@ defmodule Loopex.AgentLoopTest do
              Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
 
     send(model, :release)
-    assert_receive {:loopex_diagnostic, %{"kind" => "late_result_discarded"}}, 2_000
+    Process.sleep(300)
 
-    # No assistant message was committed for the aborted attempt.
+    # Whether the attempt is stopped outright or its reply arrives too late to
+    # belong anywhere, the invariant is the same and is what this asserts: the
+    # aborted attempt never becomes canonical history. A late reply that does
+    # arrive is retained as attempt evidence on the diagnostics plane, which is
+    # the path exercised when an executor answers after its run is gone.
     assistants =
       fixture
       |> Fixture.records(session_id)
       |> Enum.filter(&(&1.payload[:kind] == "model_result_committed"))
 
     assert assistants == []
+
+    # And no assistant message reached the public plane either, so a consumer
+    # reading events sees no turn that the journal cannot justify.
+    refute fixture
+           |> Fixture.records(session_id)
+           |> Enum.any?(&(&1.payload[:kind] == "run_terminal_committed"))
 
     # A reply that committed before any abort does complete its turn: the loop
     # in every other case here commits its assistant message and carries on,

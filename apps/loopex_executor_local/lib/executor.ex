@@ -88,6 +88,49 @@ defmodule Loopex.Executor.Local do
   @doc """
   ## Concept
 
+  Stops one running job's process tree and reports whether it is gone.
+
+  ## Technical depth
+
+  Runs in the caller rather than in this executor's GenServer, because that
+  server is blocked for the duration of the job being cancelled. The operating
+  system effect still belongs to this application — the hand owns effects, and
+  this is the hand's code — but it must not be queued behind the very work it is
+  meant to end.
+
+  Signals the job's owned process group and then confirms by looking for
+  survivors. A job this executor has no record of is trivially clean: it either
+  never started or already finished, and in both cases there is nothing running.
+  """
+  @impl Loopex.Executor
+  @spec cancel(t(), binary()) :: {:ok, :cleaned} | {:ok, :unconfirmed}
+  def cancel(executor, job_id) when is_pid(executor) and is_binary(job_id) do
+    case lookup_inflight(executor, job_id) do
+      {:ok, group} ->
+        terminate_group(group)
+
+        if confirm_group_terminated(group),
+          do: {:ok, :cleaned},
+          else: {:ok, :unconfirmed}
+
+      :error ->
+        {:ok, :cleaned}
+    end
+  end
+
+  defp lookup_inflight(executor, job_id) do
+    with {:dictionary, dictionary} <- Process.info(executor, :dictionary),
+         table when not is_nil(table) <- Keyword.get(dictionary, :loopex_inflight_table),
+         [{^job_id, group}] <- :ets.lookup(table, job_id) do
+      {:ok, group}
+    else
+      _absent -> :error
+    end
+  end
+
+  @doc """
+  ## Concept
+
   Reads a terminal receipt retained by this executor.
 
   ## Technical depth
@@ -487,6 +530,7 @@ defmodule Loopex.Executor.Local do
 
     os_pid = port |> Port.info(:os_pid) |> elem(1)
     notify(options, {:executor_process_started, job.job_id, job.tool_id, [@search_path_name]})
+    register_inflight(job.job_id, os_pid)
 
     case collect_output(port, os_pid, deadline, <<>>, options, job) do
       {:completed, output} ->
@@ -503,6 +547,39 @@ defmodule Loopex.Executor.Local do
              else: " Cleanup could not be confirmed.]"
            )}
     end
+  end
+
+  # Concept: an in-flight job publishes the group it owns, so a cancel can reach
+  # it without calling a server that is busy running it.
+  #
+  # Technical depth: `execute/5` blocks this executor's GenServer for the whole
+  # job, so a concurrent `cancel/2` cannot be a call. The table is created per
+  # executor process and its identifier is kept in that process's own dictionary
+  # rather than under a registered name, because a named table is VM-global and
+  # two executors in one VM would collide on it — the same reason nothing else in
+  # this project hides per-runtime state in a global name. Reading another
+  # process's dictionary is unusual, and it is used here precisely because it
+  # reads state that process owns without waiting for it to be free.
+  defp inflight_table do
+    case Process.get(:loopex_inflight_table) do
+      nil ->
+        table = :ets.new(:loopex_inflight, [:public, :set])
+        Process.put(:loopex_inflight_table, table)
+        table
+
+      table ->
+        table
+    end
+  end
+
+  defp register_inflight(job_id, group) do
+    :ets.insert(inflight_table(), {job_id, group})
+    :ok
+  end
+
+  defp forget_inflight(job_id) do
+    :ets.delete(inflight_table(), job_id)
+    :ok
   end
 
   defp bound_process_output(output) do
@@ -555,14 +632,18 @@ defmodule Loopex.Executor.Local do
     if remaining <= 0 do
       group = group_of(acc, os_pid)
       terminate_group(group)
+      forget_inflight(job.job_id)
       {:cancelled, strip_group_line(acc), group}
     else
       receive do
         {^port, {:data, chunk}} ->
           notify(options, {:executor_progress, job.job_id, byte_size(chunk)})
-          collect_output(port, os_pid, deadline, acc <> chunk, options, job)
+          combined = acc <> chunk
+          register_inflight(job.job_id, group_of(combined, os_pid))
+          collect_output(port, os_pid, deadline, combined, options, job)
 
         {^port, {:exit_status, _status}} ->
+          forget_inflight(job.job_id)
           {:completed, strip_group_line(acc)}
       after
         min(remaining, 50) ->

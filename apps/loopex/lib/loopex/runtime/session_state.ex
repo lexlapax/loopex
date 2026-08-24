@@ -694,6 +694,7 @@ defmodule Loopex.Runtime.SessionState do
   defp propose_new(%__MODULE__{active_run_id: run_id} = state, %{type: :abort} = command, digest)
        when is_binary(run_id) do
     reply = {:accepted, command.command_id}
+    outcome = abort_outcome(command)
 
     record = %{
       "command_id" => command.command_id,
@@ -701,11 +702,21 @@ defmodule Loopex.Runtime.SessionState do
       "command_type" => "abort",
       "admission" => "accepted",
       "run_id" => run_id,
+      "outcome" => outcome,
+      "reconciliation_ref" => abort_reference(state, run_id, outcome),
       kind: "command_admitted"
     }
 
     {_patch, queue_events} = cancel_queues(state, run_id)
-    event = abort_event(state.session_id, command.command_id, run_id)
+
+    event =
+      abort_event(
+        state.session_id,
+        command.command_id,
+        run_id,
+        outcome,
+        abort_reference(state, run_id, outcome)
+      )
 
     build_proposal(state, command.command_id, record, [event] ++ queue_events, reply)
   end
@@ -1016,9 +1027,19 @@ defmodule Loopex.Runtime.SessionState do
         # cancelled start itself a moment later.
         {patch, queue_events} = cancel_queues(state, active_run_id)
 
+        outcome = record_outcome(record)
+
         expected_events =
           state.expected_events ++
-            [abort_event(state.session_id, command_id, active_run_id)] ++ queue_events
+            [
+              abort_event(
+                state.session_id,
+                command_id,
+                active_run_id,
+                outcome,
+                Map.get(record, "reconciliation_ref")
+              )
+            ] ++ queue_events
 
         {:ok, {:accepted, command_id}, nil, Map.delete(state.pending_work, active_run_id),
          expected_events, patch}
@@ -1912,15 +1933,40 @@ defmodule Loopex.Runtime.SessionState do
     }
   end
 
-  defp abort_event(session_id, command_id, run_id) do
+  # Concept: an abort says what actually happened to the work, not merely that
+  # it was asked to stop.
+  #
+  # Technical depth: `cancelled` claims every owned operation reached a validated
+  # terminal fact and every owned process tree was confirmed cleaned. Where the
+  # executor could not confirm that, the run finishes `outcome_unknown` carrying
+  # its reconciliation reference instead, because an operator told "cancelled"
+  # about a process that may still be running has been told something false.
+  defp abort_event(session_id, command_id, run_id, outcome, reconciliation_ref) do
     %{
       "command_id" => command_id,
       "run_id" => run_id,
-      "outcome" => "aborted",
+      "outcome" => outcome,
+      "reconciliation_ref" => reconciliation_ref,
       event_id: stable_id("event-abort", session_id, command_id),
       kind: "run.finished"
     }
   end
+
+  # Concept: what the abort achieved travels beside the command, not inside it.
+  #
+  # Technical depth: the digest covers what the caller asked for, so a
+  # re-presented abort returns its retained result rather than conflicting with
+  # itself because cleanup went differently the second time. The disposition is
+  # supplied separately, exactly as a run's resolved bounds are.
+  defp abort_outcome(%{resolved_bounds: %{cleanup: :unconfirmed}}), do: "outcome_unknown"
+  defp abort_outcome(_command), do: "cancelled"
+
+  defp abort_reference(_state, _run_id, "cancelled"), do: nil
+
+  defp abort_reference(state, run_id, _outcome),
+    do: stable_id("reconciliation", state.session_id, run_id)
+
+  defp record_outcome(record), do: Map.get(record, "outcome", "cancelled")
 
   defp committed_event_sequence(next, [], receipt) do
     case Map.get(receipt, :event_sequences) do

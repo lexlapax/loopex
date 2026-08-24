@@ -167,6 +167,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        fault_to: Keyword.fetch!(options, :fault_to),
        in_flight: %{},
        streams: %{},
+       cleanup: %{},
        pending_fault: nil,
        query: nil,
        owner: nil,
@@ -275,11 +276,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {nil, _remaining} ->
         {:noreply, state}
 
-      {{:model, run_id}, remaining} ->
+      {{:model, run_id, _pid}, remaining} ->
         Process.demonitor(reference, [:flush])
         dispatch_result(%{state | in_flight: remaining}, :model, run_id, result)
 
-      {{:executor, run_id}, remaining} ->
+      {{:executor, run_id, _pid}, remaining} ->
         Process.demonitor(reference, [:flush])
         dispatch_result(%{state | in_flight: remaining}, :executor, run_id, result)
     end
@@ -508,7 +509,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp commit_command(state, command) do
-    case SessionState.propose(state.durable, command, resolve_bounds(state, command)) do
+    state = cancel_in_flight(state, command)
+
+    case SessionState.propose(state.durable, command, resolved_for(state, command)) do
       {:replayed, reply} ->
         {:reply, reply, state}
 
@@ -831,7 +834,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         end)
 
       state = %{state | streams: Map.put(state.streams, {:model, work.run_id}, stream)}
-      {:noreply, put_in_flight(state, task.ref, {:model, work.run_id})}
+      {:noreply, put_in_flight(state, task.ref, {:model, work.run_id, task.pid})}
     end
   end
 
@@ -1004,6 +1007,113 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: an abort stops the work before it records that the work stopped.
+  #
+  # Technical depth: M1 recorded an abort and removed the run, which left an
+  # operating-system process running with nobody's name on it and an operator
+  # told the task had ended. The order here is the point: scheduling stops, the
+  # in-flight model attempt and executor job are actually cancelled, cleanup is
+  # confirmed, and only then does a terminal fact commit — and it commits
+  # `cancelled` only where that confirmation succeeded.
+  #
+  # A validated terminal fact that committed before the abort is untouched. The
+  # abort ends what is still running; it does not rewrite what already finished.
+  defp cancel_in_flight(state, command) do
+    if Map.get(command, :type) in [:abort, "abort"] do
+      state
+      |> cancel_model_attempt()
+      |> cancel_executor_job()
+    else
+      state
+    end
+  end
+
+  # Concept: the abort carries what cleanup actually achieved.
+  #
+  # Technical depth: the disposition is attached after cancellation ran and
+  # before the record is proposed, so the committed outcome describes the world
+  # rather than the intent. It is not part of the command's canonical digest,
+  # which covers what the caller asked for; re-presenting the same abort returns
+  # the retained result rather than re-cancelling.
+  # Concept: what a command needs that its caller did not supply.
+  #
+  # Technical depth: a prompt needs its run's resolved bounds; an abort needs
+  # what cancellation actually achieved. Both travel alongside the command rather
+  # than inside it, because the command's digest covers what the caller asked for
+  # and must stay the same however the world turned out — otherwise re-presenting
+  # one abort would conflict with itself because cleanup went differently the
+  # second time.
+  defp resolved_for(state, command) do
+    if Map.get(command, :type) in [:abort, "abort"] do
+      disposition =
+        if Enum.any?(state.cleanup, fn {_run_id, value} -> value == :unconfirmed end),
+          do: :unconfirmed,
+          else: :cleaned
+
+      %{cleanup: disposition}
+    else
+      resolve_bounds(state, command)
+    end
+  end
+
+  defp cancel_model_attempt(state) do
+    Enum.reduce(state.in_flight, state, fn
+      {reference, {:model, run_id, pid}}, acc ->
+        # A provider call has no effect to leave behind, so shutting the task
+        # down is the whole of its cleanup. Its domain still owes a closure.
+        _ = Task.Supervisor.terminate_child(acc.workers, pid)
+        acc = close_model_stream(acc, run_id, :abandoned, 0)
+        %{acc | in_flight: Map.delete(acc.in_flight, reference)}
+
+      {_reference, _other}, acc ->
+        acc
+    end)
+  end
+
+  defp cancel_executor_job(state) do
+    Enum.reduce(state.in_flight, state, fn
+      {reference, {:executor, run_id, pid}}, acc ->
+        cleanup = cancel_executor_work(acc, run_id)
+        _ = Task.Supervisor.terminate_child(acc.workers, pid)
+        acc = close_tool_stream(acc, run_id, :abandoned, 0)
+
+        %{
+          acc
+          | in_flight: Map.delete(acc.in_flight, reference),
+            cleanup: Map.put(acc.cleanup, run_id, cleanup)
+        }
+
+      {_reference, _other}, acc ->
+        acc
+    end)
+  end
+
+  # Concept: ask the hand to stop its own job, and believe only what it confirms.
+  #
+  # Technical depth: the executor owns the process tree, so it is the one that
+  # can end it and the one that can look for survivors. An executor that cannot
+  # tell us leaves the run unable to claim a clean stop, which is why the
+  # unconfirmed answer propagates all the way to `outcome_unknown` rather than
+  # being smoothed into a success.
+  defp cancel_executor_work(state, run_id) do
+    IO.inspect(
+      {run_id, Map.keys(state.in_flight),
+       Map.get(state.durable.pending_work, run_id) |> is_map()},
+      label: "DBG cancel_exec"
+    )
+
+    case Map.get(state.durable.pending_work, run_id) do
+      %{job: job} ->
+        {:ok, disposition} =
+          Executor.cancel(state.executor.module, state.executor.reference, job.job_id)
+
+        disposition
+
+      _absent ->
+        :cleaned
+    end
+  end
+
   # Concept: every executor-backed call asks the host, including a read-only one.
   #
   # Technical depth: there is no effect class and no argument shape that skips
@@ -1109,7 +1219,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         end)
 
       state = %{state | streams: Map.put(state.streams, {:executor, work.run_id}, stream)}
-      {:noreply, put_in_flight(state, task.ref, {:executor, work.run_id})}
+      {:noreply, put_in_flight(state, task.ref, {:executor, work.run_id, task.pid})}
     end
   end
 
@@ -1476,8 +1586,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp reconciliation_proposal(state, run_id, %{evidence: "outcome_unknown"}, query),
     do: SessionState.propose_outcome_unknown(state, run_id, query.reconciliation_query_id)
 
-  defp in_flight?(state, kind, run_id),
-    do: Enum.any?(state.in_flight, fn {_reference, value} -> value == {kind, run_id} end)
+  defp in_flight?(state, kind, run_id) do
+    Enum.any?(state.in_flight, fn
+      {_reference, {^kind, ^run_id, _pid}} -> true
+      {_reference, _other} -> false
+    end)
+  end
 
   defp put_in_flight(state, reference, value),
     do: %{state | in_flight: Map.put(state.in_flight, reference, value)}
