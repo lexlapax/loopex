@@ -14,6 +14,26 @@ cd "$(git rev-parse --show-toplevel)"
 integration="${LOOPEX_INTEGRATION_REF:-origin/main}"
 status=0
 
+# The designated current-milestone branch is the documented exception. Once a
+# governance-only Acceptance checkpoint integrates, that branch is contained in
+# the integration ref while still owning the milestone's unintegrated
+# implementation until closure, so reporting it as landed work tells an
+# integrator to delete the one branch the contract says stays live. The name is
+# read from the canonical register rather than hardcoded, and compared under
+# case folding because milestone slugs are unique that way.
+milestone="$(awk -F'|' '
+  $2 ~ /^ `[A-Za-z0-9.-]+` $/ && $3 ~ /^ (Accepted|In progress|In review) $/ {
+    name = $2
+    gsub(/[ `]/, "", name)
+    print tolower(name)
+    exit
+  }' docs/plans/README.md 2>/dev/null || true)"
+
+exempt() {
+  [ "$1" = "main" ] && return 0
+  [ -n "$milestone" ] && [ "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" = "$milestone" ]
+}
+
 # Worktrees whose path no longer exists are always residue, remote or not.
 prunable="$(git worktree prune --dry-run 2>/dev/null || true)"
 if [ -n "$prunable" ]; then
@@ -28,7 +48,7 @@ if git rev-parse --verify --quiet "$integration" >/dev/null; then
   # Query refs directly: `git branch` emits a synthetic detached-HEAD display
   # line that is not a branch and must not become cleanup residue.
   merged="$(git for-each-ref --merged "$integration" --format='%(refname:short)' refs/heads \
-    | grep -vxE 'main' || true)"
+    | while IFS= read -r branch; do exempt "$branch" || printf '%s\n' "$branch"; done)"
   if [ -n "$merged" ]; then
     echo "branches already merged into ${integration}:" >&2
     printf '%s\n' "$merged" | sed 's/^/  /' >&2
@@ -49,8 +69,9 @@ if git rev-parse --verify --quiet "$integration" >/dev/null; then
     # The integration branch is never residue: a worktree on it is the checkout
     # an integrator works from. The branch scan above already exempts main, but
     # this loop did not, so running the check from any linked worktree reported
-    # the primary checkout as landed work and offered to delete it.
-    [ "$wt_branch" = "main" ] && continue
+    # the primary checkout as landed work and offered to delete it. The current
+    # milestone's own worktree is exempt for the same reason its branch is.
+    [ -n "$wt_branch" ] && exempt "$wt_branch" && continue
     if [ -n "$wt_branch" ]; then
       wt_ref="$wt_branch"
       wt_label="$wt_branch"
