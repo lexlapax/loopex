@@ -173,8 +173,8 @@ is:
 - **Decision owner.** The maintainer. A change to a founding boundary is
   explicitly non-delegable, and accepting ADR 0010 or this plan pair neither
   implies it, authorizes it, nor schedules it.
-- **Durable disposition anchor.** One new dated
-  `disposition-bound-reached-vision-change-<yyyy-mm-dd>` anchor in
+- **Durable disposition anchor.** Recorded 2026-08-23 as
+  `disposition-bound-reached-vision-change-2026-08-23` in
   `docs/developer/agent-context-map.md`, the durable register every earlier
   authority disposition in this repository already uses. That anchor names the
   principle changed, the evidence, the compatibility impact, and the empty
@@ -226,7 +226,13 @@ fixed here so acceptance sees its whole cost:
 
 - **Decision owner.** The maintainer. This is a baseline exception against a
   closed, immutable gate and is explicitly non-delegable. Accepting the M2 plan
-  pair does not imply it, authorize it, or schedule it.
+  pair does not imply it, authorize it, or schedule it. It was approved
+  separately on 2026-08-23 and recorded as
+  `disposition-m1-gate-generation-exception-2026-08-23` in
+  [the context map](../developer/agent-context-map.md#disposition-m1-gate-generation-exception-2026-08-23),
+  scoped to exactly the two artifacts below. That approval authorizes the
+  transaction; it does not approve any particular proposal `A`, which still
+  requires its own exact-SHA review and the `A` to `R` transition review.
 - **What changes in `docs/plans/M1.md`.** Nothing inside either authority row.
   The plan gains one `## Gate Generations` table outside both envelopes, and the
   amendment appends one row to it carrying the next consecutive generation

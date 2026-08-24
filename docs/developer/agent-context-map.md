@@ -632,9 +632,9 @@ release, or any gate weakening.
 <a id="disposition-bound-reached-vision-change-2026-08-23"></a>
 ### Vision terminal algebra gains `bound_reached` — 2026-08-23
 
-DRAFT PENDING MAINTAINER CONFIRMATION. This record is not an accepted
-disposition until the maintainer confirms it; no plan or ADR may cite it before
-then.
+The maintainer explicitly confirmed this disposition on 2026-08-23, in the
+session that directed the change, after reading it in full. It is a recorded
+authority decision, not an inferred one.
 
 The maintainer decided that a run stopped by a bound its operator declared ends
 in its own terminal outcome rather than as a failure, and directed that the
@@ -664,6 +664,37 @@ outcome, and no session record exists, so the widening migrates nothing.
 
 **Scope.** This disposition records the vision change alone. It does not accept
 ADR 0010, the `M2` plan pair, or the `M2` gate, and none of those accepts it.
+
+<a id="disposition-m1-gate-generation-exception-2026-08-23"></a>
+### M1 gate-generation baseline exception — 2026-08-23
+
+The maintainer explicitly approved the baseline exception `M2` names but cannot
+dispose: `M1`'s closed gate may gain one accepted gate generation under the
+additive `amendment-transaction-v2`, so the two dependency-budget artifacts `M2`
+must change can be rebound without rewriting either immutable authority row.
+
+**Scope.** This authorizes exactly two bound artifacts —
+`apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` and
+`apps/loopex/test/deps_budget_test.exs`. It authorizes no third artifact, no
+change to `M1`'s Acceptance or Closure row, no lifecycle change, and no scope,
+outcome, or evidence change to closed `M1`.
+
+**What it does not waive.** Proposal `A` must still be one atomic revision
+carrying the amended gate, its next numbered amendment section, the `v2` marker,
+the pending generation row, and both rebound artifacts together; `A` must
+receive its exact-SHA review; and the `A` to `R` review must still prove only
+the allowed transition bytes changed. Approving the exception is not approving a
+particular `A`.
+
+**Why separately from `M2`.** The transaction is sound on its own evidence: it
+preserves both authority rows byte-immutable, keeps every historical generation
+enforced for the revisions it governed, exempts no `Closed` milestone from
+artifact validation, and closes the substitution hole where an unreviewed
+revision could be bound in place of the reviewed proposal. Holding it behind
+correctable `M2` document defects would couple two independent decisions.
+
+**Scope of this record.** It disposes the baseline exception alone. It does not
+accept the `M2` plan pair, the `M2` gate, or ADRs 0009, 0010, or 0011.
 
 ## Retained Seed Bootstrap Evidence
 
