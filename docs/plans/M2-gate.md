@@ -169,8 +169,8 @@ without pretending a runner can verify its own bytes before executing them.
 the role set gains `:composition` for the wiring-only application the command
 depends on and an independent embedder fixture composes through, the `:client`
 rule gains a production dependency on at most one `:composition` while still
-admitting no other
-`:client`, and the corpus gains the three adversarial cases that prove the
+admitting no other `:client`, and the corpus gains the three adversarial cases
+that prove the
 inventory, the new role's own permitted and forbidden directions, and the client
 rule that consumes it. Those two artifacts carry the whole inventory and role
 change; `M2` binds no third artifact for it. Binding bytes the milestone must change would lock a digest
