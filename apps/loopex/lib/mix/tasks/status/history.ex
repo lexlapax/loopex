@@ -176,13 +176,13 @@ defmodule Loopex.Checks.History do
   # same evasion as a false one.
   defp require_prerequisite_adrs!(walk) do
     Enum.reduce(walk, false, fn {revision, _parents, governed}, seen ->
-      case register_rows(Map.get(governed, @index), revision, seen) do
+      case register_rows(Map.get(governed, @index), revision, seen, governed) do
         nil ->
           seen
 
         rows ->
           Enum.reduce(rows, seen, fn {name, state}, acc ->
-            case Register.prerequisite_adrs(name) do
+            case declared_prerequisites(governed, name, revision) do
               [] ->
                 acc
 
@@ -218,15 +218,76 @@ defmodule Loopex.Checks.History do
     end
   end
 
-  defp register_rows(nil, revision, true) do
+  # Concept: a milestone's prerequisites are the decisions its own plan pair names,
+  # read from the plan as it stood at the revision being judged.
+  #
+  # Technical depth: a hand-maintained table would be a second place to forget.
+  # It carried one milestone, so the guard was silent for `M1` — whose technical
+  # envelope declares five prerequisite decisions — and would have been silent for
+  # every milestone after it. The `### Prerequisites and Acceptance Points`
+  # section is required of every plan companion, so the declaration is always
+  # there to read. A declared decision whose document is absent at that revision
+  # cannot be judged, which is a failure and not a pass.
+  defp declared_prerequisites(governed, name, revision) do
+    case Map.get(governed, "docs/plans/#{name}-technical.md") do
+      nil ->
+        []
+
+      text ->
+        text
+        |> declared_adr_numbers()
+        |> Enum.map(fn number ->
+          path =
+            governed
+            |> Map.keys()
+            |> Enum.find(&adr_concept_for?(&1, number)) ||
+              raise(
+                Invalid,
+                "#{@index} at #{revision}: `#{name}` names ADR #{number} as a prerequisite " <>
+                  "but no such decision is present at that revision"
+              )
+
+          {path, "ADR #{number}"}
+        end)
+    end
+  end
+
+  defp declared_adr_numbers(text) do
+    case String.split(text, "### Prerequisites and Acceptance Points", parts: 2) do
+      [_before, rest] ->
+        rest
+        |> String.split(~r/\n### /, parts: 2)
+        |> List.first()
+        |> then(&Regex.scan(~r/\*\*ADR (\d{4})\b/, &1))
+        |> Enum.map(&Enum.at(&1, 1))
+        |> Enum.uniq()
+
+      _other ->
+        []
+    end
+  end
+
+  defp adr_concept_for?(path, number) do
+    Documents.adr_concept?(path) and
+      String.starts_with?(Paths.strip_prefix(path, "docs/adr/"), "#{number}-")
+  end
+
+  defp any_prerequisite_declared?(governed) do
+    Enum.any?(governed, fn {path, text} ->
+      String.starts_with?(path, "docs/plans/") and String.ends_with?(path, "-technical.md") and
+        declared_adr_numbers(text) != []
+    end)
+  end
+
+  defp register_rows(nil, revision, true, _governed) do
     raise Invalid,
           "#{@index} at #{revision}: the canonical register is absent from a revision that " <>
             "follows a prerequisite-bearing milestone"
   end
 
-  defp register_rows(nil, _revision, false), do: nil
+  defp register_rows(nil, _revision, false, _governed), do: nil
 
-  defp register_rows(text, revision, seen) do
+  defp register_rows(text, revision, seen, governed) do
     cond do
       not declares_register?(text) and seen ->
         raise Invalid,
@@ -237,7 +298,7 @@ defmodule Loopex.Checks.History do
         nil
 
       true ->
-        parse_register(text, revision, seen)
+        parse_register(text, revision, seen, governed)
     end
   end
 
@@ -249,21 +310,18 @@ defmodule Loopex.Checks.History do
   # accepting every one would let an unparseable table carry a milestone past the
   # check. So a parse failure is tolerated exactly when the block mentions none of
   # the milestones that declare prerequisites, and refused the moment it does.
-  defp parse_register(text, revision, seen) do
+  defp parse_register(text, revision, seen, governed) do
     Register.register(text)
   rescue
     error in Invalid ->
-      mentioned =
-        Enum.filter(Register.prerequisite_milestones(), &String.contains?(text, "`#{&1}`"))
-
       cond do
-        mentioned != [] ->
+        any_prerequisite_declared?(governed) ->
           reraise Invalid,
                   [
                     message:
                       "#{@index} at #{revision}: the register cannot be read under the " <>
-                        "current schema yet names #{Enum.join(mentioned, ", ")}, whose " <>
-                        "prerequisites must be judged there (#{Exception.message(error)})"
+                        "current schema yet a plan there declares prerequisite decisions " <>
+                        "that must be judged against it (#{Exception.message(error)})"
                   ],
                   __STACKTRACE__
 
@@ -1332,7 +1390,9 @@ defmodule Loopex.Checks.History do
   malformed state the cheapest way to unbind an artifact.
   """
   @spec artifact_history({String.t(), [{String.t(), [String.t()], map()}]} | nil) :: :ok
-  def artifact_history(nil), do: :ok
+  def artifact_history(nil) do
+    raise Invalid, "governed documents: complete reachable artifact history is unavailable"
+  end
 
   def artifact_history({_head, snapshots}) do
     Enum.reduce(snapshots, %{}, fn {revision, parents, files}, state ->

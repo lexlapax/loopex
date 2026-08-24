@@ -262,9 +262,13 @@ argv mode, is refused rather than reinterpreted.
 
 **Process ownership.** Before the executor accepts an effectful job it captures
 the kill identity of the process it will own — on POSIX, its own process group —
-and retains it with the job. Cleanup terminates the whole owned descendant tree
-and confirms termination before any `cancelled` fact commits. `M2` claims POSIX
-process semantics only and makes no Windows claim.
+and retains it with the job. Cleanup terminates that captured kill identity's
+process group and confirms that no member of the group survives before any
+`cancelled` fact commits. The limit is the group, and it is stated rather than
+implied: a descendant that leaves the captured group by calling `setsid` or
+`setpgid` is outside both the kill and the confirmation, and `M2` ships no
+cgroup, job object, or sandbox that would close that. `M2` claims POSIX process
+semantics only and makes no Windows claim.
 
 **Artifact spill.** Bytes above the model-facing ceiling become an immutable
 artifact with a digest and a bounded reference. The reference, never the bytes,

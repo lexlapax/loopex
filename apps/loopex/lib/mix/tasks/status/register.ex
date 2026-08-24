@@ -97,11 +97,14 @@ defmodule Loopex.Checks.Register do
   # derivations discarded `adr_statuses` entirely, so a milestone with three
   # outstanding prerequisites derived "None; it is accepted and implementation
   # may proceed" the moment its own row moved. The set is declared here per
-  # milestone rather than parsed out of plan prose, because the register is the
-  # surface this guard protects and prose is not a contract; the plan pair states
-  # the same prerequisite for a reader and this table states it for the checker.
-  # Each entry names the Concept file and its display name, and the technical
-  # companion follows by path convention.
+  # milestone because this is the capsule's own wording table: it decides which
+  # outstanding decisions the displayed status names as the next thing to do.
+  # Enforcement does not live here. The history walk reads each plan companion's
+  # own `### Prerequisites and Acceptance Points` declaration at the revision it
+  # is judging, so a milestone missing from this table is a capsule that says
+  # less, never a milestone that goes unchecked. Each entry names the Concept
+  # file and its display name; the technical companion follows by path
+  # convention.
   @prerequisite_adrs %{
     "M2" => [
       {"docs/adr/0009-tool-executor-and-grant-contracts.md", "ADR 0009"},
@@ -705,22 +708,6 @@ defmodule Loopex.Checks.Register do
   """
   @spec prerequisite_adrs(String.t()) :: [{String.t(), String.t()}]
   def prerequisite_adrs(name), do: Map.get(@prerequisite_adrs, name, [])
-
-  @doc """
-  ## Concept
-
-  Every milestone that declares prerequisite decisions.
-
-  ## Technical depth
-
-  The history walk needs this to judge a revision whose register predates the
-  current table schema. Such a revision cannot be parsed, and tolerating it
-  silently would let an unparseable register carry a milestone past the check, so
-  the walk instead refuses any pre-schema register that mentions one of these
-  names at all.
-  """
-  @spec prerequisite_milestones() :: [String.t()]
-  def prerequisite_milestones, do: Map.keys(@prerequisite_adrs)
 
   defp in_progress_values(name) do
     name

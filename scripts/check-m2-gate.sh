@@ -250,6 +250,14 @@ defmodule Loopex.M2Probe.Model do
   end
 end
 
+# The probe's own permissive host policy. It declares no `@behaviour` because
+# `Loopex.Policy` does not exist on the tree this probe also has to run against,
+# and a missing behaviour is a compile error there. Its `decide/1` returns the
+# ADR 0009 allow shape.
+defmodule Loopex.M2Probe.Policy do
+  def decide(_request), do: {:allow, nil}
+end
+
 defmodule Loopex.M2Probe do
   @moduledoc false
 
@@ -294,7 +302,6 @@ defmodule Loopex.M2Probe do
         workspace_ref: "probe-workspace",
         workspace_lease: "probe-lease"
       },
-      grant_decision: {:host_policy, :allow},
       progress_to: self()
     ]
 
@@ -326,18 +333,36 @@ defmodule Loopex.M2Probe do
     }
   end
 
-  # The accepted M2 runtime option is a named active tool set. A runtime that
-  # refuses it and accepts only one hand-written definition is the M1 shape, and
-  # that refusal is itself one of the observations.
+  # The accepted M2 runtime options are a named active tool set and a host-supplied
+  # policy. A runtime that refuses either and accepts only one hand-written
+  # definition and the literal allow term is the M1 shape, and that refusal is
+  # itself one of the observations.
+  #
+  # Authority has to fall back exactly as the tool set does. Outcome 6 requires an
+  # M2 runtime to refuse to start when no policy is named, so a probe that passed
+  # only M1's literal `{:host_policy, :allow}` would be refused by the very tree
+  # it exists to observe — and because the probe gates green in every role, the
+  # gate could never pass.
   defp start_runtime(base) do
-    case Loopex.start_link(Keyword.put(base, :tools, coding_tools())) do
-      {:ok, runtime} ->
-        {"named_set", runtime}
+    attempts =
+      for {shape, tool_option} <- [
+            {"named_set", {:tools, coding_tools()}},
+            {"single_hand_written", {:tool, demonstration_tool()}}
+          ],
+          authority <- [{:policy, Loopex.M2Probe.Policy}, {:grant_decision, {:host_policy, :allow}}] do
+        {shape, [tool_option, authority]}
+      end
 
-      {:error, _reason} ->
-        {:ok, runtime} = Loopex.start_link(Keyword.put(base, :tool, demonstration_tool()))
-        {"single_hand_written", runtime}
-    end
+    started =
+      Enum.find_value(attempts, fn {shape, options} ->
+        case Loopex.start_link(Keyword.merge(base, options)) do
+          {:ok, runtime} -> {shape, runtime}
+          _other -> nil
+        end
+      end)
+
+    started ||
+      raise "the probe could not start a runtime in either the M2 or the M1 shape"
   end
 
   defp coding_tools do
@@ -596,6 +621,7 @@ require_feature \
   "the maximum turn bound ends the run bound reached before another provider call" \
   "the cumulative token budget ends the run bound reached before another provider call" \
   "the wall clock deadline ends the run bound reached before another provider call" \
+  "a reached deadline whose cleanup cannot be confirmed ends outcome unknown rather than bound reached" \
   "a retried tool operation keeps its operation identity and reconciles against its own attempt bound request digest" \
   "a provider retry of a model call redispatches the same staged request bytes and reuses their staged request digest under a new recorded attempt" \
   "a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" \
@@ -613,7 +639,7 @@ require_feature \
   "replaying an adapter's emitted deltas reproduces the reply it returned byte identically" \
   "the model and executor progress domains carry separate sequences each closed by its own content free item" \
   "a gapless sequence within one stream domain and its closing total make lost progress detectable" \
-  "the canonical identity encoding is injective and distinct encodings derive stable distinct labels across a sampled corpus" \
+  "the canonical identity encoding is injective and sampled distinct encodings derive stable distinct labels" \
   "a provider retry opens a second stream domain under one turn and neither domain reports the other as loss" \
   "a retried executor operation attempt opens its own stream domain closed by its own closure item and count" \
   "the committed assistant message is built from the reply and never assembled from deltas" \
@@ -653,7 +679,7 @@ require_feature \
   "bash runs an argv command and an explicit raw shell command with distinct semantics" \
   "every tool refuses a path that escapes the workspace root through traversal or a symlink" \
   "executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted" \
-  "a tool child process tree is owned and terminated with its job" \
+  "a tool child process group is owned and terminated with its job and no group member survives" \
   "a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound"
 
 require_feature \
@@ -1265,7 +1291,7 @@ run_selector() {
   fi
 }
 
-run_selector 1 apps/loopex/test/agent_loop_test.exs default 16 zero \
+run_selector 1 apps/loopex/test/agent_loop_test.exs default 17 zero \
   "passed=a prompt runs until the model stops requesting tools rather than after a fixed number of turns" \
   "passed=every model request carries the committed conversation history including the original prompt" \
   "passed=an assistant tool call and its real tool result are committed and replayed to the model" \
@@ -1275,6 +1301,7 @@ run_selector 1 apps/loopex/test/agent_loop_test.exs default 16 zero \
   "passed=the maximum turn bound ends the run bound reached before another provider call" \
   "passed=the cumulative token budget ends the run bound reached before another provider call" \
   "passed=the wall clock deadline ends the run bound reached before another provider call" \
+  "passed=a reached deadline whose cleanup cannot be confirmed ends outcome unknown rather than bound reached" \
   "passed=a retried tool operation keeps its operation identity and reconciles against its own attempt bound request digest" \
   "passed=a provider retry of a model call redispatches the same staged request bytes and reuses their staged request digest under a new recorded attempt" \
   "passed=a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" \
@@ -1290,7 +1317,7 @@ run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs defaul
   "passed=replaying an adapter's emitted deltas reproduces the reply it returned byte identically" \
   "passed=the model and executor progress domains carry separate sequences each closed by its own content free item" \
   "passed=a gapless sequence within one stream domain and its closing total make lost progress detectable" \
-  "passed=the canonical identity encoding is injective and distinct encodings derive stable distinct labels across a sampled corpus" \
+  "passed=the canonical identity encoding is injective and sampled distinct encodings derive stable distinct labels" \
   "passed=a provider retry opens a second stream domain under one turn and neither domain reports the other as loss" \
   "passed=a retried executor operation attempt opens its own stream domain closed by its own closure item and count" \
   "passed=the committed assistant message is built from the reply and never assembled from deltas" \
@@ -1314,7 +1341,7 @@ run_selector 4 apps/loopex_executor_local/test/coding_tools_test.exs default 8 z
   "passed=bash runs an argv command and an explicit raw shell command with distinct semantics" \
   "passed=every tool refuses a path that escapes the workspace root through traversal or a symlink" \
   "passed=executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted" \
-  "passed=a tool child process tree is owned and terminated with its job" \
+  "passed=a tool child process group is owned and terminated with its job and no group member survives" \
   "passed=a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound"
 
 run_selector 5 apps/loopex_store_local/test/artifact_store_conformance_test.exs default 6 zero \
@@ -1509,7 +1536,9 @@ run_selector mechanics apps/loopex/test/status_check_test.exs default 43 zero \
   "passed=a gate generations table is append-only in both admitted directions" \
   "passed=the integrated phase is derived from the register's closed rows"
 
-run_selector mechanics apps/loopex/test/history_anchoring_test.exs default 23 zero \
+run_selector mechanics apps/loopex/test/history_anchoring_test.exs default 25 zero \
+  "passed=an unavailable walk is unavailable evidence in both history checks" \
+  "passed=a declared Bound Artifacts table that binds nothing is refused" \
   "passed=the real history reader carries the register and refuses a laundered prerequisite" \
   "passed=a completed Acceptance row is judged even while the register still says Open" \
   "passed=a Closed milestone cannot conceal an outstanding prerequisite behind an Open successor" \

@@ -27,6 +27,7 @@ defmodule Loopex.HistoryAnchoringTest do
   alias Loopex.Checks.History
   alias Loopex.Checks.Invalid
   alias Loopex.Checks.Markdown
+  alias Loopex.Checks.Plan
   alias Loopex.Checks.Status
   alias Loopex.StatusFixtures, as: Fixture
 
@@ -1338,8 +1339,26 @@ defmodule Loopex.HistoryAnchoringTest do
     """
   end
 
+  # Concept: the plan companion that declares the prerequisites, since the guard
+  # reads each milestone's own declaration rather than a table.
+  defp declaring_technical_plan do
+    String.replace(
+      Fixture.technical_plan(),
+      "Prerequisites are accepted before plan acceptance.",
+      "Prerequisites are accepted before plan acceptance.\n\n" <>
+        Enum.map_join(@m2_adrs, "\n", fn {_path, name} ->
+          "- **#{name}** must carry recorded acceptance."
+        end)
+    )
+  end
+
   defp prerequisite_files(rows, status) do
-    Enum.reduce(@m2_adrs, %{@index_path => prerequisite_index(rows)}, fn {path, _name}, acc ->
+    base = %{
+      @index_path => prerequisite_index(rows),
+      "docs/plans/M2-technical.md" => declaring_technical_plan()
+    }
+
+    Enum.reduce(@m2_adrs, base, fn {path, _name}, acc ->
       acc
       |> Map.put(path, prerequisite_adr(path, status))
       |> Map.put(
@@ -1402,7 +1421,7 @@ defmodule Loopex.HistoryAnchoringTest do
   defp accepted_plan_pair do
     %{
       @m2_plan => Fixture.plan(governed: true),
-      "docs/plans/M2-technical.md" => Fixture.technical_plan(),
+      "docs/plans/M2-technical.md" => declaring_technical_plan(),
       "docs/plans/M2-gate.md" => Fixture.gate()
     }
   end
@@ -1520,5 +1539,30 @@ defmodule Loopex.HistoryAnchoringTest do
                      git_resolver(root)
                    )
                  end
+  end
+
+  test "an unavailable walk is unavailable evidence in both history checks" do
+    # The governance walk always said so; the artifact walk returned :ok. Today
+    # ordering hides that — the governance raise fires first — so the disagreement
+    # was one reordered call away from making every bound artifact at every
+    # revision a clean pass.
+    assert_raise Invalid, ~r/governance history is unavailable/, fn ->
+      History.governance_history(%{}, nil, nil)
+    end
+
+    assert_raise Invalid, ~r/artifact history is unavailable/, fn ->
+      History.artifact_history(nil)
+    end
+  end
+
+  test "a declared Bound Artifacts table that binds nothing is refused" do
+    # Declaring the section and binding no row reads like protection and is none.
+    header = artifact_gate()
+
+    assert_raise Invalid, ~r/binds no artifact/, fn ->
+      Plan.bound_artifacts(header, @gate_path)
+    end
+
+    assert [{_digest, @runner}] = Plan.bound_artifacts(one_artifact_gate(), @gate_path)
   end
 end

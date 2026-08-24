@@ -718,8 +718,10 @@ bytes out of the domain an operator is reading.
   ADR states it rather than writing it there.
 - A domain label reproduced across recovery, asserting that the same attempt
   projects the same `stream_domain_id` before and after an owner change, that a
-  model and an executor domain never collide, and that no label is journaled or
-  published as a durable event.
+  model domain and an executor domain for the same operation derive distinct
+  canonical encodings, and therefore distinct labels under the collision
+  resistance of the truncated hash rather than as a guarantee, and that no label
+  is journaled or published as a durable event.
 - An encoding-injectivity property over generated identity tuples, asserting
   that distinct `(domain_kind, session_id, operation_id, attempt)` tuples derive
   distinct canonical encodings, with the generator including identifiers
@@ -737,8 +739,9 @@ bytes out of the domain an operator is reading.
   previous attempt, and a mismatched digest, each asserting that the event is
   refused, counted as refused progress, and never projected to a client, and
   that the live operation's outcome is unchanged.
-- Source inspection proving core never reconstructs an assistant message from
-  deltas, that no delta type appears in a durable or public payload, that no
+- Source inspection showing core carries no path that reconstructs an assistant
+  message from deltas, beside the behavioural case that proves the committed
+  message is built from the reply, that no delta type appears in a durable or public payload, that no
   client-facing delta carries executor identity, an epoch, a digest, or a fence,
   that `delta_count`, `streamed`, `progress_count`, and `stream_domain_id`
   appear on no committed conversation element, and that every delta and closure

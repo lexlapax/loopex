@@ -1694,6 +1694,15 @@ defmodule Loopex.Checks.Plan do
         _other -> raise Invalid, "#{gate_path}: malformed bound-artifact row"
       end
     end)
+    |> case do
+      # Concept: declaring the section and binding nothing is the same as not
+      # binding, and it reads like protection.
+      [] ->
+        raise Invalid, "#{gate_path}: a declared Bound Artifacts table binds no artifact"
+
+      bound ->
+        bound
+    end
   end
 
   # Concept: every milestone makes its public documentation disposition visible
