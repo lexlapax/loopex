@@ -18,6 +18,9 @@ a decision adds a new record rather than rewriting the old one.
 | 0006 | Store transaction contract and owner epoch | Accepted | [Decision](0006-store-transaction-and-owner-epoch.md#concept) | [Technical depth](0006-store-transaction-and-owner-epoch-technical.md#technical-depth) |
 | 0007 | Local executor grant, job, and receipt | Accepted | [Decision](0007-local-executor-grant-job-receipt.md#concept) | [Technical depth](0007-local-executor-grant-job-receipt-technical.md#technical-depth) |
 | 0008 | Owner succession recovery and runtime placement | Accepted | [Decision](0008-owner-succession-recovery-and-runtime-placement.md#concept) | [Technical depth](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth) |
+| 0009 | Tool, executor, and grant contracts | Accepted | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
+| 0010 | Provider continuation and exact context staging | Accepted | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
+| 0011 | Session input algebra and streaming progress | Accepted | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -32,6 +35,17 @@ before the outcomes they govern are implemented.
 then completing Workstream B. It supplies the durable identity ADR 0006's
 dead-owner recovery requires and makes M1's active-passive runtime-placement
 boundary explicit without adding an active-active coordination claim.
+
+0009, 0010, and 0011 are the prerequisites for accepting `M2`. 0009 decides what
+a tool definition is, how a runtime-scoped registry resolves one, which built-in
+tools ship, how oversized tool output leaves through an artifact port, and how a
+host says no; 0010 decides what a turn's canonical model request contains, how
+the durable conversation is journaled and replayed, which project resources may
+enter it, and when a run stops; 0011 decides which inputs a running session
+admits, how steering and queued follow-up work are ordered and journaled, and
+how a turn streams without letting transient progress become durable truth. All
+three must be dispositioned before `M2` is accepted, not merely before the loop
+they govern is implemented.
 
 0004 and 0005 are both parked. They designed correction paths for a defect
 found in an accepted plan, then the defect that prompted them turned out to be

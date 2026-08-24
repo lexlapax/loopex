@@ -191,6 +191,17 @@ defmodule Loopex.Checks.Status do
   # register's `Closed` rows. Excluding it here is again stricter, not looser: the
   # capsule could only ever demand one constant for every lifecycle state, while
   # the owner demands the value the register implies and refuses the other one.
+  # The constant was not simply wrong, which is why it survived: it was right
+  # until the first milestone closed and wrong ever after, so what it gave was
+  # one-sided protection rather than none.
+  #
+  # The owner is consulted here in `validate/2` rather than in the parser because
+  # this value derives from the register, not from the shape of the text, and
+  # `Register.current_status/1` reads shape alone. The commit that introduced
+  # this justified the placement by claiming the history walk re-parses old
+  # indexes through that parser; it does not. `History.lifecycle_state!` uses
+  # `Register.register/1`, and `current_status/1` has exactly one caller. The
+  # placement is right for the reason stated above, not the one recorded there.
   @phase_field "Integrated phase"
 
   # Concept: the fields whose owners live outside the lifecycle capsule.

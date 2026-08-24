@@ -25,15 +25,21 @@ while the session lives; a session "brain" can coordinate local or remote
 <!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-**Revision status:** Closed milestone product baseline; no milestone is active; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M2` is accepted; no next candidate is recorded.
 
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
 
-M1 now has a closure candidate for the first coherent working loop: an explicit
+M1 is closed and integrated. It delivered the durability kernel: an explicit
 embedded runtime, durable local Store, canonical model boundary, trusted-local
 executor, thin reference client, durable events, and receipt reconciliation
-across a real runtime-process crash. It remains source-tree milestone work, not
+across a real runtime-process crash. What it deliberately did not deliver is a
+usable coding loop — that loop runs a fixed two turns, carries no conversation
+history, and exposes two demonstration tools, so the only way to drive it is a
+test selector. Making it a tool a developer uses from their own terminal is what
+`M2` is for, and `M2` is open and unaccepted.
+
+Loopex remains source-tree milestone work, not
 an installable package, release, or frozen public API. Start with the
 [operator runtime guide](docs/operator/runtime.md#concept) to see the current
 feature boundary and run the complete source-tree loop, or use the

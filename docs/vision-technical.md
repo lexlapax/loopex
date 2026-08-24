@@ -844,7 +844,12 @@ denied
 failed(category, retryable?)
 unavailable(category)
 outcome_unknown(reconciliation_ref)
+bound_reached(bound, observed)        runs only
 ```
+
+`bound_reached` belongs to runs alone, because only a run carries declared
+bounds; a logical tool call has none to reach. The algebra is closed, and a
+further member requires the same kind of decision that introduced this one.
 
 `needs_interaction` is a suspended state, not a successful or terminal
 outcome.
@@ -921,13 +926,14 @@ stateDiagram-v2
     [*] --> idle
     idle --> preparing: prompt admitted
     preparing --> awaiting_model: model intent committed
+    preparing --> run_terminal: bound reached
     awaiting_model --> awaiting_tools: complete valid tool calls
     awaiting_model --> run_terminal: complete answer without tools
-    awaiting_model --> run_terminal: error / abort / budget exhausted
+    awaiting_model --> run_terminal: error / abort / bound reached
     awaiting_tools --> awaiting_tools: next serial call or safe batch
     awaiting_tools --> preparing: ordered results committed
     awaiting_tools --> suspended: host interaction required
-    awaiting_tools --> run_terminal: cancellation / unrecoverable failure
+    awaiting_tools --> run_terminal: cancellation / unrecoverable failure / bound reached
     suspended --> awaiting_tools: exact interaction resolved
     suspended --> run_terminal: denied / expired / aborted
     run_terminal --> preparing: follow-up queued
@@ -974,6 +980,26 @@ the core.
 `run.finished` and `session.settled` remain distinct. A run may be finished
 while retries, reconciliation, compaction, or queued follow-up work keep the
 session from being settled.
+
+A run's typed terminal outcome is one member of the closed algebra in §9.5,
+which `bound_reached` joined for exactly this ending.
+
+`bound_reached` is the outcome of a run stopped by a bound declared and committed
+with it — the maximum turn count, the cumulative token budget, or the absolute
+wall-clock deadline. It names which bound stopped the run and the observed value.
+It is not a failure: nothing malfunctioned, no invariant broke, and the committed
+conversation is complete and resumable, so a later run may continue it under a
+new bound. It is not `completed` either, because the model did not stop on its
+own and the task is not known to be done. Encoding it as a failure category was
+considered and rejected: every consumer grouping by terminal value would then see
+a configured stop and a genuine breakage in one bucket, distinguishable only by
+reading a reason, which is precisely the distinction an operator needs most. A
+bound is checked before a request is staged, so reaching one ends the run
+without another provider call. That is a guarantee about the next call, not a
+promise the run was free: the deadline also bounds work already in flight, and a
+deadline that expires mid-call aborts a request the provider may already have
+billed. Bounds are enforced per run; a run that already committed a validated
+terminal fact keeps it, exactly as cancellation never overwrites one.
 
 ### 10.3 Input queues
 

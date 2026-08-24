@@ -16,16 +16,16 @@ integrated product baseline.
 <!-- loopex:current-status:start -->
 ## Current Status
 
-**Revision status:** Closed milestone product baseline; no milestone is active; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; active milestone `M2` is accepted; no next candidate is recorded.
 
 | Field | Value |
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M1` — 2026-08-23 |
-| Blockers | None; `M1` is closed and its governance row is recorded |
-| Authorized work | Explicitly authorized planning, ADR, and review work only; no product implementation until the next milestone is accepted |
-| Next maintainer decision | Open the next milestone gate-first, or defer it |
-| Next transition | Create the next milestone's plan pair and red gate, and move it to Open |
+| Blockers | None; `M2` is accepted and implementation may proceed |
+| Authorized work | Implementation inside the accepted `M2` envelopes and its locked gate on the designated milestone branch; no milestone product bytes integrate before closure |
+| Next maintainer decision | None until `M2` is ready for independent review |
+| Next transition | Turn the locked gate green, then move `M2` to In progress and In review |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 
@@ -51,9 +51,9 @@ already identifies that row, and neither field claims a merge the checked-out
 bytes cannot prove.
 
 While `M0` was the sole blocked candidate, the repository status check derived
-the complete capsule from the two founding ADR records. The authorized-work
-boundary and validation command stayed fixed, and these three fields changed
-exactly as disposition advanced:
+the complete capsule from the two founding ADR records. The seed checkpoint,
+authorized-work boundary, and validation command stayed fixed, and these three
+fields changed exactly as disposition advanced:
 
 | Accepted records | Blockers | Next maintainer decision | Next transition |
 | --- | --- | --- | --- |
@@ -130,6 +130,7 @@ representable.
 | --- | --- | --- | --- | --- |
 | `M0` | Closed | [concept](M0.md) | [technical depth](M0-technical.md) | [gate](M0-gate.md) |
 | `M1` | Closed | [concept](M1.md) | [technical depth](M1-technical.md) | [gate](M1-gate.md) |
+| `M2` | Accepted | [concept](M2.md) | [technical depth](M2-technical.md) | [gate](M2-gate.md) |
 <!-- loopex:milestone-register:end -->
 
 When a plan exists, the Concept, Technical depth, and Gate columns link their
@@ -413,6 +414,56 @@ generation whose candidate lineage contains the exact prior accepted chain;
 same-generation edits, higher-numbered sibling forks, interposed or overlapping
 transactions, lifecycle changes during A-to-R, rollback, divergent merges, and
 any Closure rewrite fail closed.
+
+That transaction cannot amend a `Closed` plan. A Closed plan's Closure row binds
+the same gate digest its Acceptance row binds, so rebinding Acceptance alone
+leaves Closure naming bytes that no longer exist, and the plan never returns to a
+valid state. Amending a Closed milestone's gate uses the additive transaction
+marked `<a id="amendment-transaction-v2"></a>`. The two markers are not
+successive versions of one rule and do not exclude each other: v1 governs
+amending a gate while its plan is Accepted, v2 governs adding a generation
+after it is Closed, and a gate that lawfully used both carries both, at most
+one marker of each kind. Both authority rows stay
+byte-immutable — they record what was accepted, and what was reviewed and closed
+— and the plan gains one append-only table outside both envelopes:
+
+```markdown
+## Gate Generations
+
+| Generation | Authority | Authority evidence | Bound bytes |
+| --- | --- | --- | --- |
+| 7 | — | — | gate `sha256:<64-hex>` |
+```
+
+At `R` that row becomes:
+
+```markdown
+| 7 | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m1-generation-7) | candidate `<40-hex>`; gate `sha256:<64-hex>` |
+```
+
+Proposal `A` is one atomic revision carrying the amended gate, that gate's next
+consecutively numbered amendment section, its new row with an empty authority,
+evidence, and candidate, and every bound artifact the amendment rebinds.
+Splitting the artifact change from the generation row across two revisions
+invalidates history permanently, because each reachable revision is judged
+against the generation current at that revision. The row carries its gate digest
+at `A` but not its candidate, for the same reason v1 needs two revisions: a
+commit cannot name its own hash. A pending row means the current gate binds bytes
+no authority has accepted, so binding validation, bootstrap, and every inherited
+gate that invokes them are red at `A`, exactly as they are at a v1 proposal.
+After exact-SHA review and explicit acceptance,
+`R` completes that row's authority, evidence, and the candidate it binds, which
+is exact `A`. The evidence cell is one new amendment-specific anchor in an
+existing durable document, written as a local link carrying that fragment; it did
+not exist at `A`, appears exactly once at `R`, and never reuses or edits an
+earlier disposition. A fragmentless pointer is refused. The table's highest
+generation always equals the gate's amendment count, and only a `Closed` plan may
+carry one.
+Current artifacts are validated against the latest accepted generation and
+historical revisions against the generation current there, so no Closed milestone
+is exempt and no earlier generation stops governing the revisions it covered. A
+generation adds no scope, changes no outcome, and reopens no lifecycle state;
+anything needing those is a new milestone.
 
 Evidence links live in the Concept plan's Progress and Evidence table or in
 gate-defined artifacts; the locked Outcomes rows name their evidence class and

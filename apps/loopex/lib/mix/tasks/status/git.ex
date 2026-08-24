@@ -333,12 +333,16 @@ defmodule Loopex.Checks.Git do
   # Concept: only governed documents and declared artifacts are read.
   # Technical depth: plan and ADR Markdown is governed by path shape; an artifact
   # is governed because a gate names it, which is why the caller passes the list.
+  # The plans index is read too. It is not a plan pair, but it is the canonical
+  # register, and the history walk needs the lifecycle state and the milestone
+  # rows as they stood at each revision; excluding it made every historical
+  # snapshot indexless, so a check written against the register silently passed
+  # over the whole of real history.
   defp governed?(path, artifact_paths) do
     relative = Loopex.Checks.Paths.strip_prefix(path, "docs/plans/")
 
     plan? =
-      String.starts_with?(path, "docs/plans/") and String.ends_with?(relative, ".md") and
-        relative != "README.md"
+      String.starts_with?(path, "docs/plans/") and String.ends_with?(relative, ".md")
 
     adr? =
       Loopex.Checks.Documents.adr_concept?(path) or

@@ -25,6 +25,12 @@ defmodule Loopex.Checks.History do
   does not depend on traversal order. Two parents carrying different completed
   values for the same record is a conflict, not a merge — that is precisely the
   case where a merge would otherwise launder a mutation.
+
+  The governance walk also judges each revision against the gate generation
+  current *there*. A Closed milestone whose gate changed without the generation
+  record that accepts the change is invalid at that revision and stays invalid,
+  which is what makes splitting an artifact change from its generation row fatal
+  rather than merely discouraged.
   """
 
   alias Loopex.Checks.Adr
@@ -39,14 +45,20 @@ defmodule Loopex.Checks.History do
 
   @index "docs/plans/README.md"
 
+  # The states in which a milestone claims its prerequisites were settled.
+  @prerequisite_states ["Accepted", "In progress", "In review", "Closed"]
+
   @adr_labels ["Acceptance", "accepted concept", "accepted technical depth"]
   @gate_labels ["accepted gate"]
   @plan_labels [
     "Acceptance",
     "Closure",
     "normative concept envelope",
-    "normative technical envelope"
+    "normative technical envelope",
+    "gate generations"
   ]
+
+  @plan_fields 0..(length(@plan_labels) - 1)
 
   @doc """
   ## Concept
@@ -135,7 +147,217 @@ defmodule Loopex.Checks.History do
       Map.put(inherited, revision, anchors)
     end)
 
+    require_prerequisite_adrs!(walk)
+
     :ok
+  end
+
+  # Concept: a milestone that recorded Acceptance while a decision its plan pair
+  # declares as a prerequisite was still Proposed did not become legal
+  # afterwards. The revision that recorded it is the revision that has to be
+  # truthful.
+  #
+  # Technical depth: the live derivation only asks about the milestone whose
+  # capsule is displayed, so once a Closed milestone is followed by an Open one,
+  # nothing asks again what the closed milestone's prerequisites were. History is
+  # the only place that can still see it.
+  #
+  # Two conditions trigger, not one. Lifecycle state is the obvious trigger, but a
+  # plan's Acceptance row is completed by the proposal revision that still carries
+  # `Open`, so a milestone can record a complete Acceptance, wait for its
+  # prerequisites to be accepted afterwards, and only then move its row — every
+  # inspected state passing. A completed Acceptance row is therefore a trigger in
+  # its own right, whatever the row beside it says.
+  #
+  # The index itself is required from the first revision that carries a
+  # prerequisite-bearing milestone onward. Before that, real history genuinely
+  # predates the register markers, and demanding them there would fail on the
+  # seed rather than on a defect. After it, an absent or unparseable index is the
+  # same evasion as a false one.
+  defp require_prerequisite_adrs!(walk) do
+    Enum.reduce(walk, false, fn {revision, _parents, governed}, seen ->
+      case register_rows(Map.get(governed, @index), revision, seen, governed) do
+        nil ->
+          seen
+
+        rows ->
+          Enum.reduce(rows, seen, fn {name, state}, acc ->
+            case declared_prerequisites(governed, name, revision) do
+              [] ->
+                acc
+
+              adrs ->
+                require_settled_prerequisites!(name, state, adrs, revision, governed)
+                true
+            end
+          end)
+      end
+    end)
+
+    :ok
+  end
+
+  defp require_settled_prerequisites!(name, state, adrs, revision, governed) do
+    accepted? = plan_accepted?(Map.get(governed, "docs/plans/#{name}.md"), name, revision)
+
+    trigger =
+      cond do
+        state in @prerequisite_states -> "is #{state}"
+        accepted? -> "carries a complete Acceptance row"
+        true -> nil
+      end
+
+    if trigger do
+      Enum.each(adrs, fn {path, adr_name} ->
+        unless adr_status!(path, adr_name, name, revision, governed) == "Accepted" do
+          raise Invalid,
+                "#{@index} at #{revision}: `#{name}` #{trigger} while #{adr_name} is " <>
+                  "not accepted; a prerequisite decision cannot be recorded afterwards"
+        end
+      end)
+    end
+  end
+
+  # Concept: a milestone's prerequisites are the decisions its own plan pair names,
+  # read from the plan as it stood at the revision being judged.
+  #
+  # Technical depth: a hand-maintained table would be a second place to forget.
+  # It carried one milestone, so the guard was silent for `M1` — whose technical
+  # envelope declares five prerequisite decisions — and would have been silent for
+  # every milestone after it. The `### Prerequisites and Acceptance Points`
+  # section is required of every plan companion, so the declaration is always
+  # there to read. A declared decision whose document is absent at that revision
+  # cannot be judged, which is a failure and not a pass.
+  defp declared_prerequisites(governed, name, revision) do
+    case Map.get(governed, "docs/plans/#{name}-technical.md") do
+      nil ->
+        []
+
+      text ->
+        text
+        |> declared_adr_numbers()
+        |> Enum.map(fn number ->
+          path =
+            governed
+            |> Map.keys()
+            |> Enum.find(&adr_concept_for?(&1, number)) ||
+              raise(
+                Invalid,
+                "#{@index} at #{revision}: `#{name}` names ADR #{number} as a prerequisite " <>
+                  "but no such decision is present at that revision"
+              )
+
+          {path, "ADR #{number}"}
+        end)
+    end
+  end
+
+  defp declared_adr_numbers(text) do
+    case String.split(text, "### Prerequisites and Acceptance Points", parts: 2) do
+      [_before, rest] ->
+        rest
+        |> String.split(~r/\n### /, parts: 2)
+        |> List.first()
+        |> then(&Regex.scan(~r/\*\*ADR (\d{4})\b/, &1))
+        |> Enum.map(&Enum.at(&1, 1))
+        |> Enum.uniq()
+
+      _other ->
+        []
+    end
+  end
+
+  defp adr_concept_for?(path, number) do
+    Documents.adr_concept?(path) and
+      String.starts_with?(Paths.strip_prefix(path, "docs/adr/"), "#{number}-")
+  end
+
+  defp any_prerequisite_declared?(governed) do
+    Enum.any?(governed, fn {path, text} ->
+      String.starts_with?(path, "docs/plans/") and String.ends_with?(path, "-technical.md") and
+        declared_adr_numbers(text) != []
+    end)
+  end
+
+  defp register_rows(nil, revision, true, _governed) do
+    raise Invalid,
+          "#{@index} at #{revision}: the canonical register is absent from a revision that " <>
+            "follows a prerequisite-bearing milestone"
+  end
+
+  defp register_rows(nil, _revision, false, _governed), do: nil
+
+  defp register_rows(text, revision, seen, governed) do
+    cond do
+      not declares_register?(text) and seen ->
+        raise Invalid,
+              "#{@index} at #{revision}: the canonical register block is absent from a " <>
+                "revision that follows a prerequisite-bearing milestone"
+
+      not declares_register?(text) ->
+        nil
+
+      true ->
+        parse_register(text, revision, seen, governed)
+    end
+  end
+
+  # Concept: a register written before the current table schema is real history,
+  # not evasion — but only while it names no milestone this check must judge.
+  #
+  # Technical depth: the seed register carried four columns. Refusing every
+  # revision that cannot be parsed under today's schema would fail on that seed;
+  # accepting every one would let an unparseable table carry a milestone past the
+  # check. So a parse failure is tolerated exactly when the block mentions none of
+  # the milestones that declare prerequisites, and refused the moment it does.
+  defp parse_register(text, revision, seen, governed) do
+    Register.register(text)
+  rescue
+    error in Invalid ->
+      cond do
+        any_prerequisite_declared?(governed) ->
+          reraise Invalid,
+                  [
+                    message:
+                      "#{@index} at #{revision}: the register cannot be read under the " <>
+                        "current schema yet a plan there declares prerequisite decisions " <>
+                        "that must be judged against it (#{Exception.message(error)})"
+                  ],
+                  __STACKTRACE__
+
+        seen ->
+          reraise error, __STACKTRACE__
+
+        true ->
+          nil
+      end
+  end
+
+  defp declares_register?(text) do
+    Enum.all?(
+      ["<!-- loopex:milestone-register:start -->", "<!-- loopex:milestone-register:end -->"],
+      fn marker -> length(String.split(text, marker)) == 2 end
+    )
+  end
+
+  defp adr_status!(path, adr_name, name, revision, governed) do
+    text =
+      Map.get(governed, path) ||
+        raise(
+          Invalid,
+          "#{@index} at #{revision}: `#{name}` names #{adr_name} as a prerequisite but " <>
+            "#{path} is absent at that revision"
+        )
+
+    case Adr.record(text, "#{path} at #{revision}", legacy_ok: true) do
+      {status, _row, _complete, _status_index, _row_index} ->
+        status
+
+      nil ->
+        raise Invalid,
+              "#{@index} at #{revision}: #{adr_name} carries no governance record, so its " <>
+                "status cannot be judged where `#{name}` depends on it"
+    end
   end
 
   defp classify_primary!(all_paths, adr_concepts) do
@@ -254,13 +476,13 @@ defmodule Loopex.Checks.History do
          parents_by_revision,
          resolve_file
        ) do
-    transaction_v1 = amendment_transaction_v1?(path, revision, governed, adr_concepts)
+    strict = strict_transaction?(path, revision, governed, adr_concepts)
 
     cond do
       MapSet.member?(adr_concepts, path) ->
         :ok
 
-      transaction_v1 and length(parents) > 1 and current != from_parents ->
+      strict and length(parents) > 1 and current != from_parents ->
         raise Invalid,
               "#{path}: governance transitions require one direct parent; #{revision} is a merge"
 
@@ -269,12 +491,12 @@ defmodule Loopex.Checks.History do
 
       true ->
         changed =
-          0..3
+          @plan_fields
           |> Enum.filter(&(Enum.at(from_parents, &1) != Enum.at(current, &1)))
 
         current_generation = acceptance_generation(Enum.at(current, 0))
 
-        if transaction_v1 and
+        if strict and
              (Enum.at(from_parents, 0) != nil or
                 (is_integer(current_generation) and current_generation > 0)) do
           validate_plan_change_set!(
@@ -295,25 +517,31 @@ defmodule Loopex.Checks.History do
     end
   end
 
-  defp amendment_transaction_v1?(path, revision, governed, adr_concepts) do
+  # Concept: both amendment transactions are strict about their revision shape,
+  # so either marker turns the strict rules on.
+  #
+  # Technical depth: v2 is additive rather than a rebind, but its proposal and
+  # its acceptance are still exactly two direct one-parent revisions. Leaving it
+  # out of the strict set would let a merge carry a generation change that no
+  # single revision is accountable for.
+  defp strict_transaction?(path, revision, governed, adr_concepts) do
     cond do
       MapSet.member?(adr_concepts, path) ->
         false
 
       String.ends_with?(path, "-gate.md") ->
-        case Map.get(governed, path) do
-          nil -> false
-          gate -> Plan.amendment_transaction_v1?(gate, "#{path} at #{revision}")
-        end
+        declares_transaction?(Map.get(governed, path), "#{path} at #{revision}")
 
       true ->
         gate_path = Paths.strip_suffix(path, ".md") <> "-gate.md"
-
-        case Map.get(governed, gate_path) do
-          nil -> false
-          gate -> Plan.amendment_transaction_v1?(gate, "#{gate_path} at #{revision}")
-        end
+        declares_transaction?(Map.get(governed, gate_path), "#{gate_path} at #{revision}")
     end
+  end
+
+  defp declares_transaction?(nil, _path), do: false
+
+  defp declares_transaction?(gate, path) do
+    Plan.amendment_transaction_v1?(gate, path) or Plan.amendment_transaction_v2?(gate, path)
   end
 
   defp validate_plan_change_set!(
@@ -437,6 +665,104 @@ defmodule Loopex.Checks.History do
        ),
        do: :ok
 
+  # Concept: the additive proposal. One revision carries the amended gate, the
+  # envelopes it re-anchors, and the new proposed generation row together.
+  #
+  # Technical depth: the envelopes appear in this change set because their
+  # anchors carry the ambient gate generation, which the amended gate advances;
+  # their bytes are still pinned by the immutable Acceptance digests. Both
+  # authority rows are absent from the set, which is the property that makes this
+  # transaction usable on a Closed plan at all. A parent that already carries an
+  # unsettled proposal is refused, so generations cannot overlap.
+  defp validate_plan_change_set!(
+         [2, 3, 4],
+         path,
+         revision,
+         [parent],
+         governed,
+         from,
+         current,
+         by_revision,
+         _parents_by_revision,
+         resolve_file
+       ) do
+    inherited = Plan.decode_generations(Enum.at(from, 4))
+    proposed = Plan.decode_generations(Enum.at(current, 4))
+
+    unless Plan.generation_proposal_appended?(inherited, proposed) do
+      raise Invalid,
+            "#{path}: a gate generation proposal at #{revision} appends exactly one proposed " <>
+              "row and rewrites none"
+    end
+
+    if inherited == [] do
+      require_settled_amendment_parent!(path, revision, parent, Enum.at(from, 0), by_revision)
+    end
+
+    require_same_lifecycle!(
+      path,
+      revision,
+      parent,
+      governed,
+      by_revision,
+      resolve_file,
+      "gate generation proposal"
+    )
+  end
+
+  # Concept: the additive rebind. It records who accepted the proposal and the
+  # exact revision they reviewed, and changes nothing else.
+  #
+  # Technical depth: the completed row must bind the sole parent, and that parent
+  # must be the revision where the proposal came into existence rather than any
+  # later revision carrying it. Requiring a new disposition anchor that did not
+  # exist at the proposal is the same rule the rebinding transaction uses: an
+  # acceptance is a record someone wrote after reviewing, not a pointer reused
+  # from an earlier one.
+  defp validate_plan_change_set!(
+         [4],
+         path,
+         revision,
+         [parent],
+         governed,
+         from,
+         current,
+         by_revision,
+         parents_by_revision,
+         resolve_file
+       ) do
+    proposed = Plan.decode_generations(Enum.at(from, 4))
+    accepted = Plan.decode_generations(Enum.at(current, 4))
+
+    unless Plan.generation_proposal_completed?(proposed, accepted) do
+      raise Invalid,
+            "#{path}: a gate generation rebind at #{revision} completes exactly the proposed " <>
+              "row it inherits"
+    end
+
+    row = List.last(accepted)
+
+    if Enum.at(row, 3) != parent do
+      raise Invalid,
+            "#{path}: gate generation rebind at #{revision} must bind its sole proposal parent " <>
+              parent
+    end
+
+    require_generation_proposal!(path, revision, parent, by_revision, parents_by_revision)
+
+    require_same_lifecycle!(
+      path,
+      revision,
+      parent,
+      governed,
+      by_revision,
+      resolve_file,
+      "gate generation rebind"
+    )
+
+    Plan.validate_generation_disposition!(Enum.at(row, 2), path, parent, revision, resolve_file)
+  end
+
   defp validate_plan_change_set!(
          changed,
          path,
@@ -506,6 +832,56 @@ defmodule Loopex.Checks.History do
         raise Invalid,
               "#{path}: amendment proposal #{candidate} must be a one-parent revision"
     end
+  end
+
+  # Concept: the additive rebind binds the revision that proposed the generation,
+  # meaning the revision a reviewer actually read — not merely some later
+  # revision that carries the pending row unchanged.
+  #
+  # Technical depth: a revision changing no governed field is admitted
+  # unconditionally, so binding the sole parent alone leaves `A -> P -> R` open:
+  # the row still reads as pending at `P`, `P` is still `R`'s only parent, and
+  # the unreviewed `P` silently replaces the reviewed `A`. Anchoring on the
+  # append closes it. The parent must be a one-parent revision whose recorded
+  # generations append exactly the pending row relative to its own parent, which
+  # identifies where the proposal came into existence. An interposed revision, a
+  # merge parent, a revision behind a merge, a root with no parent, and a parent
+  # or grandparent whose plan bytes are unavailable therefore all fail closed;
+  # the same rule the v1 rebind applies through require_amendment_proposal!/4.
+  #
+  # The generations table is read from each revision's own document rather than
+  # the propagated anchor, because the anchor exists only where a plan's
+  # Acceptance is complete, and the question here is which revision wrote the
+  # row. A milestone recording no generation never reaches this clause at all,
+  # since field 4 stays nil and cannot appear in a change set.
+  defp require_generation_proposal!(path, revision, parent, by_revision, parents_by_revision) do
+    with [grandparent] <- Map.get(parents_by_revision, parent, []),
+         proposal when is_binary(proposal) <- revision_document(by_revision, parent, path),
+         prior when is_binary(prior) <- revision_document(by_revision, grandparent, path),
+         true <-
+           Plan.generation_proposal_appended?(
+             recorded_generations(prior, path, grandparent),
+             recorded_generations(proposal, path, parent)
+           ) do
+      :ok
+    else
+      _other ->
+        raise Invalid,
+              "#{path}: gate generation rebind at #{revision} must bind the one-parent " <>
+                "revision that first proposed the generation; #{parent} carries the proposal " <>
+                "without appending it"
+    end
+  end
+
+  defp revision_document(by_revision, revision, path) do
+    by_revision |> Map.get(revision, %{}) |> Map.get(path)
+  end
+
+  defp recorded_generations(text, path, revision) do
+    text
+    |> Plan.gate_generations("#{path} at #{revision}")
+    |> Plan.generations_anchor()
+    |> Plan.decode_generations()
   end
 
   defp require_settled_amendment_parent!(
@@ -709,7 +1085,8 @@ defmodule Loopex.Checks.History do
       "accepted gate",
       "Acceptance",
       "normative concept envelope",
-      "normative technical envelope"
+      "normative technical envelope",
+      "gate generations"
     ] and not Enum.member?(adr_concepts, path)
   end
 
@@ -843,11 +1220,11 @@ defmodule Loopex.Checks.History do
   end
 
   defp plan_values(text, path, historical_path, governed, revision, by_revision) do
-    {rows, _bound, complete} = Records.governance_records(text, historical_path)
+    {rows, bound, complete} = Records.governance_records(text, historical_path)
 
     case Enum.at(complete, 0) do
       false ->
-        [nil, nil, nil, nil]
+        Enum.map(@plan_fields, fn _field -> nil end)
 
       true ->
         technical_path = Paths.strip_suffix(path, ".md") <> "-technical.md"
@@ -892,23 +1269,93 @@ defmodule Loopex.Checks.History do
         # above because its administrative rebind necessarily follows later.
         gate_path = Paths.strip_suffix(path, ".md") <> "-gate.md"
 
-        ambient_generation =
+        gate =
           case Map.get(governed, gate_path) do
-            nil ->
-              raise Invalid, "#{gate_path}: accepted plan gate disappeared at #{revision}"
-
-            gate ->
-              Plan.gate_generation(gate, "#{gate_path} at #{revision}")
+            nil -> raise Invalid, "#{gate_path}: accepted plan gate disappeared at #{revision}"
+            found -> found
           end
+
+        ambient_generation = Plan.gate_generation(gate, "#{gate_path} at #{revision}")
+        generations = Plan.gate_generations(text, historical_path)
+
+        require_generation_coupling!(%{
+          path: path,
+          gate_path: gate_path,
+          revision: revision,
+          gate: gate,
+          generations: generations,
+          ambient_generation: ambient_generation,
+          closure: Enum.at(bound, 1)
+        })
 
         [
           "#{candidate_generation}\0#{candidate_lineage}\0" <>
             Enum.join(Enum.at(rows, 0), "\0"),
           if(Enum.at(complete, 1), do: Enum.join(Enum.at(rows, 1), "\0")),
           "#{ambient_generation}\0" <> Enum.join(concept_envelope, "\n"),
-          "#{ambient_generation}\0" <> Enum.join(technical_envelope, "\n")
+          "#{ambient_generation}\0" <> Enum.join(technical_envelope, "\n"),
+          Plan.generations_anchor(generations)
         ]
     end
+  end
+
+  # Concept: at every reachable revision, a Closed milestone's gate is either the
+  # gate its Closure record bound or the gate a recorded generation binds.
+  #
+  # Technical depth: this is the check that makes splitting an amendment fatal.
+  # The artifact walk already proves each revision's bound artifacts match the
+  # gate declaration that revision carried, so changing an artifact forces
+  # changing the gate, and changing an accepted gate forces advancing its
+  # amendment generation. Requiring the matching generation row in the same
+  # revision closes the remaining gap: a revision that moves the artifact and the
+  # gate while leaving the record for later is invalid where it stands, and no
+  # descendant can make it valid again.
+  defp require_generation_coupling!(context) do
+    %{path: path, gate_path: gate_path, revision: revision, generations: generations} = context
+    declared = Plan.amendment_transaction_v2?(context.gate, "#{gate_path} at #{revision}")
+
+    cond do
+      generations == [] and declared ->
+        raise Invalid,
+              "#{gate_path} at #{revision}: a gate declaring amendment transaction v2 must " <>
+                "record its accepted gate generations"
+
+      generations == [] ->
+        require_closure_gate_retained!(context)
+
+      not declared ->
+        raise Invalid,
+              "#{gate_path} at #{revision}: a recorded gate generation requires the gate to " <>
+                "declare amendment transaction v2"
+
+      context.closure == nil ->
+        raise Invalid,
+              "#{path} at #{revision}: gate generations amend a Closed milestone's gate; an " <>
+                "active milestone amends its accepted plan pair instead"
+
+      List.last(generations).generation != context.ambient_generation ->
+        raise Invalid,
+              "#{path} at #{revision}: the highest gate generation must be the amendment " <>
+                "generation the gate itself declares"
+
+      true ->
+        :ok
+    end
+  end
+
+  defp require_closure_gate_retained!(%{closure: nil}), do: :ok
+
+  defp require_closure_gate_retained!(context) do
+    {_revision, _concept, _technical, bound_gate} = context.closure
+    historical_path = "#{context.gate_path} at #{context.revision}"
+
+    if Plan.gate_digest(context.gate, historical_path) != bound_gate do
+      raise Invalid,
+            "#{context.path} at #{context.revision}: the Closed milestone's gate no longer " <>
+              "matches its Closure record and no gate generation accepts the change"
+    end
+
+    :ok
   end
 
   defp plan_accepted?(nil, _path, _revision), do: false
@@ -943,7 +1390,9 @@ defmodule Loopex.Checks.History do
   malformed state the cheapest way to unbind an artifact.
   """
   @spec artifact_history({String.t(), [{String.t(), [String.t()], map()}]} | nil) :: :ok
-  def artifact_history(nil), do: :ok
+  def artifact_history(nil) do
+    raise Invalid, "governed documents: complete reachable artifact history is unavailable"
+  end
 
   def artifact_history({_head, snapshots}) do
     Enum.reduce(snapshots, %{}, fn {revision, parents, files}, state ->

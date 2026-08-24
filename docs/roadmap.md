@@ -22,6 +22,8 @@ Authority details: [Roadmap boundary and derivation](roadmap-technical.md#techni
 ### Capability ladder
 
 Each rung asks a product question rather than promising a milestone or version.
+A rung may take more than one milestone to answer, and the milestone names below
+are navigation aids for the current projection rather than commitments.
 Compatibility surfaces remain independent and freeze only when their own
 evidence is accepted.
 
@@ -40,15 +42,49 @@ Technical depth: [M0 candidate proof boundaries](roadmap-technical.md#technical-
 #### Useful local kernel — v0.1 candidate
 
 Can a developer use a small, durable, truthful coding loop through the
-embedded API and reference client? Its surfaces remain experimental.
+embedded API and reference client? Two milestones answer it: the foreground
+harness a developer drives from a terminal, then the headless boundary another
+program drives with the same semantics. It builds on the durable single-machine
+session and effect truth M1 delivered. Its surfaces remain experimental
+throughout, and the projected `0.1.0` tag sits at the end of the second
+milestone rather than the first.
 
 Technical depth: [Useful-local-kernel candidate proof](roadmap-technical.md#technical-roadmap-useful-local-kernel)
+
+<a id="concept-roadmap-foreground-harness"></a>
+##### Foreground coding harness — M2 candidate
+
+Can an operator do real work in their own terminal against a durable session?
+The projected shape is a genuine multi-turn loop over committed conversation
+history, real tool results returned to the model, a four-tool bootstrap coding
+profile, host policy that can refuse a call, truthful same-process cancellation,
+streaming progress, session discovery and resume, a one-page embedded
+composition, and a runnable `loopex` command. It publishes nothing and freezes
+nothing.
+
+Technical depth: [Foreground-harness candidate proof](roadmap-technical.md#technical-roadmap-foreground-harness)
+
+<a id="concept-roadmap-session-protocol"></a>
+##### Headless session protocol — M3 candidate
+
+Can a separate program drive the same session semantics over a language-neutral
+boundary? The projected shape is a long-lived stdio JSONL contract with an exact
+versioned schema bundle, golden vectors, capability negotiation, command
+admission separated from asynchronous completion, and sample clients. The vision
+names this transport before the reference daemon, so a daemon inherits a
+boundary already proved against a real loop instead of defining one.
+
+Technical depth: [Session-protocol candidate proof](roadmap-technical.md#technical-roadmap-session-protocol)
 
 <a id="concept-roadmap-durable-service"></a>
 #### Durable service — v0.2 candidate
 
 Can independent clients attach, recover, and agree on one protocol candidate
-without owning session lifetime? The protocol still remains experimental.
+without owning session lifetime? M4 carries this rung: daemon-owned session
+lifetime, a local socket transport, concurrent independent clients,
+collaboration with crash takeover, snapshot and cursor replay, residency limits,
+a daemon-grade store, and cancellation that crosses processes. The protocol
+still remains experimental.
 
 Technical depth: [Durable-service candidate proof](roadmap-technical.md#technical-roadmap-durable-service)
 
@@ -105,10 +141,12 @@ the decision required to amend the vision.
 
 Decisions are made when their capability first depends on them, not merely to
 record implementation activity. The early agenda covers repository layout and
-runtime floor, then runtime/code ownership, transaction domains, operation
-outcomes, effects and context boundaries, durable storage and public protocol,
-extension rollback, isolated and remote threat models, ACP mapping, and
-compatibility policy.
+runtime floor, then runtime/code ownership, transaction domains, and operation
+outcomes; the tool, effect, context, and session-input contracts a foreground
+harness dispatches through; the schema, negotiation, and interaction-identity
+contracts a headless protocol publishes; durable storage, attachment, and
+collaboration for a daemon; then extension rollback, isolated and remote threat
+models, ACP mapping, and compatibility policy.
 
 Technical depth: [Decision-by-capability blocking matrix](roadmap-technical.md#technical-roadmap-adr-agenda)
 
@@ -126,10 +164,10 @@ Technical depth: [Evidence classes and governing references](roadmap-technical.m
 <a id="concept-roadmap-open-questions"></a>
 ### Open questions without a milestone
 
-Name clearance, terminal scope, the default tool profile, reference memory,
-pinned memory, published hand images, secured-host validation, and package
-splits remain trigger-based questions. Their presence here does not schedule
-them.
+Name clearance, terminal scope, the reference tool profile beyond the four
+bootstrap tools, reference memory, pinned memory, published hand images,
+secured-host validation, and package splits remain trigger-based questions.
+Their presence here does not schedule them.
 
 Technical depth: [Complete unscheduled question list](roadmap-technical.md#technical-roadmap-open-questions)
 

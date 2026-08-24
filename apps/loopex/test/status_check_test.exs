@@ -21,6 +21,7 @@ defmodule Loopex.StatusCheckTest do
   alias Loopex.Checks.Git
   alias Loopex.Checks.Invalid
   alias Loopex.Checks.History
+  alias Loopex.Checks.Markdown
   alias Loopex.Checks.Plan
   alias Mix.Tasks.Loopex.Matrix
   alias Loopex.Checks.Register
@@ -449,9 +450,11 @@ defmodule Loopex.StatusCheckTest do
     )
     |> assert_invalid("Integrated phase")
 
-    # Rewriting every record together used to be enough, because the sentence was
-    # composed from whatever cell the document carried. It is composed from the
-    # register now, so the records agreeing with each other no longer settles it.
+    # The old capsule refused this one too, but only by luck of direction: its
+    # constant happened to be the right value while nothing had closed, and was
+    # the wrong one ever after. The hole it left was one-sided, and the closed
+    # register below is where it opened. This pins the property in every state,
+    # which one constant could not do in any.
     Fixture.documents()
     |> Map.new(fn {path, text} ->
       {path,
@@ -676,6 +679,18 @@ defmodule Loopex.StatusCheckTest do
 
     assert Plan.amendment_transaction_v1?(amended_gate, "gate")
     refute Plan.amendment_transaction_v1?(old_gate, "gate")
+
+    # A duplicate marker is refused rather than read as an absence. Returning
+    # false would fail closed wherever a marker is required, but would let a
+    # gate carrying two markers, no amendment section, and no generation row
+    # pass silently, leaving the stated cardinality rule unenforced.
+    doubled_gate =
+      String.trim_trailing(amended_gate, "\n") <>
+        "\n\n<a id=\"amendment-transaction-v1\"></a>\n"
+
+    assert_raise Loopex.Checks.Invalid, ~r/is declared 2 times; a gate carries at most one/, fn ->
+      Plan.amendment_transaction_v1?(doubled_gate, "gate")
+    end
 
     resolver = fn revision, path ->
       accepted_index =
@@ -996,6 +1011,12 @@ defmodule Loopex.StatusCheckTest do
   test "accepted M1 truthfully derives its implementation-time ADR blocker" do
     path = "docs/adr/0008-owner-succession-recovery-and-runtime-placement.md"
 
+    m2_prerequisites = %{
+      "docs/adr/0009-tool-executor-and-grant-contracts.md" => "Accepted",
+      "docs/adr/0010-provider-continuation-and-context-staging.md" => "Accepted",
+      "docs/adr/0011-session-input-algebra-and-streaming.md" => "Accepted"
+    }
+
     proposed = Register.expected_capsule("Accepted", "M1", %{path => "Proposed"})
     accepted = Register.expected_capsule("Accepted", "M1", %{path => "Accepted"})
 
@@ -1006,14 +1027,18 @@ defmodule Loopex.StatusCheckTest do
     assert accepted["Blockers"] == "None; `M1` is accepted and implementation may proceed"
 
     lookahead_proposed =
-      Register.expected_capsule({"M1", "Accepted"}, {"M2", "Open"}, %{
-        path => "Proposed"
-      })
+      Register.expected_capsule(
+        {"M1", "Accepted"},
+        {"M2", "Open"},
+        Map.put(m2_prerequisites, path, "Proposed")
+      )
 
     lookahead_accepted =
-      Register.expected_capsule({"M1", "Accepted"}, {"M2", "Open"}, %{
-        path => "Accepted"
-      })
+      Register.expected_capsule(
+        {"M1", "Accepted"},
+        {"M2", "Open"},
+        Map.put(m2_prerequisites, path, "Accepted")
+      )
 
     assert lookahead_proposed["Blockers"] =~ "ADR 0008"
     assert lookahead_proposed["Blockers"] =~ "`M2` acceptance"
@@ -1026,6 +1051,116 @@ defmodule Loopex.StatusCheckTest do
       end
 
       assert is_map(Register.expected_capsule(state, "M1", %{path => "Accepted"}))
+    end
+  end
+
+  test "a milestone cannot outrun the ADR dispositions its plan pair declares" do
+    adrs = [
+      {"docs/adr/0009-tool-executor-and-grant-contracts.md", "ADR 0009"},
+      {"docs/adr/0010-provider-continuation-and-context-staging.md", "ADR 0010"},
+      {"docs/adr/0011-session-input-algebra-and-streaming.md", "ADR 0011"}
+    ]
+
+    all_accepted = Map.new(adrs, fn {path, _name} -> {path, "Accepted"} end)
+    m1_adr = "docs/adr/0008-owner-succession-recovery-and-runtime-placement.md"
+
+    # The defect this protects against: the generic Open and Accepted
+    # derivations discarded ADR statuses, so `M2` derived "implementation may
+    # proceed" while all three prerequisites were still Proposed.
+    for {path, name} <- adrs do
+      statuses = Map.put(all_accepted, path, "Proposed")
+      open = Register.expected_capsule("Open", "M2", statuses)
+
+      assert open["Blockers"] =~ name
+      assert open["Next maintainer decision"] == "Disposition #{name}"
+      assert open["Next transition"] =~ "the prerequisite is accepted"
+
+      for other <- Enum.reject(adrs, &(elem(&1, 1) == name)) do
+        refute open["Blockers"] =~ elem(other, 1)
+      end
+
+      for state <- ["Accepted", "In progress", "In review", "Closed"] do
+        assert_raise Invalid, ~r/`M2` cannot move to #{state} before #{name} is accepted/, fn ->
+          Register.expected_capsule(state, "M2", statuses)
+        end
+      end
+
+      # The composite capsule is the only shape carrying an Open milestone that
+      # does not run the Open derivation, so it must still name what that
+      # milestone waits on.
+      composite =
+        Register.expected_capsule(
+          {"M1", "Accepted"},
+          {"M2", "Open"},
+          Map.put(statuses, m1_adr, "Accepted")
+        )
+
+      assert composite["Blockers"] =~ name
+      assert composite["Next maintainer decision"] =~ name
+    end
+
+    two_outstanding =
+      all_accepted
+      |> Map.put("docs/adr/0009-tool-executor-and-grant-contracts.md", "Proposed")
+      |> Map.put("docs/adr/0011-session-input-algebra-and-streaming.md", "Proposed")
+
+    open_two = Register.expected_capsule("Open", "M2", two_outstanding)
+    assert open_two["Next maintainer decision"] == "Disposition ADR 0009 and ADR 0011"
+    assert open_two["Next transition"] =~ "the prerequisites are accepted"
+    refute open_two["Blockers"] =~ "ADR 0010"
+
+    none_accepted = Map.new(adrs, fn {path, _name} -> {path, "Proposed"} end)
+    open_none = Register.expected_capsule("Open", "M2", none_accepted)
+
+    assert open_none["Next maintainer decision"] ==
+             "Disposition ADR 0009, ADR 0010, and ADR 0011"
+
+    for {_path, name} <- adrs do
+      assert open_none["Blockers"] =~ name
+    end
+
+    assert_raise Invalid, ~r/ADR 0009, ADR 0010, and ADR 0011 are accepted/, fn ->
+      Register.expected_capsule("Accepted", "M2", none_accepted)
+    end
+
+    # All three accepted returns the ordinary derivation for each state, and the
+    # Open capsule goes back to naming acceptance itself as the open decision.
+    open_clear = Register.expected_capsule("Open", "M2", all_accepted)
+
+    assert open_clear ==
+             Register.expected_capsule("Open", "unconstrained", all_accepted)
+             |> Map.put(
+               "Blockers",
+               "`M2` is open and not accepted; the recorded acceptance authority must " <>
+                 "accept both normative envelopes and the gate"
+             )
+             |> Map.put(
+               "Next maintainer decision",
+               "Accept or reject the `M2` plan pair and gate"
+             )
+             |> Map.put(
+               "Next transition",
+               "Record the acceptance governance row and move `M2` to Accepted"
+             )
+
+    for state <- ["Accepted", "In progress", "In review", "Closed"] do
+      assert is_map(Register.expected_capsule(state, "M2", all_accepted))
+    end
+
+    composite_clear =
+      Register.expected_capsule(
+        {"M1", "Accepted"},
+        {"M2", "Open"},
+        Map.put(all_accepted, m1_adr, "Accepted")
+      )
+
+    refute composite_clear["Blockers"] =~ "ADR 00"
+    refute composite_clear["Next maintainer decision"] =~ "ADR 00"
+
+    # A declared prerequisite that is not a registered ADR is a governed failure,
+    # never a silently resolved one.
+    assert_raise Invalid, ~r/names ADR 0009 as a prerequisite/, fn ->
+      Register.expected_capsule("Open", "M2", Map.delete(all_accepted, elem(hd(adrs), 0)))
     end
   end
 
@@ -2322,22 +2457,22 @@ defmodule Loopex.StatusCheckTest do
   # newly opened one coexist from the moment a second milestone opens.
   #
   # Technical depth: derivation must name the milestone a reader would call
-  # active. With M0 closed and M2 open in this generic fixture, the capsule
-  # describes M2; the closed row is history, and describing it would tell a
-  # reader no work is authorized while M2 is open. The negative case pins exactly
+  # active. With M0 closed and M9 open in this generic fixture, the capsule
+  # describes M9; the closed row is history, and describing it would tell a
+  # reader no work is authorized while M9 is open. The negative case pins exactly
   # that: M0's closed capsule, every field of it a real derived value, must be
-  # refused once M2 is open.
+  # refused once M9 is open.
   test "an open milestone beside a closed one derives the open one's capsule" do
-    rename = &String.replace(&1, "M0", "M2")
+    rename = &String.replace(&1, "M0", "M9")
 
     # The sentence is composed from the register rather than from the open
     # fixture's, because the closed row moves the phase and only the milestone
     # clauses come from the open one.
-    rows = [{"M0", "Closed"}, {"M2", "Open"}]
+    rows = [{"M0", "Closed"}, {"M9", "Open"}]
     summary = Register.summary(Register.integrated_phase(rows), rows)
 
     assert summary ==
-             "**Revision status:** Closed milestone product baseline; active milestone `M2` " <>
+             "**Revision status:** Closed milestone product baseline; active milestone `M9` " <>
                "is open; no next candidate is recorded."
 
     documents =
@@ -2349,20 +2484,20 @@ defmodule Loopex.StatusCheckTest do
            Fixture.blocked_row(),
            "| `M0` | Closed | [concept](M0.md) | [technical depth](M0-technical.md) | " <>
              "[gate](M0-gate.md) |\n" <>
-             "| `M2` | Open | [concept](M2.md) | [technical depth](M2-technical.md) | " <>
-             "[gate](M2-gate.md) |"
+             "| `M9` | Open | [concept](M9.md) | [technical depth](M9-technical.md) | " <>
+             "[gate](M9-gate.md) |"
          )
          |> String.replace(Fixture.summary(), summary)}
       end)
       |> Map.put("docs/plans/M0.md", Fixture.plan(governed: true, closed: true))
       |> Map.put("docs/plans/M0-technical.md", Fixture.technical_plan())
       |> Map.put("docs/plans/M0-gate.md", Fixture.gate())
-      |> Map.put("docs/plans/M2.md", rename.(Fixture.plan()))
-      |> Map.put("docs/plans/M2-technical.md", rename.(Fixture.technical_plan()))
-      |> Map.put("docs/plans/M2-gate.md", rename.(Fixture.gate()))
+      |> Map.put("docs/plans/M9.md", rename.(Fixture.plan()))
+      |> Map.put("docs/plans/M9-technical.md", rename.(Fixture.technical_plan()))
+      |> Map.put("docs/plans/M9-gate.md", rename.(Fixture.gate()))
       |> replace("docs/plans/README.md", "Seed bootstrap — 2026-08-15", "`M0` — 2026-08-15")
       |> Map.update!("docs/plans/README.md", &Fixture.closed_phase_cell/1)
-      |> Map.update!("docs/plans/README.md", &capsule(&1, "Open", "M2"))
+      |> Map.update!("docs/plans/README.md", &capsule(&1, "Open", "M9"))
 
     assert [] == Fixture.checked(documents)
 
@@ -2372,9 +2507,9 @@ defmodule Loopex.StatusCheckTest do
   end
 
   test "one delivery milestone may carry exactly one generic Open successor" do
-    successor = &String.replace(&1, "M0", "M2")
+    successor = &String.replace(&1, "M0", "M9")
 
-    rows = [{"M0", "Accepted"}, {"M2", "Open"}]
+    rows = [{"M0", "Accepted"}, {"M9", "Open"}]
 
     # The phase is derived rather than named here, so this literal also pins the
     # other half of the derivation: a register with no Closed row stays
@@ -2383,7 +2518,7 @@ defmodule Loopex.StatusCheckTest do
 
     assert summary ==
              "**Revision status:** Pre-implementation planning; active milestone `M0` is " <>
-               "accepted; next candidate `M2` is open."
+               "accepted; next candidate `M9` is open."
 
     documents =
       Fixture.documents()
@@ -2394,20 +2529,20 @@ defmodule Loopex.StatusCheckTest do
            Fixture.blocked_row(),
            "| `M0` | Accepted | [concept](M0.md) | " <>
              "[technical depth](M0-technical.md) | [gate](M0-gate.md) |\n" <>
-             "| `M2` | Open | [concept](M2.md) | " <>
-             "[technical depth](M2-technical.md) | [gate](M2-gate.md) |"
+             "| `M9` | Open | [concept](M9.md) | " <>
+             "[technical depth](M9-technical.md) | [gate](M9-gate.md) |"
          )
          |> String.replace(Fixture.summary(), summary)}
       end)
       |> Map.put("docs/plans/M0.md", Fixture.plan(governed: true))
       |> Map.put("docs/plans/M0-technical.md", Fixture.technical_plan())
       |> Map.put("docs/plans/M0-gate.md", Fixture.gate())
-      |> Map.put("docs/plans/M2.md", successor.(Fixture.plan()))
-      |> Map.put("docs/plans/M2-technical.md", successor.(Fixture.technical_plan()))
-      |> Map.put("docs/plans/M2-gate.md", Fixture.gate())
+      |> Map.put("docs/plans/M9.md", successor.(Fixture.plan()))
+      |> Map.put("docs/plans/M9-technical.md", successor.(Fixture.technical_plan()))
+      |> Map.put("docs/plans/M9-gate.md", Fixture.gate())
       |> Map.update!(
         "docs/plans/README.md",
-        &capsule(&1, {"M0", "Accepted"}, {"M2", "Open"})
+        &capsule(&1, {"M0", "Accepted"}, {"M9", "Open"})
       )
 
     assert [] == Fixture.checked(documents)
@@ -2420,12 +2555,12 @@ defmodule Loopex.StatusCheckTest do
       |> Map.fetch!("Authorized work")
 
     assert authorized =~ "accepted `M0`"
-    assert authorized =~ "planning, gate construction, and review for Open `M2`"
-    assert authorized =~ "no `M2` product implementation"
+    assert authorized =~ "planning, gate construction, and review for Open `M9`"
+    assert authorized =~ "no `M9` product implementation"
 
     documents
     |> replace(
-      "docs/plans/M2.md",
+      "docs/plans/M9.md",
       "| 1 | Open | — |",
       "| 1 | Proved | proof |"
     )
@@ -2574,5 +2709,270 @@ defmodule Loopex.StatusCheckTest do
 
   defp append(documents, path, suffix) do
     Map.update!(documents, path, &(&1 <> suffix))
+  end
+
+  # The additive transaction a Closed milestone uses. The Acceptance and Closure
+  # rows keep binding the original gate at the candidates they name; only the
+  # generations table moves the current gate forward.
+  defp generation_acceptance, do: String.duplicate("a", 40)
+  defp generation_closure, do: String.duplicate("c", 40)
+  defp generation_candidate, do: String.duplicate("b", 40)
+  defp generation_disposition, do: "../developer/agent-context-map.md#gate-generation-1"
+
+  defp generation_resolver(amended) do
+    original = Fixture.gate()
+
+    fn sha, path ->
+      cond do
+        String.ends_with?(path, "M0-technical.md") ->
+          Fixture.technical_plan()
+
+        String.ends_with?(path, "M0-gate.md") and sha == generation_candidate() ->
+          amended
+
+        String.ends_with?(path, "M0-gate.md") and
+            sha in [generation_acceptance(), generation_closure()] ->
+          original
+
+        String.ends_with?(path, "M0.md") and sha == generation_acceptance() ->
+          Fixture.plan()
+
+        String.ends_with?(path, "M0.md") and sha == generation_closure() ->
+          Fixture.plan(governed: true, progress: "Proved")
+
+        true ->
+          nil
+      end
+    end
+  end
+
+  defp closed_plan(generations) do
+    Fixture.plan(governed: true, closed: true, generations: generations)
+  end
+
+  defp governed_generations(plan, gate, state \\ "Closed") do
+    Plan.governance(plan, Fixture.technical_plan(), gate, "M0", state, generation_resolver(gate))
+  end
+
+  test "a Closed milestone's gate is amended by an accepted generation, not a rebind" do
+    amended = Fixture.amended_gate(1)
+
+    accepted =
+      Fixture.accepted_generation(1, generation_candidate(), amended, generation_disposition())
+
+    # A plan that records no generation is unchanged by this transaction: it has
+    # no table, and its rows still bind the gate beside it.
+    assert [] == Plan.gate_generations(Fixture.plan(governed: true), "docs/plans/M0.md")
+    assert :ok == governed_generations(closed_plan([]), Fixture.gate())
+
+    # One accepted generation makes the amended gate the current one while both
+    # immutable authority rows keep binding the gate they were reviewed against.
+    assert :ok == governed_generations(closed_plan([accepted]), amended)
+
+    # The proposal state is deliberately not a passing state: it records bytes
+    # that no authority has accepted yet.
+    proposed = Fixture.proposed_generation(1, amended)
+
+    assert_raise Invalid, ~r/is proposed and not accepted/, fn ->
+      governed_generations(closed_plan([proposed]), amended)
+    end
+
+    # An accepted generation whose reviewed candidate carries different bytes at
+    # the same generation leaves the working tree binding unaccepted ones.
+    variant = Fixture.amended_gate(1, Fixture.gate() <> "\nAn alternate gate body.\n")
+
+    stale =
+      Fixture.accepted_generation(1, generation_candidate(), variant, generation_disposition())
+
+    assert_raise Invalid, ~r/latest accepted gate generation must bind the current gate/, fn ->
+      Plan.governance(
+        closed_plan([stale]),
+        Fixture.technical_plan(),
+        amended,
+        "M0",
+        "Closed",
+        generation_resolver(variant)
+      )
+    end
+
+    # The table and the gate's declared transaction imply each other.
+    assert_raise Invalid, ~r/requires the gate to declare amendment transaction v2/, fn ->
+      governed_generations(closed_plan([accepted]), Fixture.gate())
+    end
+
+    assert_raise Invalid, ~r/must record its accepted gate generations/, fn ->
+      governed_generations(closed_plan([]), amended)
+    end
+
+    # A generation adds no scope and reopens no lifecycle state, so an active
+    # milestone cannot use it in place of amending its accepted plan pair. The
+    # gate declares both transactions here, so the case reaches the lifecycle
+    # rule rather than stopping at the active-gate marker requirement.
+    active_gate = amended <> "\n<a id=\"amendment-transaction-v1\"></a>\n"
+
+    assert_raise Invalid, ~r/amend a Closed milestone's gate/, fn ->
+      governed_generations(
+        Fixture.plan(governed: true, generations: [accepted]),
+        active_gate,
+        "Accepted"
+      )
+    end
+  end
+
+  test "a gate generation table fails closed on every malformed shape" do
+    amended = Fixture.amended_gate(1)
+    two = Fixture.amended_gate(2)
+    path = "docs/plans/M0.md"
+
+    accepted =
+      Fixture.accepted_generation(1, generation_candidate(), amended, generation_disposition())
+
+    proposed = Fixture.proposed_generation(1, amended)
+
+    malformed = [
+      {"a half-filled row", ["1 | Maintainer | — | gate `sha256:#{Markdown.digest(amended)}`"],
+       ~r/neither a complete accepted record nor a proposal/},
+      {"a bound cell that is not a digest", ["1 | — | — | gate `sha256:deadbeef`"],
+       ~r/neither a complete accepted record nor a proposal/},
+      {"a non-numeric generation",
+       [String.replace(accepted, "1 | Maintainer", "one | Maintainer", global: false)],
+       ~r/positive decimal number/},
+      {"two proposals at once", [proposed, Fixture.proposed_generation(2, two)],
+       ~r/only one gate generation may await/},
+      {"a proposal that is not the highest generation",
+       [
+         proposed,
+         Fixture.accepted_generation(2, generation_candidate(), two, generation_disposition())
+       ], ~r/must be the highest generation recorded/},
+      {"a gap in the numbering",
+       [
+         accepted,
+         Fixture.accepted_generation(3, generation_candidate(), two, generation_disposition())
+       ], ~r/consecutively and strictly increasing/},
+      {"a repeated generation", [accepted, accepted], ~r/consecutively and strictly increasing/}
+    ]
+
+    for {label, rows, expected} <- malformed do
+      assert_raise Invalid, expected, fn -> Plan.gate_generations(closed_plan(rows), path) end
+      assert label != nil
+    end
+
+    # A table is one contiguous structure; prose beside it does not qualify a
+    # record, and an empty one records nothing.
+    assert_raise Invalid, ~r/one contiguous table and nothing else/, fn ->
+      Plan.gate_generations(closed_plan([accepted]) <> "\nSee the amendment for context.\n", path)
+    end
+
+    assert_raise Invalid, ~r/one contiguous table and nothing else/, fn ->
+      Plan.gate_generations(
+        closed_plan([]) <>
+          Fixture.generations_section([]) <> "\n## Gate Generations\n\nNone yet.\n",
+        path
+      )
+    end
+
+    # Generations continue from the generation the Acceptance record bound, and
+    # each accepted row must describe the candidate it names.
+    detached =
+      Fixture.accepted_generation(
+        2,
+        generation_candidate(),
+        Fixture.amended_gate(2),
+        generation_disposition()
+      )
+
+    assert_raise Invalid, ~r/must continue from the generation the Acceptance record bound/, fn ->
+      governed_generations(closed_plan([detached]), Fixture.amended_gate(2))
+    end
+
+    unreachable =
+      Fixture.accepted_generation(1, String.duplicate("f", 40), amended, generation_disposition())
+
+    assert_raise Invalid, ~r/is unavailable/, fn ->
+      governed_generations(closed_plan([unreachable]), amended)
+    end
+
+    # The candidate resolves, but its gate declares a different generation than
+    # the row claims, so the record does not describe what a reviewer would open.
+    mismatched =
+      Fixture.accepted_generation(1, generation_candidate(), two, generation_disposition())
+
+    assert_raise Invalid, ~r/declares a different amendment generation/, fn ->
+      Plan.governance(
+        closed_plan([mismatched]),
+        Fixture.technical_plan(),
+        amended,
+        "M0",
+        "Closed",
+        generation_resolver(two)
+      )
+    end
+  end
+
+  test "a gate generations table is append-only in both admitted directions" do
+    proposal = ["1\t\t\t\tgate-one"]
+    accepted = ["1\tMaintainer\t[disposition](x.md#y)\t#{generation_candidate()}\tgate-one"]
+    second = ["2\t\t\t\tgate-two"]
+
+    # The two admitted transitions: propose one row, then complete exactly it.
+    assert Plan.supersedes?("gate generations", nil, Enum.join(proposal, "\n"))
+
+    assert Plan.supersedes?(
+             "gate generations",
+             Enum.join(proposal, "\n"),
+             Enum.join(accepted, "\n")
+           )
+
+    assert Plan.supersedes?(
+             "gate generations",
+             Enum.join(accepted, "\n"),
+             Enum.join(accepted ++ second, "\n")
+           )
+
+    # Rewriting an accepted row is not a supersession, whether it is restated,
+    # dropped, or reordered behind a new one.
+    rewritten = [
+      "1\tDelegate: Reviewer\t[disposition](x.md#y)\t#{generation_candidate()}\tgate-one"
+    ]
+
+    refute Plan.supersedes?(
+             "gate generations",
+             Enum.join(accepted, "\n"),
+             Enum.join(rewritten ++ second, "\n")
+           )
+
+    refute Plan.supersedes?(
+             "gate generations",
+             Enum.join(accepted ++ second, "\n"),
+             Enum.join(accepted, "\n")
+           )
+
+    refute Plan.supersedes?(
+             "gate generations",
+             Enum.join(accepted, "\n"),
+             Enum.join(rewritten, "\n")
+           )
+
+    # A second generation cannot start while the first is unsettled, and a row
+    # cannot arrive already accepted.
+    refute Plan.supersedes?(
+             "gate generations",
+             Enum.join(proposal, "\n"),
+             Enum.join(proposal ++ second, "\n")
+           )
+
+    refute Plan.supersedes?("gate generations", nil, Enum.join(accepted, "\n"))
+
+    # A rebind records who accepted the proposal, never what was proposed.
+    for changed <- [
+          ["1\tMaintainer\t[disposition](x.md#y)\t#{generation_candidate()}\tgate-other"],
+          ["2\tMaintainer\t[disposition](x.md#y)\t#{generation_candidate()}\tgate-one"]
+        ] do
+      refute Plan.supersedes?(
+               "gate generations",
+               Enum.join(proposal, "\n"),
+               Enum.join(changed, "\n")
+             )
+    end
   end
 end

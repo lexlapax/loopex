@@ -272,8 +272,14 @@ register and plan index.
   An amendment to an already accepted plan uses two direct, one-parent revisions.
   This strict transaction is versioned by the visible
   `<a id="amendment-transaction-v1"></a>` gate marker. Closed pre-v1 amendment
-  history remains valid; every active or future amended gate must carry exactly
-  one marker and obey v1 from its first marked proposal forward.
+  history remains valid; every active or future amended gate must carry that
+  marker and obey v1 from its first marked proposal forward. The v1 and v2
+  markers are not successive versions of one rule and do not exclude each other:
+  v1 governs amending a gate while its plan is Accepted, v2 governs adding a gate
+  generation after it is Closed, and a gate that lawfully used both carries both.
+  A gate carries at most one marker of each kind, carries the v1 marker if it
+  holds any amendment section, and carries the v2 marker if it holds any gate
+  generation row.
   Amendment sections appear in physical document order with consecutive numbers.
   The amendment proposal `A` is the first revision that advances the generation;
   it retains both the prior Acceptance row and lifecycle state, so binding
@@ -293,6 +299,39 @@ register and plan index.
   back-projected onto `A` and does not replace later same-source product-candidate
   evidence. The exact `A` to `R` review also proves that only the allowed
   transition bytes changed. Only `R` is eligible for integration.
+  A Closed plan cannot use that transaction, because its Closure row binds the
+  same gate digest its Acceptance row binds, and rebinding only Acceptance leaves
+  Closure naming bytes that no longer exist. Amending a Closed milestone's gate
+  therefore uses the additive transaction versioned by the visible
+  `<a id="amendment-transaction-v2"></a>` marker. Acceptance and Closure both stay
+  byte-immutable: they record what was accepted and what was reviewed and closed,
+  and neither is made retroactively false. The Closed plan instead gains one
+  `## Gate Generations` table outside both envelopes, appended to and never
+  rewritten, whose rows carry a consecutive generation number, the accepting
+  authority, durable evidence of that authority's explicit disposition, the
+  candidate SHA, and the new gate digest. Proposal `A` is one atomic revision
+  carrying the amended gate, that gate's next consecutively numbered amendment
+  section, its new generation row with an empty authority, disposition, and
+  candidate, and every bound artifact the amendment rebinds; splitting the
+  artifact change and the generation row across revisions permanently invalidates
+  history, because artifact validation judges each reachable revision against the
+  generation current at that revision. The row carries its gate digest at `A` but
+  not its candidate, for the same reason v1 needs two revisions: a commit cannot
+  name its own hash. At `A` the pending row means the current gate binds bytes no
+  authority has accepted, so binding validation, bootstrap, and every inherited
+  gate that invokes them are red there, exactly as they are at a v1 proposal.
+  After exact-SHA review and explicit acceptance, `R`
+  completes that row's authority, disposition, and the candidate it binds, which
+  is exact `A`. As in v1, the disposition is one new amendment-specific anchor in
+  an existing durable document, written as a local link carrying that fragment;
+  it did not exist at `A`, it appears exactly once at `R`, and `R` never reuses,
+  completes, or edits an earlier disposition. Current
+  bound artifacts are validated against the latest accepted generation, and each
+  historical revision against the generation current there. No Closed milestone is
+  exempted from artifact validation, and no earlier generation stops being
+  enforced for the revisions it governed. A gate generation adds no scope, changes
+  no outcome, and reopens no lifecycle state; a change needing any of those is a
+  new milestone.
   After that review, an explicitly approved governance-only Acceptance checkpoint
   may integrate to `main` while its exact accepted opening gate remains red. It
   may contain the accepted plan/gate machinery, governance, derived status and
