@@ -370,7 +370,8 @@ derivation reads nothing the coordinator does not already hold.
 | Model domain | `domain_kind` `model`, with the `(operation_id, attempt)` of the model-call intent ADR 0010 journals before dispatch |
 | Executor domain | `domain_kind` `executor`, with the `(operation_id, attempt)` of the executor operation ADR 0007 binds a grant, a job, and a receipt to |
 | Stability | A pure function of committed identity, so a successor owner, a re-projection, and a replay all produce the same label for the same attempt. No domain state is journaled to achieve this |
-| Injectivity | Distinct `(domain_kind, session_id, operation_id, attempt)` tuples derive distinct encodings for arbitrary binary identifiers, because the canonical encoding is length-aware, and therefore distinct labels under a collision-resistant hash. The encoding is injective; the hash over it is collision-resistant, not injective, and the derivation is chosen for the first because the second cannot repair a delimiter collision |
+| Encoding injectivity | Distinct `(domain_kind, session_id, operation_id, attempt)` tuples derive distinct encodings for arbitrary binary identifiers, because the canonical encoding is length-aware. This is the property a delimiter-joined derivation fails: no identifier containing a delimiter byte, and no pair whose concatenations coincide, can produce one encoding from two tuples |
+| Label distinctness | Not injective, and not claimed to be. The label is a 128-bit truncated SHA-256 over that encoding, so distinct encodings derive distinct labels only with the collision resistance of a truncated hash, never as a guarantee. The derivation is chosen for the encoding's injectivity because a hash cannot repair a delimiter ambiguity, not because the hash removes collision risk |
 
 `domain_kind` keeps the two namespaces disjoint even where a model operation and
 an executor operation were numbered alike, and `session_id` keeps labels
@@ -719,12 +720,19 @@ bytes out of the domain an operator is reading.
   projects the same `stream_domain_id` before and after an owner change, that a
   model and an executor domain never collide, and that no label is journaled or
   published as a durable event.
-- A domain-derivation injectivity property over generated identity tuples,
-  asserting that distinct `(domain_kind, session_id, operation_id, attempt)`
-  tuples derive distinct labels, with the generator including identifiers
+- An encoding-injectivity property over generated identity tuples, asserting
+  that distinct `(domain_kind, session_id, operation_id, attempt)` tuples derive
+  distinct canonical encodings, with the generator including identifiers
   containing NUL and other delimiter-shaped bytes and identifiers whose
   concatenations coincide. This is the property a delimiter-joined derivation
-  fails and the length-aware canonical encoding holds.
+  fails and the length-aware canonical encoding holds, and it is asserted over
+  the encoding because it is true of the encoding.
+- Label stability and sampled distinctness beside it: the same tuple derives the
+  same label every time, and distinct encodings in the generated corpus derive
+  distinct labels. The second is a sampled observation, not a proof — no test
+  can establish that a truncated hash is injective, and nothing in this design
+  relies on it, because the label is a naming device closed under equality and
+  guards nothing.
 - Executor progress from a superseded executor, a stale executor epoch, a
   previous attempt, and a mismatched digest, each asserting that the event is
   refused, counted as refused progress, and never projected to a client, and

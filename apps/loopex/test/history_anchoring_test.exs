@@ -23,6 +23,7 @@ defmodule Loopex.HistoryAnchoringTest do
 
   use ExUnit.Case, async: true
 
+  alias Loopex.Checks.Git
   alias Loopex.Checks.History
   alias Loopex.Checks.Invalid
   alias Loopex.Checks.Markdown
@@ -1387,5 +1388,137 @@ defmodule Loopex.HistoryAnchoringTest do
                {sha("a"), [], settled},
                {sha("b"), [sha("a")], settled}
              ])
+  end
+
+  @m2_plan "docs/plans/M2.md"
+
+  # Concept: a plan whose Acceptance row is complete while its lifecycle row is
+  # still Open.
+  #
+  # Technical depth: only the Governance Records table matters to the trigger, so
+  # the fixture carries that and the preamble the reader needs, with a candidate
+  # that never has to resolve because the guard reads the row's completeness and
+  # not its binding.
+  defp accepted_plan_pair do
+    %{
+      @m2_plan => Fixture.plan(governed: true),
+      "docs/plans/M2-technical.md" => Fixture.technical_plan(),
+      "docs/plans/M2-gate.md" => Fixture.gate()
+    }
+  end
+
+  defp current_files!(root) do
+    root
+    |> git!(["ls-files"])
+    |> String.split("\n", trim: true)
+    |> Map.new(fn path -> {path, File.read!(Path.join(root, path))} end)
+  end
+
+  defp git_resolver(root) do
+    fn revision, path ->
+      case System.cmd("git", ["-C", root, "show", "#{revision}:#{path}"], stderr_to_stdout: true) do
+        {content, 0} -> content
+        _other -> nil
+      end
+    end
+  end
+
+  defp git!(root, args) do
+    case System.cmd("git", ["-C", root | args], stderr_to_stdout: true) do
+      {output, 0} -> output
+      {output, status} -> flunk("git #{Enum.join(args, " ")} failed #{status}: #{output}")
+    end
+  end
+
+  defp git_commit!(root, message) do
+    git!(root, ["add", "-A"])
+    git!(root, ["-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", message])
+    root |> git!(["rev-parse", "HEAD"]) |> String.trim()
+  end
+
+  defp write_files!(root, files) do
+    Enum.each(files, fn {path, text} ->
+      absolute = Path.join(root, path)
+      File.mkdir_p!(Path.dirname(absolute))
+      File.write!(absolute, text)
+    end)
+  end
+
+  defp temporary_repository! do
+    root = Path.join(System.tmp_dir!(), "prereq-history-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    git!(root, ["init", "-q", "-b", "main"])
+    git!(root, ["config", "user.email", "fixture@example.invalid"])
+    git!(root, ["config", "user.name", "Fixture"])
+    root
+  end
+
+  test "the real history reader carries the register and refuses a laundered prerequisite" do
+    # The guard reads the canonical register at every revision, so the reader has
+    # to deliver it. It did not: the plans index was excluded from historical
+    # snapshots, and an absent index made the check pass over the whole of real
+    # history while its unit cases went on passing against injected maps.
+    root = temporary_repository!()
+
+    write_files!(root, prerequisite_files([{"M2", "Open"}], "Proposed"))
+    seed = git_commit!(root, "seed")
+
+    {head, snapshots} = Git.history_reader(root).()
+
+    assert head == seed
+    assert Enum.all?(snapshots, fn {_r, _p, files} -> Map.has_key?(files, @index_path) end)
+
+    # A milestone reaching Accepted with its prerequisites outstanding is refused
+    # at the revision that recorded it, read back out of real Git.
+    write_files!(root, prerequisite_files([{"M2", "Accepted"}], "Proposed"))
+    laundered = git_commit!(root, "accept M2 early")
+
+    write_files!(root, prerequisite_files([{"M2", "Accepted"}], "Accepted"))
+    git_commit!(root, "accept the prerequisites afterwards")
+
+    {head, snapshots} = Git.history_reader(root).()
+    current = current_files!(root)
+
+    assert_raise Invalid, ~r/#{laundered}: `M2` is Accepted while ADR 0009/, fn ->
+      History.governance_history(current, {head, snapshots}, git_resolver(root))
+    end
+
+    assert head == elem(List.last(snapshots), 0)
+  end
+
+  test "a completed Acceptance row is judged even while the register still says Open" do
+    # The evasion the lifecycle trigger alone misses: complete the Acceptance row
+    # while the row beside it still reads Open, let the prerequisites be accepted
+    # afterwards, then move the state. Every inspected state passes. The row is
+    # therefore a trigger in its own right.
+    root = temporary_repository!()
+
+    open_outstanding = prerequisite_files([{"M2", "Open"}], "Proposed")
+    write_files!(root, open_outstanding)
+    git_commit!(root, "open M2")
+
+    write_files!(root, Map.merge(open_outstanding, accepted_plan_pair()))
+    early = git_commit!(root, "complete the Acceptance row while still Open")
+
+    write_files!(
+      root,
+      Map.merge(prerequisite_files([{"M2", "Open"}], "Accepted"), accepted_plan_pair())
+    )
+
+    git_commit!(root, "accept the prerequisites afterwards")
+
+    {head, snapshots} = Git.history_reader(root).()
+
+    assert_raise Invalid,
+                 ~r/#{early}: `M2` carries a complete Acceptance row while ADR 0009/,
+                 fn ->
+                   History.governance_history(
+                     current_files!(root),
+                     {head, snapshots},
+                     git_resolver(root)
+                   )
+                 end
   end
 end

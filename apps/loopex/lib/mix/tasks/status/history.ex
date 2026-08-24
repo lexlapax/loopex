@@ -144,46 +144,142 @@ defmodule Loopex.Checks.History do
            )}
         end)
 
-      require_prerequisite_adrs!(revision, governed)
-
       Map.put(inherited, revision, anchors)
     end)
+
+    require_prerequisite_adrs!(walk)
 
     :ok
   end
 
-  # Concept: a milestone that recorded Acceptance or Closure while a decision its
-  # plan pair declares as a prerequisite was still Proposed did not become legal
+  # Concept: a milestone that recorded Acceptance while a decision its plan pair
+  # declares as a prerequisite was still Proposed did not become legal
   # afterwards. The revision that recorded it is the revision that has to be
   # truthful.
   #
   # Technical depth: the live derivation only asks about the milestone whose
   # capsule is displayed, so once a Closed milestone is followed by an Open one,
-  # nothing asks again what the closed milestone's prerequisites were, and a
-  # Closed row plus an Open successor conceals them. History is the only place
-  # that can still see it. Every revision already carries the plans index and
-  # every ADR concept, so this reads the register and the statuses as they stood
-  # there and refuses any milestone at Accepted or later with an outstanding
-  # prerequisite. Accepting the ADR later cannot repair the earlier revision,
-  # because that revision is still walked and still fails.
-  defp require_prerequisite_adrs!(revision, governed) do
-    case Map.get(governed, @index) do
-      nil ->
-        :ok
+  # nothing asks again what the closed milestone's prerequisites were. History is
+  # the only place that can still see it.
+  #
+  # Two conditions trigger, not one. Lifecycle state is the obvious trigger, but a
+  # plan's Acceptance row is completed by the proposal revision that still carries
+  # `Open`, so a milestone can record a complete Acceptance, wait for its
+  # prerequisites to be accepted afterwards, and only then move its row — every
+  # inspected state passing. A completed Acceptance row is therefore a trigger in
+  # its own right, whatever the row beside it says.
+  #
+  # The index itself is required from the first revision that carries a
+  # prerequisite-bearing milestone onward. Before that, real history genuinely
+  # predates the register markers, and demanding them there would fail on the
+  # seed rather than on a defect. After it, an absent or unparseable index is the
+  # same evasion as a false one.
+  defp require_prerequisite_adrs!(walk) do
+    Enum.reduce(walk, false, fn {revision, _parents, governed}, seen ->
+      case register_rows(Map.get(governed, @index), revision, seen) do
+        nil ->
+          seen
 
-      text ->
-        Enum.each(Register.register(text), fn {name, state} ->
-          if state in @prerequisite_states do
-            Enum.each(Register.prerequisite_adrs(name), fn {path, adr_name} ->
-              unless adr_status!(path, adr_name, name, revision, governed) == "Accepted" do
-                raise Invalid,
-                      "#{@index} at #{revision}: `#{name}` is #{state} while #{adr_name} is " <>
-                        "not accepted; a prerequisite decision cannot be recorded afterwards"
-              end
-            end)
-          end
-        end)
+        rows ->
+          Enum.reduce(rows, seen, fn {name, state}, acc ->
+            case Register.prerequisite_adrs(name) do
+              [] ->
+                acc
+
+              adrs ->
+                require_settled_prerequisites!(name, state, adrs, revision, governed)
+                true
+            end
+          end)
+      end
+    end)
+
+    :ok
+  end
+
+  defp require_settled_prerequisites!(name, state, adrs, revision, governed) do
+    accepted? = plan_accepted?(Map.get(governed, "docs/plans/#{name}.md"), name, revision)
+
+    trigger =
+      cond do
+        state in @prerequisite_states -> "is #{state}"
+        accepted? -> "carries a complete Acceptance row"
+        true -> nil
+      end
+
+    if trigger do
+      Enum.each(adrs, fn {path, adr_name} ->
+        unless adr_status!(path, adr_name, name, revision, governed) == "Accepted" do
+          raise Invalid,
+                "#{@index} at #{revision}: `#{name}` #{trigger} while #{adr_name} is " <>
+                  "not accepted; a prerequisite decision cannot be recorded afterwards"
+        end
+      end)
     end
+  end
+
+  defp register_rows(nil, revision, true) do
+    raise Invalid,
+          "#{@index} at #{revision}: the canonical register is absent from a revision that " <>
+            "follows a prerequisite-bearing milestone"
+  end
+
+  defp register_rows(nil, _revision, false), do: nil
+
+  defp register_rows(text, revision, seen) do
+    cond do
+      not declares_register?(text) and seen ->
+        raise Invalid,
+              "#{@index} at #{revision}: the canonical register block is absent from a " <>
+                "revision that follows a prerequisite-bearing milestone"
+
+      not declares_register?(text) ->
+        nil
+
+      true ->
+        parse_register(text, revision, seen)
+    end
+  end
+
+  # Concept: a register written before the current table schema is real history,
+  # not evasion — but only while it names no milestone this check must judge.
+  #
+  # Technical depth: the seed register carried four columns. Refusing every
+  # revision that cannot be parsed under today's schema would fail on that seed;
+  # accepting every one would let an unparseable table carry a milestone past the
+  # check. So a parse failure is tolerated exactly when the block mentions none of
+  # the milestones that declare prerequisites, and refused the moment it does.
+  defp parse_register(text, revision, seen) do
+    Register.register(text)
+  rescue
+    error in Invalid ->
+      mentioned =
+        Enum.filter(Register.prerequisite_milestones(), &String.contains?(text, "`#{&1}`"))
+
+      cond do
+        mentioned != [] ->
+          reraise Invalid,
+                  [
+                    message:
+                      "#{@index} at #{revision}: the register cannot be read under the " <>
+                        "current schema yet names #{Enum.join(mentioned, ", ")}, whose " <>
+                        "prerequisites must be judged there (#{Exception.message(error)})"
+                  ],
+                  __STACKTRACE__
+
+        seen ->
+          reraise error, __STACKTRACE__
+
+        true ->
+          nil
+      end
+  end
+
+  defp declares_register?(text) do
+    Enum.all?(
+      ["<!-- loopex:milestone-register:start -->", "<!-- loopex:milestone-register:end -->"],
+      fn marker -> length(String.split(text, marker)) == 2 end
+    )
   end
 
   defp adr_status!(path, adr_name, name, revision, governed) do

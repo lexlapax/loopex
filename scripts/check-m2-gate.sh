@@ -613,6 +613,7 @@ require_feature \
   "replaying an adapter's emitted deltas reproduces the reply it returned byte identically" \
   "the model and executor progress domains carry separate sequences each closed by its own content free item" \
   "a gapless sequence within one stream domain and its closing total make lost progress detectable" \
+  "the canonical identity encoding is injective and distinct encodings derive stable distinct labels across a sampled corpus" \
   "a provider retry opens a second stream domain under one turn and neither domain reports the other as loss" \
   "a retried executor operation attempt opens its own stream domain closed by its own closure item and count" \
   "the committed assistant message is built from the reply and never assembled from deltas" \
@@ -1282,13 +1283,14 @@ run_selector 1 apps/loopex/test/agent_loop_test.exs default 16 zero \
   "passed=a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated" \
   "passed=every sampling bound is a declared committed value with no implicit default"
 
-run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs default 11 zero \
+run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs default 12 zero \
   "passed=every model adapter satisfies one streaming conformance suite" \
   "passed=each canonical delta kind is bounded plain data carrying no provider or host term" \
   "passed=a text delta is observable while its operation is still incomplete rather than after the reply returns" \
   "passed=replaying an adapter's emitted deltas reproduces the reply it returned byte identically" \
   "passed=the model and executor progress domains carry separate sequences each closed by its own content free item" \
   "passed=a gapless sequence within one stream domain and its closing total make lost progress detectable" \
+  "passed=the canonical identity encoding is injective and distinct encodings derive stable distinct labels across a sampled corpus" \
   "passed=a provider retry opens a second stream domain under one turn and neither domain reports the other as loss" \
   "passed=a retried executor operation attempt opens its own stream domain closed by its own closure item and count" \
   "passed=the committed assistant message is built from the reply and never assembled from deltas" \
@@ -1507,7 +1509,9 @@ run_selector mechanics apps/loopex/test/status_check_test.exs default 43 zero \
   "passed=a gate generations table is append-only in both admitted directions" \
   "passed=the integrated phase is derived from the register's closed rows"
 
-run_selector mechanics apps/loopex/test/history_anchoring_test.exs default 21 zero \
+run_selector mechanics apps/loopex/test/history_anchoring_test.exs default 23 zero \
+  "passed=the real history reader carries the register and refuses a laundered prerequisite" \
+  "passed=a completed Acceptance row is judged even while the register still says Open" \
   "passed=a Closed milestone cannot conceal an outstanding prerequisite behind an Open successor" \
   "passed=accepting a prerequisite later cannot legalise an earlier acceptance" \
   "passed=a Closed milestone's gate generation is one atomic proposal and one rebind" \

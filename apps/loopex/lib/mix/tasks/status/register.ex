@@ -706,6 +706,22 @@ defmodule Loopex.Checks.Register do
   @spec prerequisite_adrs(String.t()) :: [{String.t(), String.t()}]
   def prerequisite_adrs(name), do: Map.get(@prerequisite_adrs, name, [])
 
+  @doc """
+  ## Concept
+
+  Every milestone that declares prerequisite decisions.
+
+  ## Technical depth
+
+  The history walk needs this to judge a revision whose register predates the
+  current table schema. Such a revision cannot be parsed, and tolerating it
+  silently would let an unparseable register carry a milestone past the check, so
+  the walk instead refuses any pre-schema register that mentions one of these
+  names at all.
+  """
+  @spec prerequisite_milestones() :: [String.t()]
+  def prerequisite_milestones, do: Map.keys(@prerequisite_adrs)
+
   defp in_progress_values(name) do
     name
     |> accepted_values()
