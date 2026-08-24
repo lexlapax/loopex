@@ -86,8 +86,9 @@ The composition is wiring and nothing else. It names the concrete Store, Model,
 Executor, and ArtifactStore implementations, starts the OTP application tree an
 `escript` does not start for it, starts a runtime, and returns it. It ships no
 policy and refuses to start unless the host supplies the one that governs the
-run. Both the `loopex` command and an embedder using those same reference
-adapters depend on it, which is the whole point of shipping it: a snippet each
+run. The `loopex` command depends on it and an embedder using those same reference
+adapters depends on it rather than copying it, which is the whole point of
+shipping it: a snippet each
 such embedder copies is re-derived once per embedder and goes stale silently the
 first time the kernel's start-up shape changes, while a shipped application
 changes once and breaks the build of every dependant that must change with it.
@@ -1143,7 +1144,8 @@ which is the opposite of what the budget is for.
 **One `mix.exs` and one role rule is what shipping it costs, and what it buys.**
 An application is more machinery than a module in an existing one, so the
 addition is justified rather than assumed: the composition must be depended on
-by both a client and an embedder, no existing role may be depended on that way
+by a client and reachable the same way by an embedder, no existing role may be
+depended on that way
 without weakening a rule that is load-bearing elsewhere, and the alternative —
 one page each embedder copies — is re-derived once per embedder and drifts
 silently the first time the kernel's start-up shape changes. A shipped
