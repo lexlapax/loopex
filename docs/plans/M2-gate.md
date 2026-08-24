@@ -335,8 +335,9 @@ or ArtifactStore implementation. The host policy modules the command ships for
 `--policy` are its single named exception, because policy is the host's own
 decision and the one decision the shipped composition refuses to make for it.
 Outcome 11 is where the composition itself is locked: it lives in
-`apps/loopex_composition`, a `:composition` application both the command and an
-embedder on the reference adapters depend on, and its locked case that the composition requires a
+`apps/loopex_composition`, a `:composition` application the command depends on
+and an independent embedder fixture composes through, and its locked case that
+the composition requires a
 host-supplied policy is what stops shared wiring answering the host's question
 for every embedder at once. Outcome 6 is split across two roles
 because the two halves prove different things: the executor edge proves the

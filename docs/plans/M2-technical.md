@@ -174,13 +174,13 @@ is:
   explicitly non-delegable, and accepting ADR 0010 or this plan pair neither
   implies it, authorizes it, nor schedules it.
 - **Durable disposition anchor.** Recorded 2026-08-23 as
-  `disposition-bound-reached-vision-change-2026-08-23` in
-  `docs/developer/agent-context-map.md`, the durable register every earlier
-  authority disposition in this repository already uses. That anchor names the
-  principle changed, the evidence, the compatibility impact, and the empty
-  migration path, and it is the single pointer this plan pair and ADR 0010 both
-  read. Until it exists the prerequisite is unmet, and no plan text, ADR text,
-  or gate result may be read as supplying it.
+  [`disposition-bound-reached-vision-change-2026-08-23`](../developer/agent-context-map.md#disposition-bound-reached-vision-change-2026-08-23),
+  in the durable register every earlier authority disposition in this repository
+  already uses. That anchor names the principle changed, the evidence, the
+  compatibility impact, and the empty migration path, and it is the single
+  pointer this plan pair and ADR 0010 both read. The prerequisite is met by that
+  record alone: no plan text, ADR text, or gate result supplies it, and were it
+  absent none of them could.
 
 **The second prerequisite this plan pair names but cannot dispose: an accepted
 M1 gate generation.** M1's closed gate binds nine paths by SHA-256, and M2 must
@@ -1029,8 +1029,8 @@ The consequence for the operator command is stated rather than worked around. A
 `:client` may not depend on another `:client`, so `loopex_cli` cannot use the
 reference client's `AllowAll` and ships its own named permissive policy for a
 trusted local developer, selected only through an explicit `--policy` value and
-emitting the same single permissive-authority notice. The composition both hosts
-depend on does not close that gap and must not: it ships no policy at all, takes
+emitting the same single permissive-authority notice. The composition supplies no
+policy of its own and must not close that gap: it ships no policy at all, takes
 the host's as a required argument, and starts no runtime without one, because a
 permissive default living in shared wiring would be inherited by every embedder
 that depends on the wiring. Two reference hosts each naming their own policy is
