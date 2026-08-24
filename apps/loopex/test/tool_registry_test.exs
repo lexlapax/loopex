@@ -38,8 +38,13 @@ defmodule Loopex.ToolRegistryTest do
   defp start_runtime(label, options) do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: label)
 
+    # A runtime with tools active must name its authority, so these cases name a
+    # permissive one. What a policy decides is proved in the policy lanes; here
+    # it is only the precondition for having tools at all.
     {:ok, runtime} =
-      Loopex.start_link([runtime_id: label, store: store] ++ options)
+      Loopex.start_link(
+        [runtime_id: label, store: store, policy: Loopex.AgentLoopTestPolicy] ++ options
+      )
 
     on_exit(fn ->
       try do

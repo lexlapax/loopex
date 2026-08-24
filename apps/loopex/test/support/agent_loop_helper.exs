@@ -150,6 +150,22 @@ defmodule Loopex.AgentLoopTestExecutor do
   end
 end
 
+defmodule Loopex.AgentLoopTestPolicy do
+  @moduledoc false
+
+  # Concept: a host policy that allows, so loop cases exercise the loop.
+  #
+  # Technical depth: a permissive policy is named explicitly here for the same
+  # reason a real host must name one — the kernel refuses to run tools for a
+  # runtime that declared no authority at all. Cases about refusal name a
+  # refusing policy instead.
+
+  @behaviour Loopex.Policy
+
+  @impl Loopex.Policy
+  def decide(_request), do: {:allow, nil}
+end
+
 defmodule Loopex.AgentLoopFixture do
   @moduledoc false
 
@@ -231,6 +247,7 @@ defmodule Loopex.AgentLoopFixture do
         project_decision: Keyword.get(options, :project_decision),
         tools: definitions,
         active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
+        policy: Keyword.get(options, :policy, Loopex.AgentLoopTestPolicy),
         grant_decision: {:host_policy, :allow}
       )
 

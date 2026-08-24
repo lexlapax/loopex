@@ -31,6 +31,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Runtime.SessionState
   alias Loopex.Executor
   alias Loopex.Model
+  alias Loopex.Policy
   alias Loopex.ProjectResource
   alias Loopex.StreamDomain
   alias LoopexProtocol.ToolDefinition
@@ -158,6 +159,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        progress_to: Keyword.get(options, :progress_to),
        diagnostics_to: Keyword.get(options, :diagnostics_to),
        bounds: Keyword.get(options, :bounds),
+       policy: Keyword.get(options, :policy),
        project_manifest: Keyword.get(options, :project_manifest),
        project_decision: Keyword.get(options, :project_decision),
        sampling: Keyword.get(options, :sampling),
@@ -969,26 +971,73 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp dispatch_effect(state, work, call) do
     with {:ok, definition} <- resolve_active_tool(state, call.name),
          {:ok, job} <- build_job(state, work, call, definition),
+         {:allow, context} <- consult_policy(state, work, call, definition),
          {:ok, grant} <-
            Executor.issue_grant(
-             state.grant_decision,
+             grant_decision(state),
              job,
-             System.system_time(:millisecond) + 60_000
+             System.system_time(:millisecond) + 60_000,
+             policy_context(context)
            ),
          {:ok, proposal} <-
            SessionState.propose_effect_intent(state.durable, work.run_id, job, grant),
          {:ok, next} <- commit_internal(state, proposal) do
       start_executor_work(next, Map.fetch!(next.durable.pending_work, work.run_id))
     else
+      # Concept: a host refusal is an answer, not an error.
+      #
+      # Technical depth: no grant is issued and no operating-system process
+      # starts. The denial commits as a terminal fact the operator can read, and
+      # the run carries on or ends truthfully. It is never retried, because the
+      # host already answered.
+      {:deny, category} ->
+        commit_tool_terminal(state, work, call, :denied, Atom.to_string(category))
+
       # Concept: a call that cannot be dispatched still gets an answer.
       #
       # Technical depth: the name is never guessed and the call is never
       # dispatched; it takes a terminal `failed` fact naming what went wrong, and
       # the loop carries on from there. Exiting here instead would lose the run's
       # place in its own conversation over a problem with one tool.
-      {:error, reason} -> commit_tool_failure(state, work, call, reason)
+      {:error, reason} ->
+        commit_tool_failure(state, work, call, reason)
     end
   end
+
+  # Concept: every executor-backed call asks the host, including a read-only one.
+  #
+  # Technical depth: there is no effect class and no argument shape that skips
+  # this. An exemption would be a dispatch branch nothing policed. Where no
+  # policy is configured the runtime refused to start, so reaching here without
+  # one means tools were composed after start, and that is refused rather than
+  # allowed.
+  defp consult_policy(%{policy: nil}, _work, _call, _definition),
+    do: {:deny, :policy_unavailable}
+
+  defp consult_policy(state, work, call, definition) do
+    Policy.decide(state.policy, %{
+      session_id: state.session_id,
+      run_id: work.run_id,
+      tool_call_id: call.tool_call_id,
+      generation: ToolDefinition.generation(definition),
+      arguments: call.arguments,
+      effect_class: Map.fetch!(definition, "effect_class"),
+      idempotency_class: Map.fetch!(definition, "idempotency_class"),
+      workspace_lease: state.executor.workspace_lease
+    })
+  end
+
+  # Concept: the grant is minted because the host allowed, not because a literal
+  # said so.
+  #
+  # Technical depth: a runtime with any tool active refuses to start without a
+  # policy, so reaching a dispatch means a host answered allow for this exact
+  # call. The reference issuance function still takes M1's marker term; what
+  # changed is that nothing reaches it unless a policy said yes first.
+  defp grant_decision(_state), do: {:host_policy, :allow}
+
+  defp policy_context(nil), do: nil
+  defp policy_context(context) when is_map(context), do: context
 
   defp commit_tool_failure(state, work, call, reason),
     do: commit_tool_terminal(state, work, call, :failed, failure_reason(reason))

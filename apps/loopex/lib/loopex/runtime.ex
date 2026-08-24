@@ -65,6 +65,7 @@ defmodule Loopex.Runtime do
           | {:tools, [LoopexProtocol.ToolDefinition.t()]}
           | {:active_tools, [binary() | {binary(), binary()}]}
           | {:bounds, map()}
+          | {:policy, module() | nil}
           | {:project_manifest, map() | nil}
           | {:project_decision, map() | nil}
           | {:sampling, map()}
@@ -389,6 +390,7 @@ defmodule Loopex.Runtime do
              active_tools: [],
              bounds: nil,
              sampling: nil,
+             policy: nil,
              project_manifest: nil,
              project_decision: nil,
              grant_decision: nil,
@@ -405,10 +407,17 @@ defmodule Loopex.Runtime do
          {:ok, tools} <- validate_tools(inherited_tool_set(validated)),
          active_tools = inherited_active_tools(validated, tools),
          {:ok, bounds} <- validate_bounds(validated[:bounds]),
+         {:ok, policy} <- validate_policy(validated[:policy], validated[:tools], validated[:tool]),
          {:ok, sampling} <- validate_sampling(validated[:sampling]),
          {:ok, grant_decision} <- validate_grant_decision(validated[:grant_decision]),
          {:ok, fault_to} <- validate_sink(validated[:fault_to]),
-         :ok <- validate_loop_configuration(model, executor, tools, grant_decision) do
+         :ok <-
+           validate_loop_configuration(
+             model,
+             executor,
+             tools,
+             loop_authority(policy, grant_decision)
+           ) do
       {:ok,
        [
          runtime_id: runtime_id,
@@ -424,12 +433,21 @@ defmodule Loopex.Runtime do
          active_tools: active_tools,
          bounds: bounds,
          sampling: sampling,
+         policy: policy,
          project_manifest: validated[:project_manifest],
          project_decision: validated[:project_decision],
          grant_decision: grant_decision,
          fault_to: fault_to
        ]}
     else
+      # Concept: a missing host policy says so, rather than reading as a typo.
+      #
+      # Technical depth: every other validation failure collapses to one reason
+      # because the caller's mistake is in the option list and the list is right
+      # there to inspect. A missing policy is different: nothing in the options is
+      # malformed, and an operator told only "invalid options" would look for a
+      # spelling error instead of the decision they have not made.
+      {:error, :host_policy_required} -> {:error, :host_policy_required}
       _other -> {:error, :invalid_runtime_options}
     end
   end
@@ -463,6 +481,29 @@ defmodule Loopex.Runtime do
   # than recomputing one from its own clock.
   @default_bounds %{max_turns: 16, token_budget: 1_000_000, deadline_ms: 600_000}
   @default_sampling %{"max_tokens" => 4_096}
+
+  # Concept: a runtime that can run tools must name who authorises them.
+  #
+  # Technical depth: starting with any executor-backed tool active and no policy
+  # configured is refused here, before any child starts. The alternative — start
+  # now and discover the missing authority at the first tool call — puts the
+  # question at the moment it is least answerable, with a run underway and an
+  # operator waiting. A runtime with no tools at all needs no policy, because
+  # there is nothing for a host to decide about.
+  defp loop_authority(policy, _grant_decision) when is_atom(policy) and not is_nil(policy),
+    do: {:policy, policy}
+
+  defp loop_authority(_policy, grant_decision), do: {:literal, grant_decision}
+
+  defp validate_policy(policy, tools, tool) do
+    active? = tools != [] or is_map(tool)
+
+    cond do
+      is_atom(policy) and not is_nil(policy) -> {:ok, policy}
+      not active? -> {:ok, nil}
+      true -> {:error, :host_policy_required}
+    end
+  end
 
   defp validate_bounds(nil), do: {:ok, @default_bounds}
 
@@ -614,12 +655,25 @@ defmodule Loopex.Runtime do
   # be empty, because a runtime that offers the model no tools still runs a
   # single-turn conversation. The retained `:tool` option is accepted so an
   # inherited caller keeps working and is otherwise unused.
-  defp validate_loop_configuration(nil, nil, _tools, nil), do: :ok
+  defp validate_loop_configuration(nil, nil, _tools, _authority), do: :ok
 
-  defp validate_loop_configuration(model, executor, tools, {:host_policy, :allow})
-       when is_map(model) and is_map(executor) and is_list(tools),
-       do: :ok
+  defp validate_loop_configuration(model, executor, tools, authority)
+       when is_map(model) and is_map(executor) and is_list(tools) do
+    # Concept: naming a policy is naming authority; the inherited literal is the
+    # other way of doing the same thing.
+    #
+    # Technical depth: M1 required the literal `{:host_policy, :allow}` because
+    # there was no port to ask. A runtime that names a policy has something
+    # better than a literal and must not be made to carry both — requiring the
+    # literal alongside would mean every host restating a decision the port now
+    # owns.
+    case authority do
+      {:policy, module} when is_atom(module) and not is_nil(module) -> :ok
+      {:literal, {:host_policy, :allow}} -> :ok
+      _absent -> {:error, :incomplete_loop_configuration}
+    end
+  end
 
-  defp validate_loop_configuration(_model, _executor, _tools, _decision),
+  defp validate_loop_configuration(_model, _executor, _tools, _authority),
     do: {:error, :incomplete_loop_configuration}
 end

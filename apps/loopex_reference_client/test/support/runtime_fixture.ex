@@ -152,6 +152,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       tool: nil,
       tools: [tool],
       active_tools: ["loopex.demo.write"],
+      policy: Loopex.ReferenceClient.Policy.AllowAll,
       grant_decision: {:host_policy, :allow},
       fault_to: Keyword.get(options, :fault_to)
     ]

@@ -22,6 +22,7 @@ defmodule Loopex.Executor.Local do
   @behaviour Loopex.Executor
 
   alias Loopex.Executor
+  alias Loopex.Executor.Local.CodingTools
   alias Loopex.Executor.Local.WorkspaceLease
 
   @max_output_bytes 1_048_576
@@ -110,7 +111,28 @@ defmodule Loopex.Executor.Local do
   def tool(@wait_write_tool),
     do: {:ok, %{id: @wait_write_tool, version: @tool_version, effect_class: "workspace_write"}}
 
-  def tool(_id), do: :error
+  # Concept: the four coding tools an operator actually uses.
+  #
+  # Technical depth: routed here beside the two demonstration tools rather than
+  # replacing them. M1's inherited executor and recovery cases still resolve the
+  # demonstrations, and the registry must prove it resolves a generation outside
+  # any active profile; deleting them to tidy up would break proved protection to
+  # save two clauses.
+  def tool(id) do
+    case Enum.find(CodingTools.definitions(), &(&1["tool_id"] == id)) do
+      nil ->
+        :error
+
+      definition ->
+        {:ok,
+         %{
+           id: id,
+           version: definition["tool_version"],
+           effect_class: definition["effect_class"],
+           coding: definition
+         }}
+    end
+  end
 
   @impl GenServer
   def init(options) do
@@ -249,6 +271,49 @@ defmodule Loopex.Executor.Local do
        when is_integer(delay) and delay in 1..30_000,
        do: write_arguments(%{"relative_path" => path, "content" => content}, delay)
 
+  defp validate_arguments(%{coding: %{"tool_id" => "loopex.read"}}, %{"path" => path})
+       when is_binary(path),
+       do: {:ok, %{kind: :read, path: path}}
+
+  defp validate_arguments(%{coding: %{"tool_id" => "loopex.write"}}, %{
+         "path" => path,
+         "content" => content
+       })
+       when is_binary(path) and is_binary(content),
+       do: {:ok, %{kind: :write, path: path, content: content}}
+
+  defp validate_arguments(%{coding: %{"tool_id" => "loopex.edit"}}, %{
+         "path" => path,
+         "old" => old,
+         "new" => new
+       })
+       when is_binary(path) and is_binary(old) and is_binary(new),
+       do: {:ok, %{kind: :edit, path: path, old: old, new: new}}
+
+  # Concept: argv and a raw shell command are two operations, not one with a
+  # convenience.
+  #
+  # Technical depth: an argv vector is passed through without a shell, so no
+  # character in an argument is interpreted; a raw command asks for a shell and
+  # gets one. Accepting both at once would leave a caller unable to say which
+  # they meant, so supplying both is refused.
+  defp validate_arguments(%{coding: %{"tool_id" => "loopex.bash"}}, arguments)
+       when is_map(arguments) do
+    argv = Map.get(arguments, "argv")
+    command = Map.get(arguments, "command")
+
+    cond do
+      is_list(argv) and Enum.all?(argv, &is_binary/1) and argv != [] and is_nil(command) ->
+        {:ok, %{kind: :bash, argv: argv}}
+
+      is_binary(command) and command != "" and is_nil(argv) ->
+        {:ok, %{kind: :bash, command: command}}
+
+      true ->
+        {:error, :invalid_tool_arguments}
+    end
+  end
+
   defp validate_arguments(_tool, _arguments), do: {:error, :invalid_tool_arguments}
 
   defp write_arguments(%{"relative_path" => path, "content" => content}, delay)
@@ -263,6 +328,19 @@ defmodule Loopex.Executor.Local do
   end
 
   defp write_arguments(_arguments, _delay), do: {:error, :invalid_tool_arguments}
+
+  defp run_tool(
+         state,
+         job,
+         %{coding: _definition} = tool,
+         _lease_pid,
+         workspace,
+         arguments,
+         options
+       ) do
+    {outcome, output} = run_coding_tool(job, tool, workspace, arguments, options)
+    receipt(state, job, tool, outcome, output)
+  end
 
   defp run_tool(state, job, tool, lease_pid, workspace, arguments, options) do
     monitor = Process.monitor(lease_pid)
@@ -287,6 +365,313 @@ defmodule Loopex.Executor.Local do
     Process.demonitor(monitor, [:flush])
 
     receipt(state, job, tool, outcome, output)
+  end
+
+  # Concept: the three filesystem tools do not need a process, so they do not
+  # start one.
+  #
+  # Technical depth: spawning a shell to read a file would put an operating
+  # system process, a signal path, and a termination story between the operator
+  # and a `File.read`. `bash` is the tool that genuinely needs a child, and it is
+  # the only one that gets one.
+  defp run_coding_tool(_job, _tool, workspace, %{kind: :read, path: path}, _options) do
+    with {:ok, resolved} <- CodingTools.resolve(workspace, path) do
+      case File.read(resolved) do
+        {:ok, content} ->
+          case CodingTools.bound_output(content, CodingTools.limits().read_bytes) do
+            {:complete, bounded} -> {:completed, bounded}
+            {:truncated, kept, _full} -> {:completed, truncation_marker(kept, byte_size(content))}
+          end
+
+        {:error, reason} ->
+          {:failed, "read failed: #{:file.format_error(reason)}"}
+      end
+    else
+      {:error, reason} -> {:failed, containment_message(reason)}
+    end
+  end
+
+  defp run_coding_tool(
+         _job,
+         _tool,
+         workspace,
+         %{kind: :write, path: path, content: content},
+         _opts
+       ) do
+    with {:ok, resolved} <- CodingTools.resolve(workspace, path),
+         :ok <- File.mkdir_p(Path.dirname(resolved)),
+         :ok <- File.write(resolved, content) do
+      {:completed, "wrote #{byte_size(content)} bytes to #{path}"}
+    else
+      {:error, reason} when is_atom(reason) ->
+        {:failed, "write failed: #{:file.format_error(reason)}"}
+
+      {:error, reason} ->
+        {:failed, containment_message(reason)}
+    end
+  end
+
+  # Concept: an edit that cannot be made says what it found instead.
+  #
+  # Technical depth: a blank failure costs a model a guess and another turn. The
+  # diagnostics below distinguish absent from ambiguous, and an absent match
+  # reports the nearest line it did find, because "your string is not here" and
+  # "your string is here twice" call for different corrections.
+  defp run_coding_tool(_job, _tool, workspace, %{kind: :edit} = arguments, _options) do
+    %{path: path, old: old, new: new} = arguments
+
+    with {:ok, resolved} <- CodingTools.resolve(workspace, path),
+         {:ok, content} <- read_for_edit(resolved) do
+      case occurrences(content, old) do
+        1 ->
+          updated = String.replace(content, old, new)
+
+          case File.write(resolved, updated) do
+            :ok -> {:completed, "replaced 1 occurrence in #{path}"}
+            {:error, reason} -> {:failed, "edit failed: #{:file.format_error(reason)}"}
+          end
+
+        0 ->
+          {:failed,
+           "edit failed: the exact text was not found in #{path}. " <>
+             nearest_hint(content, old)}
+
+        count ->
+          {:failed,
+           "edit failed: the text appears #{count} times in #{path}. " <>
+             "Include more surrounding context so exactly one occurrence matches."}
+      end
+    else
+      {:error, reason} when is_atom(reason) ->
+        {:failed, "edit failed: #{:file.format_error(reason)}"}
+
+      {:error, reason} ->
+        {:failed, containment_message(reason)}
+    end
+  end
+
+  defp run_coding_tool(job, tool, workspace, %{kind: :bash} = arguments, options) do
+    run_owned_process(job, tool, workspace, arguments, options)
+  end
+
+  # Concept: a command runs as a group this executor owns and can end.
+  #
+  # Technical depth: the child is started under `setsid`, so it becomes a process
+  # group leader and every descendant it spawns joins that group. Termination
+  # then signals the negated group id rather than the leader, which is the
+  # difference between ending the work and ending the one process that happened
+  # to be on top of it. A leader that forks and exits would otherwise leave its
+  # children running with nobody's name on them.
+  #
+  # The group id is captured by the child itself and printed on its first line,
+  # because the BEAM gives a port's os_pid but not the group the child chose. A
+  # captured identity is the only one termination can honestly claim to have
+  # confirmed.
+  defp run_owned_process(job, _tool, workspace, arguments, options) do
+    deadline = effective_deadline(job, arguments)
+    {launcher, command_arguments} = process_launcher(arguments)
+
+    port =
+      Port.open(
+        {:spawn_executable, launcher},
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          :hide,
+          args: Enum.map(command_arguments, &String.to_charlist/1),
+          cd: String.to_charlist(workspace)
+        ]
+      )
+
+    os_pid = port |> Port.info(:os_pid) |> elem(1)
+    notify(options, {:executor_process_started, job.job_id, job.tool_id, [@search_path_name]})
+
+    case collect_output(port, os_pid, deadline, <<>>, options, job) do
+      {:completed, output} ->
+        bound_process_output(output)
+
+      {:cancelled, output, group} ->
+        confirmed = confirm_group_terminated(group)
+
+        {if(confirmed, do: :cancelled, else: :outcome_unknown),
+         output <>
+           "\n[loopex: the deadline passed and the command was terminated." <>
+           if(confirmed,
+             do: " Its process group is confirmed cleaned.]",
+             else: " Cleanup could not be confirmed.]"
+           )}
+    end
+  end
+
+  defp bound_process_output(output) do
+    case CodingTools.bound_output(output, CodingTools.limits().output_bytes) do
+      {:complete, bounded} -> {:completed, bounded}
+      {:truncated, kept, _full} -> {:completed, truncation_marker(kept, byte_size(output))}
+    end
+  end
+
+  # Concept: the effective deadline is the earlier of the run's and the tool's.
+  #
+  # Technical depth: a tool's own wall-time budget can only make a job end
+  # sooner, never later. Taking the minimum is what stops a tool budget from
+  # outliving the run that authorised it.
+  defp effective_deadline(job, _arguments) do
+    tool_budget = System.system_time(:millisecond) + 120_000
+    min(job.run_deadline, tool_budget)
+  end
+
+  # Concept: argv runs without a shell; a raw command runs in one.
+  #
+  # Technical depth: `setsid` wraps both so the child leads its own group. For
+  # argv the program and its arguments are passed through untouched, so a `$` or
+  # a space in an argument is data. For a raw command a shell is asked for
+  # explicitly, which is the whole point of that form.
+  defp process_launcher(%{argv: [program | rest]}) do
+    {setsid_path(),
+     ["/usr/bin/env", "sh", "-c", group_preamble() <> "exec \"$0\" \"$@\"", program] ++ rest}
+  end
+
+  defp process_launcher(%{command: command}) do
+    {setsid_path(), ["/usr/bin/env", "sh", "-c", group_preamble() <> command]}
+  end
+
+  # The child announces the group it actually leads before doing anything else,
+  # so termination confirms a group the operating system assigned rather than one
+  # this executor assumed.
+  defp group_preamble, do: "printf 'loopex-pgid:%s\\n' \"$(ps -o pgid= -p $$ | tr -d ' ')\" >&2; "
+
+  defp setsid_path do
+    case System.find_executable("setsid") do
+      nil -> "/usr/bin/env"
+      path -> path
+    end
+  end
+
+  defp collect_output(port, os_pid, deadline, acc, options, job) do
+    remaining = deadline - System.system_time(:millisecond)
+
+    if remaining <= 0 do
+      group = group_of(acc, os_pid)
+      terminate_group(group)
+      {:cancelled, strip_group_line(acc), group}
+    else
+      receive do
+        {^port, {:data, chunk}} ->
+          notify(options, {:executor_progress, job.job_id, byte_size(chunk)})
+          collect_output(port, os_pid, deadline, acc <> chunk, options, job)
+
+        {^port, {:exit_status, _status}} ->
+          {:completed, strip_group_line(acc)}
+      after
+        min(remaining, 50) ->
+          collect_output(port, os_pid, deadline, acc, options, job)
+      end
+    end
+  end
+
+  defp group_of(output, os_pid) do
+    case Regex.run(~r/loopex-pgid:(\d+)/, output) do
+      [_all, group] -> String.to_integer(group)
+      nil -> os_pid
+    end
+  end
+
+  defp strip_group_line(output), do: String.replace(output, ~r/loopex-pgid:\d+\n/, "")
+
+  # Concept: end the group, not the leader.
+  #
+  # Technical depth: a negative pid names the process group. TERM first so a
+  # child can finish a write, then KILL, because a command interrupted mid-write
+  # leaves a half-written file the operator has to notice for themselves.
+  defp terminate_group(group) when is_integer(group) and group > 1 do
+    _ = System.cmd("/bin/kill", ["-TERM", "-#{group}"], stderr_to_stdout: true)
+    Process.sleep(50)
+    _ = System.cmd("/bin/kill", ["-KILL", "-#{group}"], stderr_to_stdout: true)
+    :ok
+  end
+
+  defp terminate_group(_group), do: :ok
+
+  # Concept: cleanup is confirmed by looking, not by assuming the signal worked.
+  #
+  # Technical depth: the confirmation is that no member of the group remains. A
+  # descendant that left the group is outside both the kill and this check, which
+  # is stated rather than papered over: the claim is about the group this
+  # executor owns and no wider.
+  defp confirm_group_terminated(group) when is_integer(group) and group > 1 do
+    case System.cmd("/bin/ps", ["-o", "pid=", "-g", Integer.to_string(group)],
+           stderr_to_stdout: true
+         ) do
+      {output, _status} -> String.trim(output) == ""
+    end
+  rescue
+    _error -> false
+  end
+
+  defp confirm_group_terminated(_group), do: true
+
+  defp read_for_edit(resolved) do
+    case File.read(resolved) do
+      {:ok, content} -> {:ok, content}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp occurrences(content, needle) when needle != "" do
+    content |> String.split(needle) |> length() |> Kernel.-(1)
+  end
+
+  defp occurrences(_content, _needle), do: 0
+
+  # Concept: point at the nearest thing that looks like what was asked for.
+  #
+  # Technical depth: matching the first line of the requested text against the
+  # file's lines finds the common case — the model had the right place and the
+  # wrong whitespace or a stale neighbouring line — without pretending to be a
+  # diff engine.
+  defp nearest_hint(content, old) do
+    first = old |> String.split("\n", parts: 2) |> List.first() |> String.trim()
+
+    if first == "" do
+      "The file has #{content |> String.split("\n") |> length()} lines."
+    else
+      # Concept: the closest line, not merely one that contains the whole request.
+      #
+      # Technical depth: an exact containment check finds nothing in the common
+      # case, because the model's text differs from the file's by exactly the
+      # detail that made the edit fail. Ranking by shared prefix points at the
+      # line it probably meant, which is what turns a blank failure into one
+      # retry rather than several.
+      content
+      |> String.split("\n")
+      |> Enum.reject(&(String.trim(&1) == ""))
+      |> Enum.max_by(&shared_prefix_length(String.trim(&1), first), fn -> nil end)
+      |> case do
+        nil -> "The file is empty."
+        line -> "The closest line is #{inspect(String.trim(line))}."
+      end
+    end
+  end
+
+  defp shared_prefix_length(left, right) do
+    left
+    |> String.graphemes()
+    |> Enum.zip(String.graphemes(right))
+    |> Enum.take_while(fn {a, b} -> a == b end)
+    |> length()
+  end
+
+  defp containment_message({:path_escapes_workspace, path}),
+    do: "refused: #{path} resolves outside the workspace root"
+
+  defp containment_message({:invalid_path, _path}), do: "refused: the path is not a string"
+  defp containment_message(reason), do: "refused: #{inspect(reason)}"
+
+  defp truncation_marker(kept, total) do
+    kept <>
+      "\n\n[loopex: output truncated. #{byte_size(kept)} of #{total} bytes shown.]"
   end
 
   defp launcher_arguments(%{path: path, content: content, delay_ms: delay}) do
