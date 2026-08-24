@@ -227,15 +227,26 @@ defmodule Loopex.M2Probe.Model do
           []
       end
 
+    # Technical depth: M2 renames the model request's digest field to
+    # staged_request_digest so it stops sharing an identifier with the
+    # executor's attempt-bound canonical_request_digest. The probe asks for the
+    # M2 name first and falls back to the M1 name, exactly as it does for the
+    # streaming callback arity, because it must keep observing the M1 tree it
+    # runs against today. It echoes back only the field names the request
+    # actually carried, so it adds no key to either shape.
+    digest_fields = Map.take(request, [:staged_request_digest, :canonical_request_digest])
+
     {:ok,
-     %{
-       text: "probe turn #{turn}",
-       identity: %{provider: "probe", model: request.model, endpoint: "in-process"},
-       usage: %{input_tokens: nil, output_tokens: nil},
-       tool_calls: tool_calls,
-       canonical_request_bytes: request.canonical_request_bytes,
-       canonical_request_digest: request.canonical_request_digest
-     }}
+     Map.merge(
+       %{
+         text: "probe turn #{turn}",
+         identity: %{provider: "probe", model: request.model, endpoint: "in-process"},
+         usage: %{input_tokens: nil, output_tokens: nil},
+         tool_calls: tool_calls,
+         canonical_request_bytes: request.canonical_request_bytes
+       },
+       digest_fields
+     )}
   end
 end
 
@@ -602,7 +613,7 @@ require_feature \
   "the model and executor progress domains carry separate sequences each closed by its own content free item" \
   "a gapless sequence within one stream domain and its closing total make lost progress detectable" \
   "a provider retry opens a second stream domain under one turn and neither domain reports the other as loss" \
-  "a retried executor operation attempt opens its own stream domain closed by its own final sequence" \
+  "a retried executor operation attempt opens its own stream domain closed by its own closure item and count" \
   "the committed assistant message is built from the reply and never assembled from deltas" \
   "a cancelled stream commits no assistant message and a late reply never becomes canonical" \
   "an adapter that emits no deltas is conformant and declares that it does not stream"
@@ -1276,7 +1287,7 @@ run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs defaul
   "passed=the model and executor progress domains carry separate sequences each closed by its own content free item" \
   "passed=a gapless sequence within one stream domain and its closing total make lost progress detectable" \
   "passed=a provider retry opens a second stream domain under one turn and neither domain reports the other as loss" \
-  "passed=a retried executor operation attempt opens its own stream domain closed by its own final sequence" \
+  "passed=a retried executor operation attempt opens its own stream domain closed by its own closure item and count" \
   "passed=the committed assistant message is built from the reply and never assembled from deltas" \
   "passed=a cancelled stream commits no assistant message and a late reply never becomes canonical" \
   "passed=an adapter that emits no deltas is conformant and declares that it does not stream"

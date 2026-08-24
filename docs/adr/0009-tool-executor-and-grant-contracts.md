@@ -170,11 +170,16 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   the host and Loopex owns only the seam. It is admitted as a port and not as a
   configuration option for one reason: the decision it carries is per call, and
   a host that cannot see this path, this command, and this effect class cannot
-  make it. It unifies two concrete implementations in `M2` — the documented
-  permissive local policy the reference command names, and the refusing policy
-  the negative-authority selectors drive — and it is what a hosted product
-  supplies without forking core. It runs the reusable policy conformance suite
-  §23.2 already requires of every policy adapter.
+  make it. It unifies three concrete implementations in `M2` — the permissive
+  policy the reference client ships, the separately named permissive policy the
+  operator command ships because a `:client` may not depend on another
+  `:client`, and the refusing policy the negative-authority selectors drive.
+  Two of those three are permissive and neither is reachable from the other,
+  which is the port's justification rather than duplication to remove: each host
+  names its own answer explicitly, each emits the same single notice, neither is
+  ever an implicit fallback, and a hosted product supplies its own without
+  forking core. It runs the reusable policy conformance suite §23.2 already
+  requires of every policy adapter.
 - **Oversized tool output leaves through a fifth behaviour, `ArtifactStore`,
   with the smallest local adapter.** The artifact-spill rule below cannot be
   honest without a place to put the bytes, and §12.6 assigns that place to a
@@ -215,7 +220,7 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   is where the round trip first has a client on the other end of it.
   Multi-client attachment in the daemon milestone then supplies the reconnect
   and takeover cases, not the first evidence.
-- **The core has no default policy, and the permissive policy is a named,
+- **The core has no default policy, and every permissive policy is a named,
   visible host choice.** Starting a runtime with any executor-backed tool active
   and no configured policy is refused. `Loopex.Policy.AllowAll` ships in the
   reference client, the `:client` application that is Loopex's reference host,
@@ -227,10 +232,16 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   forbids, and it would also travel to the first isolated or remote hand as an
   inherited `AllowAll`. Nothing in an edge imports it: the executor edge's
   deny and refusal selectors define their own fixture policies in their own test
-  file, so no application depends on a `:client` to reach one. It must be named
-  explicitly in configuration, is never an implicit fallback, and emits one
-  visible notice stating that this is permissive local authority and not a
-  permission model.
+  file, so no application depends on a `:client` to reach one. A second
+  reference host repeats the pattern rather than importing it: the operator
+  command is also a `:client`, and a `:client` may not depend on another
+  `:client`, so it cannot reach `Loopex.Policy.AllowAll` and names a permissive
+  policy of its own. The shipped composition both hosts depend on supplies
+  neither, because a permissive default living in shared wiring would be
+  inherited by every embedder that depends on the wiring. Each permissive policy
+  must be named explicitly in configuration, is never an implicit fallback, and
+  emits one visible notice stating that this is permissive local authority and
+  not a permission model.
 - **Nothing but a policy `allow` mints a grant.** Model output, tool metadata,
   the registry entry, a definition digest, prompt text, project resources, and
   client arguments transport no authority. This restates ADR 0007's boundary in

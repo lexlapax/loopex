@@ -107,7 +107,8 @@ Per turn, in order:
    a `queued` steer's exact bytes as a user-role element, canonicalize, and
    digest.
 4. Commit, in **one** transaction, the steer's `applied` transition, its
-   user-role conversation element, and the staged request bytes and digest. If
+   user-role conversation element, and the staged request bytes and their
+   `staged_request_digest`. If
    that transaction does not commit, neither does the element: the steer stays
    `queued` and resolves `unapplied` when the run reaches its terminal outcome.
 5. Dispatch exactly the staged bytes.
@@ -284,7 +285,7 @@ against state it already holds for the live attempt, never against the event:
 | Binding | Validated against |
 | --- | --- |
 | `job_id`, `operation_id`, `attempt` | The operation attempt this coordinator dispatched and journaled |
-| `canonical_request_digest` | The digest journaled for that attempt. Attempt identity is canonical, so a previous attempt of the same operation carries a different digest and is refused here rather than matching |
+| `canonical_request_digest` | The attempt-bound job digest journaled for that executor attempt. Attempt identity is inside the job canonicalization, so a previous attempt of the same operation carries a different digest and is refused here rather than matching. This is the executor rule; it does not hold of a model call's `staged_request_digest`, which is unchanged across provider attempts |
 | `session_id` / `run_id` / `turn_id` / `tool_call_id` | The live run's current turn and one of its committed tool calls |
 | `origin_session_epoch` | The current session epoch |
 | `origin_executor_epoch` | The executor epoch recorded for this dispatch |
@@ -343,7 +344,8 @@ domain_tuple     = {"loopex.stream_domain.v1", domain_kind, session_id,
 `canonical_encoding` is the repository's protocol-versioned canonical encoding —
 the same deterministic, length-aware tuple encoding
 [ADR 0010](0010-provider-continuation-and-context-staging.md#concept)'s
-`canonical_request_digest` is computed over. The choice is load-bearing rather
+`staged_request_digest` and the executor's attempt-bound
+`canonical_request_digest` are computed over. The choice is load-bearing rather
 than a matter of reuse. `session_id`, `operation_id`, and the tuple's other
 members are unrestricted binaries. A length-aware encoding is injective over
 arbitrary binary content because every element is preceded by its own length, so
@@ -385,10 +387,10 @@ A new attempt is a new domain, without exception:
 | Event | Domain |
 | --- | --- |
 | First model attempt of a turn | New model domain |
-| Provider retry against the same staged bytes — a new recorded attempt under the same `operation_id`, carrying its own `canonical_request_digest` because attempt identity is canonical, as ADR 0010 requires | New model domain |
+| Provider retry against the same staged bytes — a new recorded attempt under the same `operation_id`, reusing those bytes' `staged_request_digest` because the canonical model request has no attempt member, as ADR 0010 requires. The digest is unchanged; the attempt is not, and the domain is keyed on the attempt | New model domain |
 | Run resumed after recovery: same `run_id`, same `operation_id`, next attempt | New model domain |
 | First executor attempt of a tool call | New executor domain |
-| Retried executor operation attempt | New executor domain |
+| Retried executor operation attempt, carrying its own attempt-bound `canonical_request_digest` because attempt identity is inside the job canonicalization | New executor domain |
 | Same attempt, more output | Same domain, next sequence |
 
 The consumer rules follow from that and are exhaustive:
@@ -850,7 +852,8 @@ identifiers must not contain NUL would be a new constraint on a boundary this
 decision does not own, enforced nowhere, and it would have to be restated at
 every future identity source. The repository already has a deterministic
 length-aware canonical encoding, chosen for exactly this property and already
-carrying the request digest; every element is preceded by its own length, so no
+carrying Loopex's request digests; every element is preceded by its own length,
+so no
 member's content can be read as a boundary and the encoding is injective for
 arbitrary binary content. Reusing it costs one call and removes the constraint
 rather than adding it.

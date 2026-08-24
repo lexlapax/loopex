@@ -436,7 +436,7 @@ composition. An edge supplies a mechanism; it does not get to answer the host's
 question.
 
 The dependency direction is settled by the test fixtures rather than by
-placement. `apps/loopex_executor_local/test/host_policy_test.exs` owns Outcome 7's
+placement. `apps/loopex_executor_local/test/host_policy_test.exs` owns Outcome 6's
 deny, fail-closed, and refusal-to-start selectors, and it defines its own policy
 fixtures inside the test file: one refusing module returning `{:deny, category}`,
 one permitting module returning `{:allow, nil}`, and the raising, sleeping, and
@@ -456,7 +456,20 @@ particular allows every decision and emits exactly one visible
 permissive-authority notice is a property of that module and is proved in the
 reference client's own test lane, where the module lives.
 
-Two alternative homes were rejected against the minimalism budget. A seventh
+A second reference host repeats that arrangement rather than importing it. The
+operator command is also a `:client`, and a `:client` may not depend on another
+`:client`, so it cannot reach `Loopex.Policy.AllowAll` and ships its own
+separately named permissive policy for a trusted local developer, applied only
+when the operator names it and emitting the same single permissive-authority
+notice. The shipped composition both hosts depend on supplies neither: it takes
+the host's policy as a required argument and starts no runtime without one,
+because a permissive default living in shared wiring would be inherited by every
+embedder that depends on the wiring. `M2` therefore ships two permissive
+policies, each owned and named by the host that decided to trust its own
+workspace, each proved in that host's own lane, and neither ever an implicit
+fallback for the other or for anybody else.
+
+Two alternative homes were rejected against the minimalism budget. A separate
 application holding one module would add a project, a dependency record, and an
 inventory row to give one module a home it already has. Core would make the
 permissive choice invisible, which is the one property it must not have.
@@ -736,8 +749,9 @@ Claim-proportional evidence for this decision:
 - refusal to start a runtime with any executor-backed tool active and no
   configured policy, including a `read_only`-only active set; a dependency-budget
   run proving no application acquired a client, sideways edge, or external
-  dependency; and reference-client selectors proving `AllowAll` applies only when
-  named explicitly and emits exactly one permissive-authority notice;
+  dependency; and each reference host's own selectors proving the permissive
+  policy it ships allows every decision it is asked and emits exactly one
+  permissive-authority notice;
 - abort during a model call and abort during an executor effect, each admitted
   through the facade, each proving owned work stopped, cleanup confirmed, the
   terminal fact truthful, and no late result projected into model context;
@@ -1011,10 +1025,11 @@ Concept: [Consequences](0009-tool-executor-and-grant-contracts.md#concept-adr-00
   pays one host decision per read and every host implementation must answer reads
   as well as writes. The removed alternative — an exemption predicate with an
   unpoliced false branch — is what that cost buys.
-- The permissive policy lives with the reference host. An embedder who composes
+- A permissive policy lives with the host that chose it. An embedder who composes
   the trusted-local executor gets a mechanism and no policy, and must name one,
-  which is the intended friction. The reference client keeps one module and one
-  notice that its own tests own.
+  which is the intended friction. Each reference host keeps its own module and
+  its own single notice, owned by its own tests; neither host reaches the
+  other's, and the shared composition carries none.
 - Cancellation stays inside the process that owns the session. An operator with
   two terminals cannot stop a run from the second one, and a command surface
   that offers such a subcommand would be offering something the runtime cannot

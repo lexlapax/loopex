@@ -83,11 +83,14 @@ The composition is wiring and nothing else. It names the concrete Store, Model,
 Executor, and ArtifactStore implementations, starts the OTP application tree an
 `escript` does not start for it, starts a runtime, and returns it. It ships no
 policy and refuses to start unless the host supplies the one that governs the
-run. Both the `loopex` command and an embedder depend on it, which is the whole
-point of shipping it: a snippet each embedder copies is re-derived once per
-embedder and goes stale silently the first time the kernel's start-up shape
-changes, while a shipped application changes once and breaks the build of every
-dependant that must change with it.
+run. Both the `loopex` command and an embedder using those same reference
+adapters depend on it, which is the whole point of shipping it: a snippet each
+such embedder copies is re-derived once per embedder and goes stale silently the
+first time the kernel's start-up shape changes, while a shipped application
+changes once and breaks the build of every dependant that must change with it.
+It is that reference stack and no more: an embedder choosing a different Store,
+Model, Executor, or ArtifactStore composes the public ports and the `Loopex`
+facade itself, and M2 ships no generic wiring layer for that case.
 
 **Why a new role rather than a wider `:client`.** A composition names concrete
 adapters by definition, which is exactly what an `:edge` may not do, and it must
@@ -118,10 +121,14 @@ may not depend on another `:client`. Nothing depends on a `:client`.
 Taken together this is narrower in production than the widened client rule it
 replaces, not wider: no client gains a production edge dependency, `:client` to
 `:client` stays forbidden, dependency direction is unchanged because every new
-edge is still inward, and exactly one production module in the
-repository is permitted to name a concrete adapter, test modules excepted as
-above. The composition's reach is bounded by the
-exact-inspection rule in Ownership below.
+edge is still inward, and exactly one application — the single `:composition` —
+is permitted to declare a production dependency on the concrete `:edge`
+applications, test-only client dependencies excepted as above. That dependency
+statement is the enforceable form of the rule and is what `mix loopex.deps_budget`
+checks; it is not a claim that the repository is source-inspected for concrete
+module references. The composition's own contents are bounded by the
+`:composition` role rule, by the Ownership rules below, and by the measured
+eighty-effective-line module ceiling in Minimalism below.
 
 **Two. Two narrow ports join the three M1 boundary behaviours.** `Loopex.Policy`
 is created by ADR 0009 and required by the founding vision's host policy port;
@@ -330,6 +337,18 @@ reached a validated terminal fact and every owned process tree has been confirme
 cleaned, and one unprovable effect or unconfirmed cleanup finishes the run
 `outcome_unknown` with that reconciliation reference instead.
 
+**Two digests, two names.** `M2` renames the canonical model request's digest
+field to `staged_request_digest`. Today the model request carries
+`canonical_request_digest`, the executor job's name, and one identifier holding
+two opposite retry rules is what let the executor rule be carried onto a model
+call more than once during this plan's own review. A provider retry reuses
+`staged_request_digest` under a newly recorded attempt because the model request
+has no operation or attempt member; an executor attempt carries its own
+attempt-bound `canonical_request_digest` because the job canonicalization covers
+attempt identity. The gate's opening probe observes either name, exactly as it
+already asks for the `M2` shape and falls back to the `M1` shape, because it
+runs against the tree it is judging.
+
 **Two kinds of sequence domain, and a label on every item.** Following ADR 0011,
 `model_sequence` is per model attempt and is closed by the reply's
 `delta_count`; `progress_sequence` is per `(operation_id, attempt)` and is closed
@@ -349,12 +368,17 @@ is read off an executor event, which is the same fail-closed discipline that
 governs every other binding on this plane. A provider
 retry and a retried executor attempt each open a new domain, so several domains
 under one turn are the ordinary shape of a retried turn rather than a fault.
-Every domain the coordinator opens it also closes exactly once, an abandoned one
-included, with a content-free item on the transient plane —
+Every domain the coordinator opens it also emits exactly one closure for, an
+abandoned one included, with a content-free item on the transient plane —
 `model_stream_closed` and `tool_stream_closed` — carrying its count and a
 `disposition` of `complete` or `abandoned`. Neither closing total may sit on a
-durable element, and an unclosed domain would be indistinguishable from one still
-streaming, so abandonment is stated rather than inferred from a timeout. The executor boundary change
+durable element. Following ADR 0011 the obligation is on emission and not on
+delivery: a closure is itself progress and may be coalesced away, dropped under
+backpressure, or lost with the plane when its owner changes, so a consumer that
+receives no closure is looking at an incomplete transient view, falls back to the
+durable record exactly as it does for a sequence gap, and never reads an absence
+as abandonment or starts a timer to decide. What a received closure buys is that
+an abandoned attempt is stated rather than inferred from a stream that stopped. The executor boundary change
 is exactly one parameter: `execute/4` becomes `execute/5`, gaining a bounded
 in-VM progress function in the trailing position. Grants, job request, receipt
 schema apart from that one private field, deduplication, cancellation, and the
@@ -441,23 +465,29 @@ fails truthfully.
 
 **The command surface owns nothing durable, and the composition owns nothing
 else.** `loopex_cli` calls only the public `Loopex` facade for every session
-operation, including the interrupt path. Exactly one production module in the
-repository — the single composition module of `apps/loopex_composition` — may
-name concrete Store, Model, Executor, and ArtifactStore implementations, and it
-may do so only to build the runtime options passed to `Loopex.start_link/1`.
-Test modules are unaffected: the inherited conformance, executor, and
+operation, including the interrupt path. M2 ships exactly one `:composition`
+application, `apps/loopex_composition`, and only that role may declare a
+production dependency on the concrete `:edge` applications; every other
+production role reaches an adapter through a port. That dependency statement is
+the rule, and `mix loopex.deps_budget` is what enforces it, over the declared
+in-umbrella dependencies of each application rather than over arbitrary source.
+Nothing in M2 claims a repository-wide source monopoly on naming a concrete
+adapter, and no check in this gate looks for one. The composition's single module
+uses that dependency only to build the runtime options passed to
+`Loopex.start_link/1`; it takes the host's policy as a required argument,
+supplies no default for it, and starts nothing when it is absent.
+Test dependencies are unaffected: the inherited conformance, executor, and
 reference-client selectors this gate re-runs at their exact M1 identities name
 concrete adapters today and must keep doing so, which is why a client retains
-its test-only edge dependencies. It takes the
-host's policy as a required argument, supplies no default for it, and starts
-nothing when it is absent. No module of `loopex_cli` may name a concrete Store,
+its test-only edge dependencies. No module of `loopex_cli` may name a concrete Store,
 Model, Executor, or ArtifactStore implementation, reference a coordinator,
 journal, outbox, or cursor internal, hold a cursor as truth, or own a second
 state machine. Beyond the public facade and the composition's entry function the
 command names only the host policy modules an operator may select with
 `--policy` — the host's own decision, and the one decision the composition
-refuses to make for it. The gate proves this by source inspection, exactly as M1
-proved it for the reference client.
+refuses to make for it. The gate proves that `loopex_cli` restriction by
+inspecting the command application's own source, exactly as M1 proved it for the
+reference client. That inspection is scoped to `loopex_cli` and to nothing else.
 
 **Cancellation is same-process by construction.** The foreground command traps
 the interrupt signal and calls the public abort operation on the session it is
@@ -688,8 +718,8 @@ Outcome-specific obligations are:
 
 | # | Obligation |
 | --- | --- |
-| 1 | Generate legal multi-turn histories and prove the run continues while the model requests tools and ends when it does not; prove every request after the first contains the original prompt, the model's own prior assistant message including its tool call, and the real tool result rather than a synthesized string; prove the canonical request bytes and digest committed before each dispatch are exactly the bytes the adapter receives; prove a staged request carries complete canonical tool-definition bytes and its generation triple and is reconstructible and verifiable from the journal alone; prove every turn after the first is canonical-history replay and that the reserved continuation field is present and empty; prove each of the maximum-turn, cumulative-token, and wall-clock bounds is evaluated before staging, commits `bound_reached` naming the bound and the observed value, with the accounting source retained beside it, costs no provider call, and fabricates no assistant message; prove the committed absolute deadline bounds every operation the run owns: that it is propagated into the supervised model call rather than duplicated as an independent per-call timeout, that it is carried on every executor job the run dispatches — which Outcome 4's job obligation proves at the executor end — and that no adapter-level, transport-level, or tool-level bound can outlast it; prove a tool call whose run deadline has already passed when its intent would commit is not dispatched, mints no grant, and still takes a terminal fact so canonical history has no hole; prove `bound_reached(:deadline)` commits only after every owned operation has reached a validated terminal fact and every owned process tree has been confirmed cleaned, and that one unprovable effect or unconfirmed cleanup finishes the run `outcome_unknown` carrying that reconciliation reference instead, so no evidence, message, or document describes a reached deadline as a guaranteed clean stop; prove the completion race is decided by committed journal order, so a reply committing first completes the turn and an abort admitted first commits no assistant message and retains the late reply as attempt evidence only; prove a cancelled or deadline-aborted turn is charged its request bytes plus that turn's committed `max_tokens` in full and marked `estimated`; prove `max_tokens` and every other sampling bound is a declared committed value with no implicit fallback anywhere in the path; prove the run's committed absolute deadline instant is a canonicalized `JobRequest` field covered by that attempt's `canonical_request_digest` because it is an immutable semantic field of the run, while the derived `effective_job_deadline` of row 4 is not because it is dispatch-local wall-clock; prove that two attempts of one operation carry the same stable `operation_id` and two different attempt-bound `canonical_request_digest` values, since the canonicalization covers attempt identity, and that reconciliation matches the original attempt against the digest journaled for that attempt rather than against any digest shared with its retries; prove the loop's three endings after a committed tool-calling reply — continue with the deadline still in the future, `bound_reached(:deadline)` where it is reached before the next request is staged, and `outcome_unknown` outranking both where effect or cleanup truth cannot be proved — so a healthy run with time left is never terminated by the race rule; assert complete derived fault coverage over every new durable transition |
-| 2 | Run one shared streaming conformance suite over every model adapter; prove each of the four canonical delta kinds is bounded plain data carrying no provider struct, pid, function, module atom, exception, terminal escape, or credential; prove a text delta is observable by a consumer while the operation that produces it is still incomplete, so an adapter that buffers a whole answer and emits every delta immediately before returning fails rather than passes; prove replaying an adapter's emitted deltas in order reproduces byte-identical content to the reply it returned; prove every delta and every closure item carries the `stream_domain_id` of the attempt that produced it, that the coordinator derives that label from the committed `("loopex.stream_domain.v1", domain_kind, session_id, operation_id, attempt)` identity it already holds, and that a label offered by an adapter or present on an executor event is never adopted; prove `model_sequence` and `progress_sequence` are separate kinds of domain, each gapless and monotonic from zero within one `stream_domain_id`, closed respectively by the reply's `delta_count` and the receipt's `progress_count`, each announced on the transient plane by its own content-free `model_stream_closed` or `tool_stream_closed` item carrying that count and a `disposition` of `complete` or `abandoned`; prove every domain the coordinator opens is closed exactly once including an abandoned one, that a conformant stream emitting nothing closes `complete` with a count of zero, and that the label is derived by hashing the length-aware canonical encoding of the committed identity so an identifier containing a delimiter byte cannot collide two attempts onto one label; prove neither closing total sits on a durable element; prove sequence continuity, count agreement, and closure are evaluated within one `stream_domain_id` and never across a turn; prove a provider retry against the same staged bytes opens a second model domain under one `turn_id`, that a retried executor operation attempt opens a second executor domain under one `tool_call_id`, that each domain starts at zero and is closed by its own item, and that neither domain is compared with, concatenated to, or reported as loss by the other; prove the counts make coalescing, dropping, or a truncated tail detectable rather than silent within a domain; prove the committed assistant message is built from the adapter's return value and never assembled from deltas, and that no delta is journaled, published as a durable event, or replayed on reconnect; prove a cancelled stream commits no `assistant_message` element at all and that a late reply for an aborted attempt is retained truthfully and never becomes canonical; prove an adapter that emits no deltas is conformant and declares that it does not stream |
+| 1 | Generate legal multi-turn histories and prove the run continues while the model requests tools and ends when it does not; prove every request after the first contains the original prompt, the model's own prior assistant message including its tool call, and the real tool result rather than a synthesized string; prove the canonical request bytes and digest committed before each dispatch are exactly the bytes the adapter receives; prove a staged request carries complete canonical tool-definition bytes and its generation triple and is reconstructible and verifiable from the journal alone; prove every turn after the first is canonical-history replay and that the reserved continuation field is present and empty; prove each of the maximum-turn, cumulative-token, and wall-clock bounds is evaluated before staging, commits `bound_reached` naming the bound and the observed value, with the accounting source retained beside it, costs no provider call, and fabricates no assistant message; prove the committed absolute deadline bounds every operation the run owns: that it is propagated into the supervised model call rather than duplicated as an independent per-call timeout, that it is carried on every executor job the run dispatches — which Outcome 4's job obligation proves at the executor end — and that no adapter-level, transport-level, or tool-level bound can outlast it; prove a tool call whose run deadline has already passed when its intent would commit is not dispatched, mints no grant, and still takes a terminal fact so canonical history has no hole; prove `bound_reached(:deadline)` commits only after every owned operation has reached a validated terminal fact and every owned process tree has been confirmed cleaned, and that one unprovable effect or unconfirmed cleanup finishes the run `outcome_unknown` carrying that reconciliation reference instead, so no evidence, message, or document describes a reached deadline as a guaranteed clean stop; prove the completion race is decided by committed journal order, so a reply committing first completes the turn and an abort admitted first commits no assistant message and retains the late reply as attempt evidence only; prove a cancelled or deadline-aborted turn is charged its request bytes plus that turn's committed `max_tokens` in full and marked `estimated`; prove `max_tokens` and every other sampling bound is a declared committed value with no implicit fallback anywhere in the path; prove the run's committed absolute deadline instant is a canonicalized `JobRequest` field covered by that attempt's `canonical_request_digest` because it is an immutable semantic field of the run, while the derived `effective_job_deadline` of row 4 is not because it is dispatch-local wall-clock; prove the executor rule, that two attempts of one **tool operation** carry the same stable `operation_id` and two different attempt-bound `canonical_request_digest` values, since the job canonicalization covers attempt identity, and that reconciliation matches the original attempt against the digest journaled for that attempt; prove the distinct model rule alongside it, that a provider retry of a model call dispatches the same staged bytes and reuses their `staged_request_digest` under a newly recorded attempt rather than recomputing one, since the canonical model request carries no operation or attempt member; prove the loop's three endings after a committed tool-calling reply — continue with the deadline still in the future, `bound_reached(:deadline)` where it is reached before the next request is staged, and `outcome_unknown` outranking both where effect or cleanup truth cannot be proved — so a healthy run with time left is never terminated by the race rule; assert complete derived fault coverage over every new durable transition |
+| 2 | Run one shared streaming conformance suite over every model adapter; prove each of the four canonical delta kinds is bounded plain data carrying no provider struct, pid, function, module atom, exception, terminal escape, or credential; prove a text delta is observable by a consumer while the operation that produces it is still incomplete, so an adapter that buffers a whole answer and emits every delta immediately before returning fails rather than passes; prove replaying an adapter's emitted deltas in order reproduces byte-identical content to the reply it returned; prove every delta and every closure item carries the `stream_domain_id` of the attempt that produced it, that the coordinator derives that label from the committed `("loopex.stream_domain.v1", domain_kind, session_id, operation_id, attempt)` identity it already holds, and that a label offered by an adapter or present on an executor event is never adopted; prove `model_sequence` and `progress_sequence` are separate kinds of domain, each gapless and monotonic from zero within one `stream_domain_id`, closed respectively by the reply's `delta_count` and the receipt's `progress_count`, each announced on the transient plane by its own content-free `model_stream_closed` or `tool_stream_closed` item carrying that count and a `disposition` of `complete` or `abandoned`; prove every domain the coordinator opens is emitted exactly one closure including an abandoned one, that a conformant stream emitting nothing closes `complete` with a count of zero, and that the label is derived by hashing the length-aware canonical encoding of the committed identity so an identifier containing a delimiter byte cannot collide two attempts onto one label; prove neither closing total sits on a durable element; prove sequence continuity, count agreement, and closure are evaluated within one `stream_domain_id` and never across a turn; prove a provider retry against the same staged bytes opens a second model domain under one `turn_id`, that a retried executor operation attempt opens a second executor domain under one `tool_call_id`, that each domain starts at zero and is closed by its own item, and that neither domain is compared with, concatenated to, or reported as loss by the other; prove the counts make coalescing, dropping, or a truncated tail detectable rather than silent within a domain; prove the committed assistant message is built from the adapter's return value and never assembled from deltas, and that no delta is journaled, published as a durable event, or replayed on reconnect; prove a cancelled stream commits no `assistant_message` element at all and that a late reply for an aborted attempt is retained truthfully and never becomes canonical; prove an adapter that emits no deltas is conformant and declares that it does not stream |
 | 3 | Prove a prompt is admitted only while the session is settled and is refused with an explicit reason while a run is active; prove a steer names one active run, that a steer naming a different run or naming none while a run is active is rejected rather than retargeted, and that the runtime never infers which input class an input is; prove an admitted steer is applied after the current tool batch completes and before the next model request is staged, commits as a user-role conversation element in admission order, and does not attempt to reverse an effect already started; prove a steer is recorded applied only when a committed request actually carried it, so a steer admitted against a run that never staged another request is never reported as applied; prove a follow-up is queued and starts a new run only after the active run and its steering settle; prove a steer whose run reaches a terminal outcome first commits as unapplied with its reason rather than being discarded or promoted; prove at most one unapplied steer per run and at most one queued follow-up exist, and that both queue states are durable and survive owner succession; prove a durably admitted abort resolves any unapplied steer and any queued follow-up as cancelled |
 | 4 | Run one shared conformance suite over `read`, `write`, `edit`, and `bash`, covering bounded and truncation-reporting output, workspace-root resolution, refusal of every path that escapes the root through traversal, a symlink, or a link chain, exact edit preconditions with a mismatch diagnostic that names what differed, explicit shell-versus-argv semantics, and ownership and termination of the whole child process tree; each tool executes as a real controlled OS process under ADR 0007 with a credential-free environment; prove an emitted executor progress event carries the complete identity, operation and attempt, session, executor and origin epochs, canonical request digest, and fencing token, that each binding is validated fail-closed against state the coordinator already holds rather than against the event, that a missing binding and a present-but-wrong binding are refused identically, and that a refused event is dropped and counted on the attempt's private record without ever being projected, journaled, published, or allowed to affect an outcome, bound, or receipt; prove a long-running job carries the run's committed absolute deadline instant, that its effective deadline is the minimum of that instant and the wall-time budget the tool itself declares, that expiry runs the existing cancellation sequence — cooperative cancel, declared grace period, owned process-tree termination — and that the cleanup is confirmed before the run commits its `bound_reached(:deadline)`, with `outcome_unknown` committed instead wherever that cleanup or the effect's truth cannot be proved |
 | 5 | Run one reusable `ArtifactStore` conformance suite over the local adapter, covering put, get, absent, and repeated-digest cases; prove output beyond a tool's declared bound spills to an artifact rather than truncating silently, that the durable event carries content digest, media type, size, logical role, and an opaque retrieval reference, and that the reference is opaque rather than a filesystem path the model can steer; prove the model-facing result stays under its bound and names what was truncated; prove the artifact round-trips byte-exactly and that a corrupted or missing artifact is reported as unavailable rather than as empty content; prove the operator retrieves a spilled artifact by that opaque reference through the public facade, resolved through the port rather than by reading the adapter's storage layout |
@@ -830,15 +860,17 @@ nothing is tagged, and the vision's seventh compatibility surface — released
 package names, their contents, and the constraints they declare — stays inert
 because nothing is published.
 
-The composition is the reference stack wired, not a wiring toolkit, and the
-plan should not be read as offering more than that. It names four concrete
-implementations behind an eighty-line ceiling, so an embedder depending on it
-transitively acquires the reference adapters and their external dependency
-whether or not every one is used, and an embedder wanting a different Store or
-Executor cannot use it and writes their own composition. That is acceptable
-while exactly one implementation of each port exists, which is M2's whole
-inventory; it is stated here rather than discovered, because "depend on this
-instead of copying it" reads broader than what ships.
+The composition is the reference stack wired, not a wiring toolkit, exactly as
+Outcome 11 states it in the Concept envelope; this is the mechanics of that
+limit, not an additional disclosure. It names four concrete implementations
+behind an eighty-line ceiling, so an embedder depending on it transitively
+acquires the reference adapters and their external dependency whether or not
+every one is used, and an embedder choosing a different Store, Model, Executor,
+or ArtifactStore cannot use it and composes the public ports and the `Loopex`
+facade itself. That is acceptable while exactly one implementation of each port
+exists, which is M2's whole inventory, and a wiring layer general enough to serve
+both cases waits until a second real composition exists to give evidence for
+one.
 
 Every surface M2 touches is therefore unstable and may change without notice
 until a milestone publishes one: the embedded Elixir API, the `loopex` command
@@ -1086,9 +1118,9 @@ inherited protection to save nothing.
 
 **The command surface is a client application, and the composition is not a
 boundary either.** Neither defines a behaviour, a callback, or a replaceable
-implementation. `loopex_composition` exists for exactly one module, the only
-production module permitted to name concrete adapters, and that module
-has a hard ceiling: at most eighty effective lines, counting neither blank lines
+implementation. `loopex_composition` exists for exactly one module, in the only
+production application permitted to depend on the concrete `:edge`
+applications, and that module has a hard ceiling: at most eighty effective lines, counting neither blank lines
 nor comments, measured by a protected test. That ceiling is the executable form
 of the vision's requirement that one page of code can start a runtime, create a
 session, submit a prompt, and consume events — a budget the repository currently
@@ -1107,7 +1139,8 @@ without weakening a rule that is load-bearing elsewhere, and the alternative —
 one page each embedder copies — is re-derived once per embedder and drifts
 silently the first time the kernel's start-up shape changes. A shipped
 application makes that drift a compile error in every dependant instead. A
-second composition module anywhere in the repository stays forbidden.
+second `:composition` application stays forbidden, and the planned application
+inventory `mix loopex.deps_budget` enforces is what forbids it.
 
 **The reference prompt has one measured ceiling.** The base system prompt plus
 the active built-in tool definitions must measure under one thousand tokens
@@ -1126,7 +1159,7 @@ immutable artifact.
 them convenient: a transport behaviour, a daemon, a socket, a wire protocol or
 line framing, a controller lease, a broker, a policy engine, a generic event
 bus, a plugin macro system, a context-provider or transformer registry, an
-alternate session engine, a second composition module, a terminal
+alternate session engine, a second `:composition` application, a terminal
 user-interface framework, and any built-in sub-agent, plan, objective,
 background job, team workflow, or social channel. The last group is a standing
 vision constraint, not an M2 preference.

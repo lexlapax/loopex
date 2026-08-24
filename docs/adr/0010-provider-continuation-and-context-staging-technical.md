@@ -75,7 +75,8 @@ three a provider request renders. That is what makes `definition_digest`
 checkable here: ADR 0009 canonicalizes and digests the whole nine-field record,
 so an entry carrying a subset could be compared against nothing. The bytes are
 canonicalized by the same protocol-versioned function and are covered by the
-request digest. `definition_digest` binds the entry to the generation the
+request's `staged_request_digest`. `definition_digest` binds the entry to the
+generation the
 registry held at staging time and is verified against those bytes; it does not
 replace them. Consequently the staged request is fully
 reconstructible and independently verifiable from the journal alone, with no
@@ -90,9 +91,22 @@ governs what the client sees separately.
 
 Canonicalization is deterministic: ordered fields, sorted map keys by binary
 value, explicit absence rather than omission, and the same protocol-versioned
-encoding the request digest already uses. The digest covers the whole structure
+length-aware encoding Loopex's other canonical digests use. The digest over this
+structure is the record's `staged_request_digest`. It covers the whole structure
 including `canonicalization_version`, so a canonicalization change is visible in
 every digest rather than silent.
+
+The two digests this milestone touches are distinct and are named distinctly
+wherever either appears:
+
+| Digest | Covers | Behaviour across attempts of one operation |
+| --- | --- | --- |
+| `staged_request_digest` | The canonical model request above — model identity, messages, complete tool definitions, sampling, the run deadline, and the reserved continuation field. No operation or attempt identity is a member | Unchanged. A provider retry dispatches the same staged bytes under a new recorded attempt and reuses their digest; nothing is recomputed |
+| Attempt-bound `canonical_request_digest` | [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept)'s `JobRequest` for an executor effect, whose canonicalization covers the immutable semantic job fields *including operation and attempt identity* | One value per attempt. Each executor attempt computes its own digest and is reconciled against it |
+
+`operation_id` is the stable identity across attempts for both. The difference is
+entirely a consequence of what each canonicalization covers, and no site may
+assert one kind's rule about the other.
 
 Staging and dispatch preserve the `M1` sequence exactly and only widen its
 payload:
@@ -101,10 +115,11 @@ payload:
 2. Assemble injected blocks within budget and produce the ordered block
    descriptors.
 3. Commit, in one transaction, the model-call intent, the staged request bytes
-   and digest, and the context receipt.
+   and their `staged_request_digest`, and the context receipt.
 4. Only after confirmed commit, hand exactly those bytes to the adapter.
 5. On recovery, dispatch the same staged bytes. A provider retry is a new
-   recorded attempt against the same bytes. Missing staged bytes fail closed as
+   recorded attempt against the same bytes and therefore against the same
+   `staged_request_digest`. Missing staged bytes fail closed as
    `unavailable(staged_context_missing)`; nothing is recomputed under the same
    operation identity.
 
@@ -230,11 +245,12 @@ both kinds of owned work:
 ```text
 run_deadline (absolute instant, committed with the run)
   -> checked before staging the next request
-  -> carried in the staged request and passed to the supervised model call
+  -> carried in the staged request, covered by its staged_request_digest,
+     and passed to the supervised model call
        -> the supervising process arms an abort at that instant
        -> the adapter receives the same instant and bounds its own transport wait
   -> canonicalized into every JobRequest the run dispatches, and therefore
-     covered by that attempt's canonical_request_digest
+     covered by that attempt's attempt-bound canonical_request_digest
        -> the attempt's effective deadline is derived at dispatch as
           min(run_deadline, dispatch_instant + tool.budgets.wall_time)
           and carried alongside the digested request, never inside it,
@@ -999,7 +1015,8 @@ The run's committed absolute deadline also reaches durable form outside this
 decision's records: it is carried in the staged request here and canonicalized
 into every `JobRequest` under
 [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept), where it is
-covered by that attempt's `canonical_request_digest` and adds no grant binding.
+covered by that attempt's attempt-bound `canonical_request_digest` and adds no
+grant binding.
 It qualifies because it is an immutable semantic field of the run. The effective
 job deadline ADR 0009 derives per attempt is durable operational state carried
 alongside that digested request and is deliberately outside the digest, because
@@ -1007,14 +1024,22 @@ it is dispatch-local wall-clock rather than an immutable semantic job field: it
 records when this dispatch stops waiting, not what work was authorized.
 
 That is a different question from retry identity, and the two must not be
-conflated. The canonicalization the
+conflated. Retry identity is itself two rules, one per digest kind, and this
+milestone states both rather than generalizing either. For an executor effect,
+the job canonicalization the
 [technical vision](../vision-technical.md#technical-depth) fixes covers operation
 *and attempt* identity, so two attempts of one operation carry two different
-`canonical_request_digest` values by construction. `operation_id` is the stable
-identity across attempts, each attempt is reconciled against the digest recorded
+attempt-bound `canonical_request_digest` values by construction; each attempt is
+reconciled against the digest recorded
 for that attempt, and ADR 0007's retained tuple already names the original
-attempt alongside its journaled digest. Nothing here depends on, or may assert,
-digest sameness across attempts.
+attempt alongside its journaled digest. Nothing about the executor job digest
+depends on, or may assert, digest sameness across attempts. For a model call, the
+same technical vision fixes the opposite rule for the opposite reason: the
+canonical model request has no operation or attempt member, so a retried attempt
+dispatches the same staged bytes under the same `staged_request_digest`, and
+nothing about the model request may assert digest difference across attempts.
+`operation_id` is the stable identity across attempts in both cases, and it is
+the only identity either rule shares.
 
 Rollback before closure removes the conversation elements, the projection, the
 bounds, the deadline's propagation into the supervised model call and onto every

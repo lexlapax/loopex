@@ -20,8 +20,8 @@ Technical depth: [Canonical request, conversation record, and termination mechan
 ## Context
 
 `M1` proved the property that matters most about a model call: the adapter
-receives exactly the bytes that were committed with the call's intent. A
-canonical request digest is committed per turn, and the real-provider lane
+receives exactly the bytes that were committed with the call's intent. A digest
+over the staged request bytes is committed per turn, and the real-provider lane
 asserts the adapter saw exactly those committed bytes. That property must
 survive `M2` intact.
 
@@ -72,7 +72,8 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   before dispatch.** It carries exact model identity, the ordered message list,
   the ordered active tool definitions, the explicit sampling bounds, and the
   reserved continuation field. It is canonicalized by a protocol-versioned
-  function, digested, and committed in the same transaction as the model-call
+  function, digested into the record's `staged_request_digest`, and committed in
+  the same transaction as the model-call
   intent and its context receipt. Only after that commit may the adapter receive
   the request, and it receives exactly those bytes. `M1`'s real-provider
   assertion is widened from one message to the whole request, never relaxed.
@@ -138,28 +139,42 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   before expiry would otherwise run past the instant an operator declared, and
   the run could not finish while it held an unresolved owned operation, so the
   number every surface prints would be one the runtime does not honour. The
-  instant this decision commits is what the job canonicalizes and what ADR 0007's
-  `canonical_request_digest` therefore covers, because it is an immutable
+  instant this decision commits is what the job canonicalizes and what
+  ADR 0007's attempt-bound `canonical_request_digest` — the canonical job digest
+  — therefore covers, because it is an immutable
   semantic field of the run. The effective deadline ADR 0009 derives per attempt
   is carried alongside that digested request and never inside it, because it is
   dispatch-local wall-clock rather than an immutable semantic field: it says when
   this dispatch stops waiting, not what work was authorized.
-- **`operation_id` is the identity that survives a retry; a digest is not.** The
-  [technical vision](../vision-technical.md#technical-depth) fixes the job
+- **`operation_id` is the identity that survives a retry, and the two digests a
+  retry meets are different digests.** A model call and an executor effect each
+  record a digest, and this decision names both so no site can read one rule for
+  the other. The **`staged_request_digest`** covers this decision's canonical
+  model request: model identity, messages, complete tool definitions, sampling
+  bounds, the run deadline, and the reserved continuation field, and no operation
+  or attempt identity. A provider retry therefore dispatches the same staged
+  bytes and reuses their `staged_request_digest` under a *new* recorded attempt;
+  the attempt is recorded anew and the digest is not recomputed, which is exactly
+  what the [technical vision](../vision-technical.md#technical-depth) fixes when
+  it says a retried model attempt uses the same staged request digest. The
+  **attempt-bound `canonical_request_digest`** is
+  [ADR 0007](0007-local-executor-grant-job-receipt.md#concept)'s canonical job
+  digest for an executor effect, and the same technical vision fixes its
   canonicalization as covering the immutable semantic job fields *including
-  operation and attempt identity*, so two attempts of one operation necessarily
-  produce two different `canonical_request_digest` values. That is the intended
-  shape rather than a defect to design around. `operation_id` is the stable
-  logical identity across attempts; each attempt carries its own attempt-bound
-  digest; and reconciliation matches the original attempt against *its own*
-  original digest, which is exactly what preserves
-  [ADR 0007](0007-local-executor-grant-job-receipt.md#concept)'s single
-  reconciliation identity. An earlier draft of this decision asserted that two
-  attempts recompute one shared digest and justified keeping the derived
+  operation and attempt identity*, so two executor attempts of one operation
+  necessarily produce two different values. That is the intended shape rather
+  than a defect to design around: each executor attempt carries its own
+  attempt-bound digest, and reconciliation matches the original attempt against
+  *its own* original digest, which is exactly what preserves ADR 0007's single
+  reconciliation identity. `operation_id` is the stable logical identity across
+  attempts in both cases; only the digest rule differs, because attempt identity
+  is inside the job canonicalization and outside the model request. An earlier
+  draft of this decision asserted that two executor attempts recompute one
+  shared job digest and justified keeping the derived
   per-attempt deadline outside the canonical bytes on that basis. Both the claim
   and that justification are withdrawn: the derived deadline stays outside
-  because of what it is, and attempt-scoped digests are how retries stay
-  distinguishable.
+  because of what it is, and attempt-scoped job digests are how executor retries
+  stay distinguishable.
 - **A reached deadline commits only after the run's owned work is confirmed
   stopped, and an unprovable outcome outranks it.** `bound_reached(:deadline, observed)`
   says the run stopped where its operator configured it to stop, so it commits
@@ -625,6 +640,15 @@ measurement embeds an unevaluated quality decision into the kernel, and the
 honest small answer is to end the run truthfully and let the operator start
 another.
 
+**Call the model request's digest `canonical_request_digest` too.** One name for
+both digests reads as one mechanism and needs no new vocabulary. It is not
+recommended, and this decision's own drafts are the evidence: the two digests
+obey opposite retry rules because the executor job canonicalization covers
+attempt identity and the canonical model request does not, so a single name lets
+a reader carry the executor rule onto a model call and assert that a provider
+retry changes the digest — which contradicts the technical vision. Two names cost
+one term and make each rule unmistakable at every site that states it.
+
 Technical depth: [Alternative analysis](0010-provider-continuation-and-context-staging-technical.md#technical-adr-0010-alternatives).
 
 <a id="concept-adr-0010-consequences"></a>
@@ -784,8 +808,11 @@ Technical depth: [Format, migration, and rollback mechanics](0010-provider-conti
   transaction and owner-epoch contract these records commit under
 - [ADR 0008](0008-owner-succession-recovery-and-runtime-placement.md#concept) —
   the succession recovery this projection must survive without change
-- [ADR 0007](0007-local-executor-grant-job-receipt.md#concept) — the one
-  canonical request digest identity this decision extends to a full request
+- [ADR 0007](0007-local-executor-grant-job-receipt.md#concept) — the
+  attempt-bound `canonical_request_digest` this decision's run deadline is
+  canonicalized into, and the reconciliation identity it serves; it covers an
+  executor job, not this decision's model request, which carries its own
+  `staged_request_digest`
 - [Vision model and context boundary](../vision.md#concept-vision-model-boundary) — the governed pipeline and what belongs to hosts
 - [Vision executor protocol and brain/hand topology](../vision.md#concept-vision-executor-protocol) — the opaque workspace reference core never resolves
 - [Vision recovery truth](../vision-technical.md#technical-vision-recovery-truth) — §9.5's outcome immutability and reconciliation rules, which a `bound_reached` run terminal obeys like any other

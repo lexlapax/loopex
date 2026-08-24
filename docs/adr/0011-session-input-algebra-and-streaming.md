@@ -220,7 +220,7 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   operation attempt alike, so a replay or a successor owner projects the same
   label for the same attempt. **The derivation hashes that identity under the
   repository's protocol-versioned canonical encoding — the same deterministic,
-  length-aware tuple encoding the request digest already uses — and never a
+  length-aware tuple encoding Loopex's request digests already use — and never a
   delimiter-joined string.** Session, operation, and attempt identifiers are
   unrestricted binaries; a length-aware encoding is injective over arbitrary
   binary content because every element carries its own length, while a delimiter
@@ -235,8 +235,12 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   one another.
 - **A retry opens a new domain, and two domains under one turn are normal.** A
   provider retry against the same staged bytes is a new model attempt and so a
-  new domain; a retried executor operation attempt is a new domain in the same
-  way. A client seeing a second domain under one `turn_id` is watching a retried
+  new domain, even though it reuses those bytes and their
+  `staged_request_digest`: the domain is keyed on `(operation_id, attempt)`, and
+  the attempt is what changed. A retried executor operation attempt is a new
+  domain in the same way, and additionally carries its own attempt-bound
+  `canonical_request_digest`. A client seeing a second domain under one
+  `turn_id` is watching a retried
   turn, not a fault: the abandoned domain closes as abandoned at whatever count
   it reached, and its short tail is never evidence of loss in the domain that
   succeeded. This is what makes the loss property true rather than nearly true.
@@ -287,8 +291,9 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   bounded progress function with the job, and the executor uses it to emit
   ordinary executor progress events that echo the complete identity and fence —
   job, operation and attempt, session/run/turn/tool-call identity, origin
-  session and executor epochs, executor identity, the canonical request digest,
-  and the fencing token. The coordinator validates every one of those against
+  session and executor epochs, executor identity, that attempt's attempt-bound
+  `canonical_request_digest`, and the fencing token. The coordinator validates
+  every one of those against
   what it independently holds for the live attempt before it projects the narrow
   client-facing delta, which carries none of that administrative material.
   Progress that fails validation is dropped and counted as refused; it is never
@@ -334,11 +339,16 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   request is canonicalized, committed, and digested before the adapter is
   called, and `complete/3` receives exactly those bytes. ADR 0010's
   real-provider byte-equality assertion applies unchanged to the streaming
-  path, a retry dispatches exactly those same staged bytes under a new recorded
-  attempt — attempt identity is canonical, so that attempt records its own
-  `canonical_request_digest` rather than reusing its predecessor's, while
-  `operation_id` stays the identity the two attempts share — and no delta is
-  ever an input to the next request.
+  path, a provider retry dispatches exactly those same staged bytes under a new
+  recorded attempt — the canonical model request has no operation or attempt
+  member, so that attempt reuses the staged bytes' `staged_request_digest`
+  rather than recomputing one, while `operation_id` stays the identity the two
+  attempts share — and no delta is ever an input to the next request. The
+  retried attempt is still a new stream domain, because the domain is keyed on
+  `(operation_id, attempt)` and the attempt genuinely changed; only the digest
+  is unchanged. An executor retry is the other case: attempt identity is inside
+  the job canonicalization, so each executor attempt carries its own
+  attempt-bound `canonical_request_digest` as well as its own domain.
 
 This decision changes no rule in
 [ADR 0006](0006-store-transaction-and-owner-epoch.md#concept),
