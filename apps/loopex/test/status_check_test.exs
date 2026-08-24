@@ -1044,6 +1044,89 @@ defmodule Loopex.StatusCheckTest do
     end
   end
 
+  test "a milestone cannot outrun the ADR dispositions its plan pair declares" do
+    adrs = [
+      {"docs/adr/0009-tool-executor-and-grant-contracts.md", "ADR 0009"},
+      {"docs/adr/0010-provider-continuation-and-context-staging.md", "ADR 0010"},
+      {"docs/adr/0011-session-input-algebra-and-streaming.md", "ADR 0011"}
+    ]
+
+    all_accepted = Map.new(adrs, fn {path, _name} -> {path, "Accepted"} end)
+
+    # The defect this protects against: the generic Open and Accepted
+    # derivations discarded ADR statuses, so `M2` derived "implementation may
+    # proceed" while all three prerequisites were still Proposed.
+    for {path, name} <- adrs do
+      statuses = Map.put(all_accepted, path, "Proposed")
+      open = Register.expected_capsule("Open", "M2", statuses)
+
+      assert open["Blockers"] =~ name
+      assert open["Next maintainer decision"] == "Disposition #{name}"
+      assert open["Next transition"] =~ "the prerequisite is accepted"
+
+      for other <- Enum.reject(adrs, &(elem(&1, 1) == name)) do
+        refute open["Blockers"] =~ elem(other, 1)
+      end
+
+      for state <- ["Accepted", "In progress", "In review"] do
+        assert_raise Invalid, ~r/`M2` cannot move to #{state} before #{name} is accepted/, fn ->
+          Register.expected_capsule(state, "M2", statuses)
+        end
+      end
+    end
+
+    two_outstanding =
+      all_accepted
+      |> Map.put("docs/adr/0009-tool-executor-and-grant-contracts.md", "Proposed")
+      |> Map.put("docs/adr/0011-session-input-algebra-and-streaming.md", "Proposed")
+
+    open_two = Register.expected_capsule("Open", "M2", two_outstanding)
+    assert open_two["Next maintainer decision"] == "Disposition ADR 0009 and ADR 0011"
+    assert open_two["Next transition"] =~ "the prerequisites are accepted"
+    refute open_two["Blockers"] =~ "ADR 0010"
+
+    none_accepted = Map.new(adrs, fn {path, _name} -> {path, "Proposed"} end)
+    open_none = Register.expected_capsule("Open", "M2", none_accepted)
+
+    assert open_none["Next maintainer decision"] ==
+             "Disposition ADR 0009, ADR 0010, and ADR 0011"
+
+    for {_path, name} <- adrs do
+      assert open_none["Blockers"] =~ name
+    end
+
+    assert_raise Invalid, ~r/ADR 0009, ADR 0010, and ADR 0011 are accepted/, fn ->
+      Register.expected_capsule("Accepted", "M2", none_accepted)
+    end
+
+    # All three accepted returns the ordinary derivation for each state, and the
+    # Open capsule goes back to naming acceptance itself as the open decision.
+    open_clear = Register.expected_capsule("Open", "M2", all_accepted)
+
+    assert open_clear ==
+             Register.expected_capsule("Open", "unconstrained", all_accepted)
+             |> Map.put(
+               "Blockers",
+               "`M2` is open and not accepted; the recorded acceptance authority must " <>
+                 "accept both normative envelopes and the gate"
+             )
+             |> Map.put("Next maintainer decision", "Accept or reject the `M2` plan pair and gate")
+             |> Map.put(
+               "Next transition",
+               "Record the acceptance governance row and move `M2` to Accepted"
+             )
+
+    for state <- ["Accepted", "In progress", "In review"] do
+      assert is_map(Register.expected_capsule(state, "M2", all_accepted))
+    end
+
+    # A declared prerequisite that is not a registered ADR is a governed failure,
+    # never a silently resolved one.
+    assert_raise Invalid, ~r/names ADR 0009 as a prerequisite/, fn ->
+      Register.expected_capsule("Open", "M2", Map.delete(all_accepted, elem(hd(adrs), 0)))
+    end
+  end
+
   test "a milestone state with no derived capsule fails closed" do
     assert "In review" in Register.delivery_states()
 
@@ -2343,16 +2426,16 @@ defmodule Loopex.StatusCheckTest do
   # that: M0's closed capsule, every field of it a real derived value, must be
   # refused once M2 is open.
   test "an open milestone beside a closed one derives the open one's capsule" do
-    rename = &String.replace(&1, "M0", "M2")
+    rename = &String.replace(&1, "M0", "M9")
 
     # The sentence is composed from the register rather than from the open
     # fixture's, because the closed row moves the phase and only the milestone
     # clauses come from the open one.
-    rows = [{"M0", "Closed"}, {"M2", "Open"}]
+    rows = [{"M0", "Closed"}, {"M9", "Open"}]
     summary = Register.summary(Register.integrated_phase(rows), rows)
 
     assert summary ==
-             "**Revision status:** Closed milestone product baseline; active milestone `M2` " <>
+             "**Revision status:** Closed milestone product baseline; active milestone `M9` " <>
                "is open; no next candidate is recorded."
 
     documents =
@@ -2364,20 +2447,20 @@ defmodule Loopex.StatusCheckTest do
            Fixture.blocked_row(),
            "| `M0` | Closed | [concept](M0.md) | [technical depth](M0-technical.md) | " <>
              "[gate](M0-gate.md) |\n" <>
-             "| `M2` | Open | [concept](M2.md) | [technical depth](M2-technical.md) | " <>
-             "[gate](M2-gate.md) |"
+             "| `M9` | Open | [concept](M9.md) | [technical depth](M9-technical.md) | " <>
+             "[gate](M9-gate.md) |"
          )
          |> String.replace(Fixture.summary(), summary)}
       end)
       |> Map.put("docs/plans/M0.md", Fixture.plan(governed: true, closed: true))
       |> Map.put("docs/plans/M0-technical.md", Fixture.technical_plan())
       |> Map.put("docs/plans/M0-gate.md", Fixture.gate())
-      |> Map.put("docs/plans/M2.md", rename.(Fixture.plan()))
-      |> Map.put("docs/plans/M2-technical.md", rename.(Fixture.technical_plan()))
-      |> Map.put("docs/plans/M2-gate.md", rename.(Fixture.gate()))
+      |> Map.put("docs/plans/M9.md", rename.(Fixture.plan()))
+      |> Map.put("docs/plans/M9-technical.md", rename.(Fixture.technical_plan()))
+      |> Map.put("docs/plans/M9-gate.md", rename.(Fixture.gate()))
       |> replace("docs/plans/README.md", "Seed bootstrap — 2026-08-15", "`M0` — 2026-08-15")
       |> Map.update!("docs/plans/README.md", &Fixture.closed_phase_cell/1)
-      |> Map.update!("docs/plans/README.md", &capsule(&1, "Open", "M2"))
+      |> Map.update!("docs/plans/README.md", &capsule(&1, "Open", "M9"))
 
     assert [] == Fixture.checked(documents)
 

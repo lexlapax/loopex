@@ -90,6 +90,26 @@ defmodule Loopex.Checks.Register do
 
   @m1_implementation_adr "docs/adr/0008-owner-succession-recovery-and-runtime-placement.md"
 
+  # Concept: a milestone whose plan pair names prerequisite decisions cannot be
+  # accepted, implemented, or reviewed while any of them is still Proposed.
+  #
+  # Technical depth: the generic Open, Accepted, In progress, and In review
+  # derivations discarded `adr_statuses` entirely, so a milestone with three
+  # outstanding prerequisites derived "None; it is accepted and implementation
+  # may proceed" the moment its own row moved. The set is declared here per
+  # milestone rather than parsed out of plan prose, because the register is the
+  # surface this guard protects and prose is not a contract; the plan pair states
+  # the same prerequisite for a reader and this table states it for the checker.
+  # Each entry names the Concept file and its display name, and the technical
+  # companion follows by path convention.
+  @prerequisite_adrs %{
+    "M2" => [
+      {"docs/adr/0009-tool-executor-and-grant-contracts.md", "ADR 0009"},
+      {"docs/adr/0010-provider-continuation-and-context-staging.md", "ADR 0010"},
+      {"docs/adr/0011-session-input-algebra-and-streaming.md", "ADR 0011"}
+    ]
+  }
+
   # Concept: the base every derived capsule starts from.
   #
   # Technical depth: `Integrated phase` is deliberately absent. It used to be
@@ -516,18 +536,41 @@ defmodule Loopex.Checks.Register do
 
   def expected_capsule("Open", "M1", adr_statuses), do: m1_open_values(adr_statuses)
 
-  def expected_capsule("Open", name, _adr_statuses) do
-    @seed_blocked
-    |> Map.put(
-      "Blockers",
-      "`#{name}` is open and not accepted; the recorded acceptance authority must " <>
-        "accept both normative envelopes and the gate"
-    )
-    |> Map.put("Next maintainer decision", "Accept or reject the `#{name}` plan pair and gate")
-    |> Map.put(
-      "Next transition",
-      "Record the acceptance governance row and move `#{name}` to Accepted"
-    )
+  def expected_capsule("Open", name, adr_statuses) do
+    base =
+      @seed_blocked
+      |> Map.put(
+        "Blockers",
+        "`#{name}` is open and not accepted; the recorded acceptance authority must " <>
+          "accept both normative envelopes and the gate"
+      )
+      |> Map.put("Next maintainer decision", "Accept or reject the `#{name}` plan pair and gate")
+      |> Map.put(
+        "Next transition",
+        "Record the acceptance governance row and move `#{name}` to Accepted"
+      )
+
+    case unresolved_prerequisites(name, adr_statuses) do
+      [] ->
+        base
+
+      unresolved ->
+        base
+        |> Map.put(
+          "Blockers",
+          "#{join_and(prerequisite_links(unresolved))} must be accepted before the " <>
+            "`#{name}` plan pair and gate can be accepted"
+        )
+        |> Map.put(
+          "Next maintainer decision",
+          "Disposition #{join_and(prerequisite_names(unresolved))}"
+        )
+        |> Map.put(
+          "Next transition",
+          "After #{prerequisite_subject(unresolved)} accepted, accept or reject the " <>
+            "`#{name}` plan pair and gate"
+        )
+    end
   end
 
   def expected_capsule("Accepted", "M1", adr_statuses) do
@@ -551,7 +594,10 @@ defmodule Loopex.Checks.Register do
     end
   end
 
-  def expected_capsule("Accepted", name, _adr_statuses), do: accepted_values(name)
+  def expected_capsule("Accepted", name, adr_statuses) do
+    require_prerequisites_accepted!(name, "Accepted", adr_statuses)
+    accepted_values(name)
+  end
 
   def expected_capsule(
         {delivery_name, "Accepted"},
@@ -581,7 +627,10 @@ defmodule Loopex.Checks.Register do
     in_progress_values("M1")
   end
 
-  def expected_capsule("In progress", name, _adr_statuses), do: in_progress_values(name)
+  def expected_capsule("In progress", name, adr_statuses) do
+    require_prerequisites_accepted!(name, "In progress", adr_statuses)
+    in_progress_values(name)
+  end
 
   # Concept: the milestone awaits an independent verdict, and the register states
   # that lifecycle fact rather than any claim about a run.
@@ -602,7 +651,10 @@ defmodule Loopex.Checks.Register do
     in_review_values("M1")
   end
 
-  def expected_capsule("In review", name, _adr_statuses), do: in_review_values(name)
+  def expected_capsule("In review", name, adr_statuses) do
+    require_prerequisites_accepted!(name, "In review", adr_statuses)
+    in_review_values(name)
+  end
 
   # Concept: a closed milestone authorises nothing until the next one opens.
   #
@@ -719,6 +771,61 @@ defmodule Loopex.Checks.Register do
     Map.fetch!(adr_statuses, @m1_implementation_adr) == "Accepted"
   end
 
+  # Concept: an outstanding prerequisite is one the register can still see is not
+  # Accepted.
+  #
+  # Technical depth: a declared prerequisite that is not a registered ADR is a
+  # governed failure rather than a missing key, because silently treating it as
+  # resolved is the one outcome this guard exists to prevent.
+  defp unresolved_prerequisites(name, adr_statuses) do
+    @prerequisite_adrs
+    |> Map.get(name, [])
+    |> Enum.filter(fn {path, adr_name} ->
+      case Map.fetch(adr_statuses, path) do
+        {:ok, status} ->
+          status != "Accepted"
+
+        :error ->
+          raise Invalid,
+                "#{@index}: `#{name}` names #{adr_name} as a prerequisite but #{path} is not " <>
+                  "a registered ADR"
+      end
+    end)
+  end
+
+  defp require_prerequisites_accepted!(name, state, adr_statuses) do
+    case unresolved_prerequisites(name, adr_statuses) do
+      [] ->
+        :ok
+
+      unresolved ->
+        raise Invalid,
+              "#{@index}: `#{name}` cannot move to #{state} before " <>
+                "#{join_and(prerequisite_names(unresolved))} #{prerequisite_verb(unresolved)} " <>
+                "accepted"
+    end
+  end
+
+  defp prerequisite_names(unresolved), do: Enum.map(unresolved, fn {_path, name} -> name end)
+
+  defp prerequisite_links(unresolved) do
+    Enum.map(unresolved, fn {path, name} -> adr_link(path, name) end)
+  end
+
+  defp prerequisite_verb([_one]), do: "is"
+  defp prerequisite_verb(_many), do: "are"
+
+  defp prerequisite_subject([_one]), do: "the prerequisite is"
+  defp prerequisite_subject(_many), do: "the prerequisites are"
+
+  defp join_and([one]), do: one
+  defp join_and([first, second]), do: "#{first} and #{second}"
+
+  defp join_and(items) do
+    {leading, [last]} = Enum.split(items, -1)
+    Enum.join(leading, ", ") <> ", and " <> last
+  end
+
   # Concept: acceptance is the only transition that widens authorized work, and it
   # widens it to the accepted envelopes and locked gate, no further.
   defp accepted_values(name) do
@@ -760,7 +867,7 @@ defmodule Loopex.Checks.Register do
 
         [path] ->
           name = Map.fetch!(@m1_adr_names, path)
-          link = m1_adr_link(path, name)
+          link = adr_link(path, name)
 
           {
             "#{link} must be accepted before the `M1` plan pair and gate can be accepted",
@@ -770,7 +877,7 @@ defmodule Loopex.Checks.Register do
           }
 
         paths ->
-          [first, second] = Enum.map(paths, &m1_adr_link(&1, Map.fetch!(@m1_adr_names, &1)))
+          [first, second] = Enum.map(paths, &adr_link(&1, Map.fetch!(@m1_adr_names, &1)))
 
           {
             "#{first} and #{second} must be accepted before the `M1` plan pair and gate " <>
@@ -787,7 +894,7 @@ defmodule Loopex.Checks.Register do
     |> Map.put("Next transition", transition)
   end
 
-  defp m1_adr_link(path, name) do
+  defp adr_link(path, name) do
     filename = Loopex.Checks.Paths.strip_prefix(path, "docs/adr/")
     "[#{name}](../adr/#{filename}#concept)"
   end

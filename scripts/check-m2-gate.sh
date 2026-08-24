@@ -690,7 +690,7 @@ require_feature \
   "the operator is shown every resolved path its provenance and the manifest digest" \
   "an explicit trust decision binds workspace revision manifest and digests" \
   "a changed workspace revision manifest or content invalidates the decision" \
-  "a headless run without a matching positive decision fails closed and stages no project block" \
+  "a headless run without a matching positive decision stages no project block journals a declined receipt and still runs" \
   "an ordinary workspace read stays a policy governed tool effect and is never context staging" \
   "an admitted project block changes no tool set policy decision bound or grant"
 
@@ -729,7 +729,7 @@ require_feature \
   "the policy option selects the governing host policy and a refusal is reported in the transcript" \
   "the command ships its own permissive policy that is named explicitly, prints one notice, and is never an implicit fallback" \
   "loopex artifact retrieves a spilled artifact by its opaque reference" \
-  "project resource trust is decided at the terminal and a non interactive run without a decision fails closed" \
+  "project resource trust is decided at the terminal and a non interactive run without a decision proceeds with the block withheld" \
   "the command surface drives only the public facade and owns no loop store cursor or authority" \
   "a dropped stream closure leaves the terminal falling back to the durable record without inferring abandonment or starting a timer" \
   "the base system prompt and active tool definitions measure under one thousand tokens" \
@@ -1342,7 +1342,7 @@ run_selector 7 apps/loopex/test/project_resource_trust_test.exs default 7 zero \
   "passed=the operator is shown every resolved path its provenance and the manifest digest" \
   "passed=an explicit trust decision binds workspace revision manifest and digests" \
   "passed=a changed workspace revision manifest or content invalidates the decision" \
-  "passed=a headless run without a matching positive decision fails closed and stages no project block" \
+  "passed=a headless run without a matching positive decision stages no project block journals a declined receipt and still runs" \
   "passed=an ordinary workspace read stays a policy governed tool effect and is never context staging" \
   "passed=an admitted project block changes no tool set policy decision bound or grant"
 
@@ -1375,7 +1375,7 @@ run_selector 10 apps/loopex_cli/test/cli_test.exs default 16 zero \
   "passed=the policy option selects the governing host policy and a refusal is reported in the transcript" \
   "passed=the command ships its own permissive policy that is named explicitly, prints one notice, and is never an implicit fallback" \
   "passed=loopex artifact retrieves a spilled artifact by its opaque reference" \
-  "passed=project resource trust is decided at the terminal and a non interactive run without a decision fails closed" \
+  "passed=project resource trust is decided at the terminal and a non interactive run without a decision proceeds with the block withheld" \
   "passed=the command surface drives only the public facade and owns no loop store cursor or authority" \
   "passed=a dropped stream closure leaves the terminal falling back to the durable record without inferring abandonment or starting a timer" \
   "passed=the base system prompt and active tool definitions measure under one thousand tokens" \
@@ -1500,7 +1500,8 @@ run_selector mechanics apps/loopex/test/deps_budget_test.exs default 28 zero \
   "passed=a composition depends on the edge applications it composes and on no client or external package" \
   "passed=a client depends on at most one composition and never on another client"
 
-run_selector mechanics apps/loopex/test/status_check_test.exs default 42 zero \
+run_selector mechanics apps/loopex/test/status_check_test.exs default 43 zero \
+  "passed=a milestone cannot outrun the ADR dispositions its plan pair declares" \
   "passed=a Closed milestone's gate is amended by an accepted generation, not a rebind" \
   "passed=a gate generation table fails closed on every malformed shape" \
   "passed=a gate generations table is append-only in both admitted directions" \
