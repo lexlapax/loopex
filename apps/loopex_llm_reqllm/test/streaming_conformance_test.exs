@@ -278,6 +278,50 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     refute reply.text =~ "PARTIAL"
   end
 
+  test "a cancelled stream commits no assistant message and a late reply never becomes canonical" do
+    # An adapter cancelled mid-stream returns no reply at all. Core builds the
+    # committed assistant message from the adapter's return value, so there is
+    # nothing to commit — not a partial message assembled from what did arrive.
+    defmodule Cancelled do
+      @moduledoc false
+      @behaviour Loopex.Model
+
+      @impl Loopex.Model
+      def complete(_request, _options, progress \\ nil) do
+        progress = progress || Loopex.Model.discard_progress()
+        progress.(%{kind: :text_delta, content_index: 0, text: "half a th"})
+        {:error, :cancelled}
+      end
+    end
+
+    parent = self()
+
+    observed =
+      fn delta ->
+        send(parent, {:delta, delta})
+        :ok
+      end
+
+    assert {:error, :cancelled} = Cancelled.complete(request(), [], observed)
+    assert_received {:delta, %{text: "half a th"}}
+
+    # Deltas arrived, and no reply did. Core has nothing to assemble from, which
+    # is what makes "commits no assistant message" structural rather than a rule
+    # someone has to remember.
+    refute match?({:ok, _reply}, Cancelled.complete(request(), [], observed))
+
+    # The domain still closes, abandoned, stating what the coordinator observed.
+    domain = StreamDomain.derive(:model, "s1", "op-1", 1)
+    closure = StreamDomain.model_closed("t1", domain, 0, :abandoned, 1)
+    assert closure.disposition == :abandoned
+    assert closure.delta_count == 1
+
+    # A late reply for that abandoned attempt belongs to a new domain, never to
+    # the closed one, so it cannot be mistaken for the cancelled attempt's own.
+    retried = StreamDomain.derive(:model, "s1", "op-1", 2)
+    assert retried != domain
+  end
+
   test "an adapter that emits no deltas is conformant and declares that it does not stream" do
     {reply, deltas} = collect(Silent)
 
@@ -292,6 +336,58 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     closure = StreamDomain.model_closed("t1", domain, 0, :complete, 0)
     assert closure.disposition == :complete
     assert closure.delta_count == 0
+  end
+
+  test "a provider retry opens a second stream domain under one turn and neither domain reports the other as loss" do
+    # Same session, same model operation, two attempts. The staged bytes and
+    # their digest are reused by a provider retry, so the attempt is the only
+    # thing that differs — and it alone must separate the domains.
+    first = StreamDomain.derive(:model, "s1", "model-op-1", 1)
+    second = StreamDomain.derive(:model, "s1", "model-op-1", 2)
+
+    assert first != second
+
+    # Each carries its own sequence from one, and each closes with its own count.
+    first_items = for n <- 1..3, do: %{stream_domain_id: first, model_sequence: n}
+    second_items = for n <- 1..2, do: %{stream_domain_id: second, model_sequence: n}
+
+    first_closure = StreamDomain.model_closed("t1", first, 0, :abandoned, 3)
+    second_closure = StreamDomain.model_closed("t1", second, 0, :complete, 2)
+
+    # Continuity is evaluated strictly within a domain. Neither domain sees the
+    # other's items as a gap, because no comparison between two domains is
+    # defined at all — two domains under one turn are the ordinary shape of a
+    # retried turn rather than a fault.
+    assert gapless?(first_items) and length(first_items) == first_closure.delta_count
+    assert gapless?(second_items) and length(second_items) == second_closure.delta_count
+
+    combined = first_items ++ second_items
+    assert length(Enum.uniq_by(combined, & &1.stream_domain_id)) == 2
+
+    for domain_id <- [first, second] do
+      scoped = Enum.filter(combined, &(&1.stream_domain_id == domain_id))
+      assert gapless?(scoped)
+    end
+  end
+
+  test "a retried executor operation attempt opens its own stream domain closed by its own closure item and count" do
+    first = StreamDomain.derive(:executor, "s1", "op-1", 1)
+    second = StreamDomain.derive(:executor, "s1", "op-1", 2)
+
+    assert first != second
+
+    first_closure = StreamDomain.tool_closed("t1", first, "c1", 0, :abandoned, 4)
+    second_closure = StreamDomain.tool_closed("t1", second, "c1", 0, :complete, 1)
+
+    # One tool call, two attempts, two closures. Each states its own count, so a
+    # consumer attributing progress per call still knows which attempt produced
+    # what.
+    assert first_closure.tool_call_id == second_closure.tool_call_id
+    assert first_closure.stream_domain_id != second_closure.stream_domain_id
+    assert first_closure.progress_count == 4
+    assert second_closure.progress_count == 1
+    assert first_closure.disposition == :abandoned
+    assert second_closure.disposition == :complete
   end
 
   test "an abandoned domain is closed and stated rather than guessed from a stream that stopped" do

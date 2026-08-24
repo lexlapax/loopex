@@ -65,6 +65,8 @@ defmodule Loopex.Runtime do
           | {:tools, [LoopexProtocol.ToolDefinition.t()]}
           | {:active_tools, [binary() | {binary(), binary()}]}
           | {:bounds, map()}
+          | {:project_manifest, map() | nil}
+          | {:project_decision, map() | nil}
           | {:sampling, map()}
           | {:grant_decision, term()}
           | {:fault_to, pid() | nil}
@@ -387,6 +389,8 @@ defmodule Loopex.Runtime do
              active_tools: [],
              bounds: nil,
              sampling: nil,
+             project_manifest: nil,
+             project_decision: nil,
              grant_decision: nil,
              fault_to: nil
            ),
@@ -420,6 +424,8 @@ defmodule Loopex.Runtime do
          active_tools: active_tools,
          bounds: bounds,
          sampling: sampling,
+         project_manifest: validated[:project_manifest],
+         project_decision: validated[:project_decision],
          grant_decision: grant_decision,
          fault_to: fault_to
        ]}

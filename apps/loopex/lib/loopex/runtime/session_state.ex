@@ -52,6 +52,8 @@ defmodule Loopex.Runtime.SessionState do
           conversation: map(),
           bounds: map(),
           deadlines: map(),
+          steer: map(),
+          follow_up: map() | nil,
           charged: map(),
           expected_events: [map()]
         }
@@ -68,6 +70,8 @@ defmodule Loopex.Runtime.SessionState do
             conversation: %{},
             bounds: %{},
             deadlines: %{},
+            steer: %{},
+            follow_up: nil,
             charged: %{},
             expected_events: []
 
@@ -358,11 +362,58 @@ defmodule Loopex.Runtime.SessionState do
     {declared && Map.put(declared, :deadline, Map.get(state.deadlines, run_id)), charged}
   end
 
+  @doc """
+  ## Concept
+
+  The steer waiting to join this run, if one is queued.
+
+  ## Technical depth
+
+  Read by the coordinator when it stages the next request, which is the single
+  point where a steer can be applied. A steer is never applied anywhere else and
+  is never recorded applied unless a committed request actually carried it.
+  """
+
+  @spec pending_steer(t(), binary()) :: map() | nil
+  def pending_steer(%__MODULE__{} = state, run_id), do: queued_steer(state, run_id)
+
+  @doc """
+  ## Concept
+
+  Whether this run holds an effect whose truth was never established.
+
+  ## Technical depth
+
+  A committed `outcome_unknown` tool result means nobody knows whether that
+  effect happened. A run carrying one cannot honestly end `bound_reached` or
+  `completed`, because both claim the run finished in a known state. This is what
+  gives `outcome_unknown` precedence over every other terminal outcome.
+  """
+  @spec unproven_effect?(t(), binary()) :: boolean()
+  def unproven_effect?(%__MODULE__{} = state, run_id) do
+    state
+    |> elements(run_id)
+    |> Enum.any?(&(&1.kind == :tool_result and &1.outcome == :outcome_unknown))
+  end
+
+  @doc """
+  ## Concept
+
+  The follow-up waiting to become the next run, if one is queued.
+
+  ## Technical depth
+
+  At most one exists per session. It is promoted only when the active run
+  reaches a terminal outcome, in that same transaction.
+  """
+  @spec pending_follow_up(t()) :: map() | nil
+  def pending_follow_up(%__MODULE__{follow_up: follow_up}), do: follow_up
+
   @doc false
   @spec propose_run_terminal(t(), binary(), binary(), map()) ::
           {:ok, proposal()} | {:error, term()}
   def propose_run_terminal(%__MODULE__{} = state, run_id, outcome, detail)
-      when is_binary(run_id) and outcome in ["completed", "bound_reached"] do
+      when is_binary(run_id) and outcome in ["completed", "bound_reached", "outcome_unknown"] do
     record = %{
       "run_id" => run_id,
       "outcome" => outcome,
@@ -370,6 +421,7 @@ defmodule Loopex.Runtime.SessionState do
       "observed" => Map.get(detail, :observed),
       "declared_limit" => Map.get(detail, :declared_limit),
       "accounting_source" => Map.get(detail, :accounting_source),
+      "reconciliation_ref" => Map.get(detail, :reconciliation_ref),
       kind: "run_terminal_committed"
     }
 
@@ -377,10 +429,13 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   @doc false
-  @spec propose_model_request(t(), binary(), Loopex.Model.request()) ::
+  @spec propose_model_request(t(), binary(), Loopex.Model.request(), keyword()) ::
           {:ok, proposal()} | {:error, term()}
-  def propose_model_request(%__MODULE__{} = state, run_id, request)
-      when is_binary(run_id) and is_map(request) do
+  def propose_model_request(%__MODULE__{} = state, run_id, request, options \\ [])
+      when is_binary(run_id) and is_map(request) and is_list(options) do
+    applied_steer = Keyword.get(options, :applied_steer)
+    context_receipt = Keyword.get(options, :context_receipt)
+
     work = Map.get(state.pending_work, run_id, %{turn_number: 1})
     turn_number = next_turn_number(work)
 
@@ -388,6 +443,8 @@ defmodule Loopex.Runtime.SessionState do
       "run_id" => run_id,
       "turn_id" => stable_id("turn", run_id, turn_number),
       "request" => encode_plain(request),
+      "applied_steer" => applied_steer,
+      "context_receipt" => context_receipt,
       kind: "model_request_committed"
     }
 
@@ -465,6 +522,8 @@ defmodule Loopex.Runtime.SessionState do
   that exits on a failed tool loses the run's place in its own conversation and
   leaves an operator with nothing to read; recording the failure keeps the
   journal complete and the loop honest about what happened.
+
+
   """
   @spec propose_tool_result(t(), binary(), binary(), atom(), binary() | nil) ::
           {:ok, proposal()} | {:error, term()}
@@ -479,6 +538,32 @@ defmodule Loopex.Runtime.SessionState do
     }
 
     internal_proposal(state, stable_id("tool-result", run_id, tool_call_id), record)
+  end
+
+  @doc """
+  ## Concept
+
+  Charges a turn that produced no complete reply.
+
+  ## Technical depth
+
+  Its request bytes plus that turn's committed output allowance, in full, marked
+  estimated. That deliberately over-charges: charging zero would make aborting
+  every turn the cheapest way to stay inside a budget, and a bound that can be
+  evaded by giving up is not a bound.
+  """
+  @spec charge_incomplete_turn(t(), binary()) :: t()
+  def charge_incomplete_turn(%__MODULE__{} = state, run_id) do
+    case Map.get(state.pending_work, run_id) do
+      %{request: request} ->
+        {charge, source} =
+          Bounds.charge(nil, request.canonical_request_bytes, Loopex.Model.max_tokens(request))
+
+        charge_run(state, run_id, charge, source)
+
+      _absent ->
+        state
+    end
   end
 
   @doc false
@@ -530,6 +615,82 @@ defmodule Loopex.Runtime.SessionState do
     build_proposal(state, command.command_id, record, [], reply)
   end
 
+  # Concept: a steer joins a run that is actually running.
+  #
+  # Technical depth: the queue is one deep. A second steer is refused with an
+  # explicit reason rather than replacing the first or being coalesced into it,
+  # because an operator whose earlier words were silently dropped has no way to
+  # know it happened.
+  defp propose_new(%__MODULE__{active_run_id: active} = state, %{type: :steer} = command, digest)
+       when is_binary(active) do
+    cond do
+      command.run_id != active ->
+        refusal(state, command, digest, "steer", "rejected_run_mismatch", :run_mismatch)
+
+      queued_steer(state, active) != nil ->
+        refusal(state, command, digest, "steer", "rejected_steer_pending", :steer_pending)
+
+      true ->
+        record = %{
+          "command_id" => command.command_id,
+          "command_digest" => digest,
+          "command_type" => "steer",
+          "admission" => "accepted",
+          "run_id" => active,
+          "content" => command.content,
+          kind: "command_admitted"
+        }
+
+        build_proposal(state, command.command_id, record, [], {:accepted, command.command_id})
+    end
+  end
+
+  defp propose_new(%__MODULE__{active_run_id: nil} = state, %{type: :steer} = command, digest),
+    do: refusal(state, command, digest, "steer", "rejected_no_active_run", :no_active_run)
+
+  # Concept: a follow-up waits for the run in front of it.
+  #
+  # Technical depth: it is admitted only while a run is active and starts a new
+  # run once that run reaches a terminal outcome. Submitted while the session is
+  # settled it is refused, because there is nothing to follow and a caller that
+  # meant to start work should say so with a prompt.
+  defp propose_new(
+         %__MODULE__{active_run_id: active} = state,
+         %{type: :follow_up} = command,
+         digest
+       )
+       when is_binary(active) do
+    if state.follow_up do
+      refusal(
+        state,
+        command,
+        digest,
+        "follow_up",
+        "rejected_follow_up_pending",
+        :follow_up_pending
+      )
+    else
+      record = %{
+        "command_id" => command.command_id,
+        "command_digest" => digest,
+        "command_type" => "follow_up",
+        "admission" => "accepted",
+        "run_id" => active,
+        "content" => command.content,
+        kind: "command_admitted"
+      }
+
+      build_proposal(state, command.command_id, record, [], {:accepted, command.command_id})
+    end
+  end
+
+  defp propose_new(
+         %__MODULE__{active_run_id: nil} = state,
+         %{type: :follow_up} = command,
+         digest
+       ),
+       do: refusal(state, command, digest, "follow_up", "rejected_no_active_run", :no_active_run)
+
   defp propose_new(%__MODULE__{active_run_id: run_id} = state, %{type: :abort} = command, digest)
        when is_binary(run_id) do
     reply = {:accepted, command.command_id}
@@ -543,9 +704,10 @@ defmodule Loopex.Runtime.SessionState do
       kind: "command_admitted"
     }
 
+    {_patch, queue_events} = cancel_queues(state, run_id)
     event = abort_event(state.session_id, command.command_id, run_id)
 
-    build_proposal(state, command.command_id, record, [event], reply)
+    build_proposal(state, command.command_id, record, [event] ++ queue_events, reply)
   end
 
   defp propose_new(%__MODULE__{} = state, %{type: :abort} = command, digest) do
@@ -560,6 +722,25 @@ defmodule Loopex.Runtime.SessionState do
     }
 
     build_proposal(state, command.command_id, record, [], reply)
+  end
+
+  defp refusal(state, command, digest, type, admission, reason) do
+    record = %{
+      "command_id" => command.command_id,
+      "command_digest" => digest,
+      "command_type" => type,
+      "admission" => admission,
+      kind: "command_admitted"
+    }
+
+    build_proposal(state, command.command_id, record, [], {:error, reason})
+  end
+
+  defp queued_steer(state, run_id) do
+    case Map.get(state.steer, run_id) do
+      %{state: "queued"} = steer -> steer
+      _other -> nil
+    end
   end
 
   defp build_proposal(state, tx_id, record, events, reply) do
@@ -766,6 +947,46 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp command_effect(
+         %{active_run_id: active} = state,
+         record,
+         "steer",
+         "accepted",
+         command_id
+       )
+       when is_binary(active) do
+    with {:ok, run_id} <- record_binary(record, "run_id"),
+         true <- run_id == active,
+         {:ok, content} <- record_binary(record, "content") do
+      steer = %{command_id: command_id, content: content, state: "queued"}
+
+      {:ok, {:accepted, command_id}, active, state.pending_work, state.expected_events,
+       %{steer: Map.put(state.steer, active, steer)}}
+    else
+      _other -> {:error, :invalid_steer_record}
+    end
+  end
+
+  defp command_effect(
+         %{active_run_id: active} = state,
+         record,
+         "follow_up",
+         "accepted",
+         command_id
+       )
+       when is_binary(active) do
+    with {:ok, content} <- record_binary(record, "content") do
+      {:ok, {:accepted, command_id}, active, state.pending_work, state.expected_events,
+       %{follow_up: %{command_id: command_id, content: content}}}
+    end
+  end
+
+  defp command_effect(state, _record, type, "rejected_" <> reason, _command_id)
+       when type in ["steer", "follow_up"] do
+    {:ok, {:error, String.to_existing_atom(reason)}, state.active_run_id, state.pending_work,
+     state.expected_events, %{}}
+  end
+
+  defp command_effect(
          %{active_run_id: run_id} = state,
          _record,
          "prompt",
@@ -787,11 +1008,20 @@ defmodule Loopex.Runtime.SessionState do
        when is_binary(active_run_id) do
     case record_binary(record, "run_id") do
       {:ok, ^active_run_id} ->
+        # Concept: an abort cancels the queues as well as the run.
+        #
+        # Technical depth: a durably admitted abort resolves any queued steer and
+        # any queued follow-up as cancelled, each recorded truthfully against its
+        # own command_id. Leaving either queued would let work an operator
+        # cancelled start itself a moment later.
+        {patch, queue_events} = cancel_queues(state, active_run_id)
+
         expected_events =
-          state.expected_events ++ [abort_event(state.session_id, command_id, active_run_id)]
+          state.expected_events ++
+            [abort_event(state.session_id, command_id, active_run_id)] ++ queue_events
 
         {:ok, {:accepted, command_id}, nil, Map.delete(state.pending_work, active_run_id),
-         expected_events, %{}}
+         expected_events, patch}
 
       _other ->
         {:error, :invalid_abort_record}
@@ -821,6 +1051,8 @@ defmodule Loopex.Runtime.SessionState do
          "run_id" => run_id,
          "turn_id" => turn_id,
          "request" => request,
+         "applied_steer" => applied_steer,
+         "context_receipt" => _context_receipt,
          kind: "model_request_committed"
        }) do
     with {:ok, request} <- decode_request(request),
@@ -846,7 +1078,33 @@ defmodule Loopex.Runtime.SessionState do
 
       deadlines = Map.put_new(state.deadlines, run_id, request.deadline)
 
-      {:ok, put_pending(%{state | deadlines: deadlines}, run_id, next_work), []}
+      # Concept: a steer becomes applied in the same transaction that dispatches
+      # the request carrying it, and nowhere else.
+      #
+      # Technical depth: its exact bytes enter the conversation as a user-role
+      # element here, so the record of what was said and the record of what was
+      # sent cannot disagree. A steer is never recorded applied unless a
+      # committed request actually carried it.
+      {state, events} =
+        case applied_steer && Map.get(state.steer, run_id) do
+          %{command_id: ^applied_steer, content: content} = steer ->
+            element = %{
+              kind: :user_message,
+              run_id: run_id,
+              command_id: applied_steer,
+              content: content
+            }
+
+            {state
+             |> append_element(run_id, element)
+             |> Map.update!(:steer, &Map.put(&1, run_id, %{steer | state: "applied"})),
+             [steer_event(state.session_id, applied_steer, run_id, "applied", nil)]}
+
+          _absent ->
+            {state, []}
+        end
+
+      {:ok, put_pending(%{state | deadlines: deadlines}, run_id, next_work), events}
     else
       _other -> {:error, :invalid_model_request_transition}
     end
@@ -1011,10 +1269,11 @@ defmodule Loopex.Runtime.SessionState do
          "observed" => observed,
          "declared_limit" => declared_limit,
          "accounting_source" => accounting_source,
+         "reconciliation_ref" => reconciliation_ref,
          kind: "run_terminal_committed"
        }) do
     with %{stage: "turn_settled"} <- Map.get(state.pending_work, run_id),
-         true <- outcome in ["completed", "bound_reached"] do
+         true <- outcome in ["completed", "bound_reached", "outcome_unknown"] do
       # Concept: bound_reached carries the bound and the observed value and
       # nothing else.
       #
@@ -1023,7 +1282,7 @@ defmodule Loopex.Runtime.SessionState do
       # this record, recorded beside it rather than inside it, so the run
       # terminal algebra keeps exactly the shape the vision fixes.
       event =
-        run_finished_event(state.session_id, run_id, outcome, nil)
+        run_finished_event(state.session_id, run_id, outcome, reconciliation_ref)
         |> Map.merge(
           case outcome do
             "bound_reached" ->
@@ -1039,12 +1298,18 @@ defmodule Loopex.Runtime.SessionState do
           end
         )
 
-      {:ok,
-       %{
-         state
-         | active_run_id: nil,
-           pending_work: Map.delete(state.pending_work, run_id)
-       }, [event]}
+      # Concept: ending a run resolves everything that was waiting behind it.
+      #
+      # Technical depth: a queued steer that never reached a request resolves
+      # unapplied, carrying the reason the run ended, and is never auto-promoted
+      # into a follow-up — an operator resubmits it under a new command if they
+      # still mean it. A queued follow-up becomes the next run in this same
+      # transaction, so there is no window in which the session looks settled
+      # while work is still owed.
+      {state, steer_events} = resolve_steer(state, run_id, unapplied_reason(outcome, bound))
+      {state, promotion_events} = promote_follow_up(state, run_id)
+
+      {:ok, state, [event] ++ steer_events ++ promotion_events}
     else
       _other -> {:error, :invalid_run_terminal_transition}
     end
@@ -1070,6 +1335,102 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp apply_internal_record(_state, _record), do: {:error, :invalid_internal_transition}
+
+  defp unapplied_reason("bound_reached", bound) when is_binary(bound), do: bound
+  defp unapplied_reason(_outcome, _bound), do: "run_terminal"
+
+  defp resolve_steer(state, run_id, reason) do
+    case queued_steer(state, run_id) do
+      nil ->
+        {state, []}
+
+      steer ->
+        {Map.update!(state, :steer, &Map.put(&1, run_id, %{steer | state: "unapplied"})),
+         [steer_event(state.session_id, steer.command_id, run_id, "unapplied", reason)]}
+    end
+  end
+
+  defp promote_follow_up(%{follow_up: nil} = state, run_id) do
+    {%{state | active_run_id: nil, pending_work: Map.delete(state.pending_work, run_id)}, []}
+  end
+
+  defp promote_follow_up(%{follow_up: follow_up} = state, run_id) do
+    promoted = stable_id("run", state.session_id, follow_up.command_id)
+    declared = Map.get(state.bounds, run_id)
+
+    work = %{
+      type: "model",
+      stage: "model_pending",
+      run_id: promoted,
+      command_id: follow_up.command_id,
+      content: follow_up.content,
+      turn_number: 1,
+      pending_calls: []
+    }
+
+    element = %{
+      kind: :user_message,
+      run_id: promoted,
+      command_id: follow_up.command_id,
+      content: follow_up.content
+    }
+
+    next =
+      %{
+        state
+        | active_run_id: promoted,
+          follow_up: nil,
+          pending_work: state.pending_work |> Map.delete(run_id) |> Map.put(promoted, work),
+          bounds: Map.put(state.bounds, promoted, declared),
+          conversation: Map.put(state.conversation, promoted, [element])
+      }
+
+    {next, prompt_events(state.session_id, follow_up.command_id, promoted, follow_up.content)}
+  end
+
+  defp cancel_queues(state, run_id) do
+    {steer_patch, steer_events} =
+      case queued_steer(state, run_id) do
+        nil ->
+          {%{}, []}
+
+        steer ->
+          {%{steer: Map.put(state.steer, run_id, %{steer | state: "cancelled"})},
+           [steer_event(state.session_id, steer.command_id, run_id, "cancelled", "aborted")]}
+      end
+
+    {follow_patch, follow_events} =
+      case state.follow_up do
+        nil ->
+          {%{}, []}
+
+        follow_up ->
+          {%{follow_up: nil},
+           [
+             %{
+               "command_id" => follow_up.command_id,
+               "run_id" => run_id,
+               "disposition" => "cancelled",
+               "reason" => "aborted",
+               event_id: stable_id("event-follow-up", state.session_id, follow_up.command_id),
+               kind: "follow_up.resolved"
+             }
+           ]}
+      end
+
+    {Map.merge(steer_patch, follow_patch), steer_events ++ follow_events}
+  end
+
+  defp steer_event(session_id, command_id, run_id, disposition, reason) do
+    %{
+      "command_id" => command_id,
+      "run_id" => run_id,
+      "disposition" => disposition,
+      "reason" => reason,
+      event_id: stable_id("event-steer", session_id, command_id),
+      kind: "steer.resolved"
+    }
+  end
 
   # Concept: one committed reply becomes one assistant message and the turn's
   # list of calls to run.
@@ -1592,6 +1953,29 @@ defmodule Loopex.Runtime.SessionState do
 
         :abort ->
           {:ok, %{type: :abort, command_id: command_id}}
+
+        # Concept: a steer must name the run it is steering.
+        #
+        # Technical depth: the runtime never infers whether new input is
+        # steering or follow-up, so a steer that names no run, or names a
+        # different one, is refused rather than retargeted. Guessing here would
+        # put an operator's words into a run they did not mean.
+        :steer ->
+          with {:ok, run_id} <- fetch_binary(command, :run_id),
+               {:ok, content} <- fetch_binary(command, :content),
+               true <- byte_size(content) <= @max_command_bytes do
+            {:ok, %{type: :steer, command_id: command_id, run_id: run_id, content: content}}
+          else
+            _other -> {:error, :invalid_command}
+          end
+
+        :follow_up ->
+          with {:ok, content} <- fetch_binary(command, :content),
+               true <- byte_size(content) <= @max_command_bytes do
+            {:ok, %{type: :follow_up, command_id: command_id, content: content}}
+          else
+            _other -> {:error, :invalid_command}
+          end
       end
     end
   end
@@ -1600,6 +1984,8 @@ defmodule Loopex.Runtime.SessionState do
     case fetch(command, :type) do
       {:ok, value} when value in [:prompt, "prompt"] -> {:ok, :prompt}
       {:ok, value} when value in [:abort, "abort"] -> {:ok, :abort}
+      {:ok, value} when value in [:steer, "steer"] -> {:ok, :steer}
+      {:ok, value} when value in [:follow_up, "follow_up"] -> {:ok, :follow_up}
       _other -> {:error, :invalid_command_type}
     end
   end

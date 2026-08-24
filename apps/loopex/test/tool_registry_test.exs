@@ -1,4 +1,5 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
 defmodule Loopex.ToolRegistryTest do
   @moduledoc false
@@ -158,6 +159,49 @@ defmodule Loopex.ToolRegistryTest do
                runtime,
                definition(%{"tool_id" => "example.bad", "name" => "Not A Name"})
              )
+  end
+
+  test "a model request records the exact tool definition generation it used" do
+    definition = Loopex.AgentLoopFixture.tool_definition()
+
+    fixture =
+      Loopex.AgentLoopFixture.start(script: [%{text: "done", calls: []}], tools: [definition])
+
+    on_exit(fn -> Loopex.AgentLoopFixture.stop(fixture) end)
+
+    {session_id, _attachment, _reply} = Loopex.AgentLoopFixture.run(fixture, "go")
+
+    wait_settled(fixture, session_id)
+
+    [record] =
+      fixture
+      |> Loopex.AgentLoopFixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed"))
+
+    # The staged request carries the complete definition record, so the
+    # generation it used is recomputable from the journal alone rather than by
+    # asking a registry that may since have changed.
+    assert [staged] = record.payload["request"]["tools"]
+    assert ToolDefinition.generation(staged) == ToolDefinition.generation(definition)
+
+    {tool_id, tool_version, digest} = ToolDefinition.generation(staged)
+    assert tool_id == "example.write"
+    assert tool_version == "1.0.0"
+    assert String.match?(digest, ~r/^[0-9a-f]{64}$/)
+  end
+
+  defp wait_settled(fixture, session_id, attempts \\ 300) do
+    case Loopex.session_status(fixture.runtime, session_id) do
+      {:ok, %{active_run_id: nil}} ->
+        :settled
+
+      _other when attempts > 0 ->
+        Process.sleep(10)
+        wait_settled(fixture, session_id, attempts - 1)
+
+      _other ->
+        :never_settled
+    end
   end
 
   test "a session binds one active model visible name to one generation and refuses a name conflict at start" do

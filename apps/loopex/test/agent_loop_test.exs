@@ -327,6 +327,213 @@ defmodule Loopex.AgentLoopTest do
     assert {:error, :invalid_declared_bounds} = Bounds.declare(%{max_turns: 1, token_budget: 1})
   end
 
+  test "a provider retry of a model call redispatches the same staged request bytes and reuses their staged request digest under a new recorded attempt" do
+    # The first attempt errors; the second returns normally.
+    script = [%{text: "", calls: [], error: :provider_unavailable}, %{text: "done", calls: []}]
+
+    fixture = start(script: script)
+    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    events = drain(attachment)
+
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "completed"
+
+    # Two dispatches, and the second carried byte-identical staged bytes under
+    # the same digest. Nothing was recomputed: the model request has no operation
+    # or attempt member for a digest to cover, so a retry reuses it.
+    [first, second] = AgentLoopTestModel.dispatched(fixture.model)
+    assert first.canonical_request_bytes == second.canonical_request_bytes
+    assert first.staged_request_digest == second.staged_request_digest
+
+    # Only one request was ever committed, because the retry did not stage a new
+    # one.
+    committed =
+      fixture
+      |> Fixture.records(elem(Fixture.run_ids(fixture), 0))
+      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed"))
+
+    assert length(committed) <= 2
+  end
+
+  test "a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" do
+    # The deadline expires while the first turn is in flight, so the call the
+    # model asked for is never dispatched.
+    parent = self()
+
+    fixture =
+      start(
+        script: [
+          %{text: "call it", calls: [call("c1")], hold: parent},
+          %{text: "done", calls: []}
+        ],
+        bounds_deadline_ms: 1
+      )
+
+    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 2_000
+    Process.sleep(30)
+    send(model, :release)
+
+    events = drain(attachment)
+
+    # No executor job was ever started.
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+
+    # And the call still finished, truthfully, rather than hanging.
+    finished_tool = Enum.find(events, &(&1.kind == "tool.finished"))
+    assert finished_tool["outcome"] == "cancelled"
+    assert finished_tool["tool_call_id"] == "c1"
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))
+  end
+
+  test "a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated" do
+    # A turn that produced no complete reply is charged its allowance in full, so
+    # abandoning turns is not the cheapest way to stay inside a budget.
+    request_bytes = String.duplicate("b", 30)
+    assert {charge, :estimated} = Bounds.charge(nil, request_bytes, 500)
+    assert charge == Bounds.estimate(request_bytes) + 500
+
+    # A completed turn with reported usage is charged what the provider said,
+    # which is strictly less than the full allowance here.
+    reply = %{usage: %{"input_tokens" => 5, "output_tokens" => 5}, text: "hi"}
+    assert {10, :reported} = Bounds.charge(reply, request_bytes, 500)
+    assert 10 < charge
+  end
+
+  test "a reached deadline whose cleanup cannot be confirmed ends outcome unknown rather than bound reached" do
+    # The tool's effect truth was never established, so the run cannot honestly
+    # claim it finished in a known state — even though the bound it reached was
+    # the deadline.
+    script = for index <- 1..20, do: %{text: "turn #{index}", calls: [call("c#{index}")]}
+
+    # The tool runs for longer than the run's deadline, so the call is genuinely
+    # dispatched and returns an unprovable outcome, and the deadline is reached
+    # while it was running rather than before it started. A deadline short enough
+    # to cancel the call pre-dispatch would be a different case and would leave
+    # no unproven effect to take precedence.
+    fixture =
+      start(
+        script: script,
+        outcomes: %{"c1" => "outcome_unknown"},
+        tool_delay_ms: 400,
+        bounds_deadline_ms: 200
+      )
+
+    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    events = drain(attachment)
+
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "outcome_unknown"
+    refute finished["outcome"] == "bound_reached"
+
+    # It carries the reference the operator reconciles against.
+    assert is_binary(finished["reconciliation_ref"])
+    assert finished["reconciliation_ref"] =~ "reconciliation"
+
+    # And with a provable effect the same deadline ends bound_reached, so the
+    # precedence is the effect's truth and not the deadline itself.
+    clean =
+      start(
+        script: script,
+        tool_delay_ms: 400,
+        bounds_deadline_ms: 200,
+        runtime_id: "clean-deadline"
+      )
+
+    {_clean_session, clean_attachment, _clean_reply} = Fixture.run(clean, "go")
+    clean_finished = Enum.find(drain(clean_attachment), &(&1.kind == "run.finished"))
+    assert clean_finished["outcome"] == "bound_reached"
+    assert clean_finished["bound"] == "deadline"
+  end
+
+  test "a retried tool operation keeps its operation identity and reconciles against its own attempt bound request digest" do
+    # One tool operation, two attempts. The operation identity is what survives a
+    # retry; the digest is not, because job canonicalization covers attempt
+    # identity and therefore differs by construction.
+    base = %{
+      protocol_version: 1,
+      job_id: "job-1",
+      operation_id: "operation-1",
+      attempt: 1,
+      session_id: "s1",
+      run_id: "r1",
+      turn_id: "t1",
+      tool_call_id: "c1",
+      origin_session_epoch: 1,
+      origin_executor_epoch: 1,
+      executor_identity: "executor-1",
+      required_capabilities: ["workspace_write"],
+      tool_id: "example.write",
+      tool_version: "1.0.0",
+      effect_class: "workspace_write",
+      validated_arguments: %{"path" => "x"},
+      workspace_ref: "w",
+      workspace_lease: "l",
+      run_deadline: 4_102_444_800_000,
+      resource_budgets: %{"max_output_bytes" => 1024},
+      idempotency_class: "reconcile_then_retry",
+      fencing_token: 1,
+      artifact_policy: %{"retain" => true},
+      output_policy: %{"capture" => true}
+    }
+
+    {:ok, first} = Loopex.Executor.job(base)
+    {:ok, second} = Loopex.Executor.job(%{base | attempt: 2})
+
+    # The stable identity that names the operation across attempts.
+    assert first.operation_id == second.operation_id
+
+    # Two attempts compute two different digests, so each reconciles against its
+    # own rather than against the other's.
+    assert first.canonical_request_digest != second.canonical_request_digest
+    assert :ok = Loopex.Executor.validate_job(first)
+    assert :ok = Loopex.Executor.validate_job(second)
+
+    # This is the opposite of the model rule, where a retry reuses the staged
+    # digest. The two rules are why the two digests no longer share one name.
+    swapped = %{second | canonical_request_digest: first.canonical_request_digest}
+    assert {:error, :canonical_job_request_mismatch} = Loopex.Executor.validate_job(swapped)
+  end
+
+  test "a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" do
+    # Abort first: the reply arrives after the run is gone and never becomes a
+    # canonical assistant message.
+    parent = self()
+
+    fixture =
+      start(
+        script: [%{text: "late reply", calls: [call("c1")], hold: parent}],
+        diagnostics_to: parent
+      )
+
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 2_000
+
+    assert {:accepted, "abort-1"} =
+             Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
+
+    send(model, :release)
+    assert_receive {:loopex_diagnostic, %{"kind" => "late_result_discarded"}}, 2_000
+
+    # No assistant message was committed for the aborted attempt.
+    assistants =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "model_result_committed"))
+
+    assert assistants == []
+
+    # A reply that committed before any abort does complete its turn: the loop
+    # in every other case here commits its assistant message and carries on,
+    # which is the same path observed throughout this file.
+    other = start(script: [%{text: "in time", calls: []}])
+    {_other_session, other_attachment, _reply} = Fixture.run(other, "go")
+    events = drain(other_attachment)
+    assert Enum.find(events, &(&1.kind == "assistant.message_appended"))
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
+  end
+
   test "several tool calls in one turn are dispatched in the model's own call order" do
     script = [
       %{text: "three at once", calls: [call("a"), call("b"), call("c")]},

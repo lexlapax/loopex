@@ -31,6 +31,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Runtime.SessionState
   alias Loopex.Executor
   alias Loopex.Model
+  alias Loopex.ProjectResource
   alias Loopex.StreamDomain
   alias LoopexProtocol.ToolDefinition
   alias Loopex.Store
@@ -155,7 +156,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
        tool: Keyword.fetch!(options, :tool),
        active_tools: Keyword.get(options, :active_tools, []),
        progress_to: Keyword.get(options, :progress_to),
+       diagnostics_to: Keyword.get(options, :diagnostics_to),
        bounds: Keyword.get(options, :bounds),
+       project_manifest: Keyword.get(options, :project_manifest),
+       project_decision: Keyword.get(options, :project_decision),
        sampling: Keyword.get(options, :sampling),
        grant_decision: Keyword.fetch!(options, :grant_decision),
        fault_to: Keyword.fetch!(options, :fault_to),
@@ -271,11 +275,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       {{:model, run_id}, remaining} ->
         Process.demonitor(reference, [:flush])
-        accept_model_result(%{state | in_flight: remaining}, run_id, result)
+        dispatch_result(%{state | in_flight: remaining}, :model, run_id, result)
 
       {{:executor, run_id}, remaining} ->
         Process.demonitor(reference, [:flush])
-        accept_executor_result(%{state | in_flight: remaining}, run_id, result)
+        dispatch_result(%{state | in_flight: remaining}, :executor, run_id, result)
     end
   end
 
@@ -301,6 +305,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
     |> Map.put(:state, :redacted_session_coordinator_state)
     |> Map.put(:message, :redacted_session_coordinator_message)
     |> Map.put(:reason, :redacted_session_coordinator_reason)
+    |> tap(fn _ ->
+      IO.inspect(elem(Map.get(status, :reason, {:none}), 0), label: "DBG-REASON")
+    end)
     |> Map.put(:log, [])
   end
 
@@ -619,8 +626,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
     {declared, _charged} = SessionState.accounting(state.durable, run_id)
     elements = SessionState.elements(state.durable, run_id)
 
+    # Concept: a steer joins here, and only here.
+    #
+    # Technical depth: this is after every tool result of the current turn has
+    # committed and after the bound checks decided another request will actually
+    # be staged. Reading it any earlier would let a steer be recorded applied
+    # against a request the run never sent.
+    steer = SessionState.pending_steer(state.durable, run_id)
+
     with {:ok, max_tokens} <- declared_max_tokens(state),
-         messages = Conversation.project(elements, system: system_block(state)),
+         {blocks, receipt} = project_blocks(state),
+         messages =
+           Conversation.project(elements, system: system_block(state), project_blocks: blocks),
+         messages = messages ++ steer_message(steer),
          deadline = run_deadline(declared),
          {:ok, request} <-
            Model.request(state.model.model, messages,
@@ -628,7 +646,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
              sampling: %{"max_tokens" => max_tokens},
              deadline: deadline
            ),
-         {:ok, proposal} <- SessionState.propose_model_request(state.durable, run_id, request),
+         {:ok, proposal} <-
+           SessionState.propose_model_request(state.durable, run_id, request,
+             applied_steer: steer && steer.command_id,
+             context_receipt: receipt
+           ),
          {:ok, next} <- commit_internal(state, proposal) do
       send(self(), :advance_work)
       {:noreply, next}
@@ -666,6 +688,32 @@ defmodule Loopex.Runtime.SessionCoordinator do
       :completed ->
         commit_terminal(state, run_id, "completed", %{})
 
+      {:bound_reached, bound, observed} when bound == :deadline ->
+        # Concept: a deadline is not a guaranteed clean stop.
+        #
+        # Technical depth: `bound_reached(:deadline)` may commit only once every
+        # owned operation has reached a validated terminal fact. A committed
+        # `outcome_unknown` effect is precisely the case where one has not, so
+        # the run ends `outcome_unknown` carrying its reconciliation reference
+        # instead. That precedence is why no document here calls reaching a
+        # deadline a clean stop.
+        if SessionState.unproven_effect?(state.durable, run_id) do
+          commit_terminal(state, run_id, "outcome_unknown", %{
+            bound: "deadline",
+            observed: observed,
+            declared_limit: declared_limit(declared, :deadline),
+            accounting_source: charged.source && Atom.to_string(charged.source),
+            reconciliation_ref: reconciliation_ref(state, run_id)
+          })
+        else
+          commit_terminal(state, run_id, "bound_reached", %{
+            bound: "deadline",
+            observed: observed,
+            declared_limit: declared_limit(declared, :deadline),
+            accounting_source: charged.source && Atom.to_string(charged.source)
+          })
+        end
+
       {:bound_reached, bound, observed} ->
         commit_terminal(state, run_id, "bound_reached", %{
           bound: Atom.to_string(bound),
@@ -681,8 +729,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Technical depth: the deadline's declared limit is the instant the run was
   # actually bound by, not the duration it was configured with, because that is
   # what the observed clock reading is comparable to.
+  defp reconciliation_ref(state, run_id),
+    do: stable_id("reconciliation", state.session_id, run_id)
+
   defp declared_limit(declared, :deadline), do: run_deadline(declared)
   defp declared_limit(declared, bound), do: Map.fetch!(declared, bound)
+
+  # Concept: project context is admitted, never assumed.
+  #
+  # Technical depth: resolved per turn from the same manifest and decision, so a
+  # changed workspace or edited resource stops being admitted at the next turn
+  # rather than only at the next run. A declined class stages nothing and
+  # journals why; the coding task runs either way.
+  defp project_blocks(state) do
+    case ProjectResource.resolve(state.project_manifest, state.project_decision) do
+      {:staged, blocks, detail} -> {blocks, ProjectResource.receipt(:staged, detail)}
+      {:declined, reason, detail} -> {[], ProjectResource.receipt(reason, detail)}
+    end
+  end
+
+  defp steer_message(nil), do: []
+  defp steer_message(%{content: content}), do: [%{"role" => "user", "content" => content}]
 
   defp commit_terminal(state, run_id, outcome, detail) do
     with {:ok, proposal} <-
@@ -776,7 +843,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # loss.
   defp model_progress_fun(state, work) do
     domain =
-      StreamDomain.derive(:model, state.session_id, model_operation_id(work), work.turn_number)
+      StreamDomain.derive(
+        :model,
+        state.session_id,
+        model_operation_id(work),
+        Map.get(work, :model_attempt, 1)
+      )
 
     turn_id = work.turn_id
     sink = state.progress_to
@@ -870,7 +942,31 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp prepare_effect(state, work) do
     [call | _rest] = work.pending_calls
+    {declared, _charged} = SessionState.accounting(state.durable, work.run_id)
 
+    # Concept: a call is dispatched only while the run's deadline is still ahead.
+    #
+    # Technical depth: checked once, here, at intent commit. Past the deadline no
+    # intent commits, no grant is minted and no process starts, so the call takes
+    # a terminal `cancelled` fact whose cleanup is confirmed trivially — there is
+    # nothing to clean up because nothing ran. There is deliberately no minimum
+    # remaining time: a call with one millisecond left is dispatched, because
+    # inventing a threshold would refuse work the operator's declared bound
+    # actually permits.
+    if System.system_time(:millisecond) >= run_deadline(declared) do
+      commit_tool_terminal(
+        state,
+        work,
+        call,
+        :cancelled,
+        "the run deadline passed before dispatch"
+      )
+    else
+      dispatch_effect(state, work, call)
+    end
+  end
+
+  defp dispatch_effect(state, work, call) do
     with {:ok, definition} <- resolve_active_tool(state, call.name),
          {:ok, job} <- build_job(state, work, call, definition),
          {:ok, grant} <-
@@ -894,14 +990,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp commit_tool_failure(state, work, call, reason) do
+  defp commit_tool_failure(state, work, call, reason),
+    do: commit_tool_terminal(state, work, call, :failed, failure_reason(reason))
+
+  defp commit_tool_terminal(state, work, call, outcome, reason) do
     with {:ok, proposal} <-
            SessionState.propose_tool_result(
              state.durable,
              work.run_id,
              call.tool_call_id,
-             :failed,
-             failure_reason(reason)
+             outcome,
+             reason
            ),
          {:ok, next} <- commit_internal(state, proposal) do
       send(self(), :advance_work)
@@ -1034,6 +1133,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
     })
   end
 
+  # Concept: a result belongs to a run only while that run is still owed one.
+  #
+  # Technical depth: the pending-work map is the authority. If the run is gone —
+  # aborted, or already terminal — the result is late and takes the evidence
+  # path; otherwise it is applied normally.
+  defp dispatch_result(state, kind, run_id, result) do
+    if Map.has_key?(state.durable.pending_work, run_id) do
+      case kind do
+        :model -> accept_model_result(state, run_id, result)
+        :executor -> accept_executor_result(state, run_id, result)
+      end
+    else
+      accept_late_result(state, run_id, kind, result)
+    end
+  end
+
   defp accept_model_result(state, run_id, {:ok, reply}) when is_map(reply) do
     state = close_model_stream(state, run_id, :complete, Map.get(reply, :delta_count, 0))
 
@@ -1054,9 +1169,53 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp accept_model_result(state, run_id, result) do
     # An attempt that returned no reply still owes its closure, so a consumer can
-    # tell an abandoned stream from one that merely went quiet.
+    # tell an abandoned stream from one that merely went quiet, and still owes
+    # its charge, so giving up is not cheaper than finishing.
     state = close_model_stream(state, run_id, :abandoned, 0)
-    {:stop, {:model_failed, result}, state}
+    state = %{state | durable: SessionState.charge_incomplete_turn(state.durable, run_id)}
+
+    # Concept: a provider retry redispatches the bytes that were already
+    # committed.
+    #
+    # Technical depth: nothing is recomputed. The same staged bytes and the same
+    # staged_request_digest go out again under a newly recorded attempt, because
+    # the model request has no operation or attempt member for a digest to cover.
+    # That is the opposite of the executor rule, where each attempt canonicalizes
+    # its own attempt identity and therefore computes its own digest — which is
+    # exactly why the two digests no longer share one name.
+    case retry_model_attempt(state, run_id) do
+      {:ok, next} ->
+        send(self(), :advance_work)
+        {:noreply, next}
+
+      :exhausted ->
+        {:stop, {:model_failed, result}, state}
+    end
+  end
+
+  @model_attempt_limit 2
+
+  defp retry_model_attempt(state, run_id) do
+    case Map.get(state.durable.pending_work, run_id) do
+      %{stage: "model_dispatched"} = work ->
+        attempt = Map.get(work, :model_attempt, 1)
+
+        if attempt < @model_attempt_limit do
+          next_work = Map.put(work, :model_attempt, attempt + 1)
+
+          durable = %{
+            state.durable
+            | pending_work: Map.put(state.durable.pending_work, run_id, next_work)
+          }
+
+          {:ok, %{state | durable: durable}}
+        else
+          :exhausted
+        end
+
+      _absent ->
+        :exhausted
+    end
   end
 
   defp accept_executor_result(state, run_id, {:ok, receipt}) when is_map(receipt) do
@@ -1094,6 +1253,31 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:stop, {:executor_failed, result}, state}
     end
   end
+
+  # Concept: a reply that arrives after its run ended is evidence, not history.
+  #
+  # Technical depth: an abort admitted before the reply committed leaves no work
+  # for it to belong to. The attempt is retained truthfully on the diagnostics
+  # plane and never becomes a canonical assistant message, because the run it
+  # would have continued is already terminal. Treating it as a fault instead
+  # would kill an owner over a message that arrived a moment too late.
+  defp accept_late_result(state, run_id, kind, result) do
+    emit_diagnostic(state, %{
+      "kind" => "late_result_discarded",
+      "run_id" => run_id,
+      "operation" => Atom.to_string(kind),
+      "outcome" => if(match?({:ok, _}, result), do: "reply", else: "error")
+    })
+
+    {:noreply, state}
+  end
+
+  defp emit_diagnostic(%{diagnostics_to: sink}, item) when is_pid(sink) do
+    send(sink, {:loopex_diagnostic, item})
+    :ok
+  end
+
+  defp emit_diagnostic(_state, _item), do: :ok
 
   defp failure_of({:error, reason}), do: reason
   defp failure_of(other), do: other

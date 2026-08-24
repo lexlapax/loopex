@@ -41,6 +41,25 @@ defmodule Loopex.AgentLoopTestModel do
       progress.(%{kind: :text_delta, content_index: 0, text: text})
     end)
 
+    # Concept: a turn that can be held open, so a test can steer a live run.
+    #
+    # Technical depth: the adapter blocks inside the supervised task exactly as a
+    # slow provider would, which is the only way to observe input admitted while
+    # a run is genuinely active rather than between runs.
+    case Map.get(turn, :hold) do
+      nil ->
+        :ok
+
+      waiter when is_pid(waiter) ->
+        send(waiter, {:holding, self()})
+
+        receive do
+          :release -> :ok
+        after
+          5_000 -> :ok
+        end
+    end
+
     case Map.get(turn, :error) do
       nil ->
         {:ok,
@@ -72,8 +91,8 @@ defmodule Loopex.AgentLoopTestExecutor do
 
   @behaviour Loopex.Executor
 
-  def start(outcomes \\ %{}) do
-    {:ok, pid} = Agent.start_link(fn -> %{outcomes: outcomes, jobs: []} end)
+  def start(outcomes \\ %{}, delay_ms \\ 0) do
+    {:ok, pid} = Agent.start_link(fn -> %{outcomes: outcomes, jobs: [], delay_ms: delay_ms} end)
     pid
   end
 
@@ -84,6 +103,18 @@ defmodule Loopex.AgentLoopTestExecutor do
     progress = progress || Loopex.Executor.discard_progress()
     :ok = Agent.update(pid, fn state -> %{state | jobs: [job | state.jobs]} end)
     outcome = Agent.get(pid, &Map.get(&1.outcomes, job.tool_call_id, "completed"))
+
+    # Concept: a tool that takes real time, so a deadline can be reached while it
+    # runs rather than before it starts.
+    #
+    # Technical depth: without this the only way to reach a deadline mid-run is a
+    # deadline so short the call is cancelled before dispatch, which is a
+    # different case entirely and would make a precedence test pass or fail on
+    # scheduling.
+    case Agent.get(pid, & &1.delay_ms) do
+      delay when is_integer(delay) and delay > 0 -> Process.sleep(delay)
+      _none -> :ok
+    end
 
     progress.(%{
       tool_call_id: job.tool_call_id,
@@ -164,7 +195,10 @@ defmodule Loopex.AgentLoopFixture do
     outcomes = Keyword.get(options, :outcomes, %{})
 
     model_pid = Loopex.AgentLoopTestModel.start(script)
-    executor_pid = Loopex.AgentLoopTestExecutor.start(outcomes)
+
+    executor_pid =
+      Loopex.AgentLoopTestExecutor.start(outcomes, Keyword.get(options, :tool_delay_ms, 0))
+
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop")
 
     {:ok, runtime} =
@@ -172,6 +206,7 @@ defmodule Loopex.AgentLoopFixture do
         runtime_id: Keyword.get(options, :runtime_id, "agent-loop-runtime"),
         store: store,
         progress_to: Keyword.get(options, :progress_to),
+        diagnostics_to: Keyword.get(options, :diagnostics_to),
         model: %{
           module: Loopex.AgentLoopTestModel,
           model: "scripted:v1",
@@ -187,6 +222,13 @@ defmodule Loopex.AgentLoopFixture do
           workspace_lease: "workspace-lease"
         },
         tool: nil,
+        bounds: %{
+          max_turns: Keyword.get(options, :bounds_max_turns, 8),
+          token_budget: Keyword.get(options, :bounds_token_budget, 1_000_000),
+          deadline_ms: Keyword.get(options, :bounds_deadline_ms, 600_000)
+        },
+        project_manifest: Keyword.get(options, :project_manifest),
+        project_decision: Keyword.get(options, :project_decision),
         tools: definitions,
         active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
         grant_decision: {:host_policy, :allow}
@@ -221,13 +263,20 @@ defmodule Loopex.AgentLoopFixture do
 
     {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
 
-    reply =
-      Loopex.command(attachment, %{
-        type: :prompt,
-        command_id: "prompt-1",
-        content: content,
-        bounds: bounds(bound_overrides)
-      })
+    # Concept: a prompt names bounds only when the case is about overriding them.
+    #
+    # Technical depth: supplying them unconditionally would mask the runtime's
+    # own declared configuration, so a case that set a runtime bound would still
+    # see the command's default and quietly test nothing.
+    command =
+      %{type: :prompt, command_id: "prompt-1", content: content}
+      |> then(fn command ->
+        if map_size(bound_overrides) == 0,
+          do: command,
+          else: Map.put(command, :bounds, bounds(bound_overrides))
+      end)
+
+    reply = Loopex.command(attachment, command)
 
     {session_id, attachment, reply}
   end
@@ -241,6 +290,14 @@ defmodule Loopex.AgentLoopFixture do
         _other -> Enum.reverse(acc)
       end
     end
+  end
+
+  def run_ids(fixture) do
+    fixture.store
+    |> M1RuntimeTestStore.inspect_state()
+    |> Map.fetch!(:sessions)
+    |> Map.keys()
+    |> List.to_tuple()
   end
 
   def records(fixture, session_id) do
