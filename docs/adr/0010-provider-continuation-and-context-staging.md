@@ -117,7 +117,10 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
 - **Three declared bounds, all committed with the run.** Maximum model turns,
   cumulative token budget across the run, and a wall-clock deadline each have a
   configured value with a default. Every bound is checked before the next
-  request is staged, so exceeding one costs no provider call.
+  request is staged, so exceeding one makes no further provider call. The
+  deadline additionally binds work already in flight, so a deadline reached
+  mid-call aborts a request the provider may already have billed; only the
+  pre-staging check is free.
 - **The deadline bounds every operation the run owns, not only the gaps between
   turns.** The run's committed absolute deadline instant is propagated into the
   supervised model call and bounds that call, so one long generation cannot

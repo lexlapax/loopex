@@ -615,6 +615,7 @@ defmodule Loopex.Checks.Register do
         "`#{lookahead_name}` product implementation"
     )
     |> lookahead_values(delivery_name, lookahead_name, adr_statuses)
+    |> successor_prerequisites(lookahead_name, adr_statuses)
   end
 
   def expected_capsule({_delivery_name, state}, {_lookahead_name, "Open"}, _adr_statuses) do
@@ -665,7 +666,9 @@ defmodule Loopex.Checks.Register do
   # gate-first with its own plan pair and locked gate. The blocker field states the
   # closure rather than a gate verdict, because a canonical record should not
   # assert a run it cannot observe.
-  def expected_capsule("Closed", name, _adr_statuses) do
+  def expected_capsule("Closed", name, adr_statuses) do
+    require_prerequisites_accepted!(name, "Closed", adr_statuses)
+
     @seed_blocked
     |> Map.put("Blockers", "None; `#{name}` is closed and its governance row is recorded")
     |> Map.put(
@@ -738,6 +741,37 @@ defmodule Loopex.Checks.Register do
 
   defp lookahead_values(capsule, delivery_name, lookahead_name, _adr_statuses) do
     generic_lookahead_values(capsule, delivery_name, lookahead_name)
+  end
+
+  # Concept: the successor's own outstanding decisions are the successor's
+  # blocker, and the composite capsule is the only place they can be read.
+  #
+  # Technical depth: every `lookahead_values/4` clause discarded the successor's
+  # ADR statuses, so the one shape that carries an Open milestone without running
+  # the Open derivation stated nothing about that milestone's prerequisites. The
+  # delivery half already refuses to derive Accepted with one outstanding, so the
+  # gap was confined to what the successor's own row reports. This runs after
+  # whichever clause built the capsule, so a delivery-specific branch cannot
+  # bypass it the way calling `generic_lookahead_values/3` directly would.
+  defp successor_prerequisites(capsule, lookahead_name, adr_statuses) do
+    case unresolved_prerequisites(lookahead_name, adr_statuses) do
+      [] ->
+        capsule
+
+      unresolved ->
+        Map.put(
+          capsule,
+          "Next maintainer decision",
+          "#{capsule["Next maintainer decision"]}; `#{lookahead_name}` also waits on " <>
+            "#{join_and(prerequisite_links(unresolved))}, which " <>
+            "#{prerequisite_verb(unresolved)} not accepted"
+        )
+        |> Map.put(
+          "Blockers",
+          "#{capsule["Blockers"]}; `#{lookahead_name}` additionally waits on " <>
+            "#{join_and(prerequisite_names(unresolved))}"
+        )
+    end
   end
 
   defp generic_lookahead_values(capsule, delivery_name, lookahead_name) do

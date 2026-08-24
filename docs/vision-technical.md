@@ -926,6 +926,7 @@ stateDiagram-v2
     [*] --> idle
     idle --> preparing: prompt admitted
     preparing --> awaiting_model: model intent committed
+    preparing --> run_terminal: bound reached
     awaiting_model --> awaiting_tools: complete valid tool calls
     awaiting_model --> run_terminal: complete answer without tools
     awaiting_model --> run_terminal: error / abort / bound reached
@@ -993,8 +994,11 @@ own and the task is not known to be done. Encoding it as a failure category was
 considered and rejected: every consumer grouping by terminal value would then see
 a configured stop and a genuine breakage in one bucket, distinguishable only by
 reading a reason, which is precisely the distinction an operator needs most. A
-bound is checked before a request is staged, so reaching one costs no provider
-call. Bounds are enforced per run; a run that already committed a validated
+bound is checked before a request is staged, so reaching one ends the run
+without another provider call. That is a guarantee about the next call, not a
+promise the run was free: the deadline also bounds work already in flight, and a
+deadline that expires mid-call aborts a request the provider may already have
+billed. Bounds are enforced per run; a run that already committed a validated
 terminal fact keeps it, exactly as cancellation never overwrites one.
 
 ### 10.3 Input queues

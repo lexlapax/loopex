@@ -634,8 +634,9 @@ specific claim rather than reading prose.
 - Source-order properties: results committed out of completion order still
   commit in call order; staging is refused while a call lacks a result; a
   malformed tool call never becomes an element.
-- Each bound reached in isolation, asserting `bound_reached` with the named
-  bound, the observed value, and the accounting source; that no provider call
+- Each bound reached in isolation, asserting `bound_reached` carries the named
+  bound and the observed value and nothing else, with the accounting source
+  retained beside it in the same commit; that no provider call
   was made for the refused turn; that no assistant message was fabricated; and
   that the committed outcome is neither `failed` nor `completed` and carries no
   failure category or retryable flag.

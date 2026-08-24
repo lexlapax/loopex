@@ -1011,6 +1011,12 @@ defmodule Loopex.StatusCheckTest do
   test "accepted M1 truthfully derives its implementation-time ADR blocker" do
     path = "docs/adr/0008-owner-succession-recovery-and-runtime-placement.md"
 
+    m2_prerequisites = %{
+      "docs/adr/0009-tool-executor-and-grant-contracts.md" => "Accepted",
+      "docs/adr/0010-provider-continuation-and-context-staging.md" => "Accepted",
+      "docs/adr/0011-session-input-algebra-and-streaming.md" => "Accepted"
+    }
+
     proposed = Register.expected_capsule("Accepted", "M1", %{path => "Proposed"})
     accepted = Register.expected_capsule("Accepted", "M1", %{path => "Accepted"})
 
@@ -1021,14 +1027,18 @@ defmodule Loopex.StatusCheckTest do
     assert accepted["Blockers"] == "None; `M1` is accepted and implementation may proceed"
 
     lookahead_proposed =
-      Register.expected_capsule({"M1", "Accepted"}, {"M2", "Open"}, %{
-        path => "Proposed"
-      })
+      Register.expected_capsule(
+        {"M1", "Accepted"},
+        {"M2", "Open"},
+        Map.put(m2_prerequisites, path, "Proposed")
+      )
 
     lookahead_accepted =
-      Register.expected_capsule({"M1", "Accepted"}, {"M2", "Open"}, %{
-        path => "Accepted"
-      })
+      Register.expected_capsule(
+        {"M1", "Accepted"},
+        {"M2", "Open"},
+        Map.put(m2_prerequisites, path, "Accepted")
+      )
 
     assert lookahead_proposed["Blockers"] =~ "ADR 0008"
     assert lookahead_proposed["Blockers"] =~ "`M2` acceptance"
@@ -1052,6 +1062,7 @@ defmodule Loopex.StatusCheckTest do
     ]
 
     all_accepted = Map.new(adrs, fn {path, _name} -> {path, "Accepted"} end)
+    m1_adr = "docs/adr/0008-owner-succession-recovery-and-runtime-placement.md"
 
     # The defect this protects against: the generic Open and Accepted
     # derivations discarded ADR statuses, so `M2` derived "implementation may
@@ -1068,11 +1079,24 @@ defmodule Loopex.StatusCheckTest do
         refute open["Blockers"] =~ elem(other, 1)
       end
 
-      for state <- ["Accepted", "In progress", "In review"] do
+      for state <- ["Accepted", "In progress", "In review", "Closed"] do
         assert_raise Invalid, ~r/`M2` cannot move to #{state} before #{name} is accepted/, fn ->
           Register.expected_capsule(state, "M2", statuses)
         end
       end
+
+      # The composite capsule is the only shape carrying an Open milestone that
+      # does not run the Open derivation, so it must still name what that
+      # milestone waits on.
+      composite =
+        Register.expected_capsule(
+          {"M1", "Accepted"},
+          {"M2", "Open"},
+          Map.put(statuses, m1_adr, "Accepted")
+        )
+
+      assert composite["Blockers"] =~ name
+      assert composite["Next maintainer decision"] =~ name
     end
 
     two_outstanding =
@@ -1110,15 +1134,28 @@ defmodule Loopex.StatusCheckTest do
                "`M2` is open and not accepted; the recorded acceptance authority must " <>
                  "accept both normative envelopes and the gate"
              )
-             |> Map.put("Next maintainer decision", "Accept or reject the `M2` plan pair and gate")
+             |> Map.put(
+               "Next maintainer decision",
+               "Accept or reject the `M2` plan pair and gate"
+             )
              |> Map.put(
                "Next transition",
                "Record the acceptance governance row and move `M2` to Accepted"
              )
 
-    for state <- ["Accepted", "In progress", "In review"] do
+    for state <- ["Accepted", "In progress", "In review", "Closed"] do
       assert is_map(Register.expected_capsule(state, "M2", all_accepted))
     end
+
+    composite_clear =
+      Register.expected_capsule(
+        {"M1", "Accepted"},
+        {"M2", "Open"},
+        Map.put(all_accepted, m1_adr, "Accepted")
+      )
+
+    refute composite_clear["Blockers"] =~ "ADR 00"
+    refute composite_clear["Next maintainer decision"] =~ "ADR 00"
 
     # A declared prerequisite that is not a registered ADR is a governed failure,
     # never a silently resolved one.
@@ -2470,9 +2507,9 @@ defmodule Loopex.StatusCheckTest do
   end
 
   test "one delivery milestone may carry exactly one generic Open successor" do
-    successor = &String.replace(&1, "M0", "M2")
+    successor = &String.replace(&1, "M0", "M9")
 
-    rows = [{"M0", "Accepted"}, {"M2", "Open"}]
+    rows = [{"M0", "Accepted"}, {"M9", "Open"}]
 
     # The phase is derived rather than named here, so this literal also pins the
     # other half of the derivation: a register with no Closed row stays
@@ -2481,7 +2518,7 @@ defmodule Loopex.StatusCheckTest do
 
     assert summary ==
              "**Revision status:** Pre-implementation planning; active milestone `M0` is " <>
-               "accepted; next candidate `M2` is open."
+               "accepted; next candidate `M9` is open."
 
     documents =
       Fixture.documents()
@@ -2492,20 +2529,20 @@ defmodule Loopex.StatusCheckTest do
            Fixture.blocked_row(),
            "| `M0` | Accepted | [concept](M0.md) | " <>
              "[technical depth](M0-technical.md) | [gate](M0-gate.md) |\n" <>
-             "| `M2` | Open | [concept](M2.md) | " <>
-             "[technical depth](M2-technical.md) | [gate](M2-gate.md) |"
+             "| `M9` | Open | [concept](M9.md) | " <>
+             "[technical depth](M9-technical.md) | [gate](M9-gate.md) |"
          )
          |> String.replace(Fixture.summary(), summary)}
       end)
       |> Map.put("docs/plans/M0.md", Fixture.plan(governed: true))
       |> Map.put("docs/plans/M0-technical.md", Fixture.technical_plan())
       |> Map.put("docs/plans/M0-gate.md", Fixture.gate())
-      |> Map.put("docs/plans/M2.md", successor.(Fixture.plan()))
-      |> Map.put("docs/plans/M2-technical.md", successor.(Fixture.technical_plan()))
-      |> Map.put("docs/plans/M2-gate.md", Fixture.gate())
+      |> Map.put("docs/plans/M9.md", successor.(Fixture.plan()))
+      |> Map.put("docs/plans/M9-technical.md", successor.(Fixture.technical_plan()))
+      |> Map.put("docs/plans/M9-gate.md", Fixture.gate())
       |> Map.update!(
         "docs/plans/README.md",
-        &capsule(&1, {"M0", "Accepted"}, {"M2", "Open"})
+        &capsule(&1, {"M0", "Accepted"}, {"M9", "Open"})
       )
 
     assert [] == Fixture.checked(documents)
@@ -2518,12 +2555,12 @@ defmodule Loopex.StatusCheckTest do
       |> Map.fetch!("Authorized work")
 
     assert authorized =~ "accepted `M0`"
-    assert authorized =~ "planning, gate construction, and review for Open `M2`"
-    assert authorized =~ "no `M2` product implementation"
+    assert authorized =~ "planning, gate construction, and review for Open `M9`"
+    assert authorized =~ "no `M9` product implementation"
 
     documents
     |> replace(
-      "docs/plans/M2.md",
+      "docs/plans/M9.md",
       "| 1 | Open | — |",
       "| 1 | Proved | proof |"
     )
