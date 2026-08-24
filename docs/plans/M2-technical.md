@@ -86,12 +86,12 @@ The composition is wiring and nothing else. It names the concrete Store, Model,
 Executor, and ArtifactStore implementations, starts the OTP application tree an
 `escript` does not start for it, starts a runtime, and returns it. It ships no
 policy and refuses to start unless the host supplies the one that governs the
-run. The `loopex` command depends on it and an embedder using those same reference
-adapters depends on it rather than copying it, which is the whole point of
-shipping it: a snippet each
-such embedder copies is re-derived once per embedder and goes stale silently the
-first time the kernel's start-up shape changes, while a shipped application
-changes once and breaks the build of every dependant that must change with it.
+run. The `loopex` command depends on it, and that is how an embedder using those
+same reference adapters obtains the wiring rather than copying it, which is the
+whole point of shipping it: a snippet each such embedder copies is re-derived
+once per embedder and goes stale silently the first time the kernel's start-up
+shape changes, while a shipped application changes once and breaks the build of
+every dependant that must change with it.
 It is that reference stack and no more: an embedder choosing a different Store,
 Model, Executor, or ArtifactStore composes the public ports and the `Loopex`
 facade itself, and M2 ships no generic wiring layer for that case.

@@ -166,9 +166,10 @@ without pretending a runner can verify its own bytes before executing them.
 `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` and
 `apps/loopex/test/deps_budget_test.exs` are deliberately **not** bound here.
 `M2` changes both: the planned inventory grows from six applications to eight,
-the role set gains `:composition` for the wiring-only application the
-command depends on and an embedder depends on rather than copying, the `:client` rule gains a production
-dependency on at most one `:composition` while still admitting no other
+the role set gains `:composition` for the wiring-only application the command
+depends on and an independent embedder fixture composes through, the `:client`
+rule gains a production dependency on at most one `:composition` while still
+admitting no other
 `:client`, and the corpus gains the three adversarial cases that prove the
 inventory, the new role's own permitted and forbidden directions, and the client
 rule that consumes it. Those two artifacts carry the whole inventory and role
