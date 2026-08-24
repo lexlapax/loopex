@@ -118,8 +118,9 @@ may not depend on another `:client`. Nothing depends on a `:client`.
 Taken together this is narrower in production than the widened client rule it
 replaces, not wider: no client gains a production edge dependency, `:client` to
 `:client` stays forbidden, dependency direction is unchanged because every new
-edge is still inward, and exactly one application in the repository is permitted
-to name a concrete adapter. The composition's reach is bounded by the
+edge is still inward, and exactly one production module in the
+repository is permitted to name a concrete adapter, test modules excepted as
+above. The composition's reach is bounded by the
 exact-inspection rule in Ownership below.
 
 **Two. Two narrow ports join the three M1 boundary behaviours.** `Loopex.Policy`
