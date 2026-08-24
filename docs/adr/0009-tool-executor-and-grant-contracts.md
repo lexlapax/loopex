@@ -236,12 +236,13 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   reference host repeats the pattern rather than importing it: the operator
   command is also a `:client`, and a `:client` may not depend on another
   `:client`, so it cannot reach `Loopex.Policy.AllowAll` and names a permissive
-  policy of its own. The shipped composition both hosts depend on supplies
-  neither, because a permissive default living in shared wiring would be
-  inherited by every embedder that depends on the wiring. Each permissive policy
-  must be named explicitly in configuration, is never an implicit fallback, and
-  emits one visible notice stating that this is permissive local authority and
-  not a permission model.
+  policy of its own. The shipped composition supplies no policy at all: it takes
+  the host's policy as a required argument and starts no runtime without one,
+  because a permissive default living in shared wiring would be inherited by
+  every embedder that depends on the wiring. Each permissive policy must be
+  named explicitly in configuration, is never an implicit fallback, and emits
+  one visible notice stating that this is permissive local authority and not a
+  permission model.
 - **Nothing but a policy `allow` mints a grant.** Model output, tool metadata,
   the registry entry, a definition digest, prompt text, project resources, and
   client arguments transport no authority. This restates ADR 0007's boundary in

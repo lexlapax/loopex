@@ -469,15 +469,23 @@ attempt is rendered as text — by encoding the integer as itself.
 
 **Let an abandoned domain end without a closure.** The successful attempt
 carries the truth, so an abandoned one arguably has nothing left to say, and
-saying nothing is the smallest possible rule. It is rejected: an unclosed domain
-is indistinguishable from a domain still streaming, so a consumer could
-distinguish "abandoned" from "open, items pending" only by a timeout — and a
-timeout is a guess that is wrong exactly when a provider or a build is slow,
-which reintroduces the ambiguity the closure item exists to remove. It would
-also leave the abandoned domain's own count unknowable, so nobody could tell a
-domain abandoned after forty items from one that lost forty. One closed
-enumeration on an item that has to exist for the successful domain anyway is
-cheaper than either.
+saying nothing is the smallest possible rule. It is rejected, though not because
+a consumer would be left without an answer: an unclosed domain and a domain
+still streaming are the same observation on the transient plane, and that plane
+alone cannot separate them, which is exactly the position in which a timeout
+starts to look like the missing discriminator. What actually separates them is
+the durable record — under this decision and under the rejected one alike —
+which is why the selected contract answers a closure that never arrives by
+falling back to durable truth and never by starting a timer. What the rejected
+option costs is immediacy and the count. A closure that is received states the
+attempt's disposition at the moment that attempt ends, where otherwise a
+consumer waits for the durable record to learn the same thing; and it states
+that domain's own total, which no durable element carries, because
+`delta_count` and `progress_count` are private attempt evidence and an
+abandoned attempt returned neither a reply nor a receipt to state one. Without
+it nobody could tell a domain abandoned after forty items from one that lost
+forty. One closed enumeration on an item that has to exist for the successful
+domain anyway buys both.
 
 **Have a closure state the last sequence number it saw rather than a count.** A
 final sequence looks symmetrical with the sequence the deltas carry. It is
@@ -629,10 +637,12 @@ anything, keep a domain's partial output distinguishable when a retry supersedes
 it, and read the disposition on a closure rather than infer one: an `abandoned`
 closure beside a `complete` one is a retried turn, not a defect to report. The
 cost is that every client renders two closure dispositions instead of one item
-kind, and the gain is that abandonment is announced rather than waited for. A
-client that ignores the field and counts per turn will manufacture gaps on every
-retried turn — a failure mode more misleading than no loss detection at all,
-because it accuses a healthy stream.
+kind, and the gain is that a received closure states abandonment at the moment
+the attempt ends, rather than leaving a consumer to read the outcome off the
+durable record later, and states that domain's own count, which no durable
+element carries at all. A client that ignores the field and counts per turn
+will manufacture gaps on every retried turn — a failure mode more misleading
+than no loss detection at all, because it accuses a healthy stream.
 
 Promotion becomes the moment a follow-up's run is fully decided. Its bounds and
 its absolute deadline start running from the terminal transition of the run

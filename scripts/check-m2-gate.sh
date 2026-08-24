@@ -597,7 +597,7 @@ require_feature \
   "the cumulative token budget ends the run bound reached before another provider call" \
   "the wall clock deadline ends the run bound reached before another provider call" \
   "a retried tool operation keeps its operation identity and reconciles against its own attempt bound request digest" \
-  "a provider retry of a model call reuses its staged request digest under a new recorded attempt" \
+  "a provider retry of a model call redispatches the same staged request bytes and reuses their staged request digest under a new recorded attempt" \
   "a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" \
   "the committed absolute deadline is propagated into the model call rather than an independent per call timeout" \
   "a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" \
@@ -731,6 +731,7 @@ require_feature \
   "loopex artifact retrieves a spilled artifact by its opaque reference" \
   "project resource trust is decided at the terminal and a non interactive run without a decision fails closed" \
   "the command surface drives only the public facade and owns no loop store cursor or authority" \
+  "a dropped stream closure leaves the terminal falling back to the durable record without inferring abandonment or starting a timer" \
   "the base system prompt and active tool definitions measure under one thousand tokens" \
   "argument parsing and terminal output use only the standard library"
 
@@ -1274,7 +1275,7 @@ run_selector 1 apps/loopex/test/agent_loop_test.exs default 16 zero \
   "passed=the cumulative token budget ends the run bound reached before another provider call" \
   "passed=the wall clock deadline ends the run bound reached before another provider call" \
   "passed=a retried tool operation keeps its operation identity and reconciles against its own attempt bound request digest" \
-  "passed=a provider retry of a model call reuses its staged request digest under a new recorded attempt" \
+  "passed=a provider retry of a model call redispatches the same staged request bytes and reuses their staged request digest under a new recorded attempt" \
   "passed=a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" \
   "passed=the committed absolute deadline is propagated into the model call rather than an independent per call timeout" \
   "passed=a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" \
@@ -1362,7 +1363,7 @@ run_selector 9 apps/loopex/test/session_directory_test.exs default 5 zero \
   "passed=resuming a session through a different runtime identity is refused with an explicit reason" \
   "passed=a repeated resume command identity returns its historical result while a fresh identity acquires ownership"
 
-run_selector 10 apps/loopex_cli/test/cli_test.exs default 15 zero \
+run_selector 10 apps/loopex_cli/test/cli_test.exs default 16 zero \
   "passed=loopex run submits a prompt and streams the answer with its tool calls and results" \
   "passed=the operator steers a running task and queues a follow-up from the same terminal" \
   "passed=prompt steer follow up and abort have distinct explicit affordances and input naming neither is refused" \
@@ -1376,6 +1377,7 @@ run_selector 10 apps/loopex_cli/test/cli_test.exs default 15 zero \
   "passed=loopex artifact retrieves a spilled artifact by its opaque reference" \
   "passed=project resource trust is decided at the terminal and a non interactive run without a decision fails closed" \
   "passed=the command surface drives only the public facade and owns no loop store cursor or authority" \
+  "passed=a dropped stream closure leaves the terminal falling back to the durable record without inferring abandonment or starting a timer" \
   "passed=the base system prompt and active tool definitions measure under one thousand tokens" \
   "passed=argument parsing and terminal output use only the standard library"
 

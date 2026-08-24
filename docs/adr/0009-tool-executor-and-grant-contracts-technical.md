@@ -461,13 +461,14 @@ operator command is also a `:client`, and a `:client` may not depend on another
 `:client`, so it cannot reach `Loopex.Policy.AllowAll` and ships its own
 separately named permissive policy for a trusted local developer, applied only
 when the operator names it and emitting the same single permissive-authority
-notice. The shipped composition both hosts depend on supplies neither: it takes
-the host's policy as a required argument and starts no runtime without one,
-because a permissive default living in shared wiring would be inherited by every
-embedder that depends on the wiring. `M2` therefore ships two permissive
-policies, each owned and named by the host that decided to trust its own
-workspace, each proved in that host's own lane, and neither ever an implicit
-fallback for the other or for anybody else.
+notice. The shipped composition supplies no policy of its own: it takes the
+host's policy as a required argument and starts no runtime without one, because
+a permissive default living in shared wiring would be inherited by every
+embedder that depends on the wiring. Reusing the wiring therefore never means
+inheriting another host's answer. `M2` ships two permissive policies, each owned
+and named by the host that decided to trust its own workspace, each proved in
+that host's own lane, and neither ever an implicit fallback for the other or for
+anybody else.
 
 Two alternative homes were rejected against the minimalism budget. A separate
 application holding one module would add a project, a dependency record, and an

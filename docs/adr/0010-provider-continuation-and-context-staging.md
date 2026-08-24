@@ -242,8 +242,12 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   conservative number to charge.
 - **Reaching a bound is the run's own terminal outcome, not a failure.** The run
   commits `bound_reached`, the member the vision's closed run terminal set holds
-  for exactly this case, and the terminal record names which bound was reached,
-  the observed value against the declared limit, and how that value was
+  for exactly this case. That member is a prerequisite this decision depends on
+  rather than one it makes: the maintainer
+  [dispositioned the vision change](../developer/agent-context-map.md#disposition-bound-reached-vision-change-2026-08-23)
+  that added it, and this ADR neither restates nor reopens that argument. The
+  terminal record names which bound was reached, the observed value against the
+  declared limit, and how that value was
   obtained. It carries no failure category and no retryable flag, because
   nothing malfunctioned and no invariant broke: the run stopped where its
   operator configured it to stop, and the committed conversation is complete.
@@ -817,5 +821,6 @@ Technical depth: [Format, migration, and rollback mechanics](0010-provider-conti
 - [Vision executor protocol and brain/hand topology](../vision.md#concept-vision-executor-protocol) — the opaque workspace reference core never resolves
 - [Vision recovery truth](../vision-technical.md#technical-vision-recovery-truth) — §9.5's outcome immutability and reconciliation rules, which a `bound_reached` run terminal obeys like any other
 - [Vision loop semantics](../vision-technical.md#technical-vision-loop-semantics) — one run, the closed run terminal set `bound_reached` belongs to, input queues, and the split payload rule
+- [Vision terminal algebra disposition](../developer/agent-context-map.md#disposition-bound-reached-vision-change-2026-08-23) — the recorded maintainer decision that added `bound_reached` to that closed set; a prerequisite this ADR depends on, not one it makes or reopens
 - [AGENTS.md](../../AGENTS.md) — durability and recovery truth, truth planes,
   credentials and context, and the smallest sufficient system

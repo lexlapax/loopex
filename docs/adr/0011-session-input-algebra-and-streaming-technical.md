@@ -860,18 +860,30 @@ rather than adding it.
 
 **A closure only for a domain that finished.** The abandoned attempt's output is
 thrown away, so the argument is that its closure has nothing to report. What it
-reports is that the attempt ended. Without it, an abandoned domain and a domain
-still streaming are the same observation — items stopped arriving — and the only
-way to tell them apart is to wait, which makes every renderer carry a timeout
-whose correct value depends on provider latency, tool duration, and the
-operator's connection. A timeout is a guess, and this ADR refuses guesses about
-input for the same reason it should refuse one here. The absent closure also
-takes the abandoned domain's count with it, so a consumer could not distinguish
+reports is that the attempt ended, and it reports it as soon as it does.
+Without it, an abandoned domain and a domain still streaming are the same
+observation on the transient plane — items stopped arriving — and nothing on
+that plane separates them; a renderer reading only the plane is exactly the
+renderer tempted to carry a timeout whose correct value depends on provider
+latency, tool duration, and the operator's connection. That temptation is the
+defect in this option, not an absent answer: the durable record separates the
+two cases here and under this option alike, so the consumer rule this decision
+states is fall back to durable truth, never wait out a timer. A timeout is a
+guess, and this ADR refuses guesses about input for the same reason it refuses
+one here.
+
+What a received closure adds is the two things the durable record supplies late
+or not at all. Its `disposition` is stated at the instant the attempt
+terminates, so a client retires an abandoned attempt's rendering then rather
+than when the durable record settles. Its count is stronger still: an absent
+closure takes the abandoned domain's total with it, because `delta_count` and
+`progress_count` are private attempt evidence and an abandoned attempt returned
+neither a reply nor a receipt to state one, so a consumer could not distinguish
 an attempt abandoned after forty items from one that lost forty in transit,
 which is the loss detection the milestone promises inverted. Closing every
-domain costs one closed enumeration on an item that already has to exist, and it
-leaves exactly one rule for a consumer to implement — group by domain, read the
-closure — instead of one rule plus a timer.
+domain costs one closed enumeration on an item that already has to exist, and
+buys both: group by domain, read the closure where one arrives, fall back to
+the durable record where none does.
 
 **A final sequence number instead of a count.** The field would mirror the
 sequence on the items, which is superficially tidy. It breaks on the two cases
@@ -997,10 +1009,11 @@ Concept: [Consequences](0011-session-input-algebra-and-streaming.md#concept-adr-
 - The coordinator owes a closure for every domain it opens, on the error,
   cancellation, and supersession paths as well as the successful one. That is
   one more emission point on each of those paths, and it is what lets a client
-  retire an abandoned attempt's rendering on a stated fact rather than on a
-  timer. Every client in return reads a closure's `disposition` before deciding
-  anything, and treats a missing closure as an incomplete transient view rather
-  than as an abandoned attempt.
+  retire an abandoned attempt's rendering the moment that attempt ends, on a
+  stated fact, rather than waiting for the durable record to settle. Every
+  client in return reads a closure's `disposition` before deciding anything,
+  and treats a missing closure as an incomplete transient view — falling back
+  to the durable record, never to a timer — rather than as an abandoned attempt.
 - Promotion becomes a complete decision. The successor run's bounds and absolute
   deadline start at the previous run's terminal transition, so an outage between
   promotion and staging is counted against the promoted run, and a promoted run
@@ -1024,8 +1037,11 @@ Concept: [Consequences](0011-session-input-algebra-and-streaming.md#concept-adr-
 - Sequences that reset per attempt while their anchors identify a turn produce a
   loss check that reports faults on every retried turn and hides real loss on
   the abandoned one, which discredits the check rather than the retry.
-- A stream that ends without saying so leaves every client to invent a timeout,
-  and a label derived by joining unrestricted identifiers with a delimiter
+- A stream that ends without saying so states neither its disposition nor its
+  count on the plane it streamed on, so every client either waits for the
+  durable record to learn what a closure would have said immediately or invents
+  a timeout instead, and that domain's own total is stated nowhere at all. A
+  label derived by joining unrestricted identifiers with a delimiter separately
   leaves two attempts able to share one domain. Both defects are silent, both
   are decided by whoever implements first, and both are cheaper to settle here
   than in a frozen protocol.
