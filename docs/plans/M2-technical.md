@@ -76,8 +76,11 @@ than a side effect.
 **One. An eighth application, a new `:composition` role, and the client rule
 that admits it.** Two applications are added: `apps/loopex_cli` with role
 `:client`, and `apps/loopex_composition` with the new role `:composition`. The
-planned inventory therefore becomes eight applications, and the production role
-set becomes `:contract`, `:core`, `:edge`, `:composition`, and `:client`.
+planned inventory therefore becomes eight applications, and `:composition` is
+added to the existing role set, which already carries `:extension` for ADR
+0003's protocol-only contributor, so the set becomes `:contract`, `:core`,
+`:edge`, `:composition`, `:client`, and `:extension`. `:extension` is untouched
+by this milestone and must survive the edit.
 
 The composition is wiring and nothing else. It names the concrete Store, Model,
 Executor, and ArtifactStore implementations, starts the OTP application tree an
