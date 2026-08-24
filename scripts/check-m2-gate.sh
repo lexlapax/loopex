@@ -1507,7 +1507,9 @@ run_selector mechanics apps/loopex/test/status_check_test.exs default 43 zero \
   "passed=a gate generations table is append-only in both admitted directions" \
   "passed=the integrated phase is derived from the register's closed rows"
 
-run_selector mechanics apps/loopex/test/history_anchoring_test.exs default 19 zero \
+run_selector mechanics apps/loopex/test/history_anchoring_test.exs default 21 zero \
+  "passed=a Closed milestone cannot conceal an outstanding prerequisite behind an Open successor" \
+  "passed=accepting a prerequisite later cannot legalise an earlier acceptance" \
   "passed=a Closed milestone's gate generation is one atomic proposal and one rebind" \
   "passed=recorded gate generations are append-only across reachable history" \
   "passed=a gate generation rebind cannot bind an interposed revision that changes nothing" \

@@ -705,9 +705,10 @@ hard turn starts a new session and loses the conversation, which is the sort of
 friction that makes people paste context by hand.
 
 Estimated token accounting is a permanent second class of number in the durable
-record. A `bound_reached` outcome naming `:token_budget` now
-has to say how its value was obtained, every consumer that renders a token count
-has to render the distinction, and a run that mixes reported and estimated turns
+record. A `bound_reached` outcome naming `:token_budget` carries only the bound
+and the observed value, so a sibling field of the same terminal record now has to
+say how that value was obtained, every consumer that renders a token count has to
+render the distinction, and a run that mixes reported and estimated turns
 carries both. That is the cost of never letting a committed bound become
 silently inert.
 

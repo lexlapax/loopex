@@ -2457,11 +2457,11 @@ defmodule Loopex.StatusCheckTest do
   # newly opened one coexist from the moment a second milestone opens.
   #
   # Technical depth: derivation must name the milestone a reader would call
-  # active. With M0 closed and M2 open in this generic fixture, the capsule
-  # describes M2; the closed row is history, and describing it would tell a
-  # reader no work is authorized while M2 is open. The negative case pins exactly
+  # active. With M0 closed and M9 open in this generic fixture, the capsule
+  # describes M9; the closed row is history, and describing it would tell a
+  # reader no work is authorized while M9 is open. The negative case pins exactly
   # that: M0's closed capsule, every field of it a real derived value, must be
-  # refused once M2 is open.
+  # refused once M9 is open.
   test "an open milestone beside a closed one derives the open one's capsule" do
     rename = &String.replace(&1, "M0", "M9")
 

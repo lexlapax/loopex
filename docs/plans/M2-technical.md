@@ -340,11 +340,11 @@ or deadline-aborted turn is charged its request bytes plus that turn's committed
 survive restart and charging zero would make aborting every turn the cheapest
 way to stay inside a budget. Reaching a bound commits `bound_reached`, the
 terminal outcome the vision added for exactly this ending, carrying the vision's
-exact `bound_reached(bound, observed)` payload and no more; the accounting source
-is retained beside the outcome in the same commit rather than inside it, because
-the closed terminal algebra is a released shape this milestone may use but may
-not widen. It is never recorded as a failure:
-nothing malfunctioned, the committed conversation is complete, and a later run
+exact `bound_reached(bound, observed)` payload and no more; the declared limit
+and the accounting source are sibling fields of the same terminal record,
+recorded beside the outcome rather than inside it, because the closed terminal
+algebra is a released shape this milestone may use but may not widen. It is
+never recorded as a failure: nothing malfunctioned, the committed conversation is complete, and a later run
 continues it under a new bound. A reached deadline is the one bound whose commit
 waits: `bound_reached(:deadline)` commits only once every owned operation has
 reached a validated terminal fact and every owned process tree has been confirmed
@@ -762,9 +762,11 @@ named in Prerequisites, and exactly two corpora enforce that transaction:
 view of a Closed milestone's gate generations, and
 `apps/loopex/test/history_anchoring_test.exs`, which proves the same across
 reachable history. M2 locks both — `status_check_test.exs` at minimum 43 and
-`history_anchoring_test.exs` at minimum 19 — and names between them the cases
-that prove a Closed milestone's gate is amended by an accepted generation rather
-than a rebind, that a generation table fails closed on every malformed shape and
+`history_anchoring_test.exs` at minimum 21 — and names between them the cases
+that prove a Closed milestone cannot conceal an outstanding prerequisite behind
+an Open successor and that accepting one later cannot legalise an earlier
+acceptance, that a Closed milestone's gate is amended by an accepted generation
+rather than a rebind, that a generation table fails closed on every malformed shape and
 is append-only in both admitted directions, that the integrated phase is derived
 from the register's closed rows, that a milestone cannot derive an Accepted or
 later capsule while an ADR its plan pair declares as a prerequisite is still

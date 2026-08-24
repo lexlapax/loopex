@@ -147,7 +147,7 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `293696d62a5c39551e3777cd2675631710fe0bf1744503d752bbc25bf1a8336e` | `scripts/check-m2-gate.sh` |
+| `9599d692e1a57850ccf96ce19e02f3181509ef95f0dc1143985f23baf55448c4` | `scripts/check-m2-gate.sh` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -452,9 +452,11 @@ names:
 - `a gate generations table is append-only in both admitted directions`
 - `the integrated phase is derived from the register's closed rows`
 
-`apps/loopex/test/history_anchoring_test.exs`, minimum 19, including these
+`apps/loopex/test/history_anchoring_test.exs`, minimum 21, including these
 passed names:
 
+- `a Closed milestone cannot conceal an outstanding prerequisite behind an Open successor`
+- `accepting a prerequisite later cannot legalise an earlier acceptance`
 - `a Closed milestone's gate generation is one atomic proposal and one rebind`
 - `recorded gate generations are append-only across reachable history`
 - `a gate generation rebind cannot bind an interposed revision that changes nothing`

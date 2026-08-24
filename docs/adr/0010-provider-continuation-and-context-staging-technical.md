@@ -205,10 +205,13 @@ now >= run_deadline                      -> bound_reached, :deadline
 otherwise                                -> stage and dispatch
 ```
 
-Because every bound is evaluated before staging, exceeding one costs no provider
-call and commits no partial request. The terminal record names which bound was
-reached, the observed value against the declared limit, and the accounting
-source that produced it.
+Because every bound is evaluated before staging, exceeding one makes no further
+provider call and commits no partial request. The deadline is the exception in
+the other direction: it also bounds work already in flight, so a deadline reached
+mid-call aborts a request the provider may already have billed, and only the
+pre-staging check is free. The `bound_reached` outcome carries the bound and the
+observed value; the declared limit and the accounting source that produced the
+value are sibling fields of the same terminal record.
 
 The order is load-bearing at the top as well as the bottom. The no-tool check
 precedes every bound check, so a run whose model stopped on its own is
@@ -225,10 +228,11 @@ instead when one of those cannot be proved.
 category of `failed(category, retryable?)`. It therefore carries no failure
 category and no `retryable?` flag. Its payload is the vision's exact
 `bound_reached(bound, observed)`: the bound name — `:max_turns`,
-`:token_budget`, or `:deadline` — and the observed value against the declared
-limit. The accounting source that produced that value is retained beside the
-outcome in the run's terminal record rather than inside the outcome, so the
-algebra's shape stays the one the vision fixes. A retryable flag would be
+`:token_budget`, or `:deadline` — and the observed value, and nothing else. The
+declared limit that value was measured against and the accounting source that
+produced it are sibling fields of the run's terminal record, recorded beside the
+outcome rather than inside it, so the algebra's shape stays the one the vision
+fixes. A retryable flag would be
 the wrong shape as well as the wrong grouping: the bounds are committed with the
 run, so a retry under the same run identity re-evaluates the same committed
 limits against the same committed counters and stops again without a provider
@@ -295,7 +299,7 @@ three different endings rather than one:
 | --- | --- | --- | --- |
 | A complete validated reply **with no tool calls** | `completed`; the assistant message becomes canonical history and its usage is accounted normally | `completed`. The no-tool check precedes every bound check, so the run has already reached its terminal fact; a deadline firing afterwards is a no-op and never rewrites it | None; the reply is the committed fact and the run is terminal |
 | A complete validated reply **with tool calls** | `completed`; the assistant message and its complete tool calls become canonical history | Each call is dispatched only if the run deadline is still in the future at its intent commit; a call whose deadline has passed commits no intent, mints no grant, and takes a terminal `cancelled` fact. Once every call has a committed terminal result the run takes one of three endings, decided by the deadline at that moment and not by the reply: the deadline still in the future **continues the loop** into the next turn; the deadline reached before the next request is staged commits `bound_reached` naming `:deadline`; and any call whose effect or cleanup could not be proved commits `outcome_unknown` instead, outranking both | A late receipt for a cancelled call is retained truthfully and projected into no next turn |
-| The **deadline admission** | No assistant message is written; the attempt is retained as evidence with its abort reason | `bound_reached` naming `:deadline`, with the committed instant and the observed instant, after cleanup is confirmed | A reply arriving after admission is retained truthfully as attempt evidence and never becomes a canonical assistant message |
+| The **deadline admission** | No assistant message is written; the attempt is retained as evidence with its abort reason | `bound_reached(:deadline, observed_instant)` after cleanup is confirmed; the committed deadline instant is a sibling field of the same terminal record, never a second member of the outcome | A reply arriving after admission is retained truthfully as attempt evidence and never becomes a canonical assistant message |
 
 Partial or streamed output never becomes a canonical assistant message under any
 of the three, so the race cannot produce a half-message in canonical history.
@@ -359,8 +363,10 @@ canonical byte encoding it must never return fewer tokens than a provider would
 charge for the same content. The run's cumulative counter is a sum over
 committed turns, so it is recoverable rather than held in process state, and a
 run that mixes sources keeps both subtotals. A `bound_reached`
-outcome naming `:token_budget` records the cumulative value, the limit, and
-whether any turn was estimated. Nothing anywhere disables the bound: there is no
+outcome naming `:token_budget` carries the bound and the cumulative observed
+value and nothing else; the limit and whether any turn was estimated are sibling
+fields of the same terminal record, recorded beside the outcome. Nothing anywhere
+disables the bound: there is no
 configuration, provider capability, or adapter return that makes the token check
 skip.
 
@@ -387,8 +393,9 @@ inherits committed state and the other must not.
 A resumed run therefore cannot gain time, turns, or tokens by being interrupted,
 and a new run cannot be charged for a previous one. The one case operators will
 notice is a run whose deadline expired while its host was down: recovery commits
-`bound_reached` naming `:deadline`, with the committed
-instant and the observed recovery instant, and the operator's remedy is a new
+`bound_reached(:deadline, observed_recovery_instant)`, with the committed
+deadline instant recorded beside it in the same terminal record, and the
+operator's remedy is a new
 run over the same durable conversation. The precedence rule applies here as
 everywhere else — recovery reaches `bound_reached` only once every operation
 that run owned has a validated terminal fact, so a run whose in-flight executor
@@ -991,8 +998,10 @@ Concept: [Compatibility, migration, and rollback](0010-provider-continuation-and
 The durable format gains user, assistant, and tool-result conversation elements,
 the staged request record with its `canonicalization_version` and digest, the
 context receipt with ordered block descriptors, the committed run bounds, and
-the `bound_reached` run terminal outcome with its bound name, observed value,
-and accounting source. All are bounded plain data in the session mutation domain
+the `bound_reached` run terminal outcome with its bound name and observed value,
+and the sibling fields of that terminal record carrying the declared limit, the
+accounting source, and the reported and estimated subtotals. All are bounded
+plain data in the session mutation domain
 and reach a public plane only through existing bounded events.
 
 There is no installed base and no published package, and `M2` tags no version:

@@ -1266,4 +1266,126 @@ defmodule Loopex.HistoryAnchoringTest do
       )
     end
   end
+
+  @m2_adrs [
+    {"docs/adr/0009-tool-executor-and-grant-contracts.md", "ADR 0009"},
+    {"docs/adr/0010-provider-continuation-and-context-staging.md", "ADR 0010"},
+    {"docs/adr/0011-session-input-algebra-and-streaming.md", "ADR 0011"}
+  ]
+
+  # Concept: the register as it stood at one revision, with the milestone rows a
+  # case needs.
+  #
+  # Technical depth: only the Milestone Register block matters here. The status
+  # capsule is `Status.validate/2`'s concern, and driving that would require plan
+  # and gate documents this case does not need, so the fixture keeps the index
+  # and the ADR pairs and nothing else.
+  defp prerequisite_index(rows) do
+    Fixture.documents()
+    |> Map.fetch!(@index_path)
+    |> String.replace(
+      Fixture.blocked_row(),
+      Enum.map_join(rows, "\n", fn {name, state} ->
+        "| `#{name}` | #{state} | [concept](#{name}.md) | " <>
+          "[technical depth](#{name}-technical.md) | [gate](#{name}-gate.md) |"
+      end)
+    )
+  end
+
+  defp prerequisite_adr(path, status) do
+    technical =
+      path
+      |> String.replace_prefix("docs/adr/", "")
+      |> String.replace_suffix(".md", "-technical.md")
+
+    record =
+      case status do
+        "Proposed" ->
+          "| Acceptance | — | — | — |"
+
+        "Accepted" ->
+          "| Acceptance | Maintainer | [disposition](../vision.md#concept) | " <>
+            "candidate `#{sha("f")}`; concept `sha256:#{Markdown.digest("c")}`; " <>
+            "technical `sha256:#{Markdown.digest("t")}` |"
+      end
+
+    """
+    # #{path}
+
+    <a id="concept"></a>
+    ## Concept
+
+    Technical depth: [Decision details](#{technical}#technical-depth)
+
+    - **Status:** #{status}
+    - **Date:** 2026-08-23
+    - **Decision owner:** Maintainer
+
+    ## Governance Record
+
+    | Decision | Authority | Authority evidence | Bound bytes |
+    | --- | --- | --- | --- |
+    #{record}
+
+    ## Context
+
+    Concrete decision context for #{path}.
+
+    ## Decision
+
+    Choose the bounded decision.
+    """
+  end
+
+  defp prerequisite_files(rows, status) do
+    Enum.reduce(@m2_adrs, %{@index_path => prerequisite_index(rows)}, fn {path, _name}, acc ->
+      acc
+      |> Map.put(path, prerequisite_adr(path, status))
+      |> Map.put(
+        String.replace_suffix(path, ".md", "-technical.md"),
+        "# Technical depth\n\n<a id=\"technical-depth\"></a>\n## Technical depth\n\n" <>
+          "Concept: [Decision](#{Path.basename(path)}#concept)\n"
+      )
+    end)
+  end
+
+  defp prerequisite_history(snapshots) do
+    {head, _parents, files} = List.last(snapshots)
+    History.governance_history(files, {head, snapshots}, generation_resolver(snapshots))
+  end
+
+  test "a Closed milestone cannot conceal an outstanding prerequisite behind an Open successor" do
+    # The live capsule only ever describes the milestone a reader would call
+    # active, so once `M2` is Closed beside an Open successor nothing asks again
+    # what `M2`'s prerequisites were. History is where that stays visible.
+    concealed = prerequisite_files([{"M2", "Closed"}, {"M9", "Open"}], "Proposed")
+
+    assert_raise Invalid, ~r/`M2` is Closed while ADR 0009 is not accepted/, fn ->
+      prerequisite_history([{sha("a"), [], concealed}])
+    end
+
+    settled = prerequisite_files([{"M2", "Closed"}, {"M9", "Open"}], "Accepted")
+    assert :ok == prerequisite_history([{sha("a"), [], settled}])
+  end
+
+  test "accepting a prerequisite later cannot legalise an earlier acceptance" do
+    # Every revision is judged against the ADR statuses it carried, so a decision
+    # taken afterwards repairs nothing: the revision that recorded the state is
+    # still walked and still fails.
+    outstanding = prerequisite_files([{"M2", "Accepted"}], "Proposed")
+    settled = prerequisite_files([{"M2", "Accepted"}], "Accepted")
+
+    assert_raise Invalid, ~r/#{sha("a")}: `M2` is Accepted while ADR 0009/, fn ->
+      prerequisite_history([
+        {sha("a"), [], outstanding},
+        {sha("b"), [sha("a")], settled}
+      ])
+    end
+
+    assert :ok ==
+             prerequisite_history([
+               {sha("a"), [], settled},
+               {sha("b"), [sha("a")], settled}
+             ])
+  end
 end

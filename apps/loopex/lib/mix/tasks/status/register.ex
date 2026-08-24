@@ -690,6 +690,22 @@ defmodule Loopex.Checks.Register do
             "than relax this check"
   end
 
+  @doc """
+  ## Concept
+
+  The decisions a milestone's plan pair declares must carry recorded acceptance
+  before that milestone is accepted or implemented.
+
+  ## Technical depth
+
+  Exposed because two checks need one table. The live capsule derivation reads it
+  to refuse an Accepted-or-later state and to name what an Open milestone waits
+  on; the governance history walk reads it to judge every revision, since the
+  live view only ever asks about the milestone whose capsule is displayed.
+  """
+  @spec prerequisite_adrs(String.t()) :: [{String.t(), String.t()}]
+  def prerequisite_adrs(name), do: Map.get(@prerequisite_adrs, name, [])
+
   defp in_progress_values(name) do
     name
     |> accepted_values()

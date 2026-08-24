@@ -45,6 +45,9 @@ defmodule Loopex.Checks.History do
 
   @index "docs/plans/README.md"
 
+  # The states in which a milestone claims its prerequisites were settled.
+  @prerequisite_states ["Accepted", "In progress", "In review", "Closed"]
+
   @adr_labels ["Acceptance", "accepted concept", "accepted technical depth"]
   @gate_labels ["accepted gate"]
   @plan_labels [
@@ -141,10 +144,66 @@ defmodule Loopex.Checks.History do
            )}
         end)
 
+      require_prerequisite_adrs!(revision, governed)
+
       Map.put(inherited, revision, anchors)
     end)
 
     :ok
+  end
+
+  # Concept: a milestone that recorded Acceptance or Closure while a decision its
+  # plan pair declares as a prerequisite was still Proposed did not become legal
+  # afterwards. The revision that recorded it is the revision that has to be
+  # truthful.
+  #
+  # Technical depth: the live derivation only asks about the milestone whose
+  # capsule is displayed, so once a Closed milestone is followed by an Open one,
+  # nothing asks again what the closed milestone's prerequisites were, and a
+  # Closed row plus an Open successor conceals them. History is the only place
+  # that can still see it. Every revision already carries the plans index and
+  # every ADR concept, so this reads the register and the statuses as they stood
+  # there and refuses any milestone at Accepted or later with an outstanding
+  # prerequisite. Accepting the ADR later cannot repair the earlier revision,
+  # because that revision is still walked and still fails.
+  defp require_prerequisite_adrs!(revision, governed) do
+    case Map.get(governed, @index) do
+      nil ->
+        :ok
+
+      text ->
+        Enum.each(Register.register(text), fn {name, state} ->
+          if state in @prerequisite_states do
+            Enum.each(Register.prerequisite_adrs(name), fn {path, adr_name} ->
+              unless adr_status!(path, adr_name, name, revision, governed) == "Accepted" do
+                raise Invalid,
+                      "#{@index} at #{revision}: `#{name}` is #{state} while #{adr_name} is " <>
+                        "not accepted; a prerequisite decision cannot be recorded afterwards"
+              end
+            end)
+          end
+        end)
+    end
+  end
+
+  defp adr_status!(path, adr_name, name, revision, governed) do
+    text =
+      Map.get(governed, path) ||
+        raise(
+          Invalid,
+          "#{@index} at #{revision}: `#{name}` names #{adr_name} as a prerequisite but " <>
+            "#{path} is absent at that revision"
+        )
+
+    case Adr.record(text, "#{path} at #{revision}", legacy_ok: true) do
+      {status, _row, _complete, _status_index, _row_index} ->
+        status
+
+      nil ->
+        raise Invalid,
+              "#{@index} at #{revision}: #{adr_name} carries no governance record, so its " <>
+                "status cannot be judged where `#{name}` depends on it"
+    end
   end
 
   defp classify_primary!(all_paths, adr_concepts) do
