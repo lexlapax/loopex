@@ -5,7 +5,7 @@
 
 Technical depth: [Canonical request, conversation record, and termination mechanics](0010-provider-continuation-and-context-staging-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-23
 - **Decision owner:** Maintainer
 - **Prerequisite for:** `M2` acceptance
@@ -14,7 +14,7 @@ Technical depth: [Canonical request, conversation record, and termination mechan
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m2-prerequisite-adrs-2026-08-24) | candidate `e318690b6cd0e845d6dce694e5be80dc47211d6c`; concept `sha256:32cab87ba24ae499d5ed1f746c2c64a93cadaec0103b0dde1c17ab1722770518`; technical `sha256:35bce6b42bc88ae02ef7ca6592a257ee17f81e748784b7bdf074d2ff40727fe7` |
 
 <a id="concept-adr-0010-context"></a>
 ## Context

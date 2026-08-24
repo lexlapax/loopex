@@ -18,9 +18,9 @@ a decision adds a new record rather than rewriting the old one.
 | 0006 | Store transaction contract and owner epoch | Accepted | [Decision](0006-store-transaction-and-owner-epoch.md#concept) | [Technical depth](0006-store-transaction-and-owner-epoch-technical.md#technical-depth) |
 | 0007 | Local executor grant, job, and receipt | Accepted | [Decision](0007-local-executor-grant-job-receipt.md#concept) | [Technical depth](0007-local-executor-grant-job-receipt-technical.md#technical-depth) |
 | 0008 | Owner succession recovery and runtime placement | Accepted | [Decision](0008-owner-succession-recovery-and-runtime-placement.md#concept) | [Technical depth](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth) |
-| 0009 | Tool, executor, and grant contracts | Proposed | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
-| 0010 | Provider continuation and exact context staging | Proposed | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
-| 0011 | Session input algebra and streaming progress | Proposed | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
+| 0009 | Tool, executor, and grant contracts | Accepted | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
+| 0010 | Provider continuation and exact context staging | Accepted | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
+| 0011 | Session input algebra and streaming progress | Accepted | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.

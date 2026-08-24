@@ -696,6 +696,49 @@ correctable `M2` document defects would couple two independent decisions.
 **Scope of this record.** It disposes the baseline exception alone. It does not
 accept the `M2` plan pair, the `M2` gate, or ADRs 0009, 0010, or 0011.
 
+<a id="disposition-m2-prerequisite-adrs-2026-08-24"></a>
+### ADR 0009, ADR 0010, and ADR 0011 acceptance — 2026-08-24
+
+The maintainer explicitly accepted
+[ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept),
+[ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept), and
+[ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) as the
+Proposed pairs existing at candidate
+`e318690b6cd0e845d6dce694e5be80dc47211d6c`, after independent review of that
+exact candidate and the six binding digests. Acceptance binds each Concept file
+and its Technical depth companion:
+
+| Decision | Concept | Technical depth |
+| --- | --- | --- |
+| ADR 0009 | `sha256:e6998d26d19b3d89a0765dd5a08a758c49d50f6cae618a824e79f01725c57ab3` | `sha256:9716d528ddc0129b4897150fd3616aace0233b594c522db43cc84691b9317d5b` |
+| ADR 0010 | `sha256:32cab87ba24ae499d5ed1f746c2c64a93cadaec0103b0dde1c17ab1722770518` | `sha256:35bce6b42bc88ae02ef7ca6592a257ee17f81e748784b7bdf074d2ff40727fe7` |
+| ADR 0011 | `sha256:0705dc29298a63d6681317e9f7a672d1b32d8a97f2bff63c7d1cad43503f6a5b` | `sha256:b1b2e14fa035a2ba408ddcf68e729a90ca339e37c4dc7a373fe814797b0b56ea` |
+
+These three decisions are `M2`'s declared prerequisites. Together they settle the
+tool, executor, grant, and `Loopex.Policy` contracts; provider continuation,
+committed run bounds, and project-resource context staging; and the session input
+algebra with its streaming domains. Three corrections carried into the accepted
+bytes and are part of what was accepted: a missing project-resource trust
+decision withholds the block and journals a declined receipt rather than refusing
+the run; `bound_reached` carries the bound and the observed value and nothing
+else, with the declared limit and accounting source retained beside it as sibling
+fields of the same terminal record; and reaching a bound makes no further
+provider call, the wall-clock deadline excepted because it also bounds work
+already in flight that a provider may already have billed.
+
+`M2`'s streaming label is accepted at the strength it holds: the length-aware
+canonical identity encoding is injective, and the 128-bit truncated SHA-256 label
+over it is collision-resistant rather than injective. Nothing in the design
+relies on the stronger property.
+
+**Scope of this record.** It disposes the three prerequisite decisions alone. It
+does not accept the `M2` plan pair or the `M2` gate, authorize product
+implementation, authorize a merge to `main`, or authorize a release.
+
+This record is the maintainer's disposition evidence, not the independent review.
+The administrative acceptance transition changes only the three ADR status lines
+and governance rows plus the plans register's derived status capsule.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15

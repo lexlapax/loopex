@@ -5,7 +5,7 @@
 
 Technical depth: [Definition, registry, behaviour, and policy mechanics](0009-tool-executor-and-grant-contracts-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-23
 - **Decision owner:** Maintainer
 - **Prerequisite for:** `M2` acceptance
@@ -14,7 +14,7 @@ Technical depth: [Definition, registry, behaviour, and policy mechanics](0009-to
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m2-prerequisite-adrs-2026-08-24) | candidate `e318690b6cd0e845d6dce694e5be80dc47211d6c`; concept `sha256:e6998d26d19b3d89a0765dd5a08a758c49d50f6cae618a824e79f01725c57ab3`; technical `sha256:9716d528ddc0129b4897150fd3616aace0233b594c522db43cc84691b9317d5b` |
 
 <a id="concept-adr-0009-context"></a>
 ## Context

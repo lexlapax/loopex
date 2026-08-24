@@ -22,10 +22,10 @@ integrated product baseline.
 | --- | --- |
 | Integrated phase | Closed milestone product baseline |
 | Last closed product checkpoint | `M1` — 2026-08-23 |
-| Blockers | [ADR 0009](../adr/0009-tool-executor-and-grant-contracts.md#concept), [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept), and [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) must be accepted before the `M2` plan pair and gate can be accepted |
+| Blockers | `M2` is open and not accepted; the recorded acceptance authority must accept both normative envelopes and the gate |
 | Authorized work | Explicitly authorized planning, ADR, bootstrap, and review work only; no product implementation |
-| Next maintainer decision | Disposition ADR 0009, ADR 0010, and ADR 0011 |
-| Next transition | After the prerequisites are accepted, accept or reject the `M2` plan pair and gate |
+| Next maintainer decision | Accept or reject the `M2` plan pair and gate |
+| Next transition | Record the acceptance governance row and move `M2` to Accepted |
 | Validation | `bash scripts/check-bootstrap.sh` |
 <!-- loopex:current-status:end -->
 

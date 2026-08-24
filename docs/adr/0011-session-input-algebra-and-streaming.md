@@ -5,7 +5,7 @@
 
 Technical depth: [Command, queue, and delta mechanics](0011-session-input-algebra-and-streaming-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-23
 - **Decision owner:** Maintainer
 - **Prerequisite for:** `M2` acceptance
@@ -14,7 +14,7 @@ Technical depth: [Command, queue, and delta mechanics](0011-session-input-algebr
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-m2-prerequisite-adrs-2026-08-24) | candidate `e318690b6cd0e845d6dce694e5be80dc47211d6c`; concept `sha256:0705dc29298a63d6681317e9f7a672d1b32d8a97f2bff63c7d1cad43503f6a5b`; technical `sha256:b1b2e14fa035a2ba408ddcf68e729a90ca339e37c4dc7a373fe814797b0b56ea` |
 
 <a id="concept-adr-0011-context"></a>
 ## Context
