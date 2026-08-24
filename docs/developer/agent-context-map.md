@@ -629,6 +629,42 @@ or closure obligation. It authorizes this direct administrative rebind and the
 remaining M1 closure proof; it does not authorize a merge to `main`, closure,
 release, or any gate weakening.
 
+<a id="disposition-bound-reached-vision-change-2026-08-23"></a>
+### Vision terminal algebra gains `bound_reached` — 2026-08-23
+
+DRAFT PENDING MAINTAINER CONFIRMATION. This record is not an accepted
+disposition until the maintainer confirms it; no plan or ADR may cite it before
+then.
+
+The maintainer decided that a run stopped by a bound its operator declared ends
+in its own terminal outcome rather than as a failure, and directed that the
+vision be changed to say so.
+
+**The principle.** A run stopped by its turn ceiling, token budget, or
+wall-clock deadline did what its operator configured it to do. Recording that as
+`failed` put a configured stop and a genuine breakage in one bucket,
+distinguishable only by reading a reason code, which is the distinction an
+operator scanning a list of sessions needs most. The founding closed run
+terminal algebra therefore gains one member, `bound_reached(bound, observed)`,
+belonging to runs alone because only a run carries declared bounds.
+
+**The evidence.** The defect was observable rather than theoretical: every
+consumer grouping by terminal value, including any future protocol surface,
+would have shown a bounded run finishing exactly as configured beside a run that
+broke. The alternative considered and rejected was encoding it as a
+`budget_exhausted` category of `failed`, which preserves the set at the cost of
+that conflation.
+
+**Compatibility impact.** The algebra is a founding boundary and the set stays
+closed; a further member requires a decision of this same kind. Consumers and
+any later protocol must carry a case for the new value.
+
+**Migration path.** Empty. Nothing is released, no protocol carries a run
+outcome, and no session record exists, so the widening migrates nothing.
+
+**Scope.** This disposition records the vision change alone. It does not accept
+ADR 0010, the `M2` plan pair, or the `M2` gate, and none of those accepts it.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15

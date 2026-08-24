@@ -419,7 +419,11 @@ That transaction cannot amend a `Closed` plan. A Closed plan's Closure row binds
 the same gate digest its Acceptance row binds, so rebinding Acceptance alone
 leaves Closure naming bytes that no longer exist, and the plan never returns to a
 valid state. Amending a Closed milestone's gate uses the additive transaction
-marked `<a id="amendment-transaction-v2"></a>`. Both authority rows stay
+marked `<a id="amendment-transaction-v2"></a>`. The two markers are not
+successive versions of one rule and do not exclude each other: v1 governs
+amending a gate while its plan is Accepted, v2 governs adding a generation
+after it is Closed, and a gate that lawfully used both carries both, at most
+one marker of each kind. Both authority rows stay
 byte-immutable — they record what was accepted, and what was reviewed and closed
 — and the plan gains one append-only table outside both envelopes:
 

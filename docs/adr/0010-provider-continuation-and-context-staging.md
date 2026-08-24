@@ -139,10 +139,27 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   the run could not finish while it held an unresolved owned operation, so the
   number every surface prints would be one the runtime does not honour. The
   instant this decision commits is what the job canonicalizes and what ADR 0007's
-  `canonical_request_digest` therefore covers, because it is immutable for the
-  run; the effective deadline ADR 0009 derives per attempt is carried alongside
-  that digested request and never inside it, since a per-attempt value in the
-  digest would give every retry a different identity to reconcile against.
+  `canonical_request_digest` therefore covers, because it is an immutable
+  semantic field of the run. The effective deadline ADR 0009 derives per attempt
+  is carried alongside that digested request and never inside it, because it is
+  dispatch-local wall-clock rather than an immutable semantic field: it says when
+  this dispatch stops waiting, not what work was authorized.
+- **`operation_id` is the identity that survives a retry; a digest is not.** The
+  [technical vision](../vision-technical.md#technical-depth) fixes the job
+  canonicalization as covering the immutable semantic job fields *including
+  operation and attempt identity*, so two attempts of one operation necessarily
+  produce two different `canonical_request_digest` values. That is the intended
+  shape rather than a defect to design around. `operation_id` is the stable
+  logical identity across attempts; each attempt carries its own attempt-bound
+  digest; and reconciliation matches the original attempt against *its own*
+  original digest, which is exactly what preserves
+  [ADR 0007](0007-local-executor-grant-job-receipt.md#concept)'s single
+  reconciliation identity. An earlier draft of this decision asserted that two
+  attempts recompute one shared digest and justified keeping the derived
+  per-attempt deadline outside the canonical bytes on that basis. Both the claim
+  and that justification are withdrawn: the derived deadline stays outside
+  because of what it is, and attempt-scoped digests are how retries stay
+  distinguishable.
 - **A reached deadline commits only after the run's owned work is confirmed
   stopped, and an unprovable outcome outranks it.** `bound_reached(:deadline, observed)`
   says the run stopped where its operator configured it to stop, so it commits
@@ -160,11 +177,17 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   which fact is true, and the three cases are different endings rather than one:
   a no-tool final reply that commits first ends the run `completed`, and the
   deadline firing afterwards is a no-op that never rewrites it; a tool-calling
-  reply that commits first keeps its assistant message in canonical history
-  while the passed deadline stops any of its calls from being dispatched; and a
-  deadline admission that commits first writes no assistant message at all and
-  keeps a late reply as attempt evidence only. Partial or streamed output never
-  becomes a canonical assistant message under any of the three. This is the same
+  reply that commits first keeps its assistant message in canonical history and
+  is then governed by the ordinary loop — its calls are dispatched while the
+  deadline is still in the future, the run continues into the next turn if the
+  deadline is still in the future once they are all terminal, and it commits
+  `bound_reached(:deadline)` only where the deadline is actually reached before
+  the next request is staged; and a deadline admission that commits first writes
+  no assistant message at all and keeps a late reply as attempt evidence only.
+  A committed tool-calling reply is never by itself a reason to stop: a run with
+  time left keeps running, and `outcome_unknown` still outranks both endings
+  wherever effect or cleanup truth cannot be proved. Partial or streamed output
+  never becomes a canonical assistant message under any of the three. This is the same
   completion-against-cancellation ordering rule the vision already fixes — a run
   that already committed a validated terminal fact keeps it — and the deadline
   is one more thing that can request the abort.
@@ -323,6 +346,34 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   recorded tokenizer identity. The measurement is retained evidence and the
   number is reported whether it passes or fails; a review reading is not
   evidence.
+- **A real-provider claim must leave something an auditor can check outside this
+  repository.** A model reply carries a bounded plain-data `provider_attestation`
+  beside it: the provider's own response identifier for that response, and the
+  input and output token counts exactly as the endpoint reported them, or an
+  explicit unreported marker where the endpoint supplies neither. It is
+  diagnostic-plane evidence. It is never durable session truth, never projected,
+  never staged, never placed in the reserved continuation field, never read back
+  into a later request, and never required for a run to proceed — an endpoint
+  that reports nothing still runs, accounted conservatively, exactly as the
+  usage decision above already settles. What it is required for is an *evidence*
+  claim: a case that asserts a real provider answered fails when no
+  provider-supplied identifier is present, and the milestone retains each
+  identifier and its reported usage beside the non-secret provider, model,
+  endpoint, and adapter identity it already keeps. The deterministic adapter
+  reports nothing, so it cannot satisfy such a case by accident.
+- **The attestation makes fabrication detectable, not impossible, and nothing
+  may claim otherwise.** No offline check can prove a socket was opened. A
+  checker can prove the retained record is well formed, that each identifier
+  carries the documented form of the provider named in the same run's sealed
+  identity, that no identifier is reused, that the record's identity is
+  byte-identical to that sealed identity, and that the record's own call count
+  and reported totals are internally consistent. It cannot prove any call
+  happened, and it cannot bind a retained identifier to the call a later run
+  made. Verifying the identifiers and their usage against the provider account
+  is a closure-review step performed by a person, and it is the only step that
+  reaches the provider. Every document that describes this mechanism states that
+  split in those terms; describing the checker as proving network use is the
+  overclaim this bullet exists to forbid.
 - **What `M2` builds is canonical-history continuation, and the name is used
   consistently.** A turn continues its predecessor because the whole
   conversation is replayed from committed records: turn two is a continuation of
@@ -330,7 +381,13 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   this decision supports is a claim about replay from committed elements. No
   claim anywhere — plan, gate, evidence, or reference client — may call `M2`
   provider-native continuation, because nothing in `M2` retains a provider's
-  continuation state, reasoning signatures, or response identifiers.
+  continuation state, reasoning signatures, or response identifiers *as session
+  truth or as an input to any later request*. The attestation decision above is
+  not an exception to that and does not soften it: a response identifier kept in
+  a retained evidence record is a note about a call that already happened, read
+  only by a human auditor, and no projection, staging, digest, or request ever
+  reads it. Continuation in `M2` comes from replayed committed elements and from
+  nothing else.
 - **The continuation field is reserved, always empty, and carries no meaning in
   `M2`.** It is structurally present in the canonical request so that a later
   adapter-private sidecar lands without changing what a recorded digest covers,
@@ -486,6 +543,34 @@ memory extension, no retrieval store, and no second source of blocks, every
 provider, transformer, and selector abstraction would unify exactly one
 implementation, which the minimalism budget forbids. The receipt shape is what
 protects the seam in the meantime.
+
+**Have the gate collect the attestation live from the running selector.** Give
+the runner a directory or channel that each real-provider case writes its
+response identifiers into, so the checker compares the committed record against
+the calls this run actually made. It would catch a record copied forward from an
+earlier run, which is the likeliest way retained evidence goes stale. It is
+rejected. The attestation would still be produced by the same test code that
+produces the identity report, so it changes nothing a fabricator has to do — it
+moves the fabrication from one file to another. It would add a second
+unauthenticated evidence channel beside the bound selector runner's sealed
+result, which `M1` deliberately made the only authoritative path, and it would
+push a checker-owned environment contract down into product test code. The
+staleness it would catch is caught instead by the reviewer who compares the
+retained identifiers and their timestamps against the provider account, which is
+work that step must do anyway.
+
+**Cross-check the provider's reported input tokens against the committed
+canonical request bytes inside the checker.** The canonical bytes are committed
+and the reported count is retained, so the two could be compared automatically.
+It is rejected as apparent rather than real detection. The checker has no
+provider tokenizer and no access to a finished run's journal, so any offline
+comparison would be a tolerance band with no evidence behind it — the same
+defect as a minimum-remaining-time threshold — and a fabricator computes the
+band from the same public rule the checker uses. Provider-reported usage is
+retained anyway, for a different reason: it is a second independently held
+quantity that an auditor can look up against the provider account for the same
+response identifier. That is auditor value, and the gate says so rather than
+counting it as enforcement.
 
 **Refuse to start a session whose provider does not report usage.** This is the
 strictest reading of "a committed bound must be enforceable", and it has the

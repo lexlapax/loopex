@@ -272,8 +272,14 @@ register and plan index.
   An amendment to an already accepted plan uses two direct, one-parent revisions.
   This strict transaction is versioned by the visible
   `<a id="amendment-transaction-v1"></a>` gate marker. Closed pre-v1 amendment
-  history remains valid; every active or future amended gate must carry exactly
-  one marker and obey v1 from its first marked proposal forward.
+  history remains valid; every active or future amended gate must carry that
+  marker and obey v1 from its first marked proposal forward. The v1 and v2
+  markers are not successive versions of one rule and do not exclude each other:
+  v1 governs amending a gate while its plan is Accepted, v2 governs adding a gate
+  generation after it is Closed, and a gate that lawfully used both carries both.
+  A gate carries at most one marker of each kind, carries the v1 marker if it
+  holds any amendment section, and carries the v2 marker if it holds any gate
+  generation row.
   Amendment sections appear in physical document order with consecutive numbers.
   The amendment proposal `A` is the first revision that advances the generation;
   it retains both the prior Acceptance row and lifecycle state, so binding

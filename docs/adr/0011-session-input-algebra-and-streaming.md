@@ -186,14 +186,18 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   durable event, and never replayed on reconnect; a reconnecting client is owed
   the complete message, as §11.2 requires. This is structural rather than a
   rule to remember: core has nothing to assemble from.
-- **A reply's stream statistics are attempt evidence, not message content.** How
-  many deltas an attempt emitted, and whether the adapter streamed at all,
-  describe one model attempt and are retained on that private attempt record.
-  They are not fields of the committed assistant message, which carries
-  conversation content and nothing else: whether the same bytes arrived in one
-  piece or four hundred is not part of what was said, and a canonical durable
-  element must not carry transport-shaped metadata a replay would have to
-  explain.
+- **Stream statistics are attempt evidence, not message content.** The reply
+  states `delta_count`, how many deltas that attempt emitted, and `streamed`,
+  whether the adapter emitted any at all; the executor receipt gains one
+  additive private field on the same footing, `progress_count`, how many
+  progress events that operation attempt emitted. Each describes one attempt and
+  is retained on that attempt's private record. They are not fields of the
+  committed assistant message, which carries conversation content and nothing
+  else: whether the same bytes arrived in one piece or four hundred is not part
+  of what was said, and a canonical durable element must not carry
+  transport-shaped metadata a replay would have to explain. Both are counts, so
+  an adapter that streamed nothing and an executor that emitted nothing state
+  zero, which is an exact value rather than a stand-in for one.
 - **Four canonical delta kinds, all bounded plain data.** Text, reasoning,
   tool-call, and tool-progress deltas each have an exact shape carrying no
   provider struct, pid, function, module atom, exception, terminal escape, or
@@ -214,10 +218,18 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   domain that item belongs to. The coordinator derives it deterministically from
   the committed identity of that attempt, a model attempt and an executor
   operation attempt alike, so a replay or a successor owner projects the same
-  label for the same attempt. An adapter never supplies it, and it is never read
-  off an executor's event: it is stamped from the state the coordinator already
-  holds for the attempt it dispatched, which is the same discipline that governs
-  every other binding on this plane. Gaplessness and closure are therefore
+  label for the same attempt. **The derivation hashes that identity under the
+  repository's protocol-versioned canonical encoding — the same deterministic,
+  length-aware tuple encoding the request digest already uses — and never a
+  delimiter-joined string.** Session, operation, and attempt identifiers are
+  unrestricted binaries; a length-aware encoding is injective over arbitrary
+  binary content because every element carries its own length, while a delimiter
+  is not, so an identifier containing the delimiter byte would let two distinct
+  attempts derive one identical label. A label two different attempts can share
+  defeats the only thing the label is for. An adapter never supplies it, and it
+  is never read off an executor's event: it is stamped from the state the
+  coordinator already holds for the attempt it dispatched, which is the same
+  discipline that governs every other binding on this plane. Gaplessness and closure are therefore
   evaluated **within one `stream_domain_id`** and never across a turn: sequences
   from two domains are never compared, concatenated, or checked for gaps against
   one another.
@@ -225,30 +237,51 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   provider retry against the same staged bytes is a new model attempt and so a
   new domain; a retried executor operation attempt is a new domain in the same
   way. A client seeing a second domain under one `turn_id` is watching a retried
-  turn, not a fault: the abandoned domain may simply end short of its closure,
-  and its unfinished sequence is never evidence of loss in the domain that
+  turn, not a fault: the abandoned domain closes as abandoned at whatever count
+  it reached, and its short tail is never evidence of loss in the domain that
   succeeded. This is what makes the loss property true rather than nearly true.
   Both attempts of a retried turn start at sequence zero under the same
   `turn_id`, so without the domain a consumer would read the second attempt's
-  first delta as a duplicate, the first attempt's missing tail as a gap, and
+  first delta as a duplicate, the first attempt's short stream as a gap, and
   either closure as the closure of the other attempt. `M2` must accordingly lock
   one provider-retry case and one executor-retry case in which two domains
   appear under one turn; the plan and gate that own those selectors carry the
   obligation.
-- **Each domain proves its own loss, in its own terms, and each closes itself on
-  the progress plane.** Model deltas carry a sequence that starts at zero for
-  each model attempt and increases by one per emitted delta across all three
-  model kinds. Executor progress carries a sequence that starts at zero for each
-  operation attempt and increases by one per emitted progress event, plus a
-  contiguous per-stream byte offset. Each domain then ends with one closing
-  progress item naming that domain and stating its total, projected from the
-  reply and the receipt respectively, so both an interior gap and a truncated
-  tail are detectable in both without any total appearing on a durable element.
-  Every delta also carries the turn it belongs to and the public event sequence
-  it is anchored to; beyond those anchors no order is promised between the two
-  domains, and none between two domains of the same kind. Coalescing and dropping
-  under backpressure stay permitted in both, closures included; the sequences
-  are what make them visible instead of silent.
+- **Each domain proves its own loss, in its own terms, and every domain closes
+  exactly once — an abandoned one included.** Model deltas carry a sequence that
+  starts at zero for each model attempt and increases by one per emitted delta
+  across all three model kinds. Executor progress carries a sequence that starts
+  at zero for each operation attempt and increases by one per emitted progress
+  event, plus a contiguous per-stream byte offset. Every domain the coordinator
+  opens is then closed by exactly one content-free closing progress item, emitted
+  when that attempt reaches any terminal state — a returned reply, a terminal
+  receipt, an error, a cancellation, or supersession by a retry — and before that
+  attempt's outcome is published. The closing item names its domain and states
+  two things: the **disposition** of the attempt, `complete` where it produced
+  the durable artifact of its kind and `abandoned` where it produced none, and
+  the **count** of items that domain emitted. The count is the reply's
+  `delta_count` for a model domain and the receipt's `progress_count` for an
+  executor domain; where the attempt was abandoned and returned neither, it is
+  the number of items the coordinator itself observed and projected before it
+  closed the domain, which is exact because the coordinator stops accepting
+  items for a domain it has closed. Both totals are counts and never final
+  sequence numbers, so a domain that emitted nothing states zero exactly and no
+  consumer has to know a sentinel. An interior gap and a truncated tail are
+  therefore detectable in both domains without any total appearing on a durable
+  element. Every delta also carries the turn it belongs to and the public event
+  sequence it is anchored to; beyond those anchors no order is promised between
+  the two domains, and none between two domains of the same kind.
+- **Closure is an emission obligation, not a delivery guarantee, and silence
+  never means abandoned.** The coordinator owes one closure per domain it opened.
+  The closure then rides the transient plane like any other progress item:
+  coalescing and dropping under backpressure stay permitted in both domains,
+  closures included, and a plane ends when its owner does. A consumer that never
+  receives a closure is therefore looking at an incomplete transient view and
+  falls back to the durable record exactly as it does for a gap. What it must
+  never do is infer abandonment from an absence, because that inference needs a
+  timeout, and a timeout is a guess that is wrong precisely when a provider is
+  slow. The sequences and counts are what make a drop visible instead of silent;
+  the disposition is what makes an abandoned attempt stated instead of guessed.
 - **Executor progress is emitted as a complete executor event and validated
   before anything narrower is projected.** The dispatching coordinator passes a
   bounded progress function with the job, and the executor uses it to emit
@@ -301,9 +334,11 @@ Technical depth: [What M1 admits, what the loop needs, and what the port lacks](
   request is canonicalized, committed, and digested before the adapter is
   called, and `complete/3` receives exactly those bytes. ADR 0010's
   real-provider byte-equality assertion applies unchanged to the streaming
-  path, a retry
-  reuses the same staged digest, and no delta is ever an input to the next
-  request.
+  path, a retry dispatches exactly those same staged bytes under a new recorded
+  attempt — attempt identity is canonical, so that attempt records its own
+  `canonical_request_digest` rather than reusing its predecessor's, while
+  `operation_id` stays the identity the two attempts share — and no delta is
+  ever an input to the next request.
 
 This decision changes no rule in
 [ADR 0006](0006-store-transaction-and-owner-epoch.md#concept),
@@ -385,7 +420,7 @@ time.** Only one model attempt and one executor operation attempt are ever live
 per turn, so the turn and tool-call anchors look sufficient. It is rejected: a
 retry makes two attempts share one turn, both starting at sequence zero, and
 nothing in the item says which one it came from. A consumer would read the second
-attempt's opening delta as a duplicate, the abandoned attempt's missing tail as
+attempt's opening delta as a duplicate, the abandoned attempt's short stream as
 loss in the live one, and either closure as authoritative for both — so the
 loss detection this milestone promises would report faults that did not happen
 and miss ones that did.
@@ -407,6 +442,42 @@ replay, so the same attempt would carry different labels before and after a
 restart, and a projection would stop being a function of committed state. A
 label derived from the attempt's own committed identity is unique for the same
 reason and stable as well.
+
+**Derive the domain label by joining the identity with a delimiter.** Hashing a
+NUL-delimited concatenation of the prefix, kind, session, operation, and a
+decimal attempt is the obvious construction and it reads clearly. It is
+rejected: the identifiers are unrestricted binaries, and a delimiter-joined
+encoding is not injective over those, so an identifier containing the delimiter
+byte makes two distinct attempt tuples produce identical input and therefore one
+identical label. Two attempts sharing a label is exactly the confusion the label
+was introduced to remove, and it would appear only on the identifiers that
+happened to contain the byte, which is the worst way for it to appear. The
+length-aware canonical encoding already in the repository is injective for
+arbitrary binary content because every element carries its own length, and it
+costs nothing extra to call. It also removes a second decision — how an integer
+attempt is rendered as text — by encoding the integer as itself.
+
+**Let an abandoned domain end without a closure.** The successful attempt
+carries the truth, so an abandoned one arguably has nothing left to say, and
+saying nothing is the smallest possible rule. It is rejected: an unclosed domain
+is indistinguishable from a domain still streaming, so a consumer could
+distinguish "abandoned" from "open, items pending" only by a timeout — and a
+timeout is a guess that is wrong exactly when a provider or a build is slow,
+which reintroduces the ambiguity the closure item exists to remove. It would
+also leave the abandoned domain's own count unknowable, so nobody could tell a
+domain abandoned after forty items from one that lost forty. One closed
+enumeration on an item that has to exist for the successful domain anyway is
+cheaper than either.
+
+**Have a closure state the last sequence number it saw rather than a count.** A
+final sequence looks symmetrical with the sequence the deltas carry. It is
+rejected: a conformant producer that emitted nothing has no final sequence,
+because zero is a sequence that was used rather than a statement that none was,
+so the shape would need a sentinel and every consumer would need to know it —
+including the non-streaming adapter and the silent executor, which are the two
+conformant cases this decision most wants to keep ordinary. A count says zero
+exactly, and the last sequence remains derivable as the count minus one wherever
+anything was emitted.
 
 **Leave executor progress out of `M2` and drop the tool-progress delta kind.**
 Honest, smaller, and it avoids touching the executor port at all. It is not
@@ -545,10 +616,13 @@ not be gapless, which is worse than two that are.
 The loss check is scoped to an attempt, not to a turn, and every client inherits
 that. A renderer must group items by `stream_domain_id` before it counts
 anything, keep a domain's partial output distinguishable when a retry supersedes
-it, and treat an unclosed domain beside a closed one as a retried turn rather
-than as a defect to report. A client that ignores the field and counts per turn
-will manufacture gaps on every retried turn — a failure mode more misleading
-than no loss detection at all, because it accuses a healthy stream.
+it, and read the disposition on a closure rather than infer one: an `abandoned`
+closure beside a `complete` one is a retried turn, not a defect to report. The
+cost is that every client renders two closure dispositions instead of one item
+kind, and the gain is that abandonment is announced rather than waited for. A
+client that ignores the field and counts per turn will manufacture gaps on every
+retried turn — a failure mode more misleading than no loss detection at all,
+because it accuses a healthy stream.
 
 Promotion becomes the moment a follow-up's run is fully decided. Its bounds and
 its absolute deadline start running from the terminal transition of the run
@@ -568,8 +642,10 @@ No released surface exists and no installed base exists. `M2` tags no version:
 headless session-protocol milestone. The command shapes, queue states, delta
 kinds, the executor progress event, and the `complete/3` and `execute/5`
 signatures are all experimental and freeze nothing, and the compatibility
-contract's freeze machinery is not engaged. The `stream_domain_id` and the
-promoted run's committed configuration are experimental on the same terms.
+contract's freeze machinery is not engaged. The `stream_domain_id` and its
+derivation, the closure items with their disposition and count, the receipt's
+private `progress_count`, and the promoted run's committed configuration are
+experimental on the same terms.
 
 `M1` journals are not migrated. `M1` recorded only `prompt` and `abort` and its
 test roots are discarded, so there is no queue state to upgrade and no delta
@@ -584,8 +660,9 @@ usage together, returning `complete/3` to `complete/2`, `execute/5` to
 the queue, and abort's truthful outcome depends on the queue states it cancels.
 Once a version is published, adding a command type or a delta kind is additive,
 while changing an application point, a queue depth, the reconstruction
-obligation, the scope a sequence is gapless in, or what promotion commits
-changes what a recorded run meant and requires a successor decision.
+obligation, the scope a sequence is gapless in, the rule that every domain
+closes, or what promotion commits changes what a recorded run meant and requires
+a successor decision.
 
 Technical depth: [Format, migration, and rollback mechanics](0011-session-input-algebra-and-streaming-technical.md#technical-adr-0011-compatibility).
 

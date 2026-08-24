@@ -204,7 +204,7 @@ generation rather than from an executor-owned constant.
 [ADR 0011](0011-session-input-algebra-and-streaming.md#concept) decides it rather
 than this ADR: `execute/4` becomes `execute/5`, gaining a bounded in-VM progress
 function in the trailing position, and the retained receipt gains a private
-`final_progress_sequence` closing that operation's progress domain. It is
+`progress_count` closing that operation's progress domain. It is
 recorded here because this ADR owns the executor, tool, and grant contract, and
 an obligation on the executor that its owning document does not acknowledge is
 the same defect ADR 0011 was revised to remove.
@@ -525,21 +525,41 @@ on is load-bearing rather than editorial:
   canonicalized into the `JobRequest` because it qualifies as one of the
   immutable semantic request fields ADR 0007 scopes that canonicalization to: the
   run commits the instant once and it never changes, so every attempt of an
-  operation canonicalizes the same value and recomputes the same digest.
+  operation canonicalizes the same value for it.
 - `effective_job_deadline` is **not** covered by the digest and is not a
-  canonicalized request field. It is derived at dispatch from `dispatch_instant`,
-  which differs on every attempt, so canonicalizing it would give each retry of
-  one operation a different `canonical_request_digest`. That would break
-  ADR 0007's single reconciliation identity, which compares one digest across
-  attempts of the same operation and refuses a mismatch. It is attempt-local
-  operational state carried alongside the digested request, in the same spirit as
-  ADR 0007 carrying `attempt` as its own binding rather than folding a
-  per-attempt value into the digest, and the executor arms it without it ever
-  entering the digest.
+  canonicalized request field. It is derived at dispatch from
+  `dispatch_instant`: dispatch-local wall-clock, not an immutable semantic
+  property of the request.
+  Canonicalization is scoped to what was requested, and the instant a dispatch
+  happened to occur is not part of that. It is therefore attempt-local
+  operational state carried alongside the digested request, and the executor
+  arms it without it ever entering the digest.
+
+The digest is per attempt, and this boundary neither claims nor requires
+otherwise. The technical vision scopes the job canonicalization to the
+immutable semantic job fields **including operation and attempt identity**, so
+two attempts of one operation compute two different `canonical_request_digest`
+values by construction — before `effective_job_deadline` is considered at all.
+The identity model that follows is the one ADR 0007 relies on:
+
+| Value | Scope | Role in reconciliation |
+| --- | --- | --- |
+| `operation_id` | Stable across every attempt of the logical operation | Names *which* operation a retained receipt or solicited response belongs to |
+| `attempt` | One attempt | Names *which* attempt, and is itself canonicalized |
+| `canonical_request_digest` | Attempt-bound: one value per attempt | The original attempt is matched against **its own** original digest |
+
+Reconciliation therefore compares an attempt with the digest that attempt
+recorded, not one digest shared across attempts. That per-attempt match, under a
+stable `operation_id`, is what preserves ADR 0007's single reconciliation
+identity. "One digest identity" means one canonicalization semantic that the
+coordinator journals, the grant carries, the executor independently recomputes,
+and the receipt echoes for the same attempt — never one value every retry
+reproduces.
 
 So the deadline needs no second digest and no eleventh grant binding: the
-immutable instant is bound and tamper-evident inside the one existing digest, and
-the per-attempt derivation stays outside it where it cannot disturb identity.
+immutable instant is bound and tamper-evident inside the one existing digest
+semantic, and the dispatch-local derivation stays outside it where it is not
+mistaken for a semantic request field.
 
 At expiry the executor enters the cancellation sequence below at the cooperative
 step — it is not a separate path:
@@ -550,8 +570,10 @@ effective_job_deadline reached
   -> declared bounded grace period elapses
   -> owned process tree terminated by its captured kill identity
   -> cleanup confirmed
-  -> operation: cancelled when cleanup and effect truth are confirmed
-              | outcome_unknown when either is not
+  -> executor receipt: cancelled when cleanup and effect truth are confirmed
+                     | indeterminate_evidence when either is not
+  -> brain commits operation: cancelled
+                            | outcome_unknown(reconciliation_ref)
 ```
 
 The receipt reports the ending the executor can prove. A deadline-terminated
@@ -596,11 +618,13 @@ abort admitted through the facade and committed (M1 admission, extended by
   -> cooperative cancel to the in-flight model task or executor job
   -> declared bounded grace period elapses
   -> executor terminates the owned process tree by its captured kill identity
-  -> cleanup confirmed
-  -> operation: retain a validated completed / failed / denied fact
-              | cancelled when cancellation caused termination
-              | outcome_unknown when effect evidence is insufficient
-  -> run: cancelled | outcome_unknown(reconciliation_ref)
+  -> cleanup confirmed; the executor returns evidence, never a session fact
+  -> brain commits operation: retain a validated completed / failed / denied
+                              fact
+                            | cancelled when cancellation caused termination
+                            | outcome_unknown when the receipt reported
+                              indeterminate_evidence
+  -> brain commits run: cancelled | outcome_unknown(reconciliation_ref)
 ```
 
 The run outcome is derived from the owned operation outcomes, never assumed from
@@ -632,8 +656,9 @@ applies only to a run that has not yet reached a terminal fact of its own.
 
 Cleanup that is not confirmed is insufficient evidence, not a slower success. If
 the grace period elapses, the owned tree is terminated by its captured kill
-identity, and termination still cannot be confirmed, the operation ends
-`outcome_unknown` and the run ends `outcome_unknown` with it. There is no path
+identity, and termination still cannot be confirmed, the executor's receipt
+reports `indeterminate_evidence`, the brain commits `outcome_unknown` for that
+operation, and the run ends `outcome_unknown` with it. There is no path
 that commits `cancelled` over an unproved effect or an unconfirmed process tree,
 because a clean `cancelled` is precisely the report an operator would act on by
 doing nothing.
@@ -726,18 +751,24 @@ Claim-proportional evidence for this decision:
   `cancelled` only after that confirmation, with its bounded partial output and
   any spilled artifact retained; a tool call whose run deadline had already
   passed at intent commit never journals an intent, never mints a grant, and
-  dispatches nothing; two attempts of one operation dispatched at different
-  instants recompute the same `canonical_request_digest` while carrying different
-  `effective_job_deadline` values, proving the per-attempt derivation stayed
-  outside the digest and ADR 0007's reconciliation identity survives a retry; and
+  dispatches nothing; across two attempts of one operation dispatched at
+  different instants, `operation_id` is identical while each attempt records its
+  own attempt-bound `canonical_request_digest` and its own
+  `effective_job_deadline`, and reconciling the original attempt matches it
+  against that attempt's own recorded digest and refuses the other attempt's,
+  proving the dispatch-local derivation stayed outside the digest and that
+  ADR 0007's reconciliation identity survives a retry; and
   ADR 0007's ten-binding completeness oracle still passes
   unchanged, proving the deadline was added to the job rather than to the grant;
 - a deadline-terminated job whose cleanup cannot be confirmed, driven by
-  injected unconfirmability rather than timing luck: the operation ends
-  `outcome_unknown`, the run ends `outcome_unknown` with a reconciliation
-  reference rather than `bound_reached`, and the operator-facing output says so;
-- an abort whose owned effect cannot be proved: the operation ends
-  `outcome_unknown`, the run ends `outcome_unknown` with a reconciliation
+  injected unconfirmability rather than timing luck: the executor's receipt
+  reports `indeterminate_evidence` and commits nothing, the brain commits
+  `outcome_unknown` for the operation, the run ends `outcome_unknown` with a
+  reconciliation reference rather than `bound_reached`, and the operator-facing
+  output says so;
+- an abort whose owned effect cannot be proved: the executor's receipt reports
+  `indeterminate_evidence`, the brain commits `outcome_unknown` for the
+  operation, the run ends `outcome_unknown` with a reconciliation
   reference rather than `cancelled`, the operator-facing output says so, and the
   case is driven by injected unprovability rather than by timing luck;
 - the retained prompt and schema cost measurement for the bootstrap four, which
@@ -897,8 +928,11 @@ the job's whole life, so a single field would have to mean both "may start" and
 deadline instant is instead a canonicalized `JobRequest` field already covered by
 the one `canonical_request_digest`, so it is bound and tamper-evident without
 touching the ten; the per-attempt `effective_job_deadline` derived from it stays
-outside both the ten and the digest, because a value that changes on every
-attempt cannot sit inside a single reconciliation identity.
+outside both the ten and the digest, because it is dispatch-local wall-clock
+rather than an immutable semantic request field. That placement says nothing
+about digest sameness across attempts, and it could not: canonicalization covers
+attempt identity, so each attempt already carries its own attempt-bound digest
+under a stable `operation_id`.
 
 **Committing the bounded stop at the moment the deadline fires.** It reports
 faster, and cleanup would follow. It reproduces the exact defect the run-level
@@ -1023,15 +1057,16 @@ The durable format gains the active-set record committed at session start
 together with its model-visible name mapping, the per-call generation triple on
 each tool-operation intent, the durable denial record and its bounded policy
 context, the run's committed absolute deadline instant canonicalized into each
-`JobRequest` and therefore covered by the existing `canonical_request_digest`
-together with the per-attempt `effective_job_deadline` derived at dispatch and
-carried alongside that digested request rather than inside it,
+`JobRequest` and therefore covered by that attempt's
+`canonical_request_digest` together with the per-attempt
+`effective_job_deadline` derived at dispatch and carried alongside that digested
+request rather than inside it,
 the artifact reference carried on a tool result and its receipt, and the
 cancellation evidence retained with a terminal operation and run outcome,
 including the reconciliation reference an unknown run outcome carries, and the
-private `final_progress_sequence` ADR 0011 adds to the retained receipt. All are bounded plain
-data in the session mutation domain and none crosses into a public plane except
-through the existing bounded tool-call events.
+private `progress_count` ADR 0011 adds to the retained receipt. All are bounded
+plain data in the session mutation domain and none crosses into a public plane
+except through the existing bounded tool-call events.
 
 There is no installed base and no published package, and `M2` tags no version:
 `VERSION` stays `0.0.0` and the first version number belongs to the headless

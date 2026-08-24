@@ -253,11 +253,16 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   admitted abort stops scheduling new work, cooperatively cancels the in-flight
   model or executor operation, waits a declared bounded grace period, then
   terminates the owned process tree. Terminal truth follows the vision's
-  cancellation algebra exactly: an already-validated `completed`, `failed`, or
-  `denied` fact is preserved; `cancelled` commits only after confirmed cleanup
-  evidence; an effect that cannot be proved ends `outcome_unknown` and reaches
-  ADR 0007's receipt and reconciliation path unchanged. A cancelled run never
-  feeds a late tool result back to the model.
+  cancellation algebra exactly, and it is committed where durable session truth
+  is owned: the executor returns the evidence it can prove and the coordinating
+  brain commits the terminal fact. An already-validated `completed`, `failed`,
+  or `denied` fact is preserved; `cancelled` commits only after confirmed
+  cleanup evidence; an effect the executor cannot prove comes back as
+  `indeterminate_evidence` on its receipt, and the brain commits
+  `outcome_unknown` for that operation, which reaches ADR 0007's receipt and
+  reconciliation path unchanged. The executor never commits a session-level
+  outcome of its own. A cancelled run never feeds a late tool result back to the
+  model.
 - **The run's committed absolute deadline rides on every executor job, and a
   job's effective deadline is the earlier of that instant and the tool's own
   declared wall-time budget.** A run that advertises a wall-clock bound has to
@@ -275,30 +280,44 @@ Technical depth: [What M1 supplies and what the tool surface requires](0009-tool
   deadline has already passed is not dispatched at all — no tool-operation
   intent commits, no grant is minted, and the call takes a terminal `cancelled`
   fact with no owned process tree to clean up.
-- **The request digest covers the run's absolute instant and not the derived
-  per-attempt bound.** The two values the job carries fall on opposite sides of
+- **The request digest covers the run's absolute instant and not the
+  dispatch-derived bound.** The two values the job carries fall on opposite sides of
   ADR 0007's canonicalization. The run's committed absolute deadline instant is a
   canonicalized `JobRequest` field and is therefore covered by the existing
   `canonical_request_digest`: it is immutable for the life of the run, so it is
   one of the immutable semantic request fields that canonicalization is scoped
   to. The effective job deadline is not, and must not be. It is derived at
-  dispatch from the dispatch instant, so it differs on every attempt, and a
-  per-attempt value inside the digest would give every retry of one operation a
-  different `canonical_request_digest` — which would break ADR 0007's single
-  reconciliation identity, since reconciliation compares one digest across
-  attempts of the same operation. The effective deadline is therefore
-  attempt-local operational state carried alongside the digested request rather
-  than inside it. There is still no second digest and no eleventh grant binding.
+  dispatch from the dispatch instant — dispatch-local wall-clock rather than
+  an immutable semantic field — so it is attempt-local operational state carried
+  alongside the digested request rather than inside it. Keeping it out of the
+  digest is what keeps the digest a statement about what was requested rather
+  than about when a dispatch happened to occur.
+  That boundary is not a claim that two attempts digest alike, and it must not
+  be read as one. ADR 0007's canonicalization covers operation *and attempt*
+  identity, so each attempt of one operation necessarily carries its own
+  attempt-bound `canonical_request_digest`, and two attempts of one operation
+  compute different digests by construction. `operation_id` is the stable
+  logical identity across attempts; the digest is per attempt. Reconciliation
+  matches the original attempt against that attempt's own original digest, and
+  that — not sameness across attempts — is what preserves ADR 0007's single
+  reconciliation identity. There is still no second digest and no eleventh grant
+  binding: one digest identity means one canonicalization semantic that the
+  coordinator journals and the executor independently recomputes for the same
+  attempt, not one value shared by every attempt.
 - **A job that reaches its effective deadline is cancelled and cleaned up by
   the machinery an abort already uses, and its truth follows the same
   algebra.** At expiry the executor cooperatively cancels, waits the declared
   grace period, terminates the owned process tree by its captured kill
-  identity, and confirms termination. A deadline-terminated job ends
-  `cancelled` only after confirmed cleanup; where the effect or the cleanup
-  cannot be proved it ends `outcome_unknown` and reaches ADR 0007's receipt and
-  reconciliation path unchanged. Expiry introduces no second cancellation path,
-  no second grace period, and no second terminal algebra, so there is nothing
-  for the two paths to disagree about. The evidence obligation this creates is
+  identity, and confirms termination. The same ownership split holds at expiry:
+  the executor reports what it can prove and the brain commits the operation's
+  terminal fact. A deadline-terminated job takes a `cancelled` fact only after
+  the executor's receipt confirms cleanup; where the effect or the cleanup
+  cannot be proved the receipt reports `indeterminate_evidence`, and the brain
+  commits `outcome_unknown` for that operation and reaches ADR 0007's receipt
+  and reconciliation path unchanged. Expiry introduces no second cancellation
+  path, no second grace period, and no second terminal algebra, so there is
+  nothing for the two paths to disagree about. The evidence obligation this
+  creates is
   a real long-running executor job that crosses its deadline, with confirmed
   process-tree cleanup and a truthful terminal fact; the accepted plan and gate
   own the selectors that carry it.
@@ -503,9 +522,10 @@ started job may *run* and must therefore be live for the job's whole life. Two
 different questions in one field would make an expired grant and an exhausted
 deadline indistinguishable in a refusal. The run's absolute instant reaches the
 job as a canonicalized field inside the one existing request digest instead, and
-the per-attempt effective deadline stays outside both the ten bindings and the
-digest, so nothing about the deadline widens the locked set or the identity a
-retry must reproduce.
+the per-attempt effective deadline — dispatch-local wall-clock, not an immutable
+semantic field — stays outside both the ten bindings and the digest, so nothing
+about the deadline widens the locked set or changes what an attempt's own digest
+identifies.
 
 **Commit the run's bounded stop when the deadline fires and clean up
 afterwards.** It makes the terminal outcome prompt, which is what an operator

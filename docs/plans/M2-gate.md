@@ -56,9 +56,15 @@ without changing what the product does. The runner therefore observes the loop
 before it looks at any selector.
 
 The probe is one Elixir program the runner writes into an isolated evidence root
-outside the checkout. Compilation goes to a build root inside that evidence root
-rather than the checkout's, so neither a stale nor an absent `_build` can change
-what the probe sees, and the checkout is never written to. The program composes a
+outside the checkout; a root that resolves inside the checkout is refused rather
+than used. Compilation goes to a build root inside that evidence root rather than
+the checkout's, so neither a stale nor an absent `_build` can change what the
+probe sees, and the checkout is never written to. `MIX_BUILD_PATH` takes
+precedence over `MIX_BUILD_ROOT` in Mix, so the runner clears it for every
+compilation it owns; leaving an ambient value in place would let one inherited
+environment variable send the probe back to the checkout's build tree, and an
+inherited value has been observed to leave the probe unable to observe the loop
+at all, turning a truthful red into an unavailable one. The program composes a
 runtime from shipped modules only — the durable local store, the trusted-local
 executor, and its own observing model adapter — starts it through
 `Loopex.start_link/1`, creates a session, submits one prompt through the public
@@ -107,8 +113,8 @@ After the probe, and never in place of it, the runner:
    operator or the closure evidence would be missing and requires that
    definition to exist as a readable file containing every locked case identity;
 2. checks the nine inherited `M1` outcome selector files, the reused
-   selector-runner mechanics corpus, and the dependency corpus at their exact
-   locked case identities;
+   selector-runner mechanics corpus, the runner-isolation corpus, and the
+   dependency corpus at their exact locked case identities;
 3. verifies every bound artifact below except its own bytes against the files
    they name, selecting a validated `shasum` or `sha256sum` dialect; its own
    digest is verified by `mix loopex.status`, as Bound Artifacts records;
@@ -140,7 +146,7 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `e77bca8bc5eddc6ee753741f0c2eeecfd535a7ac2b5da37241e68e6496d2c0fe` | `scripts/check-m2-gate.sh` |
+| `38b3b37ab911acc0e6a00662809bc1b4c04087b1314debe5cda77de80855e3ab` | `scripts/check-m2-gate.sh` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -197,8 +203,14 @@ After the opening condition passes, the runner reads the optional provider
 frame, then allocates one physically resolved task root under a resolved
 temporary directory and owns `LOOPEX_HOME`, `TMPDIR`, the Mix build root, and a
 workspace beneath it. It refuses a task root that resolves inside the operator's
-real product state, fingerprints that state before and after the run, and
-requires the fingerprint unchanged. The task root is removed on exit.
+real product state or inside the checkout, clears `MIX_BUILD_PATH` where it
+exports `MIX_BUILD_ROOT` because the former takes precedence over the latter,
+fingerprints the operator's product state before and after the run, and requires
+that fingerprint unchanged. It fingerprints the checkout's own `_build` across
+the same window and requires it unchanged too, which is what makes the isolation
+above a proved claim rather than a declared intent: clearing the variable states
+the aim, and the fingerprint pair proves no locked command wrote into the
+checkout's build tree. The task root is removed on exit.
 
 `M2` does not rebuild `M1`'s owned candidate checkout or offline package
 materializer. It runs the committed tree in place with an owned product state
@@ -229,9 +241,9 @@ Every command below must exit zero.
 | 13 | `bash scripts/check-bootstrap.sh` | The portable aggregate remains green |
 | 14 | the root `VERSION` file | Reports exactly `0.0.0` |
 | 15 | the eleven protected `M2` outcomes, the supporting registry role, and both demonstration roles through the standalone channel | Exact names, states, and minima below hold |
-| 16 | the eleven inherited `M1` outcome roles and the two mechanics corpora through the standalone channel | `M1`'s proved behaviour still holds |
+| 16 | the eleven inherited `M1` outcome roles and the five mechanics corpora through the standalone channel | `M1`'s proved behaviour still holds |
 | 17 | `MIX_ENV=test mix test --exclude real_provider --seed <gate-seed>` | The complete credential-free suite passes at the same seed |
-| 18 | retained evidence validation | Negative demonstrations always; the toolchain matrix in ordinary mode only |
+| 18 | retained evidence validation | Negative demonstrations and real-call attestations always; the toolchain matrix in ordinary mode only |
 
 `M2` ships a runnable `loopex` command and no version. Command 7 proves the
 operator entrypoint builds; command 14 proves the source tree still reports
@@ -298,7 +310,7 @@ equal the named excluded identities.
 
 | Outcome | Selector / role | Minimum | Locked names and required states |
 | --- | --- | --- | --- |
-| 1 | `apps/loopex/test/agent_loop_test.exs` / default | 15 | passed: `a prompt runs until the model stops requesting tools rather than after a fixed number of turns`; `every model request carries the committed conversation history including the original prompt`; `an assistant tool call and its real tool result are committed and replayed to the model`; `each turn dispatches exactly the canonical request bytes and digest committed before it`; `a staged request carries complete tool definition bytes and its generation triple and is reconstructible from the journal alone`; `every turn after the first is canonical history replay and the reserved continuation field stays empty`; `the maximum turn bound ends the run bound reached before another provider call`; `the cumulative token budget ends the run bound reached before another provider call`; `the wall clock deadline ends the run bound reached before another provider call`; `two attempts of one operation dispatched at different instants recompute the same request digest`; `a tool call whose run deadline already passed is not dispatched and still commits a terminal fact`; `the committed absolute deadline is propagated into the model call rather than an independent per call timeout`; `a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only`; `a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated`; `every sampling bound is a declared committed value with no implicit default` |
+| 1 | `apps/loopex/test/agent_loop_test.exs` / default | 15 | passed: `a prompt runs until the model stops requesting tools rather than after a fixed number of turns`; `every model request carries the committed conversation history including the original prompt`; `an assistant tool call and its real tool result are committed and replayed to the model`; `each turn dispatches exactly the canonical request bytes and digest committed before it`; `a staged request carries complete tool definition bytes and its generation triple and is reconstructible from the journal alone`; `every turn after the first is canonical history replay and the reserved continuation field stays empty`; `the maximum turn bound ends the run bound reached before another provider call`; `the cumulative token budget ends the run bound reached before another provider call`; `the wall clock deadline ends the run bound reached before another provider call`; `a retried tool operation keeps its operation identity and reconciles against its own attempt bound request digest`; `a tool call whose run deadline already passed is not dispatched and still commits a terminal fact`; `the committed absolute deadline is propagated into the model call rather than an independent per call timeout`; `a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only`; `a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated`; `every sampling bound is a declared committed value with no implicit default` |
 | 2 | `apps/loopex_llm_reqllm/test/streaming_conformance_test.exs` / default | 11 | passed: `every model adapter satisfies one streaming conformance suite`; `each canonical delta kind is bounded plain data carrying no provider or host term`; `a text delta is observable while its operation is still incomplete rather than after the reply returns`; `replaying an adapter's emitted deltas reproduces the reply it returned byte identically`; `the model and executor progress domains carry separate sequences each closed by its own content free item`; `a gapless sequence within one stream domain and its closing total make lost progress detectable`; `a provider retry opens a second stream domain under one turn and neither domain reports the other as loss`; `a retried executor operation attempt opens its own stream domain closed by its own final sequence`; `the committed assistant message is built from the reply and never assembled from deltas`; `a cancelled stream commits no assistant message and a late reply never becomes canonical`; `an adapter that emits no deltas is conformant and declares that it does not stream` |
 | 3 | `apps/loopex/test/input_algebra_test.exs` / default | 8 | passed: `a prompt starts a run only while the session is settled and is otherwise refused`; `the runtime never infers whether new input is steering or follow up and a steer must name its active run`; `a steer joins the active run after the current tool batch and before the next model request`; `a steer is recorded applied only when a committed request carried it`; `a follow up starts a new run only after the active run and its steering settle`; `a steer that arrives after its run is terminal commits unapplied with a reason and is never promoted`; `at most one unapplied steer and one queued follow up exist and both survive owner succession`; `an abort resolves any unapplied steer and queued follow up as cancelled` |
 | 4 | `apps/loopex_executor_local/test/coding_tools_test.exs` / default | 8 | passed: `read returns bounded chunked content and reports truncation`; `write creates or replaces a file only beneath the workspace root`; `edit applies an exact match change and names what differed on a mismatch`; `bash runs an argv command and an explicit raw shell command with distinct semantics`; `every tool refuses a path that escapes the workspace root through traversal or a symlink`; `executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted`; `a tool child process tree is owned and terminated with its job`; `a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound` |
@@ -346,8 +358,8 @@ here exactly as an outcome's role is.
 
 | Role | Selector / role | Minimum | Locked names and required states |
 | --- | --- | --- | --- |
-| Da | `apps/loopex_cli/test/coding_task_test.exs` / default | 4 | passed: `a multi tool task reads edits and verifies a file in a disposable repository`; `the task transcript shows every tool call decision and result`; `a denied tool call inside a multi tool task is reported and the task continues truthfully`; `the demonstration workspace is disposable and never the operator's own repository`; excluded: the real case below |
-| Db | same file / real-only, `combined` profile | 1 | passed: `one real provider task streams edits a real repository across several turns and the operator sees the committed result`; excluded: the four deterministic names above |
+| Da | `apps/loopex_cli/test/coding_task_test.exs` / default | 5 | passed: `a multi tool task reads edits and verifies a file in a disposable repository`; `the task transcript shows every tool call decision and result`; `a denied tool call inside a multi tool task is reported and the task continues truthfully`; `the demonstration workspace is disposable and never the operator's own repository`; `a real provider evidence claim fails when the reply carries no provider supplied response identifier`; excluded: the two real cases below |
+| Db | same file / real-only, `combined` profile | 2 | passed: `one real provider task streams edits a real repository across several turns and the operator sees the committed result`; `one real provider call surfaces the provider's own response identifier and reported usage that the deterministic adapter cannot produce`; excluded: the five deterministic names above |
 
 Role `Db` carries the attended claim: a real provider drove the shipped command
 through several turns and several distinct tools including one `edit` and one
@@ -356,16 +368,25 @@ refusal was reported and the task continued truthfully, and the resulting bytes
 exist on disk in a disposable repository created inside the gate's own task root.
 The deterministic cases in `Da` support that claim and never substitute for it.
 
-What the runner mechanically proves is narrower than that paragraph. It proves
-one locked case name ran and passed with a credential present, and that the
-retained identity record is well formed and agrees across roles. The identity is
-supplied by the test, so a case that fabricated it and opened no socket would
-satisfy the runner. That limit is inherited from `M1`'s channel and is not
-softened here; it means the attended claim rests on closure review reading the
-retained record and the demonstration repository rather than on the runner, and
-it applies to every real-provider role in this gate, inherited or `M2`'s own.
-Its retained record is `docs/evidence/M2-coding-demonstration.md`, and the
-identity fields it seals are the ones the capture record carries.
+What the runner mechanically proves is narrower than that paragraph, and the
+narrower statement is the one that governs. It proves the locked case names ran
+and passed with a credential present, that the retained identity is well formed
+and agrees across roles, and — through the Real-Call Attestations section below —
+that each real-provider role retained provider-supplied response identifiers of
+the right documented form, unreused, internally consistent with the call count
+and usage totals they claim, and byte-identical in identity to what the bound
+runner sealed in the same run. It does not prove a network call happened. No
+offline check can: everything the runner reads is produced inside the same test
+process, so a case that fabricated all of it and opened no socket would still
+satisfy the runner. The attestation does not close that hole; it makes the hole
+externally visible, because the retained identifiers either exist in the
+provider's account for the recorded window or they do not, and only a person
+looking there can tell. That look is a closure-review step, and it is the single
+step in this gate that reaches the provider. The limit applies to every
+real-provider role here, inherited or `M2`'s own.
+Its retained records are `docs/evidence/M2-coding-demonstration.md` and
+`docs/evidence/M2-real-call-attestations.md`, and the identity fields the first
+seals are the ones the capture record carries.
 
 ## Inherited M1 Protection
 
@@ -429,6 +450,19 @@ they enforce. `M0` locks the second at minimum 3 and cannot be reopened, so
 without these rows the cases proving a Closed milestone's gate cannot be silently
 rebound could be deleted without tripping any count. The machinery that enforces
 immutable governance records was otherwise protected only by convention.
+
+`apps/loopex/test/gate_isolation_test.exs`, minimum 2, all passed:
+
+- `an ambient MIX_BUILD_PATH cannot redirect gate owned compilation out of the owned build root`
+- `the gate refuses an owned root that resolves inside the checkout or the operator's product state`
+
+This corpus exists because the runner makes a claim about itself. It says it
+compiles and runs outside the checkout, and an ambient `MIX_BUILD_PATH` — which
+Mix resolves ahead of `MIX_BUILD_ROOT` — silently made that claim false, to the
+point where the opening probe reported itself unavailable instead of observing
+the loop. A claim a runner makes about its own isolation needs a locked
+definition for the same reason a product claim does; prose in the runner about
+the runner is not evidence.
 
 `apps/loopex/test/deps_budget_test.exs`, minimum 27, including these passed
 names:
@@ -556,6 +590,75 @@ prose. Whether one clean-baseline mechanism was disabled, whether it caused the
 named failure, and whether the whole tree was clean between records remain
 review obligations.
 
+## Real-Call Attestations
+
+`M1`'s selector runner is a bound artifact at the bytes `M1` closed with. It
+seals a fixed real-path field set and refuses any report whose key set differs,
+so no attestation field can be added to that channel without reopening an
+immutable artifact. The attestation therefore lives beside that sealed report,
+in `docs/evidence/M2-real-call-attestations.md`, which `M2` owns and this runner
+validates.
+
+The record carries exactly three one-line JSON objects, each in its own `json`
+fence, in this role order:
+
+1. `demonstration_db` / `apps/loopex_cli/test/coding_task_test.exs`, at least
+   four real calls
+2. `inherited_5c` / `apps/loopex_reference_client/test/real_model_session_test.exs`,
+   at least one real call
+3. `inherited_8b` / `apps/loopex_reference_client/test/end_to_end_recovery_test.exs`,
+   at least two real calls
+
+The floors are the ones each role's own locked cases already claim: the attended
+demonstration must complete at least three turns and then make its attestation
+call, and the inherited recovery trace explicitly completes a second real call.
+
+The exact key order is:
+
+```json
+{"role":"<demonstration_db|inherited_5c|inherited_8b>","selector":"<safe tracked path>","provider":"<lowercase provider>","model":"<printable>","endpoint":"<printable>","adapter_build":"<printable>","calls":<positive integer>,"provider_response_ids":"<id>+<id>...","input_tokens":<positive integer>,"output_tokens":<positive integer>,"candidate":"<40 lowercase hex>","recorded":"<RFC3339 UTC>"}
+```
+
+`provider_response_ids` names, in order, every provider response the role
+observed; `calls` is their count; and the two token fields are the provider's own
+reported totals across exactly those responses. The admitted identifier forms are
+the providers' documented shapes: `anthropic` is `msg_` followed by 16–64
+alphanumerics, and `openai` is `chatcmpl-` or `resp_` followed by 8–128
+alphanumerics. A provider with no documented form here fails closed, because a
+form nobody wrote down is a form nothing can check; admitting a third provider is
+a gate amendment and never a skipped check.
+
+The runner checks exactly the following and nothing more. It requires the record
+to exist; exactly three records; that each parses as one line in the canonical
+key order with the declared value shapes; that each record's `role` and
+`selector` equal the locked pair for its position and that `selector` is a safe
+tracked path; that `provider`, `model`, `endpoint`, and `adapter_build` are
+byte-identical to the identity the bound selector runner sealed for the
+real-provider roles in this same run; that `provider` has a documented identifier
+form and every identifier matches it; that no identifier is reused within or
+across records; that `calls` equals the identifier count and meets the floor
+above; that the reported token totals are consistent with that count; that
+`candidate` is reachable from the running revision; and that no record contains
+the provider credential's bytes.
+
+What the runner does not prove, stated plainly because the whole mechanism is
+worth only what this paragraph admits: it does not prove that any network call
+happened. Every field it reads was produced inside the same test process that
+produced the sealed identity, so a case that fabricated a well-formed identifier,
+a plausible usage pair, and a consistent count would pass all of the above. It
+also cannot bind a retained identifier to the calls a later run made, so a record
+copied forward from an earlier run is not mechanically detectable here.
+
+What review owns is therefore the load-bearing half. Closure review looks each
+retained identifier up in the provider account, confirms it exists in the window
+`recorded` names, and confirms the reported usage matches the billed call. That
+is the only step in this gate that reaches the provider, and the only one that
+distinguishes a real call from a well-formed fabrication. Review also owns
+whether the demonstration was a genuine task, whether the retained fields match
+the process output they name, and whether the record describes this candidate's
+runs. The gate's contribution is that fabrication now has to survive an external
+lookup rather than only a reading of prose.
+
 ## Credential and Provider Boundary
 
 The runner refuses `LOOPEX_PROVIDER_API_KEY` in its initial environment. An
@@ -588,7 +691,9 @@ green real path could not stand in for another run against a different provider
 or build, and `M2` keeps that agreement rather than discarding it while claiming
 to carry `M1`'s protection forward. The first real role observed sets the
 reference identity and every later one must match it; a disagreement fails the
-run.
+run. The retained real-call attestations must carry that same sealed identity
+byte for byte, so the evidence record cannot name a provider, model, endpoint,
+or adapter build the run did not actually seal.
 
 ## User-State Containment
 
@@ -661,6 +766,7 @@ docs/evidence/README.md
 docs/evidence/M2-toolchain-matrix.md
 docs/evidence/M2-negative-demonstrations.md
 docs/evidence/M2-coding-demonstration.md
+docs/evidence/M2-real-call-attestations.md
 docs/operator/README.md
 docs/operator/coding-sessions.md
 docs/operator/tools-and-policy.md
@@ -672,6 +778,11 @@ docs/developer/agent-context-map.md
 ```
 
 A `--capture` role may omit only the matrix path it is about to populate.
+
+`docs/evidence/README.md` is in this set, so adding
+`docs/evidence/M2-real-call-attestations.md` to the evidence directory means
+indexing it there in the same change; an evidence record reachable only by
+knowing it exists is not documented.
 
 ## Failure Rules and Declared Red
 

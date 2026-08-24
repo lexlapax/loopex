@@ -234,10 +234,12 @@ run_deadline (absolute instant, committed with the run)
        -> the supervising process arms an abort at that instant
        -> the adapter receives the same instant and bounds its own transport wait
   -> canonicalized into every JobRequest the run dispatches, and therefore
-     covered by the one canonical_request_digest
+     covered by that attempt's canonical_request_digest
        -> the attempt's effective deadline is derived at dispatch as
           min(run_deadline, dispatch_instant + tool.budgets.wall_time)
-          and carried alongside the digested request, never inside it
+          and carried alongside the digested request, never inside it,
+          because it is dispatch-local wall-clock rather than an
+          immutable semantic job field
        -> at expiry ADR 0009's cancellation sequence terminates and confirms
           the owned process tree
 ```
@@ -276,7 +278,7 @@ three different endings rather than one:
 | Committed first | Turn | Run | Late evidence |
 | --- | --- | --- | --- |
 | A complete validated reply **with no tool calls** | `completed`; the assistant message becomes canonical history and its usage is accounted normally | `completed`. The no-tool check precedes every bound check, so the run has already reached its terminal fact; a deadline firing afterwards is a no-op and never rewrites it | None; the reply is the committed fact and the run is terminal |
-| A complete validated reply **with tool calls** | `completed`; the assistant message and its complete tool calls become canonical history | Each call is dispatched only if the run deadline is still in the future at its intent commit; a call whose deadline has passed commits no intent, mints no grant, and takes a terminal `cancelled` fact. Once every call has a committed terminal result, the run commits `bound_reached` naming `:deadline` — or `outcome_unknown` if any call's effect or cleanup could not be proved | A late receipt for a cancelled call is retained truthfully and projected into no next turn |
+| A complete validated reply **with tool calls** | `completed`; the assistant message and its complete tool calls become canonical history | Each call is dispatched only if the run deadline is still in the future at its intent commit; a call whose deadline has passed commits no intent, mints no grant, and takes a terminal `cancelled` fact. Once every call has a committed terminal result the run takes one of three endings, decided by the deadline at that moment and not by the reply: the deadline still in the future **continues the loop** into the next turn; the deadline reached before the next request is staged commits `bound_reached` naming `:deadline`; and any call whose effect or cleanup could not be proved commits `outcome_unknown` instead, outranking both | A late receipt for a cancelled call is retained truthfully and projected into no next turn |
 | The **deadline admission** | No assistant message is written; the attempt is retained as evidence with its abort reason | `bound_reached` naming `:deadline`, with the committed instant and the observed instant, after cleanup is confirmed | A reply arriving after admission is retained truthfully as attempt evidence and never becomes a canonical assistant message |
 
 Partial or streamed output never becomes a canonical assistant message under any
@@ -292,14 +294,23 @@ rather than what may be *remembered*. Only the third case — where nothing was
 committed for the turn — leaves the conversation without an assistant message,
 and that is exactly the case where the model produced none inside the bound.
 
-The second row is the one that needed a rule rather than an implication. Its
-boundary is checked once, at intent commit, with no minimum-remaining-time
-threshold: with time left the call is dispatched under its effective job
-deadline, and with the deadline passed it is not dispatched at all. Both branches
-end in a committed terminal result for every call, which preserves the ordering
-invariant that no next turn may be staged while a call lacks one — vacuously here,
-since there is no next turn — and keeps every committed call element paired with
-a result element.
+The second row is the one that needed a rule rather than an implication, and it
+is the row an earlier draft got wrong by committing `bound_reached`
+unconditionally once the calls finished. A committed tool-calling reply is not a
+stopping condition. It is an ordinary turn, and the ordinary loop decides what
+happens next: the three endings in the row are reached by evaluating the
+deadline where every other bound is evaluated, immediately before the next
+request would be staged. A run whose tools finished with time still on the clock
+keeps running, and a run terminated at that point would be a healthy loop killed
+by its own race rule.
+
+The dispatch boundary inside the row is checked once, at intent commit, with no
+minimum-remaining-time threshold: with time left the call is dispatched under its
+effective job deadline, and with the deadline passed it is not dispatched at all.
+Both branches end in a committed terminal result for every call, which preserves
+the ordering invariant that no next turn may be staged while a call lacks one and
+keeps every committed call element paired with a result element — an invariant
+that now does real work, because a next turn is one of the three endings.
 
 ### Token accounting
 
@@ -505,8 +516,88 @@ The measurement is a repository-owned check, not a review reading:
 The number is reported on success as well as failure, so a later increase is
 visible as a trend rather than discovered at the threshold.
 
+### Real-call attestation
+
+The reply value carries one further field beside the assistant content and the
+usage report:
+
+```text
+provider_attestation ::
+  {:reported, %{response_id: binary(), input_tokens: non_neg_integer(),
+                output_tokens: non_neg_integer()}}
+  | :unreported
+```
+
+`response_id` is the provider's own identifier for that response, copied
+verbatim and never rewritten. The values are bounded plain data under the
+boundary rule: no provider struct, no reference, no atom derived from provider
+input. The deterministic adapter returns `:unreported` unconditionally; it has
+no identifier to copy and must not invent one.
+
+Where the attestation goes, and where it must not:
+
+| Plane | Carries the attestation |
+| --- | --- |
+| Diagnostic and retained evidence | Yes. This is its only home |
+| Durable conversation element, staged request, canonical bytes, digest | No |
+| Reserved continuation field | No. It is empty in every `M2` request |
+| Projection, replay, any later request | No. Nothing reads it back |
+| Run admission, bound enforcement, outcome | No. `:unreported` is a normal run |
+
+Retained records use one line per real-provider role, in the locked role order,
+with this exact key order:
+
+```json
+{"role":"<demonstration_db|inherited_5c|inherited_8b>","selector":"<safe tracked path>","provider":"<lowercase provider>","model":"<printable>","endpoint":"<printable>","adapter_build":"<printable>","calls":<positive integer>,"provider_response_ids":"<id>+<id>...","input_tokens":<positive integer>,"output_tokens":<positive integer>,"candidate":"<40 lowercase hex>","recorded":"<RFC3339 UTC>"}
+```
+
+`provider_response_ids` names every provider response the role observed, in
+order, and `calls` is their count. `input_tokens` and `output_tokens` are the
+totals the provider reported across exactly those responses. The record names no
+credential, no prompt text, and no workspace content.
+
+The admitted identifier forms are the providers' own documented shapes:
+
+| `provider` | Documented `response_id` form |
+| --- | --- |
+| `anthropic` | `msg_` followed by 16–64 alphanumerics |
+| `openai` | `chatcmpl-` or `resp_` followed by 8–128 alphanumerics |
+
+A provider with no row fails closed rather than being accepted unchecked;
+admitting a third provider is a gate amendment, because a form nobody documented
+is a form nothing can check.
+
+What a checker proves, and what it cannot, stated so nothing infers more:
+
+| Proved mechanically | Left to a person |
+| --- | --- |
+| The record exists, is exactly three canonical lines in the locked role order, and names each role's locked selector | That any network call happened at all |
+| Each identifier matches the documented form of the provider the bound selector runner sealed in the same run, and none is a placeholder | That each identifier exists in the provider account |
+| No identifier is reused within or across roles | That the reported usage matches the billed call |
+| The record's provider, model, endpoint, and adapter build are byte-identical to the identity that same run sealed | That the record describes *this* run rather than an earlier one |
+| `calls` equals the identifier count and meets the floor its role's locked cases imply, and the reported totals are internally consistent with it | Whether the demonstration was a genuine task |
+
+The right-hand column is the honest content of the mechanism. A fabricator who
+is willing to write a fake adapter can still emit a well-formed identifier of
+the correct shape, a plausible usage pair, and a consistent count, and the
+checker will accept all of it. What changes is that the fabrication is now
+externally falsifiable: the identifiers either appear in the provider account
+for that window or they do not, and the reviewer who looks is checking a
+specific claim rather than reading prose.
+
 ### Evidence
 
+- One real-provider reply asserted to carry a `provider_attestation` whose
+  `response_id` matches the provider's documented form, with the deterministic
+  adapter asserted to return `:unreported` for the identical request, so the
+  distinguishing property is proved rather than assumed.
+- A real-provider evidence case fed a reply whose attestation is `:unreported`,
+  asserting that the case fails; and the same reply driven through an ordinary
+  run, asserting that the run proceeds normally and is accounted conservatively,
+  so the requirement lives in the evidence claim and never becomes a provider
+  allowlist at runtime.
+- The attestation asserted absent from every durable element, staged request,
+  canonical digest input, projection, and the reserved continuation field.
 - Byte equality between the committed staged request and what the real provider
   adapter received, for a multi-turn run with real tool results.
 - Replay after a restart mid-run producing a byte-identical projection and
@@ -601,6 +692,32 @@ external service. The sidecar in §13.4 keeps the benefit reachable as an
 adapter-private optimization bound to provider, model family, and source message
 range, without ever being the truth; `M2` stores none because it has no evidence
 about continuation compatibility to encode.
+
+**Collecting the attestation live from the running selector.** A checker-owned
+directory, one file per role, written by the real case and read after it. The
+appeal is real: it is the only shape that binds a retained identifier to the run
+that produced it, and it would make a copied-forward record impossible rather
+than merely detectable. The arithmetic still fails. The file would be written by
+the same test code that writes the identity report, so the set of things a
+fabricator must produce is unchanged and only their location moves. Against
+that, it adds an unauthenticated channel beside `M1`'s sealed result — the one
+path deliberately made authoritative, and the one whose singularity the reused
+runner's own corpus protects — and it makes a checker-owned environment variable
+part of a product test's contract. The staleness it prevents is visible to the
+reviewer comparing timestamps and identifiers against the provider account,
+which is the step that must happen regardless.
+
+**Cross-checking reported input tokens against the committed canonical bytes.**
+Superficially the strongest available check: both quantities exist, and a
+mismatch would be damning. It is not available. The checker holds neither a
+provider tokenizer nor the finished run's journal, so it could only compare the
+reported count against a repository-owned estimate through a tolerance band, and
+that band would be a configured number with no evidence behind it — the same
+objection this decision raises to a minimum-remaining-time threshold. Worse, the
+band is public: a fabricator computes it from the same estimator and lands
+inside it. Reported usage is retained for the auditor, who can look up one
+response identifier and compare, and the gate records it as retained evidence
+rather than as enforcement.
 
 **Better synthesized summaries.** The current `"Tool <name> completed: completed"`
 could become a richer generated description. This does not address the defect:
@@ -871,13 +988,22 @@ The run's committed absolute deadline also reaches durable form outside this
 decision's records: it is carried in the staged request here and canonicalized
 into every `JobRequest` under
 [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept), where it is
-covered by the existing `canonical_request_digest` and adds no grant binding. It
-qualifies because it is immutable for the run. The effective job deadline
-ADR 0009 derives per attempt is durable operational state carried alongside that
-digested request and is deliberately outside the digest: it is computed from the
-dispatch instant, so canonicalizing it would change the digest on every retry and
-break the single reconciliation identity ADR 0007 compares across attempts of one
-operation.
+covered by that attempt's `canonical_request_digest` and adds no grant binding.
+It qualifies because it is an immutable semantic field of the run. The effective
+job deadline ADR 0009 derives per attempt is durable operational state carried
+alongside that digested request and is deliberately outside the digest, because
+it is dispatch-local wall-clock rather than an immutable semantic job field: it
+records when this dispatch stops waiting, not what work was authorized.
+
+That is a different question from retry identity, and the two must not be
+conflated. The canonicalization the
+[technical vision](../vision-technical.md#technical-depth) fixes covers operation
+*and attempt* identity, so two attempts of one operation carry two different
+`canonical_request_digest` values by construction. `operation_id` is the stable
+identity across attempts, each attempt is reconciled against the digest recorded
+for that attempt, and ADR 0007's retained tuple already names the original
+attempt alongside its journaled digest. Nothing here depends on, or may assert,
+digest sameness across attempts.
 
 Rollback before closure removes the conversation elements, the projection, the
 bounds, the deadline's propagation into the supervised model call and onto every

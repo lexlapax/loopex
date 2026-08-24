@@ -442,6 +442,13 @@ run_opening_probe() {
   fi
 
   probe_root="$(cd "$probe_root" && pwd -P)" || probe_root=""
+  case "${probe_root:-/}" in
+    "$repository_root" | "$repository_root"/*)
+      rm -rf "$probe_root"
+      probe_unavailable_reason="the evidence root resolved inside the checkout, which is not isolation"
+      return 0
+      ;;
+  esac
   if [ -z "$probe_root" ]; then
     probe_unavailable_reason="the evidence root could not be physically resolved"
     return 0
@@ -456,9 +463,12 @@ run_opening_probe() {
 
   # Compilation goes to a build root inside the evidence root, never the
   # checkout's, so a stale or absent _build cannot change what the probe sees.
+  # MIX_BUILD_PATH is cleared rather than merely overridden: it takes precedence
+  # over MIX_BUILD_ROOT, so an ambient value would silently defeat the isolation
+  # this comment claims. Clearing it is what makes the claim true.
   if ! output="$(
-    env MIX_ENV=dev MIX_BUILD_ROOT="$probe_root/build" TMPDIR="$probe_root" \
-      mix compile 2>&1
+    env -u MIX_BUILD_PATH MIX_ENV=dev MIX_BUILD_ROOT="$probe_root/build" \
+      TMPDIR="$probe_root" mix compile 2>&1
   )"; then
     printf '%s\n' "$output" >&2
     rm -rf "$probe_root"
@@ -477,7 +487,8 @@ run_opening_probe() {
   fi
 
   output="$(
-    env LOOPEX_M2_PROBE_ROOT="$probe_root/state" LOOPEX_HOME="$probe_root/state/.loopex" \
+    env -u MIX_BUILD_PATH LOOPEX_M2_PROBE_ROOT="$probe_root/state" \
+      LOOPEX_HOME="$probe_root/state/.loopex" \
       TMPDIR="$probe_root" ERL_CRASH_DUMP=/dev/null ERL_CRASH_DUMP_SECONDS=0 \
       elixir "${code_paths[@]}" "$program" 2>&1
   )"
@@ -574,7 +585,7 @@ require_feature \
   "the maximum turn bound ends the run bound reached before another provider call" \
   "the cumulative token budget ends the run bound reached before another provider call" \
   "the wall clock deadline ends the run bound reached before another provider call" \
-  "two attempts of one operation dispatched at different instants recompute the same request digest" \
+  "a retried tool operation keeps its operation identity and reconciles against its own attempt bound request digest" \
   "a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" \
   "the committed absolute deadline is propagated into the model call rather than an independent per call timeout" \
   "a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" \
@@ -727,7 +738,9 @@ require_feature \
   "the task transcript shows every tool call decision and result" \
   "a denied tool call inside a multi tool task is reported and the task continues truthfully" \
   "the demonstration workspace is disposable and never the operator's own repository" \
-  "one real provider task streams edits a real repository across several turns and the operator sees the committed result"
+  "a real provider evidence claim fails when the reply carries no provider supplied response identifier" \
+  "one real provider task streams edits a real repository across several turns and the operator sees the committed result" \
+  "one real provider call surfaces the provider's own response identifier and reported usage that the deterministic adapter cannot produce"
 
 # M1 is closed and its outcomes are proved history, but the behaviour it proved
 # is still the floor this milestone stands on. Its selectors are re-run here at
@@ -813,6 +826,12 @@ require_feature \
   "only the declared internal dependency closure is reachable and startup never receives the provider key"
 
 require_feature \
+  "the runner's own build and root isolation has no locked definition, so an ambient environment variable can defeat it unnoticed" \
+  apps/loopex/test/gate_isolation_test.exs \
+  "an ambient MIX_BUILD_PATH cannot redirect gate owned compilation out of the owned build root" \
+  "the gate refuses an owned root that resolves inside the checkout or the operator's product state"
+
+require_feature \
   "the dependency corpus does not yet describe the M2 seven-application inventory" \
   apps/loopex/test/deps_budget_test.exs \
   "the repository satisfies the dependency budget and direction" \
@@ -877,6 +896,7 @@ closure_documents=(
   docs/evidence/M2-toolchain-matrix.md
   docs/evidence/M2-negative-demonstrations.md
   docs/evidence/M2-coding-demonstration.md
+  docs/evidence/M2-real-call-attestations.md
   docs/operator/README.md
   docs/operator/coding-sessions.md
   docs/operator/tools-and-policy.md
@@ -954,7 +974,7 @@ user_state_root=""
 user_state_before=""
 user_state_after=""
 
-fingerprint_user_state() {
+fingerprint_tree() {
   local root="$1"
   [ -d "$root" ] || { printf '%s' "absent"; return 0; }
   (
@@ -969,7 +989,7 @@ fingerprint_user_state() {
 }
 
 user_state_root="$HOME/.loopex"
-user_state_before="$(fingerprint_user_state "$user_state_root")"
+user_state_before="$(fingerprint_tree "$user_state_root")"
 
 task_root="$(mktemp -d "${TMPDIR:-/tmp}/loopex-m2-gate.XXXXXX")" \
   || fail "an owned task root could not be created"
@@ -989,6 +1009,9 @@ case "$task_root" in
   "$user_state_root" | "$user_state_root"/*)
     fail "the owned task root resolves inside the operator's product state"
     ;;
+  "$repository_root" | "$repository_root"/*)
+    fail "the owned task root resolves inside the checkout, which is not isolation"
+    ;;
 esac
 
 mkdir -p "$task_root/home" "$task_root/tmp" "$task_root/build" "$task_root/workspace" \
@@ -997,6 +1020,11 @@ mkdir -p "$task_root/home" "$task_root/tmp" "$task_root/build" "$task_root/works
 export LOOPEX_HOME="$task_root/home/.loopex"
 export TMPDIR="$task_root/tmp"
 export MIX_BUILD_ROOT="$task_root/build"
+# MIX_BUILD_PATH takes precedence over MIX_BUILD_ROOT. Exporting the root while
+# leaving an ambient path in place would let one inherited environment variable
+# redirect every locked command back into the checkout, so it is cleared here
+# and its effect is verified below rather than assumed.
+unset MIX_BUILD_PATH
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 export ERL_CRASH_DUMP=/dev/null
@@ -1004,6 +1032,13 @@ export ERL_CRASH_DUMP_SECONDS=0
 export GIT_OPTIONAL_LOCKS=0
 
 test_build_path="$task_root/build/test"
+
+# The checkout's own _build must be inert for the whole run. This is the
+# executable form of the isolation claim: clearing MIX_BUILD_PATH states the
+# intent, and this fingerprint pair proves no locked command wrote into the
+# checkout's build tree anyway.
+checkout_build_root="$repository_root/_build"
+checkout_build_before="$(fingerprint_tree "$checkout_build_root")"
 
 gate_seed="$(( $(od -An -N4 -tu4 /dev/urandom | tr -d ' \n') % 1000000 ))" \
   || fail "the gate seed could not be derived"
@@ -1224,7 +1259,7 @@ run_selector 1 apps/loopex/test/agent_loop_test.exs default 15 zero \
   "passed=the maximum turn bound ends the run bound reached before another provider call" \
   "passed=the cumulative token budget ends the run bound reached before another provider call" \
   "passed=the wall clock deadline ends the run bound reached before another provider call" \
-  "passed=two attempts of one operation dispatched at different instants recompute the same request digest" \
+  "passed=a retried tool operation keeps its operation identity and reconciles against its own attempt bound request digest" \
   "passed=a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" \
   "passed=the committed absolute deadline is propagated into the model call rather than an independent per call timeout" \
   "passed=a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" \
@@ -1344,19 +1379,23 @@ run_selector registry apps/loopex/test/tool_registry_test.exs default 5 zero \
   "passed=a model request records the exact tool definition generation it used"
 
 # Mandatory closure evidence: the attended real-provider demonstration.
-run_selector demonstration apps/loopex_cli/test/coding_task_test.exs default 4 positive \
+run_selector demonstration apps/loopex_cli/test/coding_task_test.exs default 5 positive \
   "passed=a multi tool task reads edits and verifies a file in a disposable repository" \
   "passed=the task transcript shows every tool call decision and result" \
   "passed=a denied tool call inside a multi tool task is reported and the task continues truthfully" \
   "passed=the demonstration workspace is disposable and never the operator's own repository" \
-  "excluded=one real provider task streams edits a real repository across several turns and the operator sees the committed result"
+  "passed=a real provider evidence claim fails when the reply carries no provider supplied response identifier" \
+  "excluded=one real provider task streams edits a real repository across several turns and the operator sees the committed result" \
+  "excluded=one real provider call surfaces the provider's own response identifier and reported usage that the deterministic adapter cannot produce"
 
-run_selector demonstration apps/loopex_cli/test/coding_task_test.exs real-combined 1 positive \
+run_selector demonstration apps/loopex_cli/test/coding_task_test.exs real-combined 2 positive \
   "passed=one real provider task streams edits a real repository across several turns and the operator sees the committed result" \
+  "passed=one real provider call surfaces the provider's own response identifier and reported usage that the deterministic adapter cannot produce" \
   "excluded=a multi tool task reads edits and verifies a file in a disposable repository" \
   "excluded=the task transcript shows every tool call decision and result" \
   "excluded=a denied tool call inside a multi tool task is reported and the task continues truthfully" \
-  "excluded=the demonstration workspace is disposable and never the operator's own repository"
+  "excluded=the demonstration workspace is disposable and never the operator's own repository" \
+  "excluded=a real provider evidence claim fails when the reply carries no provider supplied response identifier"
 
 [ -n "$demonstration_record" ] \
   || fail "the attended demonstration role retained no non-secret real-path identity"
@@ -1432,6 +1471,10 @@ run_selector mechanics apps/loopex/test/m1_exunit_runner_test.exs default 5 zero
   "passed=official counts and exact events refuse failures skips exclusions and missing names" \
   "passed=fake stdout at_exit and early halt cannot manufacture one authoritative result" \
   "passed=only the declared internal dependency closure is reachable and startup never receives the provider key"
+
+run_selector mechanics apps/loopex/test/gate_isolation_test.exs default 2 zero \
+  "passed=an ambient MIX_BUILD_PATH cannot redirect gate owned compilation out of the owned build root" \
+  "passed=the gate refuses an owned root that resolves inside the checkout or the operator's product state"
 
 run_selector mechanics apps/loopex/test/deps_budget_test.exs default 27 zero \
   "passed=the repository satisfies the dependency budget and direction" \
@@ -1533,6 +1576,144 @@ validate_negative_demonstrations() {
       || fail "the $mechanism demonstration artifact $artifact could not be digested"
     [ "$actual" = "$restored" ] \
       || fail "the $mechanism demonstration restored $artifact to $restored, which is not this revision's ${actual}"
+
+    index=$(( index + 1 ))
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Real-call attestations.
+#
+# M1's selector runner seals a fixed real-path field set and refuses a report
+# whose key set differs. It is a bound artifact at M1's exact closing bytes, so
+# no attestation field can enter that channel. The attestation therefore lives
+# beside it, in an M2-owned record this runner validates.
+#
+# What this proves is bounded and the gate document says so in the same terms:
+# the record is well formed, its identifiers carry the documented form of the
+# provider the bound runner sealed in this same run, no identifier is reused,
+# and the record's non-secret identity is byte-identical to that sealed
+# identity. It does not and cannot prove that a socket was opened. Whether each
+# identifier exists in the provider account, and whether the reported usage
+# matches the billed call, is closure review's step and the only one that
+# reaches the provider.
+# ---------------------------------------------------------------------------
+
+readonly ATTESTATION_RECORD_PATTERN='^\{"role":"(demonstration_db|inherited_5c|inherited_8b)","selector":"([A-Za-z0-9._/-]+)","provider":"([a-z][a-z0-9_-]*)","model":"([!-~]+)","endpoint":"([!-~]+)","adapter_build":"([!-~]+)","calls":([1-9][0-9]*),"provider_response_ids":"([A-Za-z0-9_+-]+)","input_tokens":([1-9][0-9]*),"output_tokens":([1-9][0-9]*),"candidate":"([0-9a-f]{40})","recorded":"([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)"\}$'
+
+# The documented identifier form of each admitted provider. A provider with no
+# entry here fails closed: the runner cannot check a form it does not know, and
+# accepting any non-placeholder string would be the overclaim this section
+# exists to avoid. Admitting a further provider is a gate amendment.
+provider_response_id_form() {
+  case "$1" in
+    anthropic) printf '%s' '^msg_[A-Za-z0-9]{16,64}$' ;;
+    openai) printf '%s' '^(chatcmpl-[A-Za-z0-9]{8,128}|resp_[A-Za-z0-9]{8,128})$' ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_real_call_attestations() {
+  local path=docs/evidence/M2-real-call-attestations.md
+  [ -f "$path" ] || fail "the real-call attestation record does not exist"
+
+  [ -n "$real_reference_identity" ] \
+    || fail "no real-provider role sealed an identity for the attestation record to agree with"
+
+  local expected=(
+    "demonstration_db|apps/loopex_cli/test/coding_task_test.exs|4"
+    "inherited_5c|apps/loopex_reference_client/test/real_model_session_test.exs|1"
+    "inherited_8b|apps/loopex_reference_client/test/end_to_end_recovery_test.exs|2"
+  )
+
+  local declared
+  declared="$(grep -c '"provider_response_ids"' "$path")"
+  [ "$declared" -eq 3 ] \
+    || fail "the real-call attestations must be exactly three records, not $declared"
+
+  local records=() line
+  while IFS= read -r line; do
+    records+=("$line")
+  done < <(grep -E '^\{"role":' "$path")
+
+  [ "${#records[@]}" -eq 3 ] \
+    || fail "only ${#records[@]} real-call attestation records are one-line JSON objects in the canonical key order"
+
+  local index=0 record pair want_role want_selector want_calls
+  local role_name selector provider model endpoint adapter_build calls ids
+  local input_tokens output_tokens candidate identity form id id_count seen_ids=" "
+  for record in "${records[@]}"; do
+    pair="${expected[$index]}"
+    want_role="${pair%%|*}"
+    want_selector="$(printf '%s' "$pair" | cut -d'|' -f2)"
+    want_calls="${pair##*|}"
+
+    if [ -n "$provider_key_value" ]; then
+      case "$record" in
+        *"$provider_key_value"*)
+          fail "real-call attestation $(( index + 1 )) carries provider credential bytes"
+          ;;
+      esac
+    fi
+
+    [[ "$record" =~ $ATTESTATION_RECORD_PATTERN ]] \
+      || fail "real-call attestation $(( index + 1 )) is not one canonical record in the locked key order"
+    role_name="${BASH_REMATCH[1]}"
+    selector="${BASH_REMATCH[2]}"
+    provider="${BASH_REMATCH[3]}"
+    model="${BASH_REMATCH[4]}"
+    endpoint="${BASH_REMATCH[5]}"
+    adapter_build="${BASH_REMATCH[6]}"
+    calls="${BASH_REMATCH[7]}"
+    ids="${BASH_REMATCH[8]}"
+    input_tokens="${BASH_REMATCH[9]}"
+    output_tokens="${BASH_REMATCH[10]}"
+    candidate="${BASH_REMATCH[11]}"
+
+    [ "$role_name" = "$want_role" ] \
+      || fail "real-call attestation $(( index + 1 )) attests $role_name, not the locked $want_role"
+    [ "$selector" = "$want_selector" ] \
+      || fail "the $role_name attestation names $selector, not its locked $want_selector"
+    require_safe_tracked_path "$selector" "the $role_name attestation"
+
+    identity=" provider=$provider model=$model endpoint=$endpoint adapter_build=$adapter_build"
+    [ "$identity" = "$real_reference_identity" ] \
+      || fail "the $role_name attestation records a provider, model, endpoint, or adapter build that the bound selector runner did not seal in this run"
+
+    form="$(provider_response_id_form "$provider")" \
+      || fail "the $role_name attestation names provider $provider, whose response identifier form this gate does not document; admitting it is a gate amendment, never a skipped check"
+
+    id_count=0
+    local remaining="$ids"
+    while [ -n "$remaining" ]; do
+      id="${remaining%%+*}"
+      if [ "$id" = "$remaining" ]; then
+        remaining=""
+      else
+        remaining="${remaining#*+}"
+      fi
+      [ -n "$id" ] \
+        || fail "the $role_name attestation carries an empty provider response identifier"
+      [[ "$id" =~ $form ]] \
+        || fail "the $role_name attestation carries a response identifier that is not $provider's documented form"
+      case "$seen_ids" in
+        *" $id "*)
+          fail "the $role_name attestation reuses provider response identifier $id, which another role already claimed"
+          ;;
+      esac
+      seen_ids="$seen_ids$id "
+      id_count=$(( id_count + 1 ))
+    done
+
+    [ "$calls" -eq "$id_count" ] \
+      || fail "the $role_name attestation claims $calls real calls but names $id_count response identifiers"
+    [ "$calls" -ge "$want_calls" ] \
+      || fail "the $role_name attestation claims $calls real calls, below the $want_calls its locked role must have made"
+    [ "$input_tokens" -ge "$calls" ] && [ "$output_tokens" -ge "$calls" ] \
+      || fail "the $role_name attestation reports fewer tokens than it reports calls"
+
+    git merge-base --is-ancestor "$candidate" HEAD 2>/dev/null \
+      || fail "the $role_name attestation names candidate $candidate, which is not reachable from this revision"
 
     index=$(( index + 1 ))
   done
@@ -1654,16 +1835,21 @@ validate_matrix() {
   local changed
   changed="$(git diff --name-only "$candidate" HEAD | LC_ALL=C sort | tr '\n' ' ')"
   case "$changed" in
-    "" | "docs/evidence/M2-coding-demonstration.md docs/evidence/M2-negative-demonstrations.md docs/evidence/M2-toolchain-matrix.md ") : ;;
+    "" | "docs/evidence/M2-coding-demonstration.md docs/evidence/M2-negative-demonstrations.md docs/evidence/M2-real-call-attestations.md docs/evidence/M2-toolchain-matrix.md ") : ;;
     *) fail "this revision changes product bytes relative to the captured candidate: $changed" ;;
   esac
 }
 
 validate_negative_demonstrations
+validate_real_call_attestations
 
-user_state_after="$(fingerprint_user_state "$user_state_root")"
+user_state_after="$(fingerprint_tree "$user_state_root")"
 [ "$user_state_before" = "$user_state_after" ] \
   || fail "the operator's product state under $user_state_root changed during the run"
+
+checkout_build_after="$(fingerprint_tree "$checkout_build_root")"
+[ "$checkout_build_before" = "$checkout_build_after" ] \
+  || fail "the checkout's own _build changed during the run; the owned build root did not contain compilation"
 
 if [ "$role" = "capture" ]; then
   # The retained identity fields are exactly the ones the attended
