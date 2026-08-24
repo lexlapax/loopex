@@ -739,6 +739,43 @@ This record is the maintainer's disposition evidence, not the independent review
 The administrative acceptance transition changes only the three ADR status lines
 and governance rows plus the plans register's derived status capsule.
 
+<a id="disposition-m2-plan-acceptance-2026-08-24"></a>
+### M2 plan pair and gate acceptance — 2026-08-24
+
+The maintainer explicitly accepted the `M2`
+[Concept plan](../plans/M2.md#concept), its
+[Technical depth companion](../plans/M2-technical.md#technical-depth), and the
+[locked gate](../plans/M2-gate.md) at candidate
+`e318690b6cd0e845d6dce694e5be80dc47211d6c`, after independent review of that
+exact candidate. Acceptance binds:
+
+| Bound bytes | Digest |
+| --- | --- |
+| Normative Concept Envelope | `sha256:ec70503c1775c45d79f65512d6a80c82c1477b917de60268e11e2324eb2724bd` |
+| Normative Technical Envelope | `sha256:7d7f0bb681c5e9755259cd438eb44c06430e0cb023b24741aa1bb2b9104dbc28` |
+| Gate | `sha256:add77ffd2434c583bf84896d6cc9f823928dd5bad9dffb4c3f25f14a9ff64d93` |
+
+`M2` is the foreground operator harness: eleven outcomes carrying multi-turn
+conversation with committed history, streaming with domain-scoped loss
+detection, the prompt/steer/follow-up/abort input algebra, four coding tools
+against a real workspace, artifact spill and retrieval, a host `Loopex.Policy`
+port with a working refusal, project-resource trust, truthful cancellation,
+session listing and resume, the `loopex` command, and a shipped reference
+composition. The gate is red for exactly the declared missing behaviour and
+stays red until that work lands.
+
+**Scope of this record.** It accepts the plan pair and the gate, and with them
+the milestone's normative envelopes, evidence obligations, and locked
+acceptance. It authorizes implementation inside those envelopes on the
+designated `m2` branch. It authorizes the governance-only Acceptance checkpoint
+to integrate to `main` with the gate still red and no milestone product bytes.
+It does not close `M2`, weaken or amend the locked gate, authorize a merge of
+product implementation, authorize a release, or open a successor milestone.
+
+This record is the maintainer's disposition evidence, not the independent
+review. The acceptance transition changes only the plan's governance row, this
+record, and the three primary project records that carry derived status.
+
 ## Retained Seed Bootstrap Evidence
 
 ### Closed 2026-08-15
