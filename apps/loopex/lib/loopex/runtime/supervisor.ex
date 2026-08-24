@@ -9,18 +9,23 @@ defmodule Loopex.Runtime.Supervisor do
   ## Technical depth
 
   Children use stable supervisor-local IDs and are resolved through the root
-  pid retained by `Loopex.Runtime`. `:rest_for_one` orders authority before
-  owned work and delivery: a control failure removes every later child, a
-  session-supervisor failure removes delivery state, and a dispatcher failure
-  leaves current session coordinators alive so public events can be re-read
-  from the durable outbox.
+  pid retained by `Loopex.Runtime`. `:rest_for_one` orders configuration before
+  authority, and authority before owned work and delivery: the tool registry
+  comes first because control and every session coordinator resolve tools
+  through it, so a registry failure must reset what depends on it rather than
+  leave a coordinator holding a registry that has forgotten what it held. A
+  control failure then removes every later child, a session-supervisor failure
+  removes delivery state, and a dispatcher failure leaves current session
+  coordinators alive so public events can be re-read from the durable outbox.
   """
 
   use Supervisor
 
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.EventDispatcher
+  alias Loopex.ToolRegistry
 
+  @registry_id Loopex.ToolRegistry
   @control_id Loopex.Runtime.Control
   @workers_id Loopex.Runtime.Workers
   @sessions_id Loopex.Runtime.SessionSupervisor
@@ -44,6 +49,10 @@ defmodule Loopex.Runtime.Supervisor do
     root = self()
 
     children = [
+      %{
+        id: @registry_id,
+        start: {ToolRegistry, :start_link, [[root: root] ++ options]}
+      },
       %{
         id: @control_id,
         start: {Control, :start_link, [[root: root] ++ options]}
@@ -69,11 +78,19 @@ defmodule Loopex.Runtime.Supervisor do
       resolved =
         Map.new(Supervisor.which_children(root), fn {id, pid, _type, _modules} -> {id, pid} end)
 
-      with control when is_pid(control) <- Map.get(resolved, @control_id),
+      with registry when is_pid(registry) <- Map.get(resolved, @registry_id),
+           control when is_pid(control) <- Map.get(resolved, @control_id),
            workers when is_pid(workers) <- Map.get(resolved, @workers_id),
            sessions when is_pid(sessions) <- Map.get(resolved, @sessions_id),
            dispatcher when is_pid(dispatcher) <- Map.get(resolved, @dispatcher_id) do
-        {:ok, %{control: control, workers: workers, sessions: sessions, dispatcher: dispatcher}}
+        {:ok,
+         %{
+           registry: registry,
+           control: control,
+           workers: workers,
+           sessions: sessions,
+           dispatcher: dispatcher
+         }}
       else
         _other -> {:error, :runtime_unavailable}
       end

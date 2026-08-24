@@ -62,6 +62,7 @@ defmodule Loopex.Runtime do
           | {:model, map() | nil}
           | {:executor, map() | nil}
           | {:tool, map() | nil}
+          | {:tools, [LoopexProtocol.ToolDefinition.t()]}
           | {:grant_decision, term()}
           | {:fault_to, pid() | nil}
 
@@ -295,6 +296,28 @@ defmodule Loopex.Runtime do
 
   def children(_runtime), do: {:error, :runtime_unavailable}
 
+  @doc """
+  ## Concept
+
+  This runtime's own tool registry.
+
+  ## Technical depth
+
+  The registry is reached only this way: through the explicit runtime reference,
+  never a registered name or an application-environment key. Two runtimes in one
+  VM therefore resolve two different processes, and neither can name the other's.
+  """
+  @spec tool_registry(t()) :: {:ok, pid()} | {:error, :runtime_unavailable}
+  def tool_registry(%__MODULE__{supervisor: supervisor}) do
+    with {:ok, %{registry: registry}} <- RuntimeSupervisor.children(supervisor) do
+      {:ok, registry}
+    else
+      _other -> {:error, :runtime_unavailable}
+    end
+  end
+
+  def tool_registry(_runtime), do: {:error, :runtime_unavailable}
+
   defp control_call(%__MODULE__{supervisor: supervisor}, message, timeout \\ 5_000) do
     with {:ok, %{control: control}} <- RuntimeSupervisor.children(supervisor) do
       safe_call(control, message, timeout)
@@ -357,6 +380,7 @@ defmodule Loopex.Runtime do
              model: nil,
              executor: nil,
              tool: nil,
+             tools: [],
              grant_decision: nil,
              fault_to: nil
            ),
@@ -368,6 +392,7 @@ defmodule Loopex.Runtime do
          {:ok, model} <- validate_model(validated[:model]),
          {:ok, executor} <- validate_executor(validated[:executor]),
          {:ok, tool} <- validate_tool(validated[:tool]),
+         {:ok, tools} <- validate_tools(validated[:tools]),
          {:ok, grant_decision} <- validate_grant_decision(validated[:grant_decision]),
          {:ok, fault_to} <- validate_sink(validated[:fault_to]),
          :ok <- validate_loop_configuration(model, executor, tool, grant_decision) do
@@ -381,6 +406,7 @@ defmodule Loopex.Runtime do
          model: model,
          executor: executor,
          tool: tool,
+         tools: tools,
          grant_decision: grant_decision,
          fault_to: fault_to
        ]}
@@ -399,6 +425,21 @@ defmodule Loopex.Runtime do
         {:error, :invalid_identifier}
     end
   end
+
+  # Concept: the tool set a runtime is composed with.
+  #
+  # Technical depth: this is the reference distribution declaring its own tools,
+  # and the only path by which a reserved `loopex.` identifier enters the
+  # registry. Each definition is validated here so an invalid one refuses
+  # runtime start rather than failing later inside the registry's `init/1`,
+  # where the reason would reach the caller as a supervisor start error.
+  defp validate_tools(tools) when is_list(tools) do
+    if Enum.all?(tools, &LoopexProtocol.ToolDefinition.valid?/1),
+      do: {:ok, tools},
+      else: {:error, :invalid_tool_definition}
+  end
+
+  defp validate_tools(_tools), do: {:error, :invalid_tool_definition}
 
   defp validate_capacity(value)
        when is_integer(value) and value > 0 and value <= @max_attachment_capacity,
