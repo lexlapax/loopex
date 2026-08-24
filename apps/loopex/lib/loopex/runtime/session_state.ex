@@ -29,7 +29,16 @@ defmodule Loopex.Runtime.SessionState do
   `pending_work` contains plain model intents derived from committed prompt
   admissions; Workstream B makes them observable as eligible but does not
   dispatch them.
+
+  `conversation` holds the committed elements of each run, which
+  `Loopex.Conversation` projects into the message list a turn stages. `bounds`
+  holds each run's declared bounds exactly as they were committed at admission
+  or promotion, and `charged` accumulates that run's token charge with the
+  source that produced it.
   """
+  alias Loopex.Bounds
+  alias Loopex.Conversation
+
   @type t :: %__MODULE__{
           session_id: binary(),
           owner_epoch: non_neg_integer(),
@@ -40,6 +49,10 @@ defmodule Loopex.Runtime.SessionState do
           active_run_id: binary() | nil,
           commands: map(),
           pending_work: map(),
+          conversation: map(),
+          bounds: map(),
+          deadlines: map(),
+          charged: map(),
           expected_events: [map()]
         }
 
@@ -52,6 +65,10 @@ defmodule Loopex.Runtime.SessionState do
             active_run_id: nil,
             commands: %{},
             pending_work: %{},
+            conversation: %{},
+            bounds: %{},
+            deadlines: %{},
+            charged: %{},
             expected_events: []
 
   @typedoc """
@@ -112,11 +129,14 @@ defmodule Loopex.Runtime.SessionState do
   rejected admissions both return Store-ready records so a later repetition
   cannot change merely because run state moved on.
   """
-  @spec propose(t(), map()) ::
+  @spec propose(t(), map(), map()) ::
           {:ok, proposal()}
           | {:replayed, {:accepted, binary()} | {:error, term()}}
           | {:error, term()}
-  def propose(%__MODULE__{} = state, command) when is_map(command) do
+  def propose(state, command, resolved \\ %{})
+
+  def propose(%__MODULE__{} = state, command, resolved)
+      when is_map(command) and is_map(resolved) do
     with {:ok, normalized} <- normalize_command(command),
          {:ok, digest} <- command_digest(normalized) do
       case Map.fetch(state.commands, normalized.command_id) do
@@ -127,12 +147,12 @@ defmodule Loopex.Runtime.SessionState do
           {:error, :idempotency_conflict}
 
         :error ->
-          propose_new(state, normalized, digest)
+          propose_new(state, Map.put(normalized, :resolved_bounds, resolved), digest)
       end
     end
   end
 
-  def propose(_state, _command), do: {:error, :invalid_command}
+  def propose(_state, _command, _resolved), do: {:error, :invalid_command}
 
   @doc """
   ## Concept
@@ -304,13 +324,65 @@ defmodule Loopex.Runtime.SessionState do
     |> Enum.sort_by(&Map.fetch!(&1, :run_id))
   end
 
+  @doc """
+  ## Concept
+
+  The committed conversation elements of one run.
+
+  ## Technical depth
+
+  In commit order. `Loopex.Conversation` owns how they project into messages;
+  this is only the store of what was committed, so a caller cannot get a
+  projection that disagrees with the journal by asking a different function.
+  """
+  @spec elements(t(), binary()) :: [Conversation.element()]
+  def elements(%__MODULE__{conversation: conversation}, run_id),
+    do: Map.get(conversation, run_id, [])
+
+  @doc """
+  ## Concept
+
+  The bounds declared for one run and the tokens charged against them so far.
+
+  ## Technical depth
+
+  Bounds are read back exactly as committed. A recovering owner never recomputes
+  a deadline from its own clock, because that would hand a run back the downtime
+  it slept through.
+  """
+  @spec accounting(t(), binary()) :: {map() | nil, map()}
+  def accounting(%__MODULE__{} = state, run_id) do
+    declared = Map.get(state.bounds, run_id)
+    charged = Map.get(state.charged, run_id, %{tokens: 0, source: nil})
+
+    {declared && Map.put(declared, :deadline, Map.get(state.deadlines, run_id)), charged}
+  end
+
+  @doc false
+  @spec propose_run_terminal(t(), binary(), binary(), map()) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_run_terminal(%__MODULE__{} = state, run_id, outcome, detail)
+      when is_binary(run_id) and outcome in ["completed", "bound_reached"] do
+    record = %{
+      "run_id" => run_id,
+      "outcome" => outcome,
+      "bound" => Map.get(detail, :bound),
+      "observed" => Map.get(detail, :observed),
+      "declared_limit" => Map.get(detail, :declared_limit),
+      "accounting_source" => Map.get(detail, :accounting_source),
+      kind: "run_terminal_committed"
+    }
+
+    internal_proposal(state, stable_id("run-terminal", run_id, outcome), record)
+  end
+
   @doc false
   @spec propose_model_request(t(), binary(), Loopex.Model.request()) ::
           {:ok, proposal()} | {:error, term()}
   def propose_model_request(%__MODULE__{} = state, run_id, request)
       when is_binary(run_id) and is_map(request) do
-    work = Map.get(state.pending_work, run_id, %{})
-    turn_number = Map.get(work, :turn_number, 1)
+    work = Map.get(state.pending_work, run_id, %{turn_number: 1})
+    turn_number = next_turn_number(work)
 
     record = %{
       "run_id" => run_id,
@@ -321,24 +393,25 @@ defmodule Loopex.Runtime.SessionState do
 
     internal_proposal(
       state,
-      stable_id("model-request", run_id, request.canonical_request_digest),
+      stable_id("model-request", run_id, request.staged_request_digest),
       record
     )
   end
 
   @doc false
-  @spec propose_model_result(t(), binary(), map()) :: {:ok, proposal()} | {:error, term()}
-  def propose_model_result(%__MODULE__{} = state, run_id, reply)
-      when is_binary(run_id) and is_map(reply) do
+  @spec propose_model_result(t(), binary(), map(), map()) :: {:ok, proposal()} | {:error, term()}
+  def propose_model_result(%__MODULE__{} = state, run_id, reply, generations \\ %{})
+      when is_binary(run_id) and is_map(reply) and is_map(generations) do
     record = %{
       "run_id" => run_id,
       "reply" => encode_plain(reply),
+      "generations" => encode_plain(generations),
       kind: "model_result_committed"
     }
 
     internal_proposal(
       state,
-      stable_id("model-result", run_id, reply.canonical_request_digest),
+      stable_id("model-result", run_id, reply.staged_request_digest),
       record
     )
   end
@@ -375,6 +448,39 @@ defmodule Loopex.Runtime.SessionState do
     internal_proposal(state, stable_id("executor-fact", run_id, receipt.job_id), record)
   end
 
+  @doc """
+  ## Concept
+
+  Commits a terminal fact for a tool call that never produced a receipt.
+
+  ## Technical depth
+
+  A call the run could not dispatch, or one whose executor answered with an
+  error, still owes the conversation an answer. It becomes a terminal
+  `failed` — or `denied`, once a host policy can refuse one — exactly as a
+  completed call becomes `completed`, and the run then continues or terminates
+  truthfully from there.
+
+  This is what stops a tool problem from killing the session owner. A coordinator
+  that exits on a failed tool loses the run's place in its own conversation and
+  leaves an operator with nothing to read; recording the failure keeps the
+  journal complete and the loop honest about what happened.
+  """
+  @spec propose_tool_result(t(), binary(), binary(), atom(), binary() | nil) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_tool_result(%__MODULE__{} = state, run_id, tool_call_id, outcome, reason)
+      when is_binary(run_id) and is_binary(tool_call_id) and is_atom(outcome) do
+    record = %{
+      "run_id" => run_id,
+      "tool_call_id" => tool_call_id,
+      "outcome" => Atom.to_string(outcome),
+      "reason" => reason,
+      kind: "tool_result_committed"
+    }
+
+    internal_proposal(state, stable_id("tool-result", run_id, tool_call_id), record)
+  end
+
   @doc false
   @spec propose_outcome_unknown(t(), binary(), binary()) :: {:ok, proposal()} | {:error, term()}
   def propose_outcome_unknown(%__MODULE__{} = state, run_id, reconciliation_ref)
@@ -399,6 +505,9 @@ defmodule Loopex.Runtime.SessionState do
       "admission" => "accepted",
       "run_id" => run_id,
       "content" => command.content,
+      "max_turns" => command.resolved_bounds.max_turns,
+      "token_budget" => command.resolved_bounds.token_budget,
+      "deadline_ms" => command.resolved_bounds.deadline_ms,
       kind: "command_admitted"
     }
 
@@ -558,7 +667,9 @@ defmodule Loopex.Runtime.SessionState do
               "model_result_committed",
               "effect_intent_committed",
               "executor_receipt_committed",
-              "outcome_unknown_committed"
+              "outcome_unknown_committed",
+              "run_terminal_committed",
+              "tool_result_committed"
             ] do
     if version == state.journal_version + 1 and owner_epoch == state.owner_epoch and
          incarnation == state.owner_incarnation_id and is_binary(incarnation) do
@@ -587,18 +698,21 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, command_type} <- record_binary(record, "command_type"),
          {:ok, admission} <- record_binary(record, "admission"),
          false <- Map.has_key?(state.commands, command_id),
-         {:ok, reply, active_run_id, pending_work, expected_events} <-
+         {:ok, reply, active_run_id, pending_work, expected_events, patch} <-
            command_effect(state, record, command_type, admission, command_id) do
       command_binding = %{digest: digest, reply: reply}
 
       {:ok,
-       %{
-         state
-         | active_run_id: active_run_id,
-           pending_work: pending_work,
-           expected_events: expected_events,
-           commands: Map.put(state.commands, command_id, command_binding)
-       }}
+       Map.merge(
+         %{
+           state
+           | active_run_id: active_run_id,
+             pending_work: pending_work,
+             expected_events: expected_events,
+             commands: Map.put(state.commands, command_id, command_binding)
+         },
+         patch
+       )}
     else
       true -> {:error, :duplicate_command_record}
       {:error, reason} -> {:error, reason}
@@ -613,21 +727,41 @@ defmodule Loopex.Runtime.SessionState do
          command_id
        ) do
     with {:ok, run_id} <- record_binary(record, "run_id"),
-         {:ok, content} <- record_binary(record, "content") do
+         {:ok, content} <- record_binary(record, "content"),
+         {:ok, declared} <- record_bounds(record) do
       work = %{
         type: "model",
         stage: "model_pending",
         run_id: run_id,
         command_id: command_id,
         content: content,
-        turn_number: 1
+        turn_number: 1,
+        pending_calls: []
+      }
+
+      # Concept: the prompt becomes the first element of the conversation.
+      #
+      # Technical depth: it is committed here rather than staged later, because
+      # a projection reads only committed elements. The bounds are committed in
+      # the same record, so a recovering owner re-presents the deadline that was
+      # decided at admission instead of computing a new one from its own clock.
+      element = %{
+        kind: :user_message,
+        run_id: run_id,
+        command_id: command_id,
+        content: content
       }
 
       expected_events =
         state.expected_events ++ prompt_events(state.session_id, command_id, run_id, content)
 
+      patch = %{
+        conversation: Map.put(state.conversation, run_id, [element]),
+        bounds: Map.put(state.bounds, run_id, declared)
+      }
+
       {:ok, {:accepted, command_id}, run_id, Map.put(state.pending_work, run_id, work),
-       expected_events}
+       expected_events, patch}
     end
   end
 
@@ -641,7 +775,7 @@ defmodule Loopex.Runtime.SessionState do
        when is_binary(run_id),
        do:
          {:ok, {:error, :run_active}, state.active_run_id, state.pending_work,
-          state.expected_events}
+          state.expected_events, %{}}
 
   defp command_effect(
          %{active_run_id: active_run_id} = state,
@@ -657,7 +791,7 @@ defmodule Loopex.Runtime.SessionState do
           state.expected_events ++ [abort_event(state.session_id, command_id, active_run_id)]
 
         {:ok, {:accepted, command_id}, nil, Map.delete(state.pending_work, active_run_id),
-         expected_events}
+         expected_events, %{}}
 
       _other ->
         {:error, :invalid_abort_record}
@@ -671,7 +805,7 @@ defmodule Loopex.Runtime.SessionState do
          "rejected_no_active_run",
          _command_id
        ),
-       do: {:ok, {:error, :no_active_run}, nil, state.pending_work, state.expected_events}
+       do: {:ok, {:error, :no_active_run}, nil, state.pending_work, state.expected_events, %{}}
 
   defp command_effect(_state, _record, _command_type, _admission, _command_id),
     do: {:error, :invalid_command_transition}
@@ -690,13 +824,29 @@ defmodule Loopex.Runtime.SessionState do
          kind: "model_request_committed"
        }) do
     with {:ok, request} <- decode_request(request),
-         %{stage: "model_pending"} = work <- Map.get(state.pending_work, run_id),
+         %{stage: stage} = work when stage in ["model_pending", "turn_settled"] <-
+           Map.get(state.pending_work, run_id),
          :ok <- Loopex.Model.validate_request(request),
-         true <- turn_id == stable_id("turn", run_id, work.turn_number) do
+         turn_number = next_turn_number(work),
+         true <- turn_id == stable_id("turn", run_id, turn_number) do
+      # Concept: staging a request is what advances the turn.
+      #
+      # Technical depth: a settled turn advances only here, inside the same
+      # transaction that commits the bytes about to be dispatched. There is no
+      # separate "turn advanced" record to fall out of step with the request it
+      # was supposed to accompany.
       next_work =
-        Map.merge(work, %{stage: "model_dispatched", turn_id: turn_id, request: request})
+        Map.merge(work, %{
+          stage: "model_dispatched",
+          turn_id: turn_id,
+          turn_number: turn_number,
+          request: request,
+          pending_calls: []
+        })
 
-      {:ok, put_pending(state, run_id, next_work), []}
+      deadlines = Map.put_new(state.deadlines, run_id, request.deadline)
+
+      {:ok, put_pending(%{state | deadlines: deadlines}, run_id, next_work), []}
     else
       _other -> {:error, :invalid_model_request_transition}
     end
@@ -705,16 +855,17 @@ defmodule Loopex.Runtime.SessionState do
   defp apply_internal_record(state, %{
          "run_id" => run_id,
          "reply" => reply,
+         "generations" => generations,
          kind: "model_result_committed"
        }) do
     with {:ok, reply} <- decode_reply(reply),
          %{stage: "model_dispatched", request: request} = work <-
            Map.get(state.pending_work, run_id),
          true <- reply.canonical_request_bytes == request.canonical_request_bytes,
-         true <- reply.canonical_request_digest == request.canonical_request_digest,
+         true <- reply.staged_request_digest == request.staged_request_digest,
          true <- is_binary(reply.text),
          true <- is_list(reply.tool_calls) do
-      apply_model_reply(state, work, reply)
+      apply_model_reply(state, work, reply, generations)
     else
       _other -> {:error, :invalid_model_result_transition}
     end
@@ -728,13 +879,19 @@ defmodule Loopex.Runtime.SessionState do
        }) do
     with {:ok, job} <- decode_job(job),
          {:ok, grant} <- decode_grant(grant),
-         %{stage: "effect_pending", tool_call: call, turn_id: turn_id} = work <-
+         %{stage: "effect_pending", pending_calls: [call | _rest], turn_id: turn_id} = work <-
            Map.get(state.pending_work, run_id),
          :ok <- Loopex.Executor.validate_job(job),
          true <- job.run_id == run_id and job.turn_id == turn_id,
-         true <- job.tool_call_id == call.id,
+         true <- job.tool_call_id == call.tool_call_id,
          true <- is_map(grant) do
-      next_work = Map.merge(work, %{stage: "effect_dispatched", job: job, grant: grant})
+      # Concept: calls run in the order the model asked for them.
+      #
+      # Technical depth: the dispatched call is the head of what remains, never
+      # a call chosen by the coordinator, so a job that names any other call of
+      # the same turn is refused here rather than quietly reordering the turn.
+      next_work =
+        Map.merge(work, %{stage: "effect_dispatched", job: job, grant: grant, tool_call: call})
 
       {:ok, put_pending(state, run_id, next_work), [tool_started_event(state.session_id, job)]}
     else
@@ -751,20 +908,145 @@ defmodule Loopex.Runtime.SessionState do
          %{stage: "effect_dispatched", job: job, tool_call: call} = work <-
            Map.get(state.pending_work, run_id),
          :ok <- receipt_matches_job(receipt, job),
-         true <- receipt.outcome == :completed do
+         outcome = conversation_outcome(receipt.outcome),
+         true <- outcome in Conversation.outcomes(),
+         true <- Conversation.admits_result?(elements(state, run_id), run_id, call.tool_call_id) do
+      result = %{
+        kind: :tool_result,
+        run_id: run_id,
+        turn_number: work.turn_number,
+        tool_call_id: call.tool_call_id,
+        outcome: outcome,
+        content: Conversation.result_content(outcome, receipt.output),
+        artifacts: Map.get(receipt, :artifacts, [])
+      }
+
+      # Concept: the turn is over only when every call the model made has an
+      # answer.
+      #
+      # Technical depth: remaining calls stay in the assistant's own order, so a
+      # tool that finished early cannot jump ahead of one the model asked for
+      # first. The next request may not be staged until this list empties.
+      remaining = Enum.reject(work.pending_calls, &(&1.tool_call_id == call.tool_call_id))
+      stage = if remaining == [], do: "turn_settled", else: "effect_pending"
+
       next_work =
         work
-        |> Map.merge(%{
-          stage: "model_pending",
-          content: "Tool #{call.name} completed: completed",
-          turn_number: work.turn_number + 1
-        })
-        |> Map.drop([:job, :grant, :request, :turn_id, :tool_call])
+        |> Map.merge(%{stage: stage, pending_calls: remaining})
+        |> Map.drop([:job, :grant, :tool_call])
 
-      {:ok, put_pending(state, run_id, next_work),
-       [tool_finished_event(state.session_id, job, "completed")]}
+      next =
+        state
+        |> append_element(run_id, result)
+        |> put_pending(run_id, next_work)
+
+      {:ok, next, [tool_finished_event(state.session_id, job, to_string(receipt.outcome))]}
     else
       _other -> {:error, :invalid_executor_receipt_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{
+         "run_id" => run_id,
+         "tool_call_id" => tool_call_id,
+         "outcome" => outcome,
+         "reason" => reason,
+         kind: "tool_result_committed"
+       }) do
+    with %{stage: "effect_" <> _phase, pending_calls: [call | _rest]} = work <-
+           Map.get(state.pending_work, run_id),
+         true <- call.tool_call_id == tool_call_id,
+         {:ok, terminal} <- decode_receipt_outcome(outcome),
+         terminal = conversation_outcome(terminal),
+         true <- terminal in Conversation.outcomes(),
+         true <- Conversation.admits_result?(elements(state, run_id), run_id, tool_call_id) do
+      result = %{
+        kind: :tool_result,
+        run_id: run_id,
+        turn_number: work.turn_number,
+        tool_call_id: tool_call_id,
+        outcome: terminal,
+        content: Conversation.result_content(terminal, reason),
+        artifacts: []
+      }
+
+      remaining = Enum.reject(work.pending_calls, &(&1.tool_call_id == tool_call_id))
+      stage = if remaining == [], do: "turn_settled", else: "effect_pending"
+
+      next_work =
+        work
+        |> Map.merge(%{stage: stage, pending_calls: remaining})
+        |> Map.drop([:job, :grant, :tool_call])
+
+      next =
+        state
+        |> append_element(run_id, result)
+        |> put_pending(run_id, next_work)
+
+      # Concept: a call that started must be seen to finish.
+      #
+      # Technical depth: the operator saw `tool.started` for a dispatched call,
+      # so it is owed a `tool.finished` even when no receipt exists. Without one
+      # a failed call reads on the public plane as a tool that never ended.
+      event =
+        %{
+          "run_id" => run_id,
+          "turn_id" => Map.get(work, :turn_id),
+          "tool_call_id" => tool_call_id,
+          "outcome" => outcome,
+          event_id: stable_id("event-tool-finished", state.session_id, tool_call_id),
+          kind: "tool.finished"
+        }
+
+      {:ok, next, [event]}
+    else
+      _other -> {:error, :invalid_tool_result_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{
+         "run_id" => run_id,
+         "outcome" => outcome,
+         "bound" => bound,
+         "observed" => observed,
+         "declared_limit" => declared_limit,
+         "accounting_source" => accounting_source,
+         kind: "run_terminal_committed"
+       }) do
+    with %{stage: "turn_settled"} <- Map.get(state.pending_work, run_id),
+         true <- outcome in ["completed", "bound_reached"] do
+      # Concept: bound_reached carries the bound and the observed value and
+      # nothing else.
+      #
+      # Technical depth: the declared limit that value was measured against and
+      # the accounting source that produced it are siblings of the outcome in
+      # this record, recorded beside it rather than inside it, so the run
+      # terminal algebra keeps exactly the shape the vision fixes.
+      event =
+        run_finished_event(state.session_id, run_id, outcome, nil)
+        |> Map.merge(
+          case outcome do
+            "bound_reached" ->
+              %{
+                "bound" => bound,
+                "observed" => observed,
+                "declared_limit" => declared_limit,
+                "accounting_source" => accounting_source
+              }
+
+            _completed ->
+              %{}
+          end
+        )
+
+      {:ok,
+       %{
+         state
+         | active_run_id: nil,
+           pending_work: Map.delete(state.pending_work, run_id)
+       }, [event]}
+    else
+      _other -> {:error, :invalid_run_terminal_transition}
     end
   end
 
@@ -789,31 +1071,145 @@ defmodule Loopex.Runtime.SessionState do
 
   defp apply_internal_record(_state, _record), do: {:error, :invalid_internal_transition}
 
-  defp apply_model_reply(state, work, %{tool_calls: []} = reply) do
-    events = [
-      assistant_event(state.session_id, work.run_id, work.turn_id, reply.text),
-      run_finished_event(state.session_id, work.run_id, "completed", nil)
-    ]
+  # Concept: one committed reply becomes one assistant message and the turn's
+  # list of calls to run.
+  #
+  # Technical depth: the assistant message is built from the adapter's return
+  # value and never assembled from deltas — core has nothing to assemble from,
+  # which makes that structural rather than a rule to remember. A malformed,
+  # truncated, or duplicated call never becomes a call entry: the whole batch is
+  # refused, because a turn that silently dropped one of the model's calls would
+  # project a conversation the model never had.
+  #
+  # No bound is evaluated here. Whether the run continues depends on wall clock,
+  # and a decision that reads the clock cannot be replayed; the coordinator
+  # therefore evaluates bounds against the settled turn and commits the outcome
+  # as its own durable fact.
+  defp apply_model_reply(state, work, reply, generations) do
+    case normalize_calls(reply.tool_calls, generations) do
+      {:ok, calls} ->
+        run_id = work.run_id
 
-    {:ok,
-     %{state | active_run_id: nil, pending_work: Map.delete(state.pending_work, work.run_id)},
-     events}
-  end
+        assistant = %{
+          kind: :assistant_message,
+          run_id: run_id,
+          turn_number: work.turn_number,
+          content: reply.text,
+          tool_calls: calls,
+          stop_reason: if(calls == [], do: "end_turn", else: "tool_use"),
+          usage: reply.usage
+        }
 
-  defp apply_model_reply(state, work, %{tool_calls: [call]} = reply) when is_map(call) do
-    with %{id: id, name: name, arguments: arguments} <- call,
-         true <-
-           is_binary(id) and byte_size(id) > 0 and is_binary(name) and
-             byte_size(name) > 0 and is_map(arguments) do
-      event = assistant_event(state.session_id, work.run_id, work.turn_id, reply.text)
-      next_work = Map.merge(work, %{stage: "effect_pending", tool_call: call})
-      {:ok, put_pending(state, work.run_id, next_work), [event]}
-    else
-      _other -> {:error, :invalid_model_tool_call}
+        {charge, source} =
+          Bounds.charge(
+            reply,
+            work.request.canonical_request_bytes,
+            Loopex.Model.max_tokens(work.request)
+          )
+
+        next_work =
+          if calls == [] do
+            Map.merge(work, %{stage: "turn_settled", pending_calls: []})
+          else
+            Map.merge(work, %{stage: "effect_pending", pending_calls: calls})
+          end
+
+        next =
+          state
+          |> append_element(run_id, assistant)
+          |> charge_run(run_id, charge, source)
+          |> put_pending(run_id, next_work)
+
+        {:ok, next, [assistant_event(state.session_id, run_id, work.turn_id, reply.text)]}
+
+      :error ->
+        {:error, :invalid_model_tool_call}
     end
   end
 
-  defp apply_model_reply(_state, _work, _reply), do: {:error, :invalid_model_tool_batch}
+  # Concept: turn one is turn one; every settled turn moves to the next.
+  #
+  # Technical depth: derived from the committed stage rather than from a counter
+  # the coordinator carries, so a successor that recovers mid-run resumes the
+  # same numbering the journal already describes.
+  defp next_turn_number(%{stage: "turn_settled", turn_number: turn_number}), do: turn_number + 1
+  defp next_turn_number(%{turn_number: turn_number}), do: turn_number
+
+  # Concept: the bounds a run was admitted with, read back from its own record.
+  #
+  # Technical depth: all three are required and none has a default. A record
+  # missing one refuses the replay rather than supplying a number no authority
+  # committed, which is the same rule that refuses a session configured without
+  # a sampling bound at start.
+  defp record_bounds(record) do
+    Bounds.declare(%{
+      max_turns: Map.get(record, "max_turns"),
+      token_budget: Map.get(record, "token_budget"),
+      deadline_ms: Map.get(record, "deadline_ms")
+    })
+  end
+
+  defp normalize_calls(calls, generations) when is_list(calls) do
+    normalized =
+      Enum.reduce_while(calls, {:ok, []}, fn call, {:ok, acc} ->
+        case call do
+          %{id: id, name: name, arguments: arguments}
+          when is_binary(id) and byte_size(id) > 0 and is_binary(name) and
+                 byte_size(name) > 0 and is_map(arguments) ->
+            entry = %{
+              tool_call_id: id,
+              name: name,
+              arguments: arguments,
+              generation: decode_generation(Map.get(generations, name))
+            }
+
+            {:cont, {:ok, [entry | acc]}}
+
+          _other ->
+            {:halt, :error}
+        end
+      end)
+
+    with {:ok, reversed} <- normalized do
+      calls = Enum.reverse(reversed)
+      ids = Enum.map(calls, & &1.tool_call_id)
+
+      if length(Enum.uniq(ids)) == length(ids), do: {:ok, calls}, else: :error
+    end
+  end
+
+  defp normalize_calls(_calls, _generations), do: :error
+
+  # Concept: a generation survives the journal as a list and comes back a tuple.
+  #
+  # Technical depth: plain encoding has no tuple, so the triple is stored as
+  # three ordered members and rebuilt here. A name that resolved to nothing
+  # stays nil and its call is never dispatched.
+  defp decode_generation([tool_id, tool_version, digest]),
+    do: {tool_id, tool_version, digest}
+
+  defp decode_generation({_id, _version, _digest} = generation), do: generation
+  defp decode_generation(_other), do: nil
+
+  defp append_element(state, run_id, element) do
+    %{
+      state
+      | conversation: Map.update(state.conversation, run_id, [element], &(&1 ++ [element]))
+    }
+  end
+
+  defp charge_run(state, run_id, charge, source) do
+    %{
+      state
+      | charged:
+          Map.update(
+            state.charged,
+            run_id,
+            %{tokens: charge, source: source},
+            fn held -> %{tokens: held.tokens + charge, source: source} end
+          )
+    }
+  end
 
   defp receipt_matches_job(receipt, job) do
     fields = [
@@ -854,14 +1250,15 @@ defmodule Loopex.Runtime.SessionState do
 
   defp decode_request(encoded) do
     fields = [
-      :protocol_version,
+      :canonicalization_version,
       :model,
       :messages,
       :tools,
-      :tool_choice,
-      :max_tokens,
+      :sampling,
+      :deadline,
+      :continuation,
       :canonical_request_bytes,
-      :canonical_request_digest
+      :staged_request_digest
     ]
 
     decode_top(encoded, fields)
@@ -874,12 +1271,23 @@ defmodule Loopex.Runtime.SessionState do
       :usage,
       :tool_calls,
       :canonical_request_bytes,
-      :canonical_request_digest
+      :staged_request_digest
     ]
 
+    # Concept: streaming statistics are additions, not requirements.
+    #
+    # Technical depth: `delta_count` and `streamed` are attempt-private evidence
+    # about how a reply was produced. An adapter that does not stream has nothing
+    # to say about them, and refusing its reply would make the arity change a
+    # behaviour change for exactly the adapters ADR 0011 says stay conformant.
+    # They default to "emitted nothing", which is what their absence means.
     with {:ok, reply} <- decode_top(encoded, fields),
          {:ok, calls} <- decode_tool_calls(reply.tool_calls) do
-      {:ok, %{reply | tool_calls: calls}}
+      {:ok,
+       reply
+       |> Map.put(:tool_calls, calls)
+       |> Map.put(:delta_count, Map.get(encoded, "delta_count", 0))
+       |> Map.put(:streamed, Map.get(encoded, "streamed", false))}
     end
   end
 
@@ -935,6 +1343,7 @@ defmodule Loopex.Runtime.SessionState do
       :tool_version,
       :outcome,
       :output,
+      :progress_count,
       :observed_at_ms,
       :child_environment_names,
       :provider_credential_present
@@ -949,11 +1358,25 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp decode_receipt_outcome("completed"), do: {:ok, :completed}
+  defp decode_receipt_outcome("failed"), do: {:ok, :failed}
+  defp decode_receipt_outcome("denied"), do: {:ok, :denied}
+  defp decode_receipt_outcome("cancelled"), do: {:ok, :cancelled}
+  defp decode_receipt_outcome("outcome_unknown"), do: {:ok, :outcome_unknown}
 
   defp decode_receipt_outcome("cancelled_workspace_lease_lost"),
     do: {:ok, :cancelled_workspace_lease_lost}
 
   defp decode_receipt_outcome(_outcome), do: {:error, :invalid_plain_receipt}
+
+  # Concept: what the model is told about a terminal outcome.
+  #
+  # Technical depth: the executor's own vocabulary is narrower in some cases and
+  # wider in others. `cancelled_workspace_lease_lost` is a precise executor fact
+  # retained in the receipt exactly as M1 named it; the conversation only needs
+  # to know the call was cancelled, so it is narrowed here rather than adding a
+  # sixth member to the closed conversation set.
+  defp conversation_outcome(:cancelled_workspace_lease_lost), do: :cancelled
+  defp conversation_outcome(outcome), do: outcome
 
   defp decode_top(encoded, fields) when is_map(encoded) do
     Enum.reduce_while(fields, {:ok, %{}}, fn field, {:ok, decoded} ->

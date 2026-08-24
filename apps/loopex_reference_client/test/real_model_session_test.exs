@@ -30,8 +30,8 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
     committed =
       Enum.find(records, fn record ->
         record.payload.kind == "model_request_committed" and
-          record.payload["request"]["canonical_request_digest"] ==
-            dispatched.canonical_request_digest
+          record.payload["request"]["staged_request_digest"] ==
+            dispatched.staged_request_digest
       end)
 
     assert committed
@@ -39,8 +39,8 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
     assert committed.payload["request"]["canonical_request_bytes"] ==
              dispatched.canonical_request_bytes
 
-    assert committed.payload["request"]["canonical_request_digest"] ==
-             dispatched.canonical_request_digest
+    assert committed.payload["request"]["staged_request_digest"] ==
+             dispatched.staged_request_digest
 
     assert File.read!(Path.join(fixture.workspace, "model-session.txt")) ==
              "model-session-effect"
@@ -81,8 +81,8 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
       assert result_record.payload["reply"]["canonical_request_bytes"] ==
                request_record.payload["request"]["canonical_request_bytes"]
 
-      assert result_record.payload["reply"]["canonical_request_digest"] ==
-               request_record.payload["request"]["canonical_request_digest"]
+      assert result_record.payload["reply"]["staged_request_digest"] ==
+               request_record.payload["request"]["staged_request_digest"]
     end)
 
     assert File.read!(Path.join(fixture.workspace, "real-session.txt")) ==

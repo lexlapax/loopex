@@ -150,6 +150,135 @@ defmodule LoopexProtocol.ToolDefinition do
   @doc """
   ## Concept
 
+  Completes a host's tool declaration into the canonical record.
+
+  ## Technical depth
+
+  A host declares what a model needs to see — a name, a description, an
+  identity, an effect class, and a parameter schema. The remaining fields of the
+  canonical record have defaults, so a host is not made to restate what it has
+  no opinion about. The generation digest is computed over the *completed*
+  record, so what was staged stays exactly checkable; normalization happens once,
+  on the way in, and never again.
+
+  Two narrowings are deliberate and are not silent:
+
+  `input_schema` is accepted as a name for `parameter_schema`. They are the same
+  thing under two names, and refusing the older one would break every host that
+  already uses it for no gain.
+
+  The schema is then narrowed to the subset this kernel can actually evaluate:
+  an object root, its named properties, and the required list. A key outside that
+  subset — `additionalProperties`, `const`, a union, a `$ref` — is dropped rather
+  than carried, because the kernel validates arguments against this record and a
+  key it cannot evaluate would claim a constraint that is never enforced. The
+  model is shown exactly what the kernel checks. A property whose *type* falls
+  outside the subset is refused outright by `validate/1` rather than dropped,
+  because dropping it would silently widen what the tool accepts.
+
+  Returns the completed record, which `validate/1` then judges as usual; an
+  input that cannot be completed is returned unchanged so its reasons are
+  reported against what the host actually wrote.
+  """
+  @spec normalize(term()) :: term()
+  def normalize(declaration) when is_map(declaration) and not is_struct(declaration) do
+    schema =
+      Map.get(declaration, "parameter_schema") || Map.get(declaration, "input_schema")
+
+    declaration
+    |> Map.drop(["input_schema"])
+    |> Map.put("parameter_schema", narrow_schema(schema))
+    |> Map.put_new("result_shape", %{"content_type" => "text", "description" => ""})
+    |> Map.put_new("idempotency_class", "never_blind_retry")
+    |> Map.put_new("budgets", %{
+      "wall_time_ms" => 120_000,
+      "output_bytes" => 65_536,
+      "artifact_bytes" => 8_388_608
+    })
+  end
+
+  def normalize(declaration), do: declaration
+
+  @doc """
+  ## Concept
+
+  The schema keywords `normalize/1` would drop from this declaration.
+
+  ## Technical depth
+
+  Reported so a narrowing is never silent. A host that wrote
+  `additionalProperties: false` or a `const` believes a constraint is enforced;
+  it is not, and being told so at registration is the difference between a
+  documented limitation and a surprise at dispatch. Each entry names where the
+  keyword sat, so a schema with several properties says which one lost what.
+
+  Returns an empty list when nothing is dropped, which is the ordinary case for
+  a declaration already written in the subset.
+  """
+  @spec narrowing(term()) :: [binary()]
+  def narrowing(declaration) when is_map(declaration) and not is_struct(declaration) do
+    schema = Map.get(declaration, "parameter_schema") || Map.get(declaration, "input_schema")
+
+    case schema do
+      %{} = schema ->
+        root = Enum.map(Map.keys(schema) -- @schema_keys, &"parameter_schema.#{&1}")
+
+        properties =
+          case Map.get(schema, "properties") do
+            %{} = properties ->
+              Enum.flat_map(properties, fn
+                {name, %{} = property} when is_binary(name) ->
+                  Enum.map(
+                    Map.keys(property) -- @property_keys,
+                    &"parameter_schema.properties.#{name}.#{&1}"
+                  )
+
+                _other ->
+                  []
+              end)
+
+            _other ->
+              []
+          end
+
+        Enum.sort(root ++ properties)
+
+      _other ->
+        []
+    end
+  end
+
+  def narrowing(_declaration), do: []
+
+  defp narrow_schema(schema) when is_map(schema) and not is_struct(schema) do
+    properties =
+      schema
+      |> Map.get("properties", %{})
+      |> case do
+        map when is_map(map) and not is_struct(map) ->
+          Map.new(map, fn {name, property} -> {name, narrow_property(property)} end)
+
+        other ->
+          other
+      end
+
+    %{
+      "type" => Map.get(schema, "type", "object"),
+      "properties" => properties,
+      "required" => Map.get(schema, "required", [])
+    }
+  end
+
+  defp narrow_schema(schema), do: schema
+
+  defp narrow_property(property) when is_map(property) and not is_struct(property),
+    do: Map.take(property, @property_keys)
+
+  defp narrow_property(property), do: property
+
+  @doc """
+  ## Concept
+
   Every reason this term is not a valid tool definition; an empty list means it
   is one.
 

@@ -88,10 +88,27 @@ defmodule Loopex.ReferenceClient do
   This is one direct embedded command; model and tool continuation occurs inside
   the runtime, not in this client.
   """
-  @spec prompt(t(), binary(), binary()) :: {:accepted, binary()} | {:error, term()}
-  def prompt(%__MODULE__{attachment: attachment}, command_id, content)
-      when is_binary(command_id) and is_binary(content) do
-    Loopex.command(attachment, %{type: :prompt, command_id: command_id, content: content})
+  @spec prompt(t(), binary(), binary(), keyword()) :: {:accepted, binary()} | {:error, term()}
+  def prompt(%__MODULE__{attachment: attachment}, command_id, content, options \\ [])
+      when is_binary(command_id) and is_binary(content) and is_list(options) do
+    # Concept: a run declares its bounds when it starts.
+    #
+    # Technical depth: there is no default for any of the three, so this client
+    # names them explicitly on the caller's behalf. A host embedding Loopex
+    # decides its own; these are the reference client's, not the kernel's.
+    bounds =
+      Keyword.get(options, :bounds, %{
+        max_turns: 8,
+        token_budget: 1_000_000,
+        deadline: System.system_time(:millisecond) + 300_000
+      })
+
+    Loopex.command(attachment, %{
+      type: :prompt,
+      command_id: command_id,
+      content: content,
+      bounds: bounds
+    })
   end
 
   @doc """

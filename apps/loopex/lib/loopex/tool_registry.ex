@@ -222,12 +222,47 @@ defmodule Loopex.ToolRegistry do
   def init(options) do
     tools = Keyword.get(options, :tools, [])
 
+    report_narrowing(
+      Keyword.get(options, :declared_tools, tools),
+      Keyword.get(options, :diagnostics_to)
+    )
+
     Enum.reduce_while(tools, {:ok, %{}}, fn definition, {:ok, entries} ->
       case put(entries, definition, :reference) do
         {:ok, entries} -> {:cont, {:ok, entries}}
         {:error, reason} -> {:halt, {:stop, {:invalid_tool_set, reason}}}
       end
     end)
+  end
+
+  # Concept: a narrowing is announced, never silent.
+  #
+  # Technical depth: the runtime completes a host's partial declaration into the
+  # canonical record and drops schema keywords the kernel cannot evaluate. Doing
+  # that quietly would leave a host believing a constraint is enforced when
+  # nothing enforces it, so every dropped keyword is named on the diagnostics
+  # plane at registration. This is transient plain data and is not durable truth:
+  # a host with no diagnostics sink loses the notice, which is why the same
+  # limitation is documented on `LoopexProtocol.ToolDefinition.normalize/1`
+  # rather than existing only here.
+  defp report_narrowing(_declared, nil), do: :ok
+
+  defp report_narrowing(declared, sink) when is_pid(sink) do
+    for declaration <- declared,
+        dropped = ToolDefinition.narrowing(declaration),
+        dropped != [] do
+      send(
+        sink,
+        {:loopex_diagnostic,
+         %{
+           "kind" => "tool_schema_narrowed",
+           "tool_id" => Map.get(declaration, "tool_id"),
+           "dropped" => dropped
+         }}
+      )
+    end
+
+    :ok
   end
 
   @impl GenServer

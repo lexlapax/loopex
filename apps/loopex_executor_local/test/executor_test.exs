@@ -203,7 +203,7 @@ defmodule Loopex.Executor.LocalTest do
       validated_arguments: arguments,
       workspace_ref: "workspace-#{label}",
       workspace_lease: fixture.lease_id,
-      deadline: now + 60_000,
+      run_deadline: now + 60_000,
       resource_budgets: %{"max_output_bytes" => 1_048_576},
       idempotency_class: "effectful",
       fencing_token: fixture.fence,

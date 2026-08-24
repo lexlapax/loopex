@@ -256,12 +256,20 @@ defmodule Loopex.SessionLifecycleTest do
 
     first =
       Task.async(fn ->
-        Loopex.command(attachment, %{type: :prompt, command_id: "prompt-1", content: "one"})
+        Loopex.command(attachment, %{
+          type: :prompt,
+          command_id: "prompt-1",
+          content: "one"
+        })
       end)
 
     second =
       Task.async(fn ->
-        Loopex.command(attachment, %{type: :prompt, command_id: "prompt-2", content: "two"})
+        Loopex.command(attachment, %{
+          type: :prompt,
+          command_id: "prompt-2",
+          content: "two"
+        })
       end)
 
     replies = [Task.await(first), Task.await(second)]

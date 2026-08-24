@@ -68,10 +68,19 @@ defmodule Loopex.Executor.Local do
   under the same ID is refused and never starts a process.
   """
   @impl Loopex.Executor
-  @spec execute(t(), Executor.job_request(), Executor.grant(), keyword()) ::
+  @spec execute(t(), Executor.job_request(), Executor.grant(), keyword(), Executor.progress_fun()) ::
           {:ok, map()} | {:error, term()}
-  def execute(executor, job, grant, options \\ [])
+  def execute(executor, job, grant, options \\ [], progress \\ nil)
+
+  def execute(executor, job, grant, options, progress)
       when is_pid(executor) and is_map(job) and is_map(grant) and is_list(options) do
+    # Concept: an executor that emits nothing is conformant.
+    #
+    # Technical depth: this executor does not stream yet, so it accepts the
+    # progress function, never calls it, and reports `progress_count: 0`. The
+    # coordinator then closes that operation's domain with a truthful count
+    # rather than with an absent item a consumer would have to interpret.
+    _progress = progress || Executor.discard_progress()
     GenServer.call(executor, {:execute, job, grant, options}, :infinity)
   end
 
@@ -188,7 +197,7 @@ defmodule Loopex.Executor.Local do
            }),
          true <- job.executor_identity == state.identity,
          true <- job.origin_executor_epoch == state.epoch,
-         true <- job.deadline > System.system_time(:millisecond),
+         true <- job.run_deadline > System.system_time(:millisecond),
          {:ok, arguments} <- validate_arguments(tool, job.validated_arguments) do
       {:ok, tool, lease_pid, lease.path, arguments}
     else
@@ -343,6 +352,7 @@ defmodule Loopex.Executor.Local do
       tool_version: tool.version,
       outcome: outcome,
       output: output,
+      progress_count: 0,
       observed_at_ms: System.system_time(:millisecond),
       child_environment_names: [@search_path_name],
       provider_credential_present: false

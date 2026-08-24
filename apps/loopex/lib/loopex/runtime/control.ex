@@ -84,13 +84,39 @@ defmodule Loopex.Runtime.Control do
        model: Keyword.fetch!(options, :model),
        executor: Keyword.fetch!(options, :executor),
        tool: Keyword.fetch!(options, :tool),
+       tools: Keyword.get(options, :tools, []),
+       active_tools: Keyword.get(options, :active_tools, []),
+       bounds: Keyword.get(options, :bounds),
+       sampling: Keyword.get(options, :sampling),
        grant_decision: Keyword.fetch!(options, :grant_decision),
        fault_to: Keyword.fetch!(options, :fault_to),
+       progress_to: Keyword.get(options, :progress_to),
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
        sessions: %{},
        monitor_to_session: %{},
        generation_counter: 0
      }}
+  end
+
+  # Concept: the tool set this session will offer the model, fixed at start.
+  #
+  # Technical depth: composed once here rather than resolved per turn, because a
+  # session's name-to-generation mapping is immutable for its lifetime. A
+  # registration made mid-run can therefore neither add, remove, nor repoint a
+  # name the model has already been shown. An empty selection is legitimate and
+  # means this runtime offers no tools at all.
+  defp active_tool_definitions(%{active_tools: []}), do: []
+
+  defp active_tool_definitions(state) do
+    selected = MapSet.new(state.active_tools)
+
+    Enum.filter(state.tools, fn definition ->
+      MapSet.member?(selected, Map.fetch!(definition, "tool_id")) or
+        MapSet.member?(
+          selected,
+          {Map.fetch!(definition, "tool_id"), Map.fetch!(definition, "tool_version")}
+        )
+    end)
   end
 
   @impl GenServer
@@ -349,6 +375,10 @@ defmodule Loopex.Runtime.Control do
         model: state.model,
         executor: state.executor,
         tool: state.tool,
+        active_tools: active_tool_definitions(state),
+        progress_to: state.progress_to,
+        bounds: state.bounds,
+        sampling: state.sampling,
         grant_decision: state.grant_decision,
         fault_to: state.fault_to
       ]

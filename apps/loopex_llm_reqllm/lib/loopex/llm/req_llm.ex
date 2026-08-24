@@ -167,17 +167,14 @@ defmodule Loopex.LLM.ReqLLM do
   @doc """
   ## Concept
 
-  Completes one model call from either the canonical request boundary or the
-  retained M0 prompt convenience form, returning normalized text and identity.
+  Builds and dispatches one request from a bare model name and prompt.
 
   ## Technical depth
 
-  Canonical bytes and digest are validated before the credential is read or a
-  provider is contacted. M1 supports one non-streaming user message. The M0
-  convenience clause first constructs that same canonical request. Provider
-  failures are returned as bounded strings with the credential substituted out.
+  A convenience for callers that hold no committed request, used by the
+  credential-free adapter lane. It declares its own sampling bound explicitly,
+  because there is no default anywhere and a request without one is refused.
   """
-  @impl Loopex.Model
   @spec complete(String.t(), String.t()) ::
           {:ok, reply()}
           | {:error, {:credential_unset, String.t()}}
@@ -186,21 +183,36 @@ defmodule Loopex.LLM.ReqLLM do
   def complete(model_spec, prompt) when is_binary(model_spec) and is_binary(prompt) do
     with {:ok, request} <-
            Model.request(model_spec, [%{"role" => "user", "content" => prompt}],
-             max_tokens: @max_tokens
+             sampling: %{"max_tokens" => @max_tokens},
+             deadline: System.system_time(:millisecond) + 60_000
            ) do
-      complete(request, [])
+      complete(request, [], Model.discard_progress())
     end
   end
 
-  @spec complete(Model.request(), keyword()) :: {:ok, reply()} | {:error, term()}
-  def complete(request, options) when is_map(request) and is_list(options) do
+  @doc """
+  ## Concept
+
+  Dispatches exactly the committed request and returns one complete reply.
+
+  ## Technical depth
+
+  This adapter does not stream. It is conformant anyway: it emits nothing
+  through `progress`, returns the same complete reply, and declares `streamed:
+  false` with a `delta_count` of zero, so the coordinator closes that attempt's
+  domain with a truthful count rather than with a sentinel or an absent item.
+  """
+  @impl Loopex.Model
+  @spec complete(Model.request(), keyword(), Model.progress_fun()) ::
+          {:ok, reply()} | {:error, term()}
+  def complete(request, options, progress)
+      when is_map(request) and is_list(options) and is_function(progress, 1) do
     with :ok <- Model.validate_request(request),
          {:ok, prompt} <- user_text(request),
          {:ok, credential} <- credential(),
          {:ok, identity} <- identity(request.model),
-         {:ok, tools} <- provider_tools(request.tools),
-         {:ok, tool_choice} <- provider_tool_choice(request.tool_choice) do
-      dispatch(request, prompt, credential, identity, tools, tool_choice)
+         {:ok, tools} <- provider_tools(Model.model_facing_tools(request)) do
+      dispatch(request, prompt, credential, identity, tools)
     end
   end
 
@@ -213,12 +225,11 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
-  defp dispatch(request, prompt, credential, identity, tools, tool_choice) do
+  defp dispatch(request, prompt, credential, identity, tools) do
     options = [
       api_key: credential,
-      max_tokens: request.max_tokens,
-      tools: tools,
-      tool_choice: tool_choice
+      max_tokens: Model.max_tokens(request),
+      tools: tools
     ]
 
     case ReqLLM.generate_text(request.model, prompt, options) do
@@ -229,8 +240,10 @@ defmodule Loopex.LLM.ReqLLM do
            identity: identity,
            usage: usage(response),
            tool_calls: Enum.map(ReqLLM.Response.tool_calls(response), &ReqLLM.ToolCall.to_map/1),
+           delta_count: 0,
+           streamed: false,
            canonical_request_bytes: request.canonical_request_bytes,
-           canonical_request_digest: request.canonical_request_digest
+           staged_request_digest: request.staged_request_digest
          }}
 
       {:error, error} ->
@@ -238,9 +251,25 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
-  defp user_text(%{messages: [%{"role" => "user", "content" => content}]})
-       when is_binary(content) and byte_size(content) > 0,
-       do: {:ok, content}
+  # Concept: the prompt bytes this provider call sends.
+  #
+  # Technical depth: the projected conversation now carries a system block,
+  # assistant messages, and tool results. This adapter renders the most recent
+  # user content, which is what its non-streaming single-prompt provider call
+  # accepts; a richer rendering belongs to the adapter, not to core, and does
+  # not change the bytes core committed and digested.
+  defp user_text(%{messages: messages}) when is_list(messages) do
+    messages
+    |> Enum.filter(&(Map.get(&1, "role") == "user"))
+    |> List.last()
+    |> case do
+      %{"content" => content} when is_binary(content) and byte_size(content) > 0 ->
+        {:ok, content}
+
+      _other ->
+        {:error, :unsupported_model_request}
+    end
+  end
 
   defp user_text(_request), do: {:error, :unsupported_model_request}
 
@@ -260,7 +289,7 @@ defmodule Loopex.LLM.ReqLLM do
   defp provider_tool(%{
          "name" => name,
          "description" => description,
-         "input_schema" => input_schema
+         "parameter_schema" => input_schema
        })
        when is_binary(name) and is_binary(description) and is_map(input_schema) do
     case ReqLLM.Tool.new(
@@ -275,15 +304,6 @@ defmodule Loopex.LLM.ReqLLM do
   end
 
   defp provider_tool(_definition), do: {:error, :invalid_model_tool}
-
-  defp provider_tool_choice("auto"), do: {:ok, :auto}
-  defp provider_tool_choice("none"), do: {:ok, :none}
-  defp provider_tool_choice("required"), do: {:ok, :required}
-
-  defp provider_tool_choice(%{"type" => "tool", "name" => name}) when is_binary(name),
-    do: {:ok, %{type: "tool", name: name}}
-
-  defp provider_tool_choice(_choice), do: {:error, :invalid_model_tool_choice}
 
   # Concept: usage crosses the boundary as two counts, not as a provider type.
   defp usage(response) do

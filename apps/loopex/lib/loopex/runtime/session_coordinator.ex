@@ -25,10 +25,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   use GenServer
 
+  alias Loopex.Bounds
+  alias Loopex.Conversation
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.SessionState
   alias Loopex.Executor
   alias Loopex.Model
+  alias Loopex.StreamDomain
+  alias LoopexProtocol.ToolDefinition
   alias Loopex.Store
   alias Loopex.Store.OwnerLane
 
@@ -149,9 +153,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
        model: Keyword.fetch!(options, :model),
        executor: Keyword.fetch!(options, :executor),
        tool: Keyword.fetch!(options, :tool),
+       active_tools: Keyword.get(options, :active_tools, []),
+       progress_to: Keyword.get(options, :progress_to),
+       bounds: Keyword.get(options, :bounds),
+       sampling: Keyword.get(options, :sampling),
        grant_decision: Keyword.fetch!(options, :grant_decision),
        fault_to: Keyword.fetch!(options, :fault_to),
        in_flight: %{},
+       streams: %{},
        pending_fault: nil,
        query: nil,
        owner: nil,
@@ -490,7 +499,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp commit_command(state, command) do
-    case SessionState.propose(state.durable, command) do
+    case SessionState.propose(state.durable, command, resolve_bounds(state, command)) do
       {:replayed, reply} ->
         {:reply, reply, state}
 
@@ -585,6 +594,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
         [%{stage: "effect_dispatched"} | _rest] ->
           {:noreply, state}
+
+        [%{stage: "turn_settled"} = work | _rest] ->
+          settle_turn(state, work)
       end
     else
       {:noreply, %{state | superseded: true}}
@@ -593,35 +605,146 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp advance_work(state), do: {:noreply, state}
 
+  # Concept: build the next request from what the run has actually committed.
+  #
+  # Technical depth: the message list is projected from committed elements, so
+  # every request after the first carries the operator's prompt, the model's own
+  # prior assistant messages, and the real output of every tool it ran. The
+  # bytes are canonicalized and committed *before* dispatch, and the adapter is
+  # then handed exactly those bytes. There is no sampling default: a run whose
+  # model configuration declares no `max_tokens` is refused here rather than
+  # truncated at dispatch by a number no record names.
   defp prepare_model_request(state, work) do
-    {tools, tool_choice} =
-      if work.turn_number == 1 do
-        provider_tool =
-          Map.take(state.tool, ["name", "description", "input_schema"])
+    run_id = work.run_id
+    {declared, _charged} = SessionState.accounting(state.durable, run_id)
+    elements = SessionState.elements(state.durable, run_id)
 
-        {[provider_tool], %{"type" => "tool", "name" => state.tool["name"]}}
-      else
-        {[], "none"}
-      end
-
-    max_tokens = Keyword.get(state.model.options, :max_tokens, 128)
-
-    with {:ok, request} <-
-           Model.request(
-             state.model.model,
-             [%{"role" => "user", "content" => work.content}],
-             tools: tools,
-             tool_choice: tool_choice,
-             max_tokens: max_tokens
+    with {:ok, max_tokens} <- declared_max_tokens(state),
+         messages = Conversation.project(elements, system: system_block(state)),
+         deadline = run_deadline(declared),
+         {:ok, request} <-
+           Model.request(state.model.model, messages,
+             tools: state.active_tools,
+             sampling: %{"max_tokens" => max_tokens},
+             deadline: deadline
            ),
-         {:ok, proposal} <-
-           SessionState.propose_model_request(state.durable, work.run_id, request),
+         {:ok, proposal} <- SessionState.propose_model_request(state.durable, run_id, request),
          {:ok, next} <- commit_internal(state, proposal) do
       send(self(), :advance_work)
       {:noreply, next}
     else
       {:error, reason} -> {:stop, {:model_request_failed, reason}, state}
     end
+  end
+
+  # Concept: the run stops when the model stops asking, or when a declared bound
+  # says so.
+  #
+  # Technical depth: the no-tool check runs first and unconditionally, so a run
+  # whose model finished on its own is `completed` and stays `completed`. Only
+  # then are bounds consulted, in their fixed order. The decision is committed as
+  # a durable fact rather than re-derived later, because it reads the wall clock
+  # and a clock-reading decision cannot be replayed.
+  defp settle_turn(state, work) do
+    run_id = work.run_id
+    {declared, charged} = SessionState.accounting(state.durable, run_id)
+    elements = SessionState.elements(state.durable, run_id)
+    assistant = Conversation.last_assistant(elements)
+
+    decision =
+      Bounds.decide(declared,
+        tool_calls: assistant.tool_calls,
+        turn_number: work.turn_number,
+        tokens: charged.tokens,
+        now: System.system_time(:millisecond)
+      )
+
+    case decision do
+      :continue ->
+        prepare_model_request(state, work)
+
+      :completed ->
+        commit_terminal(state, run_id, "completed", %{})
+
+      {:bound_reached, bound, observed} ->
+        commit_terminal(state, run_id, "bound_reached", %{
+          bound: Atom.to_string(bound),
+          observed: observed,
+          declared_limit: declared_limit(declared, bound),
+          accounting_source: charged.source && Atom.to_string(charged.source)
+        })
+    end
+  end
+
+  # Concept: the limit an observed value was measured against.
+  #
+  # Technical depth: the deadline's declared limit is the instant the run was
+  # actually bound by, not the duration it was configured with, because that is
+  # what the observed clock reading is comparable to.
+  defp declared_limit(declared, :deadline), do: run_deadline(declared)
+  defp declared_limit(declared, bound), do: Map.fetch!(declared, bound)
+
+  defp commit_terminal(state, run_id, outcome, detail) do
+    with {:ok, proposal} <-
+           SessionState.propose_run_terminal(state.durable, run_id, outcome, detail),
+         {:ok, next} <- commit_internal(state, proposal) do
+      {:noreply, next}
+    else
+      {:error, reason} -> {:stop, {:run_terminal_failed, reason}, state}
+    end
+  end
+
+  # Concept: the output allowance every request declares.
+  #
+  # Technical depth: read from the runtime's declared sampling configuration, or
+  # from the model options where a host set one there. There is no fallback
+  # invented here: if neither declares a bound the request is refused rather than
+  # truncated at dispatch by a number no record names.
+  # Concept: the run's absolute deadline, fixed by its first turn.
+  #
+  # Technical depth: once committed history carries one, that value is used
+  # unchanged for every later turn. Only turn one converts the declared duration
+  # into an instant, which is why a recovering owner resumes the deadline the run
+  # actually had rather than granting it the downtime it slept through.
+  defp run_deadline(%{deadline: deadline}) when is_integer(deadline), do: deadline
+
+  defp run_deadline(%{deadline_ms: deadline_ms}),
+    do: System.system_time(:millisecond) + deadline_ms
+
+  defp declared_max_tokens(state) do
+    configured =
+      Keyword.get(state.model.options, :max_tokens) ||
+        get_in(state.sampling, ["max_tokens"])
+
+    case configured do
+      max_tokens when is_integer(max_tokens) and max_tokens > 0 -> {:ok, max_tokens}
+      _absent -> {:error, :undeclared_sampling_bound}
+    end
+  end
+
+  # Concept: a run's bounds become absolute when the run is admitted.
+  #
+  # Technical depth: the configured deadline is a duration; this is the one place
+  # it becomes an instant, and it is committed with the admitting record. A
+  # command may name its own bounds and they win, which is how a host with a
+  # per-run policy overrides the runtime default without either of them being
+  # implicit.
+  defp resolve_bounds(state, command) do
+    case Map.get(command, :bounds) do
+      %{} = supplied -> Map.merge(state.bounds, supplied)
+      _absent -> state.bounds
+    end
+  end
+
+  # Concept: the versioned block that opens every conversation.
+  #
+  # Technical depth: carried inside the staged bytes and therefore covered by
+  # `staged_request_digest`, so a change to it is a visible change of what was
+  # dispatched rather than an invisible drift in how the model was instructed.
+  defp system_block(_state) do
+    "loopex.system.v1: You are a coding agent working in a real workspace. " <>
+      "Use the tools you are given to inspect and change files, and run commands " <>
+      "when you need to. Continue until the task is done, then stop."
   end
 
   defp start_model_work(state, work) do
@@ -631,21 +754,125 @@ defmodule Loopex.Runtime.SessionCoordinator do
       module = state.model.module
       request = work.request
       options = state.model.options
+      {stream, progress} = model_progress_fun(state, work)
 
       task =
         Task.Supervisor.async_nolink(state.workers, fn ->
-          module.complete(request, options)
+          module.complete(request, options, progress)
         end)
 
+      state = %{state | streams: Map.put(state.streams, {:model, work.run_id}, stream)}
       {:noreply, put_in_flight(state, task.ref, {:model, work.run_id})}
     end
   end
 
-  defp prepare_effect(state, work) do
-    call = work.tool_call
+  # Concept: the coordinator names the stream, not the adapter.
+  #
+  # Technical depth: the function closes over the domain derived from the
+  # attempt this coordinator is about to dispatch, so an adapter cannot
+  # misattribute a delta to another attempt even by accident — it never supplies
+  # a domain at all. Malformed items are dropped rather than projected, because
+  # a bad item must not be able to break the sequence a consumer uses to detect
+  # loss.
+  defp model_progress_fun(state, work) do
+    domain =
+      StreamDomain.derive(:model, state.session_id, model_operation_id(work), work.turn_number)
 
-    with true <- call.name == state.tool["name"],
-         {:ok, job} <- build_job(state, work, call),
+    turn_id = work.turn_id
+    sink = state.progress_to
+    counter = :counters.new(1, [:atomics])
+    stream = %{domain: domain, turn_id: turn_id, counter: counter}
+
+    {stream,
+     fn delta ->
+       if Model.valid_delta?(delta) do
+         :counters.add(counter, 1, 1)
+
+         emit_progress(
+           sink,
+           Map.merge(delta, %{
+             turn_id: turn_id,
+             stream_domain_id: domain,
+             model_sequence: :counters.get(counter, 1)
+           })
+         )
+       end
+
+       :ok
+     end}
+  end
+
+  defp model_operation_id(work), do: stable_id("model-operation", work.run_id, work.turn_number)
+
+  # Concept: every domain the coordinator opens is owed exactly one closure.
+  #
+  # Technical depth: a complete attempt closes with the producer's own count; an
+  # abandoned one closes with the count the coordinator itself observed, which is
+  # exact because it stops accepting items for a domain once it has closed it.
+  # Emission is the obligation — delivery is not guaranteed, because the closure
+  # rides the transient plane like any other item and may be coalesced away or
+  # lost with the plane when its owner changes.
+  defp close_model_stream(state, run_id, disposition, reported_count) do
+    case Map.fetch(state.streams, {:model, run_id}) do
+      {:ok, stream} ->
+        count =
+          case disposition do
+            :complete -> reported_count
+            :abandoned -> :counters.get(stream.counter, 1)
+          end
+
+        emit_progress(
+          state.progress_to,
+          StreamDomain.model_closed(stream.turn_id, stream.domain, 0, disposition, count)
+        )
+
+        %{state | streams: Map.delete(state.streams, {:model, run_id})}
+
+      :error ->
+        state
+    end
+  end
+
+  defp close_tool_stream(state, run_id, disposition, reported_count) do
+    case Map.fetch(state.streams, {:executor, run_id}) do
+      {:ok, stream} ->
+        count =
+          case disposition do
+            :complete -> reported_count
+            :abandoned -> :counters.get(stream.counter, 1)
+          end
+
+        emit_progress(
+          state.progress_to,
+          StreamDomain.tool_closed(
+            stream.turn_id,
+            stream.domain,
+            stream.tool_call_id,
+            0,
+            disposition,
+            count
+          )
+        )
+
+        %{state | streams: Map.delete(state.streams, {:executor, run_id})}
+
+      :error ->
+        state
+    end
+  end
+
+  defp emit_progress(nil, _item), do: :ok
+
+  defp emit_progress(sink, item) when is_pid(sink) do
+    send(sink, {:loopex_progress, item})
+    :ok
+  end
+
+  defp prepare_effect(state, work) do
+    [call | _rest] = work.pending_calls
+
+    with {:ok, definition} <- resolve_active_tool(state, call.name),
+         {:ok, job} <- build_job(state, work, call, definition),
          {:ok, grant} <-
            Executor.issue_grant(
              state.grant_decision,
@@ -657,8 +884,67 @@ defmodule Loopex.Runtime.SessionCoordinator do
          {:ok, next} <- commit_internal(state, proposal) do
       start_executor_work(next, Map.fetch!(next.durable.pending_work, work.run_id))
     else
-      false -> {:stop, :model_selected_unknown_tool, state}
-      {:error, reason} -> {:stop, {:effect_preparation_failed, reason}, state}
+      # Concept: a call that cannot be dispatched still gets an answer.
+      #
+      # Technical depth: the name is never guessed and the call is never
+      # dispatched; it takes a terminal `failed` fact naming what went wrong, and
+      # the loop carries on from there. Exiting here instead would lose the run's
+      # place in its own conversation over a problem with one tool.
+      {:error, reason} -> commit_tool_failure(state, work, call, reason)
+    end
+  end
+
+  defp commit_tool_failure(state, work, call, reason) do
+    with {:ok, proposal} <-
+           SessionState.propose_tool_result(
+             state.durable,
+             work.run_id,
+             call.tool_call_id,
+             :failed,
+             failure_reason(reason)
+           ),
+         {:ok, next} <- commit_internal(state, proposal) do
+      send(self(), :advance_work)
+      {:noreply, next}
+    else
+      {:error, commit_reason} -> {:stop, {:tool_result_failed, commit_reason}, state}
+    end
+  end
+
+  # Concept: a bounded reason the model can read.
+  #
+  # Technical depth: bounded and plain, because it becomes model-facing content
+  # and crosses the durable boundary. An unrecognised term is summarised rather
+  # than inspected in full, so a large internal structure cannot reach either.
+  defp failure_reason({:unknown_tool, name}) when is_binary(name),
+    do: "unknown_tool: no active tool is named #{name}"
+
+  defp failure_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
+
+  defp failure_reason({reason, _detail}) when is_atom(reason), do: Atom.to_string(reason)
+
+  defp failure_reason(_reason), do: "the tool could not be run"
+
+  # Concept: a name the model used must be one this session offered.
+  #
+  # Technical depth: resolved against the active set composed at session start,
+  # never against the registry directly, so a tool registered mid-run cannot
+  # become callable in a conversation that was never shown it.
+  # Concept: the session's model-visible names, each bound to one generation.
+  #
+  # Technical depth: committed with the reply that used them, so the assistant
+  # message records the exact bytes each call resolved through rather than a
+  # bare name a later registry edit could repoint.
+  defp active_generations(state) do
+    Map.new(state.active_tools, fn definition ->
+      {Map.fetch!(definition, "name"), Tuple.to_list(ToolDefinition.generation(definition))}
+    end)
+  end
+
+  defp resolve_active_tool(state, name) do
+    case Enum.find(state.active_tools, &(Map.fetch!(&1, "name") == name)) do
+      nil -> {:error, {:unknown_tool, name}}
+      definition -> {:ok, definition}
     end
   end
 
@@ -667,43 +953,81 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:noreply, state}
     else
       executor = state.executor
+      {stream, progress} = executor_progress_fun(state, work)
 
       task =
         Task.Supervisor.async_nolink(state.workers, fn ->
-          executor.module.execute(executor.reference, work.job, work.grant, [])
+          executor.module.execute(executor.reference, work.job, work.grant, [], progress)
         end)
 
+      state = %{state | streams: Map.put(state.streams, {:executor, work.run_id}, stream)}
       {:noreply, put_in_flight(state, task.ref, {:executor, work.run_id})}
     end
   end
 
-  defp build_job(state, work, call) do
-    now = System.system_time(:millisecond)
+  # Concept: an executor's progress is stamped with a domain it never supplied.
+  #
+  # Technical depth: the domain is derived from the `(operation_id, attempt)`
+  # this coordinator dispatched and journaled. An event whose `tool_call_id`
+  # does not match the dispatched call is refused rather than relabelled, which
+  # is why validation happens before the domain is stamped and not after.
+  defp executor_progress_fun(state, work) do
+    job = work.job
+    domain = StreamDomain.derive(:executor, state.session_id, job.operation_id, job.attempt)
+    turn_id = work.turn_id
+    tool_call_id = job.tool_call_id
+    sink = state.progress_to
+    counter = :counters.new(1, [:atomics])
+
+    stream = %{domain: domain, turn_id: turn_id, counter: counter, tool_call_id: tool_call_id}
+
+    {stream,
+     fn event ->
+       if is_map(event) and Map.get(event, :tool_call_id) == tool_call_id do
+         :counters.add(counter, 1, 1)
+
+         emit_progress(
+           sink,
+           Map.merge(event, %{
+             kind: :tool_progress,
+             turn_id: turn_id,
+             stream_domain_id: domain,
+             progress_sequence: :counters.get(counter, 1)
+           })
+         )
+       end
+
+       :ok
+     end}
+  end
+
+  defp build_job(state, work, call, definition) do
+    {declared, _charged} = SessionState.accounting(state.durable, work.run_id)
     executor = state.executor
-    tool = state.tool
+    budgets = Map.fetch!(definition, "budgets")
 
     Executor.job(%{
       protocol_version: 1,
-      job_id: stable_id("job", work.run_id, call.id),
-      operation_id: stable_id("operation", work.run_id, call.id),
+      job_id: stable_id("job", work.run_id, call.tool_call_id),
+      operation_id: stable_id("operation", work.run_id, call.tool_call_id),
       attempt: 1,
       session_id: state.session_id,
       run_id: work.run_id,
       turn_id: work.turn_id,
-      tool_call_id: call.id,
+      tool_call_id: call.tool_call_id,
       origin_session_epoch: state.owner.owner_epoch,
       origin_executor_epoch: executor.epoch,
       executor_identity: executor.identity,
-      required_capabilities: [tool["effect_class"]],
-      tool_id: tool["tool_id"],
-      tool_version: tool["tool_version"],
-      effect_class: tool["effect_class"],
+      required_capabilities: [Map.fetch!(definition, "effect_class")],
+      tool_id: Map.fetch!(definition, "tool_id"),
+      tool_version: Map.fetch!(definition, "tool_version"),
+      effect_class: Map.fetch!(definition, "effect_class"),
       validated_arguments: call.arguments,
       workspace_ref: executor.workspace_ref,
       workspace_lease: executor.workspace_lease,
-      deadline: now + 60_000,
-      resource_budgets: %{"max_output_bytes" => 1_048_576},
-      idempotency_class: "effectful",
+      run_deadline: declared.deadline,
+      resource_budgets: %{"max_output_bytes" => Map.fetch!(budgets, "output_bytes")},
+      idempotency_class: Map.fetch!(definition, "idempotency_class"),
       fencing_token: executor.fencing_token,
       artifact_policy: %{"retain" => true},
       output_policy: %{"capture" => true}
@@ -711,7 +1035,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp accept_model_result(state, run_id, {:ok, reply}) when is_map(reply) do
-    with {:ok, proposal} <- SessionState.propose_model_result(state.durable, run_id, reply),
+    state = close_model_stream(state, run_id, :complete, Map.get(reply, :delta_count, 0))
+
+    with {:ok, proposal} <-
+           SessionState.propose_model_result(
+             state.durable,
+             run_id,
+             reply,
+             active_generations(state)
+           ),
          {:ok, next} <- commit_internal(state, proposal) do
       send(self(), :advance_work)
       {:noreply, next}
@@ -720,9 +1052,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp accept_model_result(state, _run_id, result), do: {:stop, {:model_failed, result}, state}
+  defp accept_model_result(state, run_id, result) do
+    # An attempt that returned no reply still owes its closure, so a consumer can
+    # tell an abandoned stream from one that merely went quiet.
+    state = close_model_stream(state, run_id, :abandoned, 0)
+    {:stop, {:model_failed, result}, state}
+  end
 
   defp accept_executor_result(state, run_id, {:ok, receipt}) when is_map(receipt) do
+    state = close_tool_stream(state, run_id, :complete, Map.get(receipt, :progress_count, 0))
+
     case state.fault_to do
       pid when is_pid(pid) ->
         reference = make_ref()
@@ -740,8 +1079,24 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp accept_executor_result(state, _run_id, result),
-    do: {:stop, {:executor_failed, result}, state}
+  defp accept_executor_result(state, run_id, result) do
+    state = close_tool_stream(state, run_id, :abandoned, 0)
+
+    # An executor that answered with an error produced no receipt, so the call
+    # has no validated terminal fact of its own. It becomes a terminal `failed`
+    # rather than ending the session: the effect did not start, so there is
+    # nothing indeterminate to reconcile.
+    case Map.get(state.durable.pending_work, run_id) do
+      %{pending_calls: [call | _rest]} = work ->
+        commit_tool_failure(state, work, call, failure_of(result))
+
+      _other ->
+        {:stop, {:executor_failed, result}, state}
+    end
+  end
+
+  defp failure_of({:error, reason}), do: reason
+  defp failure_of(other), do: other
 
   defp commit_executor_fact(state, run_id, receipt) do
     with {:ok, proposal} <- SessionState.propose_executor_fact(state.durable, run_id, receipt),

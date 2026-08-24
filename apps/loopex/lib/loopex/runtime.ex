@@ -63,6 +63,9 @@ defmodule Loopex.Runtime do
           | {:executor, map() | nil}
           | {:tool, map() | nil}
           | {:tools, [LoopexProtocol.ToolDefinition.t()]}
+          | {:active_tools, [binary() | {binary(), binary()}]}
+          | {:bounds, map()}
+          | {:sampling, map()}
           | {:grant_decision, term()}
           | {:fault_to, pid() | nil}
 
@@ -381,6 +384,9 @@ defmodule Loopex.Runtime do
              executor: nil,
              tool: nil,
              tools: [],
+             active_tools: [],
+             bounds: nil,
+             sampling: nil,
              grant_decision: nil,
              fault_to: nil
            ),
@@ -392,10 +398,13 @@ defmodule Loopex.Runtime do
          {:ok, model} <- validate_model(validated[:model]),
          {:ok, executor} <- validate_executor(validated[:executor]),
          {:ok, tool} <- validate_tool(validated[:tool]),
-         {:ok, tools} <- validate_tools(validated[:tools]),
+         {:ok, tools} <- validate_tools(inherited_tool_set(validated)),
+         active_tools = inherited_active_tools(validated, tools),
+         {:ok, bounds} <- validate_bounds(validated[:bounds]),
+         {:ok, sampling} <- validate_sampling(validated[:sampling]),
          {:ok, grant_decision} <- validate_grant_decision(validated[:grant_decision]),
          {:ok, fault_to} <- validate_sink(validated[:fault_to]),
-         :ok <- validate_loop_configuration(model, executor, tool, grant_decision) do
+         :ok <- validate_loop_configuration(model, executor, tools, grant_decision) do
       {:ok,
        [
          runtime_id: runtime_id,
@@ -407,6 +416,10 @@ defmodule Loopex.Runtime do
          executor: executor,
          tool: tool,
          tools: tools,
+         declared_tools: inherited_tool_set(validated),
+         active_tools: active_tools,
+         bounds: bounds,
+         sampling: sampling,
          grant_decision: grant_decision,
          fault_to: fault_to
        ]}
@@ -426,6 +439,52 @@ defmodule Loopex.Runtime do
     end
   end
 
+  # Concept: the three declared run bounds, and the sampling bound every request
+  # carries.
+  #
+  # Technical depth: ADR 0010 gives each bound a configured value with a default,
+  # and requires the value to be committed with the run rather than invented at
+  # dispatch. Both are therefore resolved here, once, where a host can see and
+  # override them, and are committed with the run that uses them. A host that
+  # explicitly supplies a malformed value is refused at start rather than
+  # silently given the default, which is what "refused at start" protects: the
+  # defaults serve a host that said nothing, never one that said something wrong.
+  #
+  # The deadline is configured as a duration, not an instant. An absolute instant
+  # cannot be configured at runtime start, because the runtime outlives any one
+  # run; each run's absolute deadline is computed once when it is admitted or
+  # promoted and is then immutable, so a recovering owner re-presents it rather
+  # than recomputing one from its own clock.
+  @default_bounds %{max_turns: 16, token_budget: 1_000_000, deadline_ms: 600_000}
+  @default_sampling %{"max_tokens" => 4_096}
+
+  defp validate_bounds(nil), do: {:ok, @default_bounds}
+
+  defp validate_bounds(%{} = bounds) do
+    merged =
+      Map.merge(@default_bounds, Map.take(bounds, [:max_turns, :token_budget, :deadline_ms]))
+
+    valid =
+      Enum.all?([:max_turns, :token_budget, :deadline_ms], fn key ->
+        value = Map.fetch!(merged, key)
+        is_integer(value) and value > 0
+      end)
+
+    if valid and map_size(Map.drop(bounds, [:max_turns, :token_budget, :deadline_ms])) == 0,
+      do: {:ok, merged},
+      else: {:error, :invalid_declared_bounds}
+  end
+
+  defp validate_bounds(_bounds), do: {:error, :invalid_declared_bounds}
+
+  defp validate_sampling(nil), do: {:ok, @default_sampling}
+
+  defp validate_sampling(%{"max_tokens" => max_tokens} = sampling)
+       when is_integer(max_tokens) and max_tokens > 0 and map_size(sampling) == 1,
+       do: {:ok, sampling}
+
+  defp validate_sampling(_sampling), do: {:error, :invalid_sampling_bound}
+
   # Concept: the tool set a runtime is composed with.
   #
   # Technical depth: this is the reference distribution declaring its own tools,
@@ -434,12 +493,35 @@ defmodule Loopex.Runtime do
   # runtime start rather than failing later inside the registry's `init/1`,
   # where the reason would reach the caller as a supervisor start error.
   defp validate_tools(tools) when is_list(tools) do
-    if Enum.all?(tools, &LoopexProtocol.ToolDefinition.valid?/1),
-      do: {:ok, tools},
+    normalized = Enum.map(tools, &LoopexProtocol.ToolDefinition.normalize/1)
+
+    if Enum.all?(normalized, &LoopexProtocol.ToolDefinition.valid?/1),
+      do: {:ok, normalized},
       else: {:error, :invalid_tool_definition}
   end
 
   defp validate_tools(_tools), do: {:error, :invalid_tool_definition}
+
+  # Concept: the inherited `:tool` option is one tool set of size one.
+  #
+  # Technical depth: M1 composed a runtime with a single hand-written definition.
+  # Rather than keep a second dispatch path alive for it, that declaration is
+  # folded into the same tool set every other host supplies, so there is exactly
+  # one way a tool reaches a model. An explicit `:tools` wins; `:tool` is only
+  # consulted when no set was named.
+  defp inherited_tool_set(validated) do
+    case {validated[:tools], validated[:tool]} do
+      {[], tool} when is_map(tool) -> [tool]
+      {tools, _tool} -> tools
+    end
+  end
+
+  defp inherited_active_tools(validated, tools) do
+    case validated[:active_tools] do
+      [] -> Enum.map(tools, &Map.fetch!(&1, "tool_id"))
+      selections -> selections
+    end
+  end
 
   defp validate_capacity(value)
        when is_integer(value) and value > 0 and value <= @max_attachment_capacity,
@@ -518,12 +600,20 @@ defmodule Loopex.Runtime do
   defp validate_grant_decision({:host_policy, :allow} = decision), do: {:ok, decision}
   defp validate_grant_decision(_decision), do: {:error, :invalid_grant_decision}
 
-  defp validate_loop_configuration(nil, nil, nil, nil), do: :ok
+  # Concept: a runtime either runs a loop or it does not.
+  #
+  # Technical depth: M1 required one hand-written `:tool` alongside the model and
+  # executor. The registry replaces it, so a loop-capable runtime is now a model,
+  # an executor, an authority decision, and a tool set — which may legitimately
+  # be empty, because a runtime that offers the model no tools still runs a
+  # single-turn conversation. The retained `:tool` option is accepted so an
+  # inherited caller keeps working and is otherwise unused.
+  defp validate_loop_configuration(nil, nil, _tools, nil), do: :ok
 
-  defp validate_loop_configuration(model, executor, tool, {:host_policy, :allow})
-       when is_map(model) and is_map(executor) and is_map(tool),
+  defp validate_loop_configuration(model, executor, tools, {:host_policy, :allow})
+       when is_map(model) and is_map(executor) and is_list(tools),
        do: :ok
 
-  defp validate_loop_configuration(_model, _executor, _tool, _decision),
+  defp validate_loop_configuration(_model, _executor, _tools, _decision),
     do: {:error, :incomplete_loop_configuration}
 end

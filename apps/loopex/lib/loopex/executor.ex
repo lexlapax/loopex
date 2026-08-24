@@ -50,7 +50,7 @@ defmodule Loopex.Executor do
     :validated_arguments,
     :workspace_ref,
     :workspace_lease,
-    :deadline,
+    :run_deadline,
     :resource_budgets,
     :idempotency_class,
     :fencing_token,
@@ -84,8 +84,50 @@ defmodule Loopex.Executor do
   """
   @type grant :: map()
 
-  @callback execute(reference :: term(), job_request(), grant(), keyword()) ::
+  @typedoc """
+  ## Concept
+
+  One bounded piece of progress from a running job.
+
+  ## Technical depth
+
+  Plain data carrying the job's own identity, the stream it came from, a byte
+  offset, and a bounded chunk. It carries no `stream_domain_id`: an executor
+  never computes one, and the coordinator stamps the domain only after
+  validation has proved the event belongs to the attempt it dispatched.
+  """
+  @type progress_event :: %{required(:tool_call_id) => binary(), optional(atom()) => term()}
+
+  @typedoc """
+  ## Concept
+
+  The function an executor calls to report one progress event.
+
+  ## Technical depth
+
+  An ordinary in-VM function reference in the trailing argument position. That
+  one parameter is the whole executor-boundary change; an executor that emits
+  nothing stays conformant, returns the same receipt, and reports a
+  `progress_count` of zero rather than a sentinel or an absent field.
+  """
+  @type progress_fun :: (progress_event() -> :ok)
+
+  @callback execute(reference :: term(), job_request(), grant(), keyword(), progress_fun()) ::
               {:ok, map()} | {:error, term()}
+
+  @doc """
+  ## Concept
+
+  A progress function that discards everything, for a caller that wants no
+  stream.
+
+  ## Technical depth
+
+  Executors are always handed a callable rather than `nil`, so no executor needs
+  a branch asking whether it was given one.
+  """
+  @spec discard_progress() :: progress_fun()
+  def discard_progress, do: fn _event -> :ok end
 
   @doc """
   ## Concept
@@ -307,7 +349,7 @@ defmodule Loopex.Executor do
          validated_arguments: arguments,
          workspace_ref: workspace_ref,
          workspace_lease: workspace_lease,
-         deadline: deadline,
+         run_deadline: deadline,
          resource_budgets: budgets,
          idempotency_class: idempotency,
          fencing_token: fencing_token,

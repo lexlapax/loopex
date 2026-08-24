@@ -196,6 +196,44 @@ defmodule LoopexProtocol.ToolDefinitionTest do
              ["description", "name", "parameter_schema"]
   end
 
+  test "a narrowed schema keyword is reported rather than dropped in silence" do
+    declaration = %{
+      "tool_id" => "example.read",
+      "tool_version" => "1.0.0",
+      "name" => "read",
+      "description" => "Read a file.",
+      "effect_class" => "read_only",
+      "input_schema" => %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{"type" => "string", "const" => "fixed.txt"},
+          "mode" => %{"type" => "string"}
+        },
+        "required" => ["path"],
+        "additionalProperties" => false
+      }
+    }
+
+    # Completion fills the fields a host had no opinion about.
+    normalized = ToolDefinition.normalize(declaration)
+    assert ToolDefinition.validate(normalized) == []
+    assert Map.has_key?(normalized, "result_shape")
+    assert Map.has_key?(normalized, "idempotency_class")
+    assert Map.has_key?(normalized, "budgets")
+    refute Map.has_key?(normalized, "input_schema")
+
+    # And every keyword the kernel cannot evaluate is named, so a host that
+    # believed `additionalProperties: false` was enforced finds out at
+    # registration rather than at dispatch.
+    assert ToolDefinition.narrowing(declaration) == [
+             "parameter_schema.additionalProperties",
+             "parameter_schema.properties.path.const"
+           ]
+
+    # A declaration already written in the subset reports nothing.
+    assert ToolDefinition.narrowing(definition()) == []
+  end
+
   test "canonical encoding is injective over map and list shapes" do
     # A map and a list of its pairs must not collide, or two different staged
     # requests could share one digest.
