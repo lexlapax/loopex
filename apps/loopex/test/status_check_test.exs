@@ -680,6 +680,18 @@ defmodule Loopex.StatusCheckTest do
     assert Plan.amendment_transaction_v1?(amended_gate, "gate")
     refute Plan.amendment_transaction_v1?(old_gate, "gate")
 
+    # A duplicate marker is refused rather than read as an absence. Returning
+    # false would fail closed wherever a marker is required, but would let a
+    # gate carrying two markers, no amendment section, and no generation row
+    # pass silently, leaving the stated cardinality rule unenforced.
+    doubled_gate =
+      String.trim_trailing(amended_gate, "\n") <>
+        "\n\n<a id=\"amendment-transaction-v1\"></a>\n"
+
+    assert_raise Loopex.Checks.Invalid, ~r/is declared 2 times; a gate carries at most one/, fn ->
+      Plan.amendment_transaction_v1?(doubled_gate, "gate")
+    end
+
     resolver = fn revision, path ->
       accepted_index =
         Fixture.documents()

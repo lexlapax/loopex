@@ -73,17 +73,54 @@ ADR 0008 was disposed by accepting an existing plan's requirement for it.
 None of the three is implicit; each is named so acceptance is a decision rather
 than a side effect.
 
-**One. A seventh application and a widened client rule.** `apps/loopex_cli` is
-added with role `:client`. A `:client` application may declare a production
-dependency on `:loopex`, optionally on `:loopex_protocol`, and production
-dependencies on the in-umbrella `:edge` applications it composes. It may declare
-no external dependency and no dependency on another `:client`. The widening is
-required rather than convenient: a shipped composition must name concrete Store,
-Model, Executor, Policy, and ArtifactStore implementations to build an
-`escript`, core may depend only on the protocol, and an edge may not import a
-concrete sibling, so the composition can live only in a client application.
-Dependency direction is unchanged — every edge remains inward — and the
-composition's reach is bounded by the exact-inspection rule in Ownership below.
+**One. An eighth application, a new `:composition` role, and the client rule
+that admits it.** Two applications are added: `apps/loopex_cli` with role
+`:client`, and `apps/loopex_composition` with the new role `:composition`. The
+planned inventory therefore becomes eight applications, and the production role
+set becomes `:contract`, `:core`, `:edge`, `:composition`, and `:client`.
+
+The composition is wiring and nothing else. It names the concrete Store, Model,
+Executor, and ArtifactStore implementations, starts the OTP application tree an
+`escript` does not start for it, starts a runtime, and returns it. It ships no
+policy and refuses to start unless the host supplies the one that governs the
+run. Both the `loopex` command and an embedder depend on it, which is the whole
+point of shipping it: a snippet each embedder copies is re-derived once per
+embedder and goes stale silently the first time the kernel's start-up shape
+changes, while a shipped application changes once and breaks the build of every
+dependant that must change with it.
+
+**Why a new role rather than a wider `:client`.** A composition names concrete
+adapters by definition, which is exactly what an `:edge` may not do, and it must
+be depended on, which is exactly what a `:client` may not be; it fits neither
+existing role, so the choice is between inventing a role and weakening one of
+the two rules that keep the umbrella's direction legible. Widening `:client` to
+permit one client-to-client dependency was the alternative and is rejected on
+three counts: an acceptance review deliberately kept that rule narrow, the
+widening would apply to every client forever rather than to the one case that
+needs it, and it would let the command reach the reference client's `AllowAll`,
+which is the precise inheritance decision three exists to prevent. Two further
+placements were considered and rejected for the same reason each rule exists.
+Putting the composition in an `:edge` would let an adapter import a concrete
+sibling, and the composition would then be inherited by the first isolated or
+remote hand that reuses that edge — the same argument that keeps a permissive
+policy out of an edge. Putting it in `:core` would invert the founding
+dependency direction, because core may name no concrete implementation at all.
+
+The new rules are exact. A `:composition` declares a production dependency on
+`:loopex`, may also depend on `:loopex_protocol`, declares production
+dependencies on the in-umbrella `:edge` applications it composes, may declare no
+external dependency in any environment, and may depend on no `:client` and on no
+other `:composition`. A `:client` declares a production dependency on `:loopex`,
+may declare a production dependency on at most one `:composition`, may declare in-umbrella `:edge` dependencies only in
+tests exactly as M1 already permitted, may declare no external dependency, and
+may not depend on another `:client`. Nothing depends on a `:client`.
+
+Taken together this is narrower in production than the widened client rule it
+replaces, not wider: no client gains a production edge dependency, `:client` to
+`:client` stays forbidden, dependency direction is unchanged because every new
+edge is still inward, and exactly one application in the repository is permitted
+to name a concrete adapter. The composition's reach is bounded by the
+exact-inspection rule in Ownership below.
 
 **Two. Two narrow ports join the three M1 boundary behaviours.** `Loopex.Policy`
 is created by ADR 0009 and required by the founding vision's host policy port;
@@ -99,11 +136,14 @@ authorized by this acceptance.
 
 **Three. Two shipped permissive policies rather than one.** A `:client` may not
 depend on another `:client`, so `apps/loopex_cli` cannot reach the reference
-client's `AllowAll` and names its own. Both are permission-granting modules an
-operator selects explicitly, both print the same single notice, neither is ever
-an implicit fallback, and both carry a locked case. Widening the client rule to
-permit a client-to-client dependency was the alternative and would undercut
-decision one.
+client's `AllowAll` and names its own. The composition cannot supply one for
+either of them: it owns wiring, never authority, and a permissive default
+shipped there would answer the host's question once for every embedder that
+depends on it. Both are permission-granting modules an operator selects
+explicitly, both print the same single notice, neither is ever an implicit
+fallback, and both carry a locked case. Widening the client rule to permit a
+client-to-client dependency was the alternative and would undercut decision
+one.
 
 **The first prerequisite this plan pair names but cannot dispose: the recorded
 disposition of the `bound_reached` vision change.** M2 and ADR 0010 both depend
@@ -137,8 +177,12 @@ change two of them:
 
 | Bound path | Why M2 must change it |
 | --- | --- |
-| `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` | Its planned-inventory constant freezes the repository at exactly six applications with the reference client as the only `:client`. A seventh application fails it, and so does the widened client rule |
-| `apps/loopex/test/deps_budget_test.exs` | Its adversarial corpus asserts the M1 inventory and the narrow client rule, and must gain the two cases that prove the M2 inventory and the widened rule |
+| `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` | Its planned-inventory constant freezes the repository at exactly six applications with the reference client as the only `:client`, and its role set contains no `:composition` at all. An eighth application fails it, and so do the new role and the client rule that admits one composition |
+| `apps/loopex/test/deps_budget_test.exs` | Its adversarial corpus asserts the M1 inventory and the M1 client rule, and must gain the three cases that prove the M2 eight-application inventory, the `:composition` role's own rule, and the client rule that admits at most one composition |
+
+These two artifacts are where the eighth application and the new role are
+proved. M2 binds no third artifact for the inventory and role change, which is
+why the generation below rebinds exactly these two and no others.
 
 Those digests are not enforced only by `scripts/check-m1-gate.sh`.
 `Mix.Tasks.Loopex.Status` verifies every plan's declared bound artifacts against
@@ -299,9 +343,9 @@ identity it already holds for the attempt it dispatched. The encoding is
 length-aware and therefore injective for arbitrary binary identifiers, which a
 delimiter-joined derivation is not: an identifier containing the delimiter byte
 would let two distinct attempts collide on one label and defeat the whole point
-of labelling them. an adapter never
-supplies one and no value is read off an executor event, which is the same
-fail-closed discipline that governs every other binding on this plane. A provider
+of labelling them. An adapter never supplies a `stream_domain_id` and no value
+is read off an executor event, which is the same fail-closed discipline that
+governs every other binding on this plane. A provider
 retry and a retried executor attempt each open a new domain, so several domains
 under one turn are the ordinary shape of a retried turn rather than a fault.
 Every domain the coordinator opens it also closes exactly once, an abandoned one
@@ -355,7 +399,10 @@ not try to. It ships its own named permissive policy for a trusted local
 developer, selected only when the operator passes the corresponding `--policy`
 value, and emitting the same single permissive-authority notice. Two reference
 hosts each making their own decision is the ownership the ADR describes; one
-host importing the other's would be the relocation of authority it forbids.
+host importing the other's would be the relocation of authority it forbids. The
+shipped composition both hosts depend on ships no permissive policy either: it
+takes the host's policy as a required argument and starts nothing without one,
+so depending on the wiring never means inheriting somebody else's answer.
 
 Accepting this plan pair authorizes only the eleven outcomes, the tool registry
 and attended demonstration that support them, and the five named boundary
@@ -391,15 +438,25 @@ reconnecting or resuming caller sees the committed message, never a partial one.
 A stream that ends without a complete message commits nothing, and the turn
 fails truthfully.
 
-**The command surface owns nothing durable.** `loopex_cli` calls only the public
-`Loopex` facade for every session operation, including the interrupt path.
-Exactly one module in that application — the shipped composition — may name
-concrete Store, Model, Executor, Policy, and ArtifactStore implementations, and
-it may do so only to build the runtime options passed to `Loopex.start_link/1`.
-No other module in the application may reference a coordinator, journal, outbox,
-store, adapter, executor, policy, or artifact-store module, hold a cursor as
-truth, or make an authority decision. The gate proves this by source inspection,
-exactly as M1 proved it for the reference client.
+**The command surface owns nothing durable, and the composition owns nothing
+else.** `loopex_cli` calls only the public `Loopex` facade for every session
+operation, including the interrupt path. Exactly one production module in the
+repository — the single composition module of `apps/loopex_composition` — may
+name concrete Store, Model, Executor, and ArtifactStore implementations, and it
+may do so only to build the runtime options passed to `Loopex.start_link/1`.
+Test modules are unaffected: the inherited conformance, executor, and
+reference-client selectors this gate re-runs at their exact M1 identities name
+concrete adapters today and must keep doing so, which is why a client retains
+its test-only edge dependencies. It takes the
+host's policy as a required argument, supplies no default for it, and starts
+nothing when it is absent. No module of `loopex_cli` may name a concrete Store,
+Model, Executor, or ArtifactStore implementation, reference a coordinator,
+journal, outbox, or cursor internal, hold a cursor as truth, or own a second
+state machine. Beyond the public facade and the composition's entry function the
+command names only the host policy modules an operator may select with
+`--policy` — the host's own decision, and the one decision the composition
+refuses to make for it. The gate proves this by source inspection, exactly as M1
+proved it for the reference client.
 
 **Cancellation is same-process by construction.** The foreground command traps
 the interrupt signal and calls the public abort operation on the session it is
@@ -472,11 +529,13 @@ Rejoin barriers are serial and exact:
 4. **D — Cancellation and the session directory rejoins fourth.** Cancellation
    needs C's termination evidence and B's turn machine. The session directory
    needs the resolved state root and ADR 0008 placement identity.
-5. **E — Operator surface and demonstration rejoins last.** `loopex_cli` builds
-   only on the integrated A–D paths through the public facade. Its first commit
-   carries the seventh-application inventory change, and the M1 gate generation
-   above lands with it. A private client loop, substitute store, fake provider,
-   or bypass executor is not a demonstration of this milestone.
+5. **E — Operator surface, composition, and demonstration rejoins last.**
+   `loopex_composition` names the concrete adapters and starts the tree;
+   `loopex_cli` builds only on the integrated A–D paths, through the public
+   facade and that one composition entry point. Its first commit carries the
+   eighth-application inventory and the `:composition` role rule, and the M1
+   gate generation above lands with it. A private client loop, substitute store,
+   fake provider, or bypass executor is not a demonstration of this milestone.
 
 Core is a serial ownership chain across A, B, and D rather than parallel
 writers, because those workstreams touch the same coordinator and session-state
@@ -550,12 +609,40 @@ carries exactly three one-line JSON records, in the locked role order
 `demonstration_db`, `inherited_5c`, `inherited_8b`, in this exact key order:
 
 ```json
-{"role":"<role>","selector":"<safe tracked path>","provider":"<lowercase provider>","model":"<printable>","endpoint":"<printable>","adapter_build":"<printable>","calls":<positive integer>,"provider_response_ids":"<id>+<id>...","input_tokens":<positive integer>,"output_tokens":<positive integer>,"candidate":"<40 lowercase hex>","recorded":"<RFC3339 UTC>"}
+{"role":"<role>","selector":"<safe tracked path>","provider":"<lowercase provider>","model":"<printable>","endpoint":"<printable>","adapter_build":"<printable>","calls":<positive integer>,"response_id_form":"<prefix>:<min>-<max>","provider_response_ids":"<id>+<id>...","input_tokens":<positive integer>,"output_tokens":<positive integer>,"candidate":"<40 lowercase hex>","recorded":"<RFC3339 UTC>"}
 ```
 
 `provider_response_ids` names every provider response the role observed and
 `calls` is their count; the token totals are the provider's own, across exactly
-those responses. Two locked cases give the record something to be about: a
+those responses.
+
+`response_id_form` is the identifier form that provider documents, **declared by
+the record rather than looked up in a list the gate carries.** It is written
+`<prefix>:<min>-<max>`: a non-empty literal prefix of at most sixteen characters
+drawn from `[A-Za-z0-9_-]`, then the inclusive length range of the remainder,
+whose characters come from the same set, with `1 <= min <= max <= 128`.
+Anthropic's documented form is written `msg_:16-64` and OpenAI's
+chat-completions form `chatcmpl-:8-128`; neither appears anywhere in the runner.
+All three records declare the same form, because all three already agree on the
+provider the bound runner sealed, so no single record can relax the shape the
+other two are held to. One record declares one form, which is what a role
+running against one model at one endpoint produces; a role that observed two
+identifier shapes could not be recorded, and no locked role is one.
+
+The gate holds no opinion about which providers exist, and that is the point of
+the change. The model boundary is replaceable by design, so a gate that
+recognises two providers and fails closed on a third makes adding an adapter a
+governance event rather than an adapter change. Validating a declared form is
+weaker than validating a known one, and this plan says so rather than trading
+the honesty for the strictness: a fabricator declares their own form, so the
+declaration cannot make a fabricated identifier detectable. What the check keeps
+is the internal consistency it was ever worth — every identifier has the shape
+the record itself claims, no identifier is reused within or across records, and
+the count and reported totals agree with each other — and what was always
+load-bearing is untouched, because it was never the form. It is the auditor's
+lookup of each identifier against the provider account.
+
+Two locked cases give the record something to be about: a
 deterministic case proving a real-provider evidence claim fails when the reply
 carries no provider-supplied identifier, and a real case proving the shipped
 adapter surfaces the provider's own identifier and reported usage where the
@@ -563,10 +650,11 @@ deterministic adapter reports nothing. Their exact identities and minima are the
 gate's.
 
 The limit is recorded here rather than left to be inferred. The runner proves
-the record's shape and role order, that each identifier carries the documented
-form of the provider the bound runner sealed in the same run and is not reused,
-that the record's provider, model, endpoint, and adapter build are byte-identical
-to that sealed identity, and that `calls`, the identifier count, and the reported
+the record's shape and role order, that each record declares a well-formed
+identifier form and that all three declare the same one, that every identifier
+matches the form its own record declares and is reused neither within nor across
+records, that the record's provider, model, endpoint, and adapter build are
+byte-identical to the identity the bound runner sealed in the same run, and that `calls`, the identifier count, and the reported
 totals are internally consistent and meet the floor each role's locked cases
 imply. It proves nothing about whether a socket was opened, and it cannot bind a
 retained identifier to a later run's calls. Confirming the identifiers and their
@@ -608,8 +696,8 @@ Outcome-specific obligations are:
 | 7 | Prove discovery resolves a deterministic canonical ordered resource set for a workspace, that the order is stable across platforms and filesystem enumeration order, and that a per-path, per-file-size, or total-size limit refuses the excess resource explicitly rather than silently dropping it; prove the operator is presented every resolved path, its provenance class, its trust class, and the manifest digest before deciding; prove a positive decision binds canonical workspace identity, revision, resolved set, and digests, and that changing any of them invalidates it and requires a new decision; prove a headless run with no matching positive decision fails closed and stages no project block; prove an admitted block changes no active tool set, policy decision, declared bound, or grant, and that typed delimiters are input structure rather than an authority boundary; prove an ordinary workspace read requested by the model stays a policy-governed tool effect and never enters the staged project block, so the staging path covers only behaviour-shaping resources proactively admitted by an operator decision; prove the staging receipt records the final ordered block descriptors |
 | 8 | Prove cancellation is the acknowledged protocol: the request is durably recorded, scheduling stops, the in-flight model call and executor job receive a cooperative cancel, a bounded grace period elapses, and the owned process tree is terminated; prove `cancelled` commits only where every operation the run owned reached a validated terminal fact and every owned process tree was confirmed cleaned, and that any weaker state commits `outcome_unknown` carrying the reconciliation reference of the operation that could not be proved; prove the interrupt path reaches the run through the public facade and through no private path; prove a validated terminal tool fact that committed before the abort is preserved and is not overwritten by `cancelled`; prove insufficient effect evidence commits immutable `outcome_unknown` with no blind retry; prove an aborted model response never becomes a canonical assistant message; prove a second interrupt reports what is still being cleaned up rather than abandoning the session; prove the operator observes both what was cancelled and what actually happened |
 | 9 | List sessions from a state root resolved from `LOOPEX_HOME` in a fresh operating-system process with no inherited runtime; prove the state root is never read from application environment; prove a session resumes under its creating `runtime_id`, that a different `runtime_id` is refused with an explicit reason, that a repeated resume command identity returns its historical result without advancing the owner epoch, and that a fresh identity acquires live ownership; prove the placement identity survives restart because it is persisted and re-presented rather than regenerated |
-| 10 | Drive `run`, `sessions`, `resume`, `cancel`, and `artifact` end to end through the embedded API; prove `prompt`, `steer`, `follow_up`, and `abort` each have a distinct explicit affordance, that the operator steers a running task and queues a follow-up from the same terminal, and that input naming neither steer nor follow-up is refused rather than resolved from session state; prove tool progress emitted by a running executor job reaches the operator's terminal before that tool finishes; prove `artifact` retrieves a spilled artifact by its opaque reference; deliver a real interrupt signal to a real running command process and prove the task is cancelled through the public facade, that what was observed is printed, and that an interrupt whose cleanup cannot be confirmed reports `outcome_unknown` with its reconciliation reference rather than a clean `cancelled`; prove `cancel` against a live owner is refused by placement mutual exclusion with an explicit message and that against a dead owner it reconciles the session to a truthful terminal state; prove `--policy` selects the governing host policy and that a run under a refusing policy reports the refusal and continues or terminates truthfully; prove the project-resource trust decision is presented and taken at the terminal and that a non-interactive invocation without a matching decision fails closed; replace or instrument the facade so the test fails if any module outside the single shipped composition reaches a coordinator, store, model, executor, policy, artifact store, journal, outbox, or cursor internal or owns a second state machine; measure the base system prompt plus active tool definitions with the documented deterministic estimator and require the result under one thousand tokens before project context; prove argument parsing and terminal output use only the standard library and that the application declares no external dependency; prove no wire or line-framing contract is introduced |
-| 11 | Start the OTP application tree, a runtime, and a session, submit a prompt, and consume events using only the shipped composition module; measure that module and require at most eighty effective lines, counting neither blank lines nor comments; prove an independent embedder fixture composes the kernel without depending on the command application, so the shipped module is a copy-and-adapt reference an embedder owns rather than a library it depends on; prove the composition resolves its state root explicitly and reads none from application environment |
+| 10 | Drive `run`, `sessions`, `resume`, `cancel`, and `artifact` end to end through the embedded API; prove `prompt`, `steer`, `follow_up`, and `abort` each have a distinct explicit affordance, that the operator steers a running task and queues a follow-up from the same terminal, and that input naming neither steer nor follow-up is refused rather than resolved from session state; prove tool progress emitted by a running executor job reaches the operator's terminal before that tool finishes; prove `artifact` retrieves a spilled artifact by its opaque reference; deliver a real interrupt signal to a real running command process and prove the task is cancelled through the public facade, that what was observed is printed, and that an interrupt whose cleanup cannot be confirmed reports `outcome_unknown` with its reconciliation reference rather than a clean `cancelled`; prove `cancel` against a live owner is refused by placement mutual exclusion with an explicit message and that against a dead owner it reconciles the session to a truthful terminal state; prove `--policy` selects the governing host policy and that a run under a refusing policy reports the refusal and continues or terminates truthfully; prove the project-resource trust decision is presented and taken at the terminal and that a non-interactive invocation without a matching decision fails closed; replace or instrument the facade so the test fails if any module of the command application reaches a coordinator, store, model, executor, artifact store, journal, outbox, or cursor internal, names a concrete Store, Model, Executor, or ArtifactStore implementation, or owns a second state machine, the host policy modules it ships for `--policy` being the single named exception because policy is the host's own decision; measure the base system prompt plus active tool definitions with the documented deterministic estimator and require the result under one thousand tokens before project context; prove argument parsing and terminal output use only the standard library and that the application declares no external dependency; prove no wire or line-framing contract is introduced |
+| 11 | Start the OTP application tree, a runtime, and a session, submit a prompt, and consume events using only the shipped `loopex_composition` application; measure its single composition module and require at most eighty effective lines, counting neither blank lines nor comments; prove an independent embedder fixture composes the kernel through that application without depending on the command application, so the wiring is a shipped dependency rather than a snippet each embedder copies and lets go stale; prove the composition names the concrete Store, Model, Executor, and ArtifactStore implementations, ships no policy of its own, requires the host's policy as an argument, and starts no runtime when it is absent, so no embedder inherits the command's permissive default; prove the composition resolves its state root explicitly and reads none from application environment |
 
 The tool registry carries its own obligation beside the outcomes it serves:
 resolve a tool by ID and version through a runtime-scoped registry; refuse an
@@ -621,6 +709,35 @@ active set at start and refuses session start when two active generations claim
 one name, rather than ordering, preferring, aliasing, or silently renaming them;
 prove each model request records the exact definition generation used, and that
 an in-flight operation's semantics cannot change because the registry changed.
+
+**The governance machinery M2's own prerequisite rides on carries an
+obligation of its own.** M2 cannot be implemented without the M1 gate generation
+named in Prerequisites, and exactly two corpora enforce that transaction:
+`apps/loopex/test/status_check_test.exs`, which proves the status check's live
+view of a Closed milestone's gate generations, and
+`apps/loopex/test/history_anchoring_test.exs`, which proves the same across
+reachable history. M2 locks both — `status_check_test.exs` at minimum 42 and
+`history_anchoring_test.exs` at minimum 19 — and names between them the cases
+that prove a Closed milestone's gate is amended by an accepted generation rather
+than a rebind, that a generation table fails closed on every malformed shape and
+is append-only in both admitted directions, that the integrated phase is derived
+from the register's closed rows, and that a generation rebind cannot bind an
+interposed, an unrelated-byte, a merge, or a behind-a-merge revision. The
+obligation is that those cases stay present and passing at those minima for the
+whole milestone. `apps/loopex/test/m1_exunit_runner_test.exs` carries the same
+obligation at minimum 5 for the same reason, and is additionally a bound
+artifact whose bytes cannot change: it is the corpus proving the authoritative
+result channel every outcome reports through cannot be spoofed, so a channel
+bound without its corpus would be a digest without a meaning.
+
+The reason is specific to this milestone rather than general tidiness. M0 locks
+`history_anchoring_test.exs` at minimum 3 and cannot be reopened, and nothing
+locked `status_check_test.exs` at all, so without these two rows the cases that
+stop a closed gate being silently rebound could be deleted without tripping any
+count. M2 is the milestone that rebinds a closed gate's bound artifacts. A
+milestone that performs that transaction while letting the check on it rot would
+be proving its own prerequisite with the mechanism it disabled, so the ratchet
+is an evidence obligation here and not only a gate row.
 
 Durable fault coverage stays structural, as M1 established. Every new logical
 operation that can change durable session truth enters through one production
@@ -688,7 +805,7 @@ enumerates exactly what the runner checks so no reader infers more:
 
 | Authority | Owns |
 | --- | --- |
-| `bash scripts/check-m2-gate.sh` | Bound artifact digests, protected and inherited selector identities, states and minima, locked command exit status, the matrix marker set, its single reachable candidate, its per-lane toolchain and platform fields, its cross-lane identity agreement, its four self-describing digests against the files they name, negative-demonstration record shape, key order, selector pairing, tracked-path safety, and each restored digest against current bytes, real-call attestation record shape, role order, locked selector pairing, identifier form and non-reuse, agreement with the identity the bound runner sealed in the same run, and internal consistency of calls against identifiers and totals, the credential boundary, build-root isolation including the checkout's inert `_build`, and user-state containment |
+| `bash scripts/check-m2-gate.sh` | Bound artifact digests, protected and inherited selector identities, states and minima, locked command exit status, the matrix marker set, its single reachable candidate, its per-lane toolchain and platform fields, its cross-lane identity agreement, its four self-describing digests against the files they name, negative-demonstration record shape, key order, selector pairing, tracked-path safety, and each restored digest against current bytes, real-call attestation record shape, role order, locked selector pairing, the declared identifier form and its agreement across records, identifier conformance to that declared form and non-reuse, agreement with the identity the bound runner sealed in the same run, and internal consistency of calls against identifiers and totals, the credential boundary, build-root isolation including the checkout's inert `_build`, and user-state containment |
 | `mix loopex.status` | Live consistency among M2's governance rows, register state, root README status capsule, indexes, links, and the current revision's lifecycle claims, and every plan's declared bound artifacts against the working tree and reachable history |
 | Independent review | Whether tests assert what their names promise, whether mutations, interrupts, and cancellations were honestly injected, whether one clean-baseline mechanism was disabled and caused each named failure, whether retained fields match actual captured process output, whether the attended demonstration was a genuine task rather than a scripted one, whether each retained provider response identifier and its reported usage exist in the provider account for the window claimed — the only step that reaches the provider, and the only one that can distinguish a real call from a well-formed fabrication — whether the provider-reported input-token count agrees with the estimator, whether the closure documents are current, and whether the operator experience satisfies the Purpose |
 
@@ -712,10 +829,21 @@ nothing is tagged, and the vision's seventh compatibility surface — released
 package names, their contents, and the constraints they declare — stays inert
 because nothing is published.
 
+The composition is the reference stack wired, not a wiring toolkit, and the
+plan should not be read as offering more than that. It names four concrete
+implementations behind an eighty-line ceiling, so an embedder depending on it
+transitively acquires the reference adapters and their external dependency
+whether or not every one is used, and an embedder wanting a different Store or
+Executor cannot use it and writes their own composition. That is acceptable
+while exactly one implementation of each port exists, which is M2's whole
+inventory; it is stated here rather than discovered, because "depend on this
+instead of copying it" reads broader than what ships.
+
 Every surface M2 touches is therefore unstable and may change without notice
 until a milestone publishes one: the embedded Elixir API, the `loopex` command
-surface, the private journal and store schema, the executor job and receipt
-protocol, the tool contract, the policy port, and the artifact-store port.
+surface, the composition application's entry point, the private journal and
+store schema, the executor job and receipt protocol, the tool contract, the
+policy port, and the artifact-store port.
 `docs/developer/compatibility-surfaces.md` records that list and says plainly
 that no label, deprecation window, or migration note is owed for any of them
 yet. Internal process topology, process messages, and private structs are not
@@ -808,20 +936,25 @@ Concept: [Milestone scope](M2.md#concept-plan-scope).
 No package is published or installed, and no version is tagged. ADR 0001's
 umbrella direction and ADR 0002's runtime floor are unchanged.
 
-The planned inventory becomes exactly seven applications with exact roles:
+The planned inventory becomes exactly eight applications with exact roles:
 `loopex_protocol` as `:contract`, `loopex` as `:core`, `loopex_store_local`,
-`loopex_llm_reqllm`, and `loopex_executor_local` as `:edge`, and
-`loopex_reference_client` and `loopex_cli` as `:client`. The role rules are:
+`loopex_llm_reqllm`, and `loopex_executor_local` as `:edge`,
+`loopex_composition` as `:composition`, and `loopex_reference_client` and
+`loopex_cli` as `:client`. The role rules are:
 
 - `:contract` declares no dependency of any kind, in any environment;
 - `:core` declares exactly one production dependency, `:loopex_protocol`, and no
-  external, edge, or client dependency in any environment;
+  external, edge, composition, or client dependency in any environment;
 - `:edge` declares a production dependency on `:loopex`, may also depend on
   `:loopex_protocol`, and imports no concrete sibling adapter;
-- `:client` declares a production dependency on `:loopex`, may also depend on
-  `:loopex_protocol`, may declare production dependencies on the `:edge`
-  applications it composes, may declare no external dependency, and may not
-  depend on another `:client`.
+- `:composition` declares a production dependency on `:loopex`, may also depend
+  on `:loopex_protocol`, declares production dependencies on the in-umbrella
+  `:edge` applications it composes, may declare no external dependency in any
+  environment, and may depend on no `:client` and on no other `:composition`;
+- `:client` declares a production dependency on `:loopex`, may declare a
+  production dependency on at most one `:composition`, may declare in-umbrella `:edge` dependencies only in tests
+  exactly as M1 already permitted, may declare no external dependency, and may
+  not depend on another `:client`.
 
 Neither new port adds an application. The `Loopex.Policy` and `ArtifactStore`
 behaviours are declared in core, their reusable conformance suites live with the
@@ -854,17 +987,29 @@ The consequence for the operator command is stated rather than worked around. A
 `:client` may not depend on another `:client`, so `loopex_cli` cannot use the
 reference client's `AllowAll` and ships its own named permissive policy for a
 trusted local developer, selected only through an explicit `--policy` value and
-emitting the same single permissive-authority notice. Two reference hosts each
-naming their own policy is the ownership ADR 0009 describes.
+emitting the same single permissive-authority notice. The composition both hosts
+depend on does not close that gap and must not: it ships no policy at all, takes
+the host's as a required argument, and starts no runtime without one, because a
+permissive default living in shared wiring would be inherited by every embedder
+that depends on the wiring. Two reference hosts each naming their own policy is
+the ownership ADR 0009 describes.
 
 This changes the repository's own dependency check. `mix loopex.deps_budget` and
 its source, `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`, are product code
 this milestone edits: the planned inventory grows from six named applications to
-seven and the client rule widens as above. Its adversarial corpus in
-`apps/loopex/test/deps_budget_test.exs` grows two cases for the new inventory and
-the new client rule, raising its locked minimum from M1's 25 to 27. Both files
-are bound by the closed M1 gate, which is why the amendment in Prerequisites is
-a prerequisite rather than a note. The M2 gate does not bind either file's
+eight, the role set gains `:composition`, and the client rule gains its single
+composition dependency. Its adversarial corpus in
+`apps/loopex/test/deps_budget_test.exs` grows three cases, raising its locked
+minimum from M1's 25 to 28 — one for the eight-application inventory, one for
+the `:composition` role's own permitted and forbidden directions, and one for
+the client rule that admits at most one composition and still no second client.
+The minimum rises by three rather than two because a new role is not the same
+adversarial claim as the rule that consumes it: a corpus that proved only the
+client side would leave a composition free to declare an external dependency or
+to depend on a client. Both files are bound by the closed M1 gate, which is why
+the amendment in Prerequisites is a prerequisite rather than a note, and they
+are the only two artifacts that generation rebinds: the inventory and role
+change is stated in them and needs no third bound artifact. The M2 gate does not bind either file's
 bytes, because binding bytes the milestone must change would lock a digest
 acceptance already knows is wrong; it locks the command and both corpus
 identities instead. The M0 gate locks the command without binding its bytes and
@@ -872,18 +1017,21 @@ must still pass.
 
 `loopex_llm_reqllm` remains the only application permitted a direct external
 dependency, exactly `{:req_llm, "~> 1.17.1"}` without source options. Core
-remains Elixir/Erlang standard-library and OTP only. `loopex_cli` declares
-production dependencies on `:loopex`, `:loopex_store_local`,
+remains Elixir/Erlang standard-library and OTP only. `loopex_composition`
+declares production dependencies on `:loopex`, `:loopex_store_local`,
 `:loopex_llm_reqllm`, and `:loopex_executor_local`, and no external dependency
-in any environment; its argument parsing, signal handling, and terminal output
-are standard library and OTP only.
+in any environment. `loopex_cli` declares production dependencies on `:loopex`
+and `:loopex_composition` and nothing else in any environment; its argument
+parsing, signal handling, and terminal output are standard library and OTP
+only.
 
 The operator entrypoint is an `escript`. `apps/loopex_cli/mix.exs` declares an
 `escript` main module, `mix escript.build` produces an executable named `loopex`
 in that application, and `loopex --version` reports the single version train's
 value. The escript must build and run on all three locked lanes. Because an
-escript starts with no application tree, the shipped composition is responsible
-for starting one — `:ssl`, the HTTP client stack `req_llm` pulls in, telemetry,
+escript starts with no application tree, the shipped composition — now in
+`loopex_composition`, reached through the command's single composition
+dependency — is responsible for starting one — `:ssl`, the HTTP client stack `req_llm` pulls in, telemetry,
 and the Loopex applications — and that work counts against the composition
 ceiling below. The escript is not installed, signed, archived, attached to a
 release, or published, and the gate produces it inside its own owned task root.
@@ -935,18 +1083,30 @@ active profile. Four of the six are new in this milestone. Retaining the other
 two costs two definition records and no prompt tokens; deleting them would break
 inherited protection to save nothing.
 
-**The command surface is a client application, not a boundary.** It defines no
-behaviour, no callback, and no replaceable implementation. It is permitted
-exactly one composition module that names concrete adapters, and that module has
-a hard ceiling: at most eighty effective lines, counting neither blank lines nor
-comments, measured by a protected test. That ceiling is the executable form of
-the vision's requirement that one page of code can start a runtime, create a
+**The command surface is a client application, and the composition is not a
+boundary either.** Neither defines a behaviour, a callback, or a replaceable
+implementation. `loopex_composition` exists for exactly one module, the only
+production module permitted to name concrete adapters, and that module
+has a hard ceiling: at most eighty effective lines, counting neither blank lines
+nor comments, measured by a protected test. That ceiling is the executable form
+of the vision's requirement that one page of code can start a runtime, create a
 session, submit a prompt, and consume events — a budget the repository currently
 fails, because the only such composition is test support. Eighty rather than
 sixty, because the same module must also start the OTP application tree an
-escript does not start for it and must name five concrete implementations rather
-than three; a ceiling low enough to force compression buys a smaller number by
-hiding work, which is the opposite of what the budget is for.
+escript does not start for it, must name four concrete implementations rather
+than three, and must thread the host's policy through without supplying one; a
+ceiling low enough to force compression buys a smaller number by hiding work,
+which is the opposite of what the budget is for.
+
+**One `mix.exs` and one role rule is what shipping it costs, and what it buys.**
+An application is more machinery than a module in an existing one, so the
+addition is justified rather than assumed: the composition must be depended on
+by both a client and an embedder, no existing role may be depended on that way
+without weakening a rule that is load-bearing elsewhere, and the alternative —
+one page each embedder copies — is re-derived once per embedder and drifts
+silently the first time the kernel's start-up shape changes. A shipped
+application makes that drift a compile error in every dependant instead. A
+second composition module anywhere in the repository stays forbidden.
 
 **The reference prompt has one measured ceiling.** The base system prompt plus
 the active built-in tool definitions must measure under one thousand tokens

@@ -109,7 +109,8 @@ and it satisfies no outcome and no closure obligation.
 After the probe, and never in place of it, the runner:
 
 1. checks the eleven `M2` operator features, the supporting tool-registry
-   mechanism, and the attended demonstration in order. Each check names what an
+   mechanism, and the attended demonstration, the registry check sitting between
+   the third and fourth feature rather than after the eleventh. Each check names what an
    operator or the closure evidence would be missing and requires that
    definition to exist as a readable file containing every locked case identity;
 2. checks the nine inherited `M1` outcome selector files, the reused
@@ -146,7 +147,7 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `38b3b37ab911acc0e6a00662809bc1b4c04087b1314debe5cda77de80855e3ab` | `scripts/check-m2-gate.sh` |
+| `3d153940233765668123d958d2e55584098898b4400583913e220dafec572100` | `scripts/check-m2-gate.sh` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -164,10 +165,14 @@ without pretending a runner can verify its own bytes before executing them.
 
 `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` and
 `apps/loopex/test/deps_budget_test.exs` are deliberately **not** bound here.
-`M2` changes both: the planned inventory grows from six applications to seven,
-the `:client` rule widens so a client may declare production dependencies on the
-`:edge` applications it composes, and the corpus gains the two adversarial cases
-that prove each. Binding bytes the milestone must change would lock a digest
+`M2` changes both: the planned inventory grows from six applications to eight,
+the role set gains `:composition` for the wiring-only application both the
+command and an embedder depend on, the `:client` rule gains a production
+dependency on at most one `:composition` while still admitting no other
+`:client`, and the corpus gains the three adversarial cases that prove the
+inventory, the new role's own permitted and forbidden directions, and the client
+rule that consumes it. Those two artifacts carry the whole inventory and role
+change; `M2` binds no third artifact for it. Binding bytes the milestone must change would lock a digest
 acceptance already knows is wrong. The command stays locked below, and both
 corpus identities stay locked in Locked Mechanics Selectors. `M2` therefore does
 change a repository check, and says so here rather than claiming otherwise.
@@ -226,7 +231,7 @@ Every command below must exit zero.
 
 | # | Command | Locked obligation |
 | --- | --- | --- |
-| 1 | `mix loopex.deps_budget` | Application identity, the `M2` seven-application inventory, role rules, and dependency direction |
+| 1 | `mix loopex.deps_budget` | Application identity, the `M2` eight-application inventory, role rules including `:composition`, and dependency direction |
 | 2 | `mix loopex.format_scope` | Effective formatting includes every application source |
 | 3 | `mix format --check-formatted` | Formatting is clean |
 | 4 | `mix compile --warnings-as-errors` | The default build is warning-free |
@@ -321,11 +326,19 @@ equal the named excluded identities.
 | 8 | `apps/loopex/test/cancellation_test.exs` / default | 8 | passed: `an interrupt reaches the run through the public facade and through no private path`; `an abort admitted during a model call cancels the run and schedules no new work`; `an abort admitted during a tool call cancels the executor job and confirms cleanup before committing cancelled`; `a run finishes cancelled only when every owned operation is validated terminal and every owned process tree is confirmed cleaned`; `a validated terminal tool fact committed before the abort is preserved and not overwritten`; `an effect without sufficient evidence ends outcome unknown and is never blindly retried`; `a second interrupt reports what is still being cleaned up rather than abandoning the session`; `the operator observes what was cancelled and what actually happened` |
 | 9 | `apps/loopex/test/session_directory_test.exs` / default | 5 | passed: `a fresh operating system process lists the sessions in a resolved state root`; `the state root resolves from LOOPEX_HOME and never from application environment`; `a session resumes under the durable runtime placement identity that created it`; `resuming a session through a different runtime identity is refused with an explicit reason`; `a repeated resume command identity returns its historical result while a fresh identity acquires ownership` |
 | 10 | `apps/loopex_cli/test/cli_test.exs` / default | 15 | passed: `loopex run submits a prompt and streams the answer with its tool calls and results`; `the operator steers a running task and queues a follow-up from the same terminal`; `prompt steer follow up and abort have distinct explicit affordances and input naming neither is refused`; `tool progress from a running executor job reaches the operator's terminal before the tool finishes`; `loopex sessions lists the operator's sessions and loopex resume continues one`; `an interrupt signal delivered to a running loopex process cancels the task through the public facade`; `an interrupt whose cleanup cannot be confirmed reports outcome unknown with its reconciliation reference`; `loopex cancel reconciles a session left behind by a dead process and is refused against a live owner`; `the policy option selects the governing host policy and a refusal is reported in the transcript`; `the command ships its own permissive policy that is named explicitly, prints one notice, and is never an implicit fallback`; `loopex artifact retrieves a spilled artifact by its opaque reference`; `project resource trust is decided at the terminal and a non interactive run without a decision fails closed`; `the command surface drives only the public facade and owns no loop store cursor or authority`; `the base system prompt and active tool definitions measure under one thousand tokens`; `argument parsing and terminal output use only the standard library` |
-| 11 | `apps/loopex_cli/test/kernel_composition_test.exs` / default | 3 | passed: `one page of shipped code starts the application tree a runtime a session a prompt and its events`; `an independent embedder fixture composes the kernel without depending on the command application`; `the composition resolves its state root explicitly and never through application environment` |
+| 11 | `apps/loopex_composition/test/kernel_composition_test.exs` / default | 4 | passed: `one page of shipped code starts the application tree a runtime a session a prompt and its events`; `an independent embedder fixture composes the kernel without depending on the command application`; `the shipped composition requires a host supplied policy and ships no permissive default`; `the composition resolves its state root explicitly and never through application environment` |
 
-Outcome 10's facade-only case must fail if any module outside the single shipped
-composition reaches a coordinator, store, model, executor, policy, artifact
-store, journal, outbox, or cursor internal. Outcome 6 is split across two roles
+Outcome 10's facade-only case must fail if any module of the command
+application reaches a coordinator, store, model, executor, artifact store,
+journal, outbox, or cursor internal, or names a concrete Store, Model, Executor,
+or ArtifactStore implementation. The host policy modules the command ships for
+`--policy` are its single named exception, because policy is the host's own
+decision and the one decision the shipped composition refuses to make for it.
+Outcome 11 is where the composition itself is locked: it lives in
+`apps/loopex_composition`, a `:composition` application both the command and an
+embedder depend on, and its locked case that the composition requires a
+host-supplied policy is what stops shared wiring answering the host's question
+for every embedder at once. Outcome 6 is split across two roles
 because the two halves prove different things: the executor edge proves the
 runtime property that a permissive policy applies only when a host names it,
 using the selector's own in-file fixtures and importing nothing from a client,
@@ -372,10 +385,10 @@ What the runner mechanically proves is narrower than that paragraph, and the
 narrower statement is the one that governs. It proves the locked case names ran
 and passed with a credential present, that the retained identity is well formed
 and agrees across roles, and — through the Real-Call Attestations section below —
-that each real-provider role retained provider-supplied response identifiers of
-the right documented form, unreused, internally consistent with the call count
-and usage totals they claim, and byte-identical in identity to what the bound
-runner sealed in the same run. It does not prove a network call happened. No
+that each real-provider role retained provider-supplied response identifiers
+matching the identifier form its own record declares for that provider,
+unreused, internally consistent with the call count and usage totals they claim,
+and byte-identical in identity to what the bound runner sealed in the same run. It does not prove a network call happened. No
 offline check can: everything the runner reads is produced inside the same test
 process, so a case that fabricated all of it and opened no socket would still
 satisfy the runner. The attestation does not close that hole; it makes the hole
@@ -464,18 +477,23 @@ the loop. A claim a runner makes about its own isolation needs a locked
 definition for the same reason a product claim does; prose in the runner about
 the runner is not evidence.
 
-`apps/loopex/test/deps_budget_test.exs`, minimum 27, including these passed
+`apps/loopex/test/deps_budget_test.exs`, minimum 28, including these passed
 names:
 
 - `the repository satisfies the dependency budget and direction`
-- `the M2 planned inventory admits exactly seven applications with their declared roles`
-- `a client composes the edge applications it depends on and declares no external package`
+- `the M2 planned inventory admits exactly eight applications with their declared roles`
+- `a composition depends on the edge applications it composes and on no client or external package`
+- `a client depends on at most one composition and never on another client`
 
-The minimum rises from `M1`'s 25 because the inventory change and the widened
-client rule each require their own adversarial case. Removing a case to reach
-the number is a gate weakening and requires the ordinary authority. This file is
-one of the two `M1`-bound artifacts the accepted plan pair's gate-generation
-prerequisite rebinds.
+The minimum rises from `M1`'s 25 by three rather than two because the new
+`:composition` role is a separate adversarial claim from the client rule that
+consumes it: a corpus proving only the client side would leave a composition
+free to declare an external dependency or to depend on a client. Removing a case
+to reach the number is a gate weakening and requires the ordinary authority.
+This file is one of the two `M1`-bound artifacts the accepted plan pair's
+gate-generation prerequisite rebinds, and together with
+`apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` it is the whole surface of the
+inventory and role change.
 
 ## Toolchain Capture and Retained Matrix
 
@@ -616,17 +634,43 @@ call, and the inherited recovery trace explicitly completes a second real call.
 The exact key order is:
 
 ```json
-{"role":"<demonstration_db|inherited_5c|inherited_8b>","selector":"<safe tracked path>","provider":"<lowercase provider>","model":"<printable>","endpoint":"<printable>","adapter_build":"<printable>","calls":<positive integer>,"provider_response_ids":"<id>+<id>...","input_tokens":<positive integer>,"output_tokens":<positive integer>,"candidate":"<40 lowercase hex>","recorded":"<RFC3339 UTC>"}
+{"role":"<demonstration_db|inherited_5c|inherited_8b>","selector":"<safe tracked path>","provider":"<lowercase provider>","model":"<printable>","endpoint":"<printable>","adapter_build":"<printable>","calls":<positive integer>,"response_id_form":"<prefix>:<min>-<max>","provider_response_ids":"<id>+<id>...","input_tokens":<positive integer>,"output_tokens":<positive integer>,"candidate":"<40 lowercase hex>","recorded":"<RFC3339 UTC>"}
 ```
 
 `provider_response_ids` names, in order, every provider response the role
 observed; `calls` is their count; and the two token fields are the provider's own
-reported totals across exactly those responses. The admitted identifier forms are
-the providers' documented shapes: `anthropic` is `msg_` followed by 16–64
-alphanumerics, and `openai` is `chatcmpl-` or `resp_` followed by 8–128
-alphanumerics. A provider with no documented form here fails closed, because a
-form nobody wrote down is a form nothing can check; admitting a third provider is
-a gate amendment and never a skipped check.
+reported totals across exactly those responses.
+
+**The gate holds no opinion about which providers exist.** The record names the
+provider and declares the identifier form that provider documents, and the
+runner validates the recorded identifiers against that declared form. It carries
+no provider allowlist, because the model boundary is replaceable by design and a
+runner that recognised two providers and failed closed on a third would make
+adding an adapter a governance event. Adding a provider is an ordinary adapter
+change here, and never a gate amendment.
+
+`response_id_form` is written `<prefix>:<min>-<max>`: a non-empty literal prefix
+of at most sixteen characters drawn from `[A-Za-z0-9_-]`, then the inclusive
+length range of the remainder, whose characters come from the same set, with
+`1 <= min <= max <= 128`. An identifier satisfies the form when it begins with
+that exact prefix and the remainder is that many admitted characters. Anthropic's
+documented form is written `msg_:16-64` and OpenAI's chat-completions form
+`chatcmpl-:8-128`; neither appears in this runner. All three records must declare
+the same form byte for byte, because all three must already agree on the provider
+the bound runner sealed, so no one record can relax the shape the other two are
+held to. One record declares one form, which is what a role running against one
+model at one endpoint produces; a role that observed two identifier shapes could
+not be recorded here, and no locked role is one.
+
+**Validating a declared form is weaker than validating a known one, and this
+gate says so rather than implying otherwise.** A fabricator declares their own
+form, so a declaration cannot make a fabricated identifier detectable; a record
+that declared a lax form and then satisfied it would pass. What the check is
+worth is internal consistency — every identifier has the shape its own record
+claims, no identifier is reused, the count and the reported totals agree — and
+the protection that was ever load-bearing is unchanged, because it was never the
+form. It is the auditor's lookup of each identifier against the provider
+account, below.
 
 The runner checks exactly the following and nothing more. It requires the record
 to exist; exactly three records; that each parses as one line in the canonical
@@ -634,18 +678,20 @@ key order with the declared value shapes; that each record's `role` and
 `selector` equal the locked pair for its position and that `selector` is a safe
 tracked path; that `provider`, `model`, `endpoint`, and `adapter_build` are
 byte-identical to the identity the bound selector runner sealed for the
-real-provider roles in this same run; that `provider` has a documented identifier
-form and every identifier matches it; that no identifier is reused within or
-across records; that `calls` equals the identifier count and meets the floor
-above; that the reported token totals are consistent with that count; that
-`candidate` is reachable from the running revision; and that no record contains
-the provider credential's bytes.
+real-provider roles in this same run; that `response_id_form` is well formed
+under the grammar above and identical across all three records; that every
+identifier matches the form its own record declares; that no identifier is
+reused within or across records; that `calls` equals the identifier count and
+meets the floor above; that the reported token totals are consistent with that
+count; that `candidate` is reachable from the running revision; and that no
+record contains the provider credential's bytes.
 
 What the runner does not prove, stated plainly because the whole mechanism is
 worth only what this paragraph admits: it does not prove that any network call
 happened. Every field it reads was produced inside the same test process that
 produced the sealed identity, so a case that fabricated a well-formed identifier,
-a plausible usage pair, and a consistent count would pass all of the above. It
+a plausible usage pair, a consistent count, and the form it declares for them
+would pass all of the above. It
 also cannot bind a retained identifier to the calls a later run made, so a record
 copied forward from an earlier run is not mechanically detectable here.
 

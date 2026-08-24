@@ -548,7 +548,7 @@ Retained records use one line per real-provider role, in the locked role order,
 with this exact key order:
 
 ```json
-{"role":"<demonstration_db|inherited_5c|inherited_8b>","selector":"<safe tracked path>","provider":"<lowercase provider>","model":"<printable>","endpoint":"<printable>","adapter_build":"<printable>","calls":<positive integer>,"provider_response_ids":"<id>+<id>...","input_tokens":<positive integer>,"output_tokens":<positive integer>,"candidate":"<40 lowercase hex>","recorded":"<RFC3339 UTC>"}
+{"role":"<demonstration_db|inherited_5c|inherited_8b>","selector":"<safe tracked path>","provider":"<lowercase provider>","model":"<printable>","endpoint":"<printable>","adapter_build":"<printable>","calls":<positive integer>,"response_id_form":"<prefix>:<min>-<max>","provider_response_ids":"<id>+<id>...","input_tokens":<positive integer>,"output_tokens":<positive integer>,"candidate":"<40 lowercase hex>","recorded":"<RFC3339 UTC>"}
 ```
 
 `provider_response_ids` names every provider response the role observed, in
@@ -556,23 +556,33 @@ order, and `calls` is their count. `input_tokens` and `output_tokens` are the
 totals the provider reported across exactly those responses. The record names no
 credential, no prompt text, and no workspace content.
 
-The admitted identifier forms are the providers' own documented shapes:
+The identifier form is declared by the record, not enumerated by the checker.
+`response_id_form` carries the shape the named provider documents, written
+`<prefix>:<min>-<max>`:
 
-| `provider` | Documented `response_id` form |
+| Part | Admitted values |
 | --- | --- |
-| `anthropic` | `msg_` followed by 16–64 alphanumerics |
-| `openai` | `chatcmpl-` or `resp_` followed by 8–128 alphanumerics |
+| `prefix` | One to sixteen characters from `[A-Za-z0-9_-]`, non-empty |
+| `min`, `max` | Integers with `1 <= min <= max <= 128` |
+| Remainder | `min` to `max` characters from `[A-Za-z0-9_-]` |
 
-A provider with no row fails closed rather than being accepted unchecked;
-admitting a third provider is a gate amendment, because a form nobody documented
-is a form nothing can check.
+Anthropic's documented form is written `msg_:16-64`; OpenAI's chat-completions
+form is `chatcmpl-:8-128`. Neither is named in any checker. Every record in one
+retention declares the same form, since all of them already agree on the
+provider that run sealed.
+
+A checker carrying a provider allowlist would make adding an adapter a
+governance event, which contradicts the replaceable model boundary this
+repository builds on. Declaring the form instead is weaker — a fabricator
+declares their own — and the weakness is recorded here rather than papered over,
+because what the mechanism is worth was never the form.
 
 What a checker proves, and what it cannot, stated so nothing infers more:
 
 | Proved mechanically | Left to a person |
 | --- | --- |
 | The record exists, is exactly three canonical lines in the locked role order, and names each role's locked selector | That any network call happened at all |
-| Each identifier matches the documented form of the provider the bound selector runner sealed in the same run, and none is a placeholder | That each identifier exists in the provider account |
+| Each identifier matches the form its own record declares for the provider the bound selector runner sealed in the same run, that form is well shaped, and every record in the retention declares it identically | That each identifier exists in the provider account, and that the declared form is the one the provider actually documents |
 | No identifier is reused within or across roles | That the reported usage matches the billed call |
 | The record's provider, model, endpoint, and adapter build are byte-identical to the identity that same run sealed | That the record describes *this* run rather than an earlier one |
 | `calls` equals the identifier count and meets the floor its role's locked cases imply, and the reported totals are internally consistent with it | Whether the demonstration was a genuine task |
@@ -588,14 +598,15 @@ specific claim rather than reading prose.
 ### Evidence
 
 - One real-provider reply asserted to carry a `provider_attestation` whose
-  `response_id` matches the provider's documented form, with the deterministic
-  adapter asserted to return `:unreported` for the identical request, so the
-  distinguishing property is proved rather than assumed.
+  `response_id` matches the form the retained record declares for that provider,
+  with the deterministic adapter asserted to return `:unreported` for the
+  identical request, so the distinguishing property is proved rather than
+  assumed.
 - A real-provider evidence case fed a reply whose attestation is `:unreported`,
   asserting that the case fails; and the same reply driven through an ordinary
   run, asserting that the run proceeds normally and is accounted conservatively,
-  so the requirement lives in the evidence claim and never becomes a provider
-  allowlist at runtime.
+  so the requirement lives in the evidence claim and becomes a provider
+  allowlist neither at runtime nor in the checker.
 - The attestation asserted absent from every durable element, staged request,
   canonical digest input, projection, and the reserved continuation field.
 - Byte equality between the committed staged request and what the real provider

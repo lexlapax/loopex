@@ -361,13 +361,22 @@ Technical depth: [What M1 commits today and the three defects](0010-provider-con
   identifier and its reported usage beside the non-secret provider, model,
   endpoint, and adapter identity it already keeps. The deterministic adapter
   reports nothing, so it cannot satisfy such a case by accident.
+- **The identifier form is declared by the evidence, not enumerated by the
+  checker.** The retained record names the provider and the identifier form that
+  provider documents, and the checker validates the recorded identifiers against
+  that declared form. It carries no provider allowlist: the model boundary is
+  replaceable by design, and a checker that recognised two providers and failed
+  closed on a third would make adding an adapter a governance event rather than
+  an adapter change. The cost is stated with the benefit — validating a declared
+  form is weaker than validating a known one, because a fabricator declares
+  their own form — and it is accepted, because the form was never the protection.
 - **The attestation makes fabrication detectable, not impossible, and nothing
   may claim otherwise.** No offline check can prove a socket was opened. A
   checker can prove the retained record is well formed, that each identifier
-  carries the documented form of the provider named in the same run's sealed
-  identity, that no identifier is reused, that the record's identity is
-  byte-identical to that sealed identity, and that the record's own call count
-  and reported totals are internally consistent. It cannot prove any call
+  matches the form its own record declares for the provider named in the same
+  run's sealed identity, that no identifier is reused, that the record's
+  identity is byte-identical to that sealed identity, and that the record's own
+  call count and reported totals are internally consistent. It cannot prove any call
   happened, and it cannot bind a retained identifier to the call a later run
   made. Verifying the identifiers and their usage against the provider account
   is a closure-review step performed by a person, and it is the only step that

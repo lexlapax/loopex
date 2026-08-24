@@ -368,7 +368,7 @@ derivation reads nothing the coordinator does not already hold.
 | Model domain | `domain_kind` `model`, with the `(operation_id, attempt)` of the model-call intent ADR 0010 journals before dispatch |
 | Executor domain | `domain_kind` `executor`, with the `(operation_id, attempt)` of the executor operation ADR 0007 binds a grant, a job, and a receipt to |
 | Stability | A pure function of committed identity, so a successor owner, a re-projection, and a replay all produce the same label for the same attempt. No domain state is journaled to achieve this |
-| Injectivity | Distinct `(domain_kind, session_id, operation_id, attempt)` tuples derive distinct labels for arbitrary binary identifiers, because the canonical encoding is length-aware. This is the property the derivation is chosen for |
+| Injectivity | Distinct `(domain_kind, session_id, operation_id, attempt)` tuples derive distinct encodings for arbitrary binary identifiers, because the canonical encoding is length-aware, and therefore distinct labels under a collision-resistant hash. The encoding is injective; the hash over it is collision-resistant, not injective, and the derivation is chosen for the first because the second cannot repair a delimiter collision |
 
 `domain_kind` keeps the two namespaces disjoint even where a model operation and
 an executor operation were numbered alike, and `session_id` keeps labels

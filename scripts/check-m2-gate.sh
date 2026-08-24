@@ -723,10 +723,11 @@ require_feature \
   "argument parsing and terminal output use only the standard library"
 
 require_feature \
-  "an embedder cannot start the kernel in one page; the only composition is test support" \
-  apps/loopex_cli/test/kernel_composition_test.exs \
+  "an embedder cannot depend on a shipped composition; the only composition is test support" \
+  apps/loopex_composition/test/kernel_composition_test.exs \
   "one page of shipped code starts the application tree a runtime a session a prompt and its events" \
   "an independent embedder fixture composes the kernel without depending on the command application" \
+  "the shipped composition requires a host supplied policy and ships no permissive default" \
   "the composition resolves its state root explicitly and never through application environment"
 
 # The attended real-provider demonstration is mandatory closure evidence rather
@@ -832,11 +833,12 @@ require_feature \
   "the gate refuses an owned root that resolves inside the checkout or the operator's product state"
 
 require_feature \
-  "the dependency corpus does not yet describe the M2 seven-application inventory" \
+  "the dependency corpus does not yet describe the M2 eight-application inventory or the composition role" \
   apps/loopex/test/deps_budget_test.exs \
   "the repository satisfies the dependency budget and direction" \
-  "the M2 planned inventory admits exactly seven applications with their declared roles" \
-  "a client composes the edge applications it depends on and declares no external package"
+  "the M2 planned inventory admits exactly eight applications with their declared roles" \
+  "a composition depends on the edge applications it composes and on no client or external package" \
+  "a client depends on at most one composition and never on another client"
 
 # ---------------------------------------------------------------------------
 # Bound artifacts, closure documents, and platform, still read-only.
@@ -1092,7 +1094,7 @@ while IFS= read -r child; do
   project_configs+=("$child")
 done < <(git ls-files 'apps/*/mix.exs' | LC_ALL=C sort)
 
-run_locked "the dependency budget, the M2 seven-application inventory, or the role direction is violated" \
+run_locked "the dependency budget, the M2 eight-application inventory, or the role direction is violated" \
   mix loopex.deps_budget
 run_locked "effective formatting does not include every application source" \
   mix loopex.format_scope
@@ -1364,9 +1366,10 @@ run_selector 10 apps/loopex_cli/test/cli_test.exs default 15 zero \
   "passed=the base system prompt and active tool definitions measure under one thousand tokens" \
   "passed=argument parsing and terminal output use only the standard library"
 
-run_selector 11 apps/loopex_cli/test/kernel_composition_test.exs default 3 zero \
+run_selector 11 apps/loopex_composition/test/kernel_composition_test.exs default 4 zero \
   "passed=one page of shipped code starts the application tree a runtime a session a prompt and its events" \
   "passed=an independent embedder fixture composes the kernel without depending on the command application" \
+  "passed=the shipped composition requires a host supplied policy and ships no permissive default" \
   "passed=the composition resolves its state root explicitly and never through application environment"
 
 # The tool registry is the internal mechanism the loop and the tools resolve
@@ -1476,10 +1479,11 @@ run_selector mechanics apps/loopex/test/gate_isolation_test.exs default 2 zero \
   "passed=an ambient MIX_BUILD_PATH cannot redirect gate owned compilation out of the owned build root" \
   "passed=the gate refuses an owned root that resolves inside the checkout or the operator's product state"
 
-run_selector mechanics apps/loopex/test/deps_budget_test.exs default 27 zero \
+run_selector mechanics apps/loopex/test/deps_budget_test.exs default 28 zero \
   "passed=the repository satisfies the dependency budget and direction" \
-  "passed=the M2 planned inventory admits exactly seven applications with their declared roles" \
-  "passed=a client composes the edge applications it depends on and declares no external package"
+  "passed=the M2 planned inventory admits exactly eight applications with their declared roles" \
+  "passed=a composition depends on the edge applications it composes and on no client or external package" \
+  "passed=a client depends on at most one composition and never on another client"
 
 run_selector mechanics apps/loopex/test/status_check_test.exs default 42 zero \
   "passed=a Closed milestone's gate is amended by an accepted generation, not a rebind" \
@@ -1599,19 +1603,20 @@ validate_negative_demonstrations() {
 # reaches the provider.
 # ---------------------------------------------------------------------------
 
-readonly ATTESTATION_RECORD_PATTERN='^\{"role":"(demonstration_db|inherited_5c|inherited_8b)","selector":"([A-Za-z0-9._/-]+)","provider":"([a-z][a-z0-9_-]*)","model":"([!-~]+)","endpoint":"([!-~]+)","adapter_build":"([!-~]+)","calls":([1-9][0-9]*),"provider_response_ids":"([A-Za-z0-9_+-]+)","input_tokens":([1-9][0-9]*),"output_tokens":([1-9][0-9]*),"candidate":"([0-9a-f]{40})","recorded":"([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)"\}$'
+readonly ATTESTATION_RECORD_PATTERN='^\{"role":"(demonstration_db|inherited_5c|inherited_8b)","selector":"([A-Za-z0-9._/-]+)","provider":"([a-z][a-z0-9_-]*)","model":"([!-~]+)","endpoint":"([!-~]+)","adapter_build":"([!-~]+)","calls":([1-9][0-9]*),"response_id_form":"([A-Za-z0-9_-]{1,16}):([1-9][0-9]{0,2})-([1-9][0-9]{0,2})","provider_response_ids":"([A-Za-z0-9_+-]+)","input_tokens":([1-9][0-9]*),"output_tokens":([1-9][0-9]*),"candidate":"([0-9a-f]{40})","recorded":"([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)"\}$'
 
-# The documented identifier form of each admitted provider. A provider with no
-# entry here fails closed: the runner cannot check a form it does not know, and
-# accepting any non-placeholder string would be the overclaim this section
-# exists to avoid. Admitting a further provider is a gate amendment.
-provider_response_id_form() {
-  case "$1" in
-    anthropic) printf '%s' '^msg_[A-Za-z0-9]{16,64}$' ;;
-    openai) printf '%s' '^(chatcmpl-[A-Za-z0-9]{8,128}|resp_[A-Za-z0-9]{8,128})$' ;;
-    *) return 1 ;;
-  esac
-}
+# This runner carries no provider allowlist. Each record declares the identifier
+# form its named provider documents, written <prefix>:<min>-<max>, and the
+# recorded identifiers are validated against that declaration. Enumerating
+# providers here would make adding a model adapter a governance event, which a
+# replaceable model boundary does not deserve.
+#
+# Validating a declared form is weaker than validating a known one, and the gate
+# document says so rather than implying otherwise: a fabricator declares their
+# own form. What survives is internal consistency — every identifier has the
+# shape its own record claims, no identifier is reused, and the counts and
+# totals agree — plus the protection that was always the load-bearing one, which
+# is the auditor's lookup of each identifier against the provider account.
 
 validate_real_call_attestations() {
   local path=docs/evidence/M2-real-call-attestations.md
@@ -1641,7 +1646,9 @@ validate_real_call_attestations() {
 
   local index=0 record pair want_role want_selector want_calls
   local role_name selector provider model endpoint adapter_build calls ids
-  local input_tokens output_tokens candidate identity form id id_count seen_ids=" "
+  local form_prefix form_min form_max declared_form="" record_form
+  local remainder remainder_length
+  local input_tokens output_tokens candidate identity id id_count seen_ids=" "
   for record in "${records[@]}"; do
     pair="${expected[$index]}"
     want_role="${pair%%|*}"
@@ -1665,10 +1672,13 @@ validate_real_call_attestations() {
     endpoint="${BASH_REMATCH[5]}"
     adapter_build="${BASH_REMATCH[6]}"
     calls="${BASH_REMATCH[7]}"
-    ids="${BASH_REMATCH[8]}"
-    input_tokens="${BASH_REMATCH[9]}"
-    output_tokens="${BASH_REMATCH[10]}"
-    candidate="${BASH_REMATCH[11]}"
+    form_prefix="${BASH_REMATCH[8]}"
+    form_min="${BASH_REMATCH[9]}"
+    form_max="${BASH_REMATCH[10]}"
+    ids="${BASH_REMATCH[11]}"
+    input_tokens="${BASH_REMATCH[12]}"
+    output_tokens="${BASH_REMATCH[13]}"
+    candidate="${BASH_REMATCH[14]}"
 
     [ "$role_name" = "$want_role" ] \
       || fail "real-call attestation $(( index + 1 )) attests $role_name, not the locked $want_role"
@@ -1680,8 +1690,17 @@ validate_real_call_attestations() {
     [ "$identity" = "$real_reference_identity" ] \
       || fail "the $role_name attestation records a provider, model, endpoint, or adapter build that the bound selector runner did not seal in this run"
 
-    form="$(provider_response_id_form "$provider")" \
-      || fail "the $role_name attestation names provider $provider, whose response identifier form this gate does not document; admitting it is a gate amendment, never a skipped check"
+    record_form="$form_prefix:$form_min-$form_max"
+    [ "$form_min" -le "$form_max" ] \
+      || fail "the $role_name attestation declares response identifier form $record_form, whose minimum length exceeds its maximum"
+    [ "$form_max" -le 128 ] \
+      || fail "the $role_name attestation declares response identifier form $record_form, whose maximum length exceeds the admitted 128"
+    if [ -z "$declared_form" ]; then
+      declared_form="$record_form"
+    else
+      [ "$record_form" = "$declared_form" ] \
+        || fail "the $role_name attestation declares response identifier form $record_form while an earlier record declared $declared_form; all three roles ran against one sealed provider identity"
+    fi
 
     id_count=0
     local remaining="$ids"
@@ -1694,8 +1713,18 @@ validate_real_call_attestations() {
       fi
       [ -n "$id" ] \
         || fail "the $role_name attestation carries an empty provider response identifier"
-      [[ "$id" =~ $form ]] \
-        || fail "the $role_name attestation carries a response identifier that is not $provider's documented form"
+      case "$id" in
+        "$form_prefix"*) : ;;
+        *)
+          fail "the $role_name attestation carries a response identifier that does not begin with the $form_prefix prefix its record declares for $provider"
+          ;;
+      esac
+      remainder="${id#"$form_prefix"}"
+      [[ "$remainder" =~ ^[A-Za-z0-9_-]+$ ]] \
+        || fail "the $role_name attestation carries a response identifier whose remainder leaves the admitted character set"
+      remainder_length="${#remainder}"
+      { [ "$remainder_length" -ge "$form_min" ] && [ "$remainder_length" -le "$form_max" ]; } \
+        || fail "the $role_name attestation carries a response identifier of remainder length $remainder_length, outside the $form_min-$form_max range its record declares for $provider"
       case "$seen_ids" in
         *" $id "*)
           fail "the $role_name attestation reuses provider response identifier $id, which another role already claimed"

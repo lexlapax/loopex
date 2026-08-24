@@ -211,6 +211,14 @@ defmodule Loopex.Checks.Plan do
     marker_declared?(text, path, @amendment_transaction_v2)
   end
 
+  # Concept: a gate carries at most one marker of each kind.
+  #
+  # Technical depth: returning false for a duplicated marker fails closed
+  # wherever a marker is required, but left the stated cardinality rule
+  # unenforced in the one corner where none is: a gate with two markers, no
+  # amendment section, and no generation row passed silently. A rule with a hole
+  # in its enforcement is how this repository's earlier governance defects began,
+  # so a duplicate raises rather than reading as an absence.
   defp marker_declared?(text, path, marker) do
     lines = Markdown.lines(text, path)
 
@@ -218,6 +226,10 @@ defmodule Loopex.Checks.Plan do
       text
       |> Markdown.visible_line_numbers(path)
       |> Enum.count(&(Enum.at(lines, &1) == marker))
+
+    if count > 1 do
+      raise Invalid, "#{path}: #{marker} is declared #{count} times; a gate carries at most one"
+    end
 
     count == 1
   end
