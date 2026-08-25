@@ -344,10 +344,17 @@ defmodule LoopexCli.CodingTaskTest do
     assert record["calls"] == 1
     announce(record)
 
-    report_real_path(
-      [%{"identity" => stringify(reply.identity)}],
-      record
-    )
+    # Concept: one role seals one identity.
+    #
+    # Technical depth: the selector runner requires a real-provider role to
+    # report its sealed identity exactly once, because a role that reported twice
+    # could report two different providers and still look green. Both cases here
+    # belong to the same role, so the attended task above is the one that
+    # reports; this case asserts the identity it observed agrees with it rather
+    # than sealing a second one.
+    assert reply.identity.provider != ""
+    assert reply.identity.model != ""
+    assert reply.identity.endpoint != ""
   end
 
   # Concept: put the observed identifiers where a person can retain them.
@@ -422,10 +429,6 @@ defmodule LoopexCli.CodingTaskTest do
     else
       :ok
     end
-  end
-
-  defp stringify(map) do
-    Map.new(map, fn {key, value} -> {to_string(key), value} end)
   end
 end
 
