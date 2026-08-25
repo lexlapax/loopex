@@ -403,6 +403,19 @@ defmodule LoopexCli.CodingTaskTest do
   # stream is how an attended run hands them over; nothing here writes to a
   # tracked file, because a case that wrote its own evidence would be attesting
   # to itself.
+  # Concept: every tool generation the demonstration could reach, named once.
+  #
+  # Technical depth: derived from the shipped definitions and sorted, so the
+  # value is the same on every lane that runs the same candidate. The gate
+  # requires the three toolchain lanes to agree on it, and a value that depended
+  # on which tools a model happened to call would differ run to run.
+  defp tool_identity do
+    Loopex.Executor.Local.CodingTools.definitions()
+    |> Enum.map(&"#{&1["tool_id"]}@#{&1["tool_version"]}")
+    |> Enum.sort()
+    |> Enum.join("+")
+  end
+
   defp announce(record) do
     IO.puts(
       :stderr,
@@ -455,11 +468,22 @@ defmodule LoopexCli.CodingTaskTest do
       |> List.last()
       |> Map.get("identity", %{})
 
+    # Concept: the demonstration seals the whole stack it ran on.
+    #
+    # Technical depth: this role runs the `combined` profile, which seals the
+    # executor and the tools beside the provider, because the claim is about a
+    # coding task and not about a model call. The tool identity names every
+    # generation the run could reach, sorted, rather than one of them: the
+    # demonstration ran four tools and naming one would describe a different run
+    # than the one that happened.
     report = %{
       "provider" => identity["provider"],
       "model" => identity["model"],
       "endpoint" => identity["endpoint"],
-      "adapter_build" => "loopex_llm_reqllm@#{Loopex.version()}"
+      "adapter_build" => "loopex_llm_reqllm@#{Loopex.version()}",
+      "executor_build" => "loopex_executor_local@#{Loopex.version()}",
+      "executor_identity" => "executor-local",
+      "tool_identity" => tool_identity()
     }
 
     if Code.ensure_loaded?(Loopex.M1Gate.RealPathEvidence) do
