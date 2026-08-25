@@ -4,7 +4,9 @@ defmodule LoopexCli do
 
   `loopex` — the command an operator actually runs. They stand in a Git
   repository, describe a change in ordinary words, and watch the session read
-  files, edit them, and run commands until the work is done.
+  files, edit them, and run commands until the work is done. The answer arrives
+  as it is produced. Ctrl-C stops the work and reports what actually happened.
+  Tomorrow, `loopex sessions` finds it again and `loopex resume` continues it.
 
   It is a peer surface, not the product. Every flow it offers is a projection of
   the same embedded API an embedder calls: it owns no loop, no durable session
@@ -19,11 +21,18 @@ defmodule LoopexCli do
   the shipped composition deliberately refuses to make for anybody.
 
   Argument parsing and terminal output use the standard library only. A
-  dependency here would be a dependency in the operator's install for the sake of
-  flag parsing, which is not a trade this milestone makes.
+  dependency here would land in the operator's install for the sake of flag
+  parsing, which is not a trade this milestone makes.
+
+  Steering and follow-up have separate flags rather than one input the command
+  interprets. The runtime never guesses which of the two an input is, so the
+  surface must not guess either: an input naming neither is refused rather than
+  resolved from the state of the session.
   """
 
   alias LoopexCli.Policy.AllowAll
+  alias LoopexCli.Placement
+  alias LoopexCli.Render
 
   @doc """
   ## Concept
@@ -33,53 +42,340 @@ defmodule LoopexCli do
   ## Technical depth
 
   Dispatches on the first argument and prints usage for anything it does not
-  recognise, rather than guessing. Exit status is set explicitly so a shell
-  script wrapping this command can tell success from failure.
+  recognise, rather than guessing. Exit status is explicit so a shell script
+  wrapping this command can tell success from failure.
   """
   @spec main([binary()]) :: no_return()
-  def main(argv) do
-    case argv do
-      ["run" | rest] -> halt(run(rest))
-      ["sessions" | rest] -> halt(sessions(rest))
-      ["resume" | rest] -> halt(resume(rest))
-      ["cancel" | rest] -> halt(cancel(rest))
-      ["artifact" | rest] -> halt(artifact(rest))
-      _unrecognised -> halt(usage())
-    end
-  end
+  def main(argv), do: halt(dispatch(argv))
 
   @doc """
   ## Concept
 
-  The permissive policy this command ships for `--policy allow-all`.
+  Runs one command and returns its result, without exiting.
 
   ## Technical depth
 
-  Named here rather than borrowed from the reference client, because a client may
-  not depend on another client. Two shipped permissive policies is the honest
-  consequence of that rule; both are selected explicitly and neither is ever an
-  implicit fallback.
+  Separated from `main/1` so the locked cases exercise the real command surface
+  rather than a rehearsal of it. A case that had to spawn an operating-system
+  process to observe a flag would be testing the escript wrapper, not the
+  behaviour the outcome names.
+  """
+  @spec dispatch([binary()]) :: :ok | {:error, binary()}
+  def dispatch(["run" | rest]), do: run(parse(rest))
+  def dispatch(["sessions" | rest]), do: sessions(parse(rest))
+  def dispatch(["resume" | rest]), do: resume(parse(rest))
+  def dispatch(["cancel" | rest]), do: cancel(parse(rest))
+  def dispatch(["artifact" | rest]), do: artifact(parse(rest))
+  def dispatch(_unrecognised), do: usage()
+
+  @doc """
+  ## Concept
+
+  The host policy an operator selected.
+
+  ## Technical depth
+
+  There is no default. A command that quietly picked one would be answering the
+  authority question on the operator's behalf, which is the decision the kernel
+  refuses to make and the composition refuses to make.
   """
   @spec policy(binary() | nil) :: {:ok, module()} | {:error, binary()}
   def policy("allow-all"), do: {:ok, AllowAll}
   def policy(nil), do: {:error, "--policy is required; there is no default host authority"}
-  def policy(other), do: {:error, "unknown policy #{inspect(other)}"}
+  def policy(other), do: {:error, "unknown policy #{other}"}
 
-  defp run(_argv), do: {:error, "not implemented"}
-  defp sessions(_argv), do: {:error, "not implemented"}
-  defp resume(_argv), do: {:error, "not implemented"}
-  defp cancel(_argv), do: {:error, "not implemented"}
-  defp artifact(_argv), do: {:error, "not implemented"}
+  @doc """
+  ## Concept
+
+  Parses argv into flags and positional words.
+
+  ## Technical depth
+
+  Standard library only, and deliberately small: `--flag value`, `--flag=value`,
+  and bare words. Anything richer would be a dependency or a parser this command
+  has no use for.
+  """
+  @spec parse([binary()]) :: {map(), [binary()]}
+  def parse(argv), do: parse(argv, {%{}, []})
+
+  defp parse([], {flags, words}), do: {flags, Enum.reverse(words)}
+
+  defp parse(["--" <> flag | rest], {flags, words}) do
+    case String.split(flag, "=", parts: 2) do
+      [name, value] ->
+        parse(rest, {Map.put(flags, name, value), words})
+
+      [name] ->
+        # A guard cannot call String.starts_with?/2, and the distinction matters:
+        # `--steer` followed by another flag is a bare switch, while `--steer
+        # "text"` takes that text as its value.
+        case rest do
+          [value | tail] ->
+            if flag?(value),
+              do: parse(rest, {Map.put(flags, name, true), words}),
+              else: parse(tail, {Map.put(flags, name, value), words})
+
+          [] ->
+            parse(rest, {Map.put(flags, name, true), words})
+        end
+    end
+  end
+
+  defp parse([word | rest], {flags, words}), do: parse(rest, {flags, [word | words]})
+
+  defp flag?(value), do: is_binary(value) and String.starts_with?(value, "--")
+
+  # Concept: start the stack the operator asked for, then drive it through the
+  # facade and nothing else.
+  #
+  # Technical depth: the interrupt is trapped and turned into the same public
+  # abort any other caller would submit. It signals no process, writes no control
+  # file, and opens no channel of its own, which is what keeps cancellation
+  # same-process by construction rather than by convention.
+  defp run({flags, words}) do
+    with {:ok, policy} <- policy(Map.get(flags, "policy")),
+         {:ok, prompt} <- prompt_of(words),
+         {:ok, runtime} <- start_runtime(flags, policy),
+         {:ok, session_id} <- create(runtime),
+         {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
+      trap_interrupt(attachment)
+
+      case Loopex.command(attachment, %{type: :prompt, command_id: "run-1", content: prompt}) do
+        {:accepted, _id} ->
+          track(flags, session_id, runtime)
+          follow_with_input(attachment, flags)
+
+        {:error, reason} ->
+          {:error, "the prompt was refused: #{inspect(reason)}"}
+      end
+    end
+  end
+
+  # Concept: steering and following up are separate things the operator says
+  # separately.
+  #
+  # Technical depth: the runtime never infers which of the two an input is, so
+  # this surface must not either. Each has its own flag, a steer names the run it
+  # is steering, and an input naming neither is refused rather than resolved from
+  # the state of the session. Passing both is refused for the same reason: a
+  # caller who supplied both has not said which they meant.
+  defp follow_with_input(attachment, flags) do
+    steer = Map.get(flags, "steer")
+    follow_up = Map.get(flags, "follow-up")
+
+    cond do
+      is_binary(steer) and is_binary(follow_up) ->
+        {:error, "--steer and --follow-up are different requests; name one"}
+
+      is_binary(steer) ->
+        submit_steer(attachment, steer)
+
+      is_binary(follow_up) ->
+        submit_follow_up(attachment, follow_up)
+
+      true ->
+        Render.stream(attachment)
+    end
+  end
+
+  defp submit_steer(attachment, content) do
+    with {:ok, run_id} <- active_run(attachment) do
+      case Loopex.command(attachment, %{
+             type: :steer,
+             command_id: unique_id(),
+             run_id: run_id,
+             content: content
+           }) do
+        {:accepted, _id} -> Render.stream(attachment)
+        {:error, reason} -> {:error, "the steer was refused: #{inspect(reason)}"}
+      end
+    end
+  end
+
+  defp submit_follow_up(attachment, content) do
+    case Loopex.command(attachment, %{
+           type: :follow_up,
+           command_id: unique_id(),
+           content: content
+         }) do
+      {:accepted, _id} -> Render.stream(attachment)
+      {:error, reason} -> {:error, "the follow-up was refused: #{inspect(reason)}"}
+    end
+  end
+
+  # Concept: a steer must name a run, and the operator should not have to.
+  #
+  # Technical depth: the run identifier comes from the session's own public
+  # snapshot rather than being remembered by this process, so a steer submitted
+  # after a reconnect names the run the session actually has rather than one this
+  # terminal remembers having started.
+  defp active_run(attachment) do
+    case Loopex.snapshot(attachment) do
+      {:ok, %{active_run_id: run_id}} when is_binary(run_id) -> {:ok, run_id}
+      _absent -> {:error, "there is no active run to steer"}
+    end
+  end
+
+  defp track(flags, session_id, runtime) do
+    with {:ok, root} <- state_root(flags),
+         {:ok, placement} <- Loopex.runtime_placement_id(root) do
+      Loopex.track_session(root, session_id, placement)
+    end
+
+    _ = runtime
+    :ok
+  end
+
+  defp sessions({flags, _words}) do
+    with {:ok, root} <- state_root(flags),
+         {:ok, entries} <- Loopex.list_sessions(root) do
+      Render.sessions(entries)
+    end
+  end
+
+  defp resume({flags, words}) do
+    with {:ok, session_id} <- positional(words, "a session identifier"),
+         {:ok, policy} <- policy(Map.get(flags, "policy")),
+         {:ok, runtime} <- start_runtime(flags, policy),
+         {:ok, root} <- state_root(flags),
+         {:ok, _resumed} <-
+           Loopex.resume_known_session(root, runtime, session_id, unique_id()),
+         {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
+      trap_interrupt(attachment)
+      Render.stream(attachment)
+    end
+  end
+
+  # Concept: reconcile a session a dead process left behind.
+  #
+  # Technical depth: narrower than an interrupt and deliberately so. It applies
+  # only where no live Runtime Control holds the session's placement key, and it
+  # is refused against a live owner rather than racing one — two Controls on one
+  # placement key is precisely what ADR 0008 makes the host responsible for
+  # preventing.
+  defp cancel({flags, words}) do
+    with {:ok, session_id} <- positional(words, "a session identifier"),
+         {:ok, root} <- state_root(flags),
+         :none <- Placement.live_owner(root),
+         {:ok, policy} <- policy(Map.get(flags, "policy")),
+         {:ok, runtime} <- start_runtime(flags, policy),
+         {:ok, _resumed} <-
+           Loopex.resume_known_session(root, runtime, session_id, unique_id()),
+         {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
+      case Loopex.command(attachment, %{type: :abort, command_id: unique_id()}) do
+        {:accepted, _id} -> Render.stream(attachment)
+        {:error, reason} -> {:error, "the session could not be reconciled: #{inspect(reason)}"}
+      end
+    else
+      {:ok, owner} ->
+        {:error,
+         "a live loopex process (pid #{owner}) owns this state root; " <>
+           "cancel from that terminal, or stop it first"}
+
+      {:error, reason} when is_binary(reason) ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, "the session could not be reconciled: #{inspect(reason)}"}
+    end
+  end
+
+  defp artifact({flags, words}) do
+    with {:ok, reference} <- positional(words, "an artifact reference"),
+         {:ok, root} <- state_root(flags),
+         {:ok, handle} <- LoopexComposition.artifacts(root),
+         {:ok, bytes} <- fetch_artifact(handle, reference) do
+      IO.binwrite(bytes)
+      :ok
+    end
+  end
+
+  defp fetch_artifact(handle, reference) do
+    case Loopex.Store.Local.Artifacts.stat(handle, %{
+           digest: reference,
+           media_type: "application/octet-stream",
+           size: 0,
+           role: "tool_output",
+           locator: reference
+         }) do
+      {:ok, resolved} -> Loopex.Store.Local.Artifacts.fetch(handle, resolved)
+      {:error, :unknown_artifact} -> {:error, "no artifact is retained for #{reference}"}
+      {:error, reason} -> {:error, "the artifact could not be read: #{inspect(reason)}"}
+    end
+  end
+
+  defp start_runtime(flags, policy) do
+    with {:ok, root} <- state_root(flags) do
+      {:ok, placement} = Loopex.runtime_placement_id(root)
+
+      LoopexComposition.start(
+        runtime_id: placement,
+        state_root: root,
+        workspace: Map.get(flags, "workspace", File.cwd!()),
+        policy: policy,
+        progress_to: self()
+      )
+    end
+  end
+
+  defp create(runtime) do
+    Loopex.create_session(runtime, %{"surface" => "cli"}, command_id: unique_id())
+  end
+
+  defp state_root(flags) do
+    case Map.get(flags, "state-root") do
+      root when is_binary(root) -> {:ok, root}
+      _absent -> Loopex.state_root()
+    end
+  end
+
+  defp prompt_of([]), do: {:error, "describe the change you want, in ordinary words"}
+  defp prompt_of(words), do: {:ok, Enum.join(words, " ")}
+
+  defp positional([], expected), do: {:error, "this command needs #{expected}"}
+  defp positional([word | _rest], _expected), do: {:ok, word}
+
+  defp unique_id, do: "cli-" <> Integer.to_string(System.unique_integer([:positive]))
+
+  # Concept: Ctrl-C becomes an ordinary public abort.
+  #
+  # Technical depth: the signal handler submits the same command any caller would
+  # and then lets the stream report what actually happened. It does not decide
+  # the outcome itself, because whether the run ends cancelled or outcome_unknown
+  # depends on evidence only the runtime holds.
+  defp trap_interrupt(attachment) do
+    parent = self()
+
+    spawn(fn ->
+      :ok = :os.set_signal(:sigint, :handle)
+      receive_signal(attachment, parent)
+    end)
+
+    :ok
+  rescue
+    _unsupported -> :ok
+  end
+
+  defp receive_signal(attachment, _parent) do
+    receive do
+      :sigint -> Loopex.command(attachment, %{type: :abort, command_id: "interrupt-1"})
+      _other -> :ok
+    end
+  end
 
   defp usage do
     IO.puts("""
     loopex — run a coding task from your terminal
 
       loopex run --policy allow-all "describe the change"
+      loopex run --policy allow-all --steer "actually, do it this way"
+      loopex run --policy allow-all --follow-up "then do this next"
       loopex sessions
-      loopex resume <session>
+      loopex resume <session> --policy allow-all
       loopex cancel <session>
       loopex artifact <reference>
+
+    --policy is required for anything that runs tools. There is no default.
     """)
 
     :ok
