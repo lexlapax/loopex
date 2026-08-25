@@ -18,10 +18,22 @@ credential through the standalone selector channel. The claim it carries:
 
 - a real provider drove the shipped `loopex` command through several turns;
 - several distinct tools ran, including one `edit` and one `bash`;
-- the answer streamed and reconstructed once per turn;
-- one host-policy refusal was reported and the task continued truthfully;
+- the reply was reconstructed once per turn;
 - the resulting bytes exist on disk in a disposable repository created inside
   the task root.
+
+**The host-policy refusal is not part of what this role proves.** The attended
+run uses `--policy allow-all`, so no call is refused and none could be. The
+refusal is demonstrated by the deterministic case
+`a denied tool call inside a multi tool task is reported and the task continues
+truthfully`, which names a refusing policy — a role `Da` case. Recording the
+refusal among role `Db`'s claims would be exactly the substitution the next
+paragraph forbids, and this record does not make it.
+
+**The answer does not stream.** The shipped adapter returns each turn's reply
+complete and declares `streamed: false` with a delta count of zero, which is
+conformant and is what the model port's own suite proves. What the attended run
+shows is a turn-at-a-time answer, not a word-at-a-time one.
 
 The five deterministic cases in role `Da` support that claim. They run the real
 coding tools, the real executor, and the real store against a disposable Git

@@ -77,7 +77,14 @@ Each experiment ran in a local clone of the candidate, checked out detached, wit
 the source tree verified clean before the mutation and again after the artifact
 was restored from `git show <candidate>:<path>`. No experiment ran from a dirty
 or previously mutated baseline: a clean-tree check refuses before the mutation is
-applied, and the eight records above each recorded a clean tree afterwards.
+applied.
+
+The records themselves carry six fields and cleanliness is not among them. The
+gate says so — whether one mechanism was disabled, whether it caused the named
+failure, and whether the tree was clean between records are review obligations,
+not record contents. What is written above is the operator's account of how the
+experiments were run, and a reviewer weighs it as that rather than as something
+the records demonstrate.
 
 Each selector ran the way the gate runs it — compiled on its own from the
 repository root, with the application's test helper absent — so the failure each
