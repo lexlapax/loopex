@@ -32,6 +32,7 @@ defmodule LoopexCli do
   """
 
   alias LoopexCli.Policy.AllowAll
+  alias LoopexCli.Policy.ShellAllowlist
   alias LoopexCli.Interrupt
   alias LoopexCli.Placement
   alias LoopexCli.ProjectResources
@@ -104,6 +105,7 @@ defmodule LoopexCli do
   """
   @spec policy(binary() | nil) :: {:ok, module()} | {:error, binary()}
   def policy("allow-all"), do: {:ok, AllowAll}
+  def policy("shell-allowlist"), do: {:ok, ShellAllowlist}
   def policy(nil), do: {:error, "--policy is required; there is no default host authority"}
   def policy(other), do: {:error, "unknown policy #{other}"}
 
@@ -427,11 +429,12 @@ defmodule LoopexCli do
       # to the operator before the run starts.
       #
       # Technical depth: discovery is the host's job and this command is the
-      # host. The manifest is carried into the runtime with no decision beside
-      # it, which is the declined path: the kernel journals a receipt naming the
-      # manifest it withheld rather than one saying nothing was ever found.
+      # host, so it looks, shows what it found, and -- where an operator is at
+      # the terminal -- asks. Both the manifest and whatever decision was taken
+      # are carried in: with no decision the kernel journals a receipt naming
+      # the manifest it withheld, rather than one saying nothing was found.
       manifest = ProjectResources.discover(workspace)
-      ProjectResources.announce(manifest, workspace)
+      decision = ProjectResources.decide(manifest, workspace)
 
       LoopexComposition.start(
         runtime_id: placement,
@@ -439,6 +442,7 @@ defmodule LoopexCli do
         workspace: workspace,
         policy: policy,
         project_manifest: manifest,
+        project_decision: decision,
         progress_to: self()
       )
     end

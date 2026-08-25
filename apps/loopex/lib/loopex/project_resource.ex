@@ -179,9 +179,18 @@ defmodule Loopex.ProjectResource do
   | Over a declared limit | `declined(over_limit)` with observed sizes |
   | No decision | `declined(no_decision)` |
   | Decision present, digest differs | `declined(binding_changed)` |
+  | Decision revoked | `declined(decision_revoked)` |
+  | Decision expired | `declined(decision_expired)` |
 
   A decision naming a different workspace is `binding_changed` too, since the
   workspace identity is inside the digested manifest.
+
+  The last two rows are checked because the fields exist. `revocation_state`
+  and `expires_at` are part of the shape a decision is recorded in, so a host
+  that sets either one is entitled to have it mean something; matching on the
+  digest and the scope alone admitted a decision its own record said was no
+  longer good, which is worse than not carrying the fields at all. A decision
+  omitting them is active and does not expire, which is what M2 mints.
   """
   @spec resolve(term(), term()) ::
           {:staged, [binary()], map()} | {:declined, atom(), map()}
@@ -195,12 +204,7 @@ defmodule Loopex.ProjectResource do
       {:ok, manifest_digest, ordered} ->
         case decision do
           %{manifest_digest: ^manifest_digest, trust_scope: "project_resource"} = admitted ->
-            {:staged, Enum.map(ordered, &block/1),
-             %{
-               "manifest_digest" => manifest_digest,
-               "decision_source" => Map.get(admitted, :decision_source, "host_supplied"),
-               "labels" => Enum.map(ordered, & &1.label)
-             }}
+            admit(admitted, manifest_digest, ordered)
 
           %{manifest_digest: other} when is_binary(other) ->
             {:declined, :binding_changed, %{"expected" => manifest_digest, "decision" => other}}
@@ -210,6 +214,47 @@ defmodule Loopex.ProjectResource do
         end
     end
   end
+
+  defp admit(admitted, manifest_digest, ordered) do
+    with :ok <- check_revocation(Map.get(admitted, :revocation_state)),
+         :ok <- check_expiry(Map.get(admitted, :expires_at)) do
+      {:staged, Enum.map(ordered, &block/1),
+       %{
+         "manifest_digest" => manifest_digest,
+         "decision_source" => Map.get(admitted, :decision_source, "host_supplied"),
+         "labels" => Enum.map(ordered, & &1.label)
+       }}
+    else
+      {:declined, reason, detail} -> {:declined, reason, detail}
+    end
+  end
+
+  defp check_revocation(nil), do: :ok
+  defp check_revocation("active"), do: :ok
+  defp check_revocation(state), do: {:declined, :decision_revoked, %{"state" => inspect(state)}}
+
+  # Technical depth: an unparseable or non-string expiry declines rather than
+  # being ignored. A host that wrote something here meant to bound the decision,
+  # and reading the bound as absent because it is malformed extends exactly the
+  # decision it was trying to limit.
+  defp check_expiry(nil), do: :ok
+
+  defp check_expiry(expires_at) when is_binary(expires_at) do
+    case DateTime.from_iso8601(expires_at) do
+      {:ok, instant, _offset} ->
+        if DateTime.compare(instant, DateTime.utc_now()) == :gt do
+          :ok
+        else
+          {:declined, :decision_expired, %{"expires_at" => expires_at}}
+        end
+
+      {:error, _reason} ->
+        {:declined, :decision_expired, %{"expires_at" => expires_at, "reason" => "unparseable"}}
+    end
+  end
+
+  defp check_expiry(other),
+    do: {:declined, :decision_expired, %{"expires_at" => inspect(other)}}
 
   @doc """
   ## Concept

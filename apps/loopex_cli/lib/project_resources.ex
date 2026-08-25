@@ -20,10 +20,10 @@ defmodule LoopexCli.ProjectResources do
   recursion and no globbing — because a discovery rule an operator cannot predict
   is one they cannot meaningfully consent to.
 
-  This command takes no decision. A run from a terminal that was never asked is
-  the declined path, and it is declined by construction rather than by a flag
-  someone has to remember not to pass. What the operator gets is the truth about
-  it: what was found, what its digest is, and that it was withheld.
+  The decision is taken here, at the terminal, and only where there is an
+  operator at one. An interactive run is shown what was found and asked; a
+  non-interactive run is told what was withheld and why, and is never refused
+  over it. Failing closed withholds the content, never the runtime.
   """
 
   alias Loopex.ProjectResource
@@ -65,6 +65,136 @@ defmodule LoopexCli.ProjectResources do
           }
         }
     end
+  end
+
+  @doc """
+  ## Concept
+
+  Shows the operator what was found and, where there is an operator to ask,
+  asks them.
+
+  ## Technical depth
+
+  Returns the decision to bind, or `nil` where none was taken. A decision is
+  taken only from an answer typed at an interactive terminal: it carries the
+  digest of the exact manifest that was displayed, so it is invalid the moment
+  the workspace, its revision, the resolved set, or any file's content changes,
+  and the kernel refuses it rather than staging content the operator did not
+  see.
+
+  Interactivity is read from the input device rather than assumed. A pipe, a
+  redirect, a closed descriptor, and anything the runtime cannot classify are
+  all non-interactive, because a prompt nobody can answer would either hang the
+  run or be answered by whatever happened to be on standard input -- and
+  content admitted from the second is content no operator ever consented to.
+  """
+  @spec decide(map() | nil, Path.t()) :: map() | nil
+  def decide(manifest, workspace), do: decide(manifest, workspace, operator_present?())
+
+  @doc """
+  ## Concept
+
+  The same decision, told whether there is an operator to ask.
+
+  ## Technical depth
+
+  Operator presence is an argument rather than something this function reads,
+  because the two are separate facts and only one of them can be observed
+  without a terminal. `decide/2` supplies it from the real input device;
+  `operator_present?/0` is what it consults, and it fails closed.
+  """
+  @spec decide(map() | nil, Path.t(), boolean()) :: map() | nil
+  def decide(nil, workspace, _operator_present) do
+    announce(nil, workspace)
+    nil
+  end
+
+  def decide(manifest, workspace, operator_present) do
+    case ProjectResource.digest(manifest) do
+      {:error, _reason, _detail} ->
+        announce(manifest, workspace)
+        nil
+
+      {:ok, digest, resolved} ->
+        present(digest, resolved)
+
+        if operator_present do
+          ask(manifest, digest)
+        else
+          IO.puts(
+            :stderr,
+            "loopex: this terminal is not interactive, so no trust decision was taken; " <>
+              "the block is staged empty and the run continues without it"
+          )
+
+          nil
+        end
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Whether there is somebody at this terminal to ask.
+
+  ## Technical depth
+
+  `:stdin` is the runtime's own view of the input device: `true` only for a
+  terminal, `false` for a pipe or a redirect, and an error term for a
+  descriptor it cannot interrogate. Only the first is an operator. Everything
+  else, the unclassifiable included, is absence -- a prompt nobody can answer
+  either hangs the run or is answered by whatever happened to be on standard
+  input, and content admitted from the second is content no operator consented
+  to.
+  """
+  @spec operator_present?() :: boolean()
+  def operator_present? do
+    Keyword.get(:io.getopts(:standard_io), :stdin) == true
+  rescue
+    _error -> false
+  end
+
+  defp ask(manifest, digest) do
+    IO.write(:stderr, "loopex: admit these project resources for this run? [y/N] ")
+
+    answer =
+      case IO.gets("") do
+        text when is_binary(text) -> text |> String.trim() |> String.downcase()
+        _eof_or_error -> ""
+      end
+
+    if answer in ["y", "yes"] do
+      IO.puts(:stderr, "loopex: project resources admitted for this run")
+
+      %{
+        manifest_digest: digest,
+        workspace_ref: manifest.workspace.workspace_ref,
+        trust_scope: "project_resource",
+        decision_source: "terminal_prompt",
+        revocation_state: "active",
+        expires_at: nil
+      }
+    else
+      IO.puts(:stderr, "loopex: project resources withheld from this run")
+      nil
+    end
+  end
+
+  # Technical depth: the trust class is stated beside the provenance class
+  # because they are different facts -- where the content came from, and what
+  # admitting it would mean -- and an operator deciding needs both.
+  defp present(digest, resolved) do
+    IO.puts(:stderr, "loopex: project resources found in this workspace:")
+
+    for entry <- resolved do
+      IO.puts(
+        :stderr,
+        "  \u00b7 #{entry.label} (#{byte_size(entry.content)} bytes, " <>
+          "provenance workspace_root, trust class project_resource)"
+      )
+    end
+
+    IO.puts(:stderr, "loopex: manifest digest #{digest}")
   end
 
   @doc """

@@ -21,6 +21,7 @@ defmodule LoopexCliTest do
   alias LoopexCli.Interrupt
   alias LoopexCli.Placement
   alias LoopexCli.Policy.AllowAll
+  alias LoopexCli.Policy.ShellAllowlist
   alias LoopexCli.Render
 
   # Concept: exercise the real command surface in this process, against a real
@@ -500,6 +501,63 @@ defmodule LoopexCliTest do
     assert {:error, refused} = LoopexCli.dispatch(["run", "do the thing"])
     assert refused =~ "--policy is required"
 
+    # Concept: an operator can select a stance that actually refuses something.
+    #
+    # Technical depth: `--policy` accepted exactly one name, and that name
+    # permitted everything -- so the outcome's claim that a run under a refusing
+    # policy reports the refusal and continues truthfully could not be reached
+    # from the command at all. It was provable only with a fixture policy the
+    # operator has no way to select, and the attended demonstration had no
+    # refusing stance to run under.
+    assert {:ok, ShellAllowlist} = LoopexCli.policy("shell-allowlist")
+
+    # The stance is scope, and it says which commands it permits rather than
+    # leaving an operator to discover the boundary by hitting it.
+    assert "cat" in ShellAllowlist.permitted_commands()
+    refute "rm" in ShellAllowlist.permitted_commands()
+
+    allowed = %{
+      session_id: "s1",
+      run_id: "r1",
+      tool_call_id: "c1",
+      generation: {"loopex.bash", "1.0.0", String.duplicate("a", 64)},
+      arguments: %{"command" => "cat notes.md"},
+      effect_class: "shell",
+      idempotency_class: "safe_retry",
+      workspace_lease: "lease"
+    }
+
+    stance =
+      capture_io(:stderr, fn ->
+        send(
+          self(),
+          {:decisions,
+           {
+             ShellAllowlist.decide(allowed),
+             ShellAllowlist.decide(%{allowed | arguments: %{"command" => "rm -rf notes.md"}}),
+             ShellAllowlist.decide(%{allowed | arguments: %{}}),
+             ShellAllowlist.decide(%{
+               allowed
+               | generation: {"loopex.write", "1.0.0", String.duplicate("a", 64)}
+             })
+           }}
+        )
+      end)
+
+    assert_received {:decisions, {permitted, denied, unreadable, filesystem}}
+    assert permitted == {:allow, nil}
+    assert denied == {:deny, :command_not_permitted}
+
+    # A decision it cannot make is not made in the model's favour.
+    assert unreadable == {:deny, :command_not_readable}
+    assert filesystem == {:allow, nil}
+
+    # It announces itself once, and says plainly that it is scope rather than
+    # containment, so nobody reads it as a sandbox.
+    assert stance =~ "shell-allowlist host policy is active"
+    assert stance =~ "not containment"
+    assert length(String.split(stance, "shell-allowlist host policy is active")) == 2
+
     # And the policy the operator selected actually governs: a refusal is
     # reported in the transcript rather than swallowed or retried.
     fixture =
@@ -585,36 +643,15 @@ defmodule LoopexCliTest do
     # Failing closed withholds content, never the runtime.
     assert {:declined, :no_manifest, %{}} = Loopex.ProjectResource.resolve(nil, nil)
 
-    manifest = %{
-      entries: [%{label: "AGENTS.md", content: "always run the tests", contained: true}],
-      workspace: %{workspace_ref: "w", repository_origin: nil, revision: nil}
-    }
-
-    assert {:declined, :no_decision, _detail} = Loopex.ProjectResource.resolve(manifest, nil)
-
-    # A headless run with a manifest and no decision still does the coding task,
-    # and the staged bytes carry none of the withheld content.
-    fixture = fixture(script: [%{text: "done"}], project_manifest: manifest)
-    {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "do the thing")
-
-    finished = Enum.find(events(observe(attachment)), &(&1.kind == "run.finished"))
-    assert finished["outcome"] == "completed"
-
-    [request | _rest] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
-    refute request.canonical_request_bytes =~ "always run the tests"
-
-    # The decision is the terminal's to take, and this command takes none: a
-    # non-interactive run is the declined path by construction rather than by a
-    # flag someone must remember to pass.
-    refute File.read!(app_path("lib/loopex_cli.ex")) =~ "project_decision"
-
-    # Concept: an operator cannot decide about something they were never shown.
+    # Concept: an operator cannot decide about something they were never shown,
+    # and cannot be asked when there is nobody at the terminal.
     #
-    # Technical depth: discovery is the host's job and this command is the host,
-    # so it looks, and it says what it found. It previously looked at nothing, so
-    # a repository carrying an `AGENTS.md` produced a run that withheld it
-    # silently -- indistinguishable to the operator from a repository that
-    # carried none.
+    # Technical depth: this command is the host, so it looks, presents what it
+    # found with the digest a decision would bind, and asks where there is an
+    # operator. It previously did neither the asking nor the forwarding: the
+    # decision was declined by construction, and this case asserted the absence
+    # of `project_decision` from the command source -- an assertion that made
+    # the missing half of the outcome look like a design choice.
     {_state_root, workspace} = roots()
     File.write!(Path.join(workspace, "AGENTS.md"), "always run the tests")
 
@@ -622,18 +659,111 @@ defmodule LoopexCliTest do
     assert %{entries: [%{label: "AGENTS.md"}]} = found
     assert {:ok, digest, _resolved} = Loopex.ProjectResource.digest(found)
 
-    shown = capture_io(:stderr, fn -> LoopexCli.ProjectResources.announce(found, workspace) end)
+    # Presented: every resolved path, its provenance class, its trust class, and
+    # the digest, before anything is asked.
+    {shown, admitted} =
+      with_input("y\n", fn -> LoopexCli.ProjectResources.decide(found, workspace, true) end)
+
     assert shown =~ "AGENTS.md"
+    assert shown =~ "provenance workspace_root"
+    assert shown =~ "trust class project_resource"
     assert shown =~ digest
-    assert shown =~ "withheld"
+    assert shown =~ "admit these project resources for this run?"
+
+    # Taken: the answer typed at the terminal produces a decision bound to the
+    # exact manifest that was displayed.
+    assert %{
+             manifest_digest: ^digest,
+             trust_scope: "project_resource",
+             decision_source: "terminal_prompt",
+             revocation_state: "active",
+             expires_at: nil
+           } = admitted
+
+    assert admitted.workspace_ref == found.workspace.workspace_ref
+
+    # And it is a decision the kernel actually admits: the content reaches the
+    # staged request rather than being withheld anyway.
+    admitting =
+      fixture(script: [%{text: "done"}], project_manifest: found, project_decision: admitted)
+
+    {_admitted_session, admitting_attachment, {:accepted, _admitting_id}} =
+      AgentLoopFixture.run(admitting, "do the thing")
+
+    _ = observe(admitting_attachment)
+    [staged | _rest] = Loopex.AgentLoopTestModel.dispatched(admitting.model)
+    assert staged.canonical_request_bytes =~ "always run the tests"
+
+    # Declined at the terminal withholds it, and says so.
+    {refused_output, refused} =
+      with_input("n\n", fn -> LoopexCli.ProjectResources.decide(found, workspace, true) end)
+
+    assert refused == nil
+    assert refused_output =~ "withheld"
+
+    # So does an answer nobody gave: end of input is not consent.
+    {_eof_output, at_eof} =
+      with_input("", fn -> LoopexCli.ProjectResources.decide(found, workspace, true) end)
+
+    assert at_eof == nil
+
+    # Non-interactive: no prompt is printed, no decision is taken, and the
+    # operator is told which of the two happened.
+    {quiet, none} =
+      with_input("y\n", fn -> LoopexCli.ProjectResources.decide(found, workspace, false) end)
+
+    assert none == nil
+    assert quiet =~ digest
+    refute quiet =~ "admit these project resources for this run?"
+    assert quiet =~ "not interactive"
+
+    # The production default reads the real input device and fails closed: under
+    # this suite's device, which is not a terminal, there is no operator.
+    refute LoopexCli.ProjectResources.operator_present?()
+
+    # A headless run with a manifest and no decision still does the coding task,
+    # and the staged bytes carry none of the withheld content.
+    assert {:declined, :no_decision, _detail} = Loopex.ProjectResource.resolve(found, nil)
+
+    fixture = fixture(script: [%{text: "done"}], project_manifest: found)
+    {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "do the thing")
+
+    finished = Enum.find(events(observe(attachment)), &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "completed"
+
+    [request | _others] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    refute request.canonical_request_bytes =~ "always run the tests"
+
+    # The command forwards whatever was decided rather than dropping it, so the
+    # admitted path above is reachable from the terminal and not only from a
+    # test that calls the kernel directly.
+    command = File.read!(app_path("lib/loopex_cli.ex"))
+    assert command =~ "decision = ProjectResources.decide(manifest, workspace)"
+    assert command =~ "project_decision: decision"
 
     # And a workspace carrying none says so, rather than saying nothing.
     {_other_root, empty} = roots()
     absent = LoopexCli.ProjectResources.discover(empty)
     assert absent == nil
 
-    quiet = capture_io(:stderr, fn -> LoopexCli.ProjectResources.announce(absent, empty) end)
-    assert quiet =~ "no project resources found"
+    silent = capture_io(:stderr, fn -> LoopexCli.ProjectResources.announce(absent, empty) end)
+    assert silent =~ "no project resources found"
+  end
+
+  # Technical depth: the prompt is written to standard error beside the rest of
+  # the run's commentary and the answer is read from standard input, so both
+  # halves have to be captured to observe one decision.
+  defp with_input(typed, work) do
+    parent = self()
+
+    output =
+      capture_io(typed, fn ->
+        captured = capture_io(:stderr, fn -> send(parent, {:decided, work.()}) end)
+        send(parent, {:shown, captured})
+      end)
+
+    receive do: ({:decided, decision} ->
+                   receive do: ({:shown, shown} -> {output <> shown, decision}))
   end
 
   test "the command surface drives only the public facade and owns no loop store cursor or authority" do

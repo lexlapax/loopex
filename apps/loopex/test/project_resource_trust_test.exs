@@ -132,6 +132,54 @@ defmodule Loopex.ProjectResourceTrustTest do
     assert detail["manifest_digest"] == decision.manifest_digest
   end
 
+  test "a decision its own record says is revoked or expired stages nothing" do
+    # Concept: a decision that says it is no longer good is not a decision.
+    #
+    # Technical depth: `revocation_state` and `expires_at` are part of the shape
+    # a decision is recorded in, and resolution matched on the digest and the
+    # trust scope alone. A host that revoked a decision, or bounded one to a
+    # window that has passed, therefore had its own record ignored and the
+    # content staged anyway -- carrying the fields while enforcing neither is
+    # worse than not carrying them, because a host is entitled to have what it
+    # wrote mean something.
+    given = manifest()
+    decision = decision_for(given)
+
+    assert {:staged, _blocks, _detail} = ProjectResource.resolve(given, decision)
+
+    assert {:declined, :decision_revoked, detail} =
+             ProjectResource.resolve(given, Map.put(decision, :revocation_state, "revoked"))
+
+    assert detail["state"] =~ "revoked"
+
+    # An unrecognised state is not admission either: only an explicit `active`
+    # or an absent field is.
+    assert {:declined, :decision_revoked, _unknown} =
+             ProjectResource.resolve(given, Map.put(decision, :revocation_state, "pending"))
+
+    assert {:staged, _active_blocks, _active_detail} =
+             ProjectResource.resolve(given, Map.put(decision, :revocation_state, "active"))
+
+    past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.to_iso8601()
+
+    assert {:declined, :decision_expired, expired} =
+             ProjectResource.resolve(given, Map.put(decision, :expires_at, past))
+
+    assert expired["expires_at"] == past
+
+    # A bound this code cannot read is a bound it must not discard.
+    assert {:declined, :decision_expired, _unparseable} =
+             ProjectResource.resolve(given, Map.put(decision, :expires_at, "soon"))
+
+    assert {:declined, :decision_expired, _wrong_type} =
+             ProjectResource.resolve(given, Map.put(decision, :expires_at, 1))
+
+    future = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.to_iso8601()
+
+    assert {:staged, _future_blocks, _future_detail} =
+             ProjectResource.resolve(given, Map.put(decision, :expires_at, future))
+  end
+
   test "a changed workspace revision manifest or content invalidates the decision" do
     given = manifest()
     decision = decision_for(given)

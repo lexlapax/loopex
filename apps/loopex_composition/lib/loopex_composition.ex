@@ -39,6 +39,15 @@ defmodule LoopexComposition do
   alias Loopex.Store
   alias Loopex.Store.Local.Artifacts
 
+  # Concept: what the host decides stays the host's to supply.
+  #
+  # Technical depth: taken rather than defaulted, so a key the host did not
+  # supply is absent instead of an explicit `nil` this module invented. The
+  # trust decision travels beside the manifest it binds: a composition that
+  # forwarded only the manifest could never stage a project block at all, which
+  # made the withheld path the only path an embedder could reach.
+  @host_supplied [:project_manifest, :project_decision, :progress_to, :diagnostics_to]
+
   @doc """
   ## Concept
 
@@ -59,16 +68,15 @@ defmodule LoopexComposition do
          {:ok, store} <- open_store(state_root),
          {:ok, executor} <- open_executor(state_root, workspace) do
       Loopex.start_link(
-        runtime_id: Keyword.fetch!(options, :runtime_id),
-        store: store,
-        policy: policy,
-        model: %{module: ReqLLM, model: ReqLLM.default_model(), options: []},
-        executor: executor,
-        tools: CodingTools.definitions(),
-        active_tools: Enum.map(CodingTools.definitions(), & &1["tool_id"]),
-        project_manifest: Keyword.get(options, :project_manifest),
-        progress_to: Keyword.get(options, :progress_to),
-        diagnostics_to: Keyword.get(options, :diagnostics_to)
+        [
+          runtime_id: Keyword.fetch!(options, :runtime_id),
+          store: store,
+          policy: policy,
+          model: %{module: ReqLLM, model: ReqLLM.default_model(), options: []},
+          executor: executor,
+          tools: CodingTools.definitions(),
+          active_tools: Enum.map(CodingTools.definitions(), & &1["tool_id"])
+        ] ++ Keyword.take(options, @host_supplied)
       )
     end
   end
