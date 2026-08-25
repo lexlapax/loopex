@@ -208,11 +208,11 @@ defmodule Loopex.LLM.ReqLLM do
   def complete(request, options, progress)
       when is_map(request) and is_list(options) and is_function(progress, 1) do
     with :ok <- Model.validate_request(request),
-         {:ok, prompt} <- user_text(request),
+         {:ok, context} <- context_of(request),
          {:ok, credential} <- credential(),
          {:ok, identity} <- identity(request.model),
          {:ok, tools} <- provider_tools(Model.model_facing_tools(request)) do
-      dispatch(request, prompt, credential, identity, tools)
+      dispatch(request, context, credential, identity, tools)
     end
   end
 
@@ -225,14 +225,14 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
-  defp dispatch(request, prompt, credential, identity, tools) do
+  defp dispatch(request, context, credential, identity, tools) do
     options = [
       api_key: credential,
       max_tokens: Model.max_tokens(request),
       tools: tools
     ]
 
-    case ReqLLM.generate_text(request.model, prompt, options) do
+    case ReqLLM.generate_text(request.model, context, options) do
       {:ok, response} ->
         {:ok,
          %{
@@ -251,27 +251,93 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
-  # Concept: the prompt bytes this provider call sends.
+  # Concept: render the whole committed conversation, not the last thing said.
   #
-  # Technical depth: the projected conversation now carries a system block,
-  # assistant messages, and tool results. This adapter renders the most recent
-  # user content, which is what its non-streaming single-prompt provider call
-  # accepts; a richer rendering belongs to the adapter, not to core, and does
-  # not change the bytes core committed and digested.
-  defp user_text(%{messages: messages}) when is_list(messages) do
-    messages
-    |> Enum.filter(&(Map.get(&1, "role") == "user"))
-    |> List.last()
-    |> case do
-      %{"content" => content} when is_binary(content) and byte_size(content) > 0 ->
-        {:ok, content}
-
-      _other ->
-        {:error, :unsupported_model_request}
+  # Technical depth: core stages the full history — the operator's prompt, the
+  # model's own prior assistant messages with their tool calls, and the real
+  # result of each call — and this adapter must carry all of it to the provider.
+  # An earlier version sent only the most recent user message. Every test passed,
+  # because fixtures read `request.messages` directly, and the real path was
+  # nonetheless broken: the model saw its original instruction again on every
+  # turn, never learned it had already done the work, and called the same tool
+  # until the run hit its turn bound. A history the kernel commits and the edge
+  # discards is not a history.
+  #
+  # Roles map onto the provider's own shapes rather than being flattened into
+  # prose. A tool result rendered as text would read to the model as something
+  # the operator said, which is exactly the confusion the role exists to prevent.
+  defp context_of(%{messages: messages}) when is_list(messages) do
+    case Enum.reduce_while(messages, {:ok, []}, &render_message/2) do
+      {:ok, rendered} -> {:ok, ReqLLM.Context.new(Enum.reverse(rendered))}
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp user_text(_request), do: {:error, :unsupported_model_request}
+  defp context_of(_request), do: {:error, :unsupported_model_request}
+
+  defp render_message(%{"role" => "system", "content" => content}, {:ok, acc})
+       when is_binary(content),
+       do: {:cont, {:ok, [ReqLLM.Context.system(content) | acc]}}
+
+  defp render_message(%{"role" => "user", "content" => content}, {:ok, acc})
+       when is_binary(content),
+       do: {:cont, {:ok, [ReqLLM.Context.user(content) | acc]}}
+
+  defp render_message(%{"role" => "assistant"} = message, {:ok, acc}) do
+    text = Map.get(message, "content", "")
+
+    case Map.get(message, "tool_calls", []) do
+      [] ->
+        {:cont, {:ok, [ReqLLM.Context.assistant(text) | acc]}}
+
+      calls ->
+        # The provider's encoder accepts a plain map with the arguments already
+        # decoded, so nothing here has to encode JSON. That matters: the ADR 0002
+        # floor has neither `:json` nor `JSON`, and adding an encoder to reach a
+        # provider would be an external dependency this edge is not permitted.
+        rendered =
+          Enum.map(calls, fn call ->
+            %{
+              id: call["tool_call_id"],
+              name: provider_name(call),
+              arguments: call["arguments"] || %{}
+            }
+          end)
+
+        parts = if text in [nil, ""], do: [], else: [ReqLLM.Message.ContentPart.text(text)]
+
+        {:cont,
+         {:ok, [%ReqLLM.Message{role: :assistant, content: parts, tool_calls: rendered} | acc]}}
+    end
+  end
+
+  defp render_message(%{"role" => "tool"} = message, {:ok, acc}) do
+    content = Map.get(message, "content", "")
+    id = Map.get(message, "tool_call_id")
+    {:cont, {:ok, [ReqLLM.Context.tool_result(id, content) | acc]}}
+  end
+
+  defp render_message(_unknown, {:ok, acc}), do: {:cont, {:ok, acc}}
+
+  # Concept: the name the provider knows a call by.
+  #
+  # Technical depth: a committed call carries its generation triple, and the
+  # provider knows the tool by its model-visible name. The staged request carries
+  # the definitions, so the name is recovered from the call's own tool_id rather
+  # than guessed; a blank name is what made a second call render as `· ()` in the
+  # operator's terminal.
+  defp provider_name(call) do
+    case call do
+      %{"name" => name} when is_binary(name) and name != "" ->
+        name
+
+      %{"tool_id" => tool_id} when is_binary(tool_id) ->
+        tool_id |> String.split(".") |> List.last()
+
+      _absent ->
+        "unknown"
+    end
+  end
 
   defp provider_tools(tools) when is_list(tools) do
     Enum.reduce_while(tools, {:ok, []}, fn definition, {:ok, built} ->

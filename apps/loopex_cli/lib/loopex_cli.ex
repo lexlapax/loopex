@@ -5,8 +5,9 @@ defmodule LoopexCli do
   `loopex` — the command an operator actually runs. They stand in a Git
   repository, describe a change in ordinary words, and watch the session read
   files, edit them, and run commands until the work is done. The answer arrives
-  as it is produced. Ctrl-C stops the work and reports what actually happened.
-  Tomorrow, `loopex sessions` finds it again and `loopex resume` continues it.
+  as it is produced. An interrupt stops the work and reports what actually
+  happened. Tomorrow, `loopex sessions` finds it again and `loopex resume`
+  continues it.
 
   It is a peer surface, not the product. Every flow it offers is a projection of
   the same embedded API an embedder calls: it owns no loop, no durable session
@@ -31,6 +32,7 @@ defmodule LoopexCli do
   """
 
   alias LoopexCli.Policy.AllowAll
+  alias LoopexCli.Interrupt
   alias LoopexCli.Placement
   alias LoopexCli.Render
 
@@ -131,14 +133,17 @@ defmodule LoopexCli do
   # Technical depth: the interrupt is trapped and turned into the same public
   # abort any other caller would submit. It signals no process, writes no control
   # file, and opens no channel of its own, which is what keeps cancellation
-  # same-process by construction rather than by convention.
+  # same-process by construction rather than by convention. Which signals reach
+  # it, and why a terminal Ctrl-C is not one of them, is `LoopexCli.Interrupt`.
   defp run({flags, words}) do
-    with {:ok, policy} <- policy(Map.get(flags, "policy")),
+    with :ok <- known_flags(flags),
+         :ok <- one_input(flags),
+         {:ok, policy} <- policy(Map.get(flags, "policy")),
          {:ok, prompt} <- prompt_of(words),
          {:ok, runtime} <- start_runtime(flags, policy),
          {:ok, session_id} <- create(runtime),
          {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
-      trap_interrupt(attachment)
+      Interrupt.install(attachment)
 
       case Loopex.command(attachment, %{type: :prompt, command_id: "run-1", content: prompt}) do
         {:accepted, _id} ->
@@ -164,9 +169,6 @@ defmodule LoopexCli do
     follow_up = Map.get(flags, "follow-up")
 
     cond do
-      is_binary(steer) and is_binary(follow_up) ->
-        {:error, "--steer and --follow-up are different requests; name one"}
-
       is_binary(steer) ->
         submit_steer(attachment, steer)
 
@@ -178,20 +180,32 @@ defmodule LoopexCli do
     end
   end
 
+  # Concept: a steer must name a run, and the operator should not have to.
+  #
+  # Technical depth: the run identifier is taken from the `run.started` event on
+  # the durable plane as the terminal reads it, rather than remembered by this
+  # process or read from an attachment snapshot, which is anchored to the sequence
+  # it attached at and never advances. The steer therefore names the run the
+  # session actually started.
   defp submit_steer(attachment, content) do
-    with {:ok, run_id} <- active_run(attachment) do
+    Render.stream(attachment, fn run_id ->
       case Loopex.command(attachment, %{
              type: :steer,
              command_id: unique_id(),
              run_id: run_id,
              content: content
            }) do
-        {:accepted, _id} -> Render.stream(attachment)
-        {:error, reason} -> {:error, "the steer was refused: #{inspect(reason)}"}
+        {:accepted, _id} -> :ok
+        {:error, reason} -> IO.puts(:stderr, "loopex: the steer was refused: #{inspect(reason)}")
       end
-    end
+    end)
   end
 
+  # Concept: a follow-up is queued, not joined.
+  #
+  # Technical depth: it names no run because it starts one, after the active run
+  # and its steering settle. Submitting it before the stream begins is what makes
+  # it queued rather than a second prompt racing the first.
   defp submit_follow_up(attachment, content) do
     case Loopex.command(attachment, %{
            type: :follow_up,
@@ -200,19 +214,6 @@ defmodule LoopexCli do
          }) do
       {:accepted, _id} -> Render.stream(attachment)
       {:error, reason} -> {:error, "the follow-up was refused: #{inspect(reason)}"}
-    end
-  end
-
-  # Concept: a steer must name a run, and the operator should not have to.
-  #
-  # Technical depth: the run identifier comes from the session's own public
-  # snapshot rather than being remembered by this process, so a steer submitted
-  # after a reconnect names the run the session actually has rather than one this
-  # terminal remembers having started.
-  defp active_run(attachment) do
-    case Loopex.snapshot(attachment) do
-      {:ok, %{active_run_id: run_id}} when is_binary(run_id) -> {:ok, run_id}
-      _absent -> {:error, "there is no active run to steer"}
     end
   end
 
@@ -241,7 +242,7 @@ defmodule LoopexCli do
          {:ok, _resumed} <-
            Loopex.resume_known_session(root, runtime, session_id, unique_id()),
          {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
-      trap_interrupt(attachment)
+      Interrupt.install(attachment)
       Render.stream(attachment)
     end
   end
@@ -329,6 +330,35 @@ defmodule LoopexCli do
     end
   end
 
+  # Concept: input naming neither a prompt, a steer, nor a follow-up is refused.
+  #
+  # Technical depth: the runtime never infers which kind of input it was handed,
+  # and a surface that accepted an unrecognised flag would be inferring on its
+  # behalf — silently, by dropping it. An operator who typed `--nudge` meant
+  # something, and being told nothing happened is the only answer that is true.
+  @known_flags ~w(policy state-root workspace steer follow-up)
+
+  defp known_flags(flags) do
+    case Map.keys(flags) -- @known_flags do
+      [] -> :ok
+      [unknown | _rest] -> {:error, "--#{unknown} names neither a steer nor a follow-up"}
+    end
+  end
+
+  # Concept: a caller who asked for both has not said which they meant.
+  #
+  # Technical depth: refused before a runtime, a store, or an executor is
+  # started, because an ambiguous request should cost nothing to reject.
+  defp one_input(flags) do
+    case {Map.get(flags, "steer"), Map.get(flags, "follow-up")} do
+      {steer, follow_up} when is_binary(steer) and is_binary(follow_up) ->
+        {:error, "--steer and --follow-up are different requests; name one"}
+
+      _one_or_neither ->
+        :ok
+    end
+  end
+
   defp prompt_of([]), do: {:error, "describe the change you want, in ordinary words"}
   defp prompt_of(words), do: {:ok, Enum.join(words, " ")}
 
@@ -336,32 +366,6 @@ defmodule LoopexCli do
   defp positional([word | _rest], _expected), do: {:ok, word}
 
   defp unique_id, do: "cli-" <> Integer.to_string(System.unique_integer([:positive]))
-
-  # Concept: Ctrl-C becomes an ordinary public abort.
-  #
-  # Technical depth: the signal handler submits the same command any caller would
-  # and then lets the stream report what actually happened. It does not decide
-  # the outcome itself, because whether the run ends cancelled or outcome_unknown
-  # depends on evidence only the runtime holds.
-  defp trap_interrupt(attachment) do
-    parent = self()
-
-    spawn(fn ->
-      :ok = :os.set_signal(:sigint, :handle)
-      receive_signal(attachment, parent)
-    end)
-
-    :ok
-  rescue
-    _unsupported -> :ok
-  end
-
-  defp receive_signal(attachment, _parent) do
-    receive do
-      :sigint -> Loopex.command(attachment, %{type: :abort, command_id: "interrupt-1"})
-      _other -> :ok
-    end
-  end
 
   defp usage do
     IO.puts("""
@@ -376,6 +380,9 @@ defmodule LoopexCli do
       loopex artifact <reference>
 
     --policy is required for anything that runs tools. There is no default.
+
+    Ctrl-C ends this process without cleanup: the emulator reserves that signal.
+    The session survives it — `loopex cancel <session>` reconciles the run.
     """)
 
     :ok

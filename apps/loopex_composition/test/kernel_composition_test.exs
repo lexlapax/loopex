@@ -112,8 +112,13 @@ defmodule LoopexCompositionTest do
     refute :loopex_reference_client in declared
     assert :loopex in declared
 
-    # And the command module is genuinely absent from this application's world.
-    refute Code.ensure_loaded?(LoopexCli)
+    # And nothing in this application names the command, in source rather than in
+    # code-path state: the umbrella suite runs every application in one emulator,
+    # so whether a client module happens to be loadable there says nothing about
+    # what this application depends on.
+    for path <- Path.wildcard("lib/**/*.ex") do
+      refute File.read!(path) =~ "LoopexCli", "#{path} names the command application"
+    end
   end
 
   test "the shipped composition requires a host supplied policy and ships no permissive default" do

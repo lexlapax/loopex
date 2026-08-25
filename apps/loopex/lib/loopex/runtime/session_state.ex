@@ -1900,12 +1900,21 @@ defmodule Loopex.Runtime.SessionState do
     }
   end
 
+  # Concept: an operator watching a run should be able to see which tool started.
+  #
+  # Technical depth: the identity was previously carried only by the private job,
+  # so a terminal reading the public plane could name the call but not the tool —
+  # it rendered as an empty name beside an opaque identifier, which tells an
+  # operator nothing about what their agent is doing. The generation is public
+  # information: it is already inside the staged request the model was shown.
   defp tool_started_event(session_id, job) do
     %{
       "run_id" => job.run_id,
       "turn_id" => job.turn_id,
       "tool_call_id" => job.tool_call_id,
       "operation_id" => job.operation_id,
+      "tool_id" => job.tool_id,
+      "tool_version" => job.tool_version,
       event_id: stable_id("event-tool-started", session_id, job.tool_call_id),
       kind: "tool.started"
     }
@@ -1917,6 +1926,7 @@ defmodule Loopex.Runtime.SessionState do
       "turn_id" => job.turn_id,
       "tool_call_id" => job.tool_call_id,
       "operation_id" => job.operation_id,
+      "tool_id" => job.tool_id,
       "outcome" => outcome,
       event_id: stable_id("event-tool-finished", session_id, job.tool_call_id),
       kind: "tool.finished"

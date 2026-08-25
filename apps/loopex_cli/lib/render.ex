@@ -32,8 +32,9 @@ defmodule LoopexCli.Render do
   never does, because progress can stop for reasons that have nothing to do with
   the run.
   """
-  @spec stream(Loopex.Attachment.t()) :: :ok | {:error, binary()}
-  def stream(attachment), do: follow(attachment, 0)
+  @spec stream(Loopex.Attachment.t(), (binary() -> any())) :: :ok | {:error, binary()}
+  def stream(attachment, on_run_started \\ fn _run_id -> :ok end),
+    do: follow(attachment, 0, on_run_started)
 
   @doc """
   ## Concept
@@ -59,17 +60,18 @@ defmodule LoopexCli.Render do
     :ok
   end
 
-  defp follow(attachment, idle) do
+  defp follow(attachment, idle, on_run_started) do
     drain_progress()
 
     case Loopex.next_event(attachment) do
       {:ok, event} ->
         render(event)
-        if terminal?(event), do: :ok, else: follow(attachment, 0)
+        announce(event, on_run_started)
+        if terminal?(event), do: :ok, else: follow(attachment, 0, on_run_started)
 
       _absent when idle < 600 ->
         Process.sleep(10)
-        follow(attachment, idle + 1)
+        follow(attachment, idle + 1, on_run_started)
 
       # Concept: silence is not an ending.
       #
@@ -84,6 +86,20 @@ defmodule LoopexCli.Render do
         :ok
     end
   end
+
+  # Concept: the run identifier is public information, read where it is published.
+  #
+  # Technical depth: an attachment's snapshot is anchored to the event sequence it
+  # attached at and never advances, so a caller that needed the active run could
+  # not get it from there. `run.started` carries it on the durable plane, which is
+  # where a steer's target belongs: the terminal names the run the session
+  # actually started rather than one it remembers starting.
+  defp announce(%{kind: "run.started"} = event, on_run_started) do
+    _ = on_run_started.(event["run_id"])
+    :ok
+  end
+
+  defp announce(_event, _on_run_started), do: :ok
 
   # Concept: drain whatever arrived, never wait for it.
   #
@@ -124,7 +140,7 @@ defmodule LoopexCli.Render do
   end
 
   defp render(%{kind: "tool.finished"} = event) do
-    IO.puts(:stderr, "  · #{event["tool_call_id"]}: #{event["outcome"]}")
+    IO.puts(:stderr, "  · #{event["tool_id"] || event["tool_call_id"]}: #{event["outcome"]}")
   end
 
   # Concept: the ending says what happened, including when nobody knows.
