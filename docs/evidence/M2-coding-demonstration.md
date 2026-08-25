@@ -30,10 +30,11 @@ truthfully`, which names a refusing policy — a role `Da` case. Recording the
 refusal among role `Db`'s claims would be exactly the substitution the next
 paragraph forbids, and this record does not make it.
 
-**The answer does not stream.** The shipped adapter returns each turn's reply
-complete and declares `streamed: false` with a delta count of zero, which is
-conformant and is what the model port's own suite proves. What the attended run
-shows is a turn-at-a-time answer, not a word-at-a-time one.
+**The answer streams.** Every committed reply of the attended run declares
+`streamed: true` with a positive delta count, and the case asserts that on the
+run's own durable records rather than on a delta the test process happened to
+catch. The adapter emits each chunk as the provider sends it and accumulates the
+same chunks into the reply, so the reply replays its own deltas byte for byte.
 
 The five deterministic cases in role `Da` support that claim. They run the real
 coding tools, the real executor, and the real store against a disposable Git
@@ -49,7 +50,7 @@ sealed identity is what the other two records must match:
 | Record | Carries |
 | --- | --- |
 | [Toolchain matrix](M2-toolchain-matrix.md) | One capture row per lane, each naming the demonstration role's sealed provider, model, endpoint, adapter build, executor build, executor identity, and tool identity |
-| [Real-call attestations](M2-real-call-attestations.md) | Every provider response identifier the role observed, and the provider's reported token totals across exactly those responses |
+| [Real-call attestations](M2-real-call-attestations.md) | Every provider response identifier the role observed, and the provider's reported token totals across exactly those responses. A streamed call carries the provider's per-call `request-id`, which is the identifier its account surfaces |
 
 All three real-provider roles must agree on provider, model, endpoint, and
 adapter build. The demonstration role seals the executor and the tools beside
