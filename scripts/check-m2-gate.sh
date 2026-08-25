@@ -502,9 +502,18 @@ run_opening_probe() {
   # MIX_BUILD_PATH is cleared rather than merely overridden: it takes precedence
   # over MIX_BUILD_ROOT, so an ambient value would silently defeat the isolation
   # this comment claims. Clearing it is what makes the claim true.
+  #
+  # Standard input is closed for the same reason it is cleared: the probe runs
+  # before the credential frame is read, and a build tool that inherited the
+  # gate's standard input could consume that frame before the gate ever sees it.
+  # It is not hypothetical. Under the floor toolchain this compile drained the
+  # frame, and the run then reported the credential absent and refused its
+  # real-provider roles -- a true refusal about a false absence. On the current
+  # toolchain the frame survived by luck rather than by design. Closing it here
+  # makes the credential boundary hold by construction.
   if ! output="$(
     env -u MIX_BUILD_PATH MIX_ENV=dev MIX_BUILD_ROOT="$probe_root/build" \
-      TMPDIR="$probe_root" mix compile 2>&1
+      TMPDIR="$probe_root" mix compile 2>&1 </dev/null
   )"; then
     printf '%s\n' "$output" >&2
     rm -rf "$probe_root"
@@ -526,7 +535,7 @@ run_opening_probe() {
     env -u MIX_BUILD_PATH LOOPEX_M2_PROBE_ROOT="$probe_root/state" \
       LOOPEX_HOME="$probe_root/state/.loopex" \
       TMPDIR="$probe_root" ERL_CRASH_DUMP=/dev/null ERL_CRASH_DUMP_SECONDS=0 \
-      elixir "${code_paths[@]}" "$program" 2>&1
+      elixir "${code_paths[@]}" "$program" 2>&1 </dev/null
   )"
   if [ $? -ne 0 ]; then
     printf '%s\n' "$output" >&2

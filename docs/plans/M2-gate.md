@@ -151,7 +151,7 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `331d8ef0b51733c4a36e440962edbd6184c9916e04d3f044322815c537be0441` | `scripts/check-m2-gate.sh` |
+| `a4213ec1224dd863fbd59fc26f10ad2d20f3c75936f504cc34802d20e50b6f10` | `scripts/check-m2-gate.sh` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -892,3 +892,42 @@ and there is no registry. There is no `loopex` command.
 Adding a checker, a document, an evidence record, a status row, a new repository
 check, or a test file cannot move this condition. Only the working loop, the
 working tools, and the working command can.
+
+<a id="amendment-1"></a>
+
+## Amendment 1 — Close the Probe's Standard Input
+
+**Acceptance: OUTSTANDING.** This section advances the generation and rebinds
+one artifact, `scripts/check-m2-gate.sh`. The prior Acceptance row and lifecycle
+state are retained here; the immediate child revision rebinds Acceptance to this
+one and records the disposition.
+
+The runner reads its provider credential from a bounded stdin frame, and it does
+so after the opening probe, because the probe is hoisted to the front so the
+declared red is an observation rather than a file check. The probe compiles the
+tree and runs one Elixir program, and both inherited the runner's standard
+input. A build tool that reads standard input therefore consumed the credential
+frame before the runner ever looked at it.
+
+That is not a hypothetical ordering hazard. Under the floor toolchain the
+probe's `mix compile` drained the frame, and the run then reported the
+credential absent and refused its real-provider roles — a true refusal about a
+false absence, which is the worst shape a credential check can take, because it
+is indistinguishable from an operator who supplied nothing. On the current
+toolchain the same probe spawns the same class of child and the frame survived;
+it survived by luck rather than by design, and a boundary that holds by luck on
+one toolchain is not a boundary.
+
+Both probe invocations now close standard input explicitly. Nothing else about
+the runner changes: the same probe runs, observes the same loop, and emits the
+same declared red, and the frame grammar, the credential refusal in the initial
+environment, and the forwarding rule are untouched.
+
+This strengthens the credential boundary rather than relaxing it. Before the
+amendment a child could consume the frame; after it, no child can. No check is
+removed, no threshold moves, no lane is exempted, and nothing that was refused
+before is admitted now.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 1 | `scripts/check-m2-gate.sh` | `a4213ec1224dd863fbd59fc26f10ad2d20f3c75936f504cc34802d20e50b6f10` |
