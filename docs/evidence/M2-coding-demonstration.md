@@ -77,9 +77,10 @@ so a reviewer reads what the run did rather than inferring it from a pass. The
 gate's selector runner suppresses the test formatter, and without this a failed
 assertion reaches an operator as "the selector failed" and nothing else.
 
-Observed on the development machine at this candidate: all four coding tools ran
--- `loopex.read`, `loopex.edit`, `loopex.write`, `loopex.bash` -- across five
-real provider calls, the workspace ended carrying both the edited `notes.md` and
+Observed at the captured candidate, on all three toolchain lanes: all four coding
+tools ran — `loopex.read`, `loopex.edit`, `loopex.write`, `loopex.bash` — across
+five real provider calls, every committed reply declared it streamed with a
+positive delta count, the workspace ended carrying both the edited `notes.md` and
 the created `summary.txt`, and the run ended `done`.
 
 Three defects that only real execution exposed, each fixed at its source and

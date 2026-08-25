@@ -62,13 +62,13 @@ carries its own mutation record rather than resting on source inspection.
 ## Outcome 8: cancellation cleanup confirmation
 
 ```json
-{"mechanism_disabled":"cancellation_cleanup_confirmation","selector":"apps/loopex/test/cancellation_test.exs","observed_failure":"an abort whose cleanup was unconfirmed committed cancelled instead of outcome_unknown and the locked insufficient evidence case failed","candidate":"6563354ee893471dd0c511f735c9aeeea2a3b215","artifact":"apps/loopex/lib/loopex/runtime/session_state.ex","restored_sha256":"sha256:93e198c764e412a923445442b0949b290e12bae49b4eccf221e26d0759026d55"}
+{"mechanism_disabled":"cancellation_cleanup_confirmation","selector":"apps/loopex/test/cancellation_test.exs","observed_failure":"an abort whose cleanup was unconfirmed committed cancelled instead of outcome_unknown and the locked insufficient evidence case failed","candidate":"72c09ec74d43b43e4787b8905c25c57d677cf063","artifact":"apps/loopex/lib/loopex/runtime/session_state.ex","restored_sha256":"sha256:93e198c764e412a923445442b0949b290e12bae49b4eccf221e26d0759026d55"}
 ```
 
 ## Outcome 10: command surface facade only
 
 ```json
-{"mechanism_disabled":"command_surface_facade_only","selector":"apps/loopex_cli/test/cli_test.exs","observed_failure":"the command named a runtime control module and the locked facade only case failed","candidate":"6563354ee893471dd0c511f735c9aeeea2a3b215","artifact":"apps/loopex_cli/lib/loopex_cli.ex","restored_sha256":"sha256:57476fbf46672ffdd0bea450522fd3c6d59ece557f60413ac9b5114a66820d36"}
+{"mechanism_disabled":"command_surface_facade_only","selector":"apps/loopex_cli/test/cli_test.exs","observed_failure":"the command named a runtime control module and the locked facade only case failed","candidate":"72c09ec74d43b43e4787b8905c25c57d677cf063","artifact":"apps/loopex_cli/lib/loopex_cli.ex","restored_sha256":"sha256:57476fbf46672ffdd0bea450522fd3c6d59ece557f60413ac9b5114a66820d36"}
 ```
 
 ## How these were produced
