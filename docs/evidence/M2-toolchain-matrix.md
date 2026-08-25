@@ -35,13 +35,20 @@ actual captured process output.
 
 <!-- loopex:m2-matrix:start -->
 ```text
+matrix candidate=79592eaaf7176e256f9ac927831b5ae00986e02f gate_sha256=9d61e16bf80f142d73d34fcc030fef910924b7d1353b873279f09e9d31789e19 runner_sha256=a4213ec1224dd863fbd59fc26f10ad2d20f3c75936f504cc34802d20e50b6f10 exunit_runner_sha256=cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0 tool_versions_sha256=fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999 command=bash:scripts/check-m2-gate.sh
+capture lane=darwin-floor candidate=79592eaaf7176e256f9ac927831b5ae00986e02f elixir=1.17.0 otp=26.0 seed=682447 executed=116 verdict=CAPTURE exit=0 os=darwin arch=arm64 provider=anthropic model=claude-haiku-4-5-20251001 endpoint=https://api.anthropic.com adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=executor-local tool_identity=loopex.bash@1.0.0+loopex.edit@1.0.0+loopex.read@1.0.0+loopex.write@1.0.0 recorded=2026-08-25T13:31:49Z
+capture lane=darwin-current candidate=79592eaaf7176e256f9ac927831b5ae00986e02f elixir=1.20.3 otp=29.0.5 seed=719539 executed=116 verdict=CAPTURE exit=0 os=darwin arch=arm64 provider=anthropic model=claude-haiku-4-5-20251001 endpoint=https://api.anthropic.com adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=executor-local tool_identity=loopex.bash@1.0.0+loopex.edit@1.0.0+loopex.read@1.0.0+loopex.write@1.0.0 recorded=2026-08-25T13:18:51Z
+capture lane=linux-current candidate=79592eaaf7176e256f9ac927831b5ae00986e02f elixir=1.20.3 otp=29.0.5 seed=855240 executed=116 verdict=CAPTURE exit=0 os=linux arch=x86_64 provider=anthropic model=claude-haiku-4-5-20251001 endpoint=https://api.anthropic.com adapter_build=loopex_llm_reqllm@0.0.0 executor_build=loopex_executor_local@0.0.0 executor_identity=executor-local tool_identity=loopex.bash@1.0.0+loopex.edit@1.0.0+loopex.read@1.0.0+loopex.write@1.0.0 recorded=2026-08-25T13:17:41Z
+m0 lane=floor candidate=79592eaaf7176e256f9ac927831b5ae00986e02f gate_sha256=6e02cd424bab8e3410205ca053adce150ee9fa1a84d7b6f5b032390c4529e09f command=bash:scripts/check-m0-gate.sh elixir=1.17.0 otp=26.0 verdict=GREEN exit=0
+m0 lane=current candidate=79592eaaf7176e256f9ac927831b5ae00986e02f gate_sha256=6e02cd424bab8e3410205ca053adce150ee9fa1a84d7b6f5b032390c4529e09f command=bash:scripts/check-m0-gate.sh elixir=1.20.3 otp=29.0.5 verdict=GREEN exit=0
 ```
 <!-- loopex:m2-matrix:end -->
 
-No lane has been captured at this revision. The block is empty rather than
-partially filled, because a matrix that carried one lane and omitted two would
-read as a matrix with two lanes still running rather than as a milestone that
-has never been run anywhere but one machine.
+All three lanes captured at one candidate, each with a fresh and disjoint owned
+task root, and all three agree on the demonstration role's sealed provider,
+model, endpoint, adapter build, executor build, executor identity, and tool
+identity. The two `m0` rows are the closed `M0` gate run once under each pair
+against the same candidate.
 
 All three lanes are reachable. The two Darwin lanes run on the development
 machine, where the locked floor pair is installed and resolves through `mise`,
