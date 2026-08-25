@@ -127,9 +127,9 @@ facade directly instead. See
 `artifact`, with the flags `--policy`, `--state-root`, `--workspace`,
 `--steer`, and `--follow-up`. An unrecognised flag is refused rather than
 ignored, which means adding a flag is observable and removing one is breaking.
-`loopex artifact` reads objects through `Loopex.Store.Local.Artifacts` directly,
-so that subcommand is specific to the local artifact store rather than to the
-port.
+`loopex artifact` reads objects through the `Loopex.ArtifactStore` port, so the
+subcommand follows whatever artifact store a composition supplies rather than
+naming the local one.
 
 ### What an Embedder Should Do About It
 

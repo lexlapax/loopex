@@ -22,7 +22,7 @@ the exact document set its milestone must update.
 ### Added
 
 - `loopex`, a command an operator runs from their own terminal. `run` submits a
-  prompt into a durable session and reports the answer a turn at a time;
+  prompt into a durable session and prints the answer as the model writes it;
   `--steer` joins the run already going and `--follow-up` queues the next one;
   `sessions` lists the sessions in a state root and `resume` continues one;
   `cancel` reconciles a session a dead process left behind; `artifact` reads back
@@ -35,6 +35,15 @@ the exact document set its milestone must update.
   conversation including the original prompt and the real result of every tool
   that ran, and three declared bounds — maximum turns, cumulative token budget,
   and a committed absolute deadline — end a run truthfully rather than silently.
+- Streaming, as transient progress rather than durable truth. The shipped model
+  adapter emits an answer as the provider produces it and the terminal prints it
+  as it arrives, while the committed assistant message is built from the
+  adapter's return value and never assembled from what was displayed. Model and
+  executor progress are separate gapless sequences within one stream domain,
+  each closed by its own content-free item carrying its total, so a coalesced,
+  dropped, or truncated tail is detectable rather than silent — and a missing
+  closure sends a consumer to the durable record instead of a timer. An adapter
+  that does not stream is equally conformant and says so.
 - Four coding tools against a real workspace: `read`, `write`, `edit`, and
   `bash`, sharing one conformance suite for bounded output, workspace-root
   resolution, symlink and traversal containment, exact edit preconditions, and

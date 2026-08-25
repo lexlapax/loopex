@@ -51,11 +51,13 @@ Two options decide where the session's data and work live:
 | `--workspace` | The directory the tools act on | the current directory |
 
 The answer reaches standard output as the model produces it, in whatever
-granularity the model adapter delivers. **The shipped adapter does not stream**:
-it returns each turn's answer complete, so an answer appears a turn at a time
-rather than a word at a time. The runtime and the terminal both carry the
-streaming path — an adapter that streams needs no change here — but no adapter
-that ships today uses it. What the session is doing — each tool starting, each tool's outcome, and the run's ending — goes
+granularity the model adapter delivers. The shipped adapter streams, so an
+answer appears as the model writes it rather than a turn at a time. What is
+printed as it arrives is transient: the durable record of the turn is the
+committed assistant message, which is built from the adapter's return value and
+never assembled from what was displayed. An adapter that does not stream is
+equally conformant, and against one the same answer simply appears complete at
+the end of its turn. What the session is doing — each tool starting, each tool's outcome, and the run's ending — goes
 to standard error, so `loopex run ... > answer.txt` keeps the answer and leaves
 the commentary on your terminal.
 
