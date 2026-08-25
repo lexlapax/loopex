@@ -828,3 +828,38 @@ closed state from these facts alone:
   candidate's shared memory; do not move these facts into client-only state.
 - Current authorization and the next transition are recorded only in the
   [canonical plans status register](../plans/README.md).
+
+<a id="disposition-m2-gate-amendment-1-2026-08-25"></a>
+### M2 gate amendment 1 — closing the probe's standard input — 2026-08-25
+
+The maintainer explicitly accepted amendment proposal `A` to the locked `M2`
+gate at candidate `39049f02333271ac5e2e8f9971cec91ce8eff5ba`. This is the rebind revision of the
+[amendment transaction](../plans/M2-gate.md#amendment-transaction-v1) that gate
+declares: it records this disposition and rebinds Acceptance to exact `A`, and
+changes no lifecycle state.
+
+| Bound bytes | Digest |
+| --- | --- |
+| Gate | `sha256:9d61e16bf80f142d73d34fcc030fef910924b7d1353b873279f09e9d31789e19` |
+
+**What was amended.** Two lines of `scripts/check-m2-gate.sh`. The runner reads
+its provider credential from a bounded stdin frame after the opening probe,
+because the probe is hoisted to the front so the declared red is an observation
+rather than a file check. The probe's `mix compile` and its Elixir program both
+inherited the runner's standard input, so a build tool that reads standard input
+consumed the credential frame before the runner looked at it. Both invocations
+now close standard input explicitly.
+
+**Why it was accepted.** The failure it fixes is the worst shape a credential
+check can take: a true refusal about a false absence. Under the floor toolchain
+the probe drained the frame, and the run then reported the credential absent and
+refused its real-provider roles, which is indistinguishable from an operator who
+supplied nothing. On the current toolchain the same probe spawns the same class
+of child and the frame survived by luck rather than by design.
+
+**Scope of this record.** It disposes exactly this amendment. It strengthens the
+credential boundary rather than relaxing it: before the amendment a child could
+consume the frame, after it none can. No check is removed, no threshold moves,
+no lane is exempted, and nothing that was refused before is admitted now. The
+normative envelopes of the accepted plan pair are untouched, no outcome changes,
+and no lifecycle state moves.
