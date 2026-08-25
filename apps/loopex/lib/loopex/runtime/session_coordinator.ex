@@ -1599,9 +1599,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @progress_streams ["stdout", "stderr"]
 
   defp project_progress(event, bindings) when is_map(event) do
-    if Enum.all?(bindings, fn {field, expected} -> Map.fetch(event, field) == {:ok, expected} end),
-       do: bounded_progress(event),
-       else: :refused
+    bound? =
+      Enum.all?(bindings, fn {field, expected} -> Map.fetch(event, field) == {:ok, expected} end)
+
+    if bound? do
+      bounded_progress(event)
+    else
+      :refused
+    end
   end
 
   defp project_progress(_event, _bindings), do: :refused
