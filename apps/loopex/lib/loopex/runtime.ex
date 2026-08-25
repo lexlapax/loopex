@@ -407,7 +407,8 @@ defmodule Loopex.Runtime do
          {:ok, tools} <- validate_tools(inherited_tool_set(validated)),
          active_tools = inherited_active_tools(validated, tools),
          {:ok, bounds} <- validate_bounds(validated[:bounds]),
-         {:ok, policy} <- validate_policy(validated[:policy], validated[:tools], validated[:tool]),
+         {:ok, policy} <-
+           validate_policy(validated[:policy], validated[:tools], validated[:tool]),
          {:ok, sampling} <- validate_sampling(validated[:sampling]),
          {:ok, grant_decision} <- validate_grant_decision(validated[:grant_decision]),
          {:ok, fault_to} <- validate_sink(validated[:fault_to]),
