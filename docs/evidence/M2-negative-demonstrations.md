@@ -68,7 +68,7 @@ carries its own mutation record rather than resting on source inspection.
 ## Outcome 10: command surface facade only
 
 ```json
-{"mechanism_disabled":"command_surface_facade_only","selector":"apps/loopex_cli/test/cli_test.exs","observed_failure":"the command named a runtime control module and the locked facade only case failed","candidate":"4894dea16a5fdc398106cccd6c7a1b93a161d3c4","artifact":"apps/loopex_cli/lib/loopex_cli.ex","restored_sha256":"sha256:ff1066680378a3a7e97c53beb54b60e06b366594848557933b9067aad2125f89"}
+{"mechanism_disabled":"command_surface_facade_only","selector":"apps/loopex_cli/test/cli_test.exs","observed_failure":"the command named a runtime control module and the locked facade only case failed","candidate":"08fc84bd656129ccbe56f854581450e6055fa743","artifact":"apps/loopex_cli/lib/loopex_cli.ex","restored_sha256":"sha256:f7370ca81eb7042b12147bb0745dc00080646668e5fbc4838eba3b40f6580656"}
 ```
 
 ## How these were produced
@@ -85,7 +85,10 @@ record names is the failure the gate would observe.
 
 `restored_sha256` is the running revision's SHA-256 of the artifact, which is
 what makes "restored" a claim about bytes rather than prose. Each digest above
-matches this revision.
+matches this revision, and a record whose artifact changed afterwards is re-run
+rather than re-labelled: the command's record names a later candidate than the
+other seven because the command changed after its first experiment, and the gate
+refused the stale digest rather than letting it stand.
 
 ## Related
 
