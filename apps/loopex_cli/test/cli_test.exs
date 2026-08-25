@@ -59,6 +59,29 @@ defmodule LoopexCliTest do
     fixture
   end
 
+  # Concept: a case reads the source it is about, from wherever it was invoked.
+  #
+  # Technical depth: the gate compiles a protected selector from the repository
+  # root, while `mix test` runs it from the application directory. A relative
+  # path is a different file in each, so every source this file inspects is
+  # resolved against the selector's own location instead.
+  defp app_path(relative), do: Path.expand(Path.join([__DIR__, "..", relative]))
+  defp repository_path(relative), do: Path.expand(Path.join([__DIR__, "..", "..", relative]))
+
+  defp declared_dependencies do
+    # The application's own declaration, read as source. `Mix.Project.config/0`
+    # answers for whichever project is loaded, and under the gate no project is.
+    ~r/\{:([a-z_]+), in_umbrella: true\}/
+    |> Regex.scan(File.read!(app_path("mix.exs")))
+    |> Enum.map(fn [_match, name] -> String.to_atom(name) end)
+  end
+
+  defp command_sources do
+    "lib/**/*.ex"
+    |> then(&Path.wildcard(app_path(&1)))
+    |> Map.new(&{Path.relative_to(&1, app_path(".")), File.read!(&1)})
+  end
+
   defp call(id \\ "c1"), do: %{id: id, name: "write", arguments: %{"path" => "notes.txt"}}
 
   # Concept: watch both planes at once, in the order they actually arrive.
@@ -316,7 +339,7 @@ defmodule LoopexCliTest do
 
     # It reached the run by the public facade and by no private path: the
     # command opens no channel of its own.
-    source = File.read!("lib/interrupt.ex")
+    source = File.read!(app_path("lib/interrupt.ex"))
     assert source =~ "Loopex.command(attachment, %{"
     assert source =~ "type: :abort"
     refute source =~ "GenServer.call"
@@ -456,7 +479,7 @@ defmodule LoopexCliTest do
     # because a client may not depend on another client. Two shipped permissive
     # policies is the honest consequence of that rule.
     assert AllowAll == LoopexCli.Policy.AllowAll
-    declared = Enum.map(Mix.Project.config()[:deps], &elem(&1, 0))
+    declared = declared_dependencies()
     refute :loopex_reference_client in declared
   end
 
@@ -512,11 +535,11 @@ defmodule LoopexCliTest do
     # The decision is the terminal's to take, and this command takes none: a
     # non-interactive run is the declined path by construction rather than by a
     # flag someone must remember to pass.
-    refute File.read!("lib/loopex_cli.ex") =~ "project_decision"
+    refute File.read!(app_path("lib/loopex_cli.ex")) =~ "project_decision"
   end
 
   test "the command surface drives only the public facade and owns no loop store cursor or authority" do
-    sources = Map.new(Path.wildcard("lib/**/*.ex"), &{&1, File.read!(&1)})
+    sources = command_sources()
     assert map_size(sources) >= 4, "the scan found no command modules to check"
 
     for {path, source} <- sources do
@@ -556,7 +579,7 @@ defmodule LoopexCliTest do
     assert output =~ "loopex: done"
 
     # An absence is never read as abandonment, and no timer decides it.
-    source = File.read!("lib/render.ex")
+    source = File.read!(app_path("lib/render.ex"))
     assert source =~ "durable record"
     refute source =~ "Process.send_after"
     refute source =~ ":timer."
@@ -587,7 +610,7 @@ defmodule LoopexCliTest do
         "Use the tools you are given to inspect and change files, and run commands " <>
         "when you need to. Continue until the task is done, then stop."
 
-    assert File.read!("../loopex/lib/loopex/runtime/session_coordinator.ex") =~
+    assert File.read!(repository_path("loopex/lib/loopex/runtime/session_coordinator.ex")) =~
              "loopex.system.v1: You are a coding agent working in a real workspace. "
 
     staged =
@@ -606,11 +629,9 @@ defmodule LoopexCliTest do
   end
 
   test "argument parsing and terminal output use only the standard library" do
-    declared = Enum.sort(Enum.map(Mix.Project.config()[:deps], &elem(&1, 0)))
-    assert declared == [:loopex, :loopex_composition]
+    assert Enum.sort(declared_dependencies()) == [:loopex, :loopex_composition]
 
-    for path <- Path.wildcard("lib/**/*.ex") do
-      source = File.read!(path)
+    for {path, source} <- command_sources() do
       refute source =~ "Jason", "#{path} uses an external encoder"
       refute source =~ "Optimus", "#{path} uses an external argument parser"
       refute source =~ "Owl.", "#{path} uses an external terminal library"

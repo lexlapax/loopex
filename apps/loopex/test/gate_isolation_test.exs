@@ -17,7 +17,15 @@ defmodule Loopex.GateIsolationTest do
 
   @runner "scripts/check-m2-gate.sh"
 
-  defp runner_source, do: File.read!(Path.join(LoopexTest.Repo.root(), @runner))
+  # Concept: find the runner from the selector, not from the working directory.
+  #
+  # Technical depth: the gate compiles a protected selector from the repository
+  # root, while `mix test` runs it from the application directory, and the test
+  # helper that resolves the root is not loaded under the gate at all. Walking up
+  # from this file's own location answers the same in both.
+  defp repository_root, do: Path.expand(Path.join([__DIR__, "..", "..", ".."]))
+
+  defp runner_source, do: File.read!(Path.join(repository_root(), @runner))
 
   defp with_environment(pairs, fun) do
     previous = Map.new(pairs, fn {name, _value} -> {name, System.get_env(name)} end)
@@ -45,21 +53,18 @@ defmodule Loopex.GateIsolationTest do
     # The hazard is real, and it is demonstrated against the same Mix the runner
     # invokes rather than described. With both set, the ambient path wins and the
     # owned root is not where anything would be built.
-    redirected =
-      with_environment([{"MIX_BUILD_PATH", ambient}, {"MIX_BUILD_ROOT", owned}], fn ->
-        Mix.Project.build_path(config)
-      end)
-
+    #
+    # `Mix.Project.build_path/1` is asked where Mix is running, and where the
+    # selector was compiled on its own — which is how the gate runs it — the
+    # precedence is read from a real `mix` invocation instead. Both answer the
+    # same question; neither is a restatement of the runner's comment.
+    redirected = build_path_under(config, ambient, owned)
     assert redirected == ambient
     refute String.starts_with?(redirected, owned)
 
     # Cleared, the owned root is honoured. This is the whole of what the runner's
     # `unset` and its `env -u` buy, stated as a result rather than as intent.
-    contained =
-      with_environment([{"MIX_BUILD_PATH", nil}, {"MIX_BUILD_ROOT", owned}], fn ->
-        Mix.Project.build_path(config)
-      end)
-
+    contained = build_path_under(config, nil, owned)
     assert String.starts_with?(contained, owned)
 
     # And the runner clears it everywhere it could still bite. The global `unset`
@@ -98,6 +103,43 @@ defmodule Loopex.GateIsolationTest do
 
     assert early_invocations != [],
            "the probe runs before the global unset; a scan finding nothing is not proof"
+  end
+
+  defp build_path_under(config, ambient, owned) do
+    if Code.ensure_loaded?(Mix.State) and Process.whereis(Mix.State) do
+      with_environment([{"MIX_BUILD_PATH", ambient}, {"MIX_BUILD_ROOT", owned}], fn ->
+        Mix.Project.build_path(config)
+      end)
+    else
+      # Mix's own resolution order, asked of a real `mix` in a throwaway project
+      # rather than reproduced here: a copy of the rule would pass while the rule
+      # changed underneath it.
+      root =
+        Path.join(System.tmp_dir!(), "loopex-mix-probe-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(Path.join(root, "lib"))
+
+      File.write!(Path.join(root, "mix.exs"), """
+      defmodule IsolationProbe.MixProject do
+        use Mix.Project
+        def project, do: [app: :isolation_probe, version: "0.0.0", elixir: "~> 1.17"]
+      end
+      """)
+
+      environment =
+        [{"MIX_BUILD_ROOT", owned}] ++
+          if(is_nil(ambient), do: [], else: [{"MIX_BUILD_PATH", ambient}])
+
+      {output, 0} =
+        System.cmd("mix", ["run", "--no-start", "-e", "IO.puts(Mix.Project.build_path())"],
+          cd: root,
+          env: environment ++ if(is_nil(ambient), do: [{"MIX_BUILD_PATH", nil}], else: []),
+          stderr_to_stdout: true
+        )
+
+      File.rm_rf(root)
+      output |> String.split("\n", trim: true) |> List.last()
+    end
   end
 
   test "the gate refuses an owned root that resolves inside the checkout or the operator's product state" do

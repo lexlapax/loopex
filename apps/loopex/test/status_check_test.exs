@@ -467,7 +467,7 @@ defmodule Loopex.StatusCheckTest do
     # A hook matching on a command never saw a \\u0024HOME spelling as $HOME, so an
     # ordinary JSON encoding of a protected path walked past the filesystem guard.
     # That is a representation a client may legitimately send, not obfuscation.
-    root = LoopexTest.Repo.root()
+    root = repository_root()
     protected = ".loo" <> "pex"
 
     # The reader takes the document on stdin, so it is written to a file and
@@ -651,7 +651,7 @@ defmodule Loopex.StatusCheckTest do
   end
 
   test "an amendment is invalid until its administrative Acceptance rebind" do
-    root = LoopexTest.Repo.root()
+    root = repository_root()
     {proposal_revision, 0} = Git.run(root, ["rev-parse", "HEAD"])
     {prior_revision, 0} = Git.run(root, ["rev-parse", "HEAD^"])
     proposal_revision = String.trim(proposal_revision)
@@ -2002,7 +2002,7 @@ defmodule Loopex.StatusCheckTest do
   end
 
   test "the git resolver requires a reachable commit object" do
-    root = LoopexTest.Repo.root()
+    root = repository_root()
     {tree, 0} = Git.run(root, ["rev-parse", "HEAD^{tree}"])
 
     assert nil == Git.resolver(root).(String.trim(tree), "README.md")
@@ -2018,7 +2018,7 @@ defmodule Loopex.StatusCheckTest do
   end
 
   test "the git resolver rejects an unreachable commit without writing" do
-    root = LoopexTest.Repo.root()
+    root = repository_root()
     unreachable = String.duplicate("f", 40)
     calls = :ets.new(:calls, [:ordered_set, :public])
 
@@ -2975,4 +2975,14 @@ defmodule Loopex.StatusCheckTest do
              )
     end
   end
+
+  # Concept: find the checkout from this file, not from the working directory.
+  #
+  # Technical depth: the gate compiles a protected selector on its own, without
+  # the application's test helper, so the helper that resolved the repository
+  # root is not defined there. Four cases here reached for it and failed under
+  # the gate while passing under `mix test` -- which is the difference between a
+  # case that passes and a case that is proved. Walking up from this file's own
+  # location answers the same in both.
+  defp repository_root, do: Path.expand(Path.join([__DIR__, "..", "..", ".."]))
 end

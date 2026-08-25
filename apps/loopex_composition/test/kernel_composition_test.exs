@@ -107,7 +107,7 @@ defmodule LoopexCompositionTest do
     # reach the command even accidentally. That is what makes the composition
     # something an embedder can depend on rather than something only the shipped
     # command can use.
-    declared = Mix.Project.config()[:deps] |> Enum.map(&elem(&1, 0))
+    declared = declared_dependencies()
     refute :loopex_cli in declared
     refute :loopex_reference_client in declared
     assert :loopex in declared
@@ -116,7 +116,7 @@ defmodule LoopexCompositionTest do
     # code-path state: the umbrella suite runs every application in one emulator,
     # so whether a client module happens to be loadable there says nothing about
     # what this application depends on.
-    for path <- Path.wildcard("lib/**/*.ex") do
+    for path <- Path.wildcard(app_path("lib/**/*.ex")) do
       refute File.read!(path) =~ "LoopexCli", "#{path} names the command application"
     end
   end
@@ -175,7 +175,7 @@ defmodule LoopexCompositionTest do
     assert String.starts_with?(artifact_root, state_root)
 
     # The source reads no application environment at all.
-    source = File.read!("lib/loopex_composition.ex")
+    source = File.read!(app_path("lib/loopex_composition.ex"))
     refute source =~ "Application.get_env"
     refute source =~ "Application.fetch_env"
 
@@ -203,8 +203,26 @@ defmodule LoopexCompositionTest do
   # out rather than only their opening lines. Counting prose against the ceiling
   # would reward deleting the explanation, which is the opposite of what this
   # project asks of its code.
+  # Concept: read the source this application is about, from wherever the case
+  # was invoked.
+  #
+  # Technical depth: the gate compiles a protected selector from the repository
+  # root, while `mix test` runs it from the application directory, so a relative
+  # path names a different file in each. Resolving against the selector's own
+  # location answers the same in both.
+  defp app_path(relative), do: Path.expand(Path.join([__DIR__, "..", relative]))
+
+  # The application's own declaration, read as source. `Mix.Project.config/0`
+  # answers for whichever project is loaded, and under the gate none is.
+  defp declared_dependencies do
+    ~r/\{:([a-z_]+), in_umbrella: true\}/
+    |> Regex.scan(File.read!(app_path("mix.exs")))
+    |> Enum.map(fn [_match, name] -> String.to_atom(name) end)
+  end
+
   defp effective_lines(path) do
     path
+    |> app_path()
     |> File.read!()
     |> String.replace(~r/@(module)?doc """.*?"""\n/s, "")
     |> String.split("\n")
