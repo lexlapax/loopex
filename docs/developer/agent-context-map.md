@@ -629,6 +629,36 @@ or closure obligation. It authorizes this direct administrative rebind and the
 remaining M1 closure proof; it does not authorize a merge to `main`, closure,
 release, or any gate weakening.
 
+<a id="disposition-m1-gate-generation-7-2026-08-24"></a>
+### M1 gate generation 7 acceptance — 2026-08-24
+
+The maintainer explicitly accepted the `M1` gate generation 7 proposal at
+candidate `cd19347dcb98495304f4d8854526035f18f108f6`. The
+proposal was reviewed at that exact revision before acceptance.
+
+Generation 7 rebinds exactly the two artifacts the accepted `M2` plan pair named
+and no third: `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex`, whose planned
+inventory froze the repository at six applications with no `:composition` role,
+and `apps/loopex/test/deps_budget_test.exs`, its adversarial corpus, whose
+minimum rises from 25 to 28 for the three cases that prove the eight-application
+inventory, the composition role's own rule, and the client rule that admits one
+composition.
+
+This acceptance is the separately approved baseline exception against a closed,
+immutable gate, recorded on 2026-08-23 as
+[`disposition-m1-gate-generation-exception-2026-08-23`](#disposition-m1-gate-generation-exception-2026-08-23),
+being exercised for one specific proposal. That earlier approval authorised the
+transaction; it approved no particular proposal, which is why this record exists
+separately.
+
+`M1`'s Acceptance and Closure rows are unchanged and remain byte-immutable.
+Neither is made retroactively false: they record what was accepted and what was
+reviewed and closed. Acceptance binds the amended gate at
+`sha256:4b74e2c6df1217e955ae8757443049e1581bcff9f3ecdc22b10094ea9fabde5a`
+through the append-only Gate Generations table in
+[the M1 plan](../plans/M1.md), and adds no scope, changes no outcome, and reopens
+no lifecycle state.
+
 <a id="disposition-bound-reached-vision-change-2026-08-23"></a>
 ### Vision terminal algebra gains `bound_reached` — 2026-08-23
 
