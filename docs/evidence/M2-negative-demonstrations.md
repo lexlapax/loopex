@@ -62,13 +62,13 @@ carries its own mutation record rather than resting on source inspection.
 ## Outcome 8: cancellation cleanup confirmation
 
 ```json
-{"mechanism_disabled":"cancellation_cleanup_confirmation","selector":"apps/loopex/test/cancellation_test.exs","observed_failure":"an abort whose cleanup was unconfirmed committed cancelled instead of outcome_unknown and the locked insufficient evidence case failed","candidate":"4894dea16a5fdc398106cccd6c7a1b93a161d3c4","artifact":"apps/loopex/lib/loopex/runtime/session_state.ex","restored_sha256":"sha256:1f15f84509e2ffcae9428cdd927321ab5621599afa6dccc54d6c001719b9b36e"}
+{"mechanism_disabled":"cancellation_cleanup_confirmation","selector":"apps/loopex/test/cancellation_test.exs","observed_failure":"an abort whose cleanup was unconfirmed committed cancelled instead of outcome_unknown and the locked insufficient evidence case failed","candidate":"1030d84f3a9d804f9913ed33b4cdfbea283bee1e","artifact":"apps/loopex/lib/loopex/runtime/session_state.ex","restored_sha256":"sha256:e1f82776153f2e07cc9c81262e393dfdbb2b6f0df528f6b585f391f8e446f001"}
 ```
 
 ## Outcome 10: command surface facade only
 
 ```json
-{"mechanism_disabled":"command_surface_facade_only","selector":"apps/loopex_cli/test/cli_test.exs","observed_failure":"the command named a runtime control module and the locked facade only case failed","candidate":"08fc84bd656129ccbe56f854581450e6055fa743","artifact":"apps/loopex_cli/lib/loopex_cli.ex","restored_sha256":"sha256:f7370ca81eb7042b12147bb0745dc00080646668e5fbc4838eba3b40f6580656"}
+{"mechanism_disabled":"command_surface_facade_only","selector":"apps/loopex_cli/test/cli_test.exs","observed_failure":"the command named a runtime control module and the locked facade only case failed","candidate":"1030d84f3a9d804f9913ed33b4cdfbea283bee1e","artifact":"apps/loopex_cli/lib/loopex_cli.ex","restored_sha256":"sha256:c6ce370337f9f085e3faf54aea533fc46a7edcfe1f6af2fe97d1e9ead7e8e60b"}
 ```
 
 ## How these were produced
@@ -93,9 +93,11 @@ record names is the failure the gate would observe.
 `restored_sha256` is the running revision's SHA-256 of the artifact, which is
 what makes "restored" a claim about bytes rather than prose. Each digest above
 matches this revision, and a record whose artifact changed afterwards is re-run
-rather than re-labelled: the command's record names a later candidate than the
-other seven because the command changed after its first experiment, and the gate
-refused the stale digest rather than letting it stand.
+rather than re-labelled. Two records name a later candidate than the other six,
+because the session reducer and the command both changed after their first
+experiments — the reducer to carry a spilled artifact through the receipt, the
+command to refuse an unrecognised flag on every subcommand. Each was disabled
+again, at the candidate its record names, and failed its locked selector again.
 
 ## Related
 
