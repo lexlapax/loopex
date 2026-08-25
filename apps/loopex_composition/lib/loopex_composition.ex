@@ -84,13 +84,22 @@ defmodule LoopexComposition do
   an operator retrieving one later needs the store without needing a runtime.
   """
   @spec artifacts(binary()) :: {:ok, map()} | {:error, term()}
-  def artifacts(state_root), do: Artifacts.open(Path.join(state_root, "artifacts"))
+  def artifacts(state_root) do
+    with {:ok, handle} <- Artifacts.open(Path.join(state_root, "artifacts")),
+         do: {:ok, %{module: Artifacts, handle: handle}}
+  end
 
   defp fetch_policy(options) do
     case Keyword.get(options, :policy) do
       module when is_atom(module) and not is_nil(module) -> {:ok, module}
       _absent -> {:error, :host_policy_required}
     end
+  end
+
+  defp open_store(state_root) do
+    with :ok <- File.mkdir_p(state_root),
+         {:ok, adapter} <- Store.Local.start_link(path: Path.join(state_root, "store.log")),
+         do: Store.new(Store.Local, adapter)
   end
 
   defp start_applications do
@@ -100,13 +109,6 @@ defmodule LoopexComposition do
         {:error, reason} -> {:halt, {:error, {:application_not_started, app, reason}}}
       end
     end)
-  end
-
-  defp open_store(state_root) do
-    with :ok <- File.mkdir_p(state_root),
-         {:ok, adapter} <- Store.Local.start_link(path: Path.join(state_root, "store.log")) do
-      Store.new(Store.Local, adapter)
-    end
   end
 
   defp open_executor(state_root, workspace) do
@@ -122,7 +124,7 @@ defmodule LoopexComposition do
              fencing_token: 1,
              workspace_leases: %{lease_id => lease},
              ledger_root: Path.join(state_root, "receipts"),
-             artifacts: %{module: Artifacts, handle: spill}
+             artifacts: spill
            ) do
       {:ok,
        %{

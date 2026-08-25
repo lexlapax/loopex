@@ -308,22 +308,24 @@ defmodule LoopexCli do
   defp artifact({flags, words}) do
     with {:ok, reference} <- positional(words, "an artifact reference"),
          {:ok, root} <- state_root(flags),
-         {:ok, handle} <- LoopexComposition.artifacts(root),
-         {:ok, bytes} <- fetch_artifact(handle, reference) do
+         {:ok, store} <- LoopexComposition.artifacts(root),
+         {:ok, bytes} <- fetch_artifact(store, reference) do
       IO.binwrite(bytes)
       :ok
     end
   end
 
-  defp fetch_artifact(handle, reference) do
-    case Loopex.Store.Local.Artifacts.stat(handle, %{
-           digest: reference,
-           media_type: "application/octet-stream",
-           size: 0,
-           role: "tool_output",
-           locator: reference
-         }) do
-      {:ok, resolved} -> Loopex.Store.Local.Artifacts.fetch(handle, resolved)
+  # Concept: retrieval goes through the port, so a host that composed a different
+  # artifact store is followed rather than bypassed.
+  #
+  # Technical depth: this named the reference adapter directly and called its
+  # `stat` and `fetch`. The composition stayed valid and the port stayed
+  # implemented, and `loopex artifact` was still coupled to one implementation --
+  # a facade-only claim that the command's own locked check omitted rather than
+  # caught.
+  defp fetch_artifact(store, reference) do
+    case Loopex.ArtifactStore.retrieve(store, reference) do
+      {:ok, bytes} -> {:ok, bytes}
       {:error, :unknown_artifact} -> {:error, "no artifact is retained for #{reference}"}
       {:error, reason} -> {:error, "the artifact could not be read: #{inspect(reason)}"}
     end

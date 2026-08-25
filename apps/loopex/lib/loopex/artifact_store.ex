@@ -116,6 +116,43 @@ defmodule Loopex.ArtifactStore do
   @doc """
   ## Concept
 
+  Reads a retained artifact back by the opaque reference an operator was given.
+
+  ## Technical depth
+
+  A caller holds a locator and a composed store, and wants the bytes. Doing that
+  by hand means constructing a reference around the locator to ask `stat/2` for
+  the real one, then `fetch/2` — three steps in which a caller can name a
+  concrete adapter without noticing. The command did exactly that, which coupled
+  a peer surface to the reference implementation while the port sat unused beside
+  it.
+
+  The store arrives as `%{module:, handle:}`, the shape every other composed port
+  uses here, so a host that supplies a different implementation is followed
+  rather than bypassed.
+  """
+  @spec retrieve(%{module: module(), handle: term()}, binary()) ::
+          {:ok, binary()} | {:error, term()}
+  def retrieve(%{module: module, handle: handle}, locator)
+      when is_atom(module) and is_binary(locator) and locator != "" do
+    probe = %{
+      digest: locator,
+      media_type: "application/octet-stream",
+      size: 0,
+      role: "tool_output",
+      locator: locator
+    }
+
+    with {:ok, resolved} <- module.stat(handle, probe) do
+      module.fetch(handle, resolved)
+    end
+  end
+
+  def retrieve(_store, _locator), do: {:error, :invalid_artifact_reference}
+
+  @doc """
+  ## Concept
+
   The bounded result a model is shown when output spilled.
 
   ## Technical depth

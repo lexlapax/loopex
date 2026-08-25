@@ -552,10 +552,14 @@ defmodule LoopexCliTest do
 
   test "loopex artifact retrieves a spilled artifact by its opaque reference" do
     {state_root, _workspace} = roots()
-    {:ok, handle} = LoopexComposition.artifacts(state_root)
+    {:ok, store} = LoopexComposition.artifacts(state_root)
 
-    {:ok, reference} =
-      Loopex.Store.Local.Artifacts.put(handle, "the whole output", %{"role" => "tool_output"})
+    # The case retains an artifact through the port it was composed with, for the
+    # same reason the command reads it through one: naming the implementation
+    # here would prove retrieval works for the implementation this test happened
+    # to pick.
+    %{module: module, handle: handle} = store
+    {:ok, reference} = module.put(handle, "the whole output", %{"role" => "tool_output"})
 
     output =
       capture_io(fn ->
@@ -643,9 +647,31 @@ defmodule LoopexCliTest do
       refute source =~ "Loopex.Store.transact", "#{path} reaches the store directly"
       refute source =~ "Loopex.Journal", "#{path} reaches the journal"
       refute source =~ "Loopex.Outbox", "#{path} reaches the outbox"
-      refute source =~ "Loopex.Store.Local.start_link", "#{path} names a Store implementation"
-      refute source =~ "Loopex.LLM.", "#{path} names a Model implementation"
-      refute source =~ "Loopex.Executor.Local.start_link", "#{path} names an Executor"
+    end
+
+    # Concept: naming any concrete implementation is the breach, not naming one
+    # of a remembered few.
+    #
+    # Technical depth: this used to list three implementation names and check for
+    # those. `loopex artifact` called `Loopex.Store.Local.Artifacts` directly and
+    # passed, because that name was not on the list -- the check was shaped
+    # around the breach rather than around the rule. A list of forbidden names
+    # can only ever catch the couplings someone already thought of.
+    #
+    # The rule is the dependency direction itself: this application may name
+    # ports, the public facade, the composition, and its own modules. Anything
+    # under an adapter application's namespace is an implementation, whichever
+    # one it is.
+    adapters = ~w(
+      Loopex.Store.Local
+      Loopex.LLM
+      Loopex.Executor.Local
+      Loopex.ReferenceClient
+    )
+
+    for {path, source} <- sources, adapter <- adapters do
+      refute source =~ adapter,
+             "#{path} names #{adapter}, a concrete implementation rather than a port"
     end
 
     # The host policy modules it ships for `--policy` are the single named

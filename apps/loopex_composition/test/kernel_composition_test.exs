@@ -171,7 +171,10 @@ defmodule LoopexCompositionTest do
     end)
 
     assert File.exists?(Path.join(state_root, "store.log"))
-    assert {:ok, %{root: artifact_root}} = LoopexComposition.artifacts(state_root)
+
+    assert {:ok, %{module: _adapter, handle: %{root: artifact_root}}} =
+             LoopexComposition.artifacts(state_root)
+
     assert String.starts_with?(artifact_root, state_root)
 
     # The source reads no application environment at all.
