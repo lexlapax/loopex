@@ -11,8 +11,14 @@ defmodule Loopex.LLM.ReqLLM do
   durability, or policy appears here — the caller passes a model identity and a
   prompt and receives text, identity, and usage. Nothing about ReqLLM, Req,
   Finch, or a provider's wire format leaves this module: `ReqLLM` structs are
-  read here and never returned, so a host or a later core boundary sees only
-  bounded serializable maps and strings.
+  accepted and read here and never returned, so a host or a later core boundary
+  sees only bounded serializable maps and strings.
+
+  A stream that did not finish is a failure and not a shorter answer. A provider
+  that emits some text and then loses its connection, is rate limited, or stops
+  mid tool call has produced no assistant message, so this adapter returns an
+  error and the coordinator abandons that attempt. It never hands back the
+  fragment that did arrive as though the model had said it and stopped.
 
   The credential arrives only from the `LOOPEX_PROVIDER_API_KEY` environment
   variable, is handed to ReqLLM as a per-request option, and is never returned,
@@ -110,6 +116,16 @@ defmodule Loopex.LLM.ReqLLM do
   library keeps only usage from the provider's opening event and discards the
   rest. The per-call request identifier survives streaming and is the identifier
   the provider's own account and support surface use, so it is the one retained.
+
+  `staged_request_digest` names the request bytes core committed before this
+  dispatch. It is spelled the way the reply this adapter actually returns spells
+  it, so an embedder reading this type reaches a field production supplies rather
+  than one that was renamed underneath it.
+
+  `delta_count` and `streamed` are the attempt-private evidence `Loopex.Model`
+  requires of every reply: what this adapter emitted and whether it streamed at
+  all. They belong to the type because the coordinator closes the attempt's
+  progress domain with them.
   """
   @type reply :: %{
           text: String.t(),
@@ -117,8 +133,10 @@ defmodule Loopex.LLM.ReqLLM do
           provider_response_id: String.t() | nil,
           usage: %{input_tokens: non_neg_integer() | nil, output_tokens: non_neg_integer() | nil},
           tool_calls: [map()],
+          delta_count: non_neg_integer(),
+          streamed: boolean(),
           canonical_request_bytes: binary(),
-          canonical_request_digest: binary()
+          staged_request_digest: binary()
         }
 
   @doc """
@@ -219,6 +237,12 @@ defmodule Loopex.LLM.ReqLLM do
   The stream is consumed once. Usage and the per-call request identifier come
   from the metadata the provider sends after the content, so they are read once
   the stream is drained rather than beside it.
+
+  A stream that failed, was cut off, or produced a reply that could not be
+  assembled returns `{:error, reason}` instead of a reply. Deltas already emitted
+  stay emitted; the coordinator closes that attempt's domain abandoned and
+  commits no assistant message, which is what makes a partial answer impossible
+  to mistake for a short one.
   """
   @impl Loopex.Model
   @spec complete(Model.request(), keyword(), Model.progress_fun()) ::
@@ -267,44 +291,131 @@ defmodule Loopex.LLM.ReqLLM do
 
     case ReqLLM.stream_text(request.model, context, options) do
       {:ok, response} ->
-        {:ok, drain(response, request, identity, progress)}
+        drain(response, request, identity, progress, credential)
 
       {:error, error} ->
         {:error, {:provider_call_failed, scrub(error, credential)}}
     end
   end
 
-  defp drain(response, request, identity, progress) do
+  @doc """
+  ## Concept
+
+  Turns one already-open provider stream into the reply this adapter returns,
+  emitting every delta on the way, or reports why that stream produced no reply
+  at all.
+
+  ## Technical depth
+
+  This is the whole of the adapter's streaming behaviour that needs no network:
+  which chunks become which deltas, how the reply is assembled from exactly those
+  chunks, and which endings are failures rather than shorter answers. `dispatch`
+  calls it with the stream ReqLLM opened; the streaming conformance suite calls
+  it with a stream it built itself, so the shipped adapter is judged by the same
+  suite as every other one instead of being exempt for needing a credential.
+
+  The response is a `ReqLLM.StreamResponse` — accepted and read here, never
+  returned. Errors are already bounded and scrubbed, so a caller may report them
+  without inspecting a provider term.
+  """
+  @spec reply_from_stream(
+          ReqLLM.StreamResponse.t(),
+          Model.request(),
+          identity(),
+          Model.progress_fun()
+        ) :: {:ok, reply()} | {:error, term()}
+  def reply_from_stream(response, request, identity, progress)
+      when is_map(request) and is_map(identity) and is_function(progress, 1) do
+    drain(response, request, identity, progress, nil)
+  end
+
+  # Concept: an interrupted stream produces an error, never the fragment that
+  # happened to arrive first.
+  #
+  # Technical depth: the library reports a broken stream two ways, and both end
+  # here as `{:error, _}`. Pulling a chunk after the transport or the provider
+  # failed raises out of the lazy stream, which is why the whole drain is
+  # rescued: an adapter that let that escape would hand the coordinator an exit
+  # where a fact belongs. A stream that ended without the provider's terminal
+  # event instead halts normally and says so only in the metadata, which is the
+  # dangerous shape -- text already streamed, `{:ok, reply}` one line away -- and
+  # is why the metadata is judged before a reply is built at all.
+  defp drain(response, request, identity, progress, credential) do
     {chunks, text, deltas} =
       Enum.reduce(response.stream, {[], [], 0}, fn chunk, {chunks, text, deltas} ->
-        case emit(chunk, deltas, progress) do
+        case emit(chunk, progress) do
           {:text, fragment} -> {[chunk | chunks], [fragment | text], deltas + 1}
-          {:counted, _kind} -> {[chunk | chunks], text, deltas + 1}
+          :counted -> {[chunk | chunks], text, deltas + 1}
           :ignored -> {[chunk | chunks], text, deltas}
         end
       end)
 
     chunks = Enum.reverse(chunks)
     metadata = ReqLLM.StreamResponse.MetadataHandle.await(response.metadata_handle)
+
+    with :ok <- completed(metadata),
+         {:ok, assembled} <- assemble(response, chunks, metadata),
+         {:ok, calls} <- bounded_calls(assembled) do
+      streamed = text |> Enum.reverse() |> IO.iodata_to_binary()
+      {:ok, reply(request, identity, metadata, streamed, calls, deltas)}
+    else
+      {:error, {tag, reason}} -> {:error, {tag, scrub(reason, credential)}}
+    end
+  rescue
+    interrupted -> {:error, {:stream_interrupted, scrub(interrupted, credential)}}
+  end
+
+  defp reply(request, identity, metadata, text, calls, deltas) do
     reported = Map.get(metadata, :usage) || %{}
-    streamed_text = text |> Enum.reverse() |> IO.iodata_to_binary()
-    assembled = assemble(response, chunks, metadata)
 
     %{
-      text: if(streamed_text == "", do: assembled_text(assembled), else: streamed_text),
+      text: text,
       identity: identity,
       provider_response_id: provider_request_id(metadata),
       usage: %{
         input_tokens: Map.get(reported, :input_tokens),
         output_tokens: Map.get(reported, :output_tokens)
       },
-      tool_calls: assembled_calls(assembled),
+      tool_calls: calls,
       delta_count: deltas,
       streamed: deltas > 0,
       canonical_request_bytes: request.canonical_request_bytes,
       staged_request_digest: request.staged_request_digest
     }
   end
+
+  # Concept: a completion the provider finished, distinguished from one that was
+  # cut off — including the completion that finished with nothing to say.
+  #
+  # Technical depth: failure is decided on positive evidence and never on
+  # emptiness. A model that answers with no text at all still finishes `stop` and
+  # is a success; what fails is a metadata error, a provider status of 400 or
+  # above, or a finish reason that names an ending rather than a stop. The
+  # library guarantees one of the first two whenever the stream did not terminate
+  # cleanly, and substitutes `incomplete` for a missing finish reason on that
+  # path, so an unfamiliar provider-specific reason is not read as a fault: a
+  # reason this adapter has never seen is not evidence that anything went wrong.
+  # `length` is a stop, not a cut: the provider ended the turn at the output
+  # allowance core committed, and the tool-call check below is what catches a
+  # call that allowance truncated.
+  defp completed(metadata) do
+    cond do
+      is_map(metadata) and is_map_key(metadata, :error) ->
+        {:error, {:stream_failed, Map.get(metadata, :error)}}
+
+      error_status?(Map.get(metadata, :status)) ->
+        {:error, {:stream_failed, {:provider_status, Map.get(metadata, :status)}}}
+
+      Map.get(metadata, :finish_reason) in [:incomplete, :cancelled, :error] ->
+        {:error, {:stream_incomplete, Map.get(metadata, :finish_reason)}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp error_status?(status) when is_integer(status) and status >= 400, do: true
+  defp error_status?(_status), do: false
 
   # Concept: the turn's tool calls come from the provider, assembled.
   #
@@ -319,6 +430,11 @@ defmodule Loopex.LLM.ReqLLM do
   # the chunks are collected as they stream and handed to it afterwards. This is
   # what `StreamResponse.to_response/1` does, minus re-consuming a stream that
   # has already been drained once and cannot be drained twice.
+  #
+  # A builder that fails is a failed turn. It used to become `nil`, and `nil`
+  # became empty text and no tool calls -- so the one reply shape that means "the
+  # model asked for nothing and is done" was also the shape produced by a reply
+  # nobody could assemble, and the loop would have ended the run on it.
   defp assemble(response, chunks, metadata) do
     builder = ReqLLM.Provider.ResponseBuilder.for_model(response.model)
 
@@ -326,55 +442,153 @@ defmodule Loopex.LLM.ReqLLM do
            context: response.context,
            model: response.model
          ) do
-      {:ok, assembled} -> assembled
-      _other -> nil
+      {:ok, assembled} -> {:ok, assembled}
+      {:error, reason} -> {:error, {:reply_not_assembled, reason}}
+      other -> {:error, {:reply_not_assembled, other}}
     end
-  rescue
-    _unavailable -> nil
   end
 
-  defp assembled_text(nil), do: ""
-  defp assembled_text(assembled), do: ReqLLM.Response.text(assembled) || ""
-
-  defp assembled_calls(nil), do: []
-
-  defp assembled_calls(assembled) do
+  # Concept: a call the model asked for either crosses this boundary whole or
+  # does not cross it.
+  #
+  # Technical depth: the library reports arguments it could not rebuild -- a
+  # stream cut inside the argument JSON, or fragments that never arrived -- by
+  # keeping the call with empty arguments and recording the loss in its metadata.
+  # Passing that on would present "call `write` with no arguments" as the model's
+  # actual request. The metadata is also a provider term carrying a tuple, which
+  # is not plain boundary data, so the check that refuses the call is the same
+  # step that keeps the term from crossing: what crosses is exactly the
+  # identifier, the name, and the decoded arguments.
+  defp bounded_calls(assembled) do
     assembled
     |> ReqLLM.Response.tool_calls()
-    |> Enum.map(&ReqLLM.ToolCall.to_map/1)
+    |> Enum.reduce_while({:ok, []}, fn call, {:ok, built} ->
+      case ReqLLM.ToolCall.to_map(call) do
+        %{metadata: %{error: reason}} ->
+          {:halt, {:error, {:tool_call_not_reconstructible, reason}}}
+
+        %{id: id, name: name, arguments: arguments}
+        when is_binary(id) and id != "" and is_binary(name) and name != "" and is_map(arguments) ->
+          {:cont, {:ok, [%{id: id, name: name, arguments: arguments} | built]}}
+
+        malformed ->
+          {:halt, {:error, {:tool_call_not_reconstructible, malformed}}}
+      end
+    end)
+    |> case do
+      {:ok, built} -> {:ok, Enum.reverse(built)}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
-  # Concept: one provider chunk becomes at most one delta of a declared kind.
+  # Concept: one provider chunk becomes at most one delta, and the deltas of one
+  # attempt are everything needed to rebuild the reply that attempt returns.
   #
-  # Technical depth: the port names three kinds and an item of any other shape is
-  # not a delta, so a metadata chunk is counted by nothing and emitted as
-  # nothing. `content_index` is zero because this adapter produces one content
-  # part per attempt; a provider that interleaved several would need it to say
-  # which, and this one does not.
-  defp emit(%{type: :content, text: fragment}, index, progress)
+  # Technical depth: the reply's text is the concatenation of exactly these text
+  # deltas rather than a second assembly of the same chunks, so replaying them is
+  # byte-identical by construction and not by two code paths agreeing.
+  #
+  # A tool call is streamed as an opening chunk carrying the provider's call
+  # identifier and the tool name with no arguments, followed by metadata chunks
+  # carrying the argument JSON in fragments under the same content-block index.
+  # Both become `tool_call_delta`s: the opening one names the call, each later
+  # one carries the next fragment, and `call_index` is what ties them together --
+  # so a consumer joins the fragments of one index and gets the exact JSON the
+  # reply's arguments were decoded from. The previous version emitted one
+  # argument-free delta per call and dropped the fragments entirely, which
+  # described a call it could not reproduce.
+  #
+  # `content_index` is zero for text and reasoning because this adapter produces
+  # one content part per attempt; a provider that interleaved several would need
+  # it to say which, and this one does not. No delta carries a sequence: the
+  # coordinator owns the sequence and the domain, and an adapter that supplied
+  # either could misattribute an item to another attempt.
+  defp emit(%{type: :content, text: fragment}, progress)
        when is_binary(fragment) and fragment != "" do
-    progress.(%{kind: :text_delta, content_index: 0, sequence: index, text: fragment})
+    progress.(%{kind: :text_delta, content_index: 0, text: fragment})
     {:text, fragment}
   end
 
-  defp emit(%{type: :thinking, text: fragment}, index, progress)
+  defp emit(%{type: :thinking, text: fragment}, progress)
        when is_binary(fragment) and fragment != "" do
-    progress.(%{kind: :reasoning_delta, content_index: 0, sequence: index, text: fragment})
-    {:counted, :reasoning_delta}
+    progress.(%{kind: :reasoning_delta, content_index: 0, text: fragment})
+    :counted
   end
 
-  defp emit(%{type: :tool_call, name: name}, index, progress) when is_binary(name) do
+  defp emit(%{type: :tool_call, name: name} = chunk, progress)
+       when is_binary(name) and name != "" do
+    metadata = Map.get(chunk, :metadata) || %{}
+
     progress.(%{
       kind: :tool_call_delta,
-      content_index: 0,
-      sequence: index,
-      arguments_fragment: ""
+      call_index: call_index(metadata),
+      tool_call_id: field(metadata, :id),
+      name: name,
+      arguments_fragment: nil
     })
 
-    {:counted, :tool_call_delta}
+    :counted
   end
 
-  defp emit(_chunk, _index, _progress), do: :ignored
+  defp emit(%{type: :meta, metadata: metadata}, progress) when is_map(metadata) do
+    case argument_fragment(metadata) do
+      {index, fragment} ->
+        progress.(%{
+          kind: :tool_call_delta,
+          call_index: index,
+          tool_call_id: nil,
+          name: nil,
+          arguments_fragment: fragment
+        })
+
+        :counted
+
+      :none ->
+        :ignored
+    end
+  end
+
+  defp emit(_chunk, _progress), do: :ignored
+
+  # Concept: read the provider's own argument fragment the way the library's own
+  # assembler reads it, so the deltas and the reply cannot disagree about which
+  # call a fragment belongs to.
+  #
+  # Technical depth: decoders reach this metadata with atom or string keys, and
+  # the library's accumulator accepts both; accepting one here would silently
+  # drop every fragment from the other kind of provider and leave a delta stream
+  # that names a call whose arguments it never carried.
+  defp argument_fragment(metadata) do
+    case field(metadata, :tool_call_args) do
+      arguments when is_map(arguments) ->
+        case field(arguments, :fragment) do
+          fragment when is_binary(fragment) and fragment != "" ->
+            {call_index(arguments), fragment}
+
+          _absent ->
+            :none
+        end
+
+      _absent ->
+        :none
+    end
+  end
+
+  defp call_index(metadata) do
+    case field(metadata, :index) do
+      index when is_integer(index) and index >= 0 -> index
+      _absent -> 0
+    end
+  end
+
+  defp field(map, key) when is_map(map) do
+    case Map.fetch(map, key) do
+      {:ok, value} -> value
+      :error -> Map.get(map, Atom.to_string(key))
+    end
+  end
+
+  defp field(_absent, _key), do: nil
 
   # Concept: the identifier this call is known by in the provider's account.
   #
@@ -533,11 +747,17 @@ defmodule Loopex.LLM.ReqLLM do
   #
   # Technical depth: the limits cap an arbitrarily large error term, and the
   # substitution is unconditional rather than dependent on recognising which
-  # field a provider chose to echo the key into.
+  # field a provider chose to echo the key into. A drain driven without a
+  # credential -- the conformance suite's -- still gets the bound, because the
+  # bound is what makes the term plain boundary data and only the substitution
+  # depends on there being a secret.
   defp scrub(error, credential) do
-    error
-    |> inspect(limit: 8, printable_limit: 512)
-    |> String.replace(credential, @redacted)
+    bounded = inspect(error, limit: 8, printable_limit: 512)
+
+    case credential do
+      value when is_binary(value) and value != "" -> String.replace(bounded, value, @redacted)
+      _absent -> bounded
+    end
   end
 
   defp endpoint(%{base_url: url}) when is_binary(url) and url != "", do: url

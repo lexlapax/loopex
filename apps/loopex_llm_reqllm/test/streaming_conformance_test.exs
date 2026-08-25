@@ -7,7 +7,8 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
   alias Loopex.StreamDomain
   alias LoopexProtocol.Canonical
 
-  # Concept: one suite both shipped adapters satisfy.
+  # Concept: one suite every shipped adapter satisfies, the one that ships
+  # included.
   #
   # Technical depth: the suite is defined over a behaviour, not over a module, so
   # adding an adapter means adding it to this list rather than writing a second
@@ -64,7 +65,150 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     end
   end
 
-  @adapters [Streaming, Silent]
+  defmodule Shipped do
+    @moduledoc """
+    ## Concept
+
+    The adapter that actually ships, held to this suite rather than represented
+    in it by a fake written to agree with it.
+
+    ## Technical depth
+
+    `Loopex.LLM.ReqLLM.complete/3` opens a provider connection, so the
+    deterministic lane cannot call it. Everything downstream of that connection
+    it can call: this module hands the shipped adapter's own
+    `reply_from_stream/4` a `ReqLLM.StreamResponse` built here from the chunk
+    shapes `deps/req_llm`'s Anthropic decoder produces -- a `:content` chunk per
+    text delta, a `:tool_call` chunk carrying the call identifier and name with
+    no arguments, and one `:meta` chunk per incremental argument fragment -- and
+    the real `MetadataHandle`, `ResponseBuilder`, and catalog model the adapter
+    would receive from a live call.
+
+    So what the suite exercises here is production code: the shipped adapter's
+    delta emission, its reply assembly, and its disposition of a stream that did
+    not finish.
+
+    What it does not exercise, and does not claim to: that a live provider's
+    stream really carries these chunk shapes, that `ReqLLM.stream_text/3` is
+    invoked correctly, that the credential path behaves, or that any network call
+    happened at all. Nothing that runs offline can prove those, and this suite
+    does not pretend otherwise. They belong to the `real_provider` lanes, which
+    are excluded from every deterministic run: this application's
+    `provider_test.exs` makes one real call through the whole adapter, and the
+    command application's attended demonstration runs a real multi-turn coding
+    task whose tool calls travel this same path.
+    """
+
+    @behaviour Loopex.Model
+
+    alias Loopex.LLM.ReqLLM, as: Adapter
+
+    @impl Loopex.Model
+    def complete(request, options, progress \\ nil) do
+      progress = progress || Model.discard_progress()
+      Adapter.reply_from_stream(stream_response(options), request, identity(), progress)
+    end
+
+    @doc """
+    The non-secret identity of the pinned reference model, resolved from the
+    bundled catalog with no credential and no network.
+    """
+    def identity do
+      {:ok, identity} = Adapter.identity(Adapter.default_model())
+      identity
+    end
+
+    @doc """
+    The metadata a provider that finished its turn cleanly leaves behind.
+    """
+    def clean_metadata do
+      %{
+        finish_reason: :stop,
+        status: 200,
+        headers: [{"request-id", "req_synthetic_conformance"}],
+        usage: %{input_tokens: 3, output_tokens: 5}
+      }
+    end
+
+    defp stream_response(options) do
+      metadata = Keyword.get(options, :metadata, clean_metadata())
+      {:ok, handle} = ReqLLM.StreamResponse.MetadataHandle.start_link(fn -> metadata end)
+
+      %ReqLLM.StreamResponse{
+        stream: stream(options),
+        metadata_handle: handle,
+        cancel: fn -> :ok end,
+        model: model(),
+        context: ReqLLM.Context.new([ReqLLM.Context.user("hi")])
+      }
+    end
+
+    defp model do
+      {:ok, model} = ReqLLM.model(Adapter.default_model())
+      model
+    end
+
+    # Concept: a lazy stream, because a list would let the adapter look
+    # incremental while draining everything before emitting anything.
+    #
+    # Technical depth: `:release_after_first` makes the stream block inside the
+    # consuming process until the test releases it, so "a delta arrived while the
+    # call had not returned" is proved by construction rather than by a sleep
+    # that a loaded machine can invalidate.
+    defp stream(options) do
+      release = Keyword.get(options, :release_after_first)
+
+      content =
+        options
+        |> Keyword.get(:chunks, ["Hel", "lo ", "world"])
+        |> Enum.with_index()
+        |> Stream.flat_map(fn {text, index} ->
+          if release && index == 1, do: await_release(release)
+          [ReqLLM.StreamChunk.text(text)]
+        end)
+
+      thinking =
+        options
+        |> Keyword.get(:thinking, [])
+        |> Enum.map(&ReqLLM.StreamChunk.thinking/1)
+
+      chunks = Stream.concat([content, thinking, tool_chunks(Keyword.get(options, :tool_call))])
+
+      case Keyword.get(options, :cut_after_chunks, false) do
+        false -> chunks
+        true -> Stream.concat(chunks, Stream.map([:cut], fn _cut -> raise cut() end))
+      end
+    end
+
+    defp await_release(release) do
+      receive do
+        {:release, ^release} -> :ok
+      after
+        5_000 -> :ok
+      end
+    end
+
+    defp tool_chunks(nil), do: []
+
+    defp tool_chunks({id, name, fragments}) do
+      [ReqLLM.StreamChunk.tool_call(name, %{}, %{id: id, index: 1, start: true})] ++
+        Enum.map(fragments, fn fragment ->
+          ReqLLM.StreamChunk.meta(%{tool_call_args: %{index: 1, fragment: fragment}})
+        end)
+    end
+
+    # Concept: exactly what the library raises out of its own lazy stream when a
+    # provider connection fails part way through.
+    defp cut do
+      %ReqLLM.Error.API.Stream{reason: "Stream failed: closed", cause: :closed}
+    end
+  end
+
+  @adapters [Streaming, Silent, Shipped]
+
+  # Concept: the members of the suite that claim to stream, which are the ones a
+  # replay property can be asked of at all.
+  @replaying_adapters [Streaming, Shipped]
 
   defp request do
     {:ok, request} =
@@ -101,19 +245,43 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     for adapter <- @adapters do
       {reply, deltas} = collect(adapter)
 
-      # The same contract holds for both: a complete reply, an honest count, and
-      # an honest declaration of whether anything was streamed.
+      # The same contract holds for all of them: a complete reply, an honest
+      # count, and an honest declaration of whether anything was streamed.
       assert is_binary(reply.text)
       assert is_integer(reply.delta_count) and reply.delta_count >= 0
       assert is_boolean(reply.streamed)
       assert reply.delta_count == length(deltas)
       assert reply.streamed == (deltas != [])
+
+      # Every item an adapter put on the plane is one the port admits, so a
+      # conformant adapter cannot be conformant only in the counting.
+      assert Enum.all?(deltas, &Model.valid_delta?/1)
+
+      # The coordinator owns the sequence and the domain. An adapter that
+      # supplied either could number a delta into another attempt's stream, so
+      # no adapter here supplies either.
+      refute Enum.any?(deltas, &Map.has_key?(&1, :sequence))
+      refute Enum.any?(deltas, &Map.has_key?(&1, :stream_domain_id))
+      refute Enum.any?(deltas, &Map.has_key?(&1, :model_sequence))
     end
   end
 
   test "each canonical delta kind is bounded plain data carrying no provider or host term" do
-    {_reply, deltas} = collect(Streaming)
+    # Driven through the shipped adapter, because the kinds that carry provider
+    # material -- a reasoning summary, a tool call identifier and its argument
+    # fragments -- are the ones where a provider struct or an unbounded blob
+    # would actually cross.
+    {_reply, deltas} =
+      collect(Shipped,
+        chunks: ["Hel", "lo"],
+        thinking: ["weighing "],
+        tool_call: {"toolu_1", "write", [~s({"path":"a), ~s(.txt"})]}
+      )
+
     assert deltas != []
+
+    assert Enum.map(deltas, & &1.kind) |> Enum.uniq() |> Enum.sort() ==
+             Enum.sort(Model.delta_kinds())
 
     for delta <- deltas do
       assert delta.kind in Model.delta_kinds()
@@ -123,6 +291,10 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
       # port, reference, or function anywhere inside.
       assert is_binary(Canonical.encode(delta))
     end
+
+    # The fake adapter's deltas are held to the same rule.
+    {_reply, fake_deltas} = collect(Streaming)
+    assert Enum.all?(fake_deltas, &Model.valid_delta?/1)
 
     # A delta carrying a host term is refused rather than projected.
     refute Model.valid_delta?(%{kind: :text_delta, text: "x", owner: self()})
@@ -151,19 +323,229 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
 
     {:ok, reply} = Task.await(task)
     assert reply.text == "abc"
+
+    # The same, proved of the adapter that ships: its provider stream is held
+    # open after the first chunk, so observing the first delta while the call
+    # cannot yet have returned is a fact rather than a race won.
+    release = make_ref()
+
+    shipped =
+      Task.async(fn ->
+        Shipped.complete(
+          request(),
+          [chunks: ["a", "b", "c"], release_after_first: release],
+          progress
+        )
+      end)
+
+    assert_receive {:observed, %{kind: :text_delta, text: "a"}}, 1_000
+    refute Task.yield(shipped, 0)
+
+    send(shipped.pid, {:release, release})
+    assert {:ok, shipped_reply} = Task.await(shipped)
+    assert shipped_reply.text == "abc"
   end
 
   test "replaying an adapter's emitted deltas reproduces the reply it returned byte identically" do
-    {reply, deltas} = collect(Streaming, chunks: ["Loo", "pex", " runs"])
+    for adapter <- @replaying_adapters do
+      {reply, deltas} = collect(adapter, chunks: ["Loo", "pex", " runs"])
 
-    reconstructed =
-      deltas
-      |> Enum.filter(&(&1.kind == :text_delta))
-      |> Enum.sort_by(& &1.content_index)
-      |> Enum.map_join(& &1.text)
+      reconstructed =
+        deltas
+        |> Enum.filter(&(&1.kind == :text_delta))
+        |> Enum.sort_by(& &1.content_index)
+        |> Enum.map_join(& &1.text)
 
-    assert reconstructed == reply.text
-    assert :erlang.term_to_binary(reconstructed) == :erlang.term_to_binary(reply.text)
+      assert reconstructed == reply.text
+      assert :erlang.term_to_binary(reconstructed) == :erlang.term_to_binary(reply.text)
+    end
+
+    # A reply that contains a tool call is only reproducible from its deltas if
+    # the deltas carry the call: which call, by what identifier, under what name,
+    # and the argument bytes the reply's arguments were decoded from. Deltas that
+    # merely announce that some call happened describe a reply they cannot
+    # reproduce, which is the defect this asserts against.
+    {reply, deltas} =
+      collect(Shipped,
+        chunks: ["Writing "],
+        tool_call: {"toolu_1", "write", [~s({"path":"a), ~s(.txt"})]}
+      )
+
+    assert [%{id: "toolu_1", name: "write", arguments: %{"path" => "a.txt"}}] = reply.tool_calls
+    assert replay_call(deltas, 1) == {"toolu_1", "write", ~s({"path":"a.txt"})}
+
+    # And the fragments are the source of those arguments rather than something
+    # emitted alongside them: change only the fragments and the reply follows.
+    {other, other_deltas} =
+      collect(Shipped,
+        chunks: ["Writing "],
+        tool_call: {"toolu_2", "edit", [~s({"path":"b), ~s(.txt"})]}
+      )
+
+    assert [%{id: "toolu_2", name: "edit", arguments: %{"path" => "b.txt"}}] = other.tool_calls
+    assert replay_call(other_deltas, 1) == {"toolu_2", "edit", ~s({"path":"b.txt"})}
+  end
+
+  # Concept: everything a consumer holding only the deltas can rebuild about one
+  # call.
+  #
+  # Technical depth: the opening delta names the call and the later ones carry
+  # its argument JSON in order, all tied together by `call_index`. Joining them
+  # yields the exact bytes the provider sent, which is what the reply's decoded
+  # arguments came from.
+  defp replay_call(deltas, call_index) do
+    scoped =
+      Enum.filter(deltas, &(&1.kind == :tool_call_delta and &1.call_index == call_index))
+
+    opening = Enum.find(scoped, &(&1.tool_call_id != nil))
+
+    arguments =
+      scoped
+      |> Enum.filter(& &1.arguments_fragment)
+      |> Enum.map_join(& &1.arguments_fragment)
+
+    {opening.tool_call_id, opening.name, arguments}
+  end
+
+  test "an interrupted stream is an error and never the partial text the adapter already streamed" do
+    interruptions = [
+      # The connection fails part way through, which the library reports by
+      # raising out of the lazy stream the adapter is draining.
+      {:connection_cut, [chunks: ["half a th"], cut_after_chunks: true]},
+      # The stream collapsed and the failure reached the adapter only in the
+      # metadata the provider left behind.
+      {:metadata_error, [chunks: ["half a th"], metadata: %{error: :closed, headers: []}]},
+      # A rate limit arrived after the provider had already sent content.
+      {:provider_status,
+       [chunks: ["half a th"], metadata: %{finish_reason: :stop, status: 429, headers: []}]},
+      # The stream ended without the provider's terminal event, which is the
+      # dangerous shape: it halts normally and says so only in the finish reason.
+      {:no_terminal_event,
+       [chunks: ["half a th"], metadata: %{finish_reason: :incomplete, headers: []}]}
+    ]
+
+    for {_label, options} <- interruptions do
+      parent = self()
+
+      progress = fn delta ->
+        send(parent, {:delta, delta})
+        :ok
+      end
+
+      assert {:error, {tag, detail}} = Shipped.complete(request(), options, progress)
+      assert tag in [:stream_interrupted, :stream_failed, :stream_incomplete]
+
+      # The reason is bounded plain data, so a coordinator can report it without
+      # a provider term crossing the boundary.
+      assert is_binary(detail)
+
+      # The text really was streamed and really is thrown away. Core builds the
+      # committed assistant message from the returned reply, and there is no
+      # reply, so the operator's terminal showed a fragment and the session
+      # commits nothing -- rather than committing the fragment as the answer.
+      assert_received {:delta, %{kind: :text_delta, text: "half a th"}}
+    end
+  end
+
+  test "a completion the provider finished with nothing to say is a success and not an interruption" do
+    # The distinction the failure rule turns on: emptiness is not evidence of
+    # interruption. A model that finished its turn having produced no text and
+    # asked for no tool is a complete answer, and treating it as a cut stream
+    # would refuse the reply that ends a run.
+    assert {:ok, reply} = Shipped.complete(request(), [chunks: []], Model.discard_progress())
+
+    assert reply.text == ""
+    assert reply.tool_calls == []
+    assert reply.delta_count == 0
+    assert reply.streamed == false
+    assert reply.provider_response_id == "req_synthetic_conformance"
+  end
+
+  test "a reply the provider's own builder cannot assemble is an error and never a completion with no tool calls" do
+    # A builder failure used to become `nil`, and `nil` became empty text and no
+    # tool calls -- the exact reply shape that means "the model asked for nothing
+    # and is done", which is what the loop ends a run on. Any builder failure
+    # will do here; the metadata below is one the library's own normaliser
+    # refuses, and what is asserted is the adapter's disposition of it.
+    unassemblable = %{finish_reason: :stop, status: 200, headers: [], usage: :not_a_usage_map}
+
+    result =
+      Shipped.complete(
+        request(),
+        [chunks: ["Hello"], metadata: unassemblable],
+        Model.discard_progress()
+      )
+
+    assert {:error, {:reply_not_assembled, detail}} = result
+    assert is_binary(detail)
+    refute match?({:ok, %{tool_calls: []}}, result)
+  end
+
+  test "a tool call the stream cut short is an error and never a call with empty arguments" do
+    # The provider opened a `write` call and the argument JSON never finished.
+    # The library keeps the call with empty arguments and records the loss; a
+    # reply carrying it would present "call write with no arguments" as what the
+    # model asked for.
+    cut_call = [
+      chunks: [],
+      tool_call: {"toolu_1", "write", [~s({"path":"a)]},
+      metadata: %{finish_reason: :length, status: 200, headers: []}
+    ]
+
+    result =
+      ExUnit.CaptureLog.capture_log(fn ->
+        send(self(), {:result, Shipped.complete(request(), cut_call, Model.discard_progress())})
+      end)
+
+    assert is_binary(result)
+    assert_received {:result, {:error, {:tool_call_not_reconstructible, detail}}}
+    assert is_binary(detail)
+  end
+
+  test "the exported reply type names exactly the fields a reply carries" do
+    # Concept: an embedder reads the exported type and reaches for a field.
+    #
+    # Technical depth: the type is a public contract, and the only way it stays
+    # true is to check it against a reply production actually produced rather
+    # than against a reading of the source. It named `canonical_request_digest`
+    # while production returned `staged_request_digest` -- the rename that
+    # separated the model request digest from the executor's attempt-bound job
+    # digest reached the code and not the type -- so an embedder following it
+    # fetched a key that was never there.
+    assert {:ok, reply} = Shipped.complete(request(), [], Model.discard_progress())
+
+    declared = declared_reply_fields()
+    assert declared == reply |> Map.keys() |> Enum.sort()
+
+    # Every field `Loopex.Model` requires of a reply is declared, and the field
+    # the rename left behind is not.
+    for required <- [
+          :text,
+          :identity,
+          :usage,
+          :tool_calls,
+          :delta_count,
+          :streamed,
+          :canonical_request_bytes,
+          :staged_request_digest
+        ] do
+      assert required in declared
+    end
+
+    refute :canonical_request_digest in declared
+  end
+
+  defp declared_reply_fields do
+    {:ok, types} = Code.Typespec.fetch_types(Loopex.LLM.ReqLLM)
+
+    {:type, {:reply, {:type, _line, :map, fields}, []}} =
+      Enum.find(types, &match?({:type, {:reply, _definition, []}}, &1))
+
+    fields
+    |> Enum.map(fn {:type, _line, :map_field_exact, [{:atom, _key_line, name}, _value]} ->
+      name
+    end)
+    |> Enum.sort()
   end
 
   test "the model and executor progress domains carry separate sequences each closed by its own content free item" do
@@ -190,10 +572,20 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
 
   test "a gapless sequence within one stream domain and its closing total make lost progress detectable" do
     domain = StreamDomain.derive(:model, "s1", "op-1", 1)
-    delivered = for sequence <- 1..5, do: %{stream_domain_id: domain, model_sequence: sequence}
+    delivered = for sequence <- 0..4, do: %{stream_domain_id: domain, model_sequence: sequence}
     closure = StreamDomain.model_closed("t1", domain, 0, :complete, 5)
 
+    # ADR 0011 fixes the base: a model sequence starts at zero for each attempt
+    # and increases by one per emitted delta. A suite that accepted a sequence
+    # starting at one would protect the off-by-one instead of the algebra, and
+    # the count would then have to be read as the last sequence rather than as a
+    # total.
+    assert Enum.min(Enum.map(delivered, & &1.model_sequence)) == 0
     assert gapless?(delivered) and length(delivered) == closure.delta_count
+
+    # The closing total is a count and never a final sequence number, which is
+    # what lets a domain that emitted nothing state zero exactly.
+    assert closure.delta_count == Enum.max(Enum.map(delivered, & &1.model_sequence)) + 1
 
     # Drop one from the middle: the gap is detectable without any timeout.
     with_gap = List.delete_at(delivered, 2)
@@ -210,7 +602,7 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     items
     |> Enum.map(& &1.model_sequence)
     |> Enum.sort()
-    |> Enum.with_index(1)
+    |> Enum.with_index(0)
     |> Enum.all?(fn {sequence, expected} -> sequence == expected end)
   end
 
@@ -310,6 +702,17 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     # someone has to remember.
     refute match?({:ok, _reply}, Cancelled.complete(request(), [], observed))
 
+    # The shipped adapter reaches the same place when its provider stream is cut,
+    # so this is the runtime's behaviour and not only the fake's.
+    assert {:error, _reason} =
+             Shipped.complete(
+               request(),
+               [chunks: ["half a th"], cut_after_chunks: true],
+               observed
+             )
+
+    assert_received {:delta, %{kind: :text_delta, text: "half a th"}}
+
     # The domain still closes, abandoned, stating what the coordinator observed.
     domain = StreamDomain.derive(:model, "s1", "op-1", 1)
     closure = StreamDomain.model_closed("t1", domain, 0, :abandoned, 1)
@@ -347,9 +750,12 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
 
     assert first != second
 
-    # Each carries its own sequence from one, and each closes with its own count.
-    first_items = for n <- 1..3, do: %{stream_domain_id: first, model_sequence: n}
-    second_items = for n <- 1..2, do: %{stream_domain_id: second, model_sequence: n}
+    # Each carries its own sequence from zero, and each closes with its own
+    # count. Both attempts starting at zero under one turn is exactly why the
+    # domain has to exist: without it the second attempt's first delta reads as a
+    # duplicate of the first attempt's.
+    first_items = for n <- 0..2, do: %{stream_domain_id: first, model_sequence: n}
+    second_items = for n <- 0..1, do: %{stream_domain_id: second, model_sequence: n}
 
     first_closure = StreamDomain.model_closed("t1", first, 0, :abandoned, 3)
     second_closure = StreamDomain.model_closed("t1", second, 0, :complete, 2)
