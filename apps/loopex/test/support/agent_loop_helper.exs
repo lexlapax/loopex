@@ -163,7 +163,8 @@ defmodule Loopex.AgentLoopTestExecutor do
        progress_count: 1,
        observed_at_ms: System.system_time(:millisecond),
        child_environment_names: [],
-       provider_credential_present: false
+       provider_credential_present: false,
+       artifacts: []
      }}
   end
 end

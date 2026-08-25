@@ -184,6 +184,7 @@ defmodule Loopex.Executor.Local do
     fencing_token = Keyword.fetch!(options, :fencing_token)
     leases = Keyword.fetch!(options, :workspace_leases)
     ledger_root = Keyword.fetch!(options, :ledger_root) |> Path.expand()
+    artifacts = Keyword.get(options, :artifacts)
 
     valid =
       is_binary(identity) and byte_size(identity) > 0 and is_integer(epoch) and epoch >= 0 and
@@ -199,6 +200,7 @@ defmodule Loopex.Executor.Local do
          fencing_token: fencing_token,
          leases: leases,
          ledger_root: ledger_root,
+         artifacts: artifacts,
          dispatches: %{}
        }}
     else
@@ -381,8 +383,12 @@ defmodule Loopex.Executor.Local do
          arguments,
          options
        ) do
-    {outcome, output} = run_coding_tool(job, tool, workspace, arguments, options)
-    receipt(state, job, tool, outcome, output, coding_tool_environment(arguments))
+    {outcome, output, artifacts} =
+      job
+      |> run_coding_tool(tool, workspace, arguments, options)
+      |> spill(state, job)
+
+    receipt(state, job, tool, outcome, output, coding_tool_environment(arguments), artifacts)
   end
 
   defp run_tool(state, job, tool, lease_pid, workspace, arguments, options) do
@@ -407,7 +413,7 @@ defmodule Loopex.Executor.Local do
     {outcome, output} = await_port(port, monitor, lease_pid, <<>>)
     Process.demonitor(monitor, [:flush])
 
-    receipt(state, job, tool, outcome, output, demonstration_environment())
+    receipt(state, job, tool, outcome, output, demonstration_environment(), [])
   end
 
   # Concept: the three filesystem tools start no child, so they hold no
@@ -451,8 +457,8 @@ defmodule Loopex.Executor.Local do
       case File.read(resolved) do
         {:ok, content} ->
           case CodingTools.bound_output(content, CodingTools.limits().read_bytes) do
-            {:complete, bounded} -> {:completed, bounded}
-            {:truncated, kept, _full} -> {:completed, truncation_marker(kept, byte_size(content))}
+            {:complete, bounded} -> {:completed, bounded, :complete}
+            {:truncated, kept, full} -> {:completed, kept, {:truncated, full}}
           end
 
         {:error, reason} ->
@@ -615,8 +621,8 @@ defmodule Loopex.Executor.Local do
 
   defp bound_process_output(output) do
     case CodingTools.bound_output(output, CodingTools.limits().output_bytes) do
-      {:complete, bounded} -> {:completed, bounded}
-      {:truncated, kept, _full} -> {:completed, truncation_marker(kept, byte_size(output))}
+      {:complete, bounded} -> {:completed, bounded, :complete}
+      {:truncated, kept, full} -> {:completed, kept, {:truncated, full}}
     end
   end
 
@@ -646,6 +652,45 @@ defmodule Loopex.Executor.Local do
        do: budget
 
   defp declared_wall_time(_tool), do: nil
+
+  # Concept: output beyond a tool's bound is retained, not discarded.
+  #
+  # Technical depth: a bounded tool returned the kept prefix and dropped the
+  # rest, so the marker said how many bytes existed and nothing could reach them.
+  # The whole output is written to the artifact store and the model is shown the
+  # notice naming the reference, which is what makes the bound a truncation
+  # rather than a loss.
+  #
+  # A tool whose output fits spills nothing. Where no artifact store is composed,
+  # or the store refuses, the tool keeps the marker it had: an operator loses the
+  # retrieval, never the result, and the receipt says truthfully that nothing was
+  # retained.
+  defp spill({outcome, output}, state, job), do: spill({outcome, output, :complete}, state, job)
+
+  defp spill({outcome, output, :complete}, _state, _job), do: {outcome, output, []}
+
+  defp spill({outcome, kept, {:truncated, full}}, %{artifacts: nil}, _job),
+    do: {outcome, truncation_marker(kept, byte_size(full)), []}
+
+  defp spill({outcome, kept, {:truncated, full}}, state, job) do
+    metadata = %{
+      "role" => "tool_output",
+      "media_type" => "text/plain",
+      "session_id" => job.session_id,
+      "tool_call_id" => job.tool_call_id
+    }
+
+    %{module: module, handle: handle} = state.artifacts
+
+    case module.put(handle, full, metadata) do
+      {:ok, reference} ->
+        {outcome, Loopex.ArtifactStore.truncation_notice(kept, byte_size(full), reference),
+         [reference]}
+
+      {:error, _reason} ->
+        {outcome, truncation_marker(kept, byte_size(full)), []}
+    end
+  end
 
   # Concept: a tool child receives an environment this executor constructed, not
   # the one this operating-system process happens to be holding.
@@ -921,7 +966,7 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp receipt(state, job, tool, outcome, output, environment) do
+  defp receipt(state, job, tool, outcome, output, environment, artifacts) do
     %{
       protocol_version: 1,
       job_id: job.job_id,
@@ -943,7 +988,8 @@ defmodule Loopex.Executor.Local do
       progress_count: 0,
       observed_at_ms: System.system_time(:millisecond),
       child_environment_names: environment_names(environment),
-      provider_credential_present: credential_present?(environment)
+      provider_credential_present: credential_present?(environment),
+      artifacts: artifacts
     }
   end
 

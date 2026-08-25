@@ -36,6 +36,7 @@ defmodule Loopex.Runtime.SessionState do
   or promotion, and `charged` accumulates that run's token charge with the
   source that produced it.
   """
+  alias Loopex.ArtifactStore
   alias Loopex.Bounds
   alias Loopex.Conversation
 
@@ -1219,7 +1220,15 @@ defmodule Loopex.Runtime.SessionState do
         |> append_element(run_id, result)
         |> put_pending(run_id, next_work)
 
-      {:ok, next, [tool_finished_event(state.session_id, job, to_string(receipt.outcome))]}
+      {:ok, next,
+       [
+         tool_finished_event(
+           state.session_id,
+           job,
+           to_string(receipt.outcome),
+           receipt.artifacts
+         )
+       ]}
     else
       _other -> {:error, :invalid_executor_receipt_transition}
     end
@@ -1742,16 +1751,45 @@ defmodule Loopex.Runtime.SessionState do
       :progress_count,
       :observed_at_ms,
       :child_environment_names,
-      :provider_credential_present
+      :provider_credential_present,
+      :artifacts
     ]
 
     with {:ok, receipt} <- decode_top(encoded, fields),
-         {:ok, outcome} <- decode_receipt_outcome(receipt.outcome) do
-      {:ok, %{receipt | outcome: outcome}}
+         {:ok, outcome} <- decode_receipt_outcome(receipt.outcome),
+         {:ok, artifacts} <- decode_artifacts(receipt.artifacts) do
+      {:ok, %{receipt | outcome: outcome, artifacts: artifacts}}
     else
       _other -> {:error, :invalid_plain_receipt}
     end
   end
+
+  # Concept: a spilled artifact crosses this boundary as plain bounded data.
+  #
+  # Technical depth: the reference is journalled and published, so it is checked
+  # against the port's own predicate on the way in rather than trusted because
+  # an executor sent it. A malformed reference fails the receipt instead of
+  # reaching an operator as a retrieval handle that resolves to nothing.
+  defp decode_artifacts(artifacts) when is_list(artifacts) do
+    decoded = Enum.map(artifacts, &decode_artifact_reference/1)
+
+    if Enum.all?(decoded, &ArtifactStore.valid_reference?/1),
+      do: {:ok, decoded},
+      else: :error
+  end
+
+  defp decode_artifacts(_artifacts), do: :error
+
+  defp decode_artifact_reference(reference) when is_map(reference) do
+    Map.new(reference, fn
+      {key, value} when is_binary(key) -> {String.to_existing_atom(key), value}
+      {key, value} -> {key, value}
+    end)
+  rescue
+    ArgumentError -> %{}
+  end
+
+  defp decode_artifact_reference(_reference), do: %{}
 
   defp decode_receipt_outcome("completed"), do: {:ok, :completed}
   defp decode_receipt_outcome("failed"), do: {:ok, :failed}
@@ -1934,7 +1972,15 @@ defmodule Loopex.Runtime.SessionState do
     }
   end
 
-  defp tool_finished_event(session_id, job, outcome) do
+  # Concept: an operator can retrieve what a tool produced but the model was not
+  # shown.
+  #
+  # Technical depth: the spilled reference travels on the public plane because
+  # that is where an operator reads, and it carries the digest, media type, size
+  # and role beside the opaque locator so a reader knows what they are asking for
+  # before they ask. A tool that spilled nothing carries an empty list rather
+  # than an absent field, so a consumer never has to distinguish the two.
+  defp tool_finished_event(session_id, job, outcome, artifacts \\ []) do
     %{
       "run_id" => job.run_id,
       "turn_id" => job.turn_id,
@@ -1942,8 +1988,19 @@ defmodule Loopex.Runtime.SessionState do
       "operation_id" => job.operation_id,
       "tool_id" => job.tool_id,
       "outcome" => outcome,
+      "artifacts" => Enum.map(artifacts, &public_artifact/1),
       event_id: stable_id("event-tool-finished", session_id, job.tool_call_id),
       kind: "tool.finished"
+    }
+  end
+
+  defp public_artifact(reference) do
+    %{
+      "digest" => reference.digest,
+      "media_type" => reference.media_type,
+      "size" => reference.size,
+      "role" => reference.role,
+      "locator" => reference.locator
     }
   end
 

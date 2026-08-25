@@ -1,3 +1,51 @@
+defmodule Loopex.Executor.Local.CodingToolsTest.RecordingStore do
+  @moduledoc false
+
+  # Concept: an artifact store that remembers what an executor handed it.
+  #
+  # Technical depth: the claim under test is that the executor spills through the
+  # port, not that a particular adapter stores bytes well -- the local adapter has
+  # its own conformance suite for that. Recording here is what lets the case
+  # assert on the bytes the executor passed rather than on bytes a test wrote.
+
+  @behaviour Loopex.ArtifactStore
+
+  def start, do: Agent.start_link(fn -> %{} end)
+  def stored(pid), do: Agent.get(pid, & &1)
+
+  @impl Loopex.ArtifactStore
+  def put(pid, bytes, metadata) do
+    digest = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+
+    reference = %{
+      digest: digest,
+      media_type: Map.get(metadata, "media_type", "application/octet-stream"),
+      size: byte_size(bytes),
+      role: Map.get(metadata, "role", "tool_output"),
+      locator: digest
+    }
+
+    :ok = Agent.update(pid, &Map.put(&1, digest, bytes))
+    {:ok, reference}
+  end
+
+  @impl Loopex.ArtifactStore
+  def fetch(pid, reference) do
+    case Agent.get(pid, &Map.fetch(&1, reference.locator)) do
+      {:ok, bytes} -> {:ok, bytes}
+      :error -> {:error, :unknown_artifact}
+    end
+  end
+
+  @impl Loopex.ArtifactStore
+  def stat(pid, reference) do
+    case Agent.get(pid, &Map.fetch(&1, reference.locator)) do
+      {:ok, bytes} -> {:ok, %{reference | size: byte_size(bytes)}}
+      :error -> {:error, :unknown_artifact}
+    end
+  end
+end
+
 defmodule Loopex.Executor.Local.CodingToolsTest do
   @moduledoc false
 
@@ -30,7 +78,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     root
   end
 
-  defp executor_for(root) do
+  defp executor_for(root, artifacts \\ nil) do
     lease_id = "lease-#{System.unique_integer([:positive])}"
     {:ok, lease} = WorkspaceLease.start_link(id: lease_id, path: root, fencing_token: @fence)
 
@@ -43,14 +91,25 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         epoch: 3,
         fencing_token: @fence,
         workspace_leases: %{lease_id => lease},
-        ledger_root: ledger
+        ledger_root: ledger,
+        artifacts: artifacts
       )
 
     {executor, lease_id}
   end
 
   defp run(root, tool_id, arguments, overrides \\ %{}) do
-    {executor, lease_id} = executor_for(root)
+    # A case that composed its own executor passes it in; everything else gets a
+    # fresh one, as before.
+    {overrides, {executor, lease_id}} =
+      case overrides do
+        %{executor: executor, lease_id: lease_id} ->
+          {Map.drop(overrides, [:executor, :lease_id]), {executor, lease_id}}
+
+        _fresh ->
+          {overrides, executor_for(root)}
+      end
+
     unique = System.unique_integer([:positive])
 
     job_fields =
@@ -314,6 +373,62 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert {:ok, quiet} = run(root, "loopex.read", %{"path" => "notes.txt"})
     assert quiet.child_environment_names == []
     refute quiet.provider_credential_present
+  end
+
+  test "output beyond a tool's bound spills through the artifact store and the model sees a bounded notice naming it" do
+    root = workspace()
+    {:ok, store} = Loopex.Executor.Local.CodingToolsTest.RecordingStore.start()
+
+    {executor, lease_id} =
+      executor_for(root, %{
+        module: Loopex.Executor.Local.CodingToolsTest.RecordingStore,
+        handle: store
+      })
+
+    full = String.duplicate("x", CodingTools.limits().read_bytes + 5_000)
+    File.write!(Path.join(root, "large.txt"), full)
+
+    assert {:ok, receipt} =
+             run(root, "loopex.read", %{"path" => "large.txt"}, %{
+               executor: executor,
+               lease_id: lease_id
+             })
+
+    # Concept: the whole output is retained, not discarded with a count of what
+    # was lost.
+    #
+    # Technical depth: the executor previously kept the prefix and dropped the
+    # rest, so the marker said how many bytes existed and nothing could reach
+    # them. The port had a spill path and no production caller, and the locked
+    # cases exercised the port rather than a real run -- which is how an outcome
+    # stayed green while undelivered.
+    assert receipt.outcome == :completed
+    assert [reference] = receipt.artifacts
+    assert reference.size == byte_size(full)
+    assert reference.role == "tool_output"
+    assert String.match?(reference.digest, ~r/^[0-9a-f]{64}$/)
+
+    stored = Loopex.Executor.Local.CodingToolsTest.RecordingStore.stored(store)
+    assert Map.fetch!(stored, reference.locator) == full
+
+    # The model is shown a bounded result that says what was truncated and names
+    # the reference, rather than a prefix that reads like the whole answer.
+    assert byte_size(receipt.output) < byte_size(full)
+    assert receipt.output =~ "truncated"
+    assert receipt.output =~ reference.digest
+    assert String.starts_with?(receipt.output, binary_part(full, 0, 100))
+
+    # A tool whose output fits spills nothing rather than an empty artifact.
+    File.write!(Path.join(root, "small.txt"), "short")
+
+    assert {:ok, quiet} =
+             run(root, "loopex.read", %{"path" => "small.txt"}, %{
+               executor: executor,
+               lease_id: lease_id
+             })
+
+    assert quiet.artifacts == []
+    assert quiet.output == "short"
   end
 
   test "a tool child process group is owned and terminated with its job and no group member survives" do

@@ -113,13 +113,15 @@ defmodule LoopexComposition do
 
     with {:ok, lease} <-
            WorkspaceLease.start_link(id: lease_id, path: workspace, fencing_token: 1),
+         {:ok, spill} <- artifacts(state_root),
          {:ok, executor} <-
            Local.start_link(
              identity: "executor-local",
              epoch: 1,
              fencing_token: 1,
              workspace_leases: %{lease_id => lease},
-             ledger_root: Path.join(state_root, "receipts")
+             ledger_root: Path.join(state_root, "receipts"),
+             artifacts: %{module: Artifacts, handle: spill}
            ) do
       {:ok,
        %{
