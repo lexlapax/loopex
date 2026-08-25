@@ -34,6 +34,7 @@ defmodule LoopexCli do
   alias LoopexCli.Policy.AllowAll
   alias LoopexCli.Interrupt
   alias LoopexCli.Placement
+  alias LoopexCli.ProjectResources
   alias LoopexCli.Render
 
   @doc """
@@ -376,11 +377,22 @@ defmodule LoopexCli do
          :ok <- own_placement(root) do
       {:ok, placement} = Loopex.runtime_placement_id(root)
 
+      # Concept: what a workspace says about how an agent should behave is shown
+      # to the operator before the run starts.
+      #
+      # Technical depth: discovery is the host's job and this command is the
+      # host. The manifest is carried into the runtime with no decision beside
+      # it, which is the declined path: the kernel journals a receipt naming the
+      # manifest it withheld rather than one saying nothing was ever found.
+      manifest = ProjectResources.discover(workspace)
+      ProjectResources.announce(manifest, workspace)
+
       LoopexComposition.start(
         runtime_id: placement,
         state_root: root,
         workspace: workspace,
         policy: policy,
+        project_manifest: manifest,
         progress_to: self()
       )
     end

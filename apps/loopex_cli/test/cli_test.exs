@@ -564,6 +564,33 @@ defmodule LoopexCliTest do
     # non-interactive run is the declined path by construction rather than by a
     # flag someone must remember to pass.
     refute File.read!(app_path("lib/loopex_cli.ex")) =~ "project_decision"
+
+    # Concept: an operator cannot decide about something they were never shown.
+    #
+    # Technical depth: discovery is the host's job and this command is the host,
+    # so it looks, and it says what it found. It previously looked at nothing, so
+    # a repository carrying an `AGENTS.md` produced a run that withheld it
+    # silently -- indistinguishable to the operator from a repository that
+    # carried none.
+    {_state_root, workspace} = roots()
+    File.write!(Path.join(workspace, "AGENTS.md"), "always run the tests")
+
+    found = LoopexCli.ProjectResources.discover(workspace)
+    assert %{entries: [%{label: "AGENTS.md"}]} = found
+    assert {:ok, digest, _resolved} = Loopex.ProjectResource.digest(found)
+
+    shown = capture_io(:stderr, fn -> LoopexCli.ProjectResources.announce(found, workspace) end)
+    assert shown =~ "AGENTS.md"
+    assert shown =~ digest
+    assert shown =~ "withheld"
+
+    # And a workspace carrying none says so, rather than saying nothing.
+    {_other_root, empty} = roots()
+    absent = LoopexCli.ProjectResources.discover(empty)
+    assert absent == nil
+
+    quiet = capture_io(:stderr, fn -> LoopexCli.ProjectResources.announce(absent, empty) end)
+    assert quiet =~ "no project resources found"
   end
 
   test "the command surface drives only the public facade and owns no loop store cursor or authority" do

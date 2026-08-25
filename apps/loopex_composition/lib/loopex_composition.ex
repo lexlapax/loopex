@@ -66,6 +66,7 @@ defmodule LoopexComposition do
         executor: executor,
         tools: CodingTools.definitions(),
         active_tools: Enum.map(CodingTools.definitions(), & &1["tool_id"]),
+        project_manifest: Keyword.get(options, :project_manifest),
         progress_to: Keyword.get(options, :progress_to),
         diagnostics_to: Keyword.get(options, :diagnostics_to)
       )
