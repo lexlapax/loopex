@@ -3,10 +3,10 @@
 All notable changes to Loopex are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 semantic versioning under the
-[0.x compatibility policy](docs/vision.md#concept-vision-compatibility) — every
-public surface is labeled stable, release-candidate, or
-experimental, and experimental surfaces may break in a minor release with
-migration notes.
+[0.x compatibility policy](docs/vision.md#concept-vision-compatibility). That
+policy labels public surfaces stable, release-candidate, or experimental once
+there are public surfaces to label. Nothing is labelled yet — see
+[compatibility surfaces](docs/developer/compatibility-surfaces.md#concept).
 
 Nothing is released or installable yet. Entries below the first release record
 repository, planning, and milestone implementation work, and carry no
@@ -22,7 +22,7 @@ the exact document set its milestone must update.
 ### Added
 
 - `loopex`, a command an operator runs from their own terminal. `run` submits a
-  prompt into a durable session and streams the answer as it is produced;
+  prompt into a durable session and reports the answer a turn at a time;
   `--steer` joins the run already going and `--follow-up` queues the next one;
   `sessions` lists the sessions in a state root and `resume` continues one;
   `cancel` reconciles a session a dead process left behind; `artifact` reads back
@@ -74,26 +74,6 @@ the exact document set its milestone must update.
   authority in front of them, the loop and its contracts, and every surface M2
   touches — all unstable, none labelled or frozen. An M1-era session data root is
   not readable by M2.
-
-### Changed
-
-- The model reply carries the provider's own identifier for the response. It is
-  the one field a deterministic adapter cannot invent, and it is what a person
-  looks up in the provider account when confirming that a real call happened.
-- A tool that completed and produced no output now says so rather than
-  committing an empty result. An empty result is indistinguishable to a model
-  from a call that failed silently, and a real provider answered it by making the
-  same call again.
-- The public tool events carry the tool's generation alongside the call
-  identifier, so a terminal reading the public plane can name what is running and
-  what was refused.
-
-### Fixed
-
-- The ReqLLM adapter sent only the most recent user message rather than the
-  committed conversation. Every test passed, because fixtures read
-  `request.messages` directly, while the real path had the model seeing its
-  original instruction again on every turn.
 
 - The M1 single-machine working loop: explicit supervised runtime references,
   Store-backed session creation and owner succession, one serial active run,
@@ -682,6 +662,26 @@ the exact document set its milestone must update.
 - The duplicated milestone ladder in `README.md`. It restated `docs/roadmap.md`
   and had already drifted from it; the README now points at the roadmap and the
   canonical plans status register.
+
+### Changed
+
+- The model reply carries the provider's own identifier for the response. It is
+  the one field a deterministic adapter cannot invent, and it is what a person
+  looks up in the provider account when confirming that a real call happened.
+- A tool that completed and produced no output now says so rather than
+  committing an empty result. An empty result is indistinguishable to a model
+  from a call that failed silently, and a real provider answered it by making the
+  same call again.
+- The public tool events carry the tool's generation alongside the call
+  identifier, so a terminal reading the public plane can name what is running and
+  what was refused.
+
+### Fixed
+
+- The ReqLLM adapter sent only the most recent user message rather than the
+  committed conversation. Every test passed, because fixtures read
+  `request.messages` directly, while the real path had the model seeing its
+  original instruction again on every turn.
 
 ## Seed bootstrap — closed 2026-08-15
 

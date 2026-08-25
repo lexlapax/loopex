@@ -48,8 +48,9 @@ milestone branch until closure; `main`'s product baseline remains M1.
 
 Loopex remains source-tree milestone work, not
 an installable package, release, or frozen public API. Start with the
-[operator runtime guide](docs/operator/runtime.md#concept) to see the current
-feature boundary and run the complete source-tree loop, or use the
+[coding sessions guide](docs/operator/coding-sessions.md#concept) for the `loopex`
+command, or the [operator runtime guide](docs/operator/runtime.md#concept) for the
+embedded runtime beneath it and run the complete source-tree loop, or use the
 [developer embedding guide](docs/developer/runtime-and-embedding.md#concept) to
 understand the composition and commit ordering.
 

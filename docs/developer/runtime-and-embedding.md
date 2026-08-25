@@ -233,7 +233,7 @@ origin binding before committing one receipt fact or terminal unknown outcome.
 - `mix loopex.docs_check` — compiled public documentation orders Concept before
   Technical depth.
 - `mix loopex.status` — governance rows, indexes, links, and bound artifacts.
-- `/bin/bash -p scripts/check-m2-gate.sh` — the current locked milestone gate,
+- `bash scripts/check-m2-gate.sh` — the current locked milestone gate,
   which also re-runs M1's selectors as inherited roles.
   `scripts/check-m1-gate.sh` remains the closed M1 gate. Real-provider roles
   receive their credential through the gate's bounded stdin protocol; do not

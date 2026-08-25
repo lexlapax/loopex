@@ -50,8 +50,12 @@ Two options decide where the session's data and work live:
 | `--state-root` | Where durable session records and artifacts are kept | resolved from `LOOPEX_HOME` |
 | `--workspace` | The directory the tools act on | the current directory |
 
-The answer streams to standard output as the model produces it. What the session
-is doing — each tool starting, each tool's outcome, and the run's ending — goes
+The answer reaches standard output as the model produces it, in whatever
+granularity the model adapter delivers. **The shipped adapter does not stream**:
+it returns each turn's answer complete, so an answer appears a turn at a time
+rather than a word at a time. The runtime and the terminal both carry the
+streaming path — an adapter that streams needs no change here — but no adapter
+that ships today uses it. What the session is doing — each tool starting, each tool's outcome, and the run's ending — goes
 to standard error, so `loopex run ... > answer.txt` keeps the answer and leaves
 the commentary on your terminal.
 
@@ -147,9 +151,10 @@ A repository may carry a file such as `AGENTS.md` that is written to shape how a
 agent behaves. Loopex will not put that content in front of the model unless you
 decide it should be there.
 
-Discovery resolves a canonical, ordered set under declared path, per-file size,
-and total limits, and shows you each path, its provenance, and the manifest
-digest before you decide. A decision binds the workspace, revision, manifest, and
+The command looks for `AGENTS.md` at the root of the workspace — one label, no
+recursion, no globbing — and tells you what it found, how large it is, and the
+manifest digest a decision would bind, before the run starts. A discovery rule
+you cannot predict is one you cannot meaningfully consent to. A decision binds the workspace, revision, manifest, and
 content digests: change any of them and the decision no longer applies.
 
 A run with no matching positive decision **fails closed toward withholding
@@ -157,6 +162,8 @@ content, not toward refusing to work**. It stages that class empty, journals a
 declined receipt saying why, and runs the coding task without the project block.
 The command passes no decision of its own, so a non-interactive run is the
 declined path by construction rather than by a flag someone has to remember.
+There is no interactive prompt in this milestone: what you get is the showing and
+an explicit statement that the content was withheld.
 
 An admitted block changes no tool set, no policy decision, no bound, and no
 grant. It is provenance-typed, budgeted, receipt-journalled data, never a grant
@@ -187,7 +194,9 @@ standard library only: a dependency here would land in an operator's install for
 the sake of flag parsing.
 
 Exit status is `0` for success and `1` for a refusal or failure, with the reason
-on standard error prefixed `loopex:`.
+on standard error prefixed `loopex:`. An unrecognised subcommand, or no arguments
+at all, prints the usage text and exits `0` — it is a request for help rather
+than a failed run.
 
 ### Where State Lives
 
@@ -198,6 +207,7 @@ on standard error prefixed `loopex:`.
 | `receipts/` | The executor's receipt ledger |
 | `sessions/` | The session directory `loopex sessions` reads |
 | `placement.lock` | The owning process identifier, for single-owner exclusion |
+| `runtime_id` | The durable runtime placement identity sessions are recorded under |
 
 The state root resolves from `LOOPEX_HOME` and never from Elixir application
 environment, so the directory an operator's shell names is the directory used.

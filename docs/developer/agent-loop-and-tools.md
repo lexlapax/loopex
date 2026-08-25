@@ -540,7 +540,7 @@ are transient and are never durable truth.
 - `mix loopex.docs_check` — compiled public documentation orders Concept before
   Technical depth.
 - `mix loopex.status` — governance rows, indexes, links, and bound artifacts.
-- `/bin/bash -p scripts/check-m2-gate.sh` — locked milestone gate. Real-provider
+- `bash scripts/check-m2-gate.sh` — locked milestone gate. Real-provider
   roles receive their credential through the gate's bounded stdin protocol; do
   not export it to the gate's initial environment or put it in argv.
 

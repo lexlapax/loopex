@@ -39,10 +39,15 @@ and a command that already ran may have already changed something.
 <a id="operator-tools-reach"></a>
 ## What Local Execution Can Reach
 
-Every tool resolves paths against the workspace root and refuses anything that
-escapes it, whether by `..` traversal or through a symbolic link. The check is
-against the *resolved* path, so a link pointing outside is refused even though
-the name that reached the tool looked contained.
+`read`, `write` and `edit` resolve paths against the workspace root and refuse
+anything that escapes it, whether by `..` traversal or through a symbolic link.
+The check is against the *resolved* path, so a link pointing outside is refused
+even though the name that reached the tool looked contained.
+
+`bash` is not path-checked and cannot be. It runs a command, and a command can
+name any path its process can reach; it starts in the workspace and is confined
+to it by nothing. That is the honest boundary, and the next paragraph is the
+reason it matters.
 
 `bash` runs a real command on your machine, as you, with your filesystem
 permissions. That is the honest statement of its reach: **it is not a sandbox.**
@@ -89,7 +94,7 @@ than being treated as either allow or deny.
 
 `--policy allow-all` selects a policy that allows every decision it is asked. It
 exists so you can run the command without writing a module first, and it says out
-loud what it is, once per session:
+loud what it is, once per process, at the first tool call a session makes:
 
 ```text
 loopex: the allow-all host policy is active. This is permissive local authority,
@@ -192,7 +197,9 @@ nothing.
 
 Executor progress proves its identity, epochs, digest, and fence before anything
 narrower is projected; an event that fails validation is dropped and counted
-rather than being forwarded to the operator.
+rather than being forwarded to the operator. The shipped local executor emits no
+progress, so that path is exercised by conformance rather than by an operator's
+own runs; a receipt from it reports a progress count of zero truthfully.
 
 ### Artifact References
 
