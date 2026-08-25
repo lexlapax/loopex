@@ -333,8 +333,17 @@ defmodule LoopexCliTest do
     # A real signal, delivered to this real operating-system process.
     {_output, 0} = System.cmd("/bin/kill", ["-TERM", System.pid()])
 
-    send(model, :release)
+    # Concept: the model call stays held until the interrupt has ended the run.
+    #
+    # Technical depth: releasing it first raced the abort. The handler submits
+    # the command from a separate process so it cannot stall the signal server,
+    # so on a machine where the released turn completed before that process was
+    # scheduled the run finished `completed` and the case failed -- correctly,
+    # about a run that had not been interrupted. Holding the call is also what
+    # the claim is about: the abort is admitted during a model call, and it is
+    # the abort that ends it rather than the model returning.
     finished = Enum.find(events(observe(attachment)), &(&1.kind == "run.finished"))
+    send(model, :release)
 
     assert finished, "the interrupt never ended the run"
     assert finished["outcome"] in ["cancelled", "outcome_unknown"]
@@ -358,9 +367,11 @@ defmodule LoopexCliTest do
 
     {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "run the tool")
 
-    # Abort while the tool is genuinely running, so cleanup is something that
-    # has to be confirmed rather than something already settled.
-    Process.sleep(80)
+    # Abort while the tool is genuinely running, so cleanup is something that has
+    # to be confirmed rather than something already settled. The abort waits for
+    # the tool to have started rather than for a duration, because a duration is
+    # a guess about scheduling and a loaded machine makes it the wrong guess.
+    observe_until(attachment, "tool.started")
     {:accepted, _abort} = Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
 
     output =
