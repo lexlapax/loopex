@@ -63,12 +63,28 @@ defmodule LoopexCli do
   behaviour the outcome names.
   """
   @spec dispatch([binary()]) :: :ok | {:error, binary()}
-  def dispatch(["run" | rest]), do: run(parse(rest))
-  def dispatch(["sessions" | rest]), do: sessions(parse(rest))
-  def dispatch(["resume" | rest]), do: resume(parse(rest))
-  def dispatch(["cancel" | rest]), do: cancel(parse(rest))
-  def dispatch(["artifact" | rest]), do: artifact(parse(rest))
+  def dispatch(["run" | rest]), do: admitted(rest, &run/1)
+  def dispatch(["sessions" | rest]), do: admitted(rest, &sessions/1)
+  def dispatch(["resume" | rest]), do: admitted(rest, &resume/1)
+  def dispatch(["cancel" | rest]), do: admitted(rest, &cancel/1)
+  def dispatch(["artifact" | rest]), do: admitted(rest, &artifact/1)
   def dispatch(_unrecognised), do: usage()
+
+  # Concept: input naming nothing this command offers is refused, whichever
+  # subcommand it was typed after.
+  #
+  # Technical depth: the check was reached only from `run`, so `loopex sessions
+  # --nudge x` dropped the flag silently -- which is the failure the refusal
+  # exists to prevent, surviving in four of the five subcommands. Refusing at
+  # dispatch means a subcommand added later inherits it rather than having to
+  # remember it.
+  defp admitted(arguments, command) do
+    {flags, words} = parse(arguments)
+
+    with :ok <- known_flags(flags) do
+      command.({flags, words})
+    end
+  end
 
   @doc """
   ## Concept
@@ -136,8 +152,7 @@ defmodule LoopexCli do
   # same-process by construction rather than by convention. Which signals reach
   # it, and why a terminal Ctrl-C is not one of them, is `LoopexCli.Interrupt`.
   defp run({flags, words}) do
-    with :ok <- known_flags(flags),
-         :ok <- one_input(flags),
+    with :ok <- one_input(flags),
          {:ok, policy} <- policy(Map.get(flags, "policy")),
          {:ok, prompt} <- prompt_of(words),
          {:ok, runtime} <- start_runtime(flags, policy),
@@ -263,8 +278,7 @@ defmodule LoopexCli do
     with {:ok, session_id} <- positional(words, "a session identifier"),
          {:ok, root} <- state_root(flags),
          :none <- Placement.live_owner(root),
-         {:ok, policy} <- policy(Map.get(flags, "policy")),
-         {:ok, runtime} <- start_runtime(flags, policy),
+         {:ok, runtime} <- start_runtime(flags, reconciling_policy(flags)),
          {:ok, _resumed} <-
            Loopex.resume_known_session(root, runtime, session_id, unique_id()),
          {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
@@ -324,9 +338,42 @@ defmodule LoopexCli do
       else: {:error, "the workspace #{path} is not a directory"}
   end
 
+  # Concept: the authority a reconciling command needs is none.
+  #
+  # Technical depth: `cancel` submits an abort and runs no tool, so requiring a
+  # host policy made every documented invocation of it fail before it reached the
+  # session it was asked to reconcile. The runtime still refuses to start with no
+  # policy at all where tools are active, so one is named here rather than
+  # omitted -- and an operator who names their own still gets theirs.
+  defp reconciling_policy(flags) do
+    case policy(Map.get(flags, "policy")) do
+      {:ok, module} -> module
+      {:error, _absent} -> AllowAll
+    end
+  end
+
+  # Concept: one live command owns a state root while it is using it.
+  #
+  # Technical depth: the lock was implemented and never taken, so the exclusion
+  # it describes never engaged and `cancel` never found a live owner to refuse.
+  # It is taken for the life of the command and released when it ends; a lock
+  # left by a process that died is reclaimed by the next acquirer through the
+  # liveness check rather than needing this to have run.
+  defp own_placement(root) do
+    case Placement.acquire(root) do
+      {:ok, lock} ->
+        System.at_exit(fn _status -> Placement.release(lock) end)
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp start_runtime(flags, policy) do
     with {:ok, workspace} <- workspace(flags),
-         {:ok, root} <- state_root(flags) do
+         {:ok, root} <- state_root(flags),
+         :ok <- own_placement(root) do
       {:ok, placement} = Loopex.runtime_placement_id(root)
 
       LoopexComposition.start(

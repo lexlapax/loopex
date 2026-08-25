@@ -240,12 +240,22 @@ defmodule LoopexCliTest do
 
     assert both =~ "different requests"
 
-    # Input naming neither is refused rather than silently dropped.
-    assert {:error, neither} =
-             LoopexCli.dispatch(["run", "--policy", "allow-all", "--nudge", "x", "do the thing"])
+    # Input naming neither is refused rather than silently dropped, and the
+    # refusal reaches every subcommand rather than only the one it was written
+    # for: a flag dropped by `sessions` is dropped exactly as silently.
+    for arguments <- [
+          ["run", "--policy", "allow-all", "--nudge", "x", "do the thing"],
+          ["sessions", "--nudge", "x"],
+          ["resume", "s1", "--nudge", "x"],
+          ["cancel", "s1", "--nudge", "x"],
+          ["artifact", "abc", "--nudge", "x"]
+        ] do
+      assert {:error, neither} = LoopexCli.dispatch(arguments),
+             "#{hd(arguments)} admitted an unrecognised flag"
 
-    assert neither =~ "--nudge"
-    assert neither =~ "neither a steer nor a follow-up"
+      assert neither =~ "--nudge"
+      assert neither =~ "neither a steer nor a follow-up"
+    end
   end
 
   test "tool progress from a running executor job reaches the operator's terminal before the tool finishes" do
@@ -400,6 +410,11 @@ defmodule LoopexCliTest do
              LoopexCli.dispatch(["cancel", "s_known_1", "--state-root", state_root])
 
     assert message =~ "live loopex process"
+
+    # Reconciling needs no host authority: it submits an abort and runs no tool.
+    # Requiring one made every documented invocation fail before it reached the
+    # session it was asked to reconcile.
+    refute message =~ "--policy is required"
 
     # A lock left by a process that is gone describes nothing, and the session
     # behind it is reconcilable rather than permanently blocked.

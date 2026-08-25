@@ -426,7 +426,27 @@ defmodule Loopex.Executor.Local do
   # system process, a signal path, and a termination story between the operator
   # and a `File.read`. `bash` is the tool that genuinely needs a child, and it is
   # the only one that gets one.
-  defp run_coding_tool(_job, _tool, workspace, %{kind: :read, path: path}, _options) do
+  # Concept: a filesystem tool is bounded by the same instant a shell tool is.
+  #
+  # Technical depth: these three start no child, so nothing could be terminated
+  # mid-flight and they carried no deadline at all -- a run whose deadline had
+  # already passed still read, wrote, or edited. They cannot be interrupted once
+  # begun, so the honest bound is refusing to begin: the deadline is checked
+  # before the effect rather than pretended to be enforced during it.
+  defp run_coding_tool(job, tool, workspace, %{kind: kind} = arguments, options)
+       when kind in [:read, :write, :edit] do
+    if System.system_time(:millisecond) >= effective_deadline(job, tool) do
+      {:failed, "the effective deadline passed before this tool began"}
+    else
+      run_bounded_tool(job, tool, workspace, arguments, options)
+    end
+  end
+
+  defp run_coding_tool(job, tool, workspace, %{kind: :bash} = arguments, options) do
+    run_owned_process(job, tool, workspace, arguments, options)
+  end
+
+  defp run_bounded_tool(_job, _tool, workspace, %{kind: :read, path: path}, _options) do
     with {:ok, resolved} <- CodingTools.resolve(workspace, path) do
       case File.read(resolved) do
         {:ok, content} ->
@@ -443,7 +463,7 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp run_coding_tool(
+  defp run_bounded_tool(
          _job,
          _tool,
          workspace,
@@ -469,7 +489,7 @@ defmodule Loopex.Executor.Local do
   # diagnostics below distinguish absent from ambiguous, and an absent match
   # reports the nearest line it did find, because "your string is not here" and
   # "your string is here twice" call for different corrections.
-  defp run_coding_tool(_job, _tool, workspace, %{kind: :edit} = arguments, _options) do
+  defp run_bounded_tool(_job, _tool, workspace, %{kind: :edit} = arguments, _options) do
     %{path: path, old: old, new: new} = arguments
 
     with {:ok, resolved} <- CodingTools.resolve(workspace, path),
@@ -502,10 +522,6 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp run_coding_tool(job, tool, workspace, %{kind: :bash} = arguments, options) do
-    run_owned_process(job, tool, workspace, arguments, options)
-  end
-
   # Concept: a command runs as a group this executor owns and can end.
   #
   # Technical depth: the child is started under `setsid`, so it becomes a process
@@ -519,8 +535,8 @@ defmodule Loopex.Executor.Local do
   # because the BEAM gives a port's os_pid but not the group the child chose. A
   # captured identity is the only one termination can honestly claim to have
   # confirmed.
-  defp run_owned_process(job, _tool, workspace, arguments, options) do
-    deadline = effective_deadline(job, arguments)
+  defp run_owned_process(job, tool, workspace, arguments, options) do
+    deadline = effective_deadline(job, tool)
     environment = child_environment()
     {launcher, command_arguments} = process_launcher(arguments, environment)
 
@@ -609,10 +625,27 @@ defmodule Loopex.Executor.Local do
   # Technical depth: a tool's own wall-time budget can only make a job end
   # sooner, never later. Taking the minimum is what stops a tool budget from
   # outliving the run that authorised it.
-  defp effective_deadline(job, _arguments) do
-    tool_budget = System.system_time(:millisecond) + 120_000
-    min(job.run_deadline, tool_budget)
+  # Concept: the earlier of the run's committed instant and the tool's own
+  # declared wall-time budget.
+  #
+  # Technical depth: the budget was a literal two minutes, so a tool's declared
+  # `wall_time_ms` was never read anywhere in the tree -- it happened to equal
+  # `loopex.bash`'s declaration and was wrong for the other three. Reading it
+  # from the definition is what makes the declaration mean something, and a
+  # definition that declares none falls back to the run's instant alone rather
+  # than to a number invented here.
+  defp effective_deadline(job, tool) do
+    case declared_wall_time(tool) do
+      nil -> job.run_deadline
+      budget -> min(job.run_deadline, System.system_time(:millisecond) + budget)
+    end
   end
+
+  defp declared_wall_time(%{coding: %{"budgets" => %{"wall_time_ms" => budget}}})
+       when is_integer(budget) and budget > 0,
+       do: budget
+
+  defp declared_wall_time(_tool), do: nil
 
   # Concept: a tool child receives an environment this executor constructed, not
   # the one this operating-system process happens to be holding.
