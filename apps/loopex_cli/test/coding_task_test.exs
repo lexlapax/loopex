@@ -257,10 +257,29 @@ defmodule LoopexCli.CodingTaskTest do
     state_root = Path.join(root, "state")
     on_exit(fn -> File.rm_rf(root) end)
 
+    # Concept: the demonstration asks for the work it claims to demonstrate.
+    #
+    # Technical depth: role Db's claim names several distinct tools including one
+    # edit and one shell, across several turns. A prompt that left the choice open
+    # would make the claim depend on which tool a real model happened to pick that
+    # run, which is not a property of this system and is exactly the kind of
+    # assertion that passes four times and fails the fifth. Naming the tools
+    # weakens nothing: what is under test is that the command runs them, streams
+    # them, and commits their effect, never that a model can infer which one to
+    # reach for.
+    #
+    # The steps depend on each other on purpose. A task whose steps are
+    # independent is one a model can and should batch into a single turn, and a
+    # single batched turn demonstrates a tool set rather than a loop. Step 2
+    # cannot be written until step 1's result is read, so the turns are real.
     prompt =
-      "In notes.md, replace the text \"first line\" with \"edited line\". " <>
-        "Then create summary.txt containing exactly the text edited line followed by a newline. " <>
-        "Then run cat notes.md to verify, and say what it printed."
+      "Work one step at a time, and wait for each tool's result before the next. " <>
+        "Step 1: use the read tool on notes.md and tell me its exact last line. " <>
+        "Step 2: use the edit tool to replace that exact line with \"edited line\". " <>
+        "Step 3: use the write tool to create summary.txt containing exactly the " <>
+        "text edited line followed by a newline. " <>
+        "Step 4: use the bash tool to run cat notes.md, and say in one sentence " <>
+        "what it printed. Use each tool exactly once."
 
     transcript =
       capture_io(:stderr, fn ->
@@ -284,6 +303,25 @@ defmodule LoopexCli.CodingTaskTest do
       end)
 
     assert_received {:out, answer}
+
+    # Concept: an attended demonstration says what it observed.
+    #
+    # Technical depth: the gate's selector runner suppresses the test formatter,
+    # so a failed assertion here reaches an operator as "the selector failed" and
+    # nothing else. What the run actually did travels on the diagnostic stream
+    # beside the attestation identifiers, where the runner passes it through.
+    IO.puts(
+      :stderr,
+      "loopex demonstration observed: tools=" <>
+        (~r/loopex\.[a-z]+/
+         |> Regex.scan(transcript)
+         |> List.flatten()
+         |> Enum.uniq()
+         |> Enum.join(",")) <>
+        " files=" <>
+        Enum.join(Enum.sort(File.ls!(workspace)), ",") <>
+        " ending=" <> if(transcript =~ "loopex: done", do: "done", else: "not-done")
+    )
 
     # The operator sees the committed result: the bytes on disk changed.
     assert File.read!(Path.join(workspace, "notes.md")) =~ "edited line"
