@@ -49,22 +49,24 @@ sealed. Anthropic's documented identifier form is written `msg_:16-64`.
 
 <!-- loopex:m2-attestations:start -->
 ```json
-{"role":"demonstration_db","selector":"apps/loopex_cli/test/coding_task_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":6,"response_id_form":"msg_:16-64","provider_response_ids":"msg_011CeNu8zsZwrNhRZb367vcU+msg_011CeNu954awYdVkkJmKyGfw+msg_011CeNu9AGcnTKAK8iG1QcCA+msg_011CeNu9EoDkkLVbFSaPSzwK+msg_011CeNu9Jzz8fJd89iDL1RCQ+msg_011CeNu8jtuq6fevJ7fnFENX","input_tokens":6478,"output_tokens":381,"candidate":"3934164464f42a4aa075c6f08aa42b5ffd43c1bc","recorded":"2026-08-25T05:17:49Z"}
+{"role":"demonstration_db","selector":"apps/loopex_cli/test/coding_task_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":6,"response_id_form":"msg_:16-64","provider_response_ids":"msg_011CePoVVZbT7C9gd6t31jfb+msg_011CePoVZ6uv5n3ykvGjrNRQ+msg_011CePoVdgVbZ2jhhusMxrMh+msg_011CePoVhWgR225uWo9vee8T+msg_011CePoVnWK8uLHRpX1QicGS+msg_011CePoVrccnJARL7DFgt5Pz","input_tokens":6494,"output_tokens":386,"candidate":"eadaf43fac5bb374d45d057c3d4c251ccfacaa44","recorded":"2026-08-25T16:44:23Z"}
 ```
 
 ```json
-{"role":"inherited_5c","selector":"apps/loopex_reference_client/test/real_model_session_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"msg_:16-64","provider_response_ids":"msg_011CeNu9v86VYfvb4SKurEBW+msg_011CeNuAjJ19ThY26XxN6tnC","input_tokens":1463,"output_tokens":112,"candidate":"3934164464f42a4aa075c6f08aa42b5ffd43c1bc","recorded":"2026-08-25T05:17:49Z"}
+{"role":"inherited_5c","selector":"apps/loopex_reference_client/test/real_model_session_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"msg_:16-64","provider_response_ids":"msg_011CePoWSDxFoTyPL4Y1XRgo+msg_011CePoXFMsjcQfmCabwDc5y","input_tokens":1463,"output_tokens":112,"candidate":"eadaf43fac5bb374d45d057c3d4c251ccfacaa44","recorded":"2026-08-25T16:44:23Z"}
 ```
 
 ```json
-{"role":"inherited_8b","selector":"apps/loopex_reference_client/test/end_to_end_recovery_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"msg_:16-64","provider_response_ids":"msg_011CeNuBKRqVdbs5uQbGD7pM+msg_011CeNuBvoLAhirJG3yay9c3","input_tokens":1463,"output_tokens":112,"candidate":"3934164464f42a4aa075c6f08aa42b5ffd43c1bc","recorded":"2026-08-25T05:17:49Z"}
+{"role":"inherited_8b","selector":"apps/loopex_reference_client/test/end_to_end_recovery_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"msg_:16-64","provider_response_ids":"msg_011CePoXrdfoZB9yfdXWoEEf+msg_011CePoYTjYVcAePWwVqaBWZ","input_tokens":1463,"output_tokens":112,"candidate":"eadaf43fac5bb374d45d057c3d4c251ccfacaa44","recorded":"2026-08-25T16:44:23Z"}
 ```
 <!-- loopex:m2-attestations:end -->
 
 Each record above carries the identifiers its role actually observed, at the
 candidate it names, in runs made for this record and not copied from an earlier
 one. `demonstration_db` carries six because that role is two cases: the attended
-five-turn coding task and the single attestation call that follows it.
+five-turn coding task and the single attestation call beside it. The identifiers
+appear grouped by case rather than in the order the two cases happened to be
+scheduled, which the seed decides.
 
 Each locked role emits its observed identifiers on the diagnostic stream as it
 runs, in the form
