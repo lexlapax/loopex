@@ -293,6 +293,53 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              run(root, "loopex.write", %{"path" => "link/planted.txt", "content" => "x"})
 
     refute File.exists?(Path.join(outside, "planted.txt"))
+
+    # Concept: the escaping symlink is the last component, not a directory on
+    # the way to it.
+    #
+    # Technical depth: resolution used to notice a symlink, confirm its target
+    # existed, and then resolve the link's own parent plus its basename -- which
+    # is where the link sits, not where it points. Only the case above was
+    # caught, because resolving the parent happened to follow a symlinked
+    # directory. A link whose own name is the final component resolved to a
+    # contained path and passed, so `read` returned the outside file and `write`
+    # overwrote it, under a documented containment guarantee.
+    File.ln_s!(Path.join(outside, "secret.txt"), Path.join(root, "leak"))
+
+    assert {:ok, %{outcome: :failed, output: final_component}} =
+             run(root, "loopex.read", %{"path" => "leak"})
+
+    assert final_component =~ "outside the workspace"
+    refute final_component =~ "not yours"
+
+    assert {:ok, %{outcome: :failed}} =
+             run(root, "loopex.write", %{"path" => "leak", "content" => "overwritten"})
+
+    assert File.read!(Path.join(outside, "secret.txt")) == "not yours"
+
+    assert {:ok, %{outcome: :failed}} =
+             run(root, "loopex.edit", %{
+               "path" => "leak",
+               "old" => "not yours",
+               "new" => "mine now"
+             })
+
+    assert File.read!(Path.join(outside, "secret.txt")) == "not yours"
+
+    # A relative link out of the workspace is the same escape written differently.
+    File.ln_s!(
+      Path.join(["..", Path.basename(outside), "secret.txt"]),
+      Path.join(root, "relative")
+    )
+
+    assert {:ok, %{outcome: :failed, output: relative}} =
+             run(root, "loopex.read", %{"path" => "relative"})
+
+    assert relative =~ "outside the workspace"
+
+    # A link that points at itself is refused rather than followed forever.
+    File.ln_s!(Path.join(root, "loop"), Path.join(root, "loop"))
+    assert {:ok, %{outcome: :failed}} = run(root, "loopex.read", %{"path" => "loop"})
   end
 
   test "executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted" do
@@ -367,6 +414,37 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # absent when it was present is worse than one that states nothing.
     assert receipt.child_environment_names == ["PATH"]
     refute receipt.provider_credential_present
+
+    # Concept: a workspace that plants a `setsid` cannot receive the operator's
+    # environment.
+    #
+    # Technical depth: the launcher used to be `setsid` resolved from the ambient
+    # `PATH`, with `env -i` further along the argument vector -- so whatever
+    # `setsid` resolved to ran with the credential still in its environment,
+    # before anything was cleared, while the receipt reported the credential
+    # absent from the environment the downstream child would get. The planted
+    # program here writes whatever it can see; a run that reaches it at all
+    # leaves evidence behind.
+    planted = Path.join(root, "planted-bin")
+    File.mkdir_p!(planted)
+    stolen = Path.join(root, "stolen.txt")
+
+    File.write!(Path.join(planted, "setsid"), """
+    #!/bin/sh
+    printf '%s' "$LOOPEX_PROVIDER_API_KEY" > #{stolen}
+    exec "$@"
+    """)
+
+    File.chmod!(Path.join(planted, "setsid"), 0o755)
+    original_path = System.get_env("PATH")
+    System.put_env("PATH", planted <> ":" <> original_path)
+    on_exit(fn -> System.put_env("PATH", original_path) end)
+
+    assert {:ok, planted_run} = run(root, "loopex.bash", %{"command" => "printf ran"})
+    assert planted_run.outcome == :completed
+    refute File.exists?(stolen), "a planted setsid on PATH received the operator's environment"
+
+    System.put_env("PATH", original_path)
 
     # A tool that starts no child holds no environment, and says so rather than
     # reporting one it never had.

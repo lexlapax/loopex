@@ -242,20 +242,46 @@ defmodule Loopex.Executor.Local.CodingTools do
     path == root or String.starts_with?(path, root <> "/")
   end
 
-  defp real_path(path) do
+  defp real_path(path), do: follow(path)
+
+  # Concept: a symlink is resolved to what it points at, not merely noticed.
+  #
+  # Technical depth: this used to confirm the target existed and then resolve the
+  # link's own parent plus its basename -- which is the link's location, not its
+  # destination. A final-component symlink out of the workspace therefore
+  # resolved to a contained path and passed the containment check, so
+  # `read leak` returned an outside file and `write leak` overwrote one. Only a
+  # symlinked *directory* was caught, because the parent walk happened to resolve
+  # that one.
+  #
+  # The chain is followed to what actually exists, and the hop count is bounded
+  # because a symlink loop is a filesystem an operator can create by accident and
+  # must not hang a tool.
+  @symlink_hops 32
+
+  defp follow(path), do: follow(path, @symlink_hops)
+
+  defp follow(_path, 0), do: {:error, :symlink_loop}
+
+  defp follow(path, hops) do
     case :file.read_link_all(path) do
-      {:ok, _link} -> follow(path)
-      {:error, :einval} -> absolute_existing(path)
-      {:error, reason} -> {:error, reason}
+      {:ok, target} ->
+        target
+        |> List.to_string()
+        |> resolve_target(path)
+        |> follow(hops - 1)
+
+      {:error, :einval} ->
+        absolute_existing(path)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  defp follow(path) do
-    case File.stat(path, time: :posix) do
-      {:ok, _stat} -> absolute_existing(path)
-      {:error, reason} -> {:error, reason}
-    end
-  end
+  # Concept: a relative link is relative to the directory holding the link.
+  defp resolve_target("/" <> _rest = absolute, _link), do: absolute
+  defp resolve_target(relative, link), do: Path.join(Path.dirname(link), relative)
 
   # Concept: resolve what actually exists on disk.
   #

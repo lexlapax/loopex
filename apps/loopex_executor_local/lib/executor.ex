@@ -751,14 +751,31 @@ defmodule Loopex.Executor.Local do
   # argv the program and its arguments are passed through untouched, so a `$` or
   # a space in an argument is data. For a raw command a shell is asked for
   # explicitly, which is the whole point of that form.
+  # Concept: nothing runs with this process's environment, including the thing
+  # that sets up the process group.
+  #
+  # Technical depth: the launcher used to be `setsid`, resolved from the ambient
+  # `PATH`, with `env -i` further along the argument vector. That ordering hands
+  # the operator's whole environment -- the provider credential included -- to
+  # whatever `setsid` resolved to, before anything is cleared. A workspace that
+  # placed an executable named `setsid` earlier on `PATH` would receive it, while
+  # the receipt still derived `provider_credential_present: false` from the
+  # environment the *downstream* child was going to get.
+  #
+  # `/usr/bin/env` is an absolute path, so it cannot be substituted, and it is
+  # the first thing executed. It clears the environment, sets the one `PATH` this
+  # executor chose, and only then resolves `setsid` -- from that `PATH`, not the
+  # operator's. The group setup now runs inside the boundary it used to precede.
   defp process_launcher(%{argv: [program | rest]}, environment) do
-    {setsid_path(),
+    {"/usr/bin/env",
      env_prefix(environment) ++
+       group_launcher() ++
        ["sh", "-c", group_preamble() <> "exec \"$0\" \"$@\"", program] ++ rest}
   end
 
   defp process_launcher(%{command: command}, environment) do
-    {setsid_path(), env_prefix(environment) ++ ["sh", "-c", group_preamble() <> command]}
+    {"/usr/bin/env",
+     env_prefix(environment) ++ group_launcher() ++ ["sh", "-c", group_preamble() <> command]}
   end
 
   # Concept: the child's environment is built, not filtered.
@@ -783,10 +800,21 @@ defmodule Loopex.Executor.Local do
   # this executor assumed.
   defp group_preamble, do: "printf 'loopex-pgid:%s\\n' \"$(ps -o pgid= -p $$ | tr -d ' ')\" >&2; "
 
-  defp setsid_path do
-    case System.find_executable("setsid") do
-      nil -> "/usr/bin/env"
-      path -> path
+  # Concept: the group leader is looked for where this executor says, not where
+  # the operator's shell says.
+  #
+  # Technical depth: presence is decided against the same fixed directories the
+  # child receives, so the answer cannot be changed by a workspace that puts a
+  # `setsid` earlier on the ambient `PATH`. Where none is found the child leads
+  # no new group, which is a real limitation and is recorded as one rather than
+  # papered over: on such a host the cleanup confirmation covers the child and
+  # not a group it never led.
+  defp group_launcher do
+    case Enum.find(@search_path_value |> String.split(":"), fn dir ->
+           File.exists?(Path.join(dir, "setsid"))
+         end) do
+      nil -> []
+      _found -> ["setsid"]
     end
   end
 
