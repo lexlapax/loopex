@@ -26,64 +26,66 @@ carries its own mutation record rather than resting on source inspection.
 ## Outcome 1: committed history projection
 
 ```json
-{"mechanism_disabled":"committed_history_projection","selector":"apps/loopex/test/agent_loop_test.exs","observed_failure":"","candidate":"","artifact":"apps/loopex/lib/loopex/conversation.ex","restored_sha256":""}
+{"mechanism_disabled":"committed_history_projection","selector":"apps/loopex/test/agent_loop_test.exs","observed_failure":"the projection dropped every assistant turn and its results, so no request carried committed history and seven locked cases failed including the history and replay cases and every turn bound","candidate":"4894dea16a5fdc398106cccd6c7a1b93a161d3c4","artifact":"apps/loopex/lib/loopex/conversation.ex","restored_sha256":"sha256:1b24ee744f7944e91aa489fcdb49027d588d195bc037a55315fe5091beddc5c0"}
 ```
 
 ## Outcome 2: stream delta reconstruction
 
 ```json
-{"mechanism_disabled":"stream_delta_reconstruction","selector":"apps/loopex_llm_reqllm/test/streaming_conformance_test.exs","observed_failure":"","candidate":"","artifact":"apps/loopex/lib/loopex/stream_domain.ex","restored_sha256":""}
+{"mechanism_disabled":"stream_delta_reconstruction","selector":"apps/loopex_llm_reqllm/test/streaming_conformance_test.exs","observed_failure":"every attempt derived one frozen stream domain id, so two domains under one turn were indistinguishable and five locked cases failed including separate sequences per domain and retry domain separation","candidate":"4894dea16a5fdc398106cccd6c7a1b93a161d3c4","artifact":"apps/loopex/lib/loopex/stream_domain.ex","restored_sha256":"sha256:7a5b964e1ce62c7a561fa7662a19c9930c718864e1f486f40e37ee4adf35a70a"}
 ```
 
 ## Tool registry: tool definition generation binding
 
 ```json
-{"mechanism_disabled":"tool_definition_generation_binding","selector":"apps/loopex/test/tool_registry_test.exs","observed_failure":"","candidate":"","artifact":"apps/loopex_protocol/lib/loopex_protocol/tool_definition.ex","restored_sha256":""}
+{"mechanism_disabled":"tool_definition_generation_binding","selector":"apps/loopex/test/tool_registry_test.exs","observed_failure":"generation returned one frozen triple for every definition, so a changed definition kept its generation and three locked cases failed including the recorded generation and unknown id refusal","candidate":"4894dea16a5fdc398106cccd6c7a1b93a161d3c4","artifact":"apps/loopex_protocol/lib/loopex_protocol/tool_definition.ex","restored_sha256":"sha256:08a9c7b347c4b5f4774e1bc20b7db08eaeb7b29ec7f242a09882ded07696e2e5"}
 ```
 
 ## Outcome 4: workspace path scope containment
 
 ```json
-{"mechanism_disabled":"workspace_path_scope_containment","selector":"apps/loopex_executor_local/test/coding_tools_test.exs","observed_failure":"","candidate":"","artifact":"apps/loopex_executor_local/lib/coding_tools.ex","restored_sha256":""}
+{"mechanism_disabled":"workspace_path_scope_containment","selector":"apps/loopex_executor_local/test/coding_tools_test.exs","observed_failure":"resolve expanded the path and compared nothing, so traversal and symlink escapes were admitted and the locked containment case failed","candidate":"4894dea16a5fdc398106cccd6c7a1b93a161d3c4","artifact":"apps/loopex_executor_local/lib/coding_tools.ex","restored_sha256":"sha256:ebbe853fa8a23dffd1eec0d53f3d91dd1922ff85a2051cf86a248a6feb80c832"}
 ```
 
 ## Outcome 6: host policy deny pre-start refusal
 
 ```json
-{"mechanism_disabled":"host_policy_deny_prestart_refusal","selector":"apps/loopex_executor_local/test/host_policy_test.exs","observed_failure":"","candidate":"","artifact":"apps/loopex/lib/loopex/policy.ex","restored_sha256":""}
+{"mechanism_disabled":"host_policy_deny_prestart_refusal","selector":"apps/loopex_executor_local/test/host_policy_test.exs","observed_failure":"the port allowed every decision without consulting the host module, so denial timeout malformed response and defer all fell through to allow and five locked cases failed","candidate":"4894dea16a5fdc398106cccd6c7a1b93a161d3c4","artifact":"apps/loopex/lib/loopex/policy.ex","restored_sha256":"sha256:6f1729d6c000635809c6a9c8a3248450bd6aa4198b9de6b2e7490cdd4a6f911d"}
 ```
 
 ## Outcome 7: project resource trust admission
 
 ```json
-{"mechanism_disabled":"project_resource_trust_admission","selector":"apps/loopex/test/project_resource_trust_test.exs","observed_failure":"","candidate":"","artifact":"apps/loopex/lib/loopex/project_resource.ex","restored_sha256":""}
+{"mechanism_disabled":"project_resource_trust_admission","selector":"apps/loopex/test/project_resource_trust_test.exs","observed_failure":"resolve admitted every manifest without consulting the decision, so a headless run staged the project block and four locked cases failed including decision binding and invalidation","candidate":"4894dea16a5fdc398106cccd6c7a1b93a161d3c4","artifact":"apps/loopex/lib/loopex/project_resource.ex","restored_sha256":"sha256:99e658924ad2e6f0916e2ffb4fad9723d12f13ef9b9541defde218c58a0bffc7"}
 ```
 
 ## Outcome 8: cancellation cleanup confirmation
 
 ```json
-{"mechanism_disabled":"cancellation_cleanup_confirmation","selector":"apps/loopex/test/cancellation_test.exs","observed_failure":"","candidate":"","artifact":"apps/loopex/lib/loopex/runtime/session_state.ex","restored_sha256":""}
+{"mechanism_disabled":"cancellation_cleanup_confirmation","selector":"apps/loopex/test/cancellation_test.exs","observed_failure":"an abort whose cleanup was unconfirmed committed cancelled instead of outcome_unknown and the locked insufficient evidence case failed","candidate":"4894dea16a5fdc398106cccd6c7a1b93a161d3c4","artifact":"apps/loopex/lib/loopex/runtime/session_state.ex","restored_sha256":"sha256:1f15f84509e2ffcae9428cdd927321ab5621599afa6dccc54d6c001719b9b36e"}
 ```
 
 ## Outcome 10: command surface facade only
 
 ```json
-{"mechanism_disabled":"command_surface_facade_only","selector":"apps/loopex_cli/test/cli_test.exs","observed_failure":"","candidate":"","artifact":"apps/loopex_cli/lib/loopex_cli.ex","restored_sha256":""}
+{"mechanism_disabled":"command_surface_facade_only","selector":"apps/loopex_cli/test/cli_test.exs","observed_failure":"the command named a runtime control module and the locked facade only case failed","candidate":"4894dea16a5fdc398106cccd6c7a1b93a161d3c4","artifact":"apps/loopex_cli/lib/loopex_cli.ex","restored_sha256":"sha256:ff1066680378a3a7e97c53beb54b60e06b366594848557933b9067aad2125f89"}
 ```
 
-## Why the observed values are empty
+## How these were produced
 
-Each record's `observed_failure`, `candidate`, and `restored_sha256` describe one
-mutation experiment performed at one clean candidate. `restored_sha256` must
-equal the running revision's SHA-256 of the artifact it names, so a record
-written before the candidate settles goes stale the moment that artifact changes
-again — and a stale record is worse than an absent one, because it reads as
-evidence.
+Each experiment ran in a local clone of the candidate, checked out detached, with
+the source tree verified clean before the mutation and again after the artifact
+was restored from `git show <candidate>:<path>`. No experiment ran from a dirty
+or previously mutated baseline: a clean-tree check refuses before the mutation is
+applied, and the eight records above each recorded a clean tree afterwards.
 
-The eight experiments are run against the closure candidate. The locked
-`mechanism_disabled`, `selector`, and `artifact` triples above are fixed now, so
-the experiment set is decided rather than chosen afterwards to fit whatever
-happened to fail.
+Each selector ran the way the gate runs it — compiled on its own from the
+repository root, with the application's test helper absent — so the failure each
+record names is the failure the gate would observe.
+
+`restored_sha256` is the running revision's SHA-256 of the artifact, which is
+what makes "restored" a claim about bytes rather than prose. Each digest above
+matches this revision.
 
 ## Related
 
