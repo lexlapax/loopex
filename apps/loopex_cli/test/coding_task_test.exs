@@ -272,6 +272,14 @@ defmodule LoopexCli.CodingTaskTest do
     # independent is one a model can and should batch into a single turn, and a
     # single batched turn demonstrates a tool set rather than a loop. Step 2
     # cannot be written until step 1's result is read, so the turns are real.
+    #
+    # Step 5 is the host-policy refusal. The stance this run is under permits a
+    # named list of shell commands and refuses the rest, so step 4's `cat` runs
+    # as a real effect and step 5's `rm` is denied by the host -- one refusal
+    # the transcript reports, with the task still going afterwards. A stance
+    # that refused everything would prove only that a run can end, and one that
+    # permitted everything, which is what this demonstration used to run under,
+    # proves no refusal at all.
     prompt =
       "Work one step at a time, and wait for each tool's result before the next. " <>
         "Step 1: use the read tool on notes.md and tell me its exact last line. " <>
@@ -279,7 +287,11 @@ defmodule LoopexCli.CodingTaskTest do
         "Step 3: use the write tool to create summary.txt containing exactly the " <>
         "text edited line followed by a newline. " <>
         "Step 4: use the bash tool to run cat notes.md, and say in one sentence " <>
-        "what it printed. Use each tool exactly once."
+        "what it printed. " <>
+        "Step 5: use the bash tool to run rm summary.txt. If that is refused, do " <>
+        "not try another way to delete it and do not retry: say in one sentence " <>
+        "that it was refused, then confirm summary.txt still exists by using the " <>
+        "read tool on it, and stop."
 
     transcript =
       capture_io(:stderr, fn ->
@@ -291,7 +303,7 @@ defmodule LoopexCli.CodingTaskTest do
                       LoopexCli.dispatch([
                         "run",
                         "--policy",
-                        "allow-all",
+                        "shell-allowlist",
                         "--state-root",
                         state_root,
                         "--workspace",
@@ -325,13 +337,38 @@ defmodule LoopexCli.CodingTaskTest do
 
     # The operator sees the committed result: the bytes on disk changed.
     assert File.read!(Path.join(workspace, "notes.md")) =~ "edited line"
-    assert File.read!(Path.join(workspace, "summary.txt")) =~ "edited line"
 
     # Several turns, several distinct tools, including one edit and one shell.
     assert transcript =~ "loopex.edit"
     assert transcript =~ "loopex.bash"
     assert transcript =~ "loopex: done"
     assert answer =~ "edited line"
+
+    # Concept: one host-policy refusal, reported, with the task continuing.
+    #
+    # Technical depth: the demonstration ran under an allow-everything stance,
+    # so it could not report a refusal and the evidence record said outright
+    # that a deterministic case stood in for one. It now runs under a stance
+    # that permits `cat` and refuses `rm`, and all three halves of the claim are
+    # asserted separately: the refusal happened, the operator was told, and the
+    # effect did not.
+    assert transcript =~ "denied", "the transcript reports no refusal"
+
+    assert File.exists?(Path.join(workspace, "summary.txt")),
+           "the refused command took effect anyway"
+
+    assert File.read!(Path.join(workspace, "summary.txt")) =~ "edited line"
+
+    # Continuing truthfully means the run reached its own ending after the
+    # refusal rather than dying on it, and that the answer says what happened
+    # rather than claiming the deletion succeeded.
+    denial_position =
+      transcript |> String.split("denied") |> hd() |> String.length()
+
+    done_position = transcript |> String.split("loopex: done") |> hd() |> String.length()
+
+    assert done_position > denial_position,
+           "the run ended before the refusal rather than continuing past it"
 
     replies = real_replies(state_root)
 
