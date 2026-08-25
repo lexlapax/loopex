@@ -1262,16 +1262,22 @@ defmodule Loopex.Runtime.SessionState do
         |> append_element(run_id, result)
         |> put_pending(run_id, next_work)
 
-      # Concept: a call that started must be seen to finish.
+      # Concept: a call that started must be seen to finish, and it must finish
+      # under the name it started under.
       #
-      # Technical depth: the operator saw `tool.started` for a dispatched call,
-      # so it is owed a `tool.finished` even when no receipt exists. Without one
-      # a failed call reads on the public plane as a tool that never ended.
+      # Technical depth: the operator saw `tool.started` for a dispatched call, so
+      # it is owed a `tool.finished` even when no receipt exists. Without one a
+      # failed call reads on the public plane as a tool that never ended, and
+      # without the identity a denied call reads as an opaque identifier beside a
+      # refusal — which is exactly the case an operator most needs to understand.
+      # The generation is taken from the call the model actually made, so a
+      # refused call names the tool it asked for rather than nothing.
       event =
         %{
           "run_id" => run_id,
           "turn_id" => Map.get(work, :turn_id),
           "tool_call_id" => tool_call_id,
+          "tool_id" => called_tool_id(call),
           "outcome" => outcome,
           event_id: stable_id("event-tool-finished", state.session_id, tool_call_id),
           kind: "tool.finished"
@@ -1530,6 +1536,14 @@ defmodule Loopex.Runtime.SessionState do
       deadline_ms: Map.get(record, "deadline_ms")
     })
   end
+
+  # Concept: the tool a call named, where the runtime knows it.
+  #
+  # Technical depth: a call whose name matched no active generation has no tool
+  # identity to report, and reporting the model-supplied name in its place would
+  # publish an unresolved string as though the runtime had accepted it.
+  defp called_tool_id(%{generation: {tool_id, _version, _digest}}), do: tool_id
+  defp called_tool_id(_call), do: nil
 
   defp normalize_calls(calls, generations) when is_list(calls) do
     normalized =

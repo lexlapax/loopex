@@ -37,5 +37,6 @@ System.at_exit(fn _status -> File.rm_rf(root) end)
 # passed against a double the runtime no longer matches.
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+Code.require_file("support/demonstration.ex", __DIR__)
 
 ExUnit.start(exclude: [:real_provider])

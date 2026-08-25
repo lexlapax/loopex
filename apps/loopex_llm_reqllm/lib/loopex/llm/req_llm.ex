@@ -98,10 +98,17 @@ defmodule Loopex.LLM.ReqLLM do
 
   Bounded serializable data. Usage is reduced to two integer counts, or `nil`
   where the provider reported none, so no provider struct crosses the boundary.
+
+  `provider_response_id` is the provider's own identifier for the response. It is
+  the one field in a reply that a deterministic adapter cannot invent, because it
+  exists in the provider's account and can be looked up there. That is what makes
+  it the anchor of the milestone's real-call evidence, and it is `nil` wherever
+  the provider supplied none rather than being filled in with a plausible value.
   """
   @type reply :: %{
           text: String.t(),
           identity: identity(),
+          provider_response_id: String.t() | nil,
           usage: %{input_tokens: non_neg_integer() | nil, output_tokens: non_neg_integer() | nil},
           tool_calls: [map()],
           canonical_request_bytes: binary(),
@@ -238,6 +245,7 @@ defmodule Loopex.LLM.ReqLLM do
          %{
            text: ReqLLM.Response.text(response),
            identity: identity,
+           provider_response_id: response_id(response),
            usage: usage(response),
            tool_calls: Enum.map(ReqLLM.Response.tool_calls(response), &ReqLLM.ToolCall.to_map/1),
            delta_count: 0,
@@ -370,6 +378,14 @@ defmodule Loopex.LLM.ReqLLM do
   end
 
   defp provider_tool(_definition), do: {:error, :invalid_model_tool}
+
+  # Concept: the provider's own name for this response, carried across verbatim.
+  #
+  # Technical depth: absent or blank becomes `nil` rather than an empty string, so
+  # a caller asking whether the provider supplied one gets an answer rather than a
+  # value that looks supplied and is not. Nothing here manufactures a substitute.
+  defp response_id(%{id: id}) when is_binary(id) and id != "", do: id
+  defp response_id(_response), do: nil
 
   # Concept: usage crosses the boundary as two counts, not as a provider type.
   defp usage(response) do
