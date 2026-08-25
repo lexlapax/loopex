@@ -152,10 +152,10 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c` | `scripts/m1-evidence-verifier.exs` |
-| `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
+| `56d8e71b90af183d02e7e46d3bf10aae48129e3466e19325b40a81ea8abf31e9` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
 | `b3789f57e8c57216f48d62a9bec38156d18d1a42ccffe009d0567ede7ab11453` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
-| `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
+| `9705bcd08f7d0b4b4e2d36c745f4fbf732d751a48fdc369aacb6ca99e8f598ac` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 
 These are the complete M1-specific verdict machinery and its adversarial
@@ -415,7 +415,7 @@ reported passed by the authoritative channel.
 - `fake stdout at_exit and early halt cannot manufacture one authoritative result`
 - `only the declared internal dependency closure is reachable and startup never receives the provider key`
 
-`apps/loopex/test/deps_budget_test.exs`, minimum 25:
+`apps/loopex/test/deps_budget_test.exs`, minimum 28:
 
 - `the repository satisfies the dependency budget and direction`
 - `a forbidden core dependency is rejected`
@@ -930,3 +930,59 @@ directly and retain safe decoding. After independent exact-SHA review and
 explicit maintainer acceptance, immediate child `R` adds one new disposition
 anchor and rebinds Acceptance to `A`; no product, selector, gate, envelope, or
 other byte may change in `R`. Fresh source-candidate captures remain required.
+
+<a id="amendment-transaction-v2"></a>
+<a id="amendment-7"></a>
+
+## Amendment 7 — Admit the M2 Application Inventory and Composition Role
+
+**Acceptance: OUTSTANDING.** This section declares generation 7 and rebinds the
+two artifacts that carry `M1`'s planned application inventory and role rules.
+`M1` is `Closed`, so its Acceptance and Closure rows bind the same gate digest
+and the `amendment-transaction-v1` rebind cannot reach it: rebinding Acceptance
+alone would leave Closure naming bytes that no longer exist. This amendment
+therefore uses the additive transaction marked `amendment-transaction-v2`. Both
+authority rows stay byte-immutable and neither is made retroactively false; the
+plan gains one append-only `## Gate Generations` table instead.
+
+`M2` ships an operator command and the wiring application that command depends
+on, which the accepted `M2` plan pair names as its first disposed decision. Two
+artifacts and no third carry that change:
+
+`apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` froze the repository at exactly
+six applications with the reference client as the only `:client`, and its role
+set contained no `:composition` at all. The eight-application inventory now
+admits `apps/loopex_composition` with role `:composition` and `apps/loopex_cli`
+with role `:client`. A `:composition` declares a production dependency on
+`:loopex`, may also depend on `:loopex_protocol`, declares production
+dependencies on the in-umbrella `:edge` applications it composes, may declare no
+external dependency in any environment, and may depend on no `:client` and on no
+other `:composition`. A `:client` may now declare a production dependency on at
+most one `:composition`, still declares no external dependency, still may
+compose `:edge` applications only in tests, and still may not depend on another
+`:client`. `:extension` is untouched and survives the edit.
+
+`apps/loopex/test/deps_budget_test.exs` is that source's adversarial corpus. Its
+minimum rises from 25 to 28 because the new role is a separate claim from the
+client rule that consumes it: a corpus proving only the client side would leave a
+composition free to declare an external dependency or to depend on a client. The
+three added cases prove the exact eight-application inventory in both directions,
+the composition role's own permitted and forbidden edges, and the client rule
+that admits one composition and no second client.
+
+This amendment adds no scope, changes no outcome, and reopens no lifecycle state.
+It alters no product behaviour, no persistence, no public contract, no protected
+selector identity outside the one minimum stated above, no provider path, no
+fault point, no evidence class, no toolchain lane, no closure document, and no
+transition shape, and it removes or weakens no protected assertion.
+
+At proposal `A` the generation row below carries its gate digest and no
+candidate, because a commit cannot name its own hash. The row is therefore
+pending, which means the current gate binds bytes no authority has accepted, so
+binding validation, bootstrap, and every inherited gate that invokes them are red
+at `A` exactly as they are at a `v1` proposal. Binding-independent checks and the
+amended corpus must pass directly at `A`. After independent exact-SHA review and
+explicit maintainer acceptance, the immediate child `R` completes that row's
+authority, disposition, and the candidate it binds, which is exact `A`, and adds
+one new amendment-specific disposition anchor to an existing durable document. No
+product, selector, gate, envelope, or other byte may change in `R`.

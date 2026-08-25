@@ -400,6 +400,149 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
     end
   end
 
+  test "the M2 planned inventory admits exactly eight applications with their declared roles",
+       %{dir: dir} do
+    positive = Path.join(dir, "m2-positive")
+    write_m1_inventory(positive)
+    track!(positive)
+    assert Budget.check_repository(positive) == :ok
+
+    # The inventory is exact in both directions: an application the plan does not
+    # name is refused, and one it does name cannot be dropped or re-roled. A
+    # count alone would admit a swap.
+    negative_cases = [
+      {"ninth-app", "outside the exact M1 planned inventory",
+       fn root ->
+         write_child(root, "loopex_extra_client", :client, [{:loopex, [in_umbrella: true]}])
+       end},
+      {"composition-as-edge", "must declare role :composition",
+       fn root ->
+         write_child(root, "loopex_composition", :edge, [{:loopex, [in_umbrella: true]}])
+       end},
+      {"cli-as-composition", "must declare role :client",
+       fn root ->
+         write_child(root, "loopex_cli", :composition, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_store_local, [in_umbrella: true]}
+         ])
+       end}
+    ]
+
+    for {name, expected_reason, mutate} <- negative_cases do
+      root = Path.join(dir, name)
+      write_m1_inventory(root)
+      mutate.(root)
+      track!(root)
+
+      assert {:error, reasons} = Budget.check_repository(root)
+
+      assert Enum.any?(reasons, &String.contains?(&1, expected_reason)),
+             "#{name}: expected #{inspect(expected_reason)}, got #{inspect(reasons)}"
+    end
+  end
+
+  test "a composition depends on the edge applications it composes and on no client or external package",
+       %{dir: dir} do
+    # The role exists so that exactly one production application may name the
+    # concrete edges it wires. Everything else that role could reach is refused,
+    # because a composition that could depend on a client would inherit that
+    # client's authority, and one that could carry an external package would put
+    # a dependency in every embedder that wires this stack.
+    negative_cases = [
+      {"composition-external", "may not carry external dependencies",
+       fn root ->
+         write_child(root, "loopex_composition", :composition, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_store_local, [in_umbrella: true]},
+           {:loopex_llm_reqllm, [in_umbrella: true]},
+           {:loopex_executor_local, [in_umbrella: true]},
+           {:external_probe, "~> 1.0"}
+         ])
+       end},
+      {"composition-on-client", "may depend only on core, protocol, and the edges",
+       fn root ->
+         write_child(root, "loopex_composition", :composition, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_reference_client, [in_umbrella: true]}
+         ])
+       end},
+      {"composition-no-core", "require one production loopex dependency",
+       fn root ->
+         write_child(root, "loopex_composition", :composition, [
+           {:loopex_store_local, [in_umbrella: true]}
+         ])
+       end},
+      {"composition-test-only-edge", "may depend only on core, protocol, and the edges",
+       fn root ->
+         write_child(root, "loopex_composition", :composition, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_store_local, [in_umbrella: true, only: :test]}
+         ])
+       end}
+    ]
+
+    for {name, expected_reason, mutate} <- negative_cases do
+      root = Path.join(dir, name)
+      write_m1_inventory(root)
+      mutate.(root)
+      track!(root)
+
+      assert {:error, reasons} = Budget.check_repository(root)
+
+      assert Enum.any?(reasons, &String.contains?(&1, expected_reason)),
+             "#{name}: expected #{inspect(expected_reason)}, got #{inspect(reasons)}"
+    end
+  end
+
+  test "a client depends on at most one composition and never on another client", %{dir: dir} do
+    # Widening the client rule to permit a client-to-client dependency was the
+    # alternative to inventing the composition role, and this is what it would
+    # have cost: the command could then reach the reference client's permissive
+    # policy, which is precisely the inheritance the shipped composition refuses
+    # to allow.
+    negative_cases = [
+      {"client-on-client", "may compose only edge applications",
+       fn root ->
+         write_child(root, "loopex_cli", :client, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_reference_client, [in_umbrella: true]}
+         ])
+       end},
+      {"client-two-compositions", "at most one composition",
+       fn root ->
+         write_child(root, "loopex_second_composition", :composition, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_store_local, [in_umbrella: true]}
+         ])
+
+         write_child(root, "loopex_cli", :client, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_composition, [in_umbrella: true]},
+           {:loopex_second_composition, [in_umbrella: true]}
+         ])
+       end},
+      {"client-test-only-composition", "must be production and in-umbrella",
+       fn root ->
+         write_child(root, "loopex_cli", :client, [
+           {:loopex, [in_umbrella: true]},
+           {:loopex_composition, [in_umbrella: true, only: :test]}
+         ])
+       end}
+    ]
+
+    for {name, expected_reason, mutate} <- negative_cases do
+      root = Path.join(dir, name)
+      write_m1_inventory(root)
+      mutate.(root)
+      track!(root)
+
+      assert {:error, reasons} = Budget.check_repository(root)
+
+      assert Enum.any?(reasons, &String.contains?(&1, expected_reason)),
+             "#{name}: expected #{inspect(expected_reason)}, got #{inspect(reasons)}"
+    end
+  end
+
   test "dependency context separates discovered apps from the selector's declared closure", %{
     dir: dir
   } do
@@ -975,6 +1118,18 @@ defmodule Mix.Tasks.Loopex.DepsBudgetTest do
 
     write_child(root, "loopex_executor_local", :edge, [
       {:loopex, [in_umbrella: true]}
+    ])
+
+    write_child(root, "loopex_composition", :composition, [
+      {:loopex, [in_umbrella: true]},
+      {:loopex_store_local, [in_umbrella: true]},
+      {:loopex_llm_reqllm, [in_umbrella: true]},
+      {:loopex_executor_local, [in_umbrella: true]}
+    ])
+
+    write_child(root, "loopex_cli", :client, [
+      {:loopex, [in_umbrella: true]},
+      {:loopex_composition, [in_umbrella: true]}
     ])
 
     write_child(root, "loopex_reference_client", :client, [
