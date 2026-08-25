@@ -99,11 +99,17 @@ defmodule Loopex.LLM.ReqLLM do
   Bounded serializable data. Usage is reduced to two integer counts, or `nil`
   where the provider reported none, so no provider struct crosses the boundary.
 
-  `provider_response_id` is the provider's own identifier for the response. It is
-  the one field in a reply that a deterministic adapter cannot invent, because it
-  exists in the provider's account and can be looked up there. That is what makes
-  it the anchor of the milestone's real-call evidence, and it is `nil` wherever
-  the provider supplied none rather than being filled in with a plausible value.
+  `provider_response_id` is the provider's own identifier for the response, taken
+  from the `request-id` header the provider returns per call. It is the one field
+  in a reply that a deterministic adapter cannot invent, because it exists in the
+  provider's account and can be looked up there. That is what makes it the anchor
+  of the milestone's real-call evidence, and it is `nil` wherever the provider
+  supplied none rather than being filled in with a plausible value.
+
+  A streamed call cannot carry the provider's assembled *message* identifier: the
+  library keeps only usage from the provider's opening event and discards the
+  rest. The per-call request identifier survives streaming and is the identifier
+  the provider's own account and support surface use, so it is the one retained.
   """
   @type reply :: %{
           text: String.t(),
@@ -204,10 +210,15 @@ defmodule Loopex.LLM.ReqLLM do
 
   ## Technical depth
 
-  This adapter does not stream. It is conformant anyway: it emits nothing
-  through `progress`, returns the same complete reply, and declares `streamed:
-  false` with a `delta_count` of zero, so the coordinator closes that attempt's
-  domain with a truthful count rather than with a sentinel or an absent item.
+  This adapter streams. Every chunk the provider sends is emitted through
+  `progress` as it arrives and accumulated at the same time, so the reply this
+  returns is assembled from exactly the chunks the deltas carried and replays
+  them byte for byte. `delta_count` is what was emitted and `streamed` is true,
+  so the coordinator closes that attempt's domain with a truthful count.
+
+  The stream is consumed once. Usage and the per-call request identifier come
+  from the metadata the provider sends after the content, so they are read once
+  the stream is drained rather than beside it.
   """
   @impl Loopex.Model
   @spec complete(Model.request(), keyword(), Model.progress_fun()) ::
@@ -219,7 +230,7 @@ defmodule Loopex.LLM.ReqLLM do
          {:ok, credential} <- credential(),
          {:ok, identity} <- identity(request.model),
          {:ok, tools} <- provider_tools(Model.model_facing_tools(request)) do
-      dispatch(request, context, credential, identity, tools)
+      dispatch(request, context, credential, identity, tools, progress)
     end
   end
 
@@ -232,32 +243,170 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
-  defp dispatch(request, context, credential, identity, tools) do
+  # Concept: the answer reaches the operator as the provider produces it.
+  #
+  # Technical depth: this adapter used to call the non-streaming form and declare
+  # `streamed: false` with no deltas, which the port admits as conformant. It was
+  # conformant and it was also the reason nothing an operator ran ever streamed,
+  # while the runtime, the stream domains, their closure items and the terminal
+  # all carried the path.
+  #
+  # The stream is consumed exactly once. Every chunk is emitted through the
+  # progress function the coordinator supplied — closed over that attempt's
+  # stream domain — and accumulated at the same time, so the reply this returns
+  # is assembled from the same chunks the deltas carried and replays them byte
+  # for byte. Usage and the provider's response identifier come from the metadata
+  # the provider sends after the content, which is why they are read once the
+  # stream is drained rather than beside it.
+  defp dispatch(request, context, credential, identity, tools, progress) do
     options = [
       api_key: credential,
       max_tokens: Model.max_tokens(request),
       tools: tools
     ]
 
-    case ReqLLM.generate_text(request.model, context, options) do
+    case ReqLLM.stream_text(request.model, context, options) do
       {:ok, response} ->
-        {:ok,
-         %{
-           text: ReqLLM.Response.text(response),
-           identity: identity,
-           provider_response_id: response_id(response),
-           usage: usage(response),
-           tool_calls: Enum.map(ReqLLM.Response.tool_calls(response), &ReqLLM.ToolCall.to_map/1),
-           delta_count: 0,
-           streamed: false,
-           canonical_request_bytes: request.canonical_request_bytes,
-           staged_request_digest: request.staged_request_digest
-         }}
+        {:ok, drain(response, request, identity, progress)}
 
       {:error, error} ->
         {:error, {:provider_call_failed, scrub(error, credential)}}
     end
   end
+
+  defp drain(response, request, identity, progress) do
+    {chunks, text, deltas} =
+      Enum.reduce(response.stream, {[], [], 0}, fn chunk, {chunks, text, deltas} ->
+        case emit(chunk, deltas, progress) do
+          {:text, fragment} -> {[chunk | chunks], [fragment | text], deltas + 1}
+          {:counted, _kind} -> {[chunk | chunks], text, deltas + 1}
+          :ignored -> {[chunk | chunks], text, deltas}
+        end
+      end)
+
+    chunks = Enum.reverse(chunks)
+    metadata = ReqLLM.StreamResponse.MetadataHandle.await(response.metadata_handle)
+    reported = Map.get(metadata, :usage) || %{}
+    streamed_text = text |> Enum.reverse() |> IO.iodata_to_binary()
+    assembled = assemble(response, chunks, metadata)
+
+    %{
+      text: if(streamed_text == "", do: assembled_text(assembled), else: streamed_text),
+      identity: identity,
+      provider_response_id: provider_request_id(metadata),
+      usage: %{
+        input_tokens: Map.get(reported, :input_tokens),
+        output_tokens: Map.get(reported, :output_tokens)
+      },
+      tool_calls: assembled_calls(assembled),
+      delta_count: deltas,
+      streamed: deltas > 0,
+      canonical_request_bytes: request.canonical_request_bytes,
+      staged_request_digest: request.staged_request_digest
+    }
+  end
+
+  # Concept: the turn's tool calls come from the provider, assembled.
+  #
+  # Technical depth: a streaming `tool_call` chunk carries the name and an empty
+  # argument map, because the provider sends the arguments as incremental JSON
+  # after it and the chunk is emitted before they arrive. Reading the chunk alone
+  # gives a call with no arguments, which the runtime refuses and which made a
+  # coding agent that could name a tool and never use one.
+  #
+  # The provider's own response builder assembles the same chunks into a complete
+  # response -- with the provider's tool-call identifiers and its arguments -- so
+  # the chunks are collected as they stream and handed to it afterwards. This is
+  # what `StreamResponse.to_response/1` does, minus re-consuming a stream that
+  # has already been drained once and cannot be drained twice.
+  defp assemble(response, chunks, metadata) do
+    builder = ReqLLM.Provider.ResponseBuilder.for_model(response.model)
+
+    case builder.build_response(chunks, metadata,
+           context: response.context,
+           model: response.model
+         ) do
+      {:ok, assembled} -> assembled
+      _other -> nil
+    end
+  rescue
+    _unavailable -> nil
+  end
+
+  defp assembled_text(nil), do: ""
+  defp assembled_text(assembled), do: ReqLLM.Response.text(assembled) || ""
+
+  defp assembled_calls(nil), do: []
+
+  defp assembled_calls(assembled) do
+    assembled
+    |> ReqLLM.Response.tool_calls()
+    |> Enum.map(&ReqLLM.ToolCall.to_map/1)
+  end
+
+  # Concept: one provider chunk becomes at most one delta of a declared kind.
+  #
+  # Technical depth: the port names three kinds and an item of any other shape is
+  # not a delta, so a metadata chunk is counted by nothing and emitted as
+  # nothing. `content_index` is zero because this adapter produces one content
+  # part per attempt; a provider that interleaved several would need it to say
+  # which, and this one does not.
+  defp emit(%{type: :content, text: fragment}, index, progress)
+       when is_binary(fragment) and fragment != "" do
+    progress.(%{kind: :text_delta, content_index: 0, sequence: index, text: fragment})
+    {:text, fragment}
+  end
+
+  defp emit(%{type: :thinking, text: fragment}, index, progress)
+       when is_binary(fragment) and fragment != "" do
+    progress.(%{kind: :reasoning_delta, content_index: 0, sequence: index, text: fragment})
+    {:counted, :reasoning_delta}
+  end
+
+  defp emit(%{type: :tool_call, name: name}, index, progress) when is_binary(name) do
+    progress.(%{
+      kind: :tool_call_delta,
+      content_index: 0,
+      sequence: index,
+      arguments_fragment: ""
+    })
+
+    {:counted, :tool_call_delta}
+  end
+
+  defp emit(_chunk, _index, _progress), do: :ignored
+
+  # Concept: the identifier this call is known by in the provider's account.
+  #
+  # Technical depth: a streamed call cannot carry the assembled message
+  # identifier, because the library keeps only usage from the provider's
+  # `message_start` event and discards the rest. What survives is the response's
+  # own `request-id` header, which the provider issues per call and which is the
+  # identifier its account and its support surface use -- so it is the one an
+  # auditor looks a retained claim up by, and the attestation declares its form.
+  #
+  # A provider that returns no such header yields `nil` rather than a
+  # manufactured substitute, and an evidence claim built from replies carrying
+  # none is refused rather than recorded.
+  defp provider_request_id(metadata) do
+    metadata
+    |> Map.get(:headers, [])
+    |> header("request-id")
+  end
+
+  defp header(headers, name) when is_list(headers) do
+    Enum.find_value(headers, fn
+      {key, value} when is_binary(key) -> if String.downcase(key) == name, do: present(value)
+      _other -> nil
+    end)
+  end
+
+  defp header(headers, name) when is_map(headers), do: headers |> Map.to_list() |> header(name)
+  defp header(_headers, _name), do: nil
+
+  defp present(value) when is_binary(value) and value != "", do: value
+  defp present([value | _rest]), do: present(value)
+  defp present(_absent), do: nil
 
   # Concept: render the whole committed conversation, not the last thing said.
   #
@@ -378,24 +527,6 @@ defmodule Loopex.LLM.ReqLLM do
   end
 
   defp provider_tool(_definition), do: {:error, :invalid_model_tool}
-
-  # Concept: the provider's own name for this response, carried across verbatim.
-  #
-  # Technical depth: absent or blank becomes `nil` rather than an empty string, so
-  # a caller asking whether the provider supplied one gets an answer rather than a
-  # value that looks supplied and is not. Nothing here manufactures a substitute.
-  defp response_id(%{id: id}) when is_binary(id) and id != "", do: id
-  defp response_id(_response), do: nil
-
-  # Concept: usage crosses the boundary as two counts, not as a provider type.
-  defp usage(response) do
-    reported = ReqLLM.Response.usage(response) || %{}
-
-    %{
-      input_tokens: Map.get(reported, :input_tokens),
-      output_tokens: Map.get(reported, :output_tokens)
-    }
-  end
 
   # Concept: a provider error is bounded and stripped of the credential before
   # any caller, report, or terminal can see it.

@@ -94,7 +94,8 @@ than being treated as either allow or deny.
 
 `--policy allow-all` selects a policy that allows every decision it is asked. It
 exists so you can run the command without writing a module first, and it says out
-loud what it is, once per process, at the first tool call a session makes:
+loud what it is, once per operating-system process, at the first tool call it is
+asked to decide:
 
 ```text
 loopex: the allow-all host policy is active. This is permissive local authority,
@@ -116,7 +117,9 @@ rule rather than an oversight.
 A tool whose output exceeds its declared bound does not get truncated into the
 conversation and does not silently lose the rest. The full bytes spill to an
 artifact store under your state root, and the durable event carries the content
-digest, media type, size, logical role, and an opaque retrieval reference.
+digest, media type, size, logical role, and an opaque retrieval reference. Your
+terminal prints the reference beside the tool's outcome, so you can read it back
+without going looking for it.
 
 The model sees a bounded result that names what was truncated. You retrieve the
 whole output by that reference:
@@ -126,6 +129,13 @@ loopex artifact 3f9c1a…  > full-output.txt
 ```
 
 A reference to nothing says so rather than printing emptiness.
+
+**Where there is no store, the rest is lost.** The executor takes its artifact
+store from whoever composed it, and the shipped `loopex` command always supplies
+one — but a host that composed none, or a store that refuses the write, leaves
+the tool with the old marker naming how many bytes existed and no way to reach
+them. The receipt records an empty artifact list, which is true, and that is the
+whole of the warning you get.
 
 <a id="operator-tools-disclosure"></a>
 ## What Is Kept on Disk, Unencrypted

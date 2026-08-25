@@ -93,11 +93,13 @@ record names is the failure the gate would observe.
 `restored_sha256` is the running revision's SHA-256 of the artifact, which is
 what makes "restored" a claim about bytes rather than prose. Each digest above
 matches this revision, and a record whose artifact changed afterwards is re-run
-rather than re-labelled. Two records name a later candidate than the other six,
-because the session reducer and the command both changed after their first
-experiments — the reducer to carry a spilled artifact through the receipt, the
-command to refuse an unrecognised flag on every subcommand. Each was disabled
-again, at the candidate its record names, and failed its locked selector again.
+rather than re-labelled. Two records name a later candidate than the other six, because the session
+reducer and the command both changed after their first experiments. The reducer
+changed once, to carry a spilled artifact through the receipt. The command
+changed three times: the terminal's patience, the unrecognised-flag refusal on
+every subcommand, and the project-resource announcement. Each mechanism was
+disabled again, at the candidate its record names, and failed its locked selector
+again.
 
 ## Related
 

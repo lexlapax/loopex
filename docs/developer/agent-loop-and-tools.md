@@ -419,15 +419,24 @@ that are not what was stored, and `:unknown_artifact` rather than an empty
 success. The declared ceiling is 64 MiB and an oversized `put/3` fails closed.
 Nothing is collected automatically.
 
-What the M2 production path actually does with that port is narrower than the
-port allows. `Loopex.Executor.Local` bounds its own output through
-`CodingTools.bound_output/2` and appends its own marker, which states how many
-bytes of the total were shown and names no artifact. Its receipt carries no
-`artifacts` field, so a committed `tool_result` records an empty artifact list.
-`ArtifactStore.truncation_notice/3` and `CodingTools.present/1`, the forms that
-name a reference, are exercised by the conformance corpus rather than reached
-from the local executor. `loopex artifact <reference>` reads back whatever the
-store holds, and the artifact-store conformance suite covers the port itself.
+`Loopex.Executor.Local` bounds its own output through `CodingTools.bound_output/2`
+and hands the whole of it to the store its host composed, so a truncated result
+carries `ArtifactStore.truncation_notice/3` naming the reference and the receipt
+carries that reference in `artifacts`. The reference reaches the public plane on
+`tool.finished`, the terminal prints the locator, and
+`loopex artifact <reference>` reads it back.
+
+Two paths do not spill, and both keep the marker instead. A host that composed no
+artifact store — the executor's `:artifacts` option is optional — and a store
+that refuses the write both fall back to `truncation_marker/2`, which names no
+reference. **In both cases the bytes beyond the bound are gone**, not merely
+unretrievable: nothing else holds them. The receipt then records an empty
+artifact list, which is true rather than a silent absence. The shipped
+composition always supplies a store, so an operator using `loopex` does not take
+that path.
+
+`CodingTools.present/1` remains conformance-only: nothing in the production path
+calls it.
 
 ### The Four Bootstrap Coding Tools
 
@@ -456,7 +465,15 @@ replaces one exact occurrence and, on a mismatch, distinguishes absent from
 ambiguous and reports the nearest line it did find. `bash` takes either an argv
 vector, passed through without a shell, or an explicit raw `command`, which asks
 for a shell and gets one; collapsing the two would surprise a caller who supplied
-arguments safely. The three filesystem tools start no operating-system process.
+arguments safely. A job dispatched past its effective deadline is refused before it begins rather
+than interrupted while running: the three filesystem tools cannot be interrupted
+once started, so `run_coding_tool/5` compares the instant against the clock and
+returns `the effective deadline passed before this tool began`. No process is
+terminated because none was started. `bash` is the tool whose deadline governs a
+running child, and its expiry enters the termination and cleanup-confirmation
+sequence.
+
+The three filesystem tools start no operating-system process.
 A child runs in its own process group under `setsid`, announces the group the
 operating system actually assigned before doing anything else, and is terminated
 by group rather than by leader. The effective deadline of a job is the earlier of

@@ -465,6 +465,11 @@ the exact document set its milestone must update.
   `DEVELOPMENT.md` owns the commands they run.
 - This changelog.
 
+- The ReqLLM adapter sent only the most recent user message rather than the
+  committed conversation. Every test passed, because fixtures read
+  `request.messages` directly, while the real path had the model seeing its
+  original instruction again on every turn.
+
 ### Changed
 
 - Accepted milestone governance may integrate to `main` after exact review and
@@ -653,18 +658,6 @@ the exact document set its milestone must update.
   local commands; hosted CI may mirror them but remains supplementary for
   development and cannot become the project's only evidence path.
 
-### Removed
-
-- The paraphrase of the vision's serial barriers in `docs/roadmap.md`. Restating
-  a normative constraint inside a document that declares itself non-normative
-  makes the restatement read as authority while answering to nothing. The
-  verbatim quotation stays and is now checked against its source.
-- The duplicated milestone ladder in `README.md`. It restated `docs/roadmap.md`
-  and had already drifted from it; the README now points at the roadmap and the
-  canonical plans status register.
-
-### Changed
-
 - The model reply carries the provider's own identifier for the response. It is
   the one field a deterministic adapter cannot invent, and it is what a person
   looks up in the provider account when confirming that a real call happened.
@@ -676,12 +669,15 @@ the exact document set its milestone must update.
   identifier, so a terminal reading the public plane can name what is running and
   what was refused.
 
-### Fixed
+### Removed
 
-- The ReqLLM adapter sent only the most recent user message rather than the
-  committed conversation. Every test passed, because fixtures read
-  `request.messages` directly, while the real path had the model seeing its
-  original instruction again on every turn.
+- The paraphrase of the vision's serial barriers in `docs/roadmap.md`. Restating
+  a normative constraint inside a document that declares itself non-normative
+  makes the restatement read as authority while answering to nothing. The
+  verbatim quotation stays and is now checked against its source.
+- The duplicated milestone ladder in `README.md`. It restated `docs/roadmap.md`
+  and had already drifted from it; the README now points at the roadmap and the
+  canonical plans status register.
 
 ## Seed bootstrap — closed 2026-08-15
 

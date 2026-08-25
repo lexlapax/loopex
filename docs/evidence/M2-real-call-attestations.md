@@ -43,7 +43,18 @@ call, and the inherited recovery trace explicitly completes a second real call.
 All three records must declare the same `response_id_form` byte for byte and the
 same `provider`, `model`, `endpoint`, and `adapter_build` as the bound selector
 runner sealed, because all three must already agree on the provider that runner
-sealed. Anthropic's documented identifier form is written `msg_:16-64`.
+sealed.
+
+**The retained identifier is the per-call request identifier, `req_:16-64`, not
+the assembled message identifier.** The shipped adapter streams, and a streamed
+call cannot carry the message identifier: the client library keeps only usage
+from the provider's opening event and discards the rest. What survives is the
+`request-id` header the provider returns for every call, which is the identifier
+its own account and support surface use — so it is the one an auditor looks a
+retained claim up by, and it is what these records declare. The gate names
+`msg_:16-64` as an example of a documented form and carries no provider
+allowlist; the record declares the form its own run produced, which is what the
+runner validates against.
 
 ## Records
 

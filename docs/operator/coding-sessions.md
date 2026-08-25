@@ -117,6 +117,10 @@ interrupted terminal always exits.
 `loopex cancel <session>` reconciles a session that a dead process left behind.
 That is the whole of its meaning.
 
+It needs no `--policy`: it submits an abort and runs no tool. Where you name one
+it is used, and where you do not it runs under an authority that permits nothing
+— not under the permissive one, which applies only where you name it.
+
 It applies only where no live `loopex` process holds the state root's placement
 lock. Against a live owner it refuses and tells you which process is holding it:
 
@@ -183,7 +187,7 @@ loopex run --policy <name> --steer "<text>" "<prompt>"
 loopex run --policy <name> --follow-up "<text>" "<prompt>"
 loopex sessions [--state-root DIR]
 loopex resume <session> --policy <name> [--state-root DIR]
-loopex cancel <session> [--state-root DIR]
+loopex cancel <session> [--policy <name>] [--state-root DIR]
 loopex artifact <reference> [--state-root DIR]
 ```
 

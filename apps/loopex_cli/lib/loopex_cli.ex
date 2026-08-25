@@ -343,17 +343,24 @@ defmodule LoopexCli do
       else: {:error, "the workspace #{path} is not a directory"}
   end
 
-  # Concept: the authority a reconciling command needs is none.
+  # Concept: the authority a reconciling command needs is none, and what it falls
+  # back to must not be permission.
   #
   # Technical depth: `cancel` submits an abort and runs no tool, so requiring a
   # host policy made every documented invocation of it fail before it reached the
   # session it was asked to reconcile. The runtime still refuses to start with no
-  # policy at all where tools are active, so one is named here rather than
-  # omitted -- and an operator who names their own still gets theirs.
+  # policy at all, so one is named here rather than omitted.
+  #
+  # It is a refusing one. Falling back to the permissive policy would have made
+  # that policy exactly what it is documented never to be -- an implicit default
+  # an operator did not name and is not told about, since its notice only fires
+  # at a tool call this command never makes. A reconciling run that somehow
+  # reached a tool should be refused, so refusing is both the safe default and
+  # the true one. An operator who names a policy still gets theirs.
   defp reconciling_policy(flags) do
     case policy(Map.get(flags, "policy")) do
       {:ok, module} -> module
-      {:error, _absent} -> AllowAll
+      {:error, _absent} -> LoopexCli.Policy.RefuseAll
     end
   end
 
@@ -492,7 +499,7 @@ defmodule LoopexCli do
       loopex run --policy allow-all --follow-up "then do this next"
       loopex sessions
       loopex resume <session> --policy allow-all
-      loopex cancel <session>
+      loopex cancel <session> [--policy <name>]
       loopex artifact <reference>
 
     --policy is required for anything that runs tools. There is no default.

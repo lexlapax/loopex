@@ -335,6 +335,20 @@ defmodule LoopexCli.CodingTaskTest do
 
     replies = real_replies(state_root)
 
+    # Concept: the answer reached the operator as the provider produced it.
+    #
+    # Technical depth: the runtime, the stream domains, their closure items and
+    # the terminal always carried this path; the shipped adapter declined to use
+    # it and declared so, which the port admits as conformant and which meant
+    # nothing an operator ran ever streamed. Every committed reply now records
+    # what it emitted, so this asserts on the run's own durable record rather
+    # than on a delta this process happened to catch.
+    assert Enum.all?(replies, & &1["streamed"]),
+           "a committed reply declared it did not stream"
+
+    assert Enum.all?(replies, &(&1["delta_count"] > 0)),
+           "a committed reply streamed with no deltas"
+
     assert length(replies) >= 3,
            "the task completed #{length(replies)} turns; at least 3 are required"
 
