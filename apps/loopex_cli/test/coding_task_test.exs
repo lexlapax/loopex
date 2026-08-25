@@ -1,3 +1,13 @@
+# Concept: the locked selector loads what it needs.
+#
+# Technical depth: the gate compiles a protected selector on its own, without the
+# application's test helper. The demonstration stack is this application's own
+# support; the scripted model beneath it is the kernel's, required rather than
+# copied for the same reason the command's cases require it.
+Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+Code.require_file("support/demonstration.ex", __DIR__)
+
 defmodule LoopexCli.CodingTaskTest do
   @moduledoc false
 

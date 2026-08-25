@@ -1,3 +1,15 @@
+# Concept: the locked selector loads what it needs.
+#
+# Technical depth: the gate compiles a protected selector on its own, without the
+# application's test helper, so a case that relied on the helper to load a
+# fixture would find the fixture missing there and present everywhere else. The
+# kernel's own agent-loop fixture is required rather than copied: `loopex` is a
+# declared dependency of this application, and a second scripted model
+# maintained here would drift from the one the loop cases use and hide the drift
+# behind a passing test.
+Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+
 defmodule LoopexCliTest do
   @moduledoc false
 

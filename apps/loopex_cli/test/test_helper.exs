@@ -29,14 +29,11 @@ end
 
 System.at_exit(fn _status -> File.rm_rf(root) end)
 
-# Concept: the command's cases drive a real runtime, not a mock of one.
+# Concept: fixtures are loaded by the selectors that use them, not here.
 #
-# Technical depth: the kernel's own agent-loop fixture is loaded rather than
-# copied. A second scripted model and executor maintained here would drift from
-# the one the loop cases use, and the drift would be invisible until a case
-# passed against a double the runtime no longer matches.
-Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
-Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
-Code.require_file("support/demonstration.ex", __DIR__)
+# Technical depth: the gate compiles a protected selector on its own, without
+# this file, so a fixture loaded here would be present under `mix test` and
+# missing under the gate -- which is the difference between a case that passes
+# and a case that is proved.
 
 ExUnit.start(exclude: [:real_provider])
