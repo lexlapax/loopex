@@ -755,12 +755,22 @@ defmodule Loopex.Executor.Local do
       "\n\n[loopex: output truncated. #{byte_size(kept)} of #{total} bytes shown.]"
   end
 
+  # Concept: a tool that did something says what it did.
+  #
+  # Technical depth: this demonstration tool wrote its file and printed nothing,
+  # so the model received an empty result. Under M1's fixed two turns nothing
+  # depended on the model understanding it. Under M2's real loop it does: a
+  # result that says nothing is indistinguishable from a call that failed
+  # silently, and a real provider answered it by writing the same file again,
+  # several times, in a live recovery trace. The four operator-facing coding
+  # tools already report what they did; this one now does too.
   defp launcher_arguments(%{path: path, content: content, delay_ms: delay}) do
     script =
       "if [ \"${#{@credential_name}+x}\" = x ]; then exit 97; fi; " <>
         "delay=$1; target=$2; content=$3; " <>
         "if [ \"$delay\" -gt 0 ]; then sleep \"$delay\"; fi; " <>
-        "umask 077; printf %s \"$content\" > \"$target\""
+        "umask 077; printf %s \"$content\" > \"$target\"; " <>
+        "printf 'wrote the requested content to %s' \"$target\""
 
     [
       "-i",

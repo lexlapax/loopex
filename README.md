@@ -34,10 +34,17 @@ M1 is closed and integrated. It delivered the durability kernel: an explicit
 embedded runtime, durable local Store, canonical model boundary, trusted-local
 executor, thin reference client, durable events, and receipt reconciliation
 across a real runtime-process crash. What it deliberately did not deliver is a
-usable coding loop — that loop runs a fixed two turns, carries no conversation
-history, and exposes two demonstration tools, so the only way to drive it is a
-test selector. Making it a tool a developer uses from their own terminal is what
-`M2` is for, and `M2` is open and unaccepted.
+usable coding loop — that loop ran a fixed two turns, carried no conversation
+history, and exposed two demonstration tools, so the only way to drive it was a
+test selector.
+
+`M2` is accepted and in progress on its own branch. It makes that loop a command:
+`loopex` submits a prompt into a durable session, the answer streams as it is
+produced, the loop runs as many turns as the task needs while the model sees the
+whole conversation and the real output of every tool it ran, four coding tools
+act on a real workspace under a host policy that can refuse, and yesterday's
+session can be found and continued. Its product implementation stays on the
+milestone branch until closure; `main`'s product baseline remains M1.
 
 Loopex remains source-tree milestone work, not
 an installable package, release, or frozen public API. Start with the

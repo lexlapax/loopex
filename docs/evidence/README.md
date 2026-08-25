@@ -21,6 +21,10 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M1 negative demonstrations](M1-negative-demonstrations.md) | Five required safeguards disabled one at a time, each with its locked selector failure and exact restored artifact digest. |
 | [M2 recorded limitations](M2-recorded-limitations.md) | Known non-conformances carried by M2, each with its reason, observable consequence, and disposing authority. |
 | [M1 toolchain matrix](M1-toolchain-matrix.md) | Source-candidate metadata, Darwin floor/current and Linux-current M1 captures, and inherited M0 floor/current proofs. |
+| [M2 negative demonstrations](M2-negative-demonstrations.md) | Eight safeguards disabled one at a time, each with its locked selector failure and exact restored artifact digest. |
+| [M2 coding demonstration](M2-coding-demonstration.md) | The attended real-provider coding task through the shipped command, and what its capture can and cannot establish. |
+| [M2 real-call attestations](M2-real-call-attestations.md) | Provider-supplied response identifiers and reported usage for each of the three real-provider roles. |
+| [M2 toolchain matrix](M2-toolchain-matrix.md) | Source-candidate metadata and the floor, current, and Linux-current M2 captures. |
 
 ## Related
 

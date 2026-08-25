@@ -140,6 +140,11 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
   end
 
   @tag :real_provider
+  # M1's fixed two-turn loop finished inside ExUnit's default minute. M2's loop
+  # runs as many turns as the task needs across two operating-system processes,
+  # so the ceiling is raised to fit the work rather than the work trimmed to fit
+  # the ceiling.
+  @tag timeout: 600_000
   test "one real-provider trace forces a credential-free tool survives an untrappable runtime-tree kill after receipt before fact reconciles one effect without redispatch preserves its fact and completes a second real call" do
     credential = System.fetch_env!("LOOPEX_PROVIDER_API_KEY")
     System.delete_env("LOOPEX_PROVIDER_API_KEY")
@@ -173,10 +178,15 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
     assert await_trace_exit(second_port) == 0
 
     assert second.phase == 2
+    # The reconciled effect is never dispatched again by the recovered runtime.
+    # A later tool call the model chooses to make is a different effect with its
+    # own operation identity, not a redispatch of this one, and M2's loop can
+    # legitimately produce one where M1's fixed two turns could not.
     assert second.dispatches_after_restart == 0
-    assert second.model_results == 2
-    assert second.tool_started == 1
-    assert second.tool_finished == 1
+    refute Map.has_key?(second.dispatch_map, first.job_id)
+    assert second.model_results >= 2
+    assert second.tool_started >= 1
+    assert second.tool_finished >= 1
     assert second.terminal_outcome == "completed"
     assert second.child_environment_names == ["PATH"]
     refute second.provider_credential_present
@@ -185,7 +195,35 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
              first.acknowledged_event_ids
 
     assert second.provider_identity == first.provider_identity
+    # Concept: the recovered run showed the model what had already happened.
+    #
+    # Technical depth: the whole point of reconciling rather than redispatching is
+    # that the effect is already done, and the next turn has to know it. A
+    # projection that lost the assistant turn carrying the call, or the result the
+    # reconciliation committed, would leave the model looking at its original
+    # instruction with nothing done -- which reads as a task to repeat rather than
+    # one to confirm, and would show up as a second effect rather than as a failed
+    # assertion anywhere else.
+    roles = Enum.map(second.projected_messages, fn {role, _content, _calls} -> role end)
+    assert "assistant" in roles
+    assert "tool" in roles
+
+    assert Enum.any?(second.projected_messages, fn {role, _content, calls} ->
+             role == "assistant" and calls >= 1
+           end)
+
     assert_external_effect(root, first.job_id)
+
+    ids = Enum.reject(second.provider_response_ids, &is_nil/1)
+    assert length(ids) == length(Enum.uniq(ids))
+    assert length(ids) >= 2
+
+    IO.puts(
+      :stderr,
+      "loopex attestation inherited_8b: calls=#{length(ids)} ids=#{Enum.join(ids, "+")} " <>
+        "input_tokens=#{token_total(second.usage, "input_tokens")} " <>
+        "output_tokens=#{token_total(second.usage, "output_tokens")}"
+    )
 
     report_real_path(%{
       "provider" => second.provider_identity["provider"],
@@ -270,6 +308,13 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
              "loopex-real-recovery"
   end
 
+  # Concept: the provider's own reported totals across exactly the responses the
+  # role observed.
+  defp token_total(usage, field) when is_list(usage),
+    do: Enum.reduce(usage, 0, &((&1[field] || 0) + &2))
+
+  defp token_total(_usage, _field), do: 0
+
   defp wrong_value(value) when is_integer(value), do: value + 1
   defp wrong_value(value) when is_binary(value), do: value <> "-wrong"
 
@@ -326,12 +371,27 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
             await_trace_marker(port, bounded_trace_buffer(next))
         end
 
-      {^port, {:exit_status, _status}} ->
-        flunk("real trace child exited before reporting evidence")
+      # Concept: a failure that says nothing is a failure nobody can act on.
+      #
+      # Technical depth: the child merges its standard error into this port, so
+      # whatever it said before dying is already in the buffer. Discarding it
+      # left a diagnosis of "it exited", which is the one thing already known.
+      {^port, {:exit_status, status}} ->
+        flunk(
+          "real trace child exited (#{status}) before reporting evidence:\n" <>
+            String.slice(next_or(buffer), -4_000..-1//1)
+        )
     after
-      180_000 -> flunk("real trace child timed out before reporting evidence")
+      180_000 ->
+        flunk(
+          "real trace child timed out before reporting evidence:\n" <>
+            String.slice(next_or(buffer), -4_000..-1//1)
+        )
     end
   end
+
+  defp next_or(""), do: "(the child produced no output)"
+  defp next_or(buffer), do: buffer
 
   defp await_trace_exit(port) do
     receive do

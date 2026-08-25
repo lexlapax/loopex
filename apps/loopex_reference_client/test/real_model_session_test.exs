@@ -64,7 +64,12 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
              ReferenceClient.prompt(
                fixture.client,
                "prompt-real-model-session",
-               "Use the registered tool, then confirm completion."
+               # The prompt names the effect it wants, because M2's loop lets the
+               # model choose its own arguments where M1 forced the selection.
+               "Use the registered tool once to write the file real-session.txt " <>
+                 "with the exact content loopex-real-session. When the tool reports it " <>
+                 "wrote the file, confirm completion in one sentence and make no " <>
+                 "further tool calls."
              )
 
     Fixture.await_terminal(fixture, 6_000)
@@ -73,8 +78,12 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
     requests = Enum.filter(records, &(&1.payload.kind == "model_request_committed"))
     results = Enum.filter(records, &(&1.payload.kind == "model_result_committed"))
 
-    assert length(requests) == 2
-    assert length(results) == 2
+    # M2's loop runs as many turns as the task needs, so a fixed count would
+    # assert an M1 loop shape this milestone deliberately replaced. What the case
+    # claims is that every committed request reached dispatch with its own bytes
+    # and digest, and that the session completed.
+    assert length(requests) >= 1
+    assert length(results) == length(requests)
 
     Enum.zip(requests, results)
     |> Enum.each(fn {request_record, result_record} ->
@@ -90,12 +99,34 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
 
     identity = List.last(results).payload["reply"]["identity"]
 
+    announce_attestation(results)
+
     report_real_path(%{
       "provider" => identity["provider"],
       "model" => identity["model"],
       "endpoint" => identity["endpoint"],
       "adapter_build" => "loopex_llm_reqllm@#{Loopex.version()}"
     })
+  end
+
+  # Concept: hand the observed provider identifiers to an attended run.
+  #
+  # Technical depth: the retained attestation this milestone keeps is written by
+  # a person from an attended run, and the identifiers it carries must come from
+  # the run rather than a reconstruction. Emitting them on the diagnostic stream
+  # is how the run hands them over; nothing here writes a tracked file, because a
+  # case that wrote its own evidence would be attesting to itself.
+  defp announce_attestation(results) do
+    replies = Enum.map(results, & &1.payload["reply"])
+    ids = Enum.map(replies, & &1["provider_response_id"])
+    input = Enum.reduce(replies, 0, &((&1["usage"]["input_tokens"] || 0) + &2))
+    output = Enum.reduce(replies, 0, &((&1["usage"]["output_tokens"] || 0) + &2))
+
+    IO.puts(
+      :stderr,
+      "loopex attestation inherited_5c: calls=#{length(ids)} ids=#{Enum.join(ids, "+")} " <>
+        "input_tokens=#{input} output_tokens=#{output}"
+    )
   end
 
   defp report_real_path(report) do

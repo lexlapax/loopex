@@ -305,14 +305,29 @@ defmodule LoopexCli do
     end
   end
 
+  # Concept: check what the operator named before starting anything.
+  #
+  # Technical depth: the workspace becomes a lease held by the executor, and a
+  # lease over a path that is not a directory fails inside a linked start-up,
+  # which reaches an operator as an exit signal rather than as a sentence. Where
+  # the path came from the operator, so should the answer.
+  defp workspace(flags) do
+    path = Map.get(flags, "workspace", File.cwd!())
+
+    if File.dir?(path),
+      do: {:ok, path},
+      else: {:error, "the workspace #{path} is not a directory"}
+  end
+
   defp start_runtime(flags, policy) do
-    with {:ok, root} <- state_root(flags) do
+    with {:ok, workspace} <- workspace(flags),
+         {:ok, root} <- state_root(flags) do
       {:ok, placement} = Loopex.runtime_placement_id(root)
 
       LoopexComposition.start(
         runtime_id: placement,
         state_root: root,
-        workspace: Map.get(flags, "workspace", File.cwd!()),
+        workspace: workspace,
         policy: policy,
         progress_to: self()
       )

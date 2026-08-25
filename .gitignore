@@ -16,7 +16,7 @@
 # application, and it is a compiled artifact of the tracked source rather than
 # source itself; tracking it would put a platform-specific binary in history and
 # let it drift from the code it was built from.
-/apps/loopex_cli/loopex_cli
+/apps/loopex_cli/loopex
 /examples/*/_build/
 /examples/*/deps/
 /examples/*/cover/

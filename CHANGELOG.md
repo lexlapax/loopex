@@ -21,6 +21,80 @@ the exact document set its milestone must update.
 
 ### Added
 
+- `loopex`, a command an operator runs from their own terminal. `run` submits a
+  prompt into a durable session and streams the answer as it is produced;
+  `--steer` joins the run already going and `--follow-up` queues the next one;
+  `sessions` lists the sessions in a state root and `resume` continues one;
+  `cancel` reconciles a session a dead process left behind; `artifact` reads back
+  a spilled tool output. Argument parsing and terminal output use the standard
+  library only, and the command drives only the public facade: it owns no loop,
+  no durable session truth, no cursor truth, no store access, and no authority
+  decision.
+- A real agent loop. A prompt runs until the model stops asking for tools rather
+  than for a fixed number of turns, every request carries the committed
+  conversation including the original prompt and the real result of every tool
+  that ran, and three declared bounds — maximum turns, cumulative token budget,
+  and a committed absolute deadline — end a run truthfully rather than silently.
+- Four coding tools against a real workspace: `read`, `write`, `edit`, and
+  `bash`, sharing one conformance suite for bounded output, workspace-root
+  resolution, symlink and traversal containment, exact edit preconditions, and
+  ownership and termination of the child process group a job's captured kill
+  identity names.
+- A `Loopex.Policy` port that replaces M1's literal allow term. Every
+  executor-backed tool call including a read-only one requires a host decision;
+  a denial issues no grant, starts no process, and commits a truthful denied
+  outcome the operator reads; failure, timeout, and a malformed response fail
+  closed into denial. Omitting the `:policy` start option refuses runtime start,
+  and each shipped permissive policy says out loud what it is.
+- An `ArtifactStore` port and local adapter. Tool output beyond a declared bound
+  spills rather than poisoning the conversation: the durable event carries the
+  content digest, media type, size, role, and an opaque reference, the
+  model-facing result stays bounded and says what was truncated, and the
+  operator reads the whole thing back through the public facade.
+- Cancellation that reports what happened. An interrupt reaches the run through
+  the public facade, and `cancelled` commits only where every owned operation
+  reached a validated terminal fact and every owned process tree was confirmed
+  cleaned; anything less ends `outcome_unknown` carrying its reconciliation
+  reference. A terminal Ctrl-C is not one of the signals the emulator will hand
+  to a program, so it ends the process without cleanup and `loopex cancel`
+  reconciles the session it leaves behind.
+- A session directory. A fresh operating-system process lists the sessions in a
+  state root resolved from `LOOPEX_HOME`, resumes one under the durable runtime
+  placement identity that created it, and refuses a resume through a different
+  identity with an explicit reason.
+- Behaviour-shaping project resources enter the model's context only by an
+  operator's explicit decision, and a run without one fails closed toward
+  withholding the content rather than toward refusing the runtime.
+- `loopex_composition`, a shipped reference stack an embedder depends on rather
+  than copies: one module under an eighty-effective-line ceiling that starts the
+  application tree and a runtime, names the concrete Store, Model, Executor, and
+  ArtifactStore, resolves its state root explicitly, and refuses to start unless
+  the host supplies the policy that governs the run.
+- Operator and developer documentation for the command, the tools and the
+  authority in front of them, the loop and its contracts, and every surface M2
+  touches — all unstable, none labelled or frozen. An M1-era session data root is
+  not readable by M2.
+
+### Changed
+
+- The model reply carries the provider's own identifier for the response. It is
+  the one field a deterministic adapter cannot invent, and it is what a person
+  looks up in the provider account when confirming that a real call happened.
+- A tool that completed and produced no output now says so rather than
+  committing an empty result. An empty result is indistinguishable to a model
+  from a call that failed silently, and a real provider answered it by making the
+  same call again.
+- The public tool events carry the tool's generation alongside the call
+  identifier, so a terminal reading the public plane can name what is running and
+  what was refused.
+
+### Fixed
+
+- The ReqLLM adapter sent only the most recent user message rather than the
+  committed conversation. Every test passed, because fixtures read
+  `request.messages` directly, while the real path had the model seeing its
+  original instruction again on every turn.
+
 - The M1 single-machine working loop: explicit supervised runtime references,
   Store-backed session creation and owner succession, one serial active run,
   committed canonical model requests, host-granted controlled effects, durable

@@ -31,11 +31,21 @@ defmodule Loopex.Checks.Documents do
 
   @fixed_pairs ["docs/vision.md", "docs/roadmap.md", "docs/developer/development-charter.md"]
 
+  # Concept: developer documents whose companion is an operator document.
+  #
+  # Technical depth: the charter's pairing rule exists so a decision cannot hide
+  # in one half of a pair. These documents carry both depths in one file and are
+  # paired across audiences instead -- each links to the operator runbook that
+  # covers the same subject, and each of those links back -- so the reciprocal
+  # obligation is met by a real companion rather than by a second file that would
+  # exist only to satisfy a suffix.
   @exact_exceptions [
     "docs/README.md",
     "docs/developer/agent-context-map.md",
     "docs/developer/agent-adapter-smoke.md",
-    "docs/developer/runtime-and-embedding.md"
+    "docs/developer/runtime-and-embedding.md",
+    "docs/developer/agent-loop-and-tools.md",
+    "docs/developer/compatibility-surfaces.md"
   ]
 
   @unpaired_prefixes [

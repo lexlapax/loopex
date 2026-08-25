@@ -12,7 +12,7 @@ order. This file is the index of what exists.
 
 | Directory | Contents |
 | --- | --- |
-| [operator/](operator/README.md) | Runtime operation, shutdown, and recovery runbooks. |
+| [operator/](operator/README.md) | Coding-session, tool, policy, runtime, shutdown, and recovery runbooks. |
 | [developer/](developer/README.md) | Development method, routing, and retained client evidence. |
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
@@ -69,11 +69,24 @@ whose path or explicit fragment does not resolve.
   Technical depth plan, and executable gate.
 - [Development setup](../DEVELOPMENT.md) — local prerequisites and validation
   commands.
+- [Coding sessions](operator/coding-sessions.md#concept) — running, streaming,
+  steering, resuming, and stopping a coding task with the `loopex` command, and
+  what stopping does and does not promise.
+- [Tools and policy](operator/tools-and-policy.md#concept) — the four coding
+  tools, what local execution reaches, host authority, artifacts, and what the
+  local store keeps on disk.
 - [Runtime operations and first run](operator/runtime.md#concept) — current
   source-tree features, exact working-loop demonstrations, credentials, events,
   shutdown, and recovery.
-- [Runtime and embedding](developer/runtime-and-embedding.md#concept) — M1
-  composition, commit ordering, embedded API, and recovery mechanics.
+- [Agent loop and tools](developer/agent-loop-and-tools.md#concept) — the
+  multi-turn loop, tool contract and registry, bounds, stream domains, host
+  authority, artifacts, and project resources.
+- [Compatibility surfaces](developer/compatibility-surfaces.md#concept) — every
+  surface M2 touches, all unstable, none labelled or frozen, and what that means
+  for an embedder.
+- [Runtime and embedding](developer/runtime-and-embedding.md#concept) —
+  application shape, ports, composition, commit ordering, embedded API, and
+  recovery mechanics.
 - [Context map](developer/agent-context-map.md) — task-oriented routing into
   Concept first and exact Technical depth second.
 - [Adapter smoke evidence](developer/agent-adapter-smoke.md) — retained

@@ -122,7 +122,7 @@ defmodule Loopex.ConversationTest do
   test "every terminal outcome has a bounded model facing form" do
     for outcome <- Conversation.outcomes() do
       content = Conversation.result_content(outcome, "detail")
-      assert is_binary(content) and byte_size(content) > 0
+      assert byte_size(content) > 0
     end
 
     # An unknown outcome must not read as a failure the model might retry.
@@ -134,6 +134,13 @@ defmodule Loopex.ConversationTest do
     denied = Conversation.result_content(:denied, "policy_denied")
     assert denied =~ "refused"
     assert denied =~ "Do not retry"
+
+    # A completed call that produced no output still says it completed. Saying
+    # nothing reads as a call that did nothing, and a model's reasonable answer
+    # to that is to make the call again.
+    silent = Conversation.result_content(:completed, "")
+    assert silent =~ "completed"
+    assert byte_size(silent) > 0
   end
 
   test "an unknown element is refused rather than silently dropped" do

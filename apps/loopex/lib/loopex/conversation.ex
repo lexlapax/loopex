@@ -202,7 +202,17 @@ defmodule Loopex.Conversation do
   nobody knows whether the effect happened.
   """
   @spec result_content(atom(), binary() | nil) :: binary()
-  def result_content(:completed, content) when is_binary(content), do: content
+  def result_content(:completed, content) when is_binary(content) and content != "",
+    do: content
+
+  # Concept: a tool that completed and said nothing still completed.
+  #
+  # Technical depth: an empty result is indistinguishable to a model from a call
+  # that failed silently, and the reasonable response to that is to try again --
+  # which is what a tool with no output actually produced here, repeatedly, in a
+  # real trace. An empty content block is also refused outright by some
+  # providers. The result says what is true rather than saying nothing.
+  def result_content(:completed, _absent), do: "The tool completed and produced no output."
   def result_content(:failed, reason), do: "The tool failed: #{reason || "no reason recorded"}."
 
   def result_content(:denied, category),

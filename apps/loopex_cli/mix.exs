@@ -14,7 +14,10 @@ defmodule LoopexCli.MixProject do
       lockfile: "../../mix.lock",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
-      escript: [main_module: LoopexCli],
+      # The command an operator types is `loopex`. Without an explicit name the
+      # escript takes the application's, and the documentation would be
+      # describing a command that does not exist under that name.
+      escript: [main_module: LoopexCli, name: :loopex],
       deps: deps()
     ]
   end
