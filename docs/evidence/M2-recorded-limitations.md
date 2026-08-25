@@ -77,3 +77,60 @@ one of generosity, not of safety or determinism.
 deviation. The alternative considered and not taken was adding a durable commit
 instant to the Store contract, which remains the conforming fix whenever that
 decision is made.
+
+## Provider selection is not reachable from the command
+
+**Rule.**
+[Outcome 10](../plans/M2.md) promises an operator a real command, and the
+[dependency direction](../../AGENTS.md) makes the Model boundary replaceable by
+design: "shared policy never depends on a provider name". A surface that can
+reach only one provider is not itself a violation, but it is a gap between what
+the kernel supports and what an operator can ask for, and it is recorded here so
+a reviewer reads it as declared rather than as undiscovered.
+
+**What this milestone does instead.** `LoopexComposition.start/1` names one model
+specification, `anthropic:claude-haiku-4-5`, and the `loopex` command exposes no
+option to change it. Selecting another provider requires composing the ports
+directly rather than depending on the shipped composition.
+
+**Why.** The accepted plan pair scopes the composition to naming four concrete
+implementations and the command to driving the public facade. Threading a model
+specification through both is a small change, but it is a change to the command's
+input surface and to the locked composition, and neither was in the envelope the
+maintainer accepted. Operator-facing provider selection is deferred rather than
+added inside an accepted milestone.
+
+**What was proved anyway.** The adapter is provider-neutral in fact and not only
+in intent. It was exercised at the boundary against four providers, each
+resolving its identity, carrying the committed request, returning a correctly
+parsed tool call, and reporting usage and a provider-supplied response
+identifier:
+
+| Provider and model | Identity endpoint | Tool call | Response identifier form |
+| --- | --- | --- | --- |
+| `anthropic:claude-haiku-4-5` | `https://api.anthropic.com` | correct | `msg_…` |
+| `openai:gpt-4o-mini` | `https://api.openai.com/v1` | correct | `resp_…` |
+| `openrouter:qwen/qwen3-32b` | `https://openrouter.ai/api/v1` | correct | `gen-…` |
+| `ollama:qwen3.5:27b` | `http://localhost:11434/v1` | correct | `chatcmpl-…` |
+| `ollama:qwen3.6:35b-a3b-q8_0` | `http://localhost:11434/v1` | correct | `chatcmpl-…` |
+
+`ollama:qwen2.5:7b` answered the same prompt without calling the tool. It
+declares tool capability and the call reached it correctly, so this is a
+statement about that model rather than about the boundary.
+
+**A local provider can never be this milestone's real-call evidence.** An Ollama
+response identifier is a per-process counter, not an identifier that exists in a
+provider account. The
+[real-call attestations](M2-real-call-attestations.md) are worth exactly the
+external lookup a person performs against the provider's account, and there is no
+account to look in. A local model is a usable provider and is never closure
+evidence.
+
+**Observable consequence.** An operator who wants a different provider cannot ask
+the shipped command for one and composes the public ports themselves. Nothing is
+lost, mis-recorded, or silently redirected; the command does what it says, for
+one provider.
+
+**Disposition.** Maintainer, 2026-08-24: record the gap and defer operator-facing
+provider selection to a later milestone. The adapter's provider neutrality is
+proved at the boundary and is not in question.
