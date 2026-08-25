@@ -411,10 +411,34 @@ defmodule LoopexCliTest do
 
     assert message =~ "live loopex process"
 
-    # Reconciling needs no host authority: it submits an abort and runs no tool.
-    # Requiring one made every documented invocation fail before it reached the
-    # session it was asked to reconcile.
+    # Concept: the no-authority claim is asserted where the code that decides it
+    # actually runs.
+    #
+    # Technical depth: this assertion used to sit here, against the live-owner
+    # refusal, and passed without `reconciling_policy/1` ever being evaluated --
+    # the `with` chain short-circuits at the live owner, so reverting the fix left
+    # the case green while the command failed in an operator's hands. It is now
+    # made below, past a released lock, where the chain reaches `start_runtime`.
     refute message =~ "--policy is required"
+
+    # Concept: a command gives the lock back when it stops.
+    #
+    # Technical depth: the release was registered to run at exit, and the entry
+    # point ends through `System.halt/1`, which runs no Erlang afterwards -- so
+    # every successful run would have left a lock naming a dead process. The
+    # operating system reuses process identifiers, so such a lock eventually
+    # names something live and unrelated and refuses the operator their own state
+    # root. It is released explicitly instead, and this asserts the file is gone
+    # rather than that a handler was registered.
+    Placement.release(lock)
+    {:ok, retaken} = Placement.acquire(state_root)
+    :persistent_term.put({LoopexCli, :placement_lock}, retaken)
+    assert File.exists?(Path.join(state_root, "placement.lock"))
+    assert :ok = LoopexCli.release_placement()
+    refute File.exists?(Path.join(state_root, "placement.lock"))
+    assert :ok = LoopexCli.release_placement()
+
+    {:ok, lock} = Placement.acquire(state_root)
 
     # A lock left by a process that is gone describes nothing, and the session
     # behind it is reconcilable rather than permanently blocked.
@@ -447,6 +471,21 @@ defmodule LoopexCliTest do
     assert_receive {:holding, model}, 2_000
     assert {:accepted, _id} = Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
     send(model, :release)
+
+    # And the command itself gets past the authority check with no `--policy`,
+    # which is the half the live-owner refusal above can never reach. It fails
+    # later, on a runtime this test already owns, and the failure it gives is
+    # about that rather than about a flag it should not need.
+    AgentLoopFixture.stop(fixture)
+    LoopexCli.release_placement()
+
+    reconciled = LoopexCli.dispatch(["cancel", session_id, "--state-root", state_root])
+    assert match?(:ok, reconciled) or match?({:error, _reason}, reconciled)
+
+    case reconciled do
+      {:error, reason} -> refute reason =~ "--policy is required"
+      :ok -> :ok
+    end
   end
 
   test "the policy option selects the governing host policy and a refusal is reported in the transcript" do

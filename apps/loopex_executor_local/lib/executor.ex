@@ -636,10 +636,17 @@ defmodule Loopex.Executor.Local do
   #
   # Technical depth: the budget was a literal two minutes, so a tool's declared
   # `wall_time_ms` was never read anywhere in the tree -- it happened to equal
-  # `loopex.bash`'s declaration and was wrong for the other three. Reading it
-  # from the definition is what makes the declaration mean something, and a
-  # definition that declares none falls back to the run's instant alone rather
-  # than to a number invented here.
+  # `loopex.bash`'s declaration and was wrong for the other three. A definition
+  # that declares none falls back to the run's instant alone rather than to a
+  # number invented here.
+  #
+  # What this bounds is a running child, which only `bash` has. For the three
+  # synchronous tools the caller compares this instant against the clock before
+  # beginning, and `min(run_deadline, now + budget)` exceeds `now` whenever the
+  # run's own deadline does, so their declared budgets change no observable
+  # behaviour: the effective bound there is the run's deadline alone. Bounding
+  # them properly would need the work interruptible, which reading a file
+  # through `File.read/1` is not.
   defp effective_deadline(job, tool) do
     case declared_wall_time(tool) do
       nil -> job.run_deadline

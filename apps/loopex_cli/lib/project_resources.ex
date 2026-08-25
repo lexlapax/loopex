@@ -100,8 +100,7 @@ defmodule LoopexCli.ProjectResources do
         for entry <- resolved do
           IO.puts(
             :stderr,
-            "  · #{entry[:label] || entry["label"]} " <>
-              "(#{entry[:bytes] || entry["bytes"] || "?"} bytes, from the workspace root)"
+            "  · #{entry.label} (#{byte_size(entry.content)} bytes, from the workspace root)"
           )
         end
 

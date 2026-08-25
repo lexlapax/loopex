@@ -49,7 +49,11 @@ defmodule LoopexCli do
   wrapping this command can tell success from failure.
   """
   @spec main([binary()]) :: no_return()
-  def main(argv), do: halt(dispatch(argv))
+  def main(argv) do
+    result = dispatch(argv)
+    release_placement()
+    halt(result)
+  end
 
   @doc """
   ## Concept
@@ -353,21 +357,54 @@ defmodule LoopexCli do
     end
   end
 
-  # Concept: one live command owns a state root while it is using it.
+  # Concept: one live command owns a state root while it is using it, and gives
+  # it back when it stops.
   #
   # Technical depth: the lock was implemented and never taken, so the exclusion
-  # it describes never engaged and `cancel` never found a live owner to refuse.
-  # It is taken for the life of the command and released when it ends; a lock
-  # left by a process that died is reclaimed by the next acquirer through the
-  # liveness check rather than needing this to have run.
+  # it describes never engaged. Taking it without releasing it would have been
+  # worse than leaving it dormant: `System.halt/1` ends the emulator through
+  # `:erlang.halt`, which runs no Erlang afterwards, so an `at_exit` release
+  # never fires and every successful run would leave a lock naming a dead
+  # process. The operating system reuses process identifiers, so that lock
+  # eventually names something live and unrelated, and the operator is refused
+  # their own state root and told to stop a process that is not theirs.
+  #
+  # The lock is therefore recorded where the entry point can find it and released
+  # explicitly before halting. A lock left behind by a genuine crash is still
+  # reclaimed by the next acquirer through the liveness check.
+  @placement_key {__MODULE__, :placement_lock}
+
   defp own_placement(root) do
     case Placement.acquire(root) do
       {:ok, lock} ->
-        System.at_exit(fn _status -> Placement.release(lock) end)
+        :persistent_term.put(@placement_key, lock)
         :ok
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Gives back the placement lock this command took, if it took one.
+
+  ## Technical depth
+
+  Called on the way out rather than registered to run at exit, because the exit
+  path halts the emulator and nothing registered runs then. Safe to call when no
+  lock was taken, so every path out can call it without asking first.
+  """
+  @spec release_placement() :: :ok
+  def release_placement do
+    case :persistent_term.get(@placement_key, nil) do
+      nil ->
+        :ok
+
+      lock ->
+        :persistent_term.erase(@placement_key)
+        Placement.release(lock)
     end
   end
 

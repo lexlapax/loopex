@@ -1281,6 +1281,9 @@ defmodule Loopex.Runtime.SessionState do
       # refusal — which is exactly the case an operator most needs to understand.
       # The generation is taken from the call the model actually made, so a
       # refused call names the tool it asked for rather than nothing.
+      # A refused or failed call spilled nothing, and says so with an empty list
+      # rather than an absent field: a consumer reading the public plane must not
+      # have to distinguish "no artifacts" from "this producer omitted the key".
       event =
         %{
           "run_id" => run_id,
@@ -1288,6 +1291,7 @@ defmodule Loopex.Runtime.SessionState do
           "tool_call_id" => tool_call_id,
           "tool_id" => called_tool_id(call),
           "outcome" => outcome,
+          "artifacts" => [],
           event_id: stable_id("event-tool-finished", state.session_id, tool_call_id),
           kind: "tool.finished"
         }

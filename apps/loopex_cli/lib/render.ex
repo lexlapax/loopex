@@ -158,8 +158,23 @@ defmodule LoopexCli.Render do
     IO.puts(:stderr, "  · #{event["tool_id"]} (#{event["tool_call_id"]})")
   end
 
+  # Concept: a tool that spilled says where the rest of its output went.
+  #
+  # Technical depth: the reference is on the public plane precisely so an
+  # operator can retrieve what the model was not shown, and `loopex artifact`
+  # takes exactly that locator. A terminal that printed only the outcome left the
+  # operator holding a retrieval command with nothing to give it, which makes the
+  # spill a loss from where they are standing even though nothing was lost.
   defp render(%{kind: "tool.finished"} = event) do
     IO.puts(:stderr, "  · #{event["tool_id"] || event["tool_call_id"]}: #{event["outcome"]}")
+
+    for artifact <- event["artifacts"] || [] do
+      IO.puts(
+        :stderr,
+        "    output beyond the tool's bound was retained: #{artifact["size"]} bytes, " <>
+          "read it with `loopex artifact #{artifact["locator"]}`"
+      )
+    end
   end
 
   # Concept: the ending says what happened, including when nobody knows.
