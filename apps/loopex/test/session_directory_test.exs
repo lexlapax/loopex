@@ -181,6 +181,102 @@ defmodule Loopex.SessionDirectoryTest do
     assert session_owner_epoch(store_pid, session_id) == epoch_after_first + 1
   end
 
+  test "a session identifier that is not one contained name is refused before any file is touched",
+       %{root: root} do
+    # Concept: the identifier an operator types names an entry in this
+    # directory, never a path through the rest of the state root.
+    #
+    # Technical depth: `loopex resume` hands its positional argument straight
+    # here, and the argument used to be joined unchecked. A traversal
+    # identifier therefore read and wrote outside the sessions directory --
+    # `record_session/3` would create a file anywhere the process can write,
+    # and `resume/4` became a probe for whatever was there.
+    {:ok, state_root} = SessionDirectory.state_root()
+    {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
+
+    outside = Path.join(root, "outside-entry")
+
+    File.write!(
+      outside,
+      :erlang.term_to_binary(%{session_id: "x", runtime_id: "r", commands: %{}})
+    )
+
+    for identifier <- ["../outside-entry", "../../etc/passwd", "..", ".", "a/b", <<"a", 0, "b">>] do
+      assert {:error, :invalid_session_id} =
+               SessionDirectory.record_session(state_root, identifier, runtime_id),
+             "#{inspect(identifier)} was accepted as a session identifier"
+    end
+
+    # The escape was readable as well as writable: the planted entry decodes,
+    # so an unchecked join would have answered from it.
+    assert {:error, :invalid_session_id} =
+             SessionDirectory.resume(state_root, :unused, "../outside-entry", "resume-1")
+
+    # Nothing was created beside the file that was planted, and it is unchanged.
+    assert File.ls!(root) |> Enum.sort() == ["outside-entry", "runtime_id"]
+  end
+
+  test "two runtimes recording one session concurrently leave exactly one durable binding", %{
+    root: root
+  } do
+    # Concept: the runtime that creates a session owns it permanently, and two
+    # arriving together cannot both come away believing they own it.
+    #
+    # Technical depth: `record_session/3` read, saw the session unknown, and
+    # renamed unconditionally. Between the read and the rename another runtime
+    # could complete the same sequence, and the later rename replaced the
+    # earlier binding with no error to either caller -- the ADR 0008 placement
+    # binding lost to a race that the `:session_already_bound` branch appeared
+    # to cover. Creation now links rather than renames, so exactly one writer
+    # can win and the other settles against what is durably there.
+    {:ok, state_root} = SessionDirectory.state_root()
+    session_id = "contended-session"
+
+    # Serialised on a barrier so both attempts pass their read before either
+    # publishes; that is the window the unconditional rename left open.
+    barrier = :counters.new(1, [:atomics])
+
+    runtimes = for index <- 1..8, do: "runtime-#{index}"
+
+    results =
+      runtimes
+      |> Enum.map(fn id ->
+        Task.async(fn ->
+          :counters.add(barrier, 1, 1)
+          wait_for_barrier(barrier, length(runtimes))
+          {id, SessionDirectory.record_session(state_root, session_id, id)}
+        end)
+      end)
+      |> Task.await_many(5_000)
+
+    winners = for {id, :ok} <- results, do: id
+    assert length(winners) == 1, "expected one binding, got #{inspect(winners)}"
+
+    for {_id, result} <- results, result != :ok do
+      assert {:error, {:session_already_bound, bound}} = result
+      assert bound == hd(winners)
+    end
+
+    # The durable record agrees with the one caller that was told it won, and
+    # that caller can re-present its own identity idempotently.
+    assert {:ok, [%{session_id: ^session_id, runtime_id: recorded}]} =
+             SessionDirectory.list_sessions(state_root)
+
+    assert recorded == hd(winners)
+    assert :ok = SessionDirectory.record_session(state_root, session_id, recorded)
+
+    # No temporary file survived any losing attempt.
+    assert Path.join([root, "sessions"]) |> File.ls!() == [session_id]
+  end
+
+  defp wait_for_barrier(barrier, target) do
+    if :counters.get(barrier, 1) >= target do
+      :ok
+    else
+      wait_for_barrier(barrier, target)
+    end
+  end
+
   defp session_owner_epoch(store_pid, session_id) do
     M1RuntimeTestStore.inspect_state(store_pid).sessions
     |> Map.fetch!(session_id)

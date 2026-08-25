@@ -40,6 +40,10 @@ defmodule Loopex.SessionDirectory do
   alias Loopex.Runtime
 
   @max_identifier_bytes 256
+
+  # Technical depth: bounded so a pathologically contended entry fails with a
+  # reason rather than spinning.
+  @cache_attempts 5
   @runtime_id_filename "runtime_id"
   @sessions_dirname "sessions"
   @runtime_id_prefix "runtime_"
@@ -154,7 +158,7 @@ defmodule Loopex.SessionDirectory do
         {:error, {:session_already_bound, recorded}}
 
       {:error, :session_unknown} ->
-        write_entry(root, %{session_id: session_id, runtime_id: runtime_id, commands: %{}})
+        create_entry(root, session_id, runtime_id)
 
       {:error, reason} ->
         {:error, reason}
@@ -162,6 +166,31 @@ defmodule Loopex.SessionDirectory do
   end
 
   def record_session(_root, _session_id, _runtime_id), do: {:error, :invalid_session_record}
+
+  # Technical depth: `:eexist` means another writer created the entry between
+  # this one's read and its link. The winner's bytes are authoritative, so the
+  # loser answers from them -- idempotent when both recorded the same
+  # `runtime_id`, and the ordinary conflict when they did not.
+  defp create_entry(root, session_id, runtime_id) do
+    case write_entry(
+           root,
+           %{session_id: session_id, runtime_id: runtime_id, commands: %{}},
+           :create
+         ) do
+      :ok ->
+        :ok
+
+      {:error, {:session_entry_persist_failed, :eexist}} ->
+        case read_entry(root, session_id) do
+          {:ok, %{runtime_id: ^runtime_id}} -> :ok
+          {:ok, %{runtime_id: recorded}} -> {:error, {:session_already_bound, recorded}}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   @doc """
   ## Concept
@@ -238,25 +267,51 @@ defmodule Loopex.SessionDirectory do
           {:ok, cached_result}
 
         :error ->
-          resume_and_cache(root, entry, runtime, session_id, command_id)
+          resume_and_cache(root, runtime, session_id, command_id)
       end
     end
   end
 
   def resume(_root, _runtime, _session_id, _command_id), do: {:error, :invalid_resume_request}
 
-  defp resume_and_cache(root, entry, runtime, session_id, command_id) do
+  defp resume_and_cache(root, runtime, session_id, command_id) do
     case Runtime.resume_session(runtime, session_id, command_id) do
       {:ok, resumed_id} = result ->
-        updated = %{entry | commands: Map.put(entry.commands, command_id, resumed_id)}
-
-        case write_entry(root, updated) do
+        case cache_command(root, session_id, command_id, resumed_id, @cache_attempts) do
           :ok -> result
           {:error, reason} -> {:error, reason}
         end
 
       {:error, _reason} = error ->
         error
+    end
+  end
+
+  # Concept: caching a resolved command must not drop one another caller
+  # resolved at the same moment.
+  #
+  # Technical depth: the entry that reached this function was read before the
+  # resume ran, so writing it back whole republishes a `commands` map that may
+  # already be stale -- a concurrent resume's entry silently disappears, and the
+  # `command_id` it belonged to contests ownership again on re-presentation
+  # instead of returning its historical result. There is no compare-and-set on
+  # a rename, so this re-reads immediately before writing, merges into whatever
+  # is current, and then confirms its own entry survived; a lost race re-reads
+  # the winner's state and merges again. Each attempt starts from a strictly
+  # later state, so the retries converge rather than trading writes.
+  defp cache_command(_root, _session_id, _command_id, _resumed_id, 0),
+    do: {:error, :session_entry_contended}
+
+  defp cache_command(root, session_id, command_id, resumed_id, attempts) do
+    with {:ok, current} <- read_entry(root, session_id),
+         merged = %{current | commands: Map.put(current.commands, command_id, resumed_id)},
+         :ok <- write_entry(root, merged, :update),
+         {:ok, settled} <- read_entry(root, session_id) do
+      if Map.get(settled.commands, command_id) == resumed_id do
+        :ok
+      else
+        cache_command(root, session_id, command_id, resumed_id, attempts - 1)
+      end
     end
   end
 
@@ -322,15 +377,39 @@ defmodule Loopex.SessionDirectory do
     end
   end
 
-  defp session_path(root, session_id), do: Path.join([root, @sessions_dirname, session_id])
+  # Concept: a session identifier names one entry inside this directory and
+  # never anything outside it.
+  #
+  # Technical depth: the identifier arrives from a caller -- on the command
+  # surface, straight from an operator's argument -- and is used as a filename.
+  # Joined unchecked, `../../outside-entry` reads and writes outside the
+  # sessions directory entirely, so `loopex resume` became a file probe against
+  # the rest of the state root. The rule is containment rather than format: one
+  # path component, no separator, not a traversal element, and bounded. It
+  # constrains what an identifier may be used for here without constraining how
+  # a caller chooses to mint one.
+  defp session_path(root, session_id) do
+    if contained?(session_id) do
+      {:ok, Path.join([root, @sessions_dirname, session_id])}
+    else
+      {:error, :invalid_session_id}
+    end
+  end
+
+  defp contained?(session_id) do
+    is_binary(session_id) and byte_size(session_id) > 0 and
+      byte_size(session_id) <= @max_identifier_bytes and
+      session_id not in [".", ".."] and
+      not String.contains?(session_id, ["/", "\\", <<0>>])
+  end
 
   defp read_entry(root, session_id) do
-    path = session_path(root, session_id)
-
-    case File.read(path) do
-      {:ok, contents} -> decode_entry(contents)
-      {:error, :enoent} -> {:error, :session_unknown}
-      {:error, reason} -> {:error, {:session_entry_unreadable, reason}}
+    with {:ok, path} <- session_path(root, session_id) do
+      case File.read(path) do
+        {:ok, contents} -> decode_entry(contents)
+        {:error, :enoent} -> {:error, :session_unknown}
+        {:error, reason} -> {:error, {:session_entry_unreadable, reason}}
+      end
     end
   end
 
@@ -356,16 +435,38 @@ defmodule Loopex.SessionDirectory do
     ArgumentError -> {:error, :corrupt_session_entry}
   end
 
-  defp write_entry(root, entry) do
-    path = session_path(root, entry.session_id)
-    tmp = path <> ".tmp-" <> Integer.to_string(System.unique_integer([:positive]))
+  # Concept: recording a session for the first time and updating one already
+  # recorded are different acts, and only the first may not overwrite.
+  #
+  # Technical depth: both used one unconditional rename, so `record_session/3`
+  # was read-then-write with a window between. Two runtimes recording the same
+  # identifier concurrently both read `:session_unknown`, both renamed, and the
+  # later one silently rebound placement -- exactly the permanent binding
+  # ADR 0008 exists to hold, lost to a race the conflict branch appeared to
+  # cover. Creation now publishes with `:file.make_link/2`, which fails
+  # `:eexist` against an existing name rather than replacing it, so a loser
+  # learns it lost and settles against whatever is actually on disk.
+  defp write_entry(root, entry, mode) do
+    with {:ok, path} <- session_path(root, entry.session_id) do
+      tmp = path <> ".tmp-" <> Integer.to_string(System.unique_integer([:positive]))
 
-    with :ok <- File.mkdir_p(Path.dirname(path)),
-         :ok <- File.write(tmp, :erlang.term_to_binary(entry)),
-         :ok <- File.rename(tmp, path) do
-      :ok
-    else
-      {:error, reason} -> {:error, {:session_entry_persist_failed, reason}}
+      with :ok <- File.mkdir_p(Path.dirname(path)),
+           :ok <- File.write(tmp, :erlang.term_to_binary(entry)),
+           :ok <- publish(tmp, path, mode) do
+        :ok
+      else
+        {:error, reason} ->
+          _ = File.rm(tmp)
+          {:error, {:session_entry_persist_failed, reason}}
+      end
     end
   end
+
+  defp publish(tmp, path, :create) do
+    result = :file.make_link(tmp, path)
+    _ = File.rm(tmp)
+    result
+  end
+
+  defp publish(tmp, path, :update), do: File.rename(tmp, path)
 end
