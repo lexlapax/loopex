@@ -44,7 +44,7 @@ carries its own mutation record rather than resting on source inspection.
 ## Outcome 4: workspace path scope containment
 
 ```json
-{"mechanism_disabled":"workspace_path_scope_containment","selector":"apps/loopex_executor_local/test/coding_tools_test.exs","observed_failure":"resolve expanded the path and compared nothing, so traversal and symlink escapes were admitted and the locked containment case failed","candidate":"4894dea16a5fdc398106cccd6c7a1b93a161d3c4","artifact":"apps/loopex_executor_local/lib/coding_tools.ex","restored_sha256":"sha256:ebbe853fa8a23dffd1eec0d53f3d91dd1922ff85a2051cf86a248a6feb80c832"}
+{"mechanism_disabled":"workspace_path_scope_containment","selector":"apps/loopex_executor_local/test/coding_tools_test.exs","observed_failure":"containment compared nothing, so every resolved path was treated as inside the workspace and traversal and symlink escapes were admitted, and the locked containment case failed","candidate":"e09b32a8db754dc10f71082495c025770fb50b10","artifact":"apps/loopex_executor_local/lib/coding_tools.ex","restored_sha256":"sha256:e3e5f0804103995bbd2b99d2f55cb4195cad4e47edab119ca5f6b5ffa72639b2"}
 ```
 
 ## Outcome 6: host policy deny pre-start refusal
@@ -56,19 +56,19 @@ carries its own mutation record rather than resting on source inspection.
 ## Outcome 7: project resource trust admission
 
 ```json
-{"mechanism_disabled":"project_resource_trust_admission","selector":"apps/loopex/test/project_resource_trust_test.exs","observed_failure":"resolve admitted every manifest without consulting the decision, so a headless run staged the project block and four locked cases failed including decision binding and invalidation","candidate":"4894dea16a5fdc398106cccd6c7a1b93a161d3c4","artifact":"apps/loopex/lib/loopex/project_resource.ex","restored_sha256":"sha256:99e658924ad2e6f0916e2ffb4fad9723d12f13ef9b9541defde218c58a0bffc7"}
+{"mechanism_disabled":"project_resource_trust_admission","selector":"apps/loopex/test/project_resource_trust_test.exs","observed_failure":"resolution admitted the manifest whether or not a decision existed and whatever digest one carried, so withheld content staged itself and two locked cases failed including the headless declined run and the invalidated binding","candidate":"e09b32a8db754dc10f71082495c025770fb50b10","artifact":"apps/loopex/lib/loopex/project_resource.ex","restored_sha256":"sha256:d93e2fdd6cf10467e3d36ebdff62aed988d1493d9300ada3dffee1b2a302c0b9"}
 ```
 
 ## Outcome 8: cancellation cleanup confirmation
 
 ```json
-{"mechanism_disabled":"cancellation_cleanup_confirmation","selector":"apps/loopex/test/cancellation_test.exs","observed_failure":"an abort whose cleanup was unconfirmed committed cancelled instead of outcome_unknown and the locked insufficient evidence case failed","candidate":"72c09ec74d43b43e4787b8905c25c57d677cf063","artifact":"apps/loopex/lib/loopex/runtime/session_state.ex","restored_sha256":"sha256:93e198c764e412a923445442b0949b290e12bae49b4eccf221e26d0759026d55"}
+{"mechanism_disabled":"cancellation_cleanup_confirmation","selector":"apps/loopex/test/cancellation_test.exs","observed_failure":"an abort committed cancelled whatever the cleanup disposition was, so an unconfirmed cleanup and an unproven effect both reported a clean stop and two locked cases failed including the outcome unknown case and the validated terminal case","candidate":"e09b32a8db754dc10f71082495c025770fb50b10","artifact":"apps/loopex/lib/loopex/runtime/session_state.ex","restored_sha256":"sha256:3319712407c35d50c6e7667d56ea4b10102942ac051d023c880beb7d61ef8836"}
 ```
 
 ## Outcome 10: command surface facade only
 
 ```json
-{"mechanism_disabled":"command_surface_facade_only","selector":"apps/loopex_cli/test/cli_test.exs","observed_failure":"the command named a runtime control module and the locked facade only case failed","candidate":"72c09ec74d43b43e4787b8905c25c57d677cf063","artifact":"apps/loopex_cli/lib/loopex_cli.ex","restored_sha256":"sha256:57476fbf46672ffdd0bea450522fd3c6d59ece557f60413ac9b5114a66820d36"}
+{"mechanism_disabled":"command_surface_facade_only","selector":"apps/loopex_cli/test/cli_test.exs","observed_failure":"the artifact subcommand resolved and read objects through the concrete local artifact store instead of the port, so the command named an implementation again and the locked facade case failed","candidate":"e09b32a8db754dc10f71082495c025770fb50b10","artifact":"apps/loopex_cli/lib/loopex_cli.ex","restored_sha256":"sha256:b5993d8d63c3629f101f7df9a48a31b13d6f146a4df9e6cf23a7bb674f140c61"}
 ```
 
 ## How these were produced
@@ -93,13 +93,17 @@ record names is the failure the gate would observe.
 `restored_sha256` is the running revision's SHA-256 of the artifact, which is
 what makes "restored" a claim about bytes rather than prose. Each digest above
 matches this revision, and a record whose artifact changed afterwards is re-run
-rather than re-labelled. Two records name a later candidate than the other six, because the session
-reducer and the command both changed after their first experiments. The reducer
-changed once, to carry a spilled artifact through the receipt. The command
-changed three times: the terminal's patience, the unrecognised-flag refusal on
-every subcommand, and the project-resource announcement. Each mechanism was
-disabled again, at the candidate its record names, and failed its locked selector
-again.
+rather than re-labelled — which is the whole reason four records name a later
+candidate than the other four.
+
+Those four artifacts changed after their first experiments, so their earlier
+records described bytes that no longer existed. The containment resolver gained
+symlink-target resolution; project-resource resolution began honouring a
+decision's own revocation and expiry; the session reducer gained a durable
+abandoned-attempt transition and a refused-progress record; and the command
+began retrieving artifacts through the port and forwarding the trust decision.
+Each of those four mechanisms was disabled again, at the candidate its record
+now names, and failed its locked selector again.
 
 ## Related
 
