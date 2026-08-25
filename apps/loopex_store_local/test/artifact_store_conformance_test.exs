@@ -181,6 +181,34 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     assert {:ok, "the whole output"} = module.fetch(handle, rebuilt)
   end
 
+  test "a locator the store never issued reports unavailable rather than raising" do
+    # Concept: a locator is opaque to the port, so a store must answer for one it
+    # does not recognise rather than assume its own shape.
+    #
+    # Technical depth: the port admits any non-empty locator, and this store
+    # derives a path by slicing the first two characters of it. A durable
+    # reference carrying a valid digest and a one-character locator therefore
+    # passed validation and then raised out of `binary_part/3` during retrieval
+    # -- a crash in recovery where a typed answer was owed.
+    for {module, handle} <- implementations() do
+      foreign = %{
+        digest: String.duplicate("a", 64),
+        media_type: "text/plain",
+        size: 3,
+        role: "tool_output",
+        locator: "x"
+      }
+
+      assert {:error, :unknown_artifact} = module.fetch(handle, foreign)
+      assert {:error, :unknown_artifact} = module.stat(handle, foreign)
+
+      # An empty locator was already refused by the port; a long one that is not
+      # this store's shape is refused for the same reason.
+      assert {:error, :unknown_artifact} =
+               module.fetch(handle, %{foreign | locator: String.duplicate("z", 64)})
+    end
+  end
+
   test "an artifact round trips byte exactly and a missing artifact reports unavailable" do
     for {module, handle} <- implementations() do
       # Bytes that a text-oriented path would mangle: nulls, high bytes, and a

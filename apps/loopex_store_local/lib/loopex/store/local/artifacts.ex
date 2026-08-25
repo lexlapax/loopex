@@ -120,7 +120,7 @@ defmodule Loopex.Store.Local.Artifacts do
   @impl Loopex.ArtifactStore
   @spec fetch(handle(), ArtifactStore.artifact_reference()) :: {:ok, binary()} | {:error, term()}
   def fetch(%{root: root}, reference) do
-    if ArtifactStore.valid_reference?(reference) do
+    if ArtifactStore.valid_reference?(reference) and mine?(reference.locator) do
       path = object_path(root, reference.locator)
 
       case File.read(path) do
@@ -137,7 +137,7 @@ defmodule Loopex.Store.Local.Artifacts do
   @spec stat(handle(), ArtifactStore.artifact_reference()) ::
           {:ok, ArtifactStore.artifact_reference()} | {:error, term()}
   def stat(%{root: root} = handle, reference) do
-    if ArtifactStore.valid_reference?(reference) do
+    if ArtifactStore.valid_reference?(reference) and mine?(reference.locator) do
       path = object_path(root, reference.locator)
 
       case File.stat(path) do
@@ -207,6 +207,18 @@ defmodule Loopex.Store.Local.Artifacts do
       do: {:ok, bytes},
       else: {:error, :artifact_integrity_failed}
   end
+
+  # Concept: a locator is opaque to the port and meaningful only to the store
+  # that issued it.
+  #
+  # Technical depth: the port requires a locator to be a non-empty string and
+  # nothing more, because its shape is the issuing store's business. This one
+  # issues content digests and derives a path by slicing the first two
+  # characters, so a reference carrying any other shape -- one this store never
+  # wrote, or a shorter string a caller constructed -- used to raise out of
+  # `binary_part/3` during retrieval or recovery instead of failing with a value.
+  # A locator this store did not issue is simply an artifact it does not hold.
+  defp mine?(locator), do: String.match?(locator, ~r/^[0-9a-f]{64}$/)
 
   # Concept: two levels of fan-out, so a directory does not grow without bound.
   #
