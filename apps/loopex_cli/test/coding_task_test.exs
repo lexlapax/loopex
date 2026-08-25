@@ -186,8 +186,15 @@ defmodule LoopexCli.CodingTaskTest do
     resolved = Path.expand(stack.workspace)
     refute resolved == Path.expand(File.cwd!())
     refute String.starts_with?(resolved, Path.expand(System.user_home!()) <> "/.loopex")
-    refute resolved == Path.expand(System.get_env("LOOPEX_WORKSPACE"))
     assert String.starts_with?(resolved, Path.expand(System.tmp_dir!()))
+
+    # Where the run was given a workspace of its own, this is not that one
+    # either. The gate gives none, so the check is conditional on there being
+    # something to check rather than on a variable being set.
+    case System.get_env("LOOPEX_WORKSPACE") do
+      given when is_binary(given) and given != "" -> refute resolved == Path.expand(given)
+      _absent -> :ok
+    end
 
     # Disposable means it goes away with the case that made it, leaving nothing
     # for the next run to inherit.
