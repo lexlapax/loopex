@@ -49,25 +49,22 @@ sealed. Anthropic's documented identifier form is written `msg_:16-64`.
 
 <!-- loopex:m2-attestations:start -->
 ```json
-{"role":"demonstration_db","selector":"apps/loopex_cli/test/coding_task_test.exs","provider":"","model":"","endpoint":"","adapter_build":"","calls":0,"response_id_form":"","provider_response_ids":"","input_tokens":0,"output_tokens":0,"candidate":"","recorded":""}
+{"role":"demonstration_db","selector":"apps/loopex_cli/test/coding_task_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":6,"response_id_form":"msg_:16-64","provider_response_ids":"msg_011CeNsnxjAXif3UNjaMXkbG+msg_011CeNso2a6NSRUzupVGCaRG+msg_011CeNso7CeNgQv511cK1LD4+msg_011CeNsoBLw4i73rYVBnTZ4f+msg_011CeNsoEkKnbEadMSFuzcT4+msg_011CeNsoJJPSvynm8paoy52d","input_tokens":6437,"output_tokens":376,"candidate":"34d5707f08ea7c6ce3fdebee9a751cf77233f30d","recorded":"2026-08-25T05:00:19Z"}
 ```
 
 ```json
-{"role":"inherited_5c","selector":"apps/loopex_reference_client/test/real_model_session_test.exs","provider":"","model":"","endpoint":"","adapter_build":"","calls":0,"response_id_form":"","provider_response_ids":"","input_tokens":0,"output_tokens":0,"candidate":"","recorded":""}
+{"role":"inherited_5c","selector":"apps/loopex_reference_client/test/real_model_session_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"msg_:16-64","provider_response_ids":"msg_011CeNsosgpjwkQ2wYuKT7UR+msg_011CeNspK73GCTThWTQz3hmH","input_tokens":1463,"output_tokens":112,"candidate":"34d5707f08ea7c6ce3fdebee9a751cf77233f30d","recorded":"2026-08-25T05:00:19Z"}
 ```
 
 ```json
-{"role":"inherited_8b","selector":"apps/loopex_reference_client/test/end_to_end_recovery_test.exs","provider":"","model":"","endpoint":"","adapter_build":"","calls":0,"response_id_form":"","provider_response_ids":"","input_tokens":0,"output_tokens":0,"candidate":"","recorded":""}
+{"role":"inherited_8b","selector":"apps/loopex_reference_client/test/end_to_end_recovery_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"msg_:16-64","provider_response_ids":"msg_011CeNspuYURnunJUKmEBfCk+msg_011CeNsqW4Ny3nhhXTFxzVys","input_tokens":1463,"output_tokens":113,"candidate":"34d5707f08ea7c6ce3fdebee9a751cf77233f30d","recorded":"2026-08-25T05:00:19Z"}
 ```
 <!-- loopex:m2-attestations:end -->
 
-The three records above carry their locked role and selector and no observed
-values. They are populated by the attended gate run that produces the closure
-candidate, from the identifiers that run emitted, and this revision is the
-implementation candidate rather than the closure candidate. Writing identifiers
-here from an earlier run would produce a record that describes a run the
-candidate did not make — which the runner cannot detect, and which is exactly
-why it is not done.
+Each record above carries the identifiers its role actually observed, at the
+candidate it names, in runs made for this record and not copied from an earlier
+one. `demonstration_db` carries six because that role is two cases: the attended
+five-turn coding task and the single attestation call that follows it.
 
 Each locked role emits its observed identifiers on the diagnostic stream as it
 runs, in the form
