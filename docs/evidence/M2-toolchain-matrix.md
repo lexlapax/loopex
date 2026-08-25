@@ -12,9 +12,13 @@ not run is unavailable evidence, never a pass.
 
 | Lane | Command |
 | --- | --- |
-| `floor` | `mise exec erlang@26.0 elixir@1.17.0-otp-26 -- bash scripts/check-m2-gate.sh --capture floor` |
-| `current` | `bash scripts/check-m2-gate.sh --capture current` |
+| `darwin-floor` | `mise exec erlang@26.0 elixir@1.17.0-otp-26 -- bash scripts/check-m2-gate.sh --capture darwin-floor` |
+| `darwin-current` | `bash scripts/check-m2-gate.sh --capture darwin-current` |
 | `linux-current` | `bash scripts/check-m2-gate.sh --capture linux-current` |
+
+Two `m0` rows accompany them: the closed `M0` gate run once under each pair
+against the same candidate. Bootstrap does not substitute for either, and `M2`
+never nests `M0`.
 
 Each lane contributes exactly one capture row. All three must name the same
 candidate, a `CAPTURE` verdict and zero exit, their lane's exact `elixir`, `otp`,
@@ -39,16 +43,14 @@ partially filled, because a matrix that carried one lane and omitted two would
 read as a matrix with two lanes still running rather than as a milestone that
 has never been run anywhere but one machine.
 
-The `floor` and `current` lanes are runnable on the development machine: the
-locked floor pair is installed and resolves through `mise`. The third is not:
+All three lanes are reachable. The two Darwin lanes run on the development
+machine, where the locked floor pair is installed and resolves through `mise`,
+and the Linux lane runs on a host carrying the same candidate and the locked
+current pair.
 
-| Lane | What it needs |
-| --- | --- |
-| `linux-current` | a Linux host running the same candidate |
-
-That absence is unavailable evidence and blocks closure exactly as a red lane
-would; it is recorded here rather than left to be discovered during a closure
-run.
+Every lane must run against one clean committed candidate, each with a fresh and
+disjoint owned task root, so the captures are taken together once the candidate
+is settled rather than accumulated as it changes.
 
 ## Related
 
