@@ -102,7 +102,8 @@ defmodule LoopexComposition do
   end
 
   defp open_store(state_root) do
-    with {:ok, adapter} <- Store.Local.start_link(root: Path.join(state_root, "store")) do
+    with :ok <- File.mkdir_p(state_root),
+         {:ok, adapter} <- Store.Local.start_link(path: Path.join(state_root, "store.log")) do
       Store.new(Store.Local, adapter)
     end
   end

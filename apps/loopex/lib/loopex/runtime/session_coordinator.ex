@@ -308,9 +308,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
     |> Map.put(:state, :redacted_session_coordinator_state)
     |> Map.put(:message, :redacted_session_coordinator_message)
     |> Map.put(:reason, :redacted_session_coordinator_reason)
-    |> tap(fn _ ->
-      IO.inspect(elem(Map.get(status, :reason, {:none}), 0), label: "DBG-REASON")
-    end)
     |> Map.put(:log, [])
   end
 
@@ -1096,12 +1093,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # unconfirmed answer propagates all the way to `outcome_unknown` rather than
   # being smoothed into a success.
   defp cancel_executor_work(state, run_id) do
-    IO.inspect(
-      {run_id, Map.keys(state.in_flight),
-       Map.get(state.durable.pending_work, run_id) |> is_map()},
-      label: "DBG cancel_exec"
-    )
-
     case Map.get(state.durable.pending_work, run_id) do
       %{job: job} ->
         {:ok, disposition} =
