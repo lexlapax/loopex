@@ -382,7 +382,7 @@ defmodule Loopex.Executor.Local do
          options
        ) do
     {outcome, output} = run_coding_tool(job, tool, workspace, arguments, options)
-    receipt(state, job, tool, outcome, output)
+    receipt(state, job, tool, outcome, output, coding_tool_environment(arguments))
   end
 
   defp run_tool(state, job, tool, lease_pid, workspace, arguments, options) do
@@ -407,8 +407,17 @@ defmodule Loopex.Executor.Local do
     {outcome, output} = await_port(port, monitor, lease_pid, <<>>)
     Process.demonitor(monitor, [:flush])
 
-    receipt(state, job, tool, outcome, output)
+    receipt(state, job, tool, outcome, output, demonstration_environment())
   end
+
+  # Concept: the three filesystem tools start no child, so they hold no
+  # environment; `bash` holds the one this executor constructed.
+  #
+  # Technical depth: reporting `PATH` for a tool that never spawned anything
+  # would be as untrue as reporting the wrong one for a tool that did. A tool
+  # with no child reports no environment names, which is what happened.
+  defp coding_tool_environment(%{kind: :bash}), do: child_environment()
+  defp coding_tool_environment(_arguments), do: []
 
   # Concept: the three filesystem tools do not need a process, so they do not
   # start one.
@@ -512,7 +521,8 @@ defmodule Loopex.Executor.Local do
   # confirmed.
   defp run_owned_process(job, _tool, workspace, arguments, options) do
     deadline = effective_deadline(job, arguments)
-    {launcher, command_arguments} = process_launcher(arguments)
+    environment = child_environment()
+    {launcher, command_arguments} = process_launcher(arguments, environment)
 
     port =
       Port.open(
@@ -529,7 +539,12 @@ defmodule Loopex.Executor.Local do
       )
 
     os_pid = port |> Port.info(:os_pid) |> elem(1)
-    notify(options, {:executor_process_started, job.job_id, job.tool_id, [@search_path_name]})
+
+    notify(
+      options,
+      {:executor_process_started, job.job_id, job.tool_id, environment_names(environment)}
+    )
+
     register_inflight(job.job_id, os_pid)
 
     case collect_output(port, os_pid, deadline, <<>>, options, job) do
@@ -599,19 +614,83 @@ defmodule Loopex.Executor.Local do
     min(job.run_deadline, tool_budget)
   end
 
+  # Concept: a tool child receives an environment this executor constructed, not
+  # the one this operating-system process happens to be holding.
+  #
+  # Technical depth: a port opened without `env:` inherits the emulator's whole
+  # environment. The demonstration tools were launched through `/usr/bin/env -i`
+  # and so received nothing; the coding tools were not, so every `bash` call this
+  # milestone added ran with the operator's variables -- the provider credential
+  # among them, because the operator must export it for the command to run at
+  # all. The receipt then journalled `provider_credential_present: false`, which
+  # made the durable record assert an absence that was not true.
+  #
+  # `env:` replaces rather than extends, and clearing a name is `{name, false}`.
+  # The credential is cleared explicitly as well as omitted, so the intent is
+  # visible at the boundary rather than resting on the list being complete.
+  # Concept: the demonstration tools construct their environment in argv.
+  #
+  # Technical depth: `launcher_arguments/1` passes `-i` and one assignment to
+  # `/usr/bin/env`, so the child's environment is that one name. It is expressed
+  # here in the same shape the coding tools use so one function reports both.
+  defp demonstration_environment do
+    [{String.to_charlist(@search_path_name), String.to_charlist(@search_path_value)}]
+  end
+
+  defp child_environment do
+    [
+      {String.to_charlist(@search_path_name), String.to_charlist(@search_path_value)},
+      {String.to_charlist(@credential_name), false}
+    ]
+  end
+
+  # Concept: what the receipt reports is what the child was given.
+  #
+  # Technical depth: the names were a hardcoded list, so the receipt said `PATH`
+  # whatever the child actually received. Deriving them from the environment that
+  # was passed makes the journalled claim an observation, which is the only thing
+  # that makes it worth journalling.
+  defp environment_names(environment) do
+    for {name, value} <- environment, value != false, do: List.to_string(name)
+  end
+
+  defp credential_present?(environment) do
+    Enum.any?(environment, fn {name, value} ->
+      List.to_string(name) == @credential_name and value != false
+    end)
+  end
+
   # Concept: argv runs without a shell; a raw command runs in one.
   #
   # Technical depth: `setsid` wraps both so the child leads its own group. For
   # argv the program and its arguments are passed through untouched, so a `$` or
   # a space in an argument is data. For a raw command a shell is asked for
   # explicitly, which is the whole point of that form.
-  defp process_launcher(%{argv: [program | rest]}) do
+  defp process_launcher(%{argv: [program | rest]}, environment) do
     {setsid_path(),
-     ["/usr/bin/env", "sh", "-c", group_preamble() <> "exec \"$0\" \"$@\"", program] ++ rest}
+     env_prefix(environment) ++
+       ["sh", "-c", group_preamble() <> "exec \"$0\" \"$@\"", program] ++ rest}
   end
 
-  defp process_launcher(%{command: command}) do
-    {setsid_path(), ["/usr/bin/env", "sh", "-c", group_preamble() <> command]}
+  defp process_launcher(%{command: command}, environment) do
+    {setsid_path(), env_prefix(environment) ++ ["sh", "-c", group_preamble() <> command]}
+  end
+
+  # Concept: the child's environment is built, not filtered.
+  #
+  # Technical depth: a port's `env:` option adds to the inherited environment
+  # rather than replacing it, so clearing one name there leaves every other
+  # variable of this operating-system process readable by the child. `env -i`
+  # starts from nothing and takes only the assignments that follow it, which is
+  # how the demonstration tools were always launched and is the construction the
+  # operator documentation describes. Filtering would need this executor to know
+  # every name worth removing; constructing needs it to know only the names worth
+  # keeping.
+  defp env_prefix(environment) do
+    ["/usr/bin/env", "-i"] ++
+      for {name, value} <- environment,
+          value != false,
+          do: List.to_string(name) <> "=" <> List.to_string(value)
   end
 
   # The child announces the group it actually leads before doing anything else,
@@ -809,7 +888,7 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp receipt(state, job, tool, outcome, output) do
+  defp receipt(state, job, tool, outcome, output, environment) do
     %{
       protocol_version: 1,
       job_id: job.job_id,
@@ -830,8 +909,8 @@ defmodule Loopex.Executor.Local do
       output: output,
       progress_count: 0,
       observed_at_ms: System.system_time(:millisecond),
-      child_environment_names: [@search_path_name],
-      provider_credential_present: false
+      child_environment_names: environment_names(environment),
+      provider_credential_present: credential_present?(environment)
     }
   end
 

@@ -264,6 +264,58 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     refute_received {:kept, _event}
   end
 
+  test "a coding tool child receives a constructed credential free environment and its receipt reports what it received" do
+    root = workspace()
+
+    # The credential is exported exactly as an operator must export it for the
+    # command to run at all, so this is the environment a real session has.
+    System.put_env("LOOPEX_PROVIDER_API_KEY", "sk-sentinel-not-for-a-child")
+    System.put_env("LOOPEX_SENTINEL_UNRELATED", "also-not-for-a-child")
+
+    on_exit(fn ->
+      System.delete_env("LOOPEX_PROVIDER_API_KEY")
+      System.delete_env("LOOPEX_SENTINEL_UNRELATED")
+    end)
+
+    assert {:ok, receipt} =
+             run(root, "loopex.bash", %{"command" => "printf %s \"$LOOPEX_PROVIDER_API_KEY\""})
+
+    # Concept: a port opened without an explicit environment inherits this
+    # operating-system process's own, and the operator's credential is in it.
+    #
+    # Technical depth: the demonstration tools were launched through
+    # `/usr/bin/env -i` and so received nothing, but the coding tools took a
+    # different path and were not. Asserting on the child's own output is the
+    # only form of this check that cannot pass while the child can still read it.
+    assert receipt.outcome == :completed
+    refute receipt.output =~ "sk-sentinel"
+
+    assert {:ok, unrelated} =
+             run(root, "loopex.bash", %{"command" => "printf %s \"$LOOPEX_SENTINEL_UNRELATED\""})
+
+    refute unrelated.output =~ "also-not-for-a-child"
+
+    # The environment is constructed rather than filtered, so the child holds the
+    # one name it was given and nothing else.
+    assert {:ok, named} = run(root, "loopex.bash", %{"command" => "env | cut -d= -f1 | sort"})
+    assert named.output =~ "PATH"
+    refute named.output =~ "LOOPEX_PROVIDER_API_KEY"
+
+    # Concept: the receipt reports what the child received, not a constant.
+    #
+    # Technical depth: both fields were hardcoded, so the journal asserted an
+    # absence it had not observed. A durable record that states a credential was
+    # absent when it was present is worse than one that states nothing.
+    assert receipt.child_environment_names == ["PATH"]
+    refute receipt.provider_credential_present
+
+    # A tool that starts no child holds no environment, and says so rather than
+    # reporting one it never had.
+    assert {:ok, quiet} = run(root, "loopex.read", %{"path" => "notes.txt"})
+    assert quiet.child_environment_names == []
+    refute quiet.provider_credential_present
+  end
+
   test "a tool child process group is owned and terminated with its job and no group member survives" do
     root = workspace()
 
