@@ -14,6 +14,10 @@ defmodule LoopexCli.MixProject do
       lockfile: "../../mix.lock",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
+      # The demonstration stack is a support module rather than a test file, and
+      # without this the test loader warns that it matches no filter -- a warning
+      # on every run of a checkpoint that is required to carry none.
+      test_ignore_filters: [&String.starts_with?(&1, "test/support/")],
       # The command an operator types is `loopex`. Without an explicit name the
       # escript takes the application's, and the documentation would be
       # describing a command that does not exist under that name.
