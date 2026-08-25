@@ -474,9 +474,12 @@ running child, and its expiry enters the termination and cleanup-confirmation
 sequence.
 
 The three filesystem tools start no operating-system process.
-A child runs in its own process group under `setsid`, announces the group the
-operating system actually assigned before doing anything else, and is terminated
-by group rather than by leader. The effective deadline of a job is the earlier of
+A child runs in a process group of its own, established by the spawn itself
+rather than by any helper program, announces the group the operating system
+actually assigned before doing anything else, and is terminated by group rather
+than by leader. Where `setsid` is installed it is used in addition, which
+detaches the child from the controlling terminal; where it is not — Darwin ships
+none — the group ownership and the cleanup confirmation are unchanged. The effective deadline of a job is the earlier of
 the run's deadline and the tool's own wall-time budget.
 
 ### Project Resources

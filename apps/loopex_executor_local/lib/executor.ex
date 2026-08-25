@@ -530,12 +530,18 @@ defmodule Loopex.Executor.Local do
 
   # Concept: a command runs as a group this executor owns and can end.
   #
-  # Technical depth: the child is started under `setsid`, so it becomes a process
-  # group leader and every descendant it spawns joins that group. Termination
-  # then signals the negated group id rather than the leader, which is the
-  # difference between ending the work and ending the one process that happened
-  # to be on top of it. A leader that forks and exits would otherwise leave its
-  # children running with nobody's name on them.
+  # Technical depth: the port spawn places the child in a process group of its
+  # own before the command runs, and every descendant it spawns joins that group.
+  # Termination then signals the negated group id rather than the leader, which
+  # is the difference between ending the work and ending the one process that
+  # happened to be on top of it. A leader that forks and exits would otherwise
+  # leave its children running with nobody's name on them.
+  #
+  # The group comes from the spawn rather than from `setsid`, which is not
+  # installed on every supported platform. Attributing it to `setsid` would make
+  # the guarantee conditional on a program Darwin does not ship -- and the
+  # negated-group kill below is only safe *because* the group is unconditionally
+  # the child's own and never this runtime's.
   #
   # The group id is captured by the child itself and printed on its first line,
   # because the BEAM gives a port's os_pid but not the group the child chose. A
@@ -747,10 +753,9 @@ defmodule Loopex.Executor.Local do
 
   # Concept: argv runs without a shell; a raw command runs in one.
   #
-  # Technical depth: `setsid` wraps both so the child leads its own group. For
-  # argv the program and its arguments are passed through untouched, so a `$` or
-  # a space in an argument is data. For a raw command a shell is asked for
-  # explicitly, which is the whole point of that form.
+  # Technical depth: for argv the program and its arguments are passed through
+  # untouched, so a `$` or a space in an argument is data. For a raw command a
+  # shell is asked for explicitly, which is the whole point of that form.
   # Concept: nothing runs with this process's environment, including the thing
   # that sets up the process group.
   #
@@ -800,15 +805,18 @@ defmodule Loopex.Executor.Local do
   # this executor assumed.
   defp group_preamble, do: "printf 'loopex-pgid:%s\\n' \"$(ps -o pgid= -p $$ | tr -d ' ')\" >&2; "
 
-  # Concept: the group leader is looked for where this executor says, not where
-  # the operator's shell says.
+  # Concept: where a session launcher exists it is looked for where this
+  # executor says, not where the operator's shell says.
   #
-  # Technical depth: presence is decided against the same fixed directories the
-  # child receives, so the answer cannot be changed by a workspace that puts a
-  # `setsid` earlier on the ambient `PATH`. Where none is found the child leads
-  # no new group, which is a real limitation and is recorded as one rather than
-  # papered over: on such a host the cleanup confirmation covers the child and
-  # not a group it never led.
+  # Technical depth: `setsid` adds a new session on top of the process group the
+  # spawn already establishes, detaching the child from the controlling
+  # terminal. It is an addition, not the source of the group: where none is
+  # found -- Darwin ships none -- the child still leads its own group and the
+  # cleanup confirmation covers it exactly as it does elsewhere.
+  #
+  # Presence is decided against the same fixed directories the child receives,
+  # so the answer cannot be changed by a workspace that puts a `setsid` earlier
+  # on the ambient `PATH`.
   defp group_launcher do
     case Enum.find(@search_path_value |> String.split(":"), fn dir ->
            File.exists?(Path.join(dir, "setsid"))

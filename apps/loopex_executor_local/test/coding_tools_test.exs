@@ -512,6 +512,25 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   test "a tool child process group is owned and terminated with its job and no group member survives" do
     root = workspace()
 
+    # Concept: the descendant must be given a real chance to survive, or the
+    # case proves nothing.
+    #
+    # Technical depth: this waited 1.2 seconds for a descendant that slept 5.
+    # The marker could not exist yet whether the group had been ended or not, so
+    # the assertion passed against a kill that never happened. The descendant now
+    # sleeps well inside the observation window, and the same command is run once
+    # without a deadline first, which establishes that it does write the marker
+    # when nothing stops it.
+    reachable = Path.join(root, "reachable.txt")
+
+    assert {:ok, %{outcome: :completed}} =
+             run(root, "loopex.bash", %{
+               "command" => "( sleep 1; echo survived > #{reachable} ) & exit 0"
+             })
+
+    Process.sleep(2_500)
+    assert File.exists?(reachable), "the descendant never writes its marker even when left alone"
+
     # A command whose child outlives its leader: the leader exits immediately and
     # the descendant keeps writing. Killing only the leader would leave the
     # descendant running with nobody's name on it.
@@ -521,16 +540,56 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              run(
                root,
                "loopex.bash",
-               %{"command" => "( sleep 5; echo survived > #{marker} ) & exit 0"},
+               %{"command" => "( sleep 1; echo survived > #{marker} ) & exit 0"},
                %{run_deadline: System.system_time(:millisecond) + 400}
              )
 
     assert outcome in [:completed, :cancelled, :outcome_unknown]
 
-    # Give the orphan longer than its own sleep. If the group was ended, the file
-    # never appears.
-    Process.sleep(1_200)
+    Process.sleep(2_500)
     refute File.exists?(marker), "a descendant survived its job's process group"
+  end
+
+  test "the child leads its own process group whether or not a session launcher was found" do
+    # Concept: the guarantee is that the group is the executor's own, and it does
+    # not depend on a program that may not be installed.
+    #
+    # Technical depth: the code and the operator documentation both attributed
+    # the group to `setsid`, and said that where none is found the child leads no
+    # new group. Neither is true: the port spawn puts the child in a group of its
+    # own before the command runs, so the group the child announces is never this
+    # runtime's. `setsid` where present adds a new *session* -- detaching the
+    # controlling terminal -- on top of a group the spawn already established.
+    # Darwin ships no `setsid` at all, so on that platform the stated limitation
+    # described the only configuration the tool ever ran in.
+    #
+    # This matters beyond documentation: had the group actually been this
+    # runtime's, terminating it by negated group id would signal the runtime
+    # itself and every process sharing its group.
+    root = workspace()
+
+    assert {:ok, %{outcome: :completed, output: reported}} =
+             run(root, "loopex.bash", %{
+               "command" => "ps -o pgid= -p $$ | tr -d ' '"
+             })
+
+    child_group = reported |> String.trim() |> String.to_integer()
+
+    own_group =
+      System.pid()
+      |> then(&System.cmd("/bin/ps", ["-o", "pgid=", "-p", &1]))
+      |> elem(0)
+      |> String.trim()
+      |> String.to_integer()
+
+    refute child_group == own_group,
+           "the tool child shares this runtime's process group, so terminating " <>
+             "the group would signal the runtime itself"
+
+    # And the group is one the executor can end: a descendant joins it, so the
+    # kill reaches work the leader started and walked away from. That is proved
+    # by the case above; here it is enough that the group is separately owned.
+    assert child_group > 1
   end
 
   test "a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound" do
