@@ -218,7 +218,11 @@ A terminal that receives no closure therefore falls back to the durable record
 exactly as it does for a sequence gap. It never reads an absence as abandonment
 and never starts a timeout to decide, because that inference needs a timeout and
 a timeout is a guess about a stream that may simply have been coalesced away.
-Where the terminal stops reading it reports its own view and not the run's fate:
+
+The terminal's own patience is longer than the runtime's default wall-clock
+deadline, so a run the runtime is still correctly running is never reported as
+one this terminal has stopped following. Where the terminal does stop reading it
+reports its own view and not the run's fate:
 
 ```text
 loopex: stopped following this run; it may still be running

@@ -20,6 +20,19 @@ defmodule LoopexCli.Render do
   timeout is a guess about a stream that may simply have been coalesced away.
   """
 
+  # Concept: how long the terminal waits in silence before reporting its own view.
+  #
+  # Technical depth: this is patience, not a timeout on the run. The runtime's own
+  # default wall-clock deadline is ten minutes, and it commits a terminal event
+  # when that deadline expires, so a terminal that gave up sooner would report
+  # "it may still be running" about a run that was still, correctly, running --
+  # which is exactly what happened under load, where a single provider turn
+  # outlasted a six-second window. Waiting past the deadline the runtime itself
+  # enforces means the fallback is reached only when the durable stream really has
+  # gone quiet.
+  @idle_limit_ms 660_000
+  @poll_ms 10
+
   @doc """
   ## Concept
 
@@ -32,9 +45,15 @@ defmodule LoopexCli.Render do
   never does, because progress can stop for reasons that have nothing to do with
   the run.
   """
-  @spec stream(Loopex.Attachment.t(), (binary() -> any())) :: :ok | {:error, binary()}
-  def stream(attachment, on_run_started \\ fn _run_id -> :ok end),
-    do: follow(attachment, 0, on_run_started)
+  @spec stream(Loopex.Attachment.t(), keyword()) :: :ok | {:error, binary()}
+  def stream(attachment, options \\ []) do
+    follow(
+      attachment,
+      0,
+      Keyword.get(options, :on_run_started, fn _run_id -> :ok end),
+      Keyword.get(options, :idle_limit_ms, @idle_limit_ms)
+    )
+  end
 
   @doc """
   ## Concept
@@ -60,18 +79,18 @@ defmodule LoopexCli.Render do
     :ok
   end
 
-  defp follow(attachment, idle, on_run_started) do
+  defp follow(attachment, waited, on_run_started, limit) do
     drain_progress()
 
     case Loopex.next_event(attachment) do
       {:ok, event} ->
         render(event)
         announce(event, on_run_started)
-        if terminal?(event), do: :ok, else: follow(attachment, 0, on_run_started)
+        if terminal?(event), do: :ok, else: follow(attachment, 0, on_run_started, limit)
 
-      _absent when idle < 600 ->
-        Process.sleep(10)
-        follow(attachment, idle + 1, on_run_started)
+      _absent when waited < limit ->
+        Process.sleep(@poll_ms)
+        follow(attachment, waited + @poll_ms, on_run_started, limit)
 
       # Concept: silence is not an ending.
       #

@@ -277,11 +277,13 @@ defmodule LoopexCliTest do
     assert progress_at < finished_at,
            "progress must reach the terminal while the tool is still running"
 
-    # And the terminal writes it as it arrives rather than collecting it.
+    # And the terminal writes it as it arrives rather than collecting it. The run
+    # is already over and its terminal event already consumed, so this names a
+    # short window rather than waiting out the shipped patience.
     output =
       capture_io(:stderr, fn ->
         send(self(), {:loopex_progress, %{kind: :tool_progress, chunk: "working"}})
-        Render.stream(attachment)
+        Render.stream(attachment, idle_limit_ms: 200)
       end)
 
     assert output =~ "working"
@@ -584,6 +586,11 @@ defmodule LoopexCliTest do
     refute source =~ "Process.send_after"
     refute source =~ ":timer."
 
+    # The patience is longer than the runtime's own default wall-clock deadline,
+    # so the terminal never reports its own view of a run the runtime is still
+    # correctly running.
+    assert source =~ "@idle_limit_ms 660_000"
+
     # Where the terminal reads nothing at all — no closure and no durable event —
     # it reports its own view and never the run's fate.
     {:ok, quiet_session} =
@@ -591,7 +598,11 @@ defmodule LoopexCliTest do
 
     {:ok, quiet} = Loopex.attach(fixture.runtime, quiet_session, after_event_sequence: 0)
 
-    quiet_output = capture_io(:stderr, fn -> Render.stream(quiet) end)
+    # The window is named rather than waited out: the shipped patience is longer
+    # than the runtime's own deadline on purpose, and what this case is about is
+    # what the terminal says when it does stop, not how long it waits first.
+    quiet_output =
+      capture_io(:stderr, fn -> Render.stream(quiet, idle_limit_ms: 200) end)
 
     assert quiet_output =~ "it may still be running"
     assert quiet_output =~ "resume"

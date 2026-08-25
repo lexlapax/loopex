@@ -188,17 +188,22 @@ defmodule LoopexCli do
   # it attached at and never advances. The steer therefore names the run the
   # session actually started.
   defp submit_steer(attachment, content) do
-    Render.stream(attachment, fn run_id ->
-      case Loopex.command(attachment, %{
-             type: :steer,
-             command_id: unique_id(),
-             run_id: run_id,
-             content: content
-           }) do
-        {:accepted, _id} -> :ok
-        {:error, reason} -> IO.puts(:stderr, "loopex: the steer was refused: #{inspect(reason)}")
+    Render.stream(attachment,
+      on_run_started: fn run_id ->
+        case Loopex.command(attachment, %{
+               type: :steer,
+               command_id: unique_id(),
+               run_id: run_id,
+               content: content
+             }) do
+          {:accepted, _id} ->
+            :ok
+
+          {:error, reason} ->
+            IO.puts(:stderr, "loopex: the steer was refused: #{inspect(reason)}")
+        end
       end
-    end)
+    )
   end
 
   # Concept: a follow-up is queued, not joined.
