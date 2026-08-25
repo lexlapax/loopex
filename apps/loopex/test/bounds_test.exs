@@ -5,7 +5,7 @@ defmodule Loopex.BoundsTest do
 
   alias Loopex.Bounds
 
-  defp declared(overrides \\ %{}) do
+  defp declared(overrides) do
     {:ok, declared} =
       Bounds.declare(
         Map.merge(%{max_turns: 10, token_budget: 1_000, deadline_ms: 10_000}, overrides)

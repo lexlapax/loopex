@@ -116,7 +116,8 @@ breaking change to every retained digest. See
 
 **Reference composition.** `LoopexComposition.start/1` requires `:runtime_id`,
 `:state_root`, `:workspace`, and `:policy`, and accepts `:progress_to` and
-`:diagnostics_to`. It names four concrete implementations, so an embedder that
+`:diagnostics_to`, and passes `:project_manifest` and `:project_decision`
+through to the runtime. It names four concrete implementations, so an embedder that
 depends on it transitively acquires the reference adapters and their external
 dependency whether or not every one is used. An embedder who wants a different
 Store, Model, Executor, or ArtifactStore composes the ports and the `Loopex`
@@ -129,7 +130,9 @@ facade directly instead. See
 ignored, which means adding a flag is observable and removing one is breaking.
 `loopex artifact` reads objects through the `Loopex.ArtifactStore` port, so the
 subcommand follows whatever artifact store a composition supplies rather than
-naming the local one.
+naming the local one. `--policy` accepts `allow-all` and `shell-allowlist`;
+the set of accepted names is part of the surface, so adding one is observable
+and removing one is breaking.
 
 ### What an Embedder Should Do About It
 

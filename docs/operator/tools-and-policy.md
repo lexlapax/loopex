@@ -106,6 +106,31 @@ It applies only where you name it. It is never a fallback, never a default, and
 the shipped composition an embedder depends on refuses to start without a policy
 precisely so that no embedder inherits this one.
 
+<a id="operator-tools-shell-allowlist"></a>
+## A Stance That Refuses Something
+
+`--policy shell-allowlist` selects the other stance the command ships. It allows
+the filesystem tools and allows `bash` only when the command's first word is one
+it names; everything else is refused with `command_not_permitted`, the refusal
+is reported, and the session carries on. It announces itself the same way, once:
+
+```text
+loopex: the shell-allowlist host policy is active. Files may be read and changed,
+and only these shell commands are permitted: cat, ls, pwd, echo, git, grep, head,
+tail, wc. This is scope, not containment: it matches the leading word of a command
+and a compound command defeats it.
+```
+
+**Read that last sentence literally.** This is scope and not a sandbox. It
+answers "which commands did I agree to?" and nothing else. A compound command, a
+shell function, an alias, or an interpreter handed a script all reach past it
+without effort, and it is not built to stop any of them. Containment is the
+executor's boundary and whatever isolation you place around it; this is you
+saying which work you meant. Do not deploy it as a security control.
+
+A call it cannot read a command out of is denied rather than allowed, because a
+decision it cannot make is one it must not make in the model's favour.
+
 Two permissive policies ship — one in `loopex_cli`, one in
 `loopex_reference_client` — because a client application may not depend on
 another client. That duplication is the honest consequence of the dependency
@@ -186,8 +211,9 @@ def decide(request) do
 end
 ```
 
-Select it with `--policy` by name for the two shipped policies, or start the
-runtime yourself with `policy: YourModule` through `LoopexComposition.start/1`
+Select a shipped stance with `--policy` by name — `allow-all` or
+`shell-allowlist` from this command, and the reference client's own permissive
+policy in its own lane — or start the runtime yourself with `policy: YourModule` through `LoopexComposition.start/1`
 or `Loopex.start_link/1`.
 
 The decision is made on the generation triple and not on the model-supplied name,

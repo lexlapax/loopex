@@ -299,6 +299,72 @@ defmodule Loopex.InputAlgebraTest do
     assert :settled = settle(fixture, session_id)
   end
 
+  test "a replayed abort answers from its record and touches neither the active run nor its queues" do
+    # An abort id already bound to a record is a replay, whatever else has
+    # happened since. Deciding that before acting is the whole point: the run the
+    # id names is long gone, and everything live now belongs to a different run
+    # that the operator never asked to stop.
+    parent = self()
+
+    fixture =
+      start(
+        script: [
+          %{text: "first", calls: [call("c1")], hold: parent},
+          %{text: "second", calls: [call("c2")], hold: parent},
+          %{text: "done", calls: []}
+        ]
+      )
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "first"})
+
+    assert_receive {:holding, first_model}, 2_000
+    {:accepted, "a1"} = Loopex.command(attachment, %{type: :abort, command_id: "a1"})
+    send(first_model, :release)
+    assert :settled = settle(fixture, session_id)
+
+    {:accepted, "p2"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p2", content: "second"})
+
+    assert_receive {:holding, second_model}, 2_000
+    second_run = run_id_of(fixture, session_id)
+
+    {:accepted, "s1"} =
+      Loopex.command(attachment, %{
+        type: :steer,
+        command_id: "s1",
+        run_id: second_run,
+        content: "steer"
+      })
+
+    {:accepted, "f1"} =
+      Loopex.command(attachment, %{type: :follow_up, command_id: "f1", content: "later"})
+
+    # The replay is answered from the record the first run left behind.
+    assert {:accepted, "a1"} = Loopex.command(attachment, %{type: :abort, command_id: "a1"})
+
+    # And the second run's queues are untouched: both are still one deep, which
+    # they would not be had the replay resolved them as an admitted abort does.
+    assert {:error, :steer_pending} =
+             Loopex.command(attachment, %{
+               type: :steer,
+               command_id: "s2",
+               run_id: second_run,
+               content: "another"
+             })
+
+    assert {:error, :follow_up_pending} =
+             Loopex.command(attachment, %{type: :follow_up, command_id: "f2", content: "another"})
+
+    # The second run is still the active one, still working.
+    assert run_id_of(fixture, session_id) == second_run
+
+    send(second_model, :release)
+  end
+
   test "at most one unapplied steer and one queued follow up exist and both survive owner succession" do
     {fixture, attachment, session_id, run_id, _model} =
       start_held([

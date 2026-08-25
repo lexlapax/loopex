@@ -1,6 +1,87 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("support/agent_loop_helper.exs", __DIR__)
 
+defmodule Loopex.CancellationTestExecutor do
+  @moduledoc false
+
+  # Concept: an executor whose job can be made to finish inside the window the
+  # coordinator spends reducing an abort.
+  #
+  # Technical depth: the shared fixture executor answers instantly or after a
+  # fixed sleep, which can only ever produce a job that is plainly running or
+  # plainly finished. The case that matters is neither: a receipt that exists but
+  # has not been delivered yet. `cancel/2` here releases the waiting job and then
+  # waits for it to answer, which puts the receipt in the coordinator's mailbox
+  # while the coordinator is still inside the abort — deterministically, rather
+  # than by racing a sleep against a scheduler.
+
+  @behaviour Loopex.Executor
+
+  def start(mode) do
+    {:ok, pid} = Agent.start_link(fn -> %{mode: mode, jobs: [], waiting: nil} end)
+    pid
+  end
+
+  def jobs(pid), do: Agent.get(pid, & &1.jobs) |> Enum.reverse()
+
+  @impl Loopex.Executor
+  def cancel(pid, _job_id) do
+    case Agent.get(pid, & &1.mode) do
+      :receipt_before_abort ->
+        waiting = Agent.get(pid, & &1.waiting)
+        if is_pid(waiting), do: send(waiting, :answer)
+        # Let the released job actually deliver before the coordinator looks.
+        Process.sleep(120)
+        {:ok, :cleaned}
+
+      :never_answers ->
+        {:ok, :cleaned}
+    end
+  end
+
+  @impl Loopex.Executor
+  def execute(pid, job, _grant, _options, progress \\ nil) do
+    _progress = progress || Loopex.Executor.discard_progress()
+    caller = self()
+    :ok = Agent.update(pid, fn state -> %{state | jobs: [job | state.jobs], waiting: caller} end)
+
+    receive do
+      :answer -> :ok
+    after
+      4_000 -> :ok
+    end
+
+    {:ok, Loopex.CancellationTestExecutor.receipt(job)}
+  end
+
+  def receipt(job) do
+    %{
+      protocol_version: 1,
+      job_id: job.job_id,
+      operation_id: job.operation_id,
+      attempt: job.attempt,
+      session_id: job.session_id,
+      run_id: job.run_id,
+      turn_id: job.turn_id,
+      tool_call_id: job.tool_call_id,
+      session_epoch_at_dispatch: job.origin_session_epoch,
+      executor_epoch: job.origin_executor_epoch,
+      executor_identity: job.executor_identity,
+      canonical_request_digest: job.canonical_request_digest,
+      fencing_token: job.fencing_token,
+      tool_id: job.tool_id,
+      tool_version: job.tool_version,
+      outcome: "completed",
+      output: "wrote #{job.tool_call_id}",
+      progress_count: 0,
+      observed_at_ms: System.system_time(:millisecond),
+      child_environment_names: [],
+      provider_credential_present: false,
+      artifacts: []
+    }
+  end
+end
+
 defmodule Loopex.CancellationTest do
   @moduledoc false
 
@@ -8,6 +89,8 @@ defmodule Loopex.CancellationTest do
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopTestModel
+  alias Loopex.CancellationTestExecutor
+  alias Loopex.M1RuntimeTestStore
 
   defp call(id), do: %{id: id, name: "write", arguments: %{"path" => id}}
 
@@ -40,8 +123,83 @@ defmodule Loopex.CancellationTest do
     {fixture, attachment, session_id, model}
   end
 
+  # Concept: the same fixture, wired to an executor this file controls.
+  #
+  # Technical depth: composed through the public `Loopex.start_link` rather than
+  # by editing the shared helper, so the cases that need an executor with a
+  # decidable finishing moment get one without changing what every other case in
+  # the repository runs against.
+  defp start_with_executor(mode, tool_script) do
+    model_pid = AgentLoopTestModel.start(tool_script)
+    executor_pid = CancellationTestExecutor.start(mode)
+    {store_pid, store} = M1RuntimeTestStore.start_store(label: "cancellation")
+    definitions = [Fixture.tool_definition()]
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        runtime_id: "cancellation-runtime-#{System.unique_integer([:positive])}",
+        store: store,
+        model: %{
+          module: AgentLoopTestModel,
+          model: "scripted:v1",
+          options: [script: model_pid, max_tokens: 256]
+        },
+        executor: %{
+          module: CancellationTestExecutor,
+          reference: executor_pid,
+          identity: "cancellation-executor",
+          epoch: 1,
+          fencing_token: 1,
+          workspace_ref: "workspace-ref",
+          workspace_lease: "workspace-lease"
+        },
+        tool: nil,
+        bounds: %{max_turns: 8, token_budget: 1_000_000, deadline_ms: 600_000},
+        tools: definitions,
+        active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
+        policy: Loopex.AgentLoopTestPolicy,
+        grant_decision: {:host_policy, :allow}
+      )
+
+    fixture = %{runtime: runtime, model: model_pid, executor: executor_pid, store: store_pid}
+
+    on_exit(fn ->
+      try do
+        Loopex.stop(runtime)
+      catch
+        :exit, _reason -> :ok
+      end
+
+      try do
+        GenServer.stop(store_pid, :normal, 1_000)
+      catch
+        :exit, _reason -> :ok
+      end
+    end)
+
+    fixture
+  end
+
+  # Concept: reach the moment an abort lands while a tool is genuinely running.
+  defp abort_during_tool(mode) do
+    fixture = start_with_executor(mode, [%{text: "run it", calls: [call("c1")]}])
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do the work"})
+
+    :dispatched = await_dispatch(fixture)
+
+    {:accepted, "abort-1"} = Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
+    assert settled?(fixture, session_id)
+
+    {fixture, session_id, events(attachment)}
+  end
+
   defp await_dispatch(fixture, attempts \\ 300) do
-    if Loopex.AgentLoopTestExecutor.jobs(fixture.executor) != [] do
+    if Agent.get(fixture.executor, & &1.jobs) != [] do
       :dispatched
     else
       if attempts > 0 do
@@ -116,45 +274,61 @@ defmodule Loopex.CancellationTest do
   end
 
   test "an abort admitted during a tool call cancels the executor job and confirms cleanup before committing cancelled" do
-    # The executor holds its job open, so the abort lands while a tool is
-    # genuinely running rather than between operations.
-    {fixture, attachment, session_id, model} =
-      held(script: [%{text: "run it", calls: [call("c1")], hold: self()}], tool_delay_ms: 800)
+    # The window this is about: the write finished, its receipt exists, and the
+    # abort is being reduced before that receipt has been delivered. The group is
+    # already gone, so cleanup reports clean — and the run may claim `cancelled`
+    # only because the receipt is adopted rather than dropped on the floor. Under
+    # the defect it was dropped, and the run claimed a clean stop for an effect
+    # that had happened and left no terminal fact behind.
+    {fixture, session_id, observed} = abort_during_tool(:receipt_before_abort)
 
-    send(model, :release)
-    Process.sleep(100)
+    finished = Enum.find(observed, &(&1.kind == "run.finished"))
 
-    assert {:accepted, "abort-1"} =
-             Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
-
-    assert settled?(fixture, session_id)
-
-    finished = Enum.find(events(attachment), &(&1.kind == "run.finished"))
-
-    # Cleanup was confirmed, so the run may honestly claim it was cancelled.
     assert finished["outcome"] == "cancelled"
     assert finished["reconciliation_ref"] == nil
+
+    # The claim rests on a real executor fact: the call has a terminal outcome
+    # the operator can read, and the effect was not quietly discarded.
+    tool = Enum.find(observed, &(&1.kind == "tool.finished" and &1["tool_call_id"] == "c1"))
+    assert tool["outcome"] == "completed"
+
+    # And it is durable, not merely announced. The receipt is journaled as the
+    # attempt's terminal fact.
+    receipts =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "executor_receipt_committed"))
+
+    assert length(receipts) == 1
   end
 
   test "a run finishes cancelled only when every owned operation is validated terminal and every owned process tree is confirmed cleaned" do
+    # The two outcomes are not interchangeable: one claims a clean stop and the
+    # other admits it cannot. Both halves are decided here rather than accepted
+    # as either, because a case that accepts either proves neither.
+
+    # A model attempt owns no effect, so stopping it is the whole of its cleanup
+    # and the run may honestly say it was cancelled.
     {fixture, attachment, session_id, model} = held()
 
     {:accepted, "abort-1"} = Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
     send(model, :release)
     assert settled?(fixture, session_id)
 
-    finished = Enum.find(events(attachment), &(&1.kind == "run.finished"))
+    model_finished = Enum.find(events(attachment), &(&1.kind == "run.finished"))
+    assert model_finished["outcome"] == "cancelled"
+    assert model_finished["reconciliation_ref"] == nil
 
-    # The two outcomes are not interchangeable: one claims a clean stop and the
-    # other admits it cannot. Whichever committed, it must carry the evidence
-    # that goes with it.
-    assert finished["outcome"] in ["cancelled", "outcome_unknown"]
+    # An effect that was still running owns something the confirmation does not
+    # cover. The executor confirms the process tree is gone — and that is still
+    # not enough, because a confirmed cleanup bounds the tree and says nothing
+    # about what the effect did. With no validated terminal fact for that
+    # operation the run ends `outcome_unknown` carrying its reference.
+    {_effect_fixture, _effect_session, observed} = abort_during_tool(:never_answers)
+    effect_finished = Enum.find(observed, &(&1.kind == "run.finished"))
 
-    if finished["outcome"] == "cancelled" do
-      assert finished["reconciliation_ref"] == nil
-    else
-      assert is_binary(finished["reconciliation_ref"])
-    end
+    assert effect_finished["outcome"] == "outcome_unknown"
+    assert is_binary(effect_finished["reconciliation_ref"])
   end
 
   test "a validated terminal tool fact committed before the abort is preserved and not overwritten" do
@@ -233,6 +407,69 @@ defmodule Loopex.CancellationTest do
 
     send(model, :release)
     assert settled?(fixture, session_id)
+  end
+
+  test "a replayed abort returns its retained answer and never cancels the run that is active now" do
+    # Abort run one, start run two, then re-present the first abort. Under the
+    # defect the cancellation ran before the reducer had classified the command,
+    # so the replay killed run two's live work and then answered with run one's
+    # retained acceptance — leaving run two with no terminal fact at all.
+    parent = self()
+
+    fixture =
+      start(
+        script: [
+          %{text: "first run", calls: [call("c1")], hold: parent},
+          %{text: "second run", calls: [], hold: parent}
+        ]
+      )
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "first"})
+
+    assert_receive {:holding, first_model}, 2_000
+    {:accepted, "a1"} = Loopex.command(attachment, %{type: :abort, command_id: "a1"})
+    send(first_model, :release)
+    assert settled?(fixture, session_id)
+
+    {:accepted, "p2"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p2", content: "second"})
+
+    assert_receive {:holding, second_model}, 2_000
+
+    # The replay is answered from the retained record.
+    assert {:accepted, "a1"} = Loopex.command(attachment, %{type: :abort, command_id: "a1"})
+
+    # And a command whose id is bound to different bytes is refused, which is the
+    # other branch that used to cancel first and classify afterwards.
+    assert {:error, :idempotency_conflict} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "a1", content: "conflict"})
+
+    # A malformed command reaches no cancellation either.
+    assert {:error, :invalid_command} = Loopex.command(attachment, %{type: :abort})
+
+    # Run two's work was untouched: released, it finishes on its own terms.
+    send(second_model, :release)
+    assert settled?(fixture, session_id)
+
+    finishes =
+      attachment
+      |> events()
+      |> Enum.filter(&(&1.kind == "run.finished"))
+
+    assert length(finishes) == 2
+    assert List.last(finishes)["outcome"] == "completed"
+
+    # Exactly one abort was ever admitted, so nothing was cancelled twice.
+    aborts =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload["command_id"] == "a1"))
+
+    assert length(aborts) == 1
   end
 
   test "the operator observes what was cancelled and what actually happened" do

@@ -87,16 +87,44 @@ defmodule Loopex.Executor do
   @typedoc """
   ## Concept
 
-  One bounded piece of progress from a running job.
+  One bounded piece of progress from a running job, carrying the whole identity
+  of the attempt that produced it.
 
   ## Technical depth
 
-  Plain data carrying the job's own identity, the stream it came from, a byte
-  offset, and a bounded chunk. It carries no `stream_domain_id`: an executor
-  never computes one, and the coordinator stamps the domain only after
-  validation has proved the event belongs to the attempt it dispatched.
+  Plain data carrying the job's complete origin tuple — the call and operation it
+  belongs to, that operation's attempt, the session, run, and turn, the
+  attempt-bound `canonical_request_digest`, both origin epochs, the executor's
+  identity, and its fencing token — followed by the stream it came from, a byte
+  offset, and a bounded chunk.
+
+  Every one of those bindings is required, because the coordinator validates all
+  of them fail-closed against the job it journaled before it projects anything.
+  A `tool_call_id` on its own is not an identity: a stale or superseded executor
+  can hold a live call id while being wrong about the attempt, the epoch, or the
+  fence it is acting under, and an event that proves only the call id would carry
+  that staleness straight to an operator.
+
+  It carries no `stream_domain_id`: an executor never computes one, and the
+  coordinator stamps the domain only after validation has proved the event
+  belongs to the attempt it dispatched.
   """
-  @type progress_event :: %{required(:tool_call_id) => binary(), optional(atom()) => term()}
+  @type progress_event :: %{
+          required(:tool_call_id) => binary(),
+          required(:operation_id) => binary(),
+          required(:attempt) => pos_integer(),
+          required(:session_id) => binary(),
+          required(:run_id) => binary(),
+          required(:turn_id) => binary(),
+          required(:canonical_request_digest) => binary(),
+          required(:session_epoch_at_dispatch) => non_neg_integer(),
+          required(:executor_epoch) => non_neg_integer(),
+          required(:executor_identity) => binary(),
+          required(:fencing_token) => non_neg_integer(),
+          required(:stream) => binary(),
+          required(:byte_offset) => non_neg_integer(),
+          required(:chunk) => binary()
+        }
 
   @typedoc """
   ## Concept

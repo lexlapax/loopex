@@ -509,6 +509,45 @@ defmodule Loopex.Runtime.SessionState do
   @doc """
   ## Concept
 
+  Records how many progress events an executor emitted that this session had no
+  standing to accept.
+
+  ## Technical depth
+
+  A refused event is dropped: nothing about it is projected, published, or
+  allowed to affect an outcome, a bound, or a receipt. But an executor emitting
+  events it cannot identify is a fact about that attempt, and a count that lives
+  only in the coordinator's memory disappears with the coordinator -- so a
+  reviewer reading the journal afterwards cannot tell a well-behaved attempt
+  from one that was refused a thousand times.
+
+  The count is this coordinator's own tally and never a number the executor
+  reported. It rides its own record rather than the receipt, because the
+  receipt's bytes are covered by the canonical mutation digest its transaction
+  is fenced on: a count that could differ between two computations of the same
+  proposal would make a `commit_unknown` retry unresolvable. This record is
+  proposed once, at stream close, when no further event can arrive.
+
+  Zero is not recorded. An attempt that emitted nothing refusable is the
+  ordinary case and needs no row to say so.
+  """
+  @spec propose_progress_refusals(t(), binary(), binary(), pos_integer()) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_progress_refusals(%__MODULE__{} = state, run_id, tool_call_id, count)
+      when is_binary(run_id) and is_binary(tool_call_id) and is_integer(count) and count > 0 do
+    record = %{
+      "run_id" => run_id,
+      "tool_call_id" => tool_call_id,
+      "refused_count" => count,
+      kind: "executor_progress_refused"
+    }
+
+    internal_proposal(state, stable_id("progress-refusals", run_id, tool_call_id), record)
+  end
+
+  @doc """
+  ## Concept
+
   Commits a terminal fact for a tool call that never produced a receipt.
 
   ## Technical depth
@@ -544,26 +583,45 @@ defmodule Loopex.Runtime.SessionState do
   @doc """
   ## Concept
 
-  Charges a turn that produced no complete reply.
+  Records that a model attempt was abandoned: charges the turn it produced no
+  complete reply for, and advances the attempt identity the next dispatch runs
+  under.
 
   ## Technical depth
 
-  Its request bytes plus that turn's committed output allowance, in full, marked
-  estimated. That deliberately over-charges: charging zero would make aborting
-  every turn the cheapest way to stay inside a budget, and a bound that can be
-  evaded by giving up is not a bound.
-  """
-  @spec charge_incomplete_turn(t(), binary()) :: t()
-  def charge_incomplete_turn(%__MODULE__{} = state, run_id) do
-    case Map.get(state.pending_work, run_id) do
-      %{request: request} ->
-        {charge, source} =
-          Bounds.charge(nil, request.canonical_request_bytes, Loopex.Model.max_tokens(request))
+  The charge is its request bytes plus that turn's committed output allowance, in
+  full, marked estimated. That deliberately over-charges: charging zero would
+  make aborting every turn the cheapest way to stay inside a budget, and a bound
+  that can be evaded by giving up is not a bound.
 
-        charge_run(state, run_id, charge, source)
+  Both halves are one durable transition rather than two pieces of coordinator
+  memory. An owner that dies between attempts hands its successor a journal, and
+  a successor that rebuilds the run as attempt one with nothing charged repeats
+  the nominal retry allowance after every succession and reopens the stream
+  domain the abandoned attempt already used. Only the attempt currently
+  dispatched may be abandoned, so replaying the record twice is refused rather
+  than charged twice.
+  """
+  @spec propose_model_attempt_abandoned(t(), binary()) :: {:ok, proposal()} | {:error, term()}
+  def propose_model_attempt_abandoned(%__MODULE__{} = state, run_id) when is_binary(run_id) do
+    case Map.get(state.pending_work, run_id) do
+      %{stage: "model_dispatched"} = work ->
+        attempt = Map.get(work, :model_attempt, 1)
+
+        record = %{
+          "run_id" => run_id,
+          "attempt" => attempt,
+          kind: "model_attempt_abandoned"
+        }
+
+        internal_proposal(
+          state,
+          stable_id("model-attempt", run_id, attempt),
+          record
+        )
 
       _absent ->
-        state
+        {:error, :no_attempt_pending}
     end
   end
 
@@ -858,8 +916,10 @@ defmodule Loopex.Runtime.SessionState do
        when kind in [
               "model_request_committed",
               "model_result_committed",
+              "model_attempt_abandoned",
               "effect_intent_committed",
               "executor_receipt_committed",
+              "executor_progress_refused",
               "outcome_unknown_committed",
               "run_terminal_committed",
               "tool_result_committed"
@@ -1067,6 +1127,19 @@ defmodule Loopex.Runtime.SessionState do
       next = %{next | expected_events: state.expected_events ++ events}
       {:ok, proposal(tx_id, record, events, next, {:accepted, tx_id})}
     end
+  end
+
+  # Technical depth: a refusal count changes no stage, no bound, and no pending
+  # work. It is retained and nothing follows from it, which is the whole point:
+  # a refused event must not be able to affect the run it was refused from.
+  defp apply_internal_record(state, %{
+         "run_id" => run_id,
+         "tool_call_id" => tool_call_id,
+         "refused_count" => count,
+         kind: "executor_progress_refused"
+       })
+       when is_binary(run_id) and is_binary(tool_call_id) and is_integer(count) and count > 0 do
+    {:ok, state, []}
   end
 
   defp apply_internal_record(state, %{
@@ -1304,6 +1377,32 @@ defmodule Loopex.Runtime.SessionState do
 
   defp apply_internal_record(state, %{
          "run_id" => run_id,
+         "attempt" => attempt,
+         kind: "model_attempt_abandoned"
+       }) do
+    with %{stage: "model_dispatched", request: request} = work <-
+           Map.get(state.pending_work, run_id),
+         true <- Map.get(work, :model_attempt, 1) == attempt do
+      {charge, source} =
+        Bounds.charge(nil, request.canonical_request_bytes, Loopex.Model.max_tokens(request))
+
+      # Concept: the abandoned attempt is paid for, and the next one is a
+      # different attempt.
+      #
+      # Technical depth: the increment is what makes the retried dispatch open a
+      # new stream domain instead of reusing the abandoned one, and it is what
+      # bounds the retries across succession, because the limit is now read from
+      # committed history rather than from whichever owner happens to be alive.
+      next_work = Map.put(work, :model_attempt, attempt + 1)
+
+      {:ok, put_pending(charge_run(state, run_id, charge, source), run_id, next_work), []}
+    else
+      _other -> {:error, :invalid_model_attempt_transition}
+    end
+  end
+
+  defp apply_internal_record(state, %{
+         "run_id" => run_id,
          "outcome" => outcome,
          "bound" => bound,
          "observed" => observed,
@@ -1312,8 +1411,9 @@ defmodule Loopex.Runtime.SessionState do
          "reconciliation_ref" => reconciliation_ref,
          kind: "run_terminal_committed"
        }) do
-    with %{stage: "turn_settled"} <- Map.get(state.pending_work, run_id),
-         true <- outcome in ["completed", "bound_reached", "outcome_unknown"] do
+    with %{stage: stage} <- Map.get(state.pending_work, run_id),
+         true <- outcome in ["completed", "bound_reached", "outcome_unknown"],
+         true <- terminal_admitted?(stage, outcome, bound) do
       # Concept: bound_reached carries the bound and the observed value and
       # nothing else.
       #
@@ -1375,6 +1475,22 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp apply_internal_record(_state, _record), do: {:error, :invalid_internal_transition}
+
+  # Concept: only the deadline may end a run that is still mid-turn.
+  #
+  # Technical depth: every other bound is evaluated between turns, so a terminal
+  # arriving from any other stage would mean a bound was applied to a turn nobody
+  # settled. The deadline is the single bound that also binds work already in
+  # flight — it can abort a request the provider may already have billed — so it,
+  # and the `outcome_unknown` that outranks it, are the only outcomes admitted
+  # from a stage where an operation is still dispatched.
+  defp terminal_admitted?("turn_settled", _outcome, _bound), do: true
+
+  defp terminal_admitted?(_stage, outcome, "deadline")
+       when outcome in ["bound_reached", "outcome_unknown"],
+       do: true
+
+  defp terminal_admitted?(_stage, _outcome, _bound), do: false
 
   defp unapplied_reason("bound_reached", bound) when is_binary(bound), do: bound
   defp unapplied_reason(_outcome, _bound), do: "run_terminal"

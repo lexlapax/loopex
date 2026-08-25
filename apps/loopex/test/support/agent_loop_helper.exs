@@ -190,8 +190,6 @@ defmodule Loopex.AgentLoopFixture do
 
   alias Loopex.M1RuntimeTestStore
 
-  @far_future 4_102_444_800_000
-
   def tool_definition(overrides \\ %{}) do
     Map.merge(
       %{
