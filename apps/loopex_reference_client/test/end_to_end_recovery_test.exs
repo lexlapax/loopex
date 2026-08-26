@@ -139,12 +139,18 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
     Fixture.await_terminal(fixture)
   end
 
-  @tag :real_provider
   # M1's fixed two-turn loop finished inside ExUnit's default minute. M2's loop
   # runs as many turns as the task needs across two operating-system processes,
   # so the ceiling is raised to fit the work rather than the work trimmed to fit
   # the ceiling.
+  #
+  # `@tag :real_provider` stays immediately above the test. M1's gate reads the
+  # tag positionally -- the line before the test, skipping only blank lines -- so
+  # anything inserted between the two silently untags the locked case as far as
+  # that gate is concerned, which is how it came to be red without anyone
+  # noticing.
   @tag timeout: 600_000
+  @tag :real_provider
   test "one real-provider trace forces a credential-free tool survives an untrappable runtime-tree kill after receipt before fact reconciles one effect without redispatch preserves its fact and completes a second real call" do
     credential = System.fetch_env!("LOOPEX_PROVIDER_API_KEY")
     System.delete_env("LOOPEX_PROVIDER_API_KEY")
