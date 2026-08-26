@@ -60,24 +60,26 @@ runner validates against.
 
 <!-- loopex:m2-attestations:start -->
 ```json
-{"role":"demonstration_db","selector":"apps/loopex_cli/test/coding_task_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":6,"response_id_form":"req_:16-64","provider_response_ids":"req_011CePywQMStfxsMsrNxCup9+req_011CePywW8To4RYAiSysHSe1+req_011CePywaqykkyMTjScwYA7f+req_011CePywfN674rhBsv8uG2Bc+req_011CePywjnFGz8LFg54gBdEx+req_011CePywp4ULnvMMhQMqK3hM","input_tokens":6507,"output_tokens":397,"candidate":"72c09ec74d43b43e4787b8905c25c57d677cf063","recorded":"2026-08-25T19:01:20Z"}
+{"role":"demonstration_db","selector":"apps/loopex_cli/test/coding_task_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":8,"response_id_form":"req_:16-64","provider_response_ids":"req_011CeS98HFRbGpKv1SdJm6Y2+req_011CeS98KufPuJ4mgCtDC17n+req_011CeS98QG6qAMT1DZMhM8k3+req_011CeS98UizWKGi7EzA1SV3U+req_011CeS98ZZwzLjDXe52WbXkG+req_011CeS98druthh3Et5uAQfdZ+req_011CeS98iRFt5NdAKoa2EcvB+req_011CeS98nFBzKfAfrNtsQftR","input_tokens":10287,"output_tokens":564,"candidate":"0712d13e4cb928cf8771fc71a151c0ed95e8ed3b","recorded":"2026-08-26T22:23:37Z"}
 ```
 
 ```json
-{"role":"inherited_5c","selector":"apps/loopex_reference_client/test/real_model_session_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"req_:16-64","provider_response_ids":"req_011CePyxSsXv4CYUQ4vo5iav+req_011CePyxtrE4bMaAREHYgyfE","input_tokens":1463,"output_tokens":113,"candidate":"72c09ec74d43b43e4787b8905c25c57d677cf063","recorded":"2026-08-25T19:01:20Z"}
+{"role":"inherited_5c","selector":"apps/loopex_reference_client/test/real_model_session_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"req_:16-64","provider_response_ids":"req_011CeS99wwNtvWw3YJrp3RKi+req_011CeS9APQp6UEMMkiV8eH5R","input_tokens":1463,"output_tokens":112,"candidate":"0712d13e4cb928cf8771fc71a151c0ed95e8ed3b","recorded":"2026-08-26T22:23:37Z"}
 ```
 
 ```json
-{"role":"inherited_8b","selector":"apps/loopex_reference_client/test/end_to_end_recovery_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"req_:16-64","provider_response_ids":"req_011CePyy9w62ZPZwitoKK1Yx+req_011CePyynnshmueWQbvxSxZR","input_tokens":1463,"output_tokens":112,"candidate":"72c09ec74d43b43e4787b8905c25c57d677cf063","recorded":"2026-08-25T19:01:20Z"}
+{"role":"inherited_8b","selector":"apps/loopex_reference_client/test/end_to_end_recovery_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"req_:16-64","provider_response_ids":"req_011CeS9AyJ1mnwoq2ykoZ7qB+req_011CeS9BaeX28CQepDV7awrR","input_tokens":1463,"output_tokens":112,"candidate":"0712d13e4cb928cf8771fc71a151c0ed95e8ed3b","recorded":"2026-08-26T22:23:37Z"}
 ```
 <!-- loopex:m2-attestations:end -->
 
 Each record above carries the identifiers its role actually observed, at the
 candidate it names, in runs made for this record and not copied from an earlier
-one. `demonstration_db` carries six because that role is two cases: the attended
-five-turn coding task and the single attestation call beside it. The identifiers
-appear grouped by case rather than in the order the two cases happened to be
-scheduled, which the seed decides.
+one. `demonstration_db` carries eight because that role is two cases: the
+attended coding task, which took seven turns, and the single attestation call
+beside it. The task's own count is what the demonstration record reports; this
+record counts the role, so the two numbers differ by design and neither is the
+other's correction. The identifiers appear grouped by case rather than in the
+order the two cases happened to be scheduled, which the seed decides.
 
 Each locked role emits its observed identifiers on the diagnostic stream as it
 runs, in the form
