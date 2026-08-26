@@ -94,13 +94,18 @@ so a reviewer reads what the run did rather than inferring it from a pass. The
 gate's selector runner suppresses the test formatter, and without this a failed
 assertion reaches an operator as "the selector failed" and nothing else.
 
-Observed at the captured candidate: all four coding tools ran —
+Observed at the closure candidate: all four coding tools ran —
 `loopex.read`, `loopex.edit`, `loopex.write`, `loopex.bash` — across seven real
 provider calls, every committed reply declared it streamed with a positive delta
 count, one `loopex.bash` call was refused by the host stance and reported, the
 run continued past the refusal and ended `done`, and the workspace ended
 carrying both the edited `notes.md` and the `summary.txt` the refused command
 did not remove.
+
+Seven is this task's own count. The role that carries this run in the
+[real-call attestations](M2-real-call-attestations.md) records eight, because
+that role is two cases: this task and a single attestation call beside it. The
+two numbers describe different things and neither corrects the other.
 
 The lane rows in the [toolchain matrix](M2-toolchain-matrix.md) name which
 lanes captured this role and what each of them observed; this paragraph
