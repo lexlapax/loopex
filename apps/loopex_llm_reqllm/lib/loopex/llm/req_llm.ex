@@ -258,6 +258,69 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
+  # Concept: the run's own deadline bounds the transport, rather than a number
+  # this adapter never declared.
+  #
+  # Technical depth: the streaming client defaults to a 30-second receive
+  # timeout when none is given, and this passed none. That is exactly the
+  # independent per-call timeout the run's committed absolute deadline is
+  # supposed to replace: a bound nobody declared, invisible in the journal,
+  # governing a real provider call. Under load it fires while the run has
+  # minutes of its declared deadline left, and the attempt fails for a reason
+  # the operator never chose and cannot find recorded anywhere.
+  #
+  # The remaining time on the committed deadline is what goes to the transport,
+  # so the transport bound is the run's bound. It cannot outlast the deadline
+  # because it is derived from it, and it cannot cut a call short of the
+  # deadline either. A deadline already reached yields the floor rather than a
+  # negative or zero timeout, because a call dispatched at all is owed a bounded
+  # attempt to fail in; the coordinator, not this adapter, decides that a run
+  # past its deadline stops.
+  @minimum_transport_bound_ms 1_000
+
+  @doc """
+  ## Concept
+
+  Every option this adapter hands the provider for one call.
+
+  ## Technical depth
+
+  Built here rather than inline so the values a real call is made with can be
+  read back and checked, instead of being visible only to the library. Each one
+  is derived from the committed request: the sampling bound the run declared,
+  the tools it staged, and the remaining time on its committed deadline. None
+  of them is a default this adapter invented, and a value missing from this list
+  is a value the library would supply on its own behalf.
+
+  The credential is a parameter rather than a field of the request, because it
+  never enters a committed request in the first place.
+  """
+  @spec call_options(Model.request(), binary(), term()) :: keyword()
+  def call_options(request, credential, tools) do
+    [
+      api_key: credential,
+      max_tokens: Model.max_tokens(request),
+      tools: tools,
+      receive_timeout: transport_bound(request)
+    ]
+  end
+
+  @doc """
+  ## Concept
+
+  How long the transport may wait, taken from the run's own deadline.
+
+  ## Technical depth
+
+  Public because it is the value that replaced an undeclared default, and a
+  regression here is silent: the call still works, it simply stops being bounded
+  by anything the run declared.
+  """
+  @spec transport_bound(Model.request()) :: pos_integer()
+  def transport_bound(request) do
+    max(request.deadline - System.system_time(:millisecond), @minimum_transport_bound_ms)
+  end
+
   # Concept: the credential is read here and nowhere else, and an absent or
   # empty value is an absence rather than a call with a blank key.
   defp credential do
@@ -283,11 +346,7 @@ defmodule Loopex.LLM.ReqLLM do
   # the provider sends after the content, which is why they are read once the
   # stream is drained rather than beside it.
   defp dispatch(request, context, credential, identity, tools, progress) do
-    options = [
-      api_key: credential,
-      max_tokens: Model.max_tokens(request),
-      tools: tools
-    ]
+    options = call_options(request, credential, tools)
 
     case ReqLLM.stream_text(request.model, context, options) do
       {:ok, response} ->

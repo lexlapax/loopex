@@ -502,6 +502,63 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     assert is_binary(detail)
   end
 
+  test "the transport is bounded by the run's committed deadline and not by a library default" do
+    # Concept: nothing bounds a real provider call except what the run declared.
+    #
+    # Technical depth: the streaming client applies its own 30-second receive
+    # timeout when a call supplies none, and this adapter supplied none. That is
+    # precisely the independent per-call timeout the committed absolute deadline
+    # exists to replace: undeclared, absent from the journal, invisible to the
+    # operator, and shorter than the bound the run actually chose. Under load it
+    # fired with minutes of the declared deadline remaining, failing an attempt
+    # for a reason nobody selected and nothing recorded -- which is how it was
+    # found, as a gate lane that went red while two lanes on the same bytes went
+    # green.
+    #
+    # The bound handed to the transport is now the remaining time on the run's
+    # own deadline, so there is one bound rather than two and it is the declared
+    # one.
+    deadline = System.system_time(:millisecond) + 120_000
+
+    {:ok, request} =
+      Loopex.Model.request(
+        Loopex.LLM.ReqLLM.default_model(),
+        [%{"role" => "user", "content" => "bound"}],
+        sampling: %{"max_tokens" => 32},
+        deadline: deadline
+      )
+
+    bound = Loopex.LLM.ReqLLM.transport_bound(request)
+
+    # It is the run's remaining time, not a constant. Anything near the
+    # library's 30 seconds would mean the default is still governing.
+    assert bound > 100_000 and bound <= 120_000,
+           "the transport bound is #{bound}ms, which does not track the run's deadline"
+
+    # And it is what a real call is actually made with.
+    options = Loopex.LLM.ReqLLM.call_options(request, "credential", [])
+    assert Keyword.fetch!(options, :receive_timeout) == Loopex.LLM.ReqLLM.transport_bound(request)
+
+    # Every other option a call carries is a declared value too, so a bound this
+    # adapter never chose cannot re-enter through one of them.
+    assert Keyword.fetch!(options, :max_tokens) == 32
+    assert Keyword.fetch!(options, :api_key) == "credential"
+
+    # A run whose deadline has already passed still gets a bounded attempt
+    # rather than a zero or negative timeout, which the transport would read as
+    # its own default or as an immediate failure. Whether such a run should be
+    # dispatched at all is the coordinator's decision and not this adapter's.
+    {:ok, expired} =
+      Loopex.Model.request(
+        Loopex.LLM.ReqLLM.default_model(),
+        [%{"role" => "user", "content" => "bound"}],
+        sampling: %{"max_tokens" => 32},
+        deadline: System.system_time(:millisecond) - 60_000
+      )
+
+    assert Loopex.LLM.ReqLLM.transport_bound(expired) == 1_000
+  end
+
   test "the exported reply type names exactly the fields a reply carries" do
     # Concept: an embedder reads the exported type and reaches for a field.
     #
