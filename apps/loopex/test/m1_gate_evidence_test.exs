@@ -247,6 +247,24 @@ defmodule Loopex.M1GateEvidenceTest do
     Map.put(context, :evidence, evidence)
   end
 
+  # Concept: put the evidence child back on whichever matrix a case needs to
+  # read, so the lifecycle relation never masks what is under test.
+  #
+  # Technical depth: `E` must be a direct child of `C` changing only the matrix,
+  # and its committed bytes must equal the matrix being verified. Resetting to
+  # `C` and committing the wanted bytes rebuilds exactly that shape, so a case
+  # mutating recorded content is answered by the check it means to exercise.
+  defp rebuild_evidence!(context, matrix_bytes) do
+    git!(context.root, ["reset", "--hard", "--quiet", context.candidate])
+
+    File.write!(
+      Path.join(context.root, "docs/evidence/M1-toolchain-matrix.md"),
+      matrix_bytes
+    )
+
+    commit!(context.root, "fixture evidence", ["docs/evidence/M1-toolchain-matrix.md"])
+  end
+
   defp file_digest(root, relative), do: root |> Path.join(relative) |> File.read!() |> digest()
 
   defp identity_suffix(identity) do
@@ -639,19 +657,100 @@ defmodule Loopex.M1GateEvidenceTest do
           global: false
         )
 
-      File.write!(path, changed)
-      assert {_output, status} = run_loaded_verifier(context.root)
+      # Concept: this must fail because the recorded digest disagrees with the
+      # artifact at the candidate, and for no other reason.
+      #
+      # Technical depth: writing the mutated matrix into the working tree alone
+      # breaks a different rule first -- the evidence child `E` must be a direct
+      # child of `C` whose committed matrix equals the one being read -- so the
+      # verifier refused over lifecycle shape and the digest comparison was
+      # never reached. Every one of these seven cases passed for that reason,
+      # and removing all seven candidate comparisons left this corpus green.
+      #
+      # Rebuilding `E` on the mutated matrix keeps the lifecycle relation intact
+      # so the comparison is what answers, and the diagnostic is asserted so the
+      # case cannot silently go back to passing for the wrong reason.
+      rebuild_evidence!(context, changed)
+
+      assert {output, status} = run_loaded_verifier(context.root)
       assert status != 0, "#{field} was not bound"
+
+      assert output =~ "at source candidate",
+             "#{field} was refused for the wrong reason: #{output}"
     end
 
-    File.write!(path, original)
+    # Concept: the inherited M0 proof must name the M0 gate's real bytes at the
+    # candidate, and a well-formed but false digest must be refused.
+    #
+    # Technical depth: both M0 rows carry the same digest, and the rows are
+    # checked against each other before either is checked against the
+    # repository. Changing both together therefore satisfies grammar and row
+    # agreement, so the only thing standing between a false inherited proof and
+    # acceptance is the comparison against the blob at the candidate. Nothing
+    # exercised that comparison: removing it alone left this corpus green, so a
+    # retained M0 proof could name bytes the M0 gate never had.
+    false_m0 = String.duplicate("e", 64)
 
-    runner = Path.join(context.root, "scripts/check-m1-gate.sh")
-    runner_original = File.read!(runner)
-    File.write!(runner, runner_original <> "# current drift\n")
-    assert {_output, status} = run_loaded_verifier(context.root)
-    assert status != 0
-    File.write!(runner, runner_original)
+    rebuild_evidence!(
+      context,
+      String.replace(original, "gate_sha256=#{context.m0_gate_sha256}", "gate_sha256=#{false_m0}")
+    )
+
+    assert {m0_output, m0_refused} = run_loaded_verifier(context.root)
+    assert m0_refused != 0, "a false inherited M0 gate digest was admitted"
+
+    assert m0_output =~ "M0 gate at source candidate",
+           "the false M0 digest was refused for the wrong reason: #{m0_output}"
+
+    rebuild_evidence!(context, original)
+
+    # Concept: retained evidence answers for the revision it names, not for the
+    # tree a later reader holds.
+    #
+    # Technical depth: this asserted the opposite -- that drifting a bound
+    # artifact in the working tree must make the verifier refuse. That froze
+    # every artifact this evidence names, and one is `docs/plans/M1-gate.md`,
+    # which amending the gate changes by definition.
+    #
+    # The binding that carries the meaning is proved by the loop directly above,
+    # which drifts each recorded digest in turn and requires a refusal. What is
+    # asserted here is the boundary that replaced the frozen one, over every
+    # bound artifact rather than one of them, so a check left behind for a
+    # single path cannot survive. Current-ness is enforced by the repository
+    # status check against the latest accepted generation, proved in
+    # `history_anchoring_test.exs`.
+    for {_field, bound_path} <- [
+          {"runner_sha256", "scripts/check-m1-gate.sh"},
+          {"gate_sha256", "docs/plans/M1-gate.md"},
+          {"verifier_sha256", "scripts/m1-evidence-verifier.exs"},
+          {"launcher_sha256", "scripts/m1-gate-launcher.escript"},
+          {"deps_budget_sha256", "apps/loopex/lib/mix/tasks/loopex.deps_budget.ex"},
+          {"exunit_runner_sha256", "scripts/m1-exunit-runner.exs"},
+          {"tool_versions_sha256", ".tool-versions"}
+        ] do
+      artifact = Path.join(context.root, bound_path)
+      kept = File.read!(artifact)
+      File.write!(artifact, kept <> "\n# later working-tree drift\n")
+
+      assert {_output, status} = run_loaded_verifier(context.root)
+
+      assert status == 0,
+             "retained evidence refused a working-tree change to #{bound_path}"
+
+      File.write!(artifact, kept)
+    end
+
+    # The closed M0 gate document is bound the same way and was checked the same
+    # way, so it is held to the same boundary rather than left as the one path
+    # where the removed rule could survive unnoticed.
+    m0 = Path.join(context.root, "docs/plans/M0-gate.md")
+    m0_kept = File.read!(m0)
+    File.write!(m0, m0_kept <> "\n<!-- later working-tree drift -->\n")
+
+    assert {_output, m0_status} = run_loaded_verifier(context.root)
+    assert m0_status == 0, "retained evidence refused a working-tree change to the M0 gate"
+
+    File.write!(m0, m0_kept)
   end
 
   test "M1 evidence verifier binds source evidence and closure transition ancestry" do
@@ -835,16 +934,68 @@ defmodule Loopex.M1GateEvidenceTest do
     end)
 
     File.write!(path, original)
-    {_heading, _mechanism, _selector, artifact} = hd(@negative_records)
-    artifact_path = Path.join(context.root, artifact)
-    File.write!(artifact_path, "not restored\n")
-    assert {_output, status} = run_verifier(context.root, args)
-    assert status != 0
 
-    File.rm!(artifact_path)
-    File.ln_s!(Path.join(context.root, Enum.at(@negative_records, 1) |> elem(3)), artifact_path)
-    assert {_output, status} = run_verifier(context.root, args)
-    assert status != 0
+    # Concept: every record's restored digest must name its artifact's real
+    # bytes at that record's own candidate.
+    #
+    # Technical depth: nothing above mutates `restored_sha256`, so the
+    # comparison giving that field its meaning was unprotected -- replacing it
+    # with a syntactic check left this corpus green. Mutating only the first
+    # record is not enough either: an implementation that skipped the comparison
+    # for one mechanism and applied it to the rest would still pass. Each of the
+    # five records is substituted in turn, so the protection has to hold
+    # uniformly to survive.
+    for index <- 0..(length(@negative_records) - 1) do
+      {heading, _mechanism, _selector, _artifact} = Enum.at(@negative_records, index)
+
+      substituted =
+        original
+        |> String.split("\n")
+        |> Enum.map_reduce({false, false}, fn line, {seen, done} ->
+          cond do
+            String.starts_with?(line, heading) ->
+              {line, {true, done}}
+
+            seen and not done and String.contains?(line, "\"restored_sha256\":\"sha256:") ->
+              {String.replace(
+                 line,
+                 ~r/"restored_sha256":"sha256:[0-9a-f]{64}"/,
+                 ~s("restored_sha256":"sha256:#{String.duplicate("c", 64)}")
+               ), {seen, true}}
+
+            true ->
+              {line, {seen, done}}
+          end
+        end)
+        |> elem(0)
+        |> Enum.join("\n")
+
+      refute substituted == original, "no digest was substituted for #{heading}"
+      File.write!(path, substituted)
+
+      assert {_output, status} = run_verifier(context.root, args)
+      assert status != 0, "a wrong restored digest was admitted for #{heading}"
+
+      File.write!(path, original)
+    end
+
+    # Concept: "restored" is a fact about the revision the record names.
+    #
+    # Technical depth: this required the artifact to still hold its restored
+    # bytes in the working tree, which is a different claim -- that the file is
+    # never touched again. A negative demonstration names ordinary product code,
+    # so that froze it. Every record's artifact is drifted in turn, so a check
+    # left in place for one of them cannot hide behind the others.
+    for {_heading, _mechanism, _selector, artifact} <- @negative_records do
+      artifact_path = Path.join(context.root, artifact)
+      restored = File.read!(artifact_path)
+      File.write!(artifact_path, "later working-tree drift\n")
+
+      assert {_output, drifted} = run_verifier(context.root, args)
+      assert drifted == 0, "retained evidence refused a working-tree change to #{artifact}"
+
+      File.write!(artifact_path, restored)
+    end
   end
 
   test "the environment preflight removes credential aliases and unrelated ambient state" do
