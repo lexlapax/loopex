@@ -734,12 +734,53 @@ defmodule LoopexCliTest do
     [request | _others] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
     refute request.canonical_request_bytes =~ "always run the tests"
 
-    # The command forwards whatever was decided rather than dropping it, so the
-    # admitted path above is reachable from the terminal and not only from a
-    # test that calls the kernel directly.
-    command = File.read!(app_path("lib/loopex_cli.ex"))
-    assert command =~ "decision = ProjectResources.decide(manifest, workspace)"
-    assert command =~ "project_decision: decision"
+    # Concept: the command itself runs the decision, not just the module the
+    # command happens to import.
+    #
+    # Technical depth: this asserted that `lib/loopex_cli.ex` contains two
+    # source strings. That proved nothing about behaviour -- it passes against a
+    # command that reformats those lines, and it would keep passing against one
+    # that computed a decision and dropped it. It is the same defect class this
+    # case was written to fix, committed while fixing it.
+    #
+    # Driving `dispatch/1` proves it instead. The decision is taken while the
+    # runtime starts, which every subcommand that needs a runtime shares, so a
+    # dispatch that starts one and then fails for its own unrelated reason still
+    # exercises discovery, the presentation, and the decision, and the command's
+    # own diagnostic stream shows all three. `cancel` against a session that does
+    # not exist is used because it returns instead of waiting on a run: what the
+    # command does after the decision is not this case's claim.
+    {command_root, command_workspace} = roots()
+    File.write!(Path.join(command_workspace, "AGENTS.md"), "always run the tests")
+
+    commanded =
+      capture_io(:stderr, fn ->
+        assert {:error, unreconciled} =
+                 LoopexCli.dispatch([
+                   "cancel",
+                   "no-such-session",
+                   "--policy",
+                   "allow-all",
+                   "--state-root",
+                   command_root,
+                   "--workspace",
+                   command_workspace
+                 ])
+
+        send(self(), {:unreconciled, unreconciled})
+      end)
+
+    assert_received {:unreconciled, unreconciled}
+    assert unreconciled =~ "session_unknown"
+
+    assert commanded =~ "project resources found in this workspace",
+           "the command did not run discovery: #{String.slice(commanded, 0, 400)}"
+
+    assert commanded =~ "AGENTS.md"
+    assert commanded =~ "trust class project_resource"
+
+    assert commanded =~ "not interactive",
+           "the command did not reach the trust decision from dispatch"
 
     # And a workspace carrying none says so, rather than saying nothing.
     {_other_root, empty} = roots()
