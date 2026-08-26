@@ -659,6 +659,66 @@ through the append-only Gate Generations table in
 [the M1 plan](../plans/M1.md), and adds no scope, changes no outcome, and reopens
 no lifecycle state.
 
+<a id="disposition-m1-gate-generation-8-2026-08-26"></a>
+### M1 gate generation 8 acceptance — 2026-08-26
+
+The maintainer explicitly accepted the `M1` gate generation 8 proposal at
+candidate `3ddbf741c4175b5595920727645f2aae24ff4a73`. The proposal was reviewed
+at that exact revision before acceptance.
+
+Generation 8 rebinds exactly three artifacts and no fourth:
+`scripts/m1-evidence-verifier.exs`, which asserted retained evidence against the
+working tree as well as against the revision that evidence names;
+`scripts/check-m1-gate.sh`, whose inline digest copies had drifted from the rows
+the gate document binds; and `apps/loopex/test/m1_gate_evidence_test.exs`, the
+verifier's adversarial corpus, whose case names, count, and minimum of ten are
+unchanged.
+
+This acceptance exercises the separately approved baseline exception against a
+closed, immutable gate, recorded on 2026-08-23 as
+[`disposition-m1-gate-generation-exception-2026-08-23`](#disposition-m1-gate-generation-exception-2026-08-23),
+for one specific proposal. That earlier approval authorised the transaction and
+approved no particular proposal, which is why this record exists separately.
+
+`M1`'s Acceptance and Closure rows are unchanged and remain byte-immutable.
+Neither is made retroactively false. Acceptance binds the amended gate at
+`sha256:0076a8aa7602db0695a03ef12712e4bdf4d31098d8e71219c9f69e1298f852ee`
+through the append-only Gate Generations table in
+[the M1 plan](../plans/M1.md), and adds no scope, changes no outcome, and
+reopens no lifecycle state.
+
+**The reviewer's sandbox profile was waived for this review, and that waiver is
+recorded here because it belongs to this acceptance.** On 2026-08-26 the
+maintainer explicitly waived the requirement that this generation's independent
+pre-integration review run under a wholly write-denied sandbox profile. The
+reviewer's sandbox could permit writes, including isolated temporary roots for
+executable checks and mutation experiments, and such a review could serve as the
+transition evidence.
+
+The waiver did not cover the reviewed checkout, which had to be untouched and
+verified clean; the maintainer confirmed separately that this requirement stands
+unchanged, so a review that modified what it reviewed would be void rather than
+advisory. It concerns sandbox policy and never the integrity of the bytes under
+review.
+
+It was needed because six proposals were reviewed under this transaction and
+every reviewer ran under a write-permitting profile, correctly self-declaring
+advisory. Five substantive reviews, each of which found real defects, therefore
+produced no usable transition evidence. The constraint was the profile, not the
+reviews.
+
+The accepted review was performed by Codex at exact
+`3ddbf741c4175b5595920727645f2aae24ff4a73` under that waiver. It reported the
+reviewed checkout untouched and clean, and the integrator independently
+confirmed it: no tracked or staged change, every bound artifact matching its
+row, and the gate document matching the digest generation 8 binds.
+
+This waiver is specific to this generation's review and disposes of nothing
+else. In particular it neither resolves nor bears on the unresolved
+inherited-gate enforcement decision recorded in
+[Amendment 8](../plans/M1-gate.md#amendment-8-inherited-gate-enforcement), which
+remains owed before `M2` closes.
+
 <a id="disposition-bound-reached-vision-change-2026-08-23"></a>
 ### Vision terminal algebra gains `bound_reached` — 2026-08-23
 
