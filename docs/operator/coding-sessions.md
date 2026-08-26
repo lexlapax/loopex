@@ -166,10 +166,31 @@ content digests: change any of them and the decision no longer applies.
 A run with no matching positive decision **fails closed toward withholding
 content, not toward refusing to work**. It stages that class empty, journals a
 declined receipt saying why, and runs the coding task without the project block.
-The command passes no decision of its own, so a non-interactive run is the
-declined path by construction rather than by a flag someone has to remember.
-There is no interactive prompt in this milestone: what you get is the showing and
-an explicit statement that the content was withheld.
+At an interactive terminal the command asks you, having first shown you every
+resolved path with its provenance and trust class and the manifest digest a
+decision would bind:
+
+```text
+loopex: admit these project resources for this run? [y/N]
+```
+
+Only `y` or `yes` admits. Anything else withholds, and so does end of input — a
+question nobody answered is not consent.
+
+Where there is nobody to ask, the command does not ask. It reads that from the
+input device rather than assuming it, and fails closed: a pipe, a redirect, and
+any descriptor it cannot classify are all treated as absence, because a prompt
+nobody can answer would otherwise be answered by whatever happened to be on
+standard input. Such a run prints
+
+```text
+loopex: this terminal is not interactive, so no trust decision was taken; the
+block is staged empty and the run continues without it
+```
+
+and takes the declined path above. There is no flag to admit project resources
+non-interactively; the decision is one a person makes at a terminal or not at
+all.
 
 An admitted block changes no tool set, no policy decision, no bound, and no
 grant. It is provenance-typed, budgeted, receipt-journalled data, never a grant

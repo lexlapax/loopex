@@ -54,7 +54,12 @@ the exact document set its milestone must update.
   a denial issues no grant, starts no process, and commits a truthful denied
   outcome the operator reads; failure, timeout, and a malformed response fail
   closed into denial. Omitting the `:policy` start option refuses runtime start,
-  and each shipped permissive policy says out loud what it is.
+  and each shipped permissive policy says out loud what it is. `--policy`
+  selects between `allow-all`, which permits everything and says so, and
+  `shell-allowlist`, which permits the filesystem tools and only the shell
+  commands it names, refusing the rest while the run carries on. The second is
+  scope and not a sandbox: it matches a command's leading word, a compound
+  command reaches past it, and it says that in its own notice.
 - An `ArtifactStore` port and local adapter. Tool output beyond a declared bound
   spills rather than poisoning the conversation: the durable event carries the
   content digest, media type, size, role, and an opaque reference, the
@@ -147,6 +152,16 @@ the exact document set its milestone must update.
 
 ### Fixed
 
+- Every provider call was bounded by an undeclared thirty-second transport
+  timeout the streaming client applies when a caller supplies none, instead of
+  by the run's own committed absolute deadline. Under concurrent load it fired
+  with minutes of the declared deadline remaining, and a second occurrence
+  exhausted the retry allowance and stopped the run's owner — roughly one run in
+  twelve, while runs in isolation were clean. The transport now receives the
+  remaining time on the committed deadline, so there is one bound and it is the
+  one the run declared. It became visible only because an interrupted stream is
+  now an error rather than the partial text already emitted; the same timeout
+  previously produced a truncated answer indistinguishable from a short one.
 - The core-only lane measured the ambient VM, which made outcomes 7 and 9 appear
   mutually exclusive: at an umbrella root every compiled child is on the load
   path, so any adapter failed the check by existing. That was an instance of the
