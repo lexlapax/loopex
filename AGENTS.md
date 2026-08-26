@@ -180,6 +180,18 @@ a recommendation. An incidental finding is not a report: resolve it within the
 current scope, fold it into a decision packet, or leave it out. Never hand over
 an unresolved observation for the maintainer to triage.
 
+Naming a constraint is not raising it. Where a constraint degrades required
+evidence, blocks a check, hides a defect, or would leave a future failure
+undiagnosable, present it as a decision packet: the options, what each costs in
+stability, modularity, and extensibility, the repercussions of each including
+any amendment or re-review it forces, and a recommendation. Enumerate the option
+that changes the constraining artifact even where that artifact is locked,
+bound, or closed, and state its transaction cost rather than treating locked as
+unaskable. Writing that something "is the maintainer's call", recording it as a
+known limitation, or deferring it to a later milestone without that packet is
+handing over an unresolved observation, whichever section the sentence appears
+in.
+
 ## Milestones and Gates
 
 **Vocabulary.** A *capability rung* is one of the non-normative questions in the
