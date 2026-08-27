@@ -10,17 +10,29 @@ defmodule LoopexCli.Interrupt do
 
   ## Technical depth
 
-  `SIGINT` is not among the signals this installs on and cannot be made to be.
-  The emulator reserves it for its own break handler and `os:set_signal/2`
-  refuses the name outright, so a terminal `Ctrl-C` ends the operating-system
-  process without reaching this code at all.
+  `SIGINT` is not among the signals this installs on and cannot be: the emulator
+  reserves it for its own break handler and `os:set_signal/2` refuses the name
+  outright. That is a fact about `os:set_signal/2` and about this module. It is
+  not a fact about what `Ctrl-C` does, and stating it as one described the
+  command as unable to keep a promise it does keep.
 
-  That is a smaller loss than it sounds, and it is the reason `loopex cancel`
-  exists. The session's durable truth is in the journal, not in this process, so
-  an abruptly ended terminal leaves a session that is recoverable rather than one
-  that is lost, and `loopex cancel <session>` reaches the same public abort by a
-  different route. What is genuinely lost is the chance to observe cleanup before
-  the process goes, which is exactly why the reconciling path reports
+  `Ctrl-C` reaches this handler, by the only route a reserved signal can be
+  reached by: from outside the emulator. `apps/loopex_cli/bin/loopex` is the
+  `loopex` an operator runs. It starts the escript as its own child, traps
+  `SIGINT`, and forwards `SIGTERM` — which is a signal this module does install
+  on, and which it turns into the same public abort as any other. So an
+  interrupt at the terminal ends the run through the ordinary cancellation path
+  and reports what happened, rather than ending the operating-system process
+  where it stands.
+
+  A build run directly, without that launcher, keeps the older behaviour: the
+  emulator ends on `Ctrl-C` and nothing here observes it. That is why
+  `loopex cancel` exists and why it is not merely a convenience. The session's
+  durable truth is in the journal rather than in this process, so an abruptly
+  ended terminal leaves a session that is recoverable rather than one that is
+  lost, and `loopex cancel <session>` reaches the same public abort by a third
+  route. What is lost in that case is the chance to observe cleanup before the
+  process goes, which is exactly why the reconciling path reports
   `outcome_unknown` when it cannot confirm one.
 
   Installing a handler is not enough by itself. The runtime's default signal
@@ -40,10 +52,11 @@ defmodule LoopexCli.Interrupt do
 
   # Concept: the signals an operator or a supervisor actually sends.
   #
-  # Technical depth: `SIGTERM` is what `kill` sends by default and what a process
-  # supervisor sends on shutdown; `SIGHUP` is what a closing terminal sends to its
-  # foreground group; `SIGQUIT` is the other keyboard interrupt. Each is trappable
-  # and each means the same thing here: stop this run and report what happened.
+  # Technical depth: `SIGTERM` is what `kill` sends by default, what a process
+  # supervisor sends on shutdown, and what `bin/loopex` forwards a terminal
+  # `Ctrl-C` as; `SIGHUP` is what a closing terminal sends to its foreground
+  # group; `SIGQUIT` is the other keyboard interrupt. Each is trappable and each
+  # means the same thing here: stop this run and report what happened.
   @signals [:sigterm, :sighup, :sigquit]
 
   # Concept: how long a stop is allowed to take before the process goes anyway.

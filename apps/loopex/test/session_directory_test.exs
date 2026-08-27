@@ -269,6 +269,68 @@ defmodule Loopex.SessionDirectoryTest do
     assert Path.join([root, "sessions"]) |> File.ls!() == [session_id]
   end
 
+  test "a planted symlink is not an entry of this directory and never becomes one", %{root: root} do
+    # Concept: an entry in the sessions directory is a file that directory
+    # holds. A name pointing somewhere else is not a session of this state root,
+    # whatever it decodes to.
+    #
+    # Technical depth: `contained?/1` constrains the identifier and says nothing
+    # about what the name already refers to, and `File.read/1` follows a symlink
+    # to its target. Anyone able to write into the sessions directory could
+    # therefore plant one: `list_sessions/1` reported bytes from outside the
+    # state root as a session of it, under a `runtime_id` the planter chose, and
+    # the name being taken made `record_session/3` refuse the real session
+    # `:session_already_bound` against a binding this host never made. Neither
+    # the listing nor the refusal was true.
+    {:ok, state_root} = SessionDirectory.state_root()
+    {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
+
+    sessions = Path.join(root, "sessions")
+    File.mkdir_p!(sessions)
+
+    outside = Path.join(root, "planted-entry")
+
+    File.write!(
+      outside,
+      :erlang.term_to_binary(%{
+        session_id: "s_planted",
+        runtime_id: "runtime_attacker",
+        commands: %{}
+      })
+    )
+
+    File.ln_s!(outside, Path.join(sessions, "s_planted"))
+
+    # The listing answers from what this directory holds, and it holds no
+    # session by that name.
+    assert {:ok, listed} = SessionDirectory.list_sessions(state_root)
+
+    refute Enum.any?(listed, &(&1.session_id == "s_planted")),
+           "a planted symlink was listed as a session: #{inspect(listed)}"
+
+    refute Enum.any?(listed, &(&1.runtime_id == "runtime_attacker")),
+           "an outside runtime_id reached the listing: #{inspect(listed)}"
+
+    # And the squat is refused as what it is, rather than answered from the
+    # bytes it points at.
+    assert {:error, :invalid_session_id} =
+             SessionDirectory.record_session(state_root, "s_planted", runtime_id)
+
+    assert {:error, :invalid_session_id} =
+             SessionDirectory.resume(state_root, :unused, "s_planted", "resume-1")
+
+    # The link and its target are left exactly as they were: refusing an entry
+    # is not licence to delete whatever an operator deliberately linked.
+    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(sessions, "s_planted"))
+    assert File.exists?(outside)
+
+    # An ordinary entry beside it is unaffected, so the rule is about the link
+    # and not about the directory.
+    assert :ok = SessionDirectory.record_session(state_root, "s_real", runtime_id)
+    assert {:ok, entries} = SessionDirectory.list_sessions(state_root)
+    assert Enum.map(entries, & &1.session_id) == ["s_real"]
+  end
+
   defp wait_for_barrier(barrier, target) do
     if :counters.get(barrier, 1) >= target do
       :ok

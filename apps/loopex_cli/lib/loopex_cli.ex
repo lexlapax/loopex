@@ -157,7 +157,8 @@ defmodule LoopexCli do
   # abort any other caller would submit. It signals no process, writes no control
   # file, and opens no channel of its own, which is what keeps cancellation
   # same-process by construction rather than by convention. Which signals reach
-  # it, and why a terminal Ctrl-C is not one of them, is `LoopexCli.Interrupt`.
+  # it, and by what route a terminal Ctrl-C becomes one of them, is
+  # `LoopexCli.Interrupt`.
   defp run({flags, words}) do
     with :ok <- one_input(flags),
          {:ok, policy} <- policy(Map.get(flags, "policy")),
@@ -169,8 +170,18 @@ defmodule LoopexCli do
 
       case Loopex.command(attachment, %{type: :prompt, command_id: "run-1", content: prompt}) do
         {:accepted, _id} ->
-          track(flags, session_id, runtime)
-          follow_with_input(attachment, flags)
+          case track(flags, session_id) do
+            :ok ->
+              follow_with_input(attachment, flags)
+
+            # Technical depth: the stream still runs, because the session is
+            # live and what it does is still the operator's answer. Its own
+            # result is discarded in favour of the recording failure, which is
+            # the one that outlives this terminal.
+            {:error, message} ->
+              _ = follow_with_input(attachment, flags)
+              {:error, message}
+          end
 
         {:error, reason} ->
           {:error, "the prompt was refused: #{inspect(reason)}"}
@@ -244,14 +255,57 @@ defmodule LoopexCli do
     end
   end
 
-  defp track(flags, session_id, runtime) do
-    with {:ok, root} <- state_root(flags),
-         {:ok, placement} <- Loopex.runtime_placement_id(root) do
-      Loopex.track_session(root, session_id, placement)
-    end
+  # Technical depth: the state root was resolved and used by `start_runtime/2`
+  # before this is reached, so a failure to resolve it here is not a case to
+  # handle but a contradiction to fail on.
+  defp track(flags, session_id) do
+    {:ok, root} = state_root(flags)
+    record_session(root, session_id)
+  end
 
-    _ = runtime
-    :ok
+  @doc """
+  ## Concept
+
+  Records a session in the state root, so `loopex sessions` lists it and
+  `loopex resume` can reach it — and says plainly when it could not.
+
+  ## Technical depth
+
+  Answers `:ok` only when the state root actually holds the entry, and otherwise
+  reports the reason on standard error and returns it.
+
+  It ran its `with` for the effect, discarded whatever it returned, and answered
+  `:ok` unconditionally. Every reason recording can fail --
+  `{:session_entry_persist_failed, :eacces}` against a read-only state root, a
+  placement identity that cannot be read, a `sessions` name something else
+  already occupies -- therefore became success. The run streamed exactly as it
+  does when everything worked, and the first the operator learned of it was
+  `loopex sessions` not listing the session and `loopex resume` refusing to
+  reach it, with nothing left by then to say which run it had been.
+
+  The failure is reported here, where it is observed, rather than only at the
+  exit status, because the run this belongs to may stream for a long time
+  afterwards and an operator who is told at once can still act on it. The
+  session itself is not abandoned over it: the prompt is already accepted and
+  the Store already holds the session, so the stream still reports what the
+  session did and the command fails at the end because part of what it was asked
+  to do was not done.
+  """
+  @spec record_session(Path.t(), binary()) :: :ok | {:error, binary()}
+  def record_session(root, session_id) do
+    with {:ok, placement} <- Loopex.runtime_placement_id(root),
+         :ok <- Loopex.track_session(root, session_id, placement) do
+      :ok
+    else
+      {:error, reason} ->
+        message =
+          "the session ran but was not recorded in #{root} (#{inspect(reason)}); " <>
+            "`loopex sessions` will not list #{session_id} and " <>
+            "`loopex resume #{session_id}` cannot reach it"
+
+        IO.puts(:stderr, "loopex: #{message}")
+        {:error, message}
+    end
   end
 
   defp sessions({flags, _words}) do
@@ -510,8 +564,9 @@ defmodule LoopexCli do
 
     --policy is required for anything that runs tools. There is no default.
 
-    Ctrl-C ends this process without cleanup: the emulator reserves that signal.
-    The session survives it — `loopex cancel <session>` reconciles the run.
+    Ctrl-C stops the run and reports what happened, when this command is started
+    through `bin/loopex`; the escript run directly cannot see that signal. Either
+    way the session survives — `loopex cancel <session>` reconciles the run.
     """)
 
     :ok

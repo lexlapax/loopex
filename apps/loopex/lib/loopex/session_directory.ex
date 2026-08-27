@@ -404,12 +404,38 @@ defmodule Loopex.SessionDirectory do
   end
 
   defp read_entry(root, session_id) do
-    with {:ok, path} <- session_path(root, session_id) do
+    with {:ok, path} <- session_path(root, session_id),
+         :ok <- own_entry(path) do
       case File.read(path) do
         {:ok, contents} -> decode_entry(contents)
         {:error, :enoent} -> {:error, :session_unknown}
         {:error, reason} -> {:error, {:session_entry_unreadable, reason}}
       end
+    end
+  end
+
+  # Concept: an entry in this directory is a file this directory holds, not a
+  # pointer to one somewhere else.
+  #
+  # Technical depth: `contained?/1` constrains the identifier and says nothing
+  # about what the name already refers to, and `File.read/1` follows a symlink to
+  # its target. Anyone able to write into the sessions directory could therefore
+  # plant `sessions/<id>` pointing at a file of their own: `list_sessions/1`
+  # reported it as a session of this state root with a `runtime_id` they chose,
+  # and because the name was taken, `record_session/3` refused the real session
+  # `:session_already_bound` against a binding this host never made. Neither the
+  # listing nor the refusal was true.
+  #
+  # `lstat` answers about the name rather than about what it points at, which is
+  # the only way to tell the two apart. A symlink is refused as an identifier
+  # rather than repaired, because replacing it would destroy whatever an operator
+  # deliberately linked and admitting it would be the defect.
+  defp own_entry(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :symlink}} -> {:error, :invalid_session_id}
+      {:ok, _stat} -> :ok
+      {:error, :enoent} -> {:error, :session_unknown}
+      {:error, reason} -> {:error, {:session_entry_unreadable, reason}}
     end
   end
 

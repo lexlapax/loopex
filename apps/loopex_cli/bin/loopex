@@ -1,0 +1,81 @@
+#!/bin/sh
+#
+# Concept: the `loopex` an operator runs, and the thing that makes Ctrl-C mean
+# what the command promises it means.
+#
+# Technical depth: the emulator reserves SIGINT for its own break handler and
+# `os:set_signal(sigint, handle)` refuses the name outright, so no amount of
+# Erlang inside the escript can observe a terminal interrupt. The signal has to
+# be caught outside the emulator and re-delivered as one the emulator will hand
+# over. This launcher is that outside: it runs the escript as its own child,
+# traps SIGINT, and forwards SIGTERM, which `LoopexCli.Interrupt` already turns
+# into the same public abort any other caller would submit.
+#
+# The escript is started asynchronously rather than exec'd, because a process
+# that had replaced this one could no longer be signalled on its behalf. Two
+# POSIX rules about an asynchronous list in a shell without job control follow
+# from that, and both are load-bearing:
+#
+#   * the child's standard input would be redirected from /dev/null, which would
+#     silently disable the project-resource prompt and break every piped
+#     invocation, so it is explicitly redirected from this process's own
+#     standard input instead;
+#   * SIGINT and SIGQUIT are ignored in the child, which is exactly what is
+#     wanted here: a terminal delivers Ctrl-C to the whole foreground process
+#     group, and the child ignoring it is what leaves the forwarded SIGTERM as
+#     the thing that actually ends the run.
+
+set -u
+
+# Concept: the escript is found beside the launcher, not on the PATH.
+#
+# Technical depth: `mix escript.build` writes it into the application directory,
+# one level above this one, so resolving from this script's own location keeps a
+# checkout, a copied pair, and an installed pair working without configuration.
+# LOOPEX_ESCRIPT covers every arrangement that is neither.
+if [ -n "${LOOPEX_ESCRIPT:-}" ]; then
+  escript=$LOOPEX_ESCRIPT
+else
+  here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd) || exit 1
+  escript=$here/../loopex
+fi
+
+if [ ! -x "$escript" ]; then
+  echo "loopex: no built command at $escript" >&2
+  echo "loopex: build it with 'MIX_ENV=prod mix cmd --app loopex_cli mix escript.build'," >&2
+  echo "loopex: or set LOOPEX_ESCRIPT to the path of the built command" >&2
+  exit 127
+fi
+
+# Concept: every signal an operator or a supervisor sends means stop this run.
+#
+# Technical depth: SIGTERM is the one the escript's own handler installs on, so
+# all four arrive there as SIGTERM rather than being passed through unchanged.
+# The trap is armed before the child exists so a signal delivered in the moment
+# after the fork is not the one signal this launcher misses; it names the child
+# by variable, which is read when the signal arrives rather than when the trap
+# is set.
+child=''
+trap 'if [ -n "$child" ]; then kill -TERM "$child" 2>/dev/null; fi' INT TERM HUP QUIT
+
+"$escript" "$@" <&0 &
+child=$!
+
+wait "$child"
+status=$?
+
+# Technical depth: a `wait` interrupted by a caught signal returns above 128
+# while the child is still running, so the child's real status has not been read
+# yet and waiting once more reads it. A child that genuinely exited above 128 --
+# the interrupt backstop halts 130 -- has already been reaped, so the second
+# wait reports no such job and the first answer stands.
+if [ "$status" -gt 128 ]; then
+  wait "$child" 2>/dev/null
+  reaped=$?
+  if [ "$reaped" -ne 127 ]; then
+    status=$reaped
+  fi
+fi
+
+trap - INT TERM HUP QUIT
+exit "$status"
