@@ -32,12 +32,21 @@ work in:
 ```text
 MIX_ENV=prod mix cmd --app loopex_cli mix escript.build
 cd ~/code/my-project
-~/code/loopex/apps/loopex_cli/loopex run --policy allow-all "add a changelog entry for the parser fix"
+~/code/loopex/apps/loopex_cli/bin/loopex run --policy allow-all "add a changelog entry for the parser fix"
 ```
 
-The build writes a single self-contained `loopex` file beside the application.
-Copy it anywhere on your `PATH`; it needs nothing from the checkout it was built
-from. It reads the provider credential from `LOOPEX_PROVIDER_API_KEY`.
+The build writes a self-contained `loopex` escript beside the application, and
+`bin/loopex` is a small launcher that runs it. **Run the launcher, not the
+escript.** The emulator reserves `SIGINT` for its own break handler and refuses
+to hand it to a signal handler at all, so a `Ctrl-C` delivered straight to the
+escript ends the operating-system process without stopping the run through the
+public facade: the model call is left to finish on the provider's side, a tool
+that was mid-write stays mid-write, and nothing is reported. The launcher traps
+the interrupt outside the emulator and forwards the stop the escript already
+knows how to make. Copy the pair together, keeping the launcher's
+`../loopex` layout, or point `LOOPEX_ESCRIPT` at the escript and put the launcher
+anywhere on your `PATH`. It reads the provider credential from
+`LOOPEX_PROVIDER_API_KEY`.
 
 `--policy` is required and has no default. Nothing runs a tool until you have
 named the authority that governs it; see

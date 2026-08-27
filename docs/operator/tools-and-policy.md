@@ -111,7 +111,7 @@ precisely so that no embedder inherits this one.
 
 `--policy shell-allowlist` selects the other stance the command ships. It allows
 the filesystem tools and allows `bash` only when the command's first word is one
-it names; everything else is refused with `command_not_permitted`, the refusal
+it names; everything else is refused with `policy_denied`, the refusal
 is reported, and the session carries on. It announces itself the same way, once:
 
 ```text

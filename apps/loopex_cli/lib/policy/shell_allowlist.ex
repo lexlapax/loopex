@@ -22,7 +22,7 @@ defmodule LoopexCli.Policy.ShellAllowlist do
 
   Every non-shell tool is allowed. A `loopex.bash` call is allowed when the
   first whitespace-separated word of its command is in `permitted_commands/0`,
-  and denied `:command_not_permitted` otherwise. A call carrying no readable
+  and denied `:policy_denied` otherwise. A call carrying no readable
   command is denied rather than allowed, because a decision this policy cannot
   make is a decision it must not make in the model's favour.
 
@@ -55,13 +55,26 @@ defmodule LoopexCli.Policy.ShellAllowlist do
   def permitted_commands, do: @permitted
 
   @impl Loopex.Policy
+  # Concept: a refusal names a category the port publishes, not one this stance
+  # invented.
+  #
+  # Technical depth: this returned `:command_not_permitted` and
+  # `:command_not_readable`, which read well and are in no published enumeration.
+  # `Loopex.Policy` documents a closed set precisely so an operator reading a
+  # denial gets a category they can act on rather than free text that varies by
+  # host, and it now admits only that set -- so an invented category reaches the
+  # operator as `:policy_unavailable`, which says the policy is broken when it
+  # worked exactly as intended. `:policy_denied` is the true statement the
+  # published set can carry: this stance refused it. The command itself is
+  # already in the transcript, so the detail the old atom carried is not lost,
+  # only moved to where it was always visible.
   def decide(%{generation: {"loopex.bash", _version, _digest}} = request) do
     notice()
 
     case leading_word(request) do
       {:ok, command} when command in @permitted -> {:allow, nil}
-      {:ok, _other} -> {:deny, :command_not_permitted}
-      :error -> {:deny, :command_not_readable}
+      {:ok, _other} -> {:deny, :policy_denied}
+      :error -> {:deny, :policy_denied}
     end
   end
 

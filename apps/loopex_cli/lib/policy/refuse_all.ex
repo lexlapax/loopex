@@ -25,5 +25,7 @@ defmodule LoopexCli.Policy.RefuseAll do
   @behaviour Loopex.Policy
 
   @impl Loopex.Policy
-  def decide(_request), do: {:deny, :reconciling_run_grants_no_authority}
+  # A published category, for the reason recorded in `ShellAllowlist`: an
+  # invented one now reads to the operator as a broken policy.
+  def decide(_request), do: {:deny, :policy_denied}
 end

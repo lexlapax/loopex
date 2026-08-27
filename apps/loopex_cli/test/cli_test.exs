@@ -546,10 +546,15 @@ defmodule LoopexCliTest do
 
     assert_received {:decisions, {permitted, denied, unreadable, filesystem}}
     assert permitted == {:allow, nil}
-    assert denied == {:deny, :command_not_permitted}
+
+    # The category is one the port publishes. An invented one would reach the
+    # operator as `:policy_unavailable` -- a broken policy -- when this stance
+    # refused exactly as it was asked to.
+    assert denied == {:deny, :policy_denied}
+    assert elem(denied, 1) in Loopex.Policy.reason_categories()
 
     # A decision it cannot make is not made in the model's favour.
-    assert unreadable == {:deny, :command_not_readable}
+    assert unreadable == {:deny, :policy_denied}
     assert filesystem == {:allow, nil}
 
     # It announces itself once, and says plainly that it is scope rather than
