@@ -35,6 +35,14 @@ defmodule Loopex.Executor.Local do
   @search_path_name "PATH"
   @search_path_value "/usr/bin:/bin"
 
+  @group_terminated_note "\n[loopex: the command exited while members of its own process " <>
+                           "group were still running. The group was terminated and is " <>
+                           "confirmed cleaned, so nothing it left behind outlives this job.]"
+
+  @group_unconfirmed_note "\n[loopex: the command exited while members of its own process " <>
+                            "group were still running, and the group could not be confirmed " <>
+                            "cleaned. Whether its effect is complete is unproven.]"
+
   @typedoc """
   ## Concept
 
@@ -412,7 +420,8 @@ defmodule Loopex.Executor.Local do
     {outcome, output, artifacts} =
       job
       |> run_coding_tool(tool, workspace, arguments, options, lease)
-      |> spill(state, job)
+      |> spill(state, job, lease)
+      |> honour_lease_until_receipt(lease)
 
     Process.demonitor(elem(lease, 0), [:flush])
 
@@ -442,6 +451,32 @@ defmodule Loopex.Executor.Local do
     Process.demonitor(monitor, [:flush])
 
     receipt(state, job, tool, outcome, output, demonstration_environment(), [])
+  end
+
+  # Concept: the lease is honoured until the receipt exists, not until the effect
+  # returns.
+  #
+  # Technical depth: ADR 0007 requires the lease held for the job's full
+  # lifetime, and the receipt is the end of that lifetime. The monitor covered
+  # only `run_coding_tool/6`; the artifact spill that follows it is ordinary
+  # pre-receipt work, it calls into a host-supplied store that can block for as
+  # long as it likes, and nothing there watched the holder. A store that blocked
+  # while the lease terminated produced a `completed` receipt for a job whose
+  # authorisation had already ended. `spill/4` now abandons a blocking retention
+  # on the DOWN; this final check covers every other branch, including the ones
+  # that spill nothing, by refusing to demonitor-and-flush a DOWN that arrived
+  # before the receipt was built.
+  defp honour_lease_until_receipt({outcome, output, artifacts}, {monitor, lease_pid}) do
+    receive do
+      {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
+        {:outcome_unknown,
+         output <>
+           "\n[loopex: the workspace lease was lost before this job's receipt was produced." <>
+           " Whether its effect landed in the workspace this job was authorised" <>
+           " against is unproven.]", artifacts}
+    after
+      0 -> {outcome, output, artifacts}
+    end
   end
 
   # Concept: the three filesystem tools start no child, so they hold no
@@ -586,8 +621,8 @@ defmodule Loopex.Executor.Local do
 
   defp filesystem_effect(workspace, %{kind: :read, path: path}) do
     with {:ok, resolved} <- CodingTools.resolve(workspace, path),
-         :ok <- ordinary_file(resolved, path, :required),
-         {:ok, content} <- File.read(resolved) do
+         {:ok, identity} <- ordinary_file(resolved, path, :required),
+         {:ok, content} <- read_verified(resolved, path, identity) do
       case CodingTools.bound_output(content, CodingTools.limits().read_bytes) do
         {:complete, bounded} -> {:completed, bounded, :complete}
         {:truncated, kept, full} -> {:completed, kept, {:truncated, full}}
@@ -605,10 +640,11 @@ defmodule Loopex.Executor.Local do
   end
 
   defp filesystem_effect(workspace, %{kind: :write, path: path, content: content}) do
-    with {:ok, resolved} <- CodingTools.resolve(workspace, path),
-         :ok <- ordinary_file(resolved, path, :optional),
-         :ok <- File.mkdir_p(Path.dirname(resolved)),
-         :ok <- File.write(resolved, content) do
+    with {:ok, root} <- CodingTools.resolve(workspace, "."),
+         {:ok, resolved} <- CodingTools.resolve(workspace, path),
+         {:ok, _identity} <- ordinary_file(resolved, path, :optional),
+         :ok <- ensure_directories(root, Path.dirname(resolved), path),
+         :ok <- replace_atomically(resolved, content) do
       {:completed, "wrote #{byte_size(content)} bytes to #{path}"}
     else
       {:refused, message} ->
@@ -632,13 +668,13 @@ defmodule Loopex.Executor.Local do
     %{path: path, old: old, new: new} = arguments
 
     with {:ok, resolved} <- CodingTools.resolve(workspace, path),
-         :ok <- ordinary_file(resolved, path, :required),
-         {:ok, content} <- read_for_edit(resolved) do
+         {:ok, identity} <- ordinary_file(resolved, path, :required),
+         {:ok, content} <- read_verified(resolved, path, identity) do
       case occurrences(content, old) do
         1 ->
           updated = String.replace(content, old, new)
 
-          case File.write(resolved, updated) do
+          case replace_atomically(resolved, updated) do
             :ok -> {:completed, "replaced 1 occurrence in #{path}"}
             {:error, reason} -> {:failed, "edit failed: #{:file.format_error(reason)}"}
           end
@@ -684,16 +720,175 @@ defmodule Loopex.Executor.Local do
   # on its own, so abandoning one costs nothing beyond the work already started.
   # A `write` may legitimately name a path that does not exist yet; a `read` or
   # an `edit` may not.
+  #
+  # The device and inode are returned as well, because the check answers a
+  # question about one file and the caller then acts on a *name*. Carrying the
+  # identity forward is what lets the caller ask afterwards whether the name
+  # still leads to the same file.
   defp ordinary_file(resolved, path, presence) do
     case File.lstat(resolved) do
-      {:ok, %File.Stat{type: :regular}} ->
-        :ok
+      {:ok, %File.Stat{type: :regular} = stat} ->
+        {:ok, {stat.major_device, stat.inode}}
 
       {:ok, %File.Stat{type: type}} ->
         {:refused, "refused: #{path} is a #{type}, not a regular file"}
 
       {:error, :enoent} when presence == :optional ->
+        {:ok, :absent}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Concept: the file that was opened is checked against the file that was
+  # contained, and a mismatch is refused rather than read.
+  #
+  # Technical depth: containment resolves a name and the read then opens that
+  # name again, so a component swapped between the two would be followed. The
+  # identity recorded at the containment check is compared once the handle
+  # exists: if the name now leads to a different device/inode, or to something
+  # that is no longer a regular file, nothing is read and the refusal says so.
+  #
+  # This narrows the window; it does not close it. Erlang's `:file` exposes
+  # neither `O_NOFOLLOW` nor `openat`, so there is no way to open a name and
+  # prove in one syscall that it is the name that was checked, and no way to
+  # re-stat the handle rather than the path. An adversary that swaps the path
+  # back before this comparison is still admitted. The honest claim is a smaller
+  # window and a truthful refusal when the swap is visible, not containment
+  # under a racing filesystem.
+  defp read_verified(resolved, path, identity) do
+    case File.open(resolved, [:read, :binary]) do
+      {:ok, file} ->
+        try do
+          case ordinary_file(resolved, path, :required) do
+            {:ok, ^identity} ->
+              read_open_file(file)
+
+            {:ok, _different} ->
+              {:refused,
+               "refused: #{path} was replaced while it was being opened; nothing was read"}
+
+            other ->
+              other
+          end
+        after
+          File.close(file)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp read_open_file(file) do
+    case IO.binread(file, :eof) do
+      :eof -> {:ok, ""}
+      data when is_binary(data) -> {:ok, data}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Concept: the directories a write needs are created one level at a time, and a
+  # level that is not a directory stops the write instead of being followed.
+  #
+  # Technical depth: `File.mkdir_p/1` stats each level and is satisfied by a
+  # symlink that points at a directory, so a component swapped for a link to
+  # somewhere else was silently traversed on the way to the target. Creating each
+  # level with `File.mkdir/1` and, on `:eexist`, confirming with `File.lstat/1`
+  # that the level is a directory *and not a link* refuses that shape truthfully.
+  # It is a narrowing rather than a proof for the same reason as above: nothing
+  # here can pin a directory between the confirmation and the next step.
+  defp ensure_directories(root, directory, path) do
+    cond do
+      directory == root ->
         :ok
+
+      not String.starts_with?(directory, root <> "/") ->
+        {:error, {:path_escapes_workspace, path}}
+
+      true ->
+        directory
+        |> String.replace_prefix(root <> "/", "")
+        |> Path.split()
+        |> Enum.reduce_while({:ok, root}, fn segment, {:ok, current} ->
+          next = Path.join(current, segment)
+
+          case create_directory(next, path) do
+            :ok -> {:cont, {:ok, next}}
+            other -> {:halt, other}
+          end
+        end)
+        |> case do
+          {:ok, _directory} -> :ok
+          other -> other
+        end
+    end
+  end
+
+  defp create_directory(directory, path) do
+    case File.mkdir(directory) do
+      :ok ->
+        :ok
+
+      {:error, :eexist} ->
+        case File.lstat(directory) do
+          {:ok, %File.Stat{type: :directory}} ->
+            :ok
+
+          {:ok, %File.Stat{type: type}} ->
+            {:refused, "refused: #{path} leads through a #{type}, not a directory"}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Concept: the file appears at its name complete or not at all, and creating it
+  # cannot be redirected onto something the name did not mean.
+  #
+  # Technical depth: the write used to be `mkdir_p` on a resolved-but-stale path
+  # followed by `File.write/2`, which is a fresh traversal of the same name and a
+  # truncating open. A `loopex.bash` loop alternating an in-workspace name
+  # between a directory and a symlink to an outside directory landed a
+  # model-supplied `loopex.write` outside the workspace on attempt 354 of a
+  # 500-attempt probe -- a documented containment guarantee broken by a race a
+  # model can drive itself.
+  #
+  # Two properties replace that. `[:write, :exclusive]` is `O_CREAT|O_EXCL`,
+  # which fails with `:eexist` on an existing name *including a symlink*, so the
+  # bytes cannot be created through a link that appeared after the check.
+  # `:file.rename/2` then replaces the target name itself rather than following
+  # it, so a symlink that appeared at the target is overwritten instead of
+  # dereferenced, and the file is either the old one or the new one at every
+  # instant -- no reader sees a half-written file.
+  #
+  # The temporary name lives in the same resolved directory because `rename` is
+  # only atomic within one filesystem, and it is removed on any failure so a
+  # refused write leaves nothing behind.
+  defp replace_atomically(resolved, content) do
+    temporary =
+      Path.join(
+        Path.dirname(resolved),
+        ".loopex-write-" <>
+          Integer.to_string(System.unique_integer([:positive])) <>
+          "-" <> Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
+      )
+
+    case :file.open(temporary, [:write, :binary, :exclusive, :raw]) do
+      {:ok, file} ->
+        result =
+          with :ok <- :file.write(file, content),
+               :ok <- :file.close(file) do
+            :file.rename(temporary, resolved)
+          end
+
+        if result != :ok, do: _ = :file.delete(temporary)
+        result
 
       {:error, reason} ->
         {:error, reason}
@@ -748,8 +943,34 @@ defmodule Loopex.Executor.Local do
     register_inflight(job.job_id, os_pid)
 
     case collect_output(port, os_pid, deadline, <<>>, options, job, lease) do
-      {:exited, status, output} ->
-        bound_process_output(status, output)
+      # Concept: the launcher's exit is the end of one process, not the end of
+      # the work this job owns.
+      #
+      # Technical depth: this branch treated the launcher's status as the whole
+      # job's completion, forgot the captured group and dropped the monitor at
+      # once. `( sleep 1; printf survived > after-receipt.txt ) & exit 0` reported
+      # `:completed` in 22 ms and the descendant then wrote inside the workspace
+      # after the receipt existed and after the lease had gone -- an effect
+      # attributed to nothing, outside every bound the receipt claimed. Process
+      # groups are what this executor owns and cancels; success has to mean the
+      # same thing cancellation already means, so the group is brought to
+      # quiescence and confirmed before `:completed` is reported. A command that
+      # backgrounds work and exits has that work terminated, which is the
+      # intended reading of owning the group rather than the leader.
+      {:exited, status, output, group} ->
+        quiescence = quiesce_group(group)
+        forget_inflight(job.job_id)
+
+        case quiescence do
+          :quiescent ->
+            bound_process_output(status, output, "")
+
+          :terminated ->
+            bound_process_output(status, output, @group_terminated_note)
+
+          :unconfirmed ->
+            unproven(bound_process_output(status, output, @group_unconfirmed_note))
+        end
 
       {:cancelled, output, group} ->
         confirmed = confirm_group_terminated(group)
@@ -836,13 +1057,38 @@ defmodule Loopex.Executor.Local do
   # whose diagnosis is the first thing truncated away is the defect again in
   # another form. It is appended to the spilled copy too, so the truncation
   # notice's "N of M bytes shown" counts the same bytes on both sides.
-  defp bound_process_output(status, output) do
+  defp bound_process_output(status, output, group_note) do
     outcome = if status == 0, do: :completed, else: :failed
-    note = exit_note(status)
+    note = exit_note(status) <> group_note
 
     case CodingTools.bound_output(output, CodingTools.limits().output_bytes) do
       {:complete, bounded} -> {outcome, bounded <> note, :complete}
       {:truncated, kept, full} -> {outcome, kept <> note, {:truncated, full <> note}}
+    end
+  end
+
+  defp unproven({_outcome, kept, spill}), do: {:outcome_unknown, kept, spill}
+
+  # Concept: a job is over when the group it owns is empty, and that is looked
+  # at rather than assumed.
+  #
+  # Technical depth: the common case costs one `ps` and signals nothing, because
+  # a command whose group is already empty needs no termination and must not pay
+  # for one. Where members remain, the existing cleanup-and-confirmation sequence
+  # runs — the same one the deadline branch uses — and its answer decides between
+  # a truthful `:completed` and `:outcome_unknown`.
+  #
+  # The signal is sent only while a member of the captured group is still
+  # present, and the check runs in the instant the launcher's exit is reported,
+  # which is what keeps the negated-group kill aimed at this job's own group
+  # rather than at a group identifier the operating system has since reissued.
+  defp quiesce_group(group) do
+    if confirm_group_terminated(group) do
+      :quiescent
+    else
+      terminate_group(group)
+
+      if confirm_group_terminated(group), do: :terminated, else: :unconfirmed
     end
   end
 
@@ -894,14 +1140,15 @@ defmodule Loopex.Executor.Local do
   # or the store refuses, the tool keeps the marker it had: an operator loses the
   # retrieval, never the result, and the receipt says truthfully that nothing was
   # retained.
-  defp spill({outcome, output}, state, job), do: spill({outcome, output, :complete}, state, job)
+  defp spill({outcome, output}, state, job, lease),
+    do: spill({outcome, output, :complete}, state, job, lease)
 
-  defp spill({outcome, output, :complete}, _state, _job), do: {outcome, output, []}
+  defp spill({outcome, output, :complete}, _state, _job, _lease), do: {outcome, output, []}
 
-  defp spill({outcome, kept, {:truncated, full}}, %{artifacts: nil}, _job),
+  defp spill({outcome, kept, {:truncated, full}}, %{artifacts: nil}, _job, _lease),
     do: {outcome, truncation_marker(kept, byte_size(full)), []}
 
-  defp spill({outcome, kept, {:truncated, full}}, state, job) do
+  defp spill({outcome, kept, {:truncated, full}}, state, job, lease) do
     metadata = %{
       "role" => "tool_output",
       "media_type" => "text/plain",
@@ -911,13 +1158,59 @@ defmodule Loopex.Executor.Local do
 
     %{module: module, handle: handle} = state.artifacts
 
-    case module.put(handle, full, metadata) do
+    case retain_under_lease(module, handle, full, metadata, lease) do
       {:ok, reference} ->
         {outcome, Loopex.ArtifactStore.truncation_notice(kept, byte_size(full), reference),
          [reference]}
 
       {:error, _reason} ->
         {outcome, truncation_marker(kept, byte_size(full)), []}
+
+      :workspace_lease_lost ->
+        {:outcome_unknown,
+         truncation_marker(kept, byte_size(full)) <>
+           "\n[loopex: the workspace lease was lost while this job's output was being" <>
+           " retained, and the retention was abandoned. Whether the effect landed in" <>
+           " the workspace this job was authorised against is unproven.]", []}
+    end
+  end
+
+  # Concept: retaining output is work the lease still covers, so it is waited on
+  # rather than simply called.
+  #
+  # Technical depth: `put/3` belongs to a host-supplied store and this executor
+  # cannot bound it. Calling it inline made the lease unwatchable for as long as
+  # it ran. The call is made in a monitored unlinked worker for the same reason
+  # the filesystem effects are, so the DOWN of the lease holder is a message this
+  # server is sitting in rather than an event it discovers afterwards. The
+  # abandoned worker's late answer is drained, because a reference produced in
+  # the instant before the kill would otherwise be left in this server's mailbox.
+  defp retain_under_lease(module, handle, bytes, metadata, {monitor, lease_pid}) do
+    parent = self()
+    tag = make_ref()
+
+    {worker, reference} =
+      spawn_monitor(fn -> send(parent, {tag, module.put(handle, bytes, metadata)}) end)
+
+    receive do
+      {^tag, result} ->
+        Process.demonitor(reference, [:flush])
+        result
+
+      {:DOWN, ^reference, :process, ^worker, reason} ->
+        {:error, {:artifact_retention_stopped, reason}}
+
+      {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
+        Process.exit(worker, :kill)
+        Process.demonitor(reference, [:flush])
+
+        receive do
+          {^tag, _late} -> :ok
+        after
+          0 -> :ok
+        end
+
+        :workspace_lease_lost
     end
   end
 
@@ -1060,8 +1353,7 @@ defmodule Loopex.Executor.Local do
           collect_output(port, os_pid, deadline, combined, options, job, lease)
 
         {^port, {:exit_status, status}} ->
-          forget_inflight(job.job_id)
-          {:exited, status, strip_group_line(acc)}
+          {:exited, status, strip_group_line(acc), group_of(acc, os_pid)}
 
         {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
           group = group_of(acc, os_pid)
@@ -1115,13 +1407,6 @@ defmodule Loopex.Executor.Local do
   end
 
   defp confirm_group_terminated(_group), do: true
-
-  defp read_for_edit(resolved) do
-    case File.read(resolved) do
-      {:ok, content} -> {:ok, content}
-      {:error, reason} -> {:error, reason}
-    end
-  end
 
   defp occurrences(content, needle) when needle != "" do
     content |> String.split(needle) |> length() |> Kernel.-(1)

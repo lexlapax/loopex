@@ -46,6 +46,43 @@ defmodule Loopex.Executor.Local.CodingToolsTest.RecordingStore do
   end
 end
 
+defmodule Loopex.Executor.Local.CodingToolsTest.BlockingStore do
+  @moduledoc false
+
+  # Concept: an artifact store that blocks the way a real one can.
+  #
+  # Technical depth: `put/3` belongs to a host and this executor cannot bound it
+  # -- a remote object store, a slow disk, or a saturated one all block here. The
+  # claim under test is that the workspace lease is honoured while it blocks, so
+  # the store has to actually block and has to announce that it started, or the
+  # case cannot revoke the lease at the one instant that matters.
+
+  @behaviour Loopex.ArtifactStore
+
+  @impl Loopex.ArtifactStore
+  def put({owner, delay}, bytes, metadata) do
+    send(owner, :retention_started)
+    Process.sleep(delay)
+
+    digest = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+
+    {:ok,
+     %{
+       digest: digest,
+       media_type: Map.get(metadata, "media_type", "application/octet-stream"),
+       size: byte_size(bytes),
+       role: Map.get(metadata, "role", "tool_output"),
+       locator: digest
+     }}
+  end
+
+  @impl Loopex.ArtifactStore
+  def fetch(_handle, _reference), do: {:error, :unknown_artifact}
+
+  @impl Loopex.ArtifactStore
+  def stat(_handle, _reference), do: {:error, :unknown_artifact}
+end
+
 defmodule Loopex.Executor.Local.CodingToolsTest do
   @moduledoc false
 
@@ -624,6 +661,11 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # sleeps well inside the observation window, and the same command is run once
     # without a deadline first, which establishes that it does write the marker
     # when nothing stops it.
+    #
+    # This command keeps the port's output pipe, which a background descendant
+    # inherits, so the job does not end until that descendant does: the receipt
+    # is produced with the group already quiescent and the marker already
+    # written. The deadline run below is the one that has to end a survivor.
     reachable = Path.join(root, "reachable.txt")
 
     assert {:ok, %{outcome: :completed}} =
@@ -884,5 +926,312 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              run(root, "loopex.read", %{"path" => "plain.txt"})
 
     assert System.monotonic_time(:millisecond) - plain_started < 1_000
+  end
+
+  test "write refuses a name that is not an ordinary file and replaces the one it names atomically" do
+    # Concept: the guard the filesystem case exercised was `read`'s alone.
+    #
+    # Technical depth: removing `ordinary_file(resolved, path, :optional)` from
+    # `loopex.write` left all fourteen cases green, so nothing protected the
+    # branch that stops a write from replacing something that is not a file. A
+    # write onto a named pipe is the shape a model can produce in its own
+    # workspace with `mkfifo`, and under the atomic replacement below it would
+    # otherwise succeed by turning the pipe into a regular file -- silently
+    # destroying a thing the operator made, under a tool that says it writes
+    # files.
+    root = workspace()
+
+    pipe = Path.join(root, "pipe")
+    {_output, 0} = System.cmd("/usr/bin/mkfifo", [pipe])
+
+    assert {:ok, %{outcome: :failed, output: piped}} =
+             run(root, "loopex.write", %{"path" => "pipe", "content" => "x"})
+
+    assert piped =~ "refused:"
+    assert piped =~ "not a regular file"
+    assert File.lstat!(pipe).type == :other
+
+    # A directory is refused for the same reason and says which it found.
+    File.mkdir_p!(Path.join(root, "folder"))
+
+    assert {:ok, %{outcome: :failed, output: folder}} =
+             run(root, "loopex.write", %{"path" => "folder", "content" => "x"})
+
+    assert folder =~ "is a directory, not a regular file"
+    assert File.lstat!(Path.join(root, "folder")).type == :directory
+
+    # Concept: the write leaves the file complete or absent, and nothing else.
+    #
+    # Technical depth: the content is created under a private name and renamed
+    # onto the target, so a reader never observes a partially written file and a
+    # refused write leaves no residue for the next run to trip over.
+    assert {:ok, %{outcome: :completed}} =
+             run(root, "loopex.write", %{"path" => "made.txt", "content" => "complete"})
+
+    assert File.read!(Path.join(root, "made.txt")) == "complete"
+
+    assert Enum.all?(File.ls!(root), &(not String.starts_with?(&1, ".loopex-write-")))
+
+    # That the replacement is a rename and not a truncating open is observable:
+    # the file at the name afterwards is a different inode. A truncating open
+    # writes into whatever the name leads to at that instant, which is both the
+    # redirect this defect was and a window in which a reader sees an empty
+    # file; a rename replaces the name in one step and can do neither.
+    replaced = Path.join(root, "replaced.txt")
+    File.write!(replaced, "before")
+    previous = File.lstat!(replaced).inode
+
+    assert {:ok, %{outcome: :completed}} =
+             run(root, "loopex.write", %{"path" => "replaced.txt", "content" => "after"})
+
+    assert File.read!(replaced) == "after"
+
+    refute File.lstat!(replaced).inode == previous,
+           "the write truncated the file in place rather than replacing its name"
+
+    # A symlink inside the workspace still resolves to its target, so writing
+    # through it replaces the file it points at and leaves the link a link.
+    File.write!(Path.join(root, "target.txt"), "before")
+    File.ln_s!("target.txt", Path.join(root, "alias"))
+
+    assert {:ok, %{outcome: :completed}} =
+             run(root, "loopex.write", %{"path" => "alias", "content" => "after"})
+
+    assert File.read!(Path.join(root, "target.txt")) == "after"
+    assert File.lstat!(Path.join(root, "alias")).type == :symlink
+  end
+
+  test "edit refuses a name that is not an ordinary file before it opens anything" do
+    # Concept: `edit`'s guard is its own, and removing it alone left every case
+    # green.
+    #
+    # Technical depth: `edit` reads before it writes, and the read is the half
+    # that opens a path a model chose. Without the guard a directory reaches
+    # `File.open/2` and the model is handed a filesystem error code instead of a
+    # refusal naming what it actually asked for.
+    root = workspace()
+    File.mkdir_p!(Path.join(root, "folder"))
+
+    assert {:ok, %{outcome: :failed, output: folder}} =
+             run(root, "loopex.edit", %{"path" => "folder", "old" => "a", "new" => "b"})
+
+    assert folder =~ "refused:"
+    assert folder =~ "is a directory, not a regular file"
+
+    # And the successful half still replaces the file atomically rather than
+    # truncating it in place.
+    File.write!(Path.join(root, "code.ex"), "before\n")
+
+    assert {:ok, %{outcome: :completed}} =
+             run(root, "loopex.edit", %{"path" => "code.ex", "old" => "before", "new" => "after"})
+
+    assert File.read!(Path.join(root, "code.ex")) == "after\n"
+    assert Enum.all?(File.ls!(root), &(not String.starts_with?(&1, ".loopex-write-")))
+
+    # `edit`'s write half is the same replacement, and it is a rename here too:
+    # an edit that truncated in place would leave the file empty for as long as
+    # the new content took to write, and would follow a name swapped under it.
+    edited = Path.join(root, "swap.txt")
+    File.write!(edited, "one\n")
+    previous = File.lstat!(edited).inode
+
+    assert {:ok, %{outcome: :completed}} =
+             run(root, "loopex.edit", %{"path" => "swap.txt", "old" => "one", "new" => "two"})
+
+    assert File.read!(edited) == "two\n"
+
+    refute File.lstat!(edited).inode == previous,
+           "the edit truncated the file in place rather than replacing its name"
+  end
+
+  test "a write cannot be redirected outside the workspace by a component swapped under it" do
+    # Concept: containment resolved a path and something else acted on it, which
+    # is a check rather than a guarantee.
+    #
+    # Technical depth: `resolve/2` produced a contained path, and the write then
+    # called `File.mkdir_p/1` and `File.write/2` on that name -- two fresh
+    # traversals of a name a concurrent command can change. Worse, `mkdir_p` is
+    # satisfied by a symlink that points at a directory, so a component swapped
+    # for a link out of the workspace was silently followed rather than refused.
+    # A background loop alternating one in-workspace name between absent, a
+    # directory, and a symlink to an outside directory landed a model-supplied
+    # `loopex.write` at `<outside>/escaped-354.txt` on attempt 354 of 500, and
+    # reproduced on eight of nine runs of the same probe.
+    #
+    # The racing loop is a shell loop because that is what a concurrent actor
+    # sharing this workspace looks like, and because a loop driven from this
+    # virtual machine flips too slowly against dirty IO schedulers to enter the
+    # window at all. It is started outside this executor: a `loopex.bash`
+    # command that backgrounds a loop and exits now has that loop terminated
+    # with its process group before the job is reported complete.
+    root = workspace()
+    outside = temporary_root("outside")
+    File.mkdir_p!(outside)
+    on_exit(fn -> File.rm_rf(outside) end)
+
+    {executor, lease_id} = executor_for(root)
+
+    racers =
+      for _racer <- 1..4 do
+        Port.open({:spawn_executable, ~c"/bin/sh"}, [
+          :binary,
+          :exit_status,
+          :hide,
+          args: [
+            "-c",
+            "while [ ! -e stop-race ]; do " <>
+              "/bin/rm -rf switch; /bin/mkdir switch 2>/dev/null; /bin/rm -rf switch; " <>
+              "/bin/ln -s #{outside} switch 2>/dev/null; /bin/rm -f switch; " <>
+              "done >/dev/null 2>&1"
+          ],
+          cd: String.to_charlist(root)
+        ])
+      end
+
+    on_exit(fn -> File.write(Path.join(root, "stop-race"), "stop") end)
+
+    # Concept: the attempt count is what gives the window a chance to be entered.
+    #
+    # Technical depth: the escape needs the write to reach the filesystem in the
+    # instant one name is a link rather than a directory. Fifteen hundred writes
+    # against three racing loops entered that instant on every run of the fully
+    # reverted implementation and on every run of the reverted directory guard.
+    # A failure here is a real containment escape rather than a flake: correct
+    # code produces no outside entry at all, and the assertion below is on the
+    # outside directory being empty rather than on any timing.
+    Enum.each(1..1500, fn index ->
+      run(
+        root,
+        "loopex.write",
+        %{"path" => "switch/escaped-#{index}.txt", "content" => "escaped"},
+        %{executor: executor, lease_id: lease_id}
+      )
+    end)
+
+    File.write!(Path.join(root, "stop-race"), "stop")
+
+    Enum.each(racers, fn racer ->
+      assert_receive {^racer, {:exit_status, _status}}, 15_000
+    end)
+
+    # Nothing at all reached the outside directory: not the content, and not the
+    # private name the content is created under either, since a temporary that
+    # escaped would be the same containment failure wearing a different name.
+    # Concept: what must not be there is anything this executor put there.
+    #
+    # Technical depth: the assertion names the write's own two products -- the
+    # content under the requested name, and the private name the content is
+    # created under, since a temporary that escaped is the same containment
+    # failure wearing a different name. It does not assert the outside directory
+    # is empty, because the racing loops also race each other: `ln -s` onto a
+    # name another loop has already made a link to the outside directory lands
+    # inside it, which is the probe's own artifact and not this executor's.
+    escaped =
+      Enum.filter(File.ls!(outside), fn entry ->
+        String.starts_with?(entry, "escaped-") or String.starts_with?(entry, ".loopex-write-")
+      end)
+
+    assert escaped == [],
+           "a write escaped the workspace through a component swapped under it: " <>
+             inspect(escaped)
+  end
+
+  test "a lease lost while a job's output is being retained abandons the retention and reports it unproven" do
+    # Concept: retaining a spilled artifact is pre-receipt work, so the lease
+    # covers it.
+    #
+    # Technical depth: the monitor covered `run_coding_tool/6` only. It returned,
+    # the synchronous spill ran, the monitor was demonitor-flushed, and a
+    # `completed` receipt was produced -- so a store that blocked while the lease
+    # holder terminated yielded a receipt claiming a proved effect in a workspace
+    # this executor no longer had a claim on. ADR 0007 requires the lease for the
+    # job's full lifetime, and the receipt is the end of that lifetime.
+    root = workspace()
+    delay = 4_000
+
+    {executor, lease_id, lease} =
+      executor_and_lease(root, %{
+        module: Loopex.Executor.Local.CodingToolsTest.BlockingStore,
+        handle: {self(), delay}
+      })
+
+    File.write!(
+      Path.join(root, "large.txt"),
+      String.duplicate("x", CodingTools.limits().read_bytes + 5_000)
+    )
+
+    running =
+      Task.async(fn ->
+        run(root, "loopex.read", %{"path" => "large.txt"}, %{
+          executor: executor,
+          lease_id: lease_id
+        })
+      end)
+
+    assert_receive :retention_started, 10_000
+    started = System.monotonic_time(:millisecond)
+    GenServer.stop(lease)
+
+    assert {:ok, receipt} = Task.await(running, 60_000)
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    # The retention is abandoned when the claim goes, rather than noticed once it
+    # has finished on its own.
+    assert elapsed < div(delay, 2),
+           "the lease loss was only noticed after the blocking retention returned"
+
+    assert receipt.outcome == :outcome_unknown
+    assert receipt.output =~ "workspace lease was lost"
+    assert receipt.output =~ "unproven"
+    assert receipt.artifacts == []
+  end
+
+  test "a command that backgrounds work and exits is not completed until its group is quiescent" do
+    # Concept: the launcher's exit status is one process ending, not the job.
+    #
+    # Technical depth: the captured group was forgotten and the monitor dropped
+    # the moment the launcher exited, so
+    # `( sleep 1; printf survived > after-receipt.txt ) & exit 0` reported
+    # `:completed` in 22 ms and the descendant then wrote inside the workspace
+    # after the receipt existed and after the lease had gone. Process groups are
+    # what this executor owns and cancels, so success has to mean what
+    # cancellation already means.
+    root = workspace()
+    marker = Path.join(root, "after-receipt.txt")
+
+    started = System.monotonic_time(:millisecond)
+
+    assert {:ok, receipt} =
+             run(root, "loopex.bash", %{
+               "command" =>
+                 "( sleep 2; printf survived > after-receipt.txt ) >/dev/null 2>&1 & exit 0"
+             })
+
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    # The job ends the descendant rather than waiting for it, which is the
+    # difference between owning a group and joining one.
+    assert elapsed < 1_500, "the job waited for its descendant instead of ending it"
+
+    assert receipt.outcome == :completed
+
+    # The harm the defect did, asserted before the wording that reports it: the
+    # descendant is gone, so nothing writes into this workspace after the
+    # receipt claiming the job is over already exists.
+    Process.sleep(3_000)
+
+    refute File.exists?(marker),
+           "a descendant of a completed job wrote into the workspace after the receipt existed"
+
+    assert receipt.output =~ "still running"
+    assert receipt.output =~ "confirmed cleaned"
+
+    # An ordinary command leaves nothing behind, so it gains no note: a note on
+    # every result is noise a model learns to skip.
+    assert {:ok, %{outcome: :completed, output: plain}} =
+             run(root, "loopex.bash", %{"command" => "echo ok"})
+
+    assert String.trim(plain) == "ok"
+    refute plain =~ "still running"
   end
 end
