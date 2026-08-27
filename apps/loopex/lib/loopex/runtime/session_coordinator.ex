@@ -766,17 +766,57 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: the run stops when the model stops asking, or when a declared bound
-  # says so.
+  # Concept: the run stops when an effect could not be proved, when the model
+  # stops asking, or when a declared bound says so — in that order.
   #
-  # Technical depth: the no-tool check runs first and unconditionally, so a run
-  # whose model finished on its own is `completed` and stays `completed`. Only
-  # then are bounds consulted, in their fixed order. The decision is committed as
-  # a durable fact rather than re-derived later, because it reads the wall clock
-  # and a clock-reading decision cannot be replayed.
+  # Technical depth: the unknown-effect check runs first and unconditionally,
+  # because `outcome_unknown` is immutable and terminal for the affected run and
+  # nothing may silently resume the model loop past it. Checking it only where a
+  # bound was reached left every other exit — ordinary continuation, the model
+  # stopping on its own, the maximum-turn bound and the token budget — free to
+  # settle the turn normally, which fed an unproven effect's result back to the
+  # model and finished the run `completed`. Only where no unknown effect is held
+  # does the no-tool check run, and only then are bounds consulted, in their
+  # fixed order. The decision is committed as a durable fact rather than
+  # re-derived later, because it reads the wall clock and a clock-reading
+  # decision cannot be replayed.
   defp settle_turn(state, work) do
     run_id = work.run_id
     {declared, charged} = SessionState.accounting(state.durable, run_id)
+
+    if SessionState.unproven_effect?(state.durable, run_id) do
+      finish_unknown(state, run_id, charged)
+    else
+      settle_proven_turn(state, work, declared, charged)
+    end
+  end
+
+  # Concept: a run holding an effect nobody could prove ends saying so.
+  #
+  # Technical depth: no bound is named, because no bound ended this run — the
+  # unknown effect did, whatever else the run had also reached. The reference is
+  # the same stable session-and-run reconciliation reference the deadline and
+  # abort paths emit, so an operator reconciling this run names one identity
+  # however the run was stopped. It is required to be a non-empty binary: the
+  # projection refuses an `outcome_unknown` that carries no reference, because a
+  # run that says the effect's truth is unknown and offers nothing to reconcile
+  # against is an ending an operator cannot act on.
+  defp finish_unknown(state, run_id, charged) do
+    commit_terminal(state, run_id, "outcome_unknown", %{
+      accounting_source: charged.source && Atom.to_string(charged.source),
+      reconciliation_ref: reconciliation_ref(state, run_id)
+    })
+  end
+
+  # Concept: a deadline is not a guaranteed clean stop.
+  #
+  # Technical depth: `bound_reached(:deadline)` may commit only once every owned
+  # operation has reached a validated terminal fact. A committed
+  # `outcome_unknown` effect is precisely the case where one has not, and it is
+  # already settled above before any bound is read. That precedence is why no
+  # document here calls reaching a deadline a clean stop.
+  defp settle_proven_turn(state, work, declared, charged) do
+    run_id = work.run_id
     elements = SessionState.elements(state.durable, run_id)
     assistant = Conversation.last_assistant(elements)
 
@@ -794,32 +834,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       :completed ->
         commit_terminal(state, run_id, "completed", %{})
-
-      {:bound_reached, bound, observed} when bound == :deadline ->
-        # Concept: a deadline is not a guaranteed clean stop.
-        #
-        # Technical depth: `bound_reached(:deadline)` may commit only once every
-        # owned operation has reached a validated terminal fact. A committed
-        # `outcome_unknown` effect is precisely the case where one has not, so
-        # the run ends `outcome_unknown` carrying its reconciliation reference
-        # instead. That precedence is why no document here calls reaching a
-        # deadline a clean stop.
-        if SessionState.unproven_effect?(state.durable, run_id) do
-          commit_terminal(state, run_id, "outcome_unknown", %{
-            bound: "deadline",
-            observed: observed,
-            declared_limit: declared_limit(declared, :deadline),
-            accounting_source: charged.source && Atom.to_string(charged.source),
-            reconciliation_ref: reconciliation_ref(state, run_id)
-          })
-        else
-          commit_terminal(state, run_id, "bound_reached", %{
-            bound: "deadline",
-            observed: observed,
-            declared_limit: declared_limit(declared, :deadline),
-            accounting_source: charged.source && Atom.to_string(charged.source)
-          })
-        end
 
       {:bound_reached, bound, observed} ->
         commit_terminal(state, run_id, "bound_reached", %{

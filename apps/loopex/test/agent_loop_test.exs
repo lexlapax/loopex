@@ -811,6 +811,122 @@ defmodule Loopex.AgentLoopTest do
     assert clean_finished["bound"] == "deadline"
   end
 
+  # Concept: run one turn whose tool effect could not be proved, under an
+  # ordinary deadline, and hand back what the session published.
+  #
+  # Technical depth: the deadline stays at its default, so nothing here can end
+  # the run by reaching a bound in flight. Whatever ends these runs is the
+  # unknown effect itself, which is the whole point: the precedence used to be
+  # checked only where the deadline had already been reached, so a case that
+  # arranged an elapsed deadline exercised the one branch that already had it.
+  defp unknown_effect_run(script, bound_overrides \\ %{}) do
+    fixture = start(script: script, outcomes: %{"c1" => "outcome_unknown"})
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go", bound_overrides)
+    events = drain(attachment)
+
+    {fixture, session_id, events, Enum.find(events, &(&1.kind == "run.finished"))}
+  end
+
+  test "an unproven effect ends the run rather than letting the model be asked again" do
+    # The model would ask for another tool, and under an ordinary deadline
+    # nothing else would stop it. An effect nobody could prove has to, because
+    # `outcome_unknown` is terminal for the affected run: `docs/vision-technical.md`
+    # fixes it as "immutable and terminal for its operation attempt and the
+    # affected logical operation. Later evidence never rewrites the original
+    # terminal event or silently resumes the model loop."
+    script = for index <- 1..20, do: %{text: "turn #{index}", calls: [call("c#{index}")]}
+
+    {fixture, session_id, events, finished} = unknown_effect_run(script)
+
+    assert finished["outcome"] == "outcome_unknown"
+    refute finished["outcome"] == "bound_reached"
+
+    # The tool fact that outranked everything is published truthfully too.
+    tool = Enum.find(events, &(&1.kind == "tool.finished"))
+    assert tool["tool_call_id"] == "c1"
+    assert tool["outcome"] == "outcome_unknown"
+
+    # The model was asked exactly once. A second dispatch would mean the loop
+    # resumed past an outcome that was already terminal, and would have carried
+    # the unproven result back to the model as if it were a settled fact.
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+    Process.sleep(150)
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    # And no further effect was dispatched behind it.
+    assert Enum.map(Loopex.AgentLoopTestExecutor.jobs(fixture.executor), & &1.tool_call_id) == [
+             "c1"
+           ]
+
+    # It carries the reference the operator reconciles against, and the
+    # published reference is the one the run actually committed rather than a
+    # value the projection invented.
+    assert is_binary(finished["reconciliation_ref"])
+    assert finished["reconciliation_ref"] =~ "reconciliation"
+
+    committed =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.find(&(&1.payload[:kind] == "run_terminal_committed"))
+
+    assert committed.payload["outcome"] == "outcome_unknown"
+    assert committed.payload["reconciliation_ref"] == finished["reconciliation_ref"]
+
+    # No bound ended this run, so none is claimed.
+    assert finished["bound"] == nil
+  end
+
+  test "an unproven effect outranks the model stopping on its own and the run never finishes completed" do
+    # The model asks for one tool and then stops asking. That is the ordinary
+    # `completed` path, and it is exactly where a run holding an unproven effect
+    # would quietly claim it finished in a known state.
+    script = [%{text: "run it", calls: [call("c1")]}, %{text: "done", calls: []}]
+
+    {fixture, _session_id, _events, finished} = unknown_effect_run(script)
+
+    assert finished["outcome"] == "outcome_unknown"
+    refute finished["outcome"] == "completed"
+    assert is_binary(finished["reconciliation_ref"])
+
+    # The model never got the second turn that would have produced `completed`.
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  test "an unproven effect outranks the maximum turn bound" do
+    # The bound is reached on the same turn the unknown effect settles. A run
+    # that reports `bound_reached` here tells an operator it stopped in a known
+    # state at a limit, and buries the effect nobody can account for.
+    script = for index <- 1..20, do: %{text: "turn #{index}", calls: [call("c#{index}")]}
+
+    {fixture, _session_id, _events, finished} = unknown_effect_run(script, %{max_turns: 1})
+
+    assert finished["outcome"] == "outcome_unknown"
+    refute finished["outcome"] == "bound_reached"
+    assert finished["bound"] == nil
+    assert is_binary(finished["reconciliation_ref"])
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  test "an unproven effect outranks the cumulative token budget" do
+    # Same precedence, reached through the other between-turn bound.
+    script =
+      for index <- 1..20 do
+        %{
+          text: "turn #{index}",
+          calls: [call("c#{index}")],
+          usage: %{"input_tokens" => 400, "output_tokens" => 100}
+        }
+      end
+
+    {fixture, _session_id, _events, finished} = unknown_effect_run(script, %{token_budget: 400})
+
+    assert finished["outcome"] == "outcome_unknown"
+    refute finished["outcome"] == "bound_reached"
+    assert finished["bound"] == nil
+    assert is_binary(finished["reconciliation_ref"])
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
   test "a retried tool operation keeps its operation identity and reconciles against its own attempt bound request digest" do
     # One tool operation, two attempts. The operation identity is what survives a
     # retry; the digest is not, because job canonicalization covers attempt

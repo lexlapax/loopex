@@ -389,6 +389,11 @@ defmodule Loopex.Runtime.SessionState do
   effect happened. A run carrying one cannot honestly end `bound_reached` or
   `completed`, because both claim the run finished in a known state. This is what
   gives `outcome_unknown` precedence over every other terminal outcome.
+
+  The precedence is over continuing, too, and that is why the owner asks this
+  before it settles a turn rather than only where a bound was reached. An
+  unknown effect ends the affected run; feeding its result back to the model
+  would resume a loop past an outcome that is already terminal.
   """
   @spec unproven_effect?(t(), binary()) :: boolean()
   def unproven_effect?(%__MODULE__{} = state, run_id) do
