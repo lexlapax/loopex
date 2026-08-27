@@ -94,13 +94,24 @@ so a reviewer reads what the run did rather than inferring it from a pass. The
 gate's selector runner suppresses the test formatter, and without this a failed
 assertion reaches an operator as "the selector failed" and nothing else.
 
-Observed at the closure candidate: all four coding tools ran —
-`loopex.read`, `loopex.edit`, `loopex.write`, `loopex.bash` — across seven real
-provider calls, every committed reply declared it streamed with a positive delta
-count, one `loopex.bash` call was refused by the host stance and reported, the
-run continued past the refusal and ended `done`, and the workspace ended
-carrying both the edited `notes.md` and the `summary.txt` the refused command
-did not remove.
+Observed at the closure candidate `49dcc1c`, the attended run reported:
+
+```text
+loopex demonstration observed: tools=loopex.read,loopex.edit,loopex.write,loopex.bash files=.git,notes.md,summary.txt ending=done
+```
+
+All four coding tools ran across seven real provider calls, every committed
+reply declared it streamed with a positive delta count, the run ended `done`,
+and the workspace ended carrying both the edited `notes.md` and `summary.txt`.
+
+The refusal is proved by a different role and is attributed here rather than
+read into the line above. `a denied tool call inside a multi tool task is
+reported and the task continues truthfully` is a locked case of this selector's
+`default` role, which is excluded from the real-provider role precisely so the
+behaviour is proved deterministically rather than left to what a model happens
+to attempt. That role executed five cases at this candidate and passed. What the
+attended line above shows about the refusal is only its trace: `summary.txt` is
+still there, and a permitted removal would have taken it.
 
 Seven is this task's own count. The role that carries this run in the
 [real-call attestations](M2-real-call-attestations.md) records eight, because

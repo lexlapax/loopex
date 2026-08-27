@@ -94,19 +94,42 @@ record names is the failure the gate would observe.
 what makes "restored" a claim about bytes rather than prose. Every digest above
 matches this revision.
 
-All eight were re-taken together at the closure candidate. They had been taken
+All eight were taken together at one candidate, `0712d13`. They had been taken
 at three earlier candidates as the artifacts they name changed during the
 milestone, which left a record whose eight rows described three different trees.
-Re-running them at one candidate is not a formality: the gate requires the
-retained evidence to move as a set, and evidence assembled from three moments
-cannot be read as one account of one revision.
+Running them at one candidate is not a formality: evidence assembled from three
+moments cannot be read as one account of one revision.
 
-Each ran in a local clone of the candidate, checked out detached, with the
+Each ran in a local clone of that candidate, checked out detached, with the
 source tree verified clean before every mutation and again after the artifact
 was restored. The clone was confirmed clean after all eight, not only after each
 one, so no mutation leaked into the demonstration that followed it. Each
 selector ran the way the gate runs it, so the failure each record names is the
 failure the gate would observe.
+
+`0712d13` is not the closure candidate, and these were deliberately not re-run
+there. It is an ancestor of this revision, and every artifact the eight records
+name is byte-identical here -- which is not asserted in prose but verified by the
+gate, which digests each artifact at this revision and refuses any record whose
+`restored_sha256` does not match. The revisions since changed
+`runtime.ex`, `control.ex`, `session_coordinator.ex`, two test files, and one
+document; none of them is an artifact these records name.
+
+One named selector did change. `apps/loopex/test/agent_loop_test.exs` now raises
+from its drain helper instead of returning a partial event list, so a stalled or
+refused run reports itself rather than surfacing as a missing event. That alters
+how a failure is reported, not which cases fail, and the first record's observed
+failure is accurate as written.
+
+Re-running them would have meant reconstructing eight mutations from a record
+that deliberately does not carry them -- the six fields are the mechanism, the
+selector, the observed failure, the candidate, the artifact, and its digest, and
+none of them is the edit. A mistranscribed mutation produces a record that is
+false rather than one that is merely stale, which is the worse of the two. The
+real-call attestations were re-taken at the closure candidate for the opposite
+reason: they assert calls made by this code, and the code changed. Whether that
+asymmetry is right is a review judgment, and it is stated here rather than left
+to be discovered.
 
 ## Related
 

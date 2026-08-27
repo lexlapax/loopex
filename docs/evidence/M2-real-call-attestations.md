@@ -60,15 +60,15 @@ runner validates against.
 
 <!-- loopex:m2-attestations:start -->
 ```json
-{"role":"demonstration_db","selector":"apps/loopex_cli/test/coding_task_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":8,"response_id_form":"req_:16-64","provider_response_ids":"req_011CeS98HFRbGpKv1SdJm6Y2+req_011CeS98KufPuJ4mgCtDC17n+req_011CeS98QG6qAMT1DZMhM8k3+req_011CeS98UizWKGi7EzA1SV3U+req_011CeS98ZZwzLjDXe52WbXkG+req_011CeS98druthh3Et5uAQfdZ+req_011CeS98iRFt5NdAKoa2EcvB+req_011CeS98nFBzKfAfrNtsQftR","input_tokens":10287,"output_tokens":564,"candidate":"0712d13e4cb928cf8771fc71a151c0ed95e8ed3b","recorded":"2026-08-26T22:23:37Z"}
+{"role":"demonstration_db","selector":"apps/loopex_cli/test/coding_task_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":8,"response_id_form":"req_:16-64","provider_response_ids":"req_011CeSc39iFQAoUtFzvHNHC6+req_011CeSc3GXmTaDuCAuS43356+req_011CeSc3PxkY5H19Fk7PCMPu+req_011CeSc3W66ZcaYzyAVzAYaU+req_011CeSc3cbGQ1gTyoGzKLjyt+req_011CeSc3hN1RdEGudCDgxWY1+req_011CeSc3ouAbNYX2qUxMhbMo+req_011CeSc3stmgzq3nxg7L7CyQ","input_tokens":10437,"output_tokens":622,"candidate":"49dcc1c8c59f77aae3f115de73740bb53385dd9c","recorded":"2026-08-27T04:15:27Z"}
 ```
 
 ```json
-{"role":"inherited_5c","selector":"apps/loopex_reference_client/test/real_model_session_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"req_:16-64","provider_response_ids":"req_011CeS99wwNtvWw3YJrp3RKi+req_011CeS9APQp6UEMMkiV8eH5R","input_tokens":1463,"output_tokens":112,"candidate":"0712d13e4cb928cf8771fc71a151c0ed95e8ed3b","recorded":"2026-08-26T22:23:37Z"}
+{"role":"inherited_5c","selector":"apps/loopex_reference_client/test/real_model_session_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"req_:16-64","provider_response_ids":"req_011CeScBWDG45qwyTixsxxzk+req_011CeScBdK9VzbXrvbxUk2v4","input_tokens":1463,"output_tokens":112,"candidate":"49dcc1c8c59f77aae3f115de73740bb53385dd9c","recorded":"2026-08-27T04:17:12Z"}
 ```
 
 ```json
-{"role":"inherited_8b","selector":"apps/loopex_reference_client/test/end_to_end_recovery_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"req_:16-64","provider_response_ids":"req_011CeS9AyJ1mnwoq2ykoZ7qB+req_011CeS9BaeX28CQepDV7awrR","input_tokens":1463,"output_tokens":112,"candidate":"0712d13e4cb928cf8771fc71a151c0ed95e8ed3b","recorded":"2026-08-26T22:23:37Z"}
+{"role":"inherited_8b","selector":"apps/loopex_reference_client/test/end_to_end_recovery_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"req_:16-64","provider_response_ids":"req_011CeScESCzVVwPUkTnEpHYN+req_011CeScEjGAN1bbVw33ARpUt","input_tokens":1463,"output_tokens":112,"candidate":"49dcc1c8c59f77aae3f115de73740bb53385dd9c","recorded":"2026-08-27T04:17:54Z"}
 ```
 <!-- loopex:m2-attestations:end -->
 
