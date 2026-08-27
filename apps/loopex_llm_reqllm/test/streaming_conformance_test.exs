@@ -304,6 +304,51 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     refute Model.valid_delta?(%{kind: :text_delta, text: String.duplicate("x", 70_000)})
   end
 
+  test "the delta payload ceiling counts the provider-controlled call identifier and tool name" do
+    # The defect this case holds down: the ceiling counted only the two fields
+    # that obviously carry prose, while the shipped adapter fills `tool_call_id`
+    # and `name` verbatim from the provider's stream. A delta carrying a
+    # megabyte in either field passed the check and reached the progress plane.
+    oversized = String.duplicate("a", 1_048_576)
+
+    refute Model.valid_delta?(%{
+             kind: :tool_call_delta,
+             call_index: 0,
+             tool_call_id: oversized,
+             name: "write",
+             arguments_fragment: nil
+           })
+
+    refute Model.valid_delta?(%{
+             kind: :tool_call_delta,
+             call_index: 0,
+             tool_call_id: "toolu_1",
+             name: oversized,
+             arguments_fragment: nil
+           })
+
+    # The counted fields sum rather than being weighed one at a time, so two
+    # halves of the ceiling in different fields is one delta past it.
+    half = String.duplicate("b", 33_000)
+
+    refute Model.valid_delta?(%{
+             kind: :tool_call_delta,
+             call_index: 0,
+             tool_call_id: half,
+             name: half,
+             arguments_fragment: half
+           })
+
+    # A delta of the shape the shipped adapter actually emits is unaffected.
+    assert Model.valid_delta?(%{
+             kind: :tool_call_delta,
+             call_index: 0,
+             tool_call_id: "toolu_1",
+             name: "write",
+             arguments_fragment: ~s({"path":"a.txt"})
+           })
+  end
+
   test "a text delta is observable while its operation is still incomplete rather than after the reply returns" do
     parent = self()
 

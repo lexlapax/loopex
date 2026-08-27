@@ -255,6 +255,45 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              run(root, "loopex.bash", %{"argv" => ["echo", "x"], "command" => "echo y"})
   end
 
+  test "bash reports a nonzero exit as failed and names the status the command exited with" do
+    root = workspace()
+
+    # The defect this case holds down: a command that exits nonzero and prints
+    # nothing arrived as `:completed` with empty output, which a model reads as
+    # a silent success and acts on. The status was discarded at the port and the
+    # receipt carries no field that could recover it.
+    assert {:ok, %{outcome: :failed, output: silent}} =
+             run(root, "loopex.bash", %{"command" => "exit 7"})
+
+    assert silent =~ "status 7"
+
+    # A failure that did print keeps what it printed and gains the status, so
+    # the model sees the diagnosis and the verdict together.
+    assert {:ok, %{outcome: :failed, output: noisy}} =
+             run(root, "loopex.bash", %{"command" => "echo before; exit 3"})
+
+    assert noisy =~ "before"
+    assert noisy =~ "status 3"
+
+    # A command the shell cannot find fails on the status the shell chose, not
+    # on this executor inspecting the message it printed.
+    assert {:ok, %{outcome: :failed, output: missing}} =
+             run(root, "loopex.bash", %{
+               "command" => "no_such_command_#{System.unique_integer([:positive])}"
+             })
+
+    assert missing =~ "exited with status"
+
+    # Success is unchanged: a command that exited zero is still `:completed` and
+    # carries no status note, because a note on every result is noise a model
+    # learns to skip.
+    assert {:ok, %{outcome: :completed, output: fine}} =
+             run(root, "loopex.bash", %{"command" => "echo ok"})
+
+    assert String.trim(fine) == "ok"
+    refute fine =~ "exited with status"
+  end
+
   test "every tool refuses a path that escapes the workspace root through traversal or a symlink" do
     root = workspace()
 

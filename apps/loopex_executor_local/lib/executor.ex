@@ -576,8 +576,8 @@ defmodule Loopex.Executor.Local do
     register_inflight(job.job_id, os_pid)
 
     case collect_output(port, os_pid, deadline, <<>>, options, job) do
-      {:completed, output} ->
-        bound_process_output(output)
+      {:exited, status, output} ->
+        bound_process_output(status, output)
 
       {:cancelled, output, group} ->
         confirmed = confirm_group_terminated(group)
@@ -625,12 +625,33 @@ defmodule Loopex.Executor.Local do
     :ok
   end
 
-  defp bound_process_output(output) do
+  # Concept: a command that exited nonzero failed, and the result says with what.
+  #
+  # Technical depth: this path discarded the exit status and called every finished
+  # command `:completed`, so `sh -c 'exit 7'`, a missing file, and an unknown
+  # command all reached the model as a success with no output -- indistinguishable
+  # from a command that truly succeeded silently. The sibling port path in this
+  # module has always returned `{:failed, status}` for the same message, so the
+  # two disagreed inside one file; `:failed` is an outcome this executor's other
+  # tools already produce and the conversation plane already accepts.
+  #
+  # The status is appended after bounding rather than before, because a failure
+  # whose diagnosis is the first thing truncated away is the defect again in
+  # another form. It is appended to the spilled copy too, so the truncation
+  # notice's "N of M bytes shown" counts the same bytes on both sides.
+  defp bound_process_output(status, output) do
+    outcome = if status == 0, do: :completed, else: :failed
+    note = exit_note(status)
+
     case CodingTools.bound_output(output, CodingTools.limits().output_bytes) do
-      {:complete, bounded} -> {:completed, bounded, :complete}
-      {:truncated, kept, full} -> {:completed, kept, {:truncated, full}}
+      {:complete, bounded} -> {outcome, bounded <> note, :complete}
+      {:truncated, kept, full} -> {outcome, kept <> note, {:truncated, full <> note}}
     end
   end
+
+  defp exit_note(0), do: ""
+
+  defp exit_note(status), do: "\n[loopex: the command exited with status #{status}.]"
 
   # Concept: the effective deadline is the earlier of the run's and the tool's.
   #
@@ -842,9 +863,9 @@ defmodule Loopex.Executor.Local do
           register_inflight(job.job_id, group_of(combined, os_pid))
           collect_output(port, os_pid, deadline, combined, options, job)
 
-        {^port, {:exit_status, _status}} ->
+        {^port, {:exit_status, status}} ->
           forget_inflight(job.job_id)
-          {:completed, strip_group_line(acc)}
+          {:exited, status, strip_group_line(acc)}
       after
         min(remaining, 50) ->
           collect_output(port, os_pid, deadline, acc, options, job)

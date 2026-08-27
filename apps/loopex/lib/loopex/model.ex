@@ -317,9 +317,18 @@ defmodule Loopex.Model do
     _error -> {:error, :invalid_model_request}
   end
 
+  # Concept: the ceiling covers every field a provider fills, not only the two
+  # that obviously carry prose.
+  #
+  # Technical depth: a shipped tool call delta takes `tool_call_id` and `name`
+  # verbatim from the provider's stream alongside `arguments_fragment`, so a
+  # delta carrying two megabyte-long identifiers passed this check untouched and
+  # the declared payload ceiling bounded nothing that mattered on that kind.
+  # `:chunk` was counted and no delta kind in this tree carries it: a name in a
+  # bound list that matches nothing reads as coverage the check does not have.
   defp delta_bytes(delta) do
     delta
-    |> Map.take([:text, :arguments_fragment, :chunk])
+    |> Map.take([:text, :arguments_fragment, :tool_call_id, :name])
     |> Enum.reduce(0, fn
       {_key, value}, total when is_binary(value) -> total + byte_size(value)
       {_key, _value}, total -> total
