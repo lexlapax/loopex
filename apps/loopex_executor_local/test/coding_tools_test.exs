@@ -79,6 +79,17 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   end
 
   defp executor_for(root, artifacts \\ nil) do
+    {executor, lease_id, _lease} = executor_and_lease(root, artifacts)
+    {executor, lease_id}
+  end
+
+  # Concept: a case about losing the lease needs to be able to stop the holder.
+  #
+  # Technical depth: the lease pid is edge-private and never enters a job, so
+  # every other case takes only the plain identity `executor_for/2` returns. A
+  # case that has to revoke the claim mid-job needs the holder itself, which is
+  # the one thing that composed it can supply.
+  defp executor_and_lease(root, artifacts \\ nil) do
     lease_id = "lease-#{System.unique_integer([:positive])}"
     {:ok, lease} = WorkspaceLease.start_link(id: lease_id, path: root, fencing_token: @fence)
 
@@ -95,7 +106,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         artifacts: artifacts
       )
 
-    {executor, lease_id}
+    {executor, lease_id, lease}
   end
 
   defp run(root, tool_id, arguments, overrides \\ %{}) do
@@ -292,6 +303,36 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     assert String.trim(fine) == "ok"
     refute fine =~ "exited with status"
+
+    # Concept: a failure whose output overflowed the bound is still a failure.
+    #
+    # Technical depth: bounding the output has two branches and this case
+    # exercised only the complete one, so making the truncated branch alone
+    # report `:completed` left all twelve locked cases green while a command that
+    # printed past the ceiling and exited nonzero reached the model as a success.
+    # The status note is what a model reads the verdict from, so it must survive
+    # truncation rather than being the first thing cut.
+    limit = CodingTools.limits().output_bytes
+
+    assert {:ok, %{outcome: :failed, output: overflowed}} =
+             run(root, "loopex.bash", %{
+               "command" => "yes 0123456789 | head -c #{limit + 5_000}; exit 7"
+             })
+
+    assert overflowed =~ "status 7"
+    assert overflowed =~ "truncated"
+    assert byte_size(overflowed) < limit + 1_000
+
+    # And the branch still tells the two verdicts apart: overflowing is not
+    # itself a failure, so a command that printed past the ceiling and exited
+    # zero is completed and carries no status note.
+    assert {:ok, %{outcome: :completed, output: overflowed_ok}} =
+             run(root, "loopex.bash", %{
+               "command" => "yes 0123456789 | head -c #{limit + 5_000}"
+             })
+
+    assert overflowed_ok =~ "truncated"
+    refute overflowed_ok =~ "exited with status"
   end
 
   test "every tool refuses a path that escapes the workspace root through traversal or a symlink" do
@@ -445,6 +486,29 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert {:ok, named} = run(root, "loopex.bash", %{"command" => "env | cut -d= -f1 | sort"})
     assert named.output =~ "PATH"
     refute named.output =~ "LOOPEX_PROVIDER_API_KEY"
+
+    # Concept: argv is the other launcher, and it must construct the same
+    # environment the raw-command launcher does.
+    #
+    # Technical depth: the two forms build their argument vectors in separate
+    # clauses, and this case exercised only the raw one. Removing the
+    # construction from the argv clause alone left every locked case green while
+    # an argv call handed its child this operating-system process's whole
+    # environment, the operator's provider credential among it. The receipt
+    # fields are derived from the environment the executor intended, so they
+    # cannot catch this either -- only the child's own output can.
+    assert {:ok, argv_credential} =
+             run(root, "loopex.bash", %{
+               "argv" => ["sh", "-c", "printf %s \"$LOOPEX_PROVIDER_API_KEY\""]
+             })
+
+    assert argv_credential.outcome == :completed
+    refute argv_credential.output =~ "sk-sentinel"
+
+    assert {:ok, argv_named} = run(root, "loopex.bash", %{"argv" => ["env"]})
+    assert argv_named.output =~ "PATH="
+    refute argv_named.output =~ "LOOPEX_PROVIDER_API_KEY"
+    refute argv_named.output =~ "LOOPEX_SENTINEL_UNRELATED"
 
     # Concept: the receipt reports what the child received, not a constant.
     #
@@ -662,5 +726,163 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # implicit, so a caller can refuse before producing bytes it cannot keep.
     assert CodingTools.limits().output_bytes > 0
     assert ArtifactStore.roles() == ["tool_output"]
+  end
+
+  test "a job whose workspace lease is lost mid flight is ended and reported unproven" do
+    # Concept: the lease is the claim that authorises these effects, and ADR 0007
+    # requires it held for the job's full lifetime.
+    #
+    # Technical depth: the coding-tool path resolved the lease pid at the final
+    # validation boundary and discarded it, so nothing watched the holder once
+    # work began. Stopping the lease process after a `loopex.bash` child had
+    # started left the command running for its full second and returned
+    # `:completed` -- a receipt claiming a proved effect in a workspace this
+    # executor no longer had a claim on. Both shapes of coding tool are covered
+    # here, because the defect was in the clause they share rather than in
+    # either wait.
+    root = workspace()
+    {executor, lease_id, lease} = executor_and_lease(root)
+    marker = Path.join(root, "after-the-lease.txt")
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{"command" => "sleep 3; echo survived > #{marker}"},
+          %{executor: executor, lease_id: lease_id}
+        )
+      end)
+
+    Process.sleep(800)
+    GenServer.stop(lease)
+
+    assert {:ok, receipt} = Task.await(running, 30_000)
+
+    # Not `:completed`, and not `:cancelled` either: cancellation says this
+    # executor stopped the work inside a workspace it still holds, which is
+    # exactly what is no longer true.
+    assert receipt.outcome == :outcome_unknown
+    assert receipt.output =~ "workspace lease was lost"
+    assert receipt.output =~ "unproven"
+
+    # And the command was actually ended, rather than merely reported on.
+    Process.sleep(3_500)
+    refute File.exists?(marker), "the command outlived the lease that authorised it"
+
+    # A filesystem tool holds the same claim, so losing it ends that work too.
+    {second, second_lease_id, second_lease} = executor_and_lease(root)
+    File.write!(Path.join(root, "wide.txt"), String.duplicate("abcdefghij\n", 3_000_000))
+
+    editing =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.edit",
+          %{"path" => "wide.txt", "old" => "qqqqqqqq", "new" => "x"},
+          %{executor: second, lease_id: second_lease_id}
+        )
+      end)
+
+    Process.sleep(400)
+    GenServer.stop(second_lease)
+
+    assert {:ok, edited} = Task.await(editing, 30_000)
+    assert edited.outcome == :outcome_unknown
+    assert edited.output =~ "workspace lease was lost"
+  end
+
+  test "a filesystem tool is bounded while it runs rather than only before it starts" do
+    root = workspace()
+
+    # Concept: an effect that has begun is still bounded by the run's deadline.
+    #
+    # Technical depth: production compared the deadline against the clock once
+    # and then called a synchronous `File.*` that nothing could interrupt, so a
+    # tool that blocked after that comparison ran as long as it liked and still
+    # reported `:completed`. The work here is a real `edit` on a real file whose
+    # diagnosis takes seconds; it is ordinary runtime work rather than a stalled
+    # syscall, so abandoning it genuinely ends it.
+    File.write!(Path.join(root, "wide.txt"), String.duplicate("abcdefghij\n", 3_000_000))
+
+    # Concept: the work must be given a real chance to outlast the deadline, or
+    # the case proves nothing.
+    #
+    # Technical depth: the same call is made once with the ordinary deadline
+    # first, which establishes both that it succeeds when nothing stops it and
+    # how long it takes. The bounded run below is then compared against that
+    # measurement rather than against a number written here, so a machine slow
+    # or fast enough to change the absolute timings cannot turn the case green
+    # against a bound that does nothing.
+    unbounded_started = System.monotonic_time(:millisecond)
+
+    assert {:ok, %{outcome: :failed, output: diagnosed}} =
+             run(root, "loopex.edit", %{"path" => "wide.txt", "old" => "qqqqqqqq", "new" => "x"})
+
+    unbounded = System.monotonic_time(:millisecond) - unbounded_started
+    assert diagnosed =~ "not found"
+
+    assert unbounded > 1_000,
+           "this operation is too fast for the deadline below to prove anything"
+
+    started = System.monotonic_time(:millisecond)
+
+    assert {:ok, receipt} =
+             run(
+               root,
+               "loopex.edit",
+               %{"path" => "wide.txt", "old" => "qqqqqqqq", "new" => "x"},
+               %{
+                 run_deadline: System.system_time(:millisecond) + 300
+               }
+             )
+
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    assert elapsed < div(unbounded, 2), "the tool outlived its deadline"
+    refute receipt.outcome == :completed
+    assert receipt.output =~ "deadline passed while this tool was running"
+    assert receipt.output =~ "it was stopped"
+
+    # An `edit` that was stopped part way may or may not have reached the file,
+    # so the receipt says unproven rather than picking a verdict.
+    assert receipt.outcome == :outcome_unknown
+
+    # Concept: a path that cannot be opened within any bound is refused before
+    # it is opened, not abandoned afterwards.
+    #
+    # Technical depth: a `loopex.read` of an in-workspace named pipe with a
+    # 200 ms deadline stayed blocked past 500 ms and returned `:completed` only
+    # when an external writer released it. Abandoning that read would report
+    # truthfully and still leave the open outstanding, and on this runtime a
+    # single outstanding blocked open stalls every other file operation in the
+    # whole virtual machine until it is paired -- so the refusal is the bound.
+    # `mkfifo` is reachable from `loopex.bash`, which is how a model reaches
+    # this.
+    # `mkfifo` refuses an existing name, and a run killed part way leaves its
+    # workspace behind for the next run that draws the same identifier.
+    pipe = Path.join(root, "pipe")
+    File.rm_rf!(pipe)
+    {_output, 0} = System.cmd("/usr/bin/mkfifo", [pipe])
+    fifo_started = System.monotonic_time(:millisecond)
+
+    assert {:ok, piped} =
+             run(root, "loopex.read", %{"path" => "pipe"}, %{
+               run_deadline: System.system_time(:millisecond) + 200
+             })
+
+    assert System.monotonic_time(:millisecond) - fifo_started < 1_000
+    assert piped.outcome == :failed
+    assert piped.output =~ "not a regular file"
+
+    # And the runtime's file work was never stalled behind it, which is the
+    # property the refusal exists to keep.
+    File.write!(Path.join(root, "plain.txt"), "still responsive")
+    plain_started = System.monotonic_time(:millisecond)
+
+    assert {:ok, %{outcome: :completed, output: "still responsive"}} =
+             run(root, "loopex.read", %{"path" => "plain.txt"})
+
+    assert System.monotonic_time(:millisecond) - plain_started < 1_000
   end
 end

@@ -12,9 +12,11 @@ defmodule Loopex.Executor.Local do
   One GenServer serializes final validation and process start. The fixed tool
   registry is code-owned rather than model-owned. `/usr/bin/env -i` constructs
   the child environment from nothing, then a fixed shell program receives only
-  validated bounded arguments. A monitored lease loss closes the owned port and
-  is retained as cancellation evidence. Receipts are synced to one file per job
-  and exact duplicate jobs return the retained receipt without another start.
+  validated bounded arguments. The lease is monitored for every job's full
+  lifetime: losing it ends the owned process group or abandons the filesystem
+  effect, and the job is retained as unproven rather than complete. Receipts are
+  synced to one file per job and exact duplicate jobs return the retained receipt
+  without another start.
   """
 
   use GenServer
@@ -233,6 +235,17 @@ defmodule Loopex.Executor.Local do
     end
   end
 
+  # Concept: a message that arrives after the job it belongs to is over is
+  # dropped, not treated as a fault.
+  #
+  # Technical depth: an abandoned filesystem worker can answer in the instant
+  # after it was killed, and a terminated tool child's port still reports its
+  # exit status. Both belong to work this server has already reported on. Without
+  # this clause the default implementation logs each one as an unexpected
+  # message, which turns a bounded abandonment into noise in an operator's log.
+  @impl GenServer
+  def handle_info(_message, state), do: {:noreply, state}
+
   @impl GenServer
   def format_status(status) do
     status
@@ -374,19 +387,34 @@ defmodule Loopex.Executor.Local do
 
   defp write_arguments(_arguments, _delay), do: {:error, :invalid_tool_arguments}
 
+  # Concept: the lease is held for the job's whole life, not only up to its
+  # start.
+  #
+  # Technical depth: ADR 0007 requires the workspace lease to remain held for the
+  # job's full lifetime, and the M1 demonstration path monitors it. The coding
+  # tools resolved the same lease pid at the final validation boundary and then
+  # discarded it, so nothing watched the holder once work began: stopping the
+  # lease process while a `loopex.bash` child was running left the command
+  # running to completion and reported `:completed`. The monitor is installed
+  # here, around every coding tool, and the DOWN is handled by whichever wait the
+  # tool is sitting in.
   defp run_tool(
          state,
          job,
          %{coding: _definition} = tool,
-         _lease_pid,
+         lease_pid,
          workspace,
          arguments,
          options
        ) do
+    lease = {Process.monitor(lease_pid), lease_pid}
+
     {outcome, output, artifacts} =
       job
-      |> run_coding_tool(tool, workspace, arguments, options)
+      |> run_coding_tool(tool, workspace, arguments, options, lease)
       |> spill(state, job)
+
+    Process.demonitor(elem(lease, 0), [:flush])
 
     receipt(state, job, tool, outcome, output, coding_tool_environment(arguments), artifacts)
   end
@@ -432,55 +460,160 @@ defmodule Loopex.Executor.Local do
   # system process, a signal path, and a termination story between the operator
   # and a `File.read`. `bash` is the tool that genuinely needs a child, and it is
   # the only one that gets one.
-  # Concept: a filesystem tool is bounded by the same instant a shell tool is.
+  # Concept: a filesystem tool is bounded by the same instant a shell tool is,
+  # and it is bounded while it runs rather than only before it starts.
   #
-  # Technical depth: these three start no child, so nothing could be terminated
-  # mid-flight and they carried no deadline at all -- a run whose deadline had
-  # already passed still read, wrote, or edited. They cannot be interrupted once
-  # begun, so the honest bound is refusing to begin: the deadline is checked
-  # before the effect rather than pretended to be enforced during it.
-  defp run_coding_tool(job, tool, workspace, %{kind: kind} = arguments, options)
+  # Technical depth: the deadline used to be compared against the clock once and
+  # then handed to a synchronous `File.*` call that nothing could interrupt, so a
+  # tool that blocked after that comparison ran for as long as it liked and still
+  # reported `:completed`. A `loopex.read` of an in-workspace named pipe with a
+  # 200 ms run deadline stayed blocked past 500 ms and completed only when an
+  # external writer released it. The effect now runs in a separate process this
+  # one monitors, so the deadline and a lost lease are both waits this executor
+  # is sitting in rather than events it cannot observe.
+  #
+  # The pre-start comparison is kept: a run whose deadline has already passed
+  # should not begin an effect at all, and starting one only to abandon it a
+  # moment later would be a worse way to say the same thing.
+  defp run_coding_tool(job, tool, workspace, %{kind: kind} = arguments, _options, lease)
        when kind in [:read, :write, :edit] do
-    if System.system_time(:millisecond) >= effective_deadline(job, tool) do
+    remaining = effective_deadline(job, tool) - System.system_time(:millisecond)
+
+    if remaining <= 0 do
       {:failed, "the effective deadline passed before this tool began"}
     else
-      run_bounded_tool(job, tool, workspace, arguments, options)
+      run_bounded_tool(workspace, arguments, remaining, lease)
     end
   end
 
-  defp run_coding_tool(job, tool, workspace, %{kind: :bash} = arguments, options) do
-    run_owned_process(job, tool, workspace, arguments, options)
+  defp run_coding_tool(job, tool, workspace, %{kind: :bash} = arguments, options, lease) do
+    run_owned_process(job, tool, workspace, arguments, options, lease)
   end
 
-  defp run_bounded_tool(_job, _tool, workspace, %{kind: :read, path: path}, _options) do
-    with {:ok, resolved} <- CodingTools.resolve(workspace, path) do
-      case File.read(resolved) do
-        {:ok, content} ->
-          case CodingTools.bound_output(content, CodingTools.limits().read_bytes) do
-            {:complete, bounded} -> {:completed, bounded, :complete}
-            {:truncated, kept, full} -> {:completed, kept, {:truncated, full}}
-          end
+  # Concept: the effect runs where it can be abandoned, and the abandonment is
+  # confirmed rather than assumed.
+  #
+  # Technical depth: the worker is spawned unlinked and monitored, so neither its
+  # crash nor its kill can reach this executor. Whichever of the four outcomes
+  # arrives first decides the result: the effect's own answer, the worker dying
+  # on its own, the lease holder going down, or the remaining deadline elapsing.
+  #
+  # The result is delivered as a message tagged with a fresh reference rather
+  # than as an exit reason, so a large read is not copied twice, and the tag is
+  # drained after an abandonment because a result produced in the instant before
+  # the kill would otherwise be left in this server's mailbox.
+  defp run_bounded_tool(workspace, arguments, remaining, {monitor, lease_pid}) do
+    parent = self()
+    tag = make_ref()
 
-        {:error, reason} ->
-          {:failed, "read failed: #{:file.format_error(reason)}"}
+    {worker, reference} =
+      spawn_monitor(fn -> send(parent, {tag, filesystem_effect(workspace, arguments)}) end)
+
+    receive do
+      {^tag, result} ->
+        Process.demonitor(reference, [:flush])
+        result
+
+      {:DOWN, ^reference, :process, ^worker, reason} ->
+        {:failed, "the tool stopped before it produced a result: #{inspect(reason)}"}
+
+      {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
+        abandon(worker, reference, tag, arguments, :workspace_lease_lost)
+    after
+      remaining -> abandon(worker, reference, tag, arguments, :deadline)
+    end
+  end
+
+  # Concept: an abandoned effect reports what is actually known about it, which
+  # is usually less than a verdict.
+  #
+  # Technical depth: `:completed` and `:failed` are both claims. A `read` that was
+  # stopped changed nothing and produced nothing, so `:failed` is exactly true. A
+  # `write` or an `edit` stopped part way may or may not have reached the file,
+  # and a lease that vanished mid-flight means the workspace the effect was
+  # authorised against is no longer this executor's to inspect -- in both cases
+  # the effect is unproven, which is what `:outcome_unknown` says and what stops
+  # the coordinator from blindly retrying it.
+  #
+  # A worker that does not die is the same kind of fact as a process group that
+  # cannot be confirmed cleaned: it may still act, so nothing about the effect is
+  # known regardless of which tool it was.
+  defp abandon(worker, reference, tag, arguments, cause) do
+    Process.exit(worker, :kill)
+
+    stopped =
+      receive do
+        {:DOWN, ^reference, :process, ^worker, _reason} -> true
+      after
+        1_000 -> false
+      end
+
+    if not stopped, do: Process.demonitor(reference, [:flush])
+
+    receive do
+      {^tag, _late} -> :ok
+    after
+      0 -> :ok
+    end
+
+    {abandoned_outcome(cause, arguments, stopped), abandoned_message(cause, arguments, stopped)}
+  end
+
+  defp abandoned_outcome(_cause, _arguments, false), do: :outcome_unknown
+  defp abandoned_outcome(:workspace_lease_lost, _arguments, true), do: :outcome_unknown
+  defp abandoned_outcome(:deadline, %{kind: :read}, true), do: :failed
+  defp abandoned_outcome(:deadline, _arguments, true), do: :outcome_unknown
+
+  defp abandoned_message(cause, arguments, stopped) do
+    cause_text =
+      case cause do
+        :deadline -> "the effective deadline passed while this tool was running"
+        :workspace_lease_lost -> "the workspace lease was lost while this tool was running"
+      end
+
+    stop_text =
+      if stopped,
+        do: " and it was stopped.",
+        else: " and it could not be confirmed stopped."
+
+    "[loopex: " <> cause_text <> stop_text <> " " <> effect_text(cause, arguments, stopped) <> "]"
+  end
+
+  defp effect_text(:deadline, %{kind: :read}, true), do: "Nothing was read."
+
+  defp effect_text(_cause, %{kind: kind}, _stopped),
+    do: "Whether #{kind} changed the workspace is unproven."
+
+  defp filesystem_effect(workspace, %{kind: :read, path: path}) do
+    with {:ok, resolved} <- CodingTools.resolve(workspace, path),
+         :ok <- ordinary_file(resolved, path, :required),
+         {:ok, content} <- File.read(resolved) do
+      case CodingTools.bound_output(content, CodingTools.limits().read_bytes) do
+        {:complete, bounded} -> {:completed, bounded, :complete}
+        {:truncated, kept, full} -> {:completed, kept, {:truncated, full}}
       end
     else
-      {:error, reason} -> {:failed, containment_message(reason)}
+      {:refused, message} ->
+        {:failed, message}
+
+      {:error, reason} when is_atom(reason) ->
+        {:failed, "read failed: #{:file.format_error(reason)}"}
+
+      {:error, reason} ->
+        {:failed, containment_message(reason)}
     end
   end
 
-  defp run_bounded_tool(
-         _job,
-         _tool,
-         workspace,
-         %{kind: :write, path: path, content: content},
-         _opts
-       ) do
+  defp filesystem_effect(workspace, %{kind: :write, path: path, content: content}) do
     with {:ok, resolved} <- CodingTools.resolve(workspace, path),
+         :ok <- ordinary_file(resolved, path, :optional),
          :ok <- File.mkdir_p(Path.dirname(resolved)),
          :ok <- File.write(resolved, content) do
       {:completed, "wrote #{byte_size(content)} bytes to #{path}"}
     else
+      {:refused, message} ->
+        {:failed, message}
+
       {:error, reason} when is_atom(reason) ->
         {:failed, "write failed: #{:file.format_error(reason)}"}
 
@@ -495,10 +628,11 @@ defmodule Loopex.Executor.Local do
   # diagnostics below distinguish absent from ambiguous, and an absent match
   # reports the nearest line it did find, because "your string is not here" and
   # "your string is here twice" call for different corrections.
-  defp run_bounded_tool(_job, _tool, workspace, %{kind: :edit} = arguments, _options) do
+  defp filesystem_effect(workspace, %{kind: :edit} = arguments) do
     %{path: path, old: old, new: new} = arguments
 
     with {:ok, resolved} <- CodingTools.resolve(workspace, path),
+         :ok <- ordinary_file(resolved, path, :required),
          {:ok, content} <- read_for_edit(resolved) do
       case occurrences(content, old) do
         1 ->
@@ -520,11 +654,49 @@ defmodule Loopex.Executor.Local do
              "Include more surrounding context so exactly one occurrence matches."}
       end
     else
+      {:refused, message} ->
+        {:failed, message}
+
       {:error, reason} when is_atom(reason) ->
         {:failed, "edit failed: #{:file.format_error(reason)}"}
 
       {:error, reason} ->
         {:failed, containment_message(reason)}
+    end
+  end
+
+  # Concept: these tools operate on ordinary files, and a path that is not one is
+  # refused before anything is opened.
+  #
+  # Technical depth: opening a named pipe blocks until the other end is opened,
+  # and in this runtime a blocked file open is not a local delay. Measured
+  # directly on the supported toolchain, a single outstanding blocked open stalls
+  # every subsequent `File.read` in the whole virtual machine -- with nine idle
+  # dirty IO schedulers and whether the process that started it is alive or has
+  # been killed -- until that open is paired and returns. Abandoning the tool at
+  # its deadline keeps the tool's own promise but leaves the syscall outstanding,
+  # so every other session sharing the runtime would stay stalled behind a path
+  # one model chose. `mkfifo` is reachable from `loopex.bash`, so this is a path
+  # a model can actually produce inside its own workspace.
+  #
+  # Refusing is therefore the bound that matters here, and the deadline above is
+  # the bound for an operation that is merely slow: a large regular file returns
+  # on its own, so abandoning one costs nothing beyond the work already started.
+  # A `write` may legitimately name a path that does not exist yet; a `read` or
+  # an `edit` may not.
+  defp ordinary_file(resolved, path, presence) do
+    case File.lstat(resolved) do
+      {:ok, %File.Stat{type: :regular}} ->
+        :ok
+
+      {:ok, %File.Stat{type: type}} ->
+        {:refused, "refused: #{path} is a #{type}, not a regular file"}
+
+      {:error, :enoent} when presence == :optional ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -547,7 +719,7 @@ defmodule Loopex.Executor.Local do
   # because the BEAM gives a port's os_pid but not the group the child chose. A
   # captured identity is the only one termination can honestly claim to have
   # confirmed.
-  defp run_owned_process(job, tool, workspace, arguments, options) do
+  defp run_owned_process(job, tool, workspace, arguments, options, lease) do
     deadline = effective_deadline(job, tool)
     environment = child_environment()
     {launcher, command_arguments} = process_launcher(arguments, environment)
@@ -575,7 +747,7 @@ defmodule Loopex.Executor.Local do
 
     register_inflight(job.job_id, os_pid)
 
-    case collect_output(port, os_pid, deadline, <<>>, options, job) do
+    case collect_output(port, os_pid, deadline, <<>>, options, job, lease) do
       {:exited, status, output} ->
         bound_process_output(status, output)
 
@@ -589,6 +761,31 @@ defmodule Loopex.Executor.Local do
              do: " Its process group is confirmed cleaned.]",
              else: " Cleanup could not be confirmed.]"
            )}
+
+      # Concept: a command whose lease vanished is unproven, not cancelled.
+      #
+      # Technical depth: a deadline cancellation happens while this executor
+      # still holds the workspace, so it can say the command was stopped inside a
+      # workspace that is still its own. A lost lease says the opposite: the
+      # claim that authorised these effects is gone, another holder may already
+      # have taken the workspace, and whatever the command wrote before the
+      # signal reached it is no longer attributable. `:outcome_unknown` is what
+      # stops the coordinator from blindly retrying an effectful job in that
+      # state, and it is reported whether or not the group was confirmed cleaned
+      # -- confirming cleanup proves the command stopped, not that its effect
+      # never landed.
+      {:workspace_lease_lost, output, group} ->
+        confirmed = confirm_group_terminated(group)
+
+        {:outcome_unknown,
+         output <>
+           "\n[loopex: the workspace lease was lost and the command was terminated." <>
+           if(confirmed,
+             do: " Its process group is confirmed cleaned.",
+             else: " Cleanup could not be confirmed."
+           ) <>
+           " Whether its effect landed in the workspace this job was authorised" <>
+           " against is unproven.]"}
     end
   end
 
@@ -667,13 +864,11 @@ defmodule Loopex.Executor.Local do
   # that declares none falls back to the run's instant alone rather than to a
   # number invented here.
   #
-  # What this bounds is a running child, which only `bash` has. For the three
-  # synchronous tools the caller compares this instant against the clock before
-  # beginning, and `min(run_deadline, now + budget)` exceeds `now` whenever the
-  # run's own deadline does, so their declared budgets change no observable
-  # behaviour: the effective bound there is the run's deadline alone. Bounding
-  # them properly would need the work interruptible, which reading a file
-  # through `File.read/1` is not.
+  # This instant bounds every coding tool. For `bash` it bounds a running child;
+  # for the other three it is the wait after which the effect is abandoned, so a
+  # tool that declares a shorter budget than the run now genuinely ends sooner
+  # rather than merely being compared against the clock once and then left to
+  # run.
   defp effective_deadline(job, tool) do
     case declared_wall_time(tool) do
       nil -> job.run_deadline
@@ -847,7 +1042,8 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp collect_output(port, os_pid, deadline, acc, options, job) do
+  defp collect_output(port, os_pid, deadline, acc, options, job, lease) do
+    {monitor, lease_pid} = lease
     remaining = deadline - System.system_time(:millisecond)
 
     if remaining <= 0 do
@@ -861,14 +1057,20 @@ defmodule Loopex.Executor.Local do
           notify(options, {:executor_progress, job.job_id, byte_size(chunk)})
           combined = acc <> chunk
           register_inflight(job.job_id, group_of(combined, os_pid))
-          collect_output(port, os_pid, deadline, combined, options, job)
+          collect_output(port, os_pid, deadline, combined, options, job, lease)
 
         {^port, {:exit_status, status}} ->
           forget_inflight(job.job_id)
           {:exited, status, strip_group_line(acc)}
+
+        {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
+          group = group_of(acc, os_pid)
+          terminate_group(group)
+          forget_inflight(job.job_id)
+          {:workspace_lease_lost, strip_group_line(acc), group}
       after
         min(remaining, 50) ->
-          collect_output(port, os_pid, deadline, acc, options, job)
+          collect_output(port, os_pid, deadline, acc, options, job, lease)
       end
     end
   end
