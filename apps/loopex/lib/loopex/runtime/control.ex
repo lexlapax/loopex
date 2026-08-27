@@ -227,12 +227,22 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
+  # Concept: control hands back the route to the owner; it does not carry the
+  # question there and wait.
+  #
+  # Technical depth: brokering the call made control block inside its own
+  # `handle_call` on a process that calls control back, which is the coupling the
+  # deferred owner reply removed everywhere else. Even bounded it was
+  # head-of-line blocking: one busy coordinator stalled every unrelated session's
+  # control traffic for the whole bound and then reported a session that was
+  # merely busy as unavailable. `reconciliation_query/1` already resolves a route
+  # and calls the coordinator from the caller's own process; this does the same.
   def handle_call({:session_status, token, session_id}, _from, state) do
     reply =
       with true <- token == state.token,
            {:ok, %{status: :active, coordinator: coordinator, owner: owner}} <-
              Map.fetch(state.sessions, session_id) do
-        SessionCoordinator.session_status(coordinator, owner)
+        {:ok, coordinator, owner}
       else
         _other -> {:error, :session_unavailable}
       end

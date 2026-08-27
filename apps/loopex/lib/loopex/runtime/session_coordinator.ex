@@ -112,7 +112,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @doc false
   @spec session_status(pid(), owner()) :: {:ok, map()} | {:error, term()}
   def session_status(coordinator, owner) when is_pid(coordinator) and is_map(owner) do
-    safe_call(coordinator, {:session_status, owner})
+    safe_call(coordinator, {:session_status, owner}, :infinity)
   end
 
   @doc false
@@ -122,7 +122,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @doc false
   @spec reconciliation_query(pid(), owner()) :: {:ok, map()} | {:error, term()}
   def reconciliation_query(coordinator, owner) when is_pid(coordinator) and is_map(owner),
-    do: safe_call(coordinator, {:reconciliation_query, owner})
+    do: safe_call(coordinator, {:reconciliation_query, owner}, :infinity)
 
   @doc false
   @spec reconcile(pid(), owner(), map()) :: :ok | {:error, term()}
@@ -2004,7 +2004,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
     namespace <> "_" <> binary_part(encoded, 0, 40)
   end
 
-  defp safe_call(server, message, timeout \\ 5_000) do
+  # Concept: every caller states how long it will wait; none inherits a bound it
+  # never chose.
+  #
+  # Technical depth: the default was five seconds, and a call that reached it
+  # returned `:session_unavailable` -- a claim about the session, made because a
+  # process was busy. Two of these ran from control while it held its own
+  # `handle_call`, which is how a scheduling delay became a verdict. The
+  # coordinator is the serial authority on its own state, so its callers wait for
+  # it; a caller that genuinely must give up bounds itself here, visibly, rather
+  # than inheriting a number from this line.
+  defp safe_call(server, message, timeout) do
     try do
       GenServer.call(server, message, timeout)
     catch

@@ -257,7 +257,10 @@ defmodule Loopex.Runtime do
   @doc false
   @spec session_status(t(), binary()) :: {:ok, map()} | {:error, term()}
   def session_status(%__MODULE__{} = runtime, session_id) do
-    control_call(runtime, {:session_status, runtime.token, session_id})
+    with {:ok, coordinator, owner} <-
+           control_call(runtime, {:session_status, runtime.token, session_id}) do
+      SessionCoordinator.session_status(coordinator, owner)
+    end
   end
 
   def session_status(_runtime, _session_id), do: {:error, :runtime_reference_required}
