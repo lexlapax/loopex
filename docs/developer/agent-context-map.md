@@ -889,6 +889,62 @@ closed state from these facts alone:
 - Current authorization and the next transition are recorded only in the
   [canonical plans status register](../plans/README.md).
 
+<a id="disposition-m2-inherited-gate-enforcement-2026-08-27"></a>
+### M2 inherited-gate enforcement — waived for M2, planned into M3 — 2026-08-27
+
+The maintainer explicitly disposed the decision owed at
+[M1 gate amendment 8](../plans/M1-gate.md#amendment-8-inherited-gate-enforcement),
+adopting its recommendation: **Option C for `M2`, with Option B planned into
+`M3` as accepted scope.**
+
+**The constraint being waived.** `AGENTS.md` § Milestones and Gates requires that
+existing gates stay green outside the bounded lookahead. No repository entrypoint
+enforces it. `scripts/check-m2-gate.sh` re-proves the closed `M0` gate through two
+retained matrix rows and never invokes `M1`'s gate, so an `M1` evidence,
+environment-preflight, or orchestration check can go red while `M1`'s bound
+artifacts and inherited selectors all still pass, and neither the status check nor
+`M2`'s gate reports it.
+
+**What the waiver admits.** For `M2` only, the requirement is met by retained
+exact-SHA evidence of the complete `M1` gate green rather than by an executable
+check. This is a gate-weakening decision and is non-delegable under `AGENTS.md`;
+it was taken by the maintainer, not by any agent or artifact, and no artifact
+appointed its own approver.
+
+**The evidence it retains.** The complete `M1` gate was run at exact
+`e513a38be3244ddbb0b15646839aed696f8d216c`, the same candidate `M2`'s three
+toolchain lanes captured, and reported:
+
+```text
+M1 gate GREEN seed=12256 protected_executed=36
+```
+
+That run was possible for the first time since `cd19347` only because gate
+generation 8 made the gate runnable at all. It was invoked by hand, which is
+precisely the unenforced step this waiver admits.
+
+**Why it was accepted.** `M2` neither planned nor budgeted this enforcement, and
+landing novel enforcement machinery during closure is the kind of unplanned scope
+a gate exists to refuse. Option A — amending `M2`'s locked gate to invoke `M1`'s —
+was enumerated and remains available; its price is an `amendment-transaction-v1`
+on an Accepted plan plus re-taking every real-provider evidence record, since the
+gate's own bytes would change.
+
+**What it does not dispose.** It grants nothing beyond `M2`. It does not weaken
+any check, exempt any lane, move any threshold, or admit anything previously
+refused. It changes no outcome, no envelope, and no lifecycle state. The rule
+itself stands unchanged and unenforced, and the next milestone meets it again.
+
+**The obligation it creates.** Option B — a governed closed-gate aggregate whose
+own invocation is structurally enforced — is accepted scope for `M3` and must
+appear in `M3`'s plan pair before that milestone is accepted. Amendment 8 records
+why B fails unless its invocation is itself verified: an aggregate each successor
+gate is merely expected to call reproduces this exact blind spot one level up.
+`M3`'s form of B must therefore either place invocation in a repository entrypoint
+that owns the rule, or make one mandatory call per successor gate structurally
+verified by a check that fails when a milestone gate omits it. Without that, B is
+Option C with more machinery.
+
 <a id="disposition-m2-gate-amendment-1-2026-08-25"></a>
 ### M2 gate amendment 1 — closing the probe's standard input — 2026-08-25
 
