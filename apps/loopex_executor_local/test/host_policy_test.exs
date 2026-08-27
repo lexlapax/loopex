@@ -77,6 +77,20 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     def decide(_request), do: {:allow, %{attributes: %{"owner" => self()}}}
   end
 
+  defmodule DeniesAsAsked do
+    @moduledoc false
+
+    # Concept: a host that denies with whichever category the case names.
+    #
+    # Technical depth: the category travels in the request rather than in five
+    # near-identical fixtures, and `decide/1` runs in its own task, so the
+    # request is the only channel that reaches it.
+
+    @behaviour Policy
+    @impl Policy
+    def decide(%{arguments: %{"category" => category}}), do: {:deny, category}
+  end
+
   defmodule InertStore do
     @moduledoc false
 
@@ -190,6 +204,28 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     assert {:deny, :interaction_unsupported} = Policy.decide(Defers, request())
     refute match?({:deny, :policy_denied}, Policy.decide(Defers, request()))
     assert :interaction_unsupported in Policy.reason_categories()
+  end
+
+  test "a denial category outside the published enumeration is refused rather than carried" do
+    # Every published category comes back exactly as the host sent it. That is
+    # what the enumeration is for: an operator reading a denial gets a category
+    # they can look up.
+    for category <- Policy.reason_categories() do
+      assert {:deny, ^category} =
+               Policy.decide(DeniesAsAsked, request(%{arguments: %{"category" => category}}))
+    end
+
+    # A category the host invented is not one of them, and this boundary does not
+    # hand it on. It still denies -- the fail-closed direction is unchanged --
+    # but as unavailable, because an answer this port cannot read is exactly the
+    # "I do not know" that resolves to no.
+    refute :invented_by_the_host in Policy.reason_categories()
+
+    assert {:deny, :policy_unavailable} =
+             Policy.decide(
+               DeniesAsAsked,
+               request(%{arguments: %{"category" => :invented_by_the_host}})
+             )
   end
 
   test "every executor backed tool requires a policy decision including a read only tool" do

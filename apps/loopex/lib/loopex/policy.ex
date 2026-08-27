@@ -33,7 +33,8 @@ defmodule Loopex.Policy do
   | --- | --- |
   | `{:allow, context}` in the bounded shape or `nil` | grant issued |
   | `{:allow, context}` outside the bounded shape | `{:deny, :policy_unavailable}` |
-  | `{:deny, category}` | durable denial, no dispatch |
+  | `{:deny, category}` in `reason_categories/0` | durable denial, no dispatch |
+  | `{:deny, category}` outside that enumeration | `{:deny, :policy_unavailable}` |
   | `{:defer, _}` | `{:deny, :interaction_unsupported}` |
   | callback raises, exits, or times out | `{:deny, :policy_unavailable}` |
   | any other return shape | `{:deny, :policy_unavailable}` |
@@ -107,9 +108,16 @@ defmodule Loopex.Policy do
   ## Technical depth
 
   A closed enumeration, so an operator reading a denial gets a category they can
-  act on rather than free text that varies by host.
+  act on rather than free text that varies by host. `decide/2` enforces the
+  closure: a denial carrying anything else resolves to `:policy_unavailable`.
+  The literal union and `reason_categories/0` are the same list.
   """
-  @type reason_category :: atom()
+  @type reason_category ::
+          :policy_denied
+          | :effect_class_not_permitted
+          | :workspace_not_permitted
+          | :interaction_unsupported
+          | :policy_unavailable
 
   @callback decide(request()) ::
               {:allow, context()} | {:deny, reason_category()} | {:defer, term()}
@@ -204,7 +212,21 @@ defmodule Loopex.Policy do
           do: {:allow, context},
           else: {:deny, :policy_unavailable}
 
-      {:deny, category} when is_atom(category) ->
+      # Concept: the enumeration is closed, so a category outside it is not a
+      # category this boundary hands on.
+      #
+      # Technical depth: `is_atom/1` admitted anything a host invented, which
+      # made the closed enumeration `reason_categories/0` publishes untrue: an
+      # operator could read a denial whose category no conformance suite
+      # enumerates and no surface knows how to render. This is a behavioural
+      # change at a port boundary -- a host returning its own category is now
+      # denied as `:policy_unavailable` rather than under its own label -- and
+      # the direction is deliberately unchanged, because both are denials and an
+      # answer this port cannot read is exactly the "I do not know" the
+      # fail-closed rule already resolves to no. A host that needs a distinction
+      # this list cannot carry needs the list changed, which is a decision, not
+      # a return value.
+      {:deny, category} when category in @reason_categories ->
         {:deny, category}
 
       {:defer, _interaction} ->

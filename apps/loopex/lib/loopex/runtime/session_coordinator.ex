@@ -40,7 +40,28 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   @mutation_domain "session"
   @page_size 1_024
+
+  # Concept: an owner that cannot reach the Store waits a while, then says so.
+  # It does not wait forever, because the caller that asked for this session is
+  # blocked behind it with no bound of its own.
+  #
+  # Technical depth: every retry re-reads the Store, so a flat delay against a
+  # Store that stays down is a hot loop that never ends -- roughly forty reads a
+  # second, indefinitely, while `create_session/3` and `resume_session/3` wait on
+  # `:infinity`. Three declared numbers end that. The first delay stays at 25 ms
+  # because the case this loop exists for is a Store momentarily behind its own
+  # writes, which clears in a retry or two and should cost nothing. The delay
+  # then doubles, so a longer outage is not paid for at that rate; the 400 ms
+  # ceiling holds a sustained outage at about two reads a second, which is
+  # observation rather than load. Twelve retries spend 25 + 50 + 100 + 200 ms and
+  # then eight ceilings, so acquisition gives up after roughly 3.6 s: long enough
+  # to ride out a Store that is restarting, short enough that a blocked caller
+  # gets a real answer instead of a hang. `@max_historical_attempts` does not
+  # cover this; it bounds succession contention, and `state.attempt` advances
+  # only on the stale-epoch branch, so an unavailable Store never reaches it.
   @owner_retry_ms 25
+  @owner_retry_ceiling_ms 400
+  @max_owner_retries 12
   @max_historical_attempts 1_024
   @recovery_contract "loopex-executor-recovery-v1"
   @reconciliation_fields [
@@ -109,10 +130,25 @@ defmodule Loopex.Runtime.SessionCoordinator do
     safe_call(coordinator, {:command, owner, command}, :infinity)
   end
 
+  # Concept: status is the one session question that may give up on an owner
+  # that is not answering, because asking it changes nothing.
+  #
+  # Technical depth: `command/3`, `reconciliation_query/2`, and `reconcile/3`
+  # keep `:infinity` deliberately, and must keep it: a timeout is not an
+  # ownership verdict, and bounding a call whose mutation may already be
+  # committing abandons a caller whose work becomes durable anyway. None of that
+  # reasoning reaches this call. A status read proposes nothing, commits nothing,
+  # and installs nothing, so its deadline cannot become a durable fact or fence
+  # anyone out of a session; the worst it can produce is
+  # `{:error, :session_unavailable}` for a caller free to ask again. That is why
+  # this one call carries a bound and why making the other three match it would
+  # reintroduce the defect those two commits removed.
+  @session_status_timeout_ms 5_000
+
   @doc false
   @spec session_status(pid(), owner()) :: {:ok, map()} | {:error, term()}
   def session_status(coordinator, owner) when is_pid(coordinator) and is_map(owner) do
-    safe_call(coordinator, {:session_status, owner}, :infinity)
+    safe_call(coordinator, {:session_status, owner}, @session_status_timeout_ms)
   end
 
   @doc false
@@ -142,6 +178,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
        succession_id: Keyword.fetch!(options, :succession_id),
        prior_tx_id: Keyword.get(options, :prior_tx_id),
        attempt: 1,
+       # Technical depth: one counter for the whole acquisition, never reset. A
+       # counter reset by succession contention would multiply the budget by
+       # `@max_historical_attempts` and put the unbounded wait back.
+       acquisition_retries: 0,
        transaction: nil,
        incarnation: nil,
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
@@ -363,7 +403,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           incarnation: incarnation
       })
     else
-      :retry -> retry_owner(state)
+      :retry -> retry_owner(state, :store_unavailable)
       {:error, reason} -> {:stop, reason, state}
     end
   end
@@ -461,10 +501,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:stop, reason, state}
 
       {:commit_unknown, _tx_id} ->
-        retry_owner(state)
+        retry_owner(state, :commit_unknown)
 
       {:fenced, :commit_unknown} ->
-        retry_owner(state)
+        retry_owner(state, :commit_unknown)
     end
   end
 
@@ -480,18 +520,43 @@ defmodule Loopex.Runtime.SessionCoordinator do
       send(self(), :advance_work)
       {:noreply, ready}
     else
-      {:error, :store_unavailable} -> retry_owner(state)
-      :unavailable -> retry_owner(state)
+      {:error, :store_unavailable} -> retry_owner(state, :store_unavailable)
+      :unavailable -> retry_owner(state, :store_unavailable)
       false -> {:stop, :owner_recovery_superseded, state}
       {:error, reason} -> {:stop, reason, state}
       _other -> {:stop, :owner_recovery_failed, state}
     end
   end
 
-  defp retry_owner(state) do
-    Process.send_after(self(), :retry_owner, @owner_retry_ms)
-    {:noreply, state}
+  # Concept: retrying is bounded, and running out of retries is an answer the
+  # caller receives rather than a silence it waits through.
+  #
+  # Technical depth: control holds the caller's `from`, so the coordinator cannot
+  # reply itself; it casts the reason it actually failed for and then stops. The
+  # cast is a cast: control still makes no synchronous call into a coordinator,
+  # and this direction was never half of that cycle. Order matters for the reply
+  # being exactly one. Signals from this process to control are delivered in the
+  # order they were sent, and the monitor's `:DOWN` is one of them, so control
+  # handles the cast first, answers with the true reason, and clears the waiter
+  # the `:DOWN` behind it would otherwise answer a second time with
+  # `:owner_recovery_failed`. Stopping with `:normal` is deliberate: this
+  # coordinator did its job -- it reported a Store it could not reach -- and a
+  # temporary child that reports and exits is not a crash to log.
+  defp retry_owner(state, reason) do
+    retries = state.acquisition_retries + 1
+
+    if retries > @max_owner_retries do
+      GenServer.cast(state.control, {:owner_unavailable, self(), state.session_id, reason})
+      {:stop, :normal, state}
+    else
+      Process.send_after(self(), :retry_owner, retry_delay(retries))
+      {:noreply, %{state | acquisition_retries: retries}}
+    end
   end
+
+  # Technical depth: doubling from the first delay, clamped at the ceiling.
+  defp retry_delay(retries),
+    do: min(@owner_retry_ms * Integer.pow(2, retries - 1), @owner_retry_ceiling_ms)
 
   defp valid_owner_receipt?(
          %{

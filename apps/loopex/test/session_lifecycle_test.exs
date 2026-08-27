@@ -450,6 +450,100 @@ defmodule Loopex.SessionLifecycleTest do
     assert session.owner_incarnation_id == third.owner.owner_incarnation_id
   end
 
+  # Concept: a Store that is down ends an acquisition with the truth, once,
+  # rather than leaving the caller waiting for a recovery that will never happen.
+  #
+  # Technical depth: `create_session/3` and `resume_session/3` wait on control
+  # with no bound, and the coordinator re-armed its Store reads on a flat timer
+  # with nothing counting them, so a Store that stayed unavailable produced a live
+  # coordinator, tens of reads a second, and a caller that was never answered at
+  # all. The retry budget is what ends it. Two things are asserted about the
+  # ending. The reason is the one that is true -- `:store_unavailable`, not the
+  # `:owner_recovery_failed` the monitor reports for an owner that merely died --
+  # and the caller's mailbox is empty afterwards, because control replying and the
+  # `:DOWN` behind it replying again would both land there before the call
+  # deactivates its alias, which is how a double reply becomes observable.
+  test "a persistently unavailable Store ends owner acquisition with the truthful reason exactly once",
+       fixture do
+    session_id = create_session!(fixture, "unavailable-baseline")
+    :ok = M1RuntimeTestStore.fail_reads(fixture.store_pid, true)
+
+    caller =
+      Task.async(fn ->
+        result =
+          Loopex.resume_session(fixture.runtime, session_id, command_id: "unavailable-resume")
+
+        Process.sleep(250)
+        {result, Process.info(self(), :messages)}
+      end)
+
+    started = System.monotonic_time(:millisecond)
+    assert {{:error, :store_unavailable}, {:messages, []}} = Task.await(caller, 30_000)
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    # It spent a retry budget rather than refusing the first unavailable read,
+    # and it still ended well inside what a blocked caller can wait for.
+    assert elapsed >= 1_000
+    assert elapsed < 30_000
+
+    # The session is left recoverable rather than bricked: control holds no
+    # waiter, and a Store that comes back is enough to acquire an owner again.
+    entry = current_entry(fixture.runtime, session_id)
+    assert entry.status == :unavailable
+    assert Map.get(entry, :waiting) == nil
+
+    :ok = M1RuntimeTestStore.fail_reads(fixture.store_pid, false)
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "recovered-resume")
+  end
+
+  # Concept: a status query may give up on an owner that is not answering. The
+  # calls that commit may not.
+  #
+  # Technical depth: `session_status/2` used `:infinity` like its neighbours, so
+  # a wedged owner held a read-only question open with no way out of it. The bound
+  # is safe for exactly one reason: this call proposes nothing, commits nothing,
+  # and installs nothing, so its deadline cannot become a durable fact or an
+  # ownership verdict. `command/3`, `reconciliation_query/2`, and `reconcile/3`
+  # keep `:infinity` for that same reason read the other way. This case asserts
+  # the split -- a bounded honest unavailability here, an owner that is still the
+  # owner immediately afterwards -- so a later reader does not resolve the
+  # difference by making them all match.
+  test "a status query on a wedged owner is bounded and decides nothing about ownership",
+       fixture do
+    session_id = create_session!(fixture, "wedged-status")
+    entry = current_entry(fixture.runtime, session_id)
+
+    :sys.suspend(entry.coordinator)
+
+    {result, elapsed} =
+      try do
+        started = System.monotonic_time(:millisecond)
+        result = Loopex.session_status(fixture.runtime, session_id)
+        {result, System.monotonic_time(:millisecond) - started}
+      after
+        :sys.resume(entry.coordinator)
+      end
+
+    assert result == {:error, :session_unavailable}
+
+    # It waited its declared bound rather than calling a slow owner unavailable
+    # at once, and it did give up rather than waiting forever.
+    assert elapsed >= 1_000
+    assert elapsed < 30_000
+
+    # Nothing durable was decided: the same owner answers again as soon as it is
+    # running, and control still routes to it.
+    assert {:ok, %{status: :active, owner_epoch: epoch}} =
+             Loopex.session_status(fixture.runtime, session_id)
+
+    assert epoch == entry.owner.owner_epoch
+
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    assert Control.current_owner(control, session_id, entry.owner) == :ok
+  end
+
   defp drive_fault_pair(fixture, {:runtime_control_create_session, _phase} = pair) do
     :ok = M1RuntimeTestStore.inject(fixture.store_pid, pair)
 

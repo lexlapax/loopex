@@ -306,6 +306,31 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
+  # Concept: an owner that gave up says why, so the caller waiting on it hears
+  # the reason that is true instead of the one the monitor can infer.
+  #
+  # Technical depth: the coordinator casts this and then stops, so this message
+  # and the monitor's `:DOWN` both arrive. Signals from one process to another
+  # keep their order and the `:DOWN` is one of them, so this runs first: it
+  # answers the waiter with the coordinator's own reason and clears `waiting`,
+  # which is what makes the answer exactly one rather than this reason followed
+  # by `:owner_recovery_failed` from the `:DOWN` behind it. Clearing the waiter
+  # is not belt-and-braces around that ordering; it is the whole mechanism, and
+  # it holds even if the two ever arrived the other way round. The coordinator
+  # pid is matched because a superseded generation's late report must not answer
+  # a caller waiting on the current one.
+  def handle_cast({:owner_unavailable, coordinator, session_id, reason}, state) do
+    case Map.fetch(state.sessions, session_id) do
+      {:ok, %{status: :acquiring, coordinator: ^coordinator} = entry} ->
+        reply_waiting(entry, {:error, reason})
+        answered = %{entry | status: :unavailable, waiting: nil}
+        {:noreply, %{state | sessions: Map.put(state.sessions, session_id, answered)}}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
   @impl GenServer
   def handle_info({:DOWN, reference, :process, pid, _reason}, state) do
     case Map.pop(state.monitor_to_session, reference) do
