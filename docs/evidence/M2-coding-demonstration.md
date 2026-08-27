@@ -104,14 +104,15 @@ All four coding tools ran across seven real provider calls, every committed
 reply declared it streamed with a positive delta count, the run ended `done`,
 and the workspace ended carrying both the edited `notes.md` and `summary.txt`.
 
-The refusal is proved by a different role and is attributed here rather than
-read into the line above. `a denied tool call inside a multi tool task is
-reported and the task continues truthfully` is a locked case of this selector's
-`default` role, which is excluded from the real-provider role precisely so the
-behaviour is proved deterministically rather than left to what a model happens
-to attempt. That role executed five cases at this candidate and passed. What the
-attended line above shows about the refusal is only its trace: `summary.txt` is
-still there, and a permitted removal would have taken it.
+The refusal is inside this attended run, not credited to another role. The run
+is dispatched with `--policy shell-allowlist`, and the task's fifth step asks for
+`rm summary.txt`, which that stance refuses; the case asserts the refusal
+reached the transcript, that `summary.txt` survives, and that the run ended after
+the refusal rather than on it. The observed line shows the surviving
+`summary.txt` because the removal was denied. The deterministic `Da` case
+`a denied tool call inside a multi tool task is reported and the task continues
+truthfully` remains as supporting coverage and is not what proves this claim --
+crediting it instead was the substitution this record replaced.
 
 Seven is this task's own count. The role that carries this run in the
 [real-call attestations](M2-real-call-attestations.md) records eight, because

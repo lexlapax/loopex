@@ -38,7 +38,7 @@ usable coding loop — that loop ran a fixed two turns, carried no conversation
 history, and exposed two demonstration tools, so the only way to drive it was a
 test selector.
 
-`M2` is accepted and in progress on its own branch. It makes that loop a command:
+`M2` is in review on its own branch. It makes that loop a command:
 `loopex` submits a prompt into a durable session, the answer streams as it is
 produced, the loop runs as many turns as the task needs while the model sees the
 whole conversation and the real output of every tool it ran, four coding tools

@@ -86,8 +86,9 @@ next milestone.
 
 **Durable records.** The committed record kinds are `session_genesis`,
 `owner_advanced`, `command_admitted`, `model_request_committed`,
-`model_result_committed`, `effect_intent_committed`,
-`executor_receipt_committed`, `tool_result_committed`,
+`model_result_committed`, `model_attempt_abandoned`,
+`effect_intent_committed`, `executor_receipt_committed`,
+`executor_progress_refused`, `tool_result_committed`,
 `outcome_unknown_committed`, and `run_terminal_committed`. Their payloads carry
 the M2 loop's new content — projected conversation elements, staged request
 bytes and their `staged_request_digest`, generation triples, declared bounds and
