@@ -127,6 +127,17 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   # case that has to revoke the claim mid-job needs the holder itself, which is
   # the one thing that composed it can supply.
   defp executor_and_lease(root, artifacts \\ nil) do
+    {executor, lease_id, lease, _ledger} = executor_lease_and_ledger(root, artifacts)
+    {executor, lease_id, lease}
+  end
+
+  # Concept: a case about the receipt's retention needs the ledger the receipt is
+  # retained in.
+  #
+  # Technical depth: the ledger root is host-supplied configuration, so a case
+  # that composes the executor already owns it; returning it is what lets a case
+  # observe the retention it configured rather than guess when it happens.
+  defp executor_lease_and_ledger(root, artifacts \\ nil) do
     lease_id = "lease-#{System.unique_integer([:positive])}"
     {:ok, lease} = WorkspaceLease.start_link(id: lease_id, path: root, fencing_token: @fence)
 
@@ -143,7 +154,42 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         artifacts: artifacts
       )
 
-    {executor, lease_id, lease}
+    {executor, lease_id, lease, ledger}
+  end
+
+  # Concept: wait for a path the executor creates, rather than for a duration
+  # guessed from the outside.
+  #
+  # Technical depth: a case that has to act at one point inside a job cannot use
+  # a sleep, because the point it is aiming at is a few milliseconds wide and
+  # moves with the machine. Both paths a case here aims at announce themselves on
+  # the filesystem -- the launcher writes a marker immediately before exiting,
+  # and the receipt's retention creates its staging file -- so the wait is on the
+  # executor's own progress.
+  defp await_path(check, deadline_ms) do
+    stop = System.monotonic_time(:millisecond) + deadline_ms
+    await_path(check, stop, check.())
+  end
+
+  defp await_path(_check, _stop, {:ok, found}), do: {:ok, found}
+
+  defp await_path(check, stop, :error) do
+    if System.monotonic_time(:millisecond) > stop,
+      do: :error,
+      else: await_path(check, stop, check.())
+  end
+
+  defp staging_file(ledger) do
+    case File.ls(ledger) do
+      {:ok, entries} ->
+        case Enum.find(entries, &String.contains?(&1, ".tmp-")) do
+          nil -> :error
+          found -> {:ok, found}
+        end
+
+      {:error, _reason} ->
+        :error
+    end
   end
 
   defp run(root, tool_id, arguments, overrides \\ %{}) do
@@ -1233,5 +1279,210 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     assert String.trim(plain) == "ok"
     refute plain =~ "still running"
+  end
+
+  test "a lease lost while a job's group is brought to quiescence is reported unproven" do
+    # Concept: the work between the command exiting and the receipt existing is
+    # still the job, so the lease still covers it.
+    #
+    # Technical depth: bringing an owned process group to quiescence signals the
+    # group, waits, signals again and looks twice with `ps`. None of that is a
+    # wait this executor sits in, so a lease that dies there is not noticed while
+    # it happens -- it is noticed afterwards, by the check that runs before the
+    # receipt is produced. Deleting that one check left all nineteen cases in
+    # this file green, which is what made it worth writing: nothing here proved
+    # that a lease lost after the command exited was reported at all.
+    root = workspace()
+    marker = Path.join(root, "launcher-exited.txt")
+    {executor, lease_id, lease} = executor_and_lease(root)
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{"command" => "( sleep 3 ) >/dev/null 2>&1 & printf x > launcher-exited.txt; exit 0"},
+          %{executor: executor, lease_id: lease_id}
+        )
+      end)
+
+    assert {:ok, _marker} =
+             await_path(
+               fn -> if File.exists?(marker), do: {:ok, marker}, else: :error end,
+               20_000
+             ),
+           "the launcher never announced that it was about to exit"
+
+    # The launcher exits immediately after the marker; the quiescence sequence
+    # that follows it holds this executor for tens of milliseconds, which is the
+    # instant this case is aiming at.
+    Process.sleep(30)
+    GenServer.stop(lease)
+
+    assert {:ok, receipt} = Task.await(running, 60_000)
+
+    assert receipt.outcome == :outcome_unknown,
+           "a lease lost after the command exited was reported as #{inspect(receipt.outcome)}"
+
+    assert receipt.output =~ "workspace lease was lost"
+    assert receipt.output =~ "unproven"
+
+    # The reply and the durable record are the same fact, not two.
+    assert {:ok, %{outcome: :outcome_unknown}} = Local.receipt(executor, receipt.job_id)
+  end
+
+  test "a lease lost while a job's receipt is being retained is reported unproven" do
+    # Concept: a receipt that exists only in this server's memory is not a
+    # receipt, so the lease is held until the bytes land.
+    #
+    # Technical depth: the lease was checked once with a zero-time mailbox peek
+    # and then demonitor-flushed, before the receipt was built and long before it
+    # was written. A lease that died in the window that followed was not merely
+    # missed: the evidence was discarded, so a `completed` receipt was persisted
+    # for a job whose authorisation had already ended. A peek answers "has it
+    # died yet"; the obligation is about an interval, and the write is the last
+    # blocking step in it.
+    #
+    # The lease is stopped when the retention's staging file appears, so the
+    # instant is taken from the executor's own progress rather than guessed: by
+    # then the peek has already passed and the receipt is being written.
+    root = workspace()
+    {executor, lease_id, lease, ledger} = executor_lease_and_ledger(root)
+
+    # The largest receipt this executor can retain, so the write it is stopped
+    # during is the longest one it ever performs.
+    File.write!(
+      Path.join(root, "big.txt"),
+      String.duplicate("x", CodingTools.limits().read_bytes)
+    )
+
+    # The holder is unlinked before it is killed, so the abrupt exit that gives
+    # the executor its DOWN in the fewest possible microseconds does not reach
+    # this case through the link `start_link/1` created.
+    Process.unlink(lease)
+    owner = self()
+
+    killer =
+      spawn(fn ->
+        case await_path(fn -> staging_file(ledger) end, 30_000) do
+          {:ok, found} ->
+            Process.exit(lease, :kill)
+            send(owner, {:stopped_during_retention, found})
+
+          :error ->
+            send(owner, :never_staged)
+        end
+      end)
+
+    on_exit(fn -> Process.exit(killer, :kill) end)
+
+    assert {:ok, receipt} =
+             run(root, "loopex.read", %{"path" => "big.txt"}, %{
+               executor: executor,
+               lease_id: lease_id
+             })
+
+    # The probe has to have fired inside the retention, or the case proves
+    # nothing about it.
+    assert_receive {:stopped_during_retention, _staging}, 30_000
+
+    assert receipt.outcome == :outcome_unknown,
+           "a lease lost while the receipt was being retained was reported as #{inspect(receipt.outcome)}"
+
+    assert receipt.output =~ "workspace lease was lost"
+    assert receipt.output =~ "unproven"
+
+    # The durable receipt is the plane a recovering coordinator reads, so the
+    # replacement has to have overwritten the one the abandoned write may have
+    # left behind.
+    assert {:ok, durable} = Local.receipt(executor, receipt.job_id)
+    assert durable.outcome == :outcome_unknown
+    assert durable.output == receipt.output
+
+    # Nothing half-written is left in the ledger.
+    assert {:ok, entries} = File.ls(ledger)
+    assert Enum.all?(entries, &String.ends_with?(&1, ".receipt")), inspect(entries)
+  end
+
+  test "a process group is confirmed clean only by a ps that answered" do
+    # Concept: silence from a program that died is not an answer.
+    #
+    # Technical depth: the confirmation discarded `ps`'s exit status, so any
+    # empty response read as an empty group -- and that single boolean is what
+    # stands between `:completed` and `:outcome_unknown`, and between `cancel/2`
+    # reporting `:cleaned` and `:unconfirmed`. A program killed by a signal
+    # reports empty output with an abnormal status, which read as proof.
+    #
+    # The status cannot simply be required to be zero, and the first assertion is
+    # why: measured against the toolchain this suite runs on, an empty group is
+    # reported with status 1. A rule that demanded zero would refuse every
+    # honest confirmation this executor makes.
+    group = ephemeral_process_group()
+
+    assert Local.group_answered_empty?(
+             System.cmd("/bin/ps", ["-o", "pid=", "-g", Integer.to_string(group)],
+               stderr_to_stdout: true
+             )
+           ),
+           "a group with no members is no longer confirmed clean"
+
+    # The two answers `ps` gives: members listed, and none matched.
+    refute Local.group_answered_empty?({"48965\n", 0})
+    assert Local.group_answered_empty?({"", 1})
+
+    # A `ps` that was killed says nothing at all, and nothing is not proof.
+    refute Local.group_answered_empty?({"", 137})
+    refute Local.group_answered_empty?({"", 2})
+
+    # Its own diagnostics arrive on the same stream this executor captures, so
+    # an error is already non-empty.
+    refute Local.group_answered_empty?({"ps: process group too large: 999999\n", 1})
+  end
+
+  # Concept: a real process group identifier that no longer has any members.
+  #
+  # Technical depth: taken from a child that led its own group and has since
+  # exited, so the confirmation above is asked about the same kind of identifier
+  # the executor asks about rather than an invented number, which `ps` reports
+  # differently.
+  defp ephemeral_process_group do
+    port =
+      Port.open({:spawn_executable, ~c"/bin/sh"}, [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        :stderr_to_stdout,
+        :hide,
+        args: [~c"-c", ~c"ps -o pgid= -p $$ | tr -d ' '; exit 0"]
+      ])
+
+    group =
+      receive do
+        {^port, {:data, data}} -> data |> String.trim() |> String.to_integer()
+      after
+        10_000 -> flunk("the probe child never reported its process group")
+      end
+
+    receive do
+      {^port, {:exit_status, _status}} -> :ok
+    after
+      10_000 -> flunk("the probe child never exited")
+    end
+
+    assert {:ok, :empty} =
+             await_path(
+               fn ->
+                 case System.cmd("/bin/ps", ["-o", "pid=", "-g", Integer.to_string(group)],
+                        stderr_to_stdout: true
+                      ) do
+                   {"", _status} -> {:ok, :empty}
+                   {_survivors, _status} -> :error
+                 end
+               end,
+               10_000
+             ),
+           "the probe child's group still has members"
+
+    group
   end
 end

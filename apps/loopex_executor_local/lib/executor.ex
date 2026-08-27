@@ -43,6 +43,10 @@ defmodule Loopex.Executor.Local do
                             "group were still running, and the group could not be confirmed " <>
                             "cleaned. Whether its effect is complete is unproven.]"
 
+  @lease_lost_note "\n[loopex: the workspace lease was lost before this job's receipt was " <>
+                     "durably retained. Whether its effect landed in the workspace this job " <>
+                     "was authorised against is unproven.]"
+
   @typedoc """
   ## Concept
 
@@ -295,6 +299,17 @@ defmodule Loopex.Executor.Local do
     end
   end
 
+  # Concept: one place owns the lease for one job, and it owns it from before the
+  # effect starts until after the receipt is on disk.
+  #
+  # Technical depth: the monitor used to be installed and released inside
+  # `run_tool/7`, which ends where the receipt is *built*. Retention ran after
+  # that with the DOWN already flushed, so a lease that died while the receipt
+  # was being written was not merely undetected -- the evidence of it had been
+  # thrown away. Installing the monitor here and releasing it in `after` makes
+  # the monitored interval exactly the job lifetime ADR 0007 names, and every
+  # blocking step inside it is a wait that carries the DOWN rather than a gap
+  # between two samples of the mailbox.
   defp execute_new(state, job, grant, options) do
     case final_prestart_validation(state, job, grant) do
       {:ok, tool, lease_pid, workspace, arguments} ->
@@ -303,11 +318,17 @@ defmodule Loopex.Executor.Local do
             Map.update(dispatches, job.job_id, 1, &(&1 + 1))
           end)
 
-        receipt = run_tool(next_state, job, tool, lease_pid, workspace, arguments, options)
+        lease = {Process.monitor(lease_pid), lease_pid}
 
-        case retain_receipt(next_state.ledger_root, receipt) do
-          :ok -> {:reply, {:ok, receipt}, next_state}
-          {:error, reason} -> {:reply, {:error, {:receipt_not_retained, reason}}, next_state}
+        try do
+          receipt = run_tool(next_state, job, tool, workspace, arguments, options, lease)
+
+          case retain_receipt_under_lease(next_state.ledger_root, receipt, lease) do
+            {:ok, retained} -> {:reply, {:ok, retained}, next_state}
+            {:error, reason} -> {:reply, {:error, {:receipt_not_retained, reason}}, next_state}
+          end
+        after
+          Process.demonitor(elem(lease, 0), [:flush])
         end
 
       {:error, reason} ->
@@ -395,41 +416,25 @@ defmodule Loopex.Executor.Local do
 
   defp write_arguments(_arguments, _delay), do: {:error, :invalid_tool_arguments}
 
-  # Concept: the lease is held for the job's whole life, not only up to its
-  # start.
+  # Concept: every wait a coding tool sits in carries the lease's death as one of
+  # its alternatives.
   #
-  # Technical depth: ADR 0007 requires the workspace lease to remain held for the
-  # job's full lifetime, and the M1 demonstration path monitors it. The coding
-  # tools resolved the same lease pid at the final validation boundary and then
-  # discarded it, so nothing watched the holder once work began: stopping the
-  # lease process while a `loopex.bash` child was running left the command
-  # running to completion and reported `:completed`. The monitor is installed
-  # here, around every coding tool, and the DOWN is handled by whichever wait the
-  # tool is sitting in.
-  defp run_tool(
-         state,
-         job,
-         %{coding: _definition} = tool,
-         lease_pid,
-         workspace,
-         arguments,
-         options
-       ) do
-    lease = {Process.monitor(lease_pid), lease_pid}
-
+  # Technical depth: ADR 0007 requires the workspace lease held for the job's
+  # full lifetime. The monitor belongs to `execute_new/4`, which owns that whole
+  # lifetime; this function only threads it into the waits the tool performs, so
+  # stopping the lease while a `loopex.bash` child runs, while a filesystem
+  # effect blocks, or while a spilled artifact is being stored is a message this
+  # executor is already sitting in.
+  defp run_tool(state, job, %{coding: _definition} = tool, workspace, arguments, options, lease) do
     {outcome, output, artifacts} =
       job
       |> run_coding_tool(tool, workspace, arguments, options, lease)
       |> spill(state, job, lease)
-      |> honour_lease_until_receipt(lease)
-
-    Process.demonitor(elem(lease, 0), [:flush])
 
     receipt(state, job, tool, outcome, output, coding_tool_environment(arguments), artifacts)
   end
 
-  defp run_tool(state, job, tool, lease_pid, workspace, arguments, options) do
-    monitor = Process.monitor(lease_pid)
+  defp run_tool(state, job, tool, workspace, arguments, options, {monitor, lease_pid}) do
     args = launcher_arguments(arguments)
 
     port =
@@ -448,34 +453,120 @@ defmodule Loopex.Executor.Local do
 
     notify(options, {:executor_process_started, job.job_id, tool.id, [@search_path_name]})
     {outcome, output} = await_port(port, monitor, lease_pid, <<>>)
-    Process.demonitor(monitor, [:flush])
 
     receipt(state, job, tool, outcome, output, demonstration_environment(), [])
   end
 
-  # Concept: the lease is honoured until the receipt exists, not until the effect
-  # returns.
+  # Concept: the lease is honoured until the receipt is durable, not until it is
+  # built.
   #
   # Technical depth: ADR 0007 requires the lease held for the job's full
-  # lifetime, and the receipt is the end of that lifetime. The monitor covered
-  # only `run_coding_tool/6`; the artifact spill that follows it is ordinary
-  # pre-receipt work, it calls into a host-supplied store that can block for as
-  # long as it likes, and nothing there watched the holder. A store that blocked
-  # while the lease terminated produced a `completed` receipt for a job whose
-  # authorisation had already ended. `spill/4` now abandons a blocking retention
-  # on the DOWN; this final check covers every other branch, including the ones
-  # that spill nothing, by refusing to demonitor-and-flush a DOWN that arrived
-  # before the receipt was built.
-  defp honour_lease_until_receipt({outcome, output, artifacts}, {monitor, lease_pid}) do
+  # lifetime, and the amended obligation names the end of that lifetime as the
+  # point the receipt exists. A receipt that exists only as a term in this
+  # server's heap is not one any operator or recovering coordinator can ever
+  # read, so the lifetime ends where the bytes land rather than where the map is
+  # assembled.
+  #
+  # The previous shape checked the mailbox once with `after 0` and then
+  # demonitor-flushed, before the receipt was constructed and long before it was
+  # written. A point-in-time peek answers "has the lease died yet", which is not
+  # the question the obligation asks: it is a claim about an interval, so every
+  # blocking step in that interval has to be a wait that names the DOWN. The
+  # write is therefore done in a monitored worker for exactly the reason the
+  # artifact store's `put/3` is -- `File.open/2`, `IO.binwrite/2` and
+  # `:file.sync/1` are unbounded on a network, saturated or failing ledger, and
+  # calling them inline would make the holder unwatchable for as long as they
+  # take.
+  #
+  # The peek that remains is not the guarantee; it is the cheap branch for a DOWN
+  # that has already arrived, which lets this executor write the truthful receipt
+  # once rather than write a false one and then replace it.
+  defp retain_receipt_under_lease(root, receipt, {monitor, lease_pid} = lease) do
     receive do
       {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-        {:outcome_unknown,
-         output <>
-           "\n[loopex: the workspace lease was lost before this job's receipt was produced." <>
-           " Whether its effect landed in the workspace this job was authorised" <>
-           " against is unproven.]", artifacts}
+        retain_now(root, unproven_receipt(receipt))
     after
-      0 -> {outcome, output, artifacts}
+      0 -> stage_and_commit(root, receipt, lease)
+    end
+  end
+
+  defp stage_and_commit(root, receipt, {monitor, lease_pid}) do
+    parent = self()
+    tag = make_ref()
+    staging = staging_path(root, receipt)
+
+    {worker, reference} =
+      spawn_monitor(fn -> send(parent, {tag, retain_receipt(root, receipt, staging)}) end)
+
+    receive do
+      {^tag, :ok} ->
+        Process.demonitor(reference, [:flush])
+        {:ok, receipt}
+
+      {^tag, {:error, reason}} ->
+        Process.demonitor(reference, [:flush])
+        {:error, reason}
+
+      {:DOWN, ^reference, :process, ^worker, reason} ->
+        File.rm(staging)
+        {:error, {:receipt_retention_stopped, reason}}
+
+      {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
+        abandon_retention(root, receipt, staging, {worker, reference, tag})
+    end
+  end
+
+  # Concept: a lease lost while the receipt was being written leaves the effect
+  # itself unproven, and the receipt has to say so.
+  #
+  # Technical depth: that the effect ran is not in doubt; everything the receipt
+  # asserts about it is. The claim that authorised those effects is gone, another
+  # holder may already own the workspace, and this executor can no longer prove
+  # that what it wrote is what is there. A `completed` receipt would assert a
+  # proved effect in a workspace this executor has no claim on, and it would be
+  # durable -- the one plane a coordinator trusts on recovery. `:outcome_unknown`
+  # is the honest terminal fact and is what stops the coordinator blindly
+  # retrying an effectful job.
+  #
+  # The abandoned writer is killed and *confirmed* dead before the replacement is
+  # written, because both write the same job's receipt and only ordering decides
+  # which bytes survive. Where it cannot be confirmed stopped its rename may
+  # still land after this one, so which receipt is durable is genuinely unknown;
+  # saying the receipt was not retained is honest, and claiming an outcome for
+  # bytes this executor cannot vouch for is not.
+  defp abandon_retention(root, receipt, staging, {worker, reference, tag}) do
+    Process.exit(worker, :kill)
+
+    stopped =
+      receive do
+        {:DOWN, ^reference, :process, ^worker, _reason} -> true
+      after
+        1_000 -> false
+      end
+
+    if not stopped, do: Process.demonitor(reference, [:flush])
+
+    receive do
+      {^tag, _late} -> :ok
+    after
+      0 -> :ok
+    end
+
+    if stopped do
+      File.rm(staging)
+      retain_now(root, unproven_receipt(receipt))
+    else
+      {:error, :workspace_lease_lost_during_retention}
+    end
+  end
+
+  defp unproven_receipt(receipt),
+    do: %{receipt | outcome: :outcome_unknown, output: receipt.output <> @lease_lost_note}
+
+  defp retain_now(root, receipt) do
+    case retain_receipt(root, receipt, staging_path(root, receipt)) do
+      :ok -> {:ok, receipt}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -1397,16 +1488,42 @@ defmodule Loopex.Executor.Local do
   # is stated rather than papered over: the claim is about the group this
   # executor owns and no wider.
   defp confirm_group_terminated(group) when is_integer(group) and group > 1 do
-    case System.cmd("/bin/ps", ["-o", "pid=", "-g", Integer.to_string(group)],
-           stderr_to_stdout: true
-         ) do
-      {output, _status} -> String.trim(output) == ""
-    end
+    "/bin/ps"
+    |> System.cmd(["-o", "pid=", "-g", Integer.to_string(group)], stderr_to_stdout: true)
+    |> group_answered_empty?()
   rescue
     _error -> false
   end
 
   defp confirm_group_terminated(_group), do: true
+
+  # Concept: silence only means "no survivors" when it came from a `ps` that
+  # actually answered.
+  #
+  # Technical depth: the exit status was discarded, so any empty response read as
+  # an empty group. A `ps` killed by a signal reports `{"", 137}` through
+  # `System.cmd/3` -- measured on the supported toolchain -- and that read as a
+  # confirmed-clean group. This is the single piece of evidence standing between
+  # `:completed` and `:outcome_unknown`, and between `cancel/2`'s `:cleaned` and
+  # `:unconfirmed`, so a non-answer must confirm nothing.
+  #
+  # The status cannot simply be required to be zero: measured on the same
+  # toolchain, an empty group is reported as `{"", 1}`, so zero-only would refuse
+  # every honest confirmation this executor makes. `0` and `1` are the two
+  # statuses `ps` uses to answer -- survivors listed, and none matched -- and its
+  # own errors print a diagnostic that `stderr_to_stdout` puts in the same
+  # output, so an error is already non-empty. Anything outside those two statuses
+  # is not an answer.
+  #
+  # It is exposed rather than private because no test can make the operating
+  # system's `ps` die abnormally, and a rule that decides between a proved and an
+  # unproven effect should not rest on an unreachable branch.
+  @doc false
+  @spec group_answered_empty?({binary(), integer()}) :: boolean()
+  def group_answered_empty?({output, status}) when status in 0..1,
+    do: String.trim(output) == ""
+
+  def group_answered_empty?({_output, _status}), do: false
 
   defp occurrences(content, needle) when needle != "" do
     content |> String.split(needle) |> length() |> Kernel.-(1)
@@ -1544,9 +1661,16 @@ defmodule Loopex.Executor.Local do
     }
   end
 
-  defp retain_receipt(root, receipt) do
+  # The staging name is chosen by the caller rather than here, because a caller
+  # that may have to abandon this write is the one that has to be able to remove
+  # what it left behind.
+  defp staging_path(root, receipt) do
+    receipt_path(root, receipt.job_id) <>
+      ".tmp-" <> Integer.to_string(System.unique_integer([:positive]))
+  end
+
+  defp retain_receipt(root, receipt, temporary) do
     path = receipt_path(root, receipt.job_id)
-    temporary = path <> ".tmp-" <> Integer.to_string(System.unique_integer([:positive]))
     bytes = :erlang.term_to_binary(receipt, [:deterministic])
 
     result =
