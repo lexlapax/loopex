@@ -103,12 +103,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   @doc false
-  @spec describe(pid()) :: {:ok, owner(), SessionState.t()} | {:error, term()}
-  def describe(coordinator) when is_pid(coordinator) do
-    safe_call(coordinator, :describe)
-  end
-
-  @doc false
   @spec command(pid(), owner(), map()) :: {:accepted, binary()} | {:error, term()}
   def command(coordinator, owner, command)
       when is_pid(coordinator) and is_map(owner) and is_map(command) do
@@ -180,13 +174,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   def handle_continue(:acquire_owner, state), do: advance_acquisition(state)
 
   @impl GenServer
-  def handle_call(:describe, _from, state) do
-    case state.phase do
-      :ready -> {:reply, {:ok, state.owner, state.durable}, state}
-      _other -> {:reply, {:error, :owner_acquiring}, state}
-    end
-  end
-
   def handle_call({:command, supplied_owner, command}, _from, state) do
     cond do
       state.phase != :ready ->
@@ -198,11 +185,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
       state.superseded ->
         {:reply, {:error, :superseded_owner}, state}
 
-      not Control.current_owner?(state.control, state.session_id, state.owner) ->
-        {:reply, {:error, :superseded_owner}, %{state | superseded: true}}
-
       true ->
-        commit_command(state, command)
+        case Control.current_owner(state.control, state.session_id, state.owner) do
+          :ok ->
+            commit_command(state, command)
+
+          {:error, :superseded_owner} ->
+            {:reply, {:error, :superseded_owner}, %{state | superseded: true}}
+
+          {:error, :runtime_unavailable} = error ->
+            {:reply, error, state}
+        end
     end
   end
 
@@ -295,11 +288,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
       not deadline_reached?(state, run_id) ->
         {:noreply, arm_deadline(state, run_id)}
 
-      not Control.current_owner?(state.control, state.session_id, state.owner) ->
-        {:noreply, %{state | superseded: true}}
-
       true ->
-        finish_at_deadline(state, run_id)
+        case Control.current_owner(state.control, state.session_id, state.owner) do
+          :ok ->
+            finish_at_deadline(state, run_id)
+
+          {:error, :superseded_owner} ->
+            {:noreply, %{state | superseded: true}}
+
+          # Control is gone, so there is nothing left to commit a terminal
+          # against. The successor rebuilds this decision from the journal.
+          {:error, :runtime_unavailable} ->
+            {:noreply, state}
+        end
     end
   end
 
@@ -619,28 +620,35 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp advance_work(%{phase: :ready, superseded: false, model: model} = state)
        when is_map(model) do
-    if Control.current_owner?(state.control, state.session_id, state.owner) do
-      case SessionState.pending_work(state.durable) do
-        [] ->
-          {:noreply, state}
+    case Control.current_owner(state.control, state.session_id, state.owner) do
+      :ok ->
+        case SessionState.pending_work(state.durable) do
+          [] ->
+            {:noreply, state}
 
-        [%{stage: "model_pending"} = work | _rest] ->
-          before_deadline(state, work, &prepare_model_request/2)
+          [%{stage: "model_pending"} = work | _rest] ->
+            before_deadline(state, work, &prepare_model_request/2)
 
-        [%{stage: "model_dispatched"} = work | _rest] ->
-          before_deadline(state, work, &start_model_work/2)
+          [%{stage: "model_dispatched"} = work | _rest] ->
+            before_deadline(state, work, &start_model_work/2)
 
-        [%{stage: "effect_pending"} = work | _rest] ->
-          prepare_effect(state, work)
+          [%{stage: "effect_pending"} = work | _rest] ->
+            prepare_effect(state, work)
 
-        [%{stage: "effect_dispatched"} | _rest] ->
-          {:noreply, state}
+          [%{stage: "effect_dispatched"} | _rest] ->
+            {:noreply, state}
 
-        [%{stage: "turn_settled"} = work | _rest] ->
-          settle_turn(state, work)
-      end
-    else
-      {:noreply, %{state | superseded: true}}
+          [%{stage: "turn_settled"} = work | _rest] ->
+            settle_turn(state, work)
+        end
+
+      {:error, :superseded_owner} ->
+        {:noreply, %{state | superseded: true}}
+
+      # Control is gone. Pending work stays pending rather than being abandoned
+      # under a supersession that no successor ever claimed.
+      {:error, :runtime_unavailable} ->
+        {:noreply, state}
     end
   end
 
@@ -1893,8 +1901,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       state.phase != :ready -> {:error, :owner_acquiring}
       state.superseded -> {:error, :superseded_owner}
       supplied_owner != state.owner -> {:error, :superseded_owner}
-      Control.current_owner?(state.control, state.session_id, state.owner) -> :ok
-      true -> {:error, :superseded_owner}
+      true -> Control.current_owner(state.control, state.session_id, state.owner)
     end
   end
 

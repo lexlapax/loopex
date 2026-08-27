@@ -127,33 +127,42 @@ defmodule Loopex.AgentLoopTest do
     fixture
   end
 
-  # Concept: wait for the run to actually finish before asserting on it.
+  # Concept: wait for the run to actually finish before asserting on it, and say
+  # so plainly when it never does.
   #
   # Technical depth: the loop runs asynchronously in supervised tasks, so an
   # empty read means "not yet" rather than "no more". Polling with a deadline
-  # keeps the test honest: it fails on a genuinely stuck run instead of passing
-  # because it looked too early, and it never inflates a timeout to make a slow
-  # path look green.
+  # keeps the test honest, and it never inflates a timeout to make a slow path
+  # look green. Reaching the deadline is itself the finding, so it is raised
+  # rather than returned: handing back a partial list let every caller assert on
+  # a missing event instead, which reported a stalled or refused run as
+  # `left: nil` and named neither the stall nor the refusal. The last read is
+  # carried into the message because an error and an empty queue take the same
+  # branch here, and only one of them is worth waiting out.
   defp drain(attachment, deadline_ms \\ 5_000) do
     deadline = System.monotonic_time(:millisecond) + deadline_ms
-    collect(attachment, deadline, [])
+    collect(attachment, deadline, deadline_ms, [])
   end
 
-  defp collect(attachment, deadline, acc) do
+  defp collect(attachment, deadline, deadline_ms, acc) do
     case Loopex.next_event(attachment) do
       {:ok, event} ->
         acc = [event | acc]
 
         if event.kind == "run.finished",
           do: Enum.reverse(acc),
-          else: collect(attachment, deadline, acc)
+          else: collect(attachment, deadline, deadline_ms, acc)
 
-      _other ->
+      other ->
         if System.monotonic_time(:millisecond) >= deadline do
-          Enum.reverse(acc)
+          flunk("""
+          no run.finished within #{deadline_ms}ms.
+          last read: #{inspect(other)}
+          events observed: #{inspect(Enum.map(Enum.reverse(acc), & &1.kind))}
+          """)
         else
           Process.sleep(10)
-          collect(attachment, deadline, acc)
+          collect(attachment, deadline, deadline_ms, acc)
         end
     end
   end

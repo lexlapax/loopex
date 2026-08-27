@@ -1,7 +1,34 @@
 Code.require_file("support/m1_runtime_helper.exs", __DIR__)
 
+defmodule Loopex.SlowControl do
+  @moduledoc false
+
+  # Concept: a control process that is alive and correct but slow to answer.
+  #
+  # Technical depth: the real control cannot be made late on demand without a
+  # hook that exists only for the test, so the boundary is exercised through a
+  # stand-in that answers exactly what control answers, only later. A delay of
+  # zero makes it an ordinary process this file can then stop, which is how the
+  # absent case gets a pid that is genuinely gone rather than never started.
+
+  use GenServer
+
+  def start_link(delay_ms), do: GenServer.start_link(__MODULE__, delay_ms)
+
+  @impl GenServer
+  def init(delay_ms), do: {:ok, delay_ms}
+
+  @impl GenServer
+  def handle_call({:current_owner, _session_id, _owner}, _from, delay_ms) do
+    Process.sleep(delay_ms)
+    {:reply, :ok, delay_ms}
+  end
+end
+
 defmodule Loopex.SessionLifecycleTest do
   use ExUnit.Case, async: false
+
+  alias Loopex.SlowControl
 
   alias Loopex.M1RuntimeTestStore
   alias Loopex.Runtime
@@ -13,6 +40,46 @@ defmodule Loopex.SessionLifecycleTest do
     fixture = start_fixture("session-runtime")
     on_exit(fn -> stop_fixture(fixture) end)
     fixture
+  end
+
+  # Concept: the two ways an ownership question can fail to be a "yes" are not
+  # the same answer, and neither of them is latency.
+  #
+  # Technical depth: this bound the control call at five seconds and read every
+  # failure -- including its own timeout -- as "not the owner". A control that
+  # was merely busy therefore fenced a live owner out of its own session, and
+  # because the coordinator records that verdict as `superseded`, the session was
+  # bricked for good by nothing but scheduling. Both halves are asserted here: a
+  # control slower than the old bound still answers, and a control that is gone
+  # reports unavailability rather than a supersession no one decided.
+  test "a slow control still answers and an absent one reports unavailability rather than supersession",
+       fixture do
+    {:ok, session_id} =
+      Loopex.create_session(fixture.runtime, %{"workspace" => "fence"},
+        command_id: "create-fence"
+      )
+
+    entry = current_entry(fixture.runtime, session_id)
+
+    # Alive, healthy, and slower to reply than the bound this call used to
+    # impose on itself. The owner it is asked about is the current one, so the
+    # only answer that is true is `:ok`.
+    slow = start_supervised!({SlowControl, 6_000})
+
+    assert Control.current_owner(slow, session_id, entry.owner) == :ok
+
+    # A control that is genuinely gone is unavailable. Reporting supersession
+    # here would claim a successor exists when none does.
+    absent = start_supervised!({SlowControl, 0}, id: :absent_control)
+    :ok = stop_supervised!(:absent_control)
+    refute Process.alive?(absent)
+
+    assert Control.current_owner(absent, session_id, entry.owner) ==
+             {:error, :runtime_unavailable}
+
+    # And unavailability leaves no mark: the live owner is still the owner.
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    assert Control.current_owner(control, session_id, entry.owner) == :ok
   end
 
   test "session creation atomically records its runtime command mapping and genesis re-presents identical bytes idempotently and conflicts on changed bytes",
@@ -344,9 +411,14 @@ defmodule Loopex.SessionLifecycleTest do
     assert Process.alive?(third.coordinator)
 
     {:ok, %{control: control}} = Runtime.children(fixture.runtime)
-    refute Control.current_owner?(control, session_id, first.owner)
-    refute Control.current_owner?(control, session_id, second.owner)
-    assert Control.current_owner?(control, session_id, third.owner)
+
+    assert Control.current_owner(control, session_id, first.owner) ==
+             {:error, :superseded_owner}
+
+    assert Control.current_owner(control, session_id, second.owner) ==
+             {:error, :superseded_owner}
+
+    assert Control.current_owner(control, session_id, third.owner) == :ok
 
     assert {:error, :superseded_owner} =
              SessionCoordinator.command(first.coordinator, first.owner, %{
