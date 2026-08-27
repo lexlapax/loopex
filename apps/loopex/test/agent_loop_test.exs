@@ -892,6 +892,41 @@ defmodule Loopex.AgentLoopTest do
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
   end
 
+  test "an unproven effect stops the tool calls still queued behind it in the same batch" do
+    # Both calls belong to one assistant message, so the run never reaches the
+    # settlement where the precedence used to be read: the turn is still open,
+    # and the coordinator dispatches the next call of that same turn directly.
+    # `docs/vision-technical.md` makes `outcome_unknown` terminal for the
+    # affected run, and a run that keeps running its remaining effects has
+    # resumed past a terminal outcome — the loop was merely paused at the next
+    # model call rather than stopped. The precedence is over further effects,
+    # not only over the next request.
+    script = [
+      %{text: "two at once", calls: [call("c1"), call("c2")]},
+      %{text: "done", calls: []}
+    ]
+
+    {fixture, _session_id, events, finished} = unknown_effect_run(script)
+
+    assert Enum.map(Loopex.AgentLoopTestExecutor.jobs(fixture.executor), & &1.tool_call_id) == [
+             "c1"
+           ]
+
+    # The second call was never announced either, so no operator is left holding
+    # a `tool.started` that never finishes.
+    assert Enum.map(Enum.filter(events, &(&1.kind == "tool.started")), & &1["tool_call_id"]) == [
+             "c1"
+           ]
+
+    assert finished["outcome"] == "outcome_unknown"
+    assert finished["bound"] == nil
+    assert is_binary(finished["reconciliation_ref"])
+
+    # And the model was asked exactly once, which is the part the earlier repair
+    # already held.
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
   test "an unproven effect outranks the maximum turn bound" do
     # The bound is reached on the same turn the unknown effect settles. A run
     # that reports `bound_reached` here tells an operator it stopped in a known

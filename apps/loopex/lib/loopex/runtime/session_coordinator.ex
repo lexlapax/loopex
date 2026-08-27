@@ -688,23 +688,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
     case Control.current_owner(state.control, state.session_id, state.owner) do
       :ok ->
         case SessionState.pending_work(state.durable) do
-          [] ->
-            {:noreply, state}
-
-          [%{stage: "model_pending"} = work | _rest] ->
-            before_deadline(state, work, &prepare_model_request/2)
-
-          [%{stage: "model_dispatched"} = work | _rest] ->
-            before_deadline(state, work, &start_model_work/2)
-
-          [%{stage: "effect_pending"} = work | _rest] ->
-            prepare_effect(state, work)
-
-          [%{stage: "effect_dispatched"} | _rest] ->
-            {:noreply, state}
-
-          [%{stage: "turn_settled"} = work | _rest] ->
-            settle_turn(state, work)
+          [] -> {:noreply, state}
+          [work | _rest] -> advance_run(state, work)
         end
 
       {:error, :superseded_owner} ->
@@ -718,6 +703,41 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp advance_work(state), do: {:noreply, state}
+
+  # Concept: a run holding an effect nobody could prove does nothing further.
+  #
+  # Technical depth: this is the one place the coordinator asks whether the run
+  # may still act, and it is asked before the stage is read rather than inside
+  # any stage's branch. Asking it only at settlement stopped the next model call
+  # and nothing else: the remaining calls of the same assistant batch sit at
+  # `effect_pending`, which is dispatched directly, so an unprovable first call
+  # still ran every effect queued behind it. `outcome_unknown` is terminal for
+  # the affected run, and terminal has to mean no further effects, not merely no
+  # further requests.
+  #
+  # An effect already in flight is the one thing this does not stop. It is
+  # dispatched, its process tree is owned, and ending the run over it here would
+  # abandon that tree without cancelling it. Its own receipt brings the run back
+  # through this check a moment later, which is where it ends.
+  defp advance_run(state, %{stage: "effect_dispatched"}), do: {:noreply, state}
+
+  defp advance_run(state, work) do
+    if SessionState.unproven_effect?(state.durable, work.run_id) do
+      finish_unknown(state, work.run_id)
+    else
+      dispatch_stage(state, work)
+    end
+  end
+
+  defp dispatch_stage(state, %{stage: "model_pending"} = work),
+    do: before_deadline(state, work, &prepare_model_request/2)
+
+  defp dispatch_stage(state, %{stage: "model_dispatched"} = work),
+    do: before_deadline(state, work, &start_model_work/2)
+
+  defp dispatch_stage(state, %{stage: "effect_pending"} = work), do: prepare_effect(state, work)
+
+  defp dispatch_stage(state, %{stage: "turn_settled"} = work), do: settle_turn(state, work)
 
   # Concept: build the next request from what the run has actually committed.
   #
@@ -766,31 +786,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: the run stops when an effect could not be proved, when the model
-  # stops asking, or when a declared bound says so — in that order.
-  #
-  # Technical depth: the unknown-effect check runs first and unconditionally,
-  # because `outcome_unknown` is immutable and terminal for the affected run and
-  # nothing may silently resume the model loop past it. Checking it only where a
-  # bound was reached left every other exit — ordinary continuation, the model
-  # stopping on its own, the maximum-turn bound and the token budget — free to
-  # settle the turn normally, which fed an unproven effect's result back to the
-  # model and finished the run `completed`. Only where no unknown effect is held
-  # does the no-tool check run, and only then are bounds consulted, in their
-  # fixed order. The decision is committed as a durable fact rather than
-  # re-derived later, because it reads the wall clock and a clock-reading
-  # decision cannot be replayed.
-  defp settle_turn(state, work) do
-    run_id = work.run_id
-    {declared, charged} = SessionState.accounting(state.durable, run_id)
-
-    if SessionState.unproven_effect?(state.durable, run_id) do
-      finish_unknown(state, run_id, charged)
-    else
-      settle_proven_turn(state, work, declared, charged)
-    end
-  end
-
   # Concept: a run holding an effect nobody could prove ends saying so.
   #
   # Technical depth: no bound is named, because no bound ended this run — the
@@ -801,22 +796,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # projection refuses an `outcome_unknown` that carries no reference, because a
   # run that says the effect's truth is unknown and offers nothing to reconcile
   # against is an ending an operator cannot act on.
-  defp finish_unknown(state, run_id, charged) do
+  defp finish_unknown(state, run_id) do
+    {_declared, charged} = SessionState.accounting(state.durable, run_id)
+
     commit_terminal(state, run_id, "outcome_unknown", %{
       accounting_source: charged.source && Atom.to_string(charged.source),
       reconciliation_ref: reconciliation_ref(state, run_id)
     })
   end
 
-  # Concept: a deadline is not a guaranteed clean stop.
+  # Concept: a settled turn either continues the loop or ends the run at a
+  # declared bound.
   #
-  # Technical depth: `bound_reached(:deadline)` may commit only once every owned
-  # operation has reached a validated terminal fact. A committed
-  # `outcome_unknown` effect is precisely the case where one has not, and it is
-  # already settled above before any bound is read. That precedence is why no
-  # document here calls reaching a deadline a clean stop.
-  defp settle_proven_turn(state, work, declared, charged) do
+  # Technical depth: an unprovable effect never reaches here — `advance_run`
+  # answers that before any stage is dispatched, which is why this reads bounds
+  # alone and why `bound_reached(:deadline)` is not called a clean stop
+  # anywhere in this file. The decision is committed as a durable fact rather
+  # than re-derived later, because it reads the wall clock and a clock-reading
+  # decision cannot be replayed.
+  defp settle_turn(state, work) do
     run_id = work.run_id
+    {declared, charged} = SessionState.accounting(state.durable, run_id)
     elements = SessionState.elements(state.durable, run_id)
     assistant = Conversation.last_assistant(elements)
 
@@ -1024,7 +1024,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
       accounting_source: charged.source && Atom.to_string(charged.source)
     }
 
-    if disposition == :unconfirmed or SessionState.unproven_effect?(state.durable, run_id) do
+    # An unproved cleanup is this path's own finding and nothing else can see
+    # it. A committed `outcome_unknown` effect is not: the reducer outranks
+    # every proposed terminal with it, so this branch does not carry a second
+    # copy of that rule.
+    if disposition == :unconfirmed do
       commit_terminal(
         state,
         run_id,

@@ -391,9 +391,11 @@ defmodule Loopex.Runtime.SessionState do
   gives `outcome_unknown` precedence over every other terminal outcome.
 
   The precedence is over continuing, too, and that is why the owner asks this
-  before it settles a turn rather than only where a bound was reached. An
-  unknown effect ends the affected run; feeding its result back to the model
-  would resume a loop past an outcome that is already terminal.
+  before it dispatches anything at all rather than only where a turn settles or
+  a bound was reached. An unknown effect ends the affected run: feeding its
+  result back to the model would resume a loop past an outcome that is already
+  terminal, and running the calls still queued behind it in the same assistant
+  batch would carry on producing effects past one.
   """
   @spec unproven_effect?(t(), binary()) :: boolean()
   def unproven_effect?(%__MODULE__{} = state, run_id) do
@@ -418,8 +420,10 @@ defmodule Loopex.Runtime.SessionState do
   @doc false
   @spec propose_run_terminal(t(), binary(), binary(), map()) ::
           {:ok, proposal()} | {:error, term()}
-  def propose_run_terminal(%__MODULE__{} = state, run_id, outcome, detail)
-      when is_binary(run_id) and outcome in ["completed", "bound_reached", "outcome_unknown"] do
+  def propose_run_terminal(%__MODULE__{} = state, run_id, proposed, detail)
+      when is_binary(run_id) and proposed in ["completed", "bound_reached", "outcome_unknown"] do
+    outcome = run_outcome(state, run_id, proposed)
+
     record = %{
       "run_id" => run_id,
       "outcome" => outcome,
@@ -427,7 +431,7 @@ defmodule Loopex.Runtime.SessionState do
       "observed" => Map.get(detail, :observed),
       "declared_limit" => Map.get(detail, :declared_limit),
       "accounting_source" => Map.get(detail, :accounting_source),
-      "reconciliation_ref" => Map.get(detail, :reconciliation_ref),
+      "reconciliation_ref" => terminal_reference(state, run_id, outcome, detail),
       kind: "run_terminal_committed"
     }
 
@@ -758,7 +762,7 @@ defmodule Loopex.Runtime.SessionState do
   defp propose_new(%__MODULE__{active_run_id: run_id} = state, %{type: :abort} = command, digest)
        when is_binary(run_id) do
     reply = {:accepted, command.command_id}
-    outcome = abort_outcome(command)
+    outcome = abort_outcome(state, run_id, command)
 
     record = %{
       "command_id" => command.command_id,
@@ -1083,35 +1087,41 @@ defmodule Loopex.Runtime.SessionState do
          command_id
        )
        when is_binary(active_run_id) do
-    case record_binary(record, "run_id") do
-      {:ok, ^active_run_id} ->
-        # Concept: an abort cancels the queues as well as the run.
-        #
-        # Technical depth: a durably admitted abort resolves any queued steer and
-        # any queued follow-up as cancelled, each recorded truthfully against its
-        # own command_id. Leaving either queued would let work an operator
-        # cancelled start itself a moment later.
-        {patch, queue_events} = cancel_queues(state, active_run_id)
+    # Concept: an abort record says what the abort achieved, or it is not a
+    # record this owner can apply.
+    #
+    # Technical depth: the outcome used to default to `cancelled` when the field
+    # was absent — the strongest claim in the algebra, chosen by a record that
+    # said nothing. A record replayed on recovery must never be read as claiming
+    # more than it carries, and this is the one field carrying the
+    # `outcome_unknown` precedence, so there is no honest weaker default: the
+    # record names its outcome or it is refused like any other malformed abort.
+    with {:ok, ^active_run_id} <- record_binary(record, "run_id"),
+         {:ok, outcome} <- record_binary(record, "outcome") do
+      # Concept: an abort cancels the queues as well as the run.
+      #
+      # Technical depth: a durably admitted abort resolves any queued steer and
+      # any queued follow-up as cancelled, each recorded truthfully against its
+      # own command_id. Leaving either queued would let work an operator
+      # cancelled start itself a moment later.
+      {patch, queue_events} = cancel_queues(state, active_run_id)
 
-        outcome = record_outcome(record)
+      expected_events =
+        state.expected_events ++
+          [
+            abort_event(
+              state.session_id,
+              command_id,
+              active_run_id,
+              outcome,
+              Map.get(record, "reconciliation_ref")
+            )
+          ] ++ queue_events
 
-        expected_events =
-          state.expected_events ++
-            [
-              abort_event(
-                state.session_id,
-                command_id,
-                active_run_id,
-                outcome,
-                Map.get(record, "reconciliation_ref")
-              )
-            ] ++ queue_events
-
-        {:ok, {:accepted, command_id}, nil, Map.delete(state.pending_work, active_run_id),
-         expected_events, patch}
-
-      _other ->
-        {:error, :invalid_abort_record}
+      {:ok, {:accepted, command_id}, nil, Map.delete(state.pending_work, active_run_id),
+       expected_events, patch}
+    else
+      _other -> {:error, :invalid_abort_record}
     end
   end
 
@@ -1418,7 +1428,7 @@ defmodule Loopex.Runtime.SessionState do
        }) do
     with %{stage: stage} <- Map.get(state.pending_work, run_id),
          true <- outcome in ["completed", "bound_reached", "outcome_unknown"],
-         true <- terminal_admitted?(stage, outcome, bound) do
+         true <- terminal_admitted?(state, run_id, stage, outcome, bound) do
       # Concept: bound_reached carries the bound and the observed value and
       # nothing else.
       #
@@ -1481,21 +1491,30 @@ defmodule Loopex.Runtime.SessionState do
 
   defp apply_internal_record(_state, _record), do: {:error, :invalid_internal_transition}
 
-  # Concept: only the deadline may end a run that is still mid-turn.
+  # Concept: only the deadline and an unprovable effect may end a run that is
+  # still mid-turn.
   #
   # Technical depth: every other bound is evaluated between turns, so a terminal
   # arriving from any other stage would mean a bound was applied to a turn nobody
-  # settled. The deadline is the single bound that also binds work already in
-  # flight — it can abort a request the provider may already have billed — so it,
-  # and the `outcome_unknown` that outranks it, are the only outcomes admitted
-  # from a stage where an operation is still dispatched.
-  defp terminal_admitted?("turn_settled", _outcome, _bound), do: true
+  # settled. The deadline is the one bound that also binds work already in
+  # flight — it can abort a request the provider may already have billed — so it
+  # is admitted from any stage. So is a committed `outcome_unknown`, and it must
+  # be: the calls remaining in an assistant batch leave the run at
+  # `effect_pending`, a stage no turn has settled, and requiring settlement
+  # there is what let the run keep dispatching effects behind an outcome that
+  # was already terminal. The claim is checked rather than trusted — this admits
+  # `outcome_unknown` only from a run whose committed elements actually hold an
+  # unprovable effect.
+  defp terminal_admitted?(_state, _run_id, "turn_settled", _outcome, _bound), do: true
 
-  defp terminal_admitted?(_stage, outcome, "deadline")
+  defp terminal_admitted?(state, run_id, _stage, "outcome_unknown", _bound),
+    do: unproven_effect?(state, run_id)
+
+  defp terminal_admitted?(_state, _run_id, _stage, outcome, "deadline")
        when outcome in ["bound_reached", "outcome_unknown"],
        do: true
 
-  defp terminal_admitted?(_stage, _outcome, _bound), do: false
+  defp terminal_admitted?(_state, _run_id, _stage, _outcome, _bound), do: false
 
   defp unapplied_reason("bound_reached", bound) when is_binary(bound), do: bound
   defp unapplied_reason(_outcome, _bound), do: "run_terminal"
@@ -2164,15 +2183,44 @@ defmodule Loopex.Runtime.SessionState do
   # re-presented abort returns its retained result rather than conflicting with
   # itself because cleanup went differently the second time. The disposition is
   # supplied separately, exactly as a run's resolved bounds are.
-  defp abort_outcome(%{resolved_bounds: %{cleanup: :unconfirmed}}), do: "outcome_unknown"
-  defp abort_outcome(_command), do: "cancelled"
+  defp abort_outcome(state, run_id, command),
+    do: run_outcome(state, run_id, cleanup_outcome(command))
+
+  defp cleanup_outcome(%{resolved_bounds: %{cleanup: :unconfirmed}}), do: "outcome_unknown"
+  defp cleanup_outcome(_command), do: "cancelled"
+
+  # Concept: `outcome_unknown` outranks whatever asked the run to stop.
+  #
+  # Technical depth: this is the single place ADR 0009's run-outcome table is
+  # read, and the table's third row is unconditional — "one `outcome_unknown`
+  # among the owned operations finishes the run `outcome_unknown`, whatever
+  # asked it to stop." An abort, a reached deadline, a declared bound and a
+  # model that stopped on its own therefore all arrive at the same answer here
+  # rather than each carrying its own copy of the rule. The defect this closes
+  # is exactly what a second copy costs: cancellation derived the run outcome
+  # from what cleanup achieved alone, so an abort landing on a run that already
+  # held an unprovable effect published `cancelled` — a report an operator acts
+  # on by doing nothing — over an effect nobody can account for.
+  defp run_outcome(state, run_id, proposed) do
+    if unproven_effect?(state, run_id), do: "outcome_unknown", else: proposed
+  end
+
+  # An ending that says the effect's truth is unknown must name what to
+  # reconcile against. The reference is derived rather than required from the
+  # caller, because the caller that proposed `completed` did not know its
+  # outcome was about to be outranked.
+  defp terminal_reference(state, run_id, "outcome_unknown", detail),
+    do: Map.get(detail, :reconciliation_ref) || reconciliation_reference(state, run_id)
+
+  defp terminal_reference(_state, _run_id, _outcome, detail),
+    do: Map.get(detail, :reconciliation_ref)
 
   defp abort_reference(_state, _run_id, "cancelled"), do: nil
 
-  defp abort_reference(state, run_id, _outcome),
-    do: stable_id("reconciliation", state.session_id, run_id)
+  defp abort_reference(state, run_id, _outcome), do: reconciliation_reference(state, run_id)
 
-  defp record_outcome(record), do: Map.get(record, "outcome", "cancelled")
+  defp reconciliation_reference(state, run_id),
+    do: stable_id("reconciliation", state.session_id, run_id)
 
   defp committed_event_sequence(next, [], receipt) do
     case Map.get(receipt, :event_sequences) do

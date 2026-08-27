@@ -27,14 +27,14 @@ defmodule Loopex.CancellationTestExecutor do
   @impl Loopex.Executor
   def cancel(pid, _job_id) do
     case Agent.get(pid, & &1.mode) do
-      :receipt_before_abort ->
+      :never_answers ->
+        {:ok, :cleaned}
+
+      _releases ->
         waiting = Agent.get(pid, & &1.waiting)
         if is_pid(waiting), do: send(waiting, :answer)
         # Let the released job actually deliver before the coordinator looks.
         Process.sleep(120)
-        {:ok, :cleaned}
-
-      :never_answers ->
         {:ok, :cleaned}
     end
   end
@@ -44,17 +44,34 @@ defmodule Loopex.CancellationTestExecutor do
     _progress = progress || Loopex.Executor.discard_progress()
     caller = self()
     :ok = Agent.update(pid, fn state -> %{state | jobs: [job | state.jobs], waiting: caller} end)
+    mode = Agent.get(pid, & &1.mode)
 
-    receive do
-      :answer -> :ok
-    after
-      4_000 -> :ok
+    case answer(mode, job.tool_call_id) do
+      {:now, outcome} ->
+        {:ok, Loopex.CancellationTestExecutor.receipt(job, outcome)}
+
+      {:held, outcome} ->
+        receive do
+          :answer -> :ok
+        after
+          4_000 -> :ok
+        end
+
+        {:ok, Loopex.CancellationTestExecutor.receipt(job, outcome)}
     end
-
-    {:ok, Loopex.CancellationTestExecutor.receipt(job)}
   end
 
-  def receipt(job) do
+  # Concept: which call answers when, and with what.
+  #
+  # Technical depth: the precedence cases need a job that answers `outcome_unknown`
+  # inside the abort window, and a batch whose first call is unprovable while a
+  # later one is still holdable. Both are the same executor with a different
+  # schedule, so a case differs from its neighbour in the schedule alone.
+  defp answer(:unknown_receipt_before_abort, _tool_call_id), do: {:held, "outcome_unknown"}
+  defp answer(:unknown_then_held, "c1"), do: {:now, "outcome_unknown"}
+  defp answer(_mode, _tool_call_id), do: {:held, "completed"}
+
+  def receipt(job, outcome \\ "completed") do
     %{
       protocol_version: 1,
       job_id: job.job_id,
@@ -71,7 +88,7 @@ defmodule Loopex.CancellationTestExecutor do
       fencing_token: job.fencing_token,
       tool_id: job.tool_id,
       tool_version: job.tool_version,
-      outcome: "completed",
+      outcome: outcome,
       output: "wrote #{job.tool_call_id}",
       progress_count: 0,
       observed_at_ms: System.system_time(:millisecond),
@@ -215,6 +232,35 @@ defmodule Loopex.CancellationTest do
     case Loopex.next_event(attachment) do
       {:ok, event} -> events(attachment, [event | acc])
       _other -> Enum.reverse(acc)
+    end
+  end
+
+  # Concept: read the published plane until one named tool fact has appeared,
+  # and hand back everything read on the way.
+  #
+  # Technical depth: the attachment is a cursor, so a case that waits for an
+  # event and then reads again would lose what it already consumed. Reaching the
+  # deadline is the finding rather than an empty list, because a case that
+  # asserts on a missing event reports a stalled run as a missing key.
+  defp await_tool_finished(attachment, tool_call_id, acc \\ [], attempts \\ 400) do
+    acc = acc ++ events(attachment)
+
+    cond do
+      Enum.any?(
+        acc,
+        &(&1.kind == "tool.finished" and &1["tool_call_id"] == tool_call_id)
+      ) ->
+        acc
+
+      attempts > 0 ->
+        Process.sleep(10)
+        await_tool_finished(attachment, tool_call_id, acc, attempts - 1)
+
+      true ->
+        flunk("""
+        no tool.finished for #{tool_call_id} was published.
+        events observed: #{inspect(Enum.map(acc, & &1.kind))}
+        """)
     end
   end
 
@@ -491,5 +537,57 @@ defmodule Loopex.CancellationTest do
     # And the session is left usable rather than abandoned.
     assert {:ok, %{active_run_id: nil}} =
              Loopex.session_status(fixture.runtime, session_id)
+  end
+
+  test "an abort reduced while an unprovable receipt settles finishes the run outcome unknown" do
+    # The abort is admitted first, and the receipt it adopts on the way through
+    # says the effect's truth is unknown. Deciding the run outcome from what
+    # cleanup achieved reported `cancelled` — a clean stop — over an effect
+    # nobody can account for. ADR 0009 fixes the opposite order: "one
+    # `outcome_unknown` among the owned operations finishes the run
+    # `outcome_unknown`, whatever asked it to stop."
+    {_fixture, _session_id, observed} = abort_during_tool(:unknown_receipt_before_abort)
+
+    tool = Enum.find(observed, &(&1.kind == "tool.finished" and &1["tool_call_id"] == "c1"))
+    assert tool["outcome"] == "outcome_unknown"
+
+    finished = Enum.find(observed, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "outcome_unknown"
+    refute finished["outcome"] == "cancelled"
+
+    # `cancelled` carries no reference because there is nothing to reconcile;
+    # this ending must carry one, or an operator is told to reconcile nothing.
+    assert is_binary(finished["reconciliation_ref"])
+  end
+
+  test "an abort admitted after an unprovable effect committed never rewrites the run to cancelled" do
+    # The other order. The unknown fact is already committed and published when
+    # the abort arrives, so nothing about the abort's own cleanup may decide the
+    # run outcome — the committed operation outcomes do.
+    fixture =
+      start_with_executor(:unknown_then_held, [
+        %{text: "two at once", calls: [call("c1"), call("c2")]},
+        %{text: "done", calls: []}
+      ])
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do the work"})
+
+    observed = await_tool_finished(attachment, "c1")
+
+    # Whether this is admitted at all depends on whether the run has already
+    # committed its own terminal, and either answer is correct. What is never
+    # correct is a second, contradicting ending.
+    _reply = Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
+    assert settled?(fixture, session_id)
+
+    finishes =
+      (observed ++ events(attachment))
+      |> Enum.filter(&(&1.kind == "run.finished"))
+
+    assert Enum.map(finishes, & &1["outcome"]) == ["outcome_unknown"]
   end
 end
