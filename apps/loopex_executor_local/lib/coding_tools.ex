@@ -283,25 +283,63 @@ defmodule Loopex.Executor.Local.CodingTools do
   defp resolve_target("/" <> _rest = absolute, _link), do: absolute
   defp resolve_target(relative, link), do: Path.join(Path.dirname(link), relative)
 
-  # Concept: resolve what actually exists on disk.
+  # Concept: resolve what actually exists on disk, without moving the VM.
   #
   # Technical depth: `Path.expand/1` is textual and would happily normalise a
-  # `..` that a symlink makes meaningless. `:file.get_cwd` plus a real directory
-  # walk is what turns a requested path into the path the kernel will actually
-  # open.
+  # `..` that a symlink makes meaningless, so the walk below resolves each
+  # component against the kernel instead. It used to reach that answer by
+  # `File.cd!`-ing into the directory and reading the working directory back.
+  # The working directory is global to the emulator, not local to a process, so
+  # two runtimes resolving paths at the same time read each other's answer: a
+  # write bound for one workspace landed in the other, the containment check
+  # passed because it compared against the borrowed root, and a resolution racing
+  # the restore could return the ambient directory and put the file outside every
+  # workspace. Nothing here mutates process-global state now, so concurrent
+  # resolution is simply concurrent.
+  # Concept: the path the kernel would open, one component at a time.
+  #
+  # Technical depth: each component is checked for a symlink and replaced by its
+  # target before the next is considered, because `..` after a symlink means the
+  # parent of the link's target and not the parent of the link. The hop count
+  # bounds a symlink cycle, which the filesystem permits and this walk would
+  # otherwise follow forever.
+  @symlink_hops 32
+
+  defp walk_links([], resolved, _hops), do: {:ok, resolved}
+
+  defp walk_links(_remaining, _resolved, hops) when hops > @symlink_hops,
+    do: {:error, :symlink_hops_exhausted}
+
+  defp walk_links(["/" | rest], resolved, hops), do: walk_links(rest, resolved, hops)
+  defp walk_links(["." | rest], resolved, hops), do: walk_links(rest, resolved, hops)
+
+  defp walk_links([".." | rest], resolved, hops),
+    do: walk_links(rest, Path.dirname(resolved), hops)
+
+  defp walk_links([segment | rest], resolved, hops) do
+    candidate = Path.join(resolved, segment)
+
+    case File.read_link(candidate) do
+      {:ok, target} ->
+        absolute =
+          case Path.type(target) do
+            :absolute -> target
+            _relative -> Path.join(resolved, target)
+          end
+
+        walk_links(Path.split(absolute) ++ rest, "/", hops + 1)
+
+      {:error, _not_a_symlink} ->
+        walk_links(rest, candidate, hops)
+    end
+  end
+
   defp absolute_existing(path) do
     expanded = Path.expand(path)
 
     case File.stat(expanded) do
       {:ok, %File.Stat{type: :directory}} ->
-        cwd = File.cwd!()
-
-        try do
-          File.cd!(expanded)
-          {:ok, File.cwd!()}
-        after
-          File.cd!(cwd)
-        end
+        walk_links(Path.split(expanded), "/", 0)
 
       {:ok, _stat} ->
         parent = Path.dirname(expanded)
