@@ -1869,21 +1869,124 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: an executor that did not answer with a receipt still says something
+  # about its call, and what it says depends on whether the effect had already
+  # happened when it stopped being able to prove anything.
+  #
+  # Technical depth: this used to read every executor error as a refusal and
+  # commit a terminal `failed`, on the stated reasoning that "the effect did not
+  # start, so there is nothing indeterminate to reconcile". That is true of a
+  # pre-start refusal and false of `{:receipt_not_retained, reason}`, which the
+  # executor returns after the tool has run and its effect has landed in the
+  # workspace. Reading that as `failed` told the model the tool never ran,
+  # dispatched it again, and finished the run `completed` -- the silent resume
+  # past an indeterminate effect that `docs/vision-technical.md` forbids.
+  #
+  # Neither branch decides the run. The unproven branch commits the call's own
+  # terminal fact and `advance_run/2` remains the single place a run ends,
+  # which is why one unknown effect ends the run whatever else was true of it.
   defp accept_executor_result(state, run_id, result) do
     state = close_tool_stream(state, run_id, :abandoned, 0)
 
-    # An executor that answered with an error produced no receipt, so the call
-    # has no validated terminal fact of its own. It becomes a terminal `failed`
-    # rather than ending the session: the effect did not start, so there is
-    # nothing indeterminate to reconcile.
     case Map.get(state.durable.pending_work, run_id) do
       %{pending_calls: [call | _rest]} = work ->
-        commit_tool_failure(state, work, call, failure_of(result))
+        case effect_disposition(result) do
+          :refused_before_effect -> commit_tool_failure(state, work, call, failure_of(result))
+          :unproven -> commit_tool_unproven(state, work, call, result)
+        end
 
       _other ->
         {:stop, {:executor_failed, result}, state}
     end
   end
+
+  # Concept: the executor answers that are proved to precede the effect.
+  # Anything else leaves the effect unproven.
+  #
+  # Technical depth: these are the refusals of the checks an executor performs
+  # immediately before an effect -- `Loopex.Executor.validate_job/1` and
+  # `validate_grant/3`, and the tool, argument, lease and fence checks ADR 0007
+  # requires it to complete before it starts anything. Nothing has run when one
+  # of them answers, so the call owes the conversation an ordinary terminal
+  # `failed` and the run carries on in a state that is entirely known.
+  #
+  # A reader placing a new shape answers one question about it: could the effect
+  # already have happened when an executor returns it? Only a proved no belongs
+  # in this list. `{:receipt_not_retained, _}` is the shape that made the
+  # question worth asking, and it is not the only one that fails it:
+  # `{:receipt_read_failed, _}` and `:invalid_retained_receipt` mean an earlier
+  # attempt of this job retained a receipt that cannot now be read, and
+  # `:job_id_conflict` means the executor already holds a receipt at this job's
+  # identity. In each of those an effect ran and nobody can say what it did.
+  #
+  # The default is unproven rather than failed because the port declares
+  # `{:error, term()}` and nothing narrower. An unrecognised term is not
+  # evidence, `failed` is a positive claim that the effect did not happen, and
+  # this runtime does not make claims about an executor's internals it cannot
+  # check. `Loopex.Executor.cancel/3` reads an unadmitted answer the same way,
+  # for the same reason.
+  #
+  # A lease refusal is here because an executor that loses its lease *while* a
+  # tool runs does not report that as an error at all: it retains a receipt
+  # whose own outcome is `outcome_unknown`, and a lease lost while that receipt
+  # is being written is named `:workspace_lease_lost_during_retention` inside
+  # `{:receipt_not_retained, _}`. The bare lease refusals are answers from the
+  # validation that runs before a job is started.
+  @executor_prestart_refusals [
+    :canonical_job_request_mismatch,
+    :executor_prestart_mismatch,
+    :host_policy_allow_required,
+    :invalid_grant,
+    :invalid_grant_decision,
+    :invalid_job_request,
+    :invalid_tool_arguments,
+    :tool_definition_mismatch,
+    :workspace_lease_lost,
+    :workspace_lease_mismatch,
+    :workspace_lease_not_held
+  ]
+
+  @grant_binding_refusals [:binding_mismatch, :missing_binding]
+
+  defp effect_disposition({:error, reason}) when reason in @executor_prestart_refusals,
+    do: :refused_before_effect
+
+  defp effect_disposition({:error, {binding, field}})
+       when binding in @grant_binding_refusals and is_atom(field),
+       do: :refused_before_effect
+
+  defp effect_disposition(_answer), do: :unproven
+
+  # Concept: an effect that ran and cannot be accounted for is committed as
+  # unknown, naming what an operator reconciles it against.
+  #
+  # Technical depth: the committed reason is that reference rather than the
+  # executor's error, because it is what the model is shown and what the run's
+  # terminal carries. The error is not durable truth about the effect -- it is
+  # one executor's account of why it could produce none -- so it goes to the
+  # diagnostics plane, where an operator can still read which failure this was
+  # without it being mistaken for a fact about the workspace.
+  defp commit_tool_unproven(state, work, call, result) do
+    emit_diagnostic(state, %{
+      "kind" => "executor_effect_unproven",
+      "run_id" => work.run_id,
+      "tool_call_id" => call.tool_call_id,
+      "reason" => unproven_reason(result)
+    })
+
+    commit_tool_terminal(
+      state,
+      work,
+      call,
+      :outcome_unknown,
+      reconciliation_ref(state, work.run_id)
+    )
+  end
+
+  # An answer that was not an error at all is one this runtime could not read as
+  # a receipt, which is a different diagnosis from any error the executor named.
+  defp unproven_reason({:error, reason}), do: failure_reason(reason)
+  defp unproven_reason(_answer), do: "unreadable_executor_answer"
 
   # Concept: a reply that arrives after its run ended is evidence, not history.
   #
@@ -1910,8 +2013,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp emit_diagnostic(_state, _item), do: :ok
 
+  # Only a refusal reaches this, and a refusal is always `{:error, reason}`: the
+  # shapes that are not took the unproven path before it was called.
   defp failure_of({:error, reason}), do: reason
-  defp failure_of(other), do: other
 
   defp commit_executor_fact(state, run_id, receipt) do
     case put_executor_fact(state, run_id, receipt) do

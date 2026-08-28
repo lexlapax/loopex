@@ -107,12 +107,99 @@ defmodule Loopex.AgentLoopProgressExecutor do
   end
 end
 
+defmodule Loopex.AgentLoopAnsweringExecutor do
+  @moduledoc false
+
+  # Concept: an executor that answers a dispatched call with an error, and
+  # records whether that call's effect had already happened when it did.
+  #
+  # Technical depth: the coordinator's classification of executor errors is what
+  # is under test, so the case has to be able to name both sides of it — an
+  # error raised by the validation that runs before anything is started, and an
+  # error raised after the effect landed and only its receipt was lost. The
+  # shared loop executor always answers `{:ok, receipt}`, so neither side of that
+  # distinction can be reached through it. `effects/1` is this double's own
+  # record of what actually ran; it stands in for the file the reviewer's probe
+  # found in the workspace after the executor had reported an error.
+
+  @behaviour Loopex.Executor
+
+  def start(answers) when is_map(answers) do
+    {:ok, pid} = Agent.start_link(fn -> %{answers: answers, jobs: [], effects: []} end)
+    pid
+  end
+
+  def jobs(pid), do: Agent.get(pid, & &1.jobs) |> Enum.reverse()
+
+  def effects(pid), do: Agent.get(pid, & &1.effects) |> Enum.reverse()
+
+  @impl Loopex.Executor
+  def cancel(_pid, _job_id), do: {:ok, :cleaned}
+
+  @impl Loopex.Executor
+  def execute(pid, job, _grant, _options, progress \\ nil) do
+    _progress = progress || Loopex.Executor.discard_progress()
+    :ok = Agent.update(pid, fn state -> %{state | jobs: [job | state.jobs]} end)
+
+    case Agent.get(pid, &Map.get(&1.answers, job.tool_call_id, :completed)) do
+      # The effect ran and landed. Only the answer about it is lost.
+      {:after_effect, answer} ->
+        :ok =
+          Agent.update(pid, fn state ->
+            %{state | effects: [job.tool_call_id | state.effects]}
+          end)
+
+        answer
+
+      # Refused before anything was started: no process, no workspace change.
+      {:before_effect, answer} ->
+        answer
+
+      :completed ->
+        :ok =
+          Agent.update(pid, fn state ->
+            %{state | effects: [job.tool_call_id | state.effects]}
+          end)
+
+        {:ok, receipt(job)}
+    end
+  end
+
+  defp receipt(job) do
+    %{
+      protocol_version: 1,
+      job_id: job.job_id,
+      operation_id: job.operation_id,
+      attempt: job.attempt,
+      session_id: job.session_id,
+      run_id: job.run_id,
+      turn_id: job.turn_id,
+      tool_call_id: job.tool_call_id,
+      session_epoch_at_dispatch: job.origin_session_epoch,
+      executor_epoch: job.origin_executor_epoch,
+      executor_identity: job.executor_identity,
+      canonical_request_digest: job.canonical_request_digest,
+      fencing_token: job.fencing_token,
+      tool_id: job.tool_id,
+      tool_version: job.tool_version,
+      outcome: "completed",
+      output: "done",
+      progress_count: 0,
+      observed_at_ms: System.system_time(:millisecond),
+      child_environment_names: [],
+      provider_credential_present: false,
+      artifacts: []
+    }
+  end
+end
+
 defmodule Loopex.AgentLoopTest do
   @moduledoc false
 
   use ExUnit.Case, async: false
 
   alias Loopex.AgentLoopFixture, as: Fixture
+  alias Loopex.AgentLoopAnsweringExecutor
   alias Loopex.AgentLoopProgressExecutor
   alias Loopex.AgentLoopTestModel
   alias Loopex.Bounds
@@ -1217,5 +1304,177 @@ defmodule Loopex.AgentLoopTest do
     [_first, second] = AgentLoopTestModel.dispatched(fixture.model)
     results = Enum.filter(second.messages, &(&1["role"] == "tool"))
     assert Enum.map(results, & &1["tool_call_id"]) == ["a", "b", "c"]
+  end
+
+  # Concept: the runtime, wired to an executor this file can make answer with an
+  # error, and say whether the effect had already run when it did.
+  #
+  # Technical depth: composed through the public `Loopex.start_link` for the same
+  # reason the progress cases are — the shared loop helper always answers
+  # `{:ok, receipt}`, and the executor's error is the whole input here. The
+  # attachment is handed back rather than drained, because these cases assert on
+  # what the executor recorded before they wait for the run to end.
+  defp start_answering(answers, script) do
+    model_pid = AgentLoopTestModel.start(script)
+    executor_pid = AgentLoopAnsweringExecutor.start(answers)
+    {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop-answering")
+    definitions = [Fixture.tool_definition()]
+
+    {:ok, runtime} =
+      Loopex.start_link(
+        runtime_id: "answering-runtime-#{System.unique_integer([:positive])}",
+        store: store,
+        model: %{
+          module: AgentLoopTestModel,
+          model: "scripted:v1",
+          options: [script: model_pid, max_tokens: 256]
+        },
+        executor: %{
+          module: AgentLoopAnsweringExecutor,
+          reference: executor_pid,
+          identity: "answering-executor",
+          epoch: 1,
+          fencing_token: 3,
+          workspace_ref: "workspace-ref",
+          workspace_lease: "workspace-lease"
+        },
+        tool: nil,
+        bounds: %{max_turns: 8, token_budget: 1_000_000, deadline_ms: 600_000},
+        tools: definitions,
+        active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
+        policy: Loopex.AgentLoopTestPolicy,
+        grant_decision: {:host_policy, :allow}
+      )
+
+    on_exit(fn ->
+      try do
+        Loopex.stop(runtime)
+      catch
+        :exit, _reason -> :ok
+      end
+
+      try do
+        GenServer.stop(store_pid, :normal, 1_000)
+      catch
+        :exit, _reason -> :ok
+      end
+    end)
+
+    {:ok, session_id} = Loopex.create_session(runtime, %{"t" => "x"}, command_id: "create-1")
+    {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "prompt-1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "prompt-1", content: "go"})
+
+    %{
+      runtime: runtime,
+      model: model_pid,
+      executor: executor_pid,
+      store: store_pid,
+      session_id: session_id,
+      attachment: attachment
+    }
+  end
+
+  defp one_call_script,
+    do: [%{text: "run it", calls: [call("c1")]}, %{text: "done", calls: []}]
+
+  test "a receipt lost after the effect ran ends the run outcome unknown rather than failed" do
+    # `{:receipt_not_retained, reason}` is the executor saying the tool ran and
+    # its answer could not be written down. The effect happened, in the
+    # workspace, and nothing can now establish what it did — which is exactly
+    # `docs/vision-technical.md`'s indeterminate effect, not a call that never
+    # started. Reading it as an ordinary `failed` told the model the tool did not
+    # run, dispatched it again, and finished the run `completed`.
+    fixture =
+      start_answering(
+        %{"c1" => {:after_effect, {:error, {:receipt_not_retained, :enotdir}}}},
+        one_call_script()
+      )
+
+    events = drain(fixture.attachment)
+
+    # The effect really did land before the executor answered.
+    assert AgentLoopAnsweringExecutor.effects(fixture.executor) == ["c1"]
+
+    tool = Enum.find(events, &(&1.kind == "tool.finished"))
+    assert tool["tool_call_id"] == "c1"
+    assert tool["outcome"] == "outcome_unknown"
+    refute tool["outcome"] == "failed"
+
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "outcome_unknown"
+    refute finished["outcome"] == "completed"
+
+    # It carries the reference an operator reconciles the effect against.
+    assert is_binary(finished["reconciliation_ref"])
+    assert finished["reconciliation_ref"] =~ "reconciliation"
+
+    # The model was asked exactly once. A second dispatch would be the loop
+    # resuming past an outcome that is already terminal, carrying an effect
+    # nobody can account for back to the model as a settled failure.
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+    Process.sleep(150)
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  test "a refusal that precedes the effect stays a terminal failed and the loop carries on" do
+    # Nothing started: the executor refused the job at the validation that runs
+    # immediately before an effect. There is no indeterminate effect to
+    # reconcile, so the call takes a terminal `failed` fact the model can read
+    # and act on, and the run finishes in the known state it is actually in.
+    fixture =
+      start_answering(
+        %{"c1" => {:before_effect, {:error, :invalid_tool_arguments}}},
+        one_call_script()
+      )
+
+    events = drain(fixture.attachment)
+
+    assert AgentLoopAnsweringExecutor.effects(fixture.executor) == []
+
+    tool = Enum.find(events, &(&1.kind == "tool.finished"))
+    assert tool["outcome"] == "failed"
+
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "completed"
+    assert finished["reconciliation_ref"] == nil
+
+    # The loop carried on, and the model was told what refused the call.
+    assert [_first, second] = AgentLoopTestModel.dispatched(fixture.model)
+    result = Enum.find(second.messages, &(&1["role"] == "tool"))
+    assert result["outcome"] == "failed"
+    assert result["content"] =~ "invalid_tool_arguments"
+  end
+
+  test "an executor error the runtime cannot place before the effect is unproven" do
+    # The port declares `{:error, term()}` and nothing narrower, so an executor
+    # may answer with a shape this runtime has never seen. `failed` asserts the
+    # effect did not happen, which is a claim about an executor's internals that
+    # no unrecognised term supports; the honest reading is that it is unproven.
+    # `:job_id_conflict` is the shipped example — the local executor already
+    # holds a receipt at this job's identity, so an effect ran under it.
+    unknown =
+      start_answering(
+        %{"c1" => {:after_effect, {:error, :some_executor_specific_trouble}}},
+        one_call_script()
+      )
+
+    unknown_finished = Enum.find(drain(unknown.attachment), &(&1.kind == "run.finished"))
+    assert unknown_finished["outcome"] == "outcome_unknown"
+    assert is_binary(unknown_finished["reconciliation_ref"])
+
+    # An executor that answered `:ok` certainly ran. A reply this runtime cannot
+    # read as a receipt is a lost answer to an effect that happened, and it took
+    # the same `failed` path as a refusal for exactly the same reason.
+    malformed =
+      start_answering(
+        %{"c1" => {:after_effect, {:ok, "not a receipt"}}},
+        one_call_script()
+      )
+
+    malformed_finished = Enum.find(drain(malformed.attachment), &(&1.kind == "run.finished"))
+    assert malformed_finished["outcome"] == "outcome_unknown"
+    assert length(AgentLoopTestModel.dispatched(malformed.model)) == 1
   end
 end
