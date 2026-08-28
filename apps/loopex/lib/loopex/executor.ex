@@ -6,6 +6,12 @@ defmodule Loopex.Executor do
   one transport-neutral job, the exact host-grant bindings ADR 0007 requires,
   and the value checks every executor performs immediately before an effect.
 
+  An executor also declares, for every error it returns, whether that error
+  reached the caller *before* the effect started. Nothing else can know: the
+  executor is the only party that was present at the boundary. A caller that
+  guesses turns a mid-effect failure into an ordinary refusal and resumes the
+  loop past an effect nobody can account for.
+
   ## Technical depth
 
   The job digest is SHA-256 over a deterministic encoding of one closed ordered
@@ -14,6 +20,14 @@ defmodule Loopex.Executor do
   binding schema, while the protected conformance test deliberately carries the
   independent literal ADR oracle. M1 grants are trusted-VM data and make no
   authenticity or transport claim.
+
+  The pre-start declaration is the optional `c:refused_before_effect?/1`
+  callback, read only through `refused_before_effect?/2`. It fails closed in
+  every direction an implementation can be wrong: an executor that does not
+  export it declares nothing and every error it returns is unproven; a callback
+  that raises, exits, or answers with anything but `true` declares nothing for
+  that answer. An implementation therefore cannot be silently misread, and the
+  caller holds no list of an executor's error names.
   """
 
   @protocol_version 1
@@ -140,8 +154,44 @@ defmodule Loopex.Executor do
   """
   @type progress_fun :: (progress_event() -> :ok)
 
+  @doc """
+  ## Concept
+
+  Runs one exact job and answers with its receipt, or with the reason it could
+  not.
+
+  ## Technical depth
+
+  `{:ok, receipt}` is the terminal fact for the job. `{:error, reason}` says
+  only that no receipt was produced; on its own it says nothing about whether
+  the effect started, and a caller must read it as unproven unless the executor
+  declares otherwise through `c:refused_before_effect?/1`.
+  """
   @callback execute(reference :: term(), job_request(), grant(), keyword(), progress_fun()) ::
               {:ok, map()} | {:error, term()}
+
+  @doc """
+  ## Concept
+
+  Says whether one exact answer this executor returned was refused before its
+  effect started.
+
+  ## Technical depth
+
+  The callback is handed the whole answer `c:execute/5` returned, so an executor
+  that can refuse *and* fail with the same name distinguishes the two by
+  returning distinguishable terms rather than by hoping a caller guesses. It
+  answers `true` only where nothing the job would have done can have happened:
+  no process started, no byte written, no request sent. Anything an executor
+  cannot prove that of — including everything it does not recognise — is
+  `false`, because `true` is a positive claim about the workspace and `false`
+  costs only a reconciliation.
+
+  Optional. An executor that does not implement it declares nothing, and every
+  error it returns is unproven. That is the safe default and not a defect; it is
+  the correct answer for an executor that genuinely cannot tell.
+  """
+  @callback refused_before_effect?(answer :: term()) :: boolean()
 
   @doc """
   ## Concept
@@ -170,7 +220,7 @@ defmodule Loopex.Executor do
   @callback cancel(reference :: term(), job_id :: binary()) ::
               {:ok, :cleaned} | {:ok, :unconfirmed} | {:error, term()}
 
-  @optional_callbacks cancel: 2
+  @optional_callbacks cancel: 2, refused_before_effect?: 1
 
   @doc """
   ## Concept
@@ -201,6 +251,43 @@ defmodule Loopex.Executor do
   catch
     _kind, _value -> {:ok, :unconfirmed}
   end
+
+  @doc """
+  ## Concept
+
+  Asks an executor whether one exact answer it gave preceded the effect, and
+  believes nothing it did not say.
+
+  ## Technical depth
+
+  This is the only place a caller may decide that question. The alternative it
+  replaces was a list of error names held by the *consumer*, derived from one
+  shipped executor's behaviour: `:workspace_lease_lost` was read as a refusal
+  because the local executor only ever raises it before a start, so a conforming
+  executor that lost its lease mid-effect and returned the same name had that
+  effect committed as an ordinary `failed` and the loop resumed past it.
+
+  Every way of not answering resolves to `false`. A module that is not loaded or
+  does not export the callback has declared nothing. A callback that raises,
+  exits, throws, or returns any term other than `true` has declared nothing for
+  that answer — `true` is required literally rather than truthily, so a
+  three-valued or malformed implementation cannot widen into a claim. An answer
+  that is not an `{:error, _}` tuple is not an error to classify.
+  """
+  @spec refused_before_effect?(module(), term()) :: boolean()
+  def refused_before_effect?(module, {:error, _reason} = answer) when is_atom(module) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :refused_before_effect?, 1) do
+      module.refused_before_effect?(answer) === true
+    else
+      false
+    end
+  rescue
+    _error -> false
+  catch
+    _kind, _value -> false
+  end
+
+  def refused_before_effect?(_module, _answer), do: false
 
   @doc """
   ## Concept

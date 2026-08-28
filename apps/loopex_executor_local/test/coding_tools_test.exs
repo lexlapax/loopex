@@ -251,6 +251,45 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     Local.execute(executor, job, grant, [], Loopex.Executor.discard_progress())
   end
 
+  # Concept: a case about the cleanup budget needs an executor composed with the
+  # budget it is about.
+  #
+  # Technical depth: the period is a host-supplied start option, so a case that
+  # varies it composes its own executor exactly as a host would. Everything else
+  # matches `executor_lease_and_ledger/2`; only the declared period differs.
+  defp executor_with_grace(root, grace) do
+    lease_id = "lease-#{System.unique_integer([:positive])}"
+    {:ok, lease} = WorkspaceLease.start_link(id: lease_id, path: root, fencing_token: @fence)
+
+    ledger = temporary_root("ledger")
+    on_exit(fn -> File.rm_rf(ledger) end)
+
+    {:ok, executor} =
+      Local.start_link(
+        identity: "executor-local",
+        epoch: 3,
+        fencing_token: @fence,
+        workspace_leases: %{lease_id => lease},
+        ledger_root: ledger,
+        cleanup_grace_ms: grace
+      )
+
+    {executor, lease_id}
+  end
+
+  # A command whose backgrounded group member refuses to go on `TERM`, so the
+  # cleanup sequence has to sit through its cooperative grace and then kill it.
+  # It is the only shape that makes the budget observable: a group that dies on
+  # the first signal costs one look and tells a case nothing about the period.
+  defp stubborn_group_command,
+    do: "( trap \"\" TERM; sleep 20 ) >/dev/null 2>&1 & printf started; exit 0"
+
+  defp elapsed(work) do
+    started = System.monotonic_time(:millisecond)
+    result = work.()
+    {System.monotonic_time(:millisecond) - started, result}
+  end
+
   defp effect_class_of("loopex.read"), do: "read_only"
   defp effect_class_of("loopex.bash"), do: "process"
   defp effect_class_of(_other), do: "workspace_write"
@@ -291,6 +330,63 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              run(root, "loopex.write", %{"path" => "new/nested.txt", "content" => "second"})
 
     assert File.read!(Path.join(root, "new/nested.txt")) == "second"
+
+    # Concept: "only beneath" is half a claim until a write that aims outside is
+    # refused, and the refusal is checked in the filesystem rather than in the
+    # answer.
+    #
+    # Technical depth: this case asserted successful writes inside the root and
+    # nothing else, so every word after "creates or replaces a file" was
+    # untested. A `write` that ignored containment entirely -- or one that
+    # reported a refusal while the bytes still landed -- passed it. The three
+    # ways a path leaves a root are asserted here against a directory this case
+    # owns and can inspect afterwards: a relative traversal, an absolute path,
+    # and a static symlink, which is the one no amount of string inspection
+    # catches. Each is checked twice: the tool refused, and the file it named is
+    # not there.
+    outside = temporary_root("outside-write")
+    File.mkdir_p!(outside)
+    File.write!(Path.join(outside, "existing.txt"), "not yours")
+    on_exit(fn -> File.rm_rf(outside) end)
+
+    escapes = [
+      {"a relative traversal", Path.join(["..", Path.basename(outside), "traversed.txt"]),
+       Path.join(outside, "traversed.txt")},
+      {"an absolute path", Path.join(outside, "absolute.txt"), Path.join(outside, "absolute.txt")}
+    ]
+
+    for {described, path, planted} <- escapes do
+      assert {:ok, %{outcome: :failed, output: refusal}} =
+               run(root, "loopex.write", %{"path" => path, "content" => "planted"})
+
+      assert refusal =~ "outside the workspace", "#{described} was not refused as an escape"
+      refute File.exists?(planted), "#{described} wrote a file outside the workspace root"
+    end
+
+    # A static symlink placed in the workspace before the call, pointing at a
+    # directory outside it. The path this names is contained as text and escapes
+    # once it is resolved.
+    File.ln_s!(outside, Path.join(root, "escape"))
+
+    assert {:ok, %{outcome: :failed, output: through_link}} =
+             run(root, "loopex.write", %{"path" => "escape/planted.txt", "content" => "planted"})
+
+    assert through_link =~ "outside the workspace"
+    refute File.exists?(Path.join(outside, "planted.txt"))
+
+    # The same symlink as the final component, naming a file that already exists
+    # outside. A refusal that arrived after the truncation would leave this file
+    # empty rather than intact.
+    File.ln_s!(Path.join(outside, "existing.txt"), Path.join(root, "escaping-file"))
+
+    assert {:ok, %{outcome: :failed}} =
+             run(root, "loopex.write", %{"path" => "escaping-file", "content" => "overwritten"})
+
+    assert File.read!(Path.join(outside, "existing.txt")) == "not yours"
+
+    # Nothing beyond the file this case put there itself is in the outside
+    # directory, so no escape landed under a name this case did not predict.
+    assert File.ls!(outside) == ["existing.txt"]
   end
 
   test "edit applies an exact match change and names what differed on a mismatch" do
@@ -420,7 +516,17 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     refute overflowed_ok =~ "exited with status"
   end
 
-  test "every tool refuses a path that escapes the workspace root through traversal or a symlink" do
+  test "every filesystem tool refuses a path that escapes the workspace root through traversal or a symlink" do
+    # Concept: containment is a property of the three tools that take a path, and
+    # each of them has to be asked.
+    #
+    # Technical depth: this case was named for every tool and exercised
+    # `loopex.read` for two vectors. `loopex.bash` was never in scope: it takes
+    # no path at all, it runs a command, and a command can name any path its
+    # process can reach -- which `docs/operator/tools-and-policy.md` states
+    # plainly rather than implying a guarantee this executor does not make. The
+    # name is now the claim: every tool that accepts a path, for every vector
+    # claimed, refuses and leaves the outside file as it found it.
     root = workspace()
 
     outside = temporary_root("outside")
@@ -429,82 +535,79 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     File.write!(Path.join(outside, "secret.txt"), "not yours")
     on_exit(fn -> File.rm_rf(outside) end)
 
-    # Relative traversal.
-    assert {:ok, %{outcome: :failed, output: traversal}} =
-             run(root, "loopex.read", %{
-               "path" => Path.join(["..", Path.basename(outside), "secret.txt"])
-             })
-
-    assert traversal =~ "outside the workspace"
-
-    # An absolute path.
-    assert {:ok, %{outcome: :failed, output: absolute}} =
-             run(root, "loopex.read", %{"path" => Path.join(outside, "secret.txt")})
-
-    assert absolute =~ "outside the workspace"
-
-    # A symlink that points out. This is the case no amount of string inspection
-    # catches, which is why containment is checked against the resolved path.
+    # A static symlink to the outside directory, and one whose own name is the
+    # final component. The second is the case no amount of string inspection
+    # catches: resolution once resolved the link's own parent plus its basename
+    # -- where the link sits, not where it points -- so `read` returned the
+    # outside file and `write` overwrote it under a documented guarantee.
     File.ln_s!(outside, Path.join(root, "link"))
-
-    assert {:ok, %{outcome: :failed, output: symlinked}} =
-             run(root, "loopex.read", %{"path" => "link/secret.txt"})
-
-    assert symlinked =~ "outside the workspace"
-
-    # Writing through the same symlink is refused too, so containment is not a
-    # read-only property.
-    assert {:ok, %{outcome: :failed}} =
-             run(root, "loopex.write", %{"path" => "link/planted.txt", "content" => "x"})
-
-    refute File.exists?(Path.join(outside, "planted.txt"))
-
-    # Concept: the escaping symlink is the last component, not a directory on
-    # the way to it.
-    #
-    # Technical depth: resolution used to notice a symlink, confirm its target
-    # existed, and then resolve the link's own parent plus its basename -- which
-    # is where the link sits, not where it points. Only the case above was
-    # caught, because resolving the parent happened to follow a symlinked
-    # directory. A link whose own name is the final component resolved to a
-    # contained path and passed, so `read` returned the outside file and `write`
-    # overwrote it, under a documented containment guarantee.
     File.ln_s!(Path.join(outside, "secret.txt"), Path.join(root, "leak"))
 
-    assert {:ok, %{outcome: :failed, output: final_component}} =
-             run(root, "loopex.read", %{"path" => "leak"})
-
-    assert final_component =~ "outside the workspace"
-    refute final_component =~ "not yours"
-
-    assert {:ok, %{outcome: :failed}} =
-             run(root, "loopex.write", %{"path" => "leak", "content" => "overwritten"})
-
-    assert File.read!(Path.join(outside, "secret.txt")) == "not yours"
-
-    assert {:ok, %{outcome: :failed}} =
-             run(root, "loopex.edit", %{
-               "path" => "leak",
-               "old" => "not yours",
-               "new" => "mine now"
-             })
-
-    assert File.read!(Path.join(outside, "secret.txt")) == "not yours"
-
-    # A relative link out of the workspace is the same escape written differently.
+    # A relative link out of the workspace is the same escape written
+    # differently, and a link that points at itself must be refused rather than
+    # followed forever.
     File.ln_s!(
       Path.join(["..", Path.basename(outside), "secret.txt"]),
       Path.join(root, "relative")
     )
 
-    assert {:ok, %{outcome: :failed, output: relative}} =
-             run(root, "loopex.read", %{"path" => "relative"})
-
-    assert relative =~ "outside the workspace"
-
-    # A link that points at itself is refused rather than followed forever.
     File.ln_s!(Path.join(root, "loop"), Path.join(root, "loop"))
-    assert {:ok, %{outcome: :failed}} = run(root, "loopex.read", %{"path" => "loop"})
+
+    # The vectors this case claims, each named once and asked of all three tools.
+    vectors = [
+      {"a relative traversal", Path.join(["..", Path.basename(outside), "secret.txt"])},
+      {"an absolute path", Path.join(outside, "secret.txt")},
+      {"a static symlink to a directory outside", "link/secret.txt"},
+      {"a static symlink as the final component", "leak"},
+      {"a static symlink whose target is relative", "relative"},
+      {"a symlink that points at itself", "loop"}
+    ]
+
+    # `loopex.bash` is deliberately absent: it declares no path parameter, so
+    # there is no path for it to escape with and no containment claim to test.
+    # Asserting its schema is what keeps that a fact about the shipped tool
+    # rather than an omission a reader has to take on trust.
+    bash = Enum.find(CodingTools.definitions(), &(&1["tool_id"] == "loopex.bash"))
+    refute Map.has_key?(bash["parameter_schema"]["properties"], "path")
+
+    filesystem_tools =
+      for definition <- CodingTools.definitions(),
+          Map.has_key?(definition["parameter_schema"]["properties"], "path"),
+          do: definition["tool_id"]
+
+    assert Enum.sort(filesystem_tools) == ["loopex.edit", "loopex.read", "loopex.write"]
+
+    for {described, path} <- vectors, tool <- filesystem_tools do
+      arguments =
+        case tool do
+          "loopex.read" -> %{"path" => path}
+          "loopex.write" -> %{"path" => path, "content" => "planted"}
+          "loopex.edit" -> %{"path" => path, "old" => "not yours", "new" => "mine now"}
+        end
+
+      assert {:ok, %{outcome: :failed, output: refusal}} = run(root, tool, arguments),
+             "#{tool} did not refuse #{described}"
+
+      # A self-referential link is an unresolvable path rather than a resolved
+      # one that landed outside, so it is refused for a reason of its own. Every
+      # other vector resolves to somewhere outside the root and says so.
+      if path == "loop" do
+        refute refusal =~ "not yours", "#{tool} followed #{described} to the outside file"
+      else
+        assert refusal =~ "outside the workspace",
+               "#{tool} refused #{described} without naming the escape: #{refusal}"
+
+        refute refusal =~ "not yours", "#{tool} returned the outside file's content"
+      end
+
+      # The refusal is checked in the filesystem too: the outside file is
+      # untouched and no new name appeared beside it.
+      assert File.read!(Path.join(outside, "secret.txt")) == "not yours",
+             "#{tool} changed the outside file through #{described}"
+
+      assert File.ls!(outside) == ["secret.txt"],
+             "#{tool} created something outside the workspace through #{described}"
+    end
   end
 
   test "executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted" do
@@ -1288,12 +1391,22 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # still the job, so the lease still covers it.
     #
     # Technical depth: bringing an owned process group to quiescence signals the
-    # group, waits, signals again and looks twice with `ps`. None of that is a
-    # wait this executor sits in, so a lease that dies there is not noticed while
-    # it happens -- it is noticed afterwards, by the check that runs before the
-    # receipt is produced. Deleting that one check left all nineteen cases in
-    # this file green, which is what made it worth writing: nothing here proved
-    # that a lease lost after the command exited was reported at all.
+    # group, gives it the cooperative grace to go, signals again and looks with
+    # `ps`. None of that is a wait this executor sits in, so a lease that dies
+    # there is not noticed while it happens -- it is noticed afterwards, by the
+    # check that runs before the receipt is produced. Deleting that one check left
+    # all nineteen cases in this file green, which is what made it worth writing:
+    # nothing here proved that a lease lost after the command exited was reported
+    # at all.
+    #
+    # The instant this case aims at is opened by the group itself rather than by
+    # a guess about how slow the sequence is. The backgrounded subshell ignores
+    # `TERM`, so it is still there when the cooperative grace is measured and the
+    # sequence must sit through that grace before it kills the group -- half the
+    # configured cleanup period, which is seconds rather than the tens of
+    # milliseconds a group that dies on the first signal costs. Aiming at the
+    # latter is what made this case depend on the sequence being slow, and it
+    # became a false negative the moment the sequence stopped wasting time.
     root = workspace()
     marker = Path.join(root, "launcher-exited.txt")
     {executor, lease_id, lease} = executor_and_lease(root)
@@ -1303,7 +1416,11 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         run(
           root,
           "loopex.bash",
-          %{"command" => "( sleep 3 ) >/dev/null 2>&1 & printf x > launcher-exited.txt; exit 0"},
+          %{
+            "command" =>
+              "( trap \"\" TERM; sleep 30 ) >/dev/null 2>&1 & " <>
+                "printf x > launcher-exited.txt; exit 0"
+          },
           %{executor: executor, lease_id: lease_id}
         )
       end)
@@ -1315,9 +1432,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              ),
            "the launcher never announced that it was about to exit"
 
-    # The launcher exits immediately after the marker; the quiescence sequence
-    # that follows it holds this executor for tens of milliseconds, which is the
-    # instant this case is aiming at.
+    # The launcher exits immediately after the marker, and the quiescence
+    # sequence that follows it is held by the cooperative grace for as long as
+    # the group refuses to go.
     Process.sleep(30)
     GenServer.stop(lease)
 
@@ -1632,6 +1749,50 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       assert first_child =~ "PATH=/usr/bin:/bin"
     end
 
+    # Concept: the environment the *first* image was loaded with, observed at the
+    # first image and not at anything it later executed.
+    #
+    # Technical depth: everything above reads the environment of the command
+    # `env` goes on to run, which `-i` has already cleared. It is the wrong
+    # process. `/usr/bin/env` is `execve`d before it parses a single argument,
+    # and the loader acts on it in that instant: on a platform honouring an
+    # ambient `LD_PRELOAD` the named object is mapped into a process that is at
+    # that moment holding the provider credential, and no argument can undo a
+    # load that has already happened. The spawn's own `env:` option is the only
+    # thing that reaches it.
+    #
+    # `env` with no arguments at all prints the environment it was itself given,
+    # so spawning it with this executor's real port options and nothing else is a
+    # direct reading of the first image's own environment with no second image
+    # anywhere in it.
+    options = Local.launcher_port_options(root)
+
+    assert Keyword.has_key?(options, :env),
+           "the launcher is spawned with no env: option, so the first image inherits this " <>
+             "operating system process's whole environment: #{inspect(options)}"
+
+    first_image = Port.open({:spawn_executable, ~c"/usr/bin/env"}, [args: []] ++ options)
+
+    loaded =
+      Enum.reduce_while(1..200, <<>>, fn _attempt, acc ->
+        receive do
+          {^first_image, {:data, chunk}} -> {:cont, acc <> chunk}
+          {^first_image, {:exit_status, 0}} -> {:halt, acc}
+        after
+          15_000 -> {:halt, acc}
+        end
+      end)
+
+    refute loaded =~ "sk-sentinel-first-child",
+           "the first image was loaded holding the provider credential: #{loaded}"
+
+    refute loaded =~ "also-not-for-a-first-child",
+           "the first image was loaded holding this process's environment: #{loaded}"
+
+    # A loader acts on names, so the assertion is that the first image holds
+    # exactly the constructed environment and nothing beside it.
+    assert loaded |> String.split("\n", trim: true) |> Enum.sort() == ["PATH=/usr/bin:/bin"]
+
     # The demonstration launcher is the other spawn site and already begins with
     # the clearing option rather than with an executable path; asserting it keeps
     # the two vectors from drifting apart again.
@@ -1884,5 +2045,138 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "the probe child's group still has members"
 
     group
+  end
+
+  test "the cleanup budget is one configured period an operator can read and every receipt records it" do
+    # Concept: ADR 0009 asks for one visible, configured grace. A private module
+    # attribute is neither.
+    #
+    # Technical depth: the period was `@cleanup_grace_ms 5_000`, absent from the
+    # start options, from anything an operator could read back, and from the
+    # terminal evidence of the job it bounded -- so a run that spent it left no
+    # record of what it had been spending. It is now a start option with a
+    # declared default, readable from the composed executor, and written into
+    # every receipt, which is what makes the live configuration and the durable
+    # record of a job the same fact rather than two.
+    root = workspace()
+
+    {default_executor, default_lease} = executor_with_grace(root, 5_000)
+    assert Local.cleanup_grace_ms(default_executor) == 5_000
+
+    {executor, lease_id} = executor_with_grace(root, 750)
+    assert Local.cleanup_grace_ms(executor) == 750
+
+    assert {:ok, receipt} =
+             run(root, "loopex.write", %{"path" => "budgeted.txt", "content" => "x"}, %{
+               executor: executor,
+               lease_id: lease_id
+             })
+
+    assert receipt.cleanup_grace_ms == 750
+
+    # The durable record carries it too, so a coordinator recovering this job
+    # reads the period it was bounded by rather than the one running now.
+    assert {:ok, retained} = Local.receipt(executor, receipt.job_id)
+    assert retained.cleanup_grace_ms == 750
+
+    # A second executor in the same VM keeps its own period; the value is
+    # per-instance configuration and not a global.
+    assert Local.cleanup_grace_ms(default_executor) == 5_000
+    assert is_binary(default_lease)
+  end
+
+  test "the configured cleanup budget bounds the whole termination sequence rather than each step of it" do
+    # Concept: one absolute budget means shrinking it shortens the cleanup, and
+    # that the cleanup never costs more than it.
+    #
+    # Technical depth: the sequence is a `ps`, a `TERM`, the cooperative grace, a
+    # `KILL` and a second `ps`. Each used to receive five seconds of its own and
+    # the pause between the signals was a hard fifty milliseconds, so the
+    # declared period described none of them: the sequence could run for twenty
+    # seconds under a grace that said five, and the one part an operator might
+    # have wanted to lengthen -- the time a command gets to finish its write --
+    # was the one part the period did not reach at all.
+    #
+    # Both runs here are the same command with the same group, and the group
+    # refuses `TERM`, so the cooperative grace is actually spent in each. The
+    # only difference is the configured period, and it is visible twice: the
+    # longer budget takes measurably longer, and neither takes longer than the
+    # budget it was given.
+    root = workspace()
+
+    {small_executor, small_lease} = executor_with_grace(root, 600)
+    {large_executor, large_lease} = executor_with_grace(root, 3_000)
+
+    {small_ms, small} =
+      elapsed(fn ->
+        run(root, "loopex.bash", %{"command" => stubborn_group_command()}, %{
+          executor: small_executor,
+          lease_id: small_lease
+        })
+      end)
+
+    {large_ms, large} =
+      elapsed(fn ->
+        run(root, "loopex.bash", %{"command" => stubborn_group_command()}, %{
+          executor: large_executor,
+          lease_id: large_lease
+        })
+      end)
+
+    # Both ended the group and said so; the outcome is not what differs.
+    assert {:ok, %{outcome: :completed, output: small_output}} = small
+    assert {:ok, %{outcome: :completed, output: large_output}} = large
+    assert small_output =~ "confirmed cleaned"
+    assert large_output =~ "confirmed cleaned"
+
+    # The declared period is what the sequence spends, so a larger one spends
+    # longer on the same group.
+    assert large_ms > small_ms,
+           "the configured period did not change how long cleanup took: " <>
+             "#{small_ms}ms at 600ms and #{large_ms}ms at 3000ms"
+
+    # And it is a bound, not a per-step allowance. Under separate allowances the
+    # same group cost `ps` plus `TERM` plus a pause plus `KILL` plus `ps`, which
+    # no single declared period described.
+    assert small_ms < 600 + 2_000, "cleanup at a 600ms budget took #{small_ms}ms"
+    assert large_ms < 3_000 + 2_000, "cleanup at a 3000ms budget took #{large_ms}ms"
+  end
+
+  test "a cleanup helper that outlives its bound is terminated rather than left running" do
+    # Concept: a bound that only stops this runtime waiting is not a bound on the
+    # program it was waiting for.
+    #
+    # Technical depth: the helper used to run inside a spawned BEAM process that
+    # was killed at the bound. Closing its port does not end the operating-system
+    # process behind it, so a probe answered `:no_answer` after a hundred
+    # milliseconds and the child went on to do its work afterwards. For `/bin/ps`
+    # that is untidy. For `/bin/kill` it is a signal aimed at a negated process
+    # group identifier and delivered at a moment this executor believes its
+    # cleanup already ended -- and group identifiers are reissued, so the target
+    # need not be the group that was meant.
+    #
+    # The file is the evidence: it exists only if the helper ran to completion
+    # after its bound had passed.
+    root = workspace()
+    written = Path.join(root, "helper-ran-after-its-bound.txt")
+
+    {answered_ms, answer} =
+      elapsed(fn ->
+        Local.answer_within("/bin/sh", ["-c", "sleep 2; printf x > #{written}"], 150)
+      end)
+
+    assert answer == :no_answer
+    assert answered_ms < 1_500, "the bound was not honoured: #{answered_ms}ms"
+
+    # Long enough that the helper would have finished if it were still alive.
+    Process.sleep(3_000)
+
+    refute File.exists?(written),
+           "the helper outlived its bound and completed its work afterwards"
+
+    # A helper that answers inside its bound is unaffected: the kill is the
+    # abandonment path and not the ordinary one.
+    assert {output, 0} = Local.answer_within("/bin/sh", ["-c", "printf answered"], 5_000)
+    assert output == "answered"
   end
 end

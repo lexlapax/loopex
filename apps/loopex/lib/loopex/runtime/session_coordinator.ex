@@ -1141,14 +1141,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp close_tool_stream(state, run_id, disposition, reported_count) do
+  # Concept: the closing item says how many items this coordinator put on the
+  # stream, which is the only count it can vouch for.
+  #
+  # Technical depth: a completed stream closed with the executor's own
+  # `progress_count` -- the executor's claim about what it emitted, taken as this
+  # runtime's statement about what it published. Those are different numbers
+  # whenever `project_progress/2` refuses an event: an executor that emitted
+  # three, two of them with a wrong binding, had one item reach the operator
+  # under a closure declaring three, so a consumer using the closure to detect
+  # loss on the transient plane concluded that two items had been coalesced away.
+  # The refusals are not loss and are already reported as refusals.
+  #
+  # The port declares no relationship between that field and what a coordinator
+  # accepted -- it could not, because refusal is the coordinator's decision and
+  # the executor has not heard of it. So the number is counted here, from what
+  # was emitted, and the executor's own figure stays where it belongs: in the
+  # receipt, as that executor's record of what it sent.
+  defp close_tool_stream(state, run_id, disposition) do
     case Map.fetch(state.streams, {:executor, run_id}) do
       {:ok, stream} ->
-        count =
-          case disposition do
-            :complete -> reported_count
-            :abandoned -> :atomics.get(stream.counter, 1)
-          end
+        count = :atomics.get(stream.counter, 1)
 
         emit_progress(
           state.progress_to,
@@ -1437,7 +1450,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
         case take_worker_result(reference) do
           {:ok, receipt} when is_map(receipt) ->
-            state = close_tool_stream(state, run_id, :complete, receipt_progress_count(receipt))
+            state = close_tool_stream(state, run_id, :complete)
 
             case put_executor_fact(state, run_id, receipt) do
               {:ok, next} -> {next, cleanup}
@@ -1445,12 +1458,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
             end
 
           _unproved ->
-            {close_tool_stream(state, run_id, :abandoned, 0), :unconfirmed}
+            {close_tool_stream(state, run_id, :abandoned), :unconfirmed}
         end
     end
   end
-
-  defp receipt_progress_count(receipt), do: Map.get(receipt, :progress_count, 0)
 
   # Concept: take a worker's answer out of the mailbox instead of leaving it to
   # be dropped in silence.
@@ -1850,7 +1861,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp accept_executor_result(state, run_id, {:ok, receipt}) when is_map(receipt) do
-    state = close_tool_stream(state, run_id, :complete, Map.get(receipt, :progress_count, 0))
+    state = close_tool_stream(state, run_id, :complete)
 
     case state.fault_to do
       pid when is_pid(pid) ->
@@ -1886,11 +1897,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # terminal fact and `advance_run/2` remains the single place a run ends,
   # which is why one unknown effect ends the run whatever else was true of it.
   defp accept_executor_result(state, run_id, result) do
-    state = close_tool_stream(state, run_id, :abandoned, 0)
+    state = close_tool_stream(state, run_id, :abandoned)
 
     case Map.get(state.durable.pending_work, run_id) do
       %{pending_calls: [call | _rest]} = work ->
-        case effect_disposition(result) do
+        case effect_disposition(state.executor.module, result) do
           :refused_before_effect -> commit_tool_failure(state, work, call, failure_of(result))
           :unproven -> commit_tool_unproven(state, work, call, result)
         end
@@ -1900,62 +1911,30 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: the executor answers that are proved to precede the effect.
-  # Anything else leaves the effect unproven.
+  # Concept: whether an effect started is a fact about the executor, so the
+  # executor is asked rather than guessed at.
   #
-  # Technical depth: these are the refusals of the checks an executor performs
-  # immediately before an effect -- `Loopex.Executor.validate_job/1` and
-  # `validate_grant/3`, and the tool, argument, lease and fence checks ADR 0007
-  # requires it to complete before it starts anything. Nothing has run when one
-  # of them answers, so the call owes the conversation an ordinary terminal
-  # `failed` and the run carries on in a state that is entirely known.
+  # Technical depth: this used to be a list of error names held here, copied from
+  # the shipped local executor's behaviour and applied to every implementation of
+  # a port that is deliberately open. `:workspace_lease_lost` shows what that
+  # costs. The local executor raises it only from the validation that runs before
+  # a start, so listing it here was true of that executor -- and a conforming
+  # third-party executor that lost its lease halfway through a write and returned
+  # the same name had its effect committed as an ordinary `failed`, with the loop
+  # carrying on past an effect nobody could account for. That is the defect this
+  # runtime had just repaired, reachable again through the port.
   #
-  # A reader placing a new shape answers one question about it: could the effect
-  # already have happened when an executor returns it? Only a proved no belongs
-  # in this list. `{:receipt_not_retained, _}` is the shape that made the
-  # question worth asking, and it is not the only one that fails it:
-  # `{:receipt_read_failed, _}` and `:invalid_retained_receipt` mean an earlier
-  # attempt of this job retained a receipt that cannot now be read, and
-  # `:job_id_conflict` means the executor already holds a receipt at this job's
-  # identity. In each of those an effect ran and nobody can say what it did.
-  #
-  # The default is unproven rather than failed because the port declares
-  # `{:error, term()}` and nothing narrower. An unrecognised term is not
-  # evidence, `failed` is a positive claim that the effect did not happen, and
-  # this runtime does not make claims about an executor's internals it cannot
-  # check. `Loopex.Executor.cancel/3` reads an unadmitted answer the same way,
-  # for the same reason.
-  #
-  # A lease refusal is here because an executor that loses its lease *while* a
-  # tool runs does not report that as an error at all: it retains a receipt
-  # whose own outcome is `outcome_unknown`, and a lease lost while that receipt
-  # is being written is named `:workspace_lease_lost_during_retention` inside
-  # `{:receipt_not_retained, _}`. The bare lease refusals are answers from the
-  # validation that runs before a job is started.
-  @executor_prestart_refusals [
-    :canonical_job_request_mismatch,
-    :executor_prestart_mismatch,
-    :host_policy_allow_required,
-    :invalid_grant,
-    :invalid_grant_decision,
-    :invalid_job_request,
-    :invalid_tool_arguments,
-    :tool_definition_mismatch,
-    :workspace_lease_lost,
-    :workspace_lease_mismatch,
-    :workspace_lease_not_held
-  ]
-
-  @grant_binding_refusals [:binding_mismatch, :missing_binding]
-
-  defp effect_disposition({:error, reason}) when reason in @executor_prestart_refusals,
-    do: :refused_before_effect
-
-  defp effect_disposition({:error, {binding, field}})
-       when binding in @grant_binding_refusals and is_atom(field),
-       do: :refused_before_effect
-
-  defp effect_disposition(_answer), do: :unproven
+  # `Loopex.Executor.refused_before_effect?/2` asks the one party that was there.
+  # An executor that declares nothing is unproven, which is also the answer for
+  # anything this runtime cannot read as an error at all: `failed` is a positive
+  # claim that the effect did not happen, and nothing here can support it.
+  # `Loopex.Executor.cancel/3` reads an unadmitted answer the same way, for the
+  # same reason.
+  defp effect_disposition(module, answer) do
+    if Executor.refused_before_effect?(module, answer),
+      do: :refused_before_effect,
+      else: :unproven
+  end
 
   # Concept: an effect that ran and cannot be accounted for is committed as
   # unknown, naming what an operator reconciles it against.

@@ -63,6 +63,22 @@ defmodule Loopex.AgentLoopProgressExecutor do
   defp events(:wrong_digest, job),
     do: [%{chunk(job, 0, "other") | canonical_request_digest: "not-the-digest"}]
 
+  # Concept: one event this coordinator accepts and two it refuses, from an
+  # executor that counts all three.
+  #
+  # Technical depth: the executor's `progress_count` is what it emitted, which is
+  # the only number it can know. Whether an event was projected is the
+  # coordinator's decision, made after the executor has finished with it. A case
+  # that needs those two numbers to differ needs an executor that emits events
+  # of both kinds in one job, which no single-mode double could produce.
+  defp events(:one_valid_two_refused, job) do
+    [
+      chunk(job, 0, "kept"),
+      %{chunk(job, 1, "stale") | attempt: job.attempt + 1},
+      %{chunk(job, 2, "fenced") | fencing_token: job.fencing_token + 1}
+    ]
+  end
+
   # Only the call id, which is what the boundary used to accept as an identity.
   defp events(:call_id_only, job),
     do: [%{tool_call_id: job.tool_call_id, stream: "stdout", byte_offset: 0, chunk: "bare"}]
@@ -136,6 +152,19 @@ defmodule Loopex.AgentLoopAnsweringExecutor do
   @impl Loopex.Executor
   def cancel(_pid, _job_id), do: {:ok, :cleaned}
 
+  # Concept: this double declares which of its own answers preceded the effect,
+  # because the port makes that the executor's statement rather than a caller's
+  # inference.
+  #
+  # Technical depth: it refuses at argument validation and nowhere else, so
+  # `:invalid_tool_arguments` is the one name it can trace to a line that runs
+  # before `effects/1` records anything. Every other answer it gives is produced
+  # after that record exists, which is why the declaration is this narrow and why
+  # `{:receipt_not_retained, _}` is absent from it.
+  @impl Loopex.Executor
+  def refused_before_effect?({:error, :invalid_tool_arguments}), do: true
+  def refused_before_effect?(_answer), do: false
+
   @impl Loopex.Executor
   def execute(pid, job, _grant, _options, progress \\ nil) do
     _progress = progress || Loopex.Executor.discard_progress()
@@ -193,6 +222,91 @@ defmodule Loopex.AgentLoopAnsweringExecutor do
   end
 end
 
+defmodule Loopex.AgentLoopUndeclaringExecutor do
+  @moduledoc false
+
+  # Concept: a conforming executor that is not this project's, that loses its
+  # workspace lease halfway through the effect and says so with the same name the
+  # shipped local executor uses before a start.
+  #
+  # Technical depth: it implements exactly `execute/5`. `refused_before_effect?/1`
+  # is optional, and an executor that does not export it has declared nothing --
+  # which is the whole point of this double. Under the deleted allowlist the
+  # coordinator recognised `:workspace_lease_lost` by name, read this answer as a
+  # refusal, committed an ordinary `failed`, and let the loop resume past an
+  # effect that had already landed in a workspace this executor no longer held.
+  # `effects/1` is this double's own record of what actually ran.
+
+  @behaviour Loopex.Executor
+
+  def start(answers) when is_map(answers) do
+    {:ok, pid} = Agent.start_link(fn -> %{answers: answers, jobs: [], effects: []} end)
+    pid
+  end
+
+  def jobs(pid), do: Agent.get(pid, & &1.jobs) |> Enum.reverse()
+
+  def effects(pid), do: Agent.get(pid, & &1.effects) |> Enum.reverse()
+
+  @impl Loopex.Executor
+  def execute(pid, job, _grant, _options, progress \\ nil) do
+    _progress = progress || Loopex.Executor.discard_progress()
+    :ok = Agent.update(pid, fn state -> %{state | jobs: [job | state.jobs]} end)
+
+    :ok =
+      Agent.update(pid, fn state -> %{state | effects: [job.tool_call_id | state.effects]} end)
+
+    Agent.get(pid, &Map.get(&1.answers, job.tool_call_id, {:error, :workspace_lease_lost}))
+  end
+end
+
+defmodule Loopex.AgentLoopBrokenDeclarationExecutor do
+  @moduledoc false
+
+  # Concept: an executor whose declaration is present but does not work.
+  #
+  # Technical depth: an optional callback is code, and code can raise, exit, or
+  # answer with something that is not a boolean at all. None of those is a
+  # statement that the effect did not happen, so none of them may be read as one.
+  # The three modes here are the three ways this double can fail to declare, and
+  # each must reach the same unproven answer a silent executor reaches.
+
+  @behaviour Loopex.Executor
+
+  def start(mode) do
+    {:ok, pid} = Agent.start_link(fn -> %{mode: mode, effects: []} end)
+    Process.put(:loopex_broken_declaration_mode, mode)
+    pid
+  end
+
+  def effects(pid), do: Agent.get(pid, & &1.effects) |> Enum.reverse()
+
+  # The mode has to be readable without the executor reference, because the port
+  # hands the declaration only the answer. A module attribute of the test process
+  # would not survive into the coordinator, so it is a persistent term keyed by
+  # this module.
+  def arm(mode), do: :persistent_term.put({__MODULE__, :mode}, mode)
+
+  @impl Loopex.Executor
+  def refused_before_effect?(_answer) do
+    case :persistent_term.get({__MODULE__, :mode}, :raises) do
+      :raises -> raise "this executor's declaration is broken"
+      :exits -> exit(:declaration_unavailable)
+      :not_a_boolean -> :yes
+    end
+  end
+
+  @impl Loopex.Executor
+  def execute(pid, job, _grant, _options, progress \\ nil) do
+    _progress = progress || Loopex.Executor.discard_progress()
+
+    :ok =
+      Agent.update(pid, fn state -> %{state | effects: [job.tool_call_id | state.effects]} end)
+
+    {:error, :workspace_lease_lost}
+  end
+end
+
 defmodule Loopex.AgentLoopTest do
   @moduledoc false
 
@@ -200,6 +314,8 @@ defmodule Loopex.AgentLoopTest do
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopAnsweringExecutor
+  alias Loopex.AgentLoopBrokenDeclarationExecutor
+  alias Loopex.AgentLoopUndeclaringExecutor
   alias Loopex.AgentLoopProgressExecutor
   alias Loopex.AgentLoopTestModel
   alias Loopex.Bounds
@@ -1314,9 +1430,24 @@ defmodule Loopex.AgentLoopTest do
   # `{:ok, receipt}`, and the executor's error is the whole input here. The
   # attachment is handed back rather than drained, because these cases assert on
   # what the executor recorded before they wait for the run to end.
-  defp start_answering(answers, script) do
+  defp start_answering(answers, script),
+    do:
+      start_with_executor(
+        AgentLoopAnsweringExecutor,
+        AgentLoopAnsweringExecutor.start(answers),
+        script
+      )
+
+  # Concept: the same runtime, wired to whichever executor a case needs to be the
+  # one under test.
+  #
+  # Technical depth: whether an effect started is now the executor's own
+  # statement, so the cases that judge that classification differ only in which
+  # executor module the runtime holds -- one that declares, one that does not,
+  # one whose declaration is broken. Composing them through one function is what
+  # keeps that the only difference between them.
+  defp start_with_executor(module, executor_pid, script) do
     model_pid = AgentLoopTestModel.start(script)
-    executor_pid = AgentLoopAnsweringExecutor.start(answers)
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop-answering")
     definitions = [Fixture.tool_definition()]
 
@@ -1330,7 +1461,7 @@ defmodule Loopex.AgentLoopTest do
           options: [script: model_pid, max_tokens: 256]
         },
         executor: %{
-          module: AgentLoopAnsweringExecutor,
+          module: module,
           reference: executor_pid,
           identity: "answering-executor",
           epoch: 1,
@@ -1476,5 +1607,157 @@ defmodule Loopex.AgentLoopTest do
     malformed_finished = Enum.find(drain(malformed.attachment), &(&1.kind == "run.finished"))
     assert malformed_finished["outcome"] == "outcome_unknown"
     assert length(AgentLoopTestModel.dispatched(malformed.model)) == 1
+  end
+
+  test "an executor that declares nothing has every error read as unproven" do
+    # Concept: the port is open, so the coordinator meets executors it did not
+    # ship and must not read their error names as though it had.
+    #
+    # Technical depth: this executor loses its workspace lease halfway through
+    # the effect and answers `{:error, :workspace_lease_lost}` -- the same name
+    # the shipped local executor uses for a refusal that precedes every start.
+    # The deleted allowlist matched on that name, committed an ordinary `failed`,
+    # told the model the tool had not run, and let the loop carry on past an
+    # effect already in a workspace this executor no longer held: the exact
+    # defect this milestone repaired, reintroduced through the port. Because this
+    # executor exports no `refused_before_effect?/1`, it has declared nothing,
+    # and nothing is what the coordinator believes.
+    fixture =
+      start_with_executor(
+        AgentLoopUndeclaringExecutor,
+        AgentLoopUndeclaringExecutor.start(%{"c1" => {:error, :workspace_lease_lost}}),
+        one_call_script()
+      )
+
+    events = drain(fixture.attachment)
+
+    # The effect really did run under this executor before it answered.
+    assert AgentLoopUndeclaringExecutor.effects(fixture.executor) == ["c1"]
+
+    tool = Enum.find(events, &(&1.kind == "tool.finished"))
+    assert tool["tool_call_id"] == "c1"
+    assert tool["outcome"] == "outcome_unknown"
+    refute tool["outcome"] == "failed"
+
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "outcome_unknown"
+    refute finished["outcome"] == "completed"
+    assert is_binary(finished["reconciliation_ref"])
+
+    # The loop stopped. A resumed loop is what the name-matching classification
+    # produced, and it is the observable this case exists to refuse.
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+    Process.sleep(150)
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  test "an executor declaration that raises exits or answers with anything but true declares nothing" do
+    # Concept: an optional callback is code an implementer wrote, and code fails.
+    # A failed declaration is not a statement that the effect did not happen.
+    #
+    # Technical depth: `true` is required literally rather than truthily, so a
+    # declaration answering `:yes` -- plausible, and not a boolean -- claims
+    # nothing. A raise and an exit are the two other ways an implementation can
+    # be present and unusable. All three reach the same place a silent executor
+    # reaches, because the runtime believes only what an executor actually said.
+    for mode <- [:raises, :exits, :not_a_boolean] do
+      AgentLoopBrokenDeclarationExecutor.arm(mode)
+
+      fixture =
+        start_with_executor(
+          AgentLoopBrokenDeclarationExecutor,
+          AgentLoopBrokenDeclarationExecutor.start(mode),
+          one_call_script()
+        )
+
+      events = drain(fixture.attachment)
+
+      assert AgentLoopBrokenDeclarationExecutor.effects(fixture.executor) == ["c1"]
+
+      tool = Enum.find(events, &(&1.kind == "tool.finished"))
+
+      assert tool["outcome"] == "outcome_unknown",
+             "a #{mode} declaration was read as a refusal that preceded the effect"
+
+      finished = Enum.find(events, &(&1.kind == "run.finished"))
+      assert finished["outcome"] == "outcome_unknown"
+      assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+    end
+  end
+
+  test "a declared pre-start refusal is read from the executor and not from the error's name" do
+    # Concept: the same error name means opposite things from two executors, and
+    # only the executor that produced it can say which.
+    #
+    # Technical depth: both cases answer `{:error, :workspace_lease_lost}`. The
+    # declaring executor refuses before it records an effect and says so; the
+    # undeclaring one has already run the effect and says nothing. A
+    # classification that reads the name gives them the same answer, and exactly
+    # one of those answers is true of each.
+    assert Loopex.Executor.refused_before_effect?(
+             Loopex.Executor.Local,
+             {:error, :workspace_lease_lost}
+           )
+
+    refute Loopex.Executor.refused_before_effect?(
+             AgentLoopUndeclaringExecutor,
+             {:error, :workspace_lease_lost}
+           )
+
+    # The shipped executor declares only what it can trace to a line before a
+    # start; its post-effect answers are unproven from the same module.
+    refute Loopex.Executor.refused_before_effect?(
+             Loopex.Executor.Local,
+             {:error, {:receipt_not_retained, :enotdir}}
+           )
+
+    refute Loopex.Executor.refused_before_effect?(
+             Loopex.Executor.Local,
+             {:error, :job_id_conflict}
+           )
+
+    # A module that is not an executor at all, and an answer that is not an
+    # error, both declare nothing rather than raising.
+    refute Loopex.Executor.refused_before_effect?(
+             :no_such_executor_module,
+             {:error, :workspace_lease_lost}
+           )
+
+    refute Loopex.Executor.refused_before_effect?(Loopex.Executor.Local, {:ok, %{}})
+  end
+
+  test "a tool stream closes on the count this runtime published rather than the executor's own" do
+    # Concept: the closing item is this coordinator's statement about the stream
+    # it published, so it cannot be an executor's claim passed along.
+    #
+    # Technical depth: a completed stream closed with the receipt's
+    # `progress_count`. That is the executor's count of what it emitted, and the
+    # port declares no relationship between it and what a coordinator accepted --
+    # it could not, because refusal happens here, after the executor is done. The
+    # executor below emits three events and reports three; two carry a wrong
+    # binding and never reach the operator, so the stream carried one. Closing it
+    # at three tells a consumer that two items were lost on the transient plane,
+    # which is the one reading of a closing count that matters and the one thing
+    # that did not happen.
+    _fixture = start_with_progress(:one_valid_two_refused)
+
+    items = receive_progress()
+
+    progress = Enum.filter(items, &(&1.kind == :tool_progress))
+    assert length(progress) == 1
+    assert [%{chunk: "kept", progress_sequence: 0}] = progress
+
+    closure = Enum.find(items, &(&1.kind == :tool_stream_closed))
+    assert closure, "the tool stream was never closed"
+    assert closure.disposition == :complete
+
+    assert closure.progress_count == 1,
+           "the closing item carried the executor's count of three rather than the one item " <>
+             "this runtime published"
+
+    # The two that were refused are still visible, as refusals rather than as
+    # progress that went missing.
+    refusal = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
+    assert refusal["refused_count"] == 2
   end
 end

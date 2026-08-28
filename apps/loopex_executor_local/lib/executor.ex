@@ -30,15 +30,46 @@ defmodule Loopex.Executor.Local do
   @max_output_bytes 1_048_576
 
   # Concept: the declared grace the cancellation sequence gets once the run's own
-  # instant has passed.
+  # instant has passed, and the only number any of that work is measured against.
   #
   # Technical depth: obligation 4 runs termination and its confirmations *after*
   # expiry, so the work that follows a deadline cannot be bounded by the deadline
-  # -- that instant is already behind it. This is the one budget that work gets:
-  # the bound on each cleanup program, and the grace added to whatever remains of
-  # the run when the receipt is retained. Everything the run owns before its
+  # -- that instant is already behind it. Everything the run owns before its
   # deadline is bounded by the deadline itself and never by this.
-  @cleanup_grace_ms 5_000
+  #
+  # This used to be a bound handed separately to each cleanup program. ADR 0009
+  # asks for one visible period and that was four: the `TERM`, the `KILL`, each
+  # `ps` confirmation and the receipt's retention each received five seconds of
+  # their own, and `quiesce_group/2` spends three of them in sequence, so a job
+  # could take more than twenty seconds to finish cleaning up under a grace that
+  # said five. The cooperative pause between `TERM` and `KILL` was worse than
+  # invisible: it was fifty milliseconds, written nowhere an operator could read
+  # and unrelated to the declared period.
+  #
+  # `cleanup_until/1` turns the grace into one absolute instant per job, and
+  # every step of the sequence -- cooperative grace, forced termination, each
+  # confirmation, and retaining the receipt -- draws what remains of that one
+  # instant. Reaching it means the cleanup is over, not that the next step starts
+  # its own allowance.
+  @default_cleanup_grace_ms 5_000
+
+  # The share of what remains that a signalled group gets to exit on its own
+  # before it is killed. It is a share rather than a number so that it cannot
+  # drift away from the declared period the way fifty milliseconds had, and half
+  # rather than all of it so that a group which ignores `TERM` still leaves time
+  # for the `KILL` and the confirmation that follows.
+  @cooperative_share 2
+
+  # How often a signalled group is looked at while it is being given that grace.
+  # A `ps` costs a few milliseconds, so the common case -- a group that is gone
+  # the moment it is signalled -- pays one look rather than the whole window.
+  @cooperative_poll_ms 25
+
+  # The wait for a cleanup helper's own kill to be reported. It is a fixed bound
+  # for the same reason `@abandon_confirmation_ms` is: it is asked only once a
+  # bound has already been exceeded, and `kill(2)` either returns at once or the
+  # process running it is itself the thing that has stopped answering.
+  @helper_signal_ms 250
 
   # The wait for a killed worker to be confirmed dead. It is a fixed bound rather
   # than a deadline for the same reason: it is asked only once a bound has
@@ -121,6 +152,67 @@ defmodule Loopex.Executor.Local do
     GenServer.call(executor, {:execute, job, grant, options}, :infinity)
   end
 
+  # Concept: the exact answers this executor gives before it starts anything.
+  #
+  # Technical depth: every one of these is produced by `final_prestart_validation/3`
+  # and by nothing else in this module, which is what makes the declaration
+  # truthful rather than a guess about names. The post-effect answers --
+  # `{:receipt_not_retained, _}`, `{:receipt_read_failed, _}`,
+  # `:invalid_retained_receipt` and `:job_id_conflict` -- are deliberately
+  # absent: each of them is this executor saying an effect ran and its account of
+  # it is gone.
+  #
+  # `:workspace_lease_lost` and `:workspace_lease_mismatch` belong here for this
+  # executor and for no other reason. They reach `execute/5` only from
+  # `WorkspaceLease.resolve/2` inside the pre-start validation; a lease lost while
+  # a tool is running is never reported as an error at all, but as a retained
+  # receipt whose own outcome is `:outcome_unknown`. An executor built
+  # differently would answer differently, which is exactly why the answer is
+  # given here rather than assumed by a caller.
+  @prestart_refusals [
+    :canonical_job_request_mismatch,
+    :executor_prestart_mismatch,
+    :host_policy_allow_required,
+    :invalid_grant,
+    :invalid_grant_decision,
+    :invalid_job_request,
+    :invalid_tool_arguments,
+    :tool_definition_mismatch,
+    :workspace_lease_lost,
+    :workspace_lease_mismatch,
+    :workspace_lease_not_held
+  ]
+
+  @grant_binding_refusals [:binding_mismatch, :missing_binding]
+
+  @doc """
+  ## Concept
+
+  Says whether one exact answer this executor gave was refused before its effect
+  started.
+
+  ## Technical depth
+
+  This executor performs every check ADR 0007 requires at one serialized
+  boundary and opens no Port until all of them pass, so an answer produced there
+  is proved to precede the effect: no process ran, nothing was written, and the
+  call owes the conversation an ordinary terminal failure.
+
+  Everything else is `false`, including answers this executor does not
+  recognise. `true` is a positive claim about a workspace, and the only claims
+  made here are the ones this module can trace to a specific line that runs
+  before a start.
+  """
+  @impl Loopex.Executor
+  @spec refused_before_effect?(term()) :: boolean()
+  def refused_before_effect?({:error, reason}) when reason in @prestart_refusals, do: true
+
+  def refused_before_effect?({:error, {binding, field}})
+      when binding in @grant_binding_refusals and is_atom(field),
+      do: true
+
+  def refused_before_effect?(_answer), do: false
+
   @doc """
   ## Concept
 
@@ -142,10 +234,14 @@ defmodule Loopex.Executor.Local do
   @spec cancel(t(), binary()) :: {:ok, :cleaned} | {:ok, :unconfirmed}
   def cancel(executor, job_id) when is_pid(executor) and is_binary(job_id) do
     case lookup_inflight(executor, job_id) do
-      {:ok, group} ->
-        terminate_group(group)
+      {:ok, group, grace} ->
+        # The cancellation is its own cleanup episode, so its one absolute
+        # instant opens here rather than being inherited from a job whose own
+        # deadline may be minutes away.
+        until = System.system_time(:millisecond) + grace
+        terminate_group(group, until)
 
-        if confirm_group_terminated(group),
+        if confirm_group_terminated(group, until),
           do: {:ok, :cleaned},
           else: {:ok, :unconfirmed}
 
@@ -154,15 +250,74 @@ defmodule Loopex.Executor.Local do
     end
   end
 
+  @doc """
+  ## Concept
+
+  The one cleanup period this executor was configured with, in milliseconds.
+
+  ## Technical depth
+
+  ADR 0009 asks for a single visible, configured grace, and this is where a host
+  or operator reads back the value it composed the executor with. It is the same
+  number every receipt this executor retains reports as `cleanup_grace_ms`, so
+  the terminal evidence of a job and the live configuration cannot disagree.
+  """
+  @spec cleanup_grace_ms(t()) :: non_neg_integer()
+  def cleanup_grace_ms(executor) when is_pid(executor),
+    do: GenServer.call(executor, :cleanup_grace_ms)
+
   defp lookup_inflight(executor, job_id) do
     with {:dictionary, dictionary} <- Process.info(executor, :dictionary),
          table when not is_nil(table) <- Keyword.get(dictionary, :loopex_inflight_table),
+         grace when is_integer(grace) <-
+           Keyword.get(dictionary, :loopex_cleanup_grace_ms, @default_cleanup_grace_ms),
          [{^job_id, group}] <- :ets.lookup(table, job_id) do
-      {:ok, group}
+      {:ok, group, grace}
     else
       _absent -> :error
     end
   end
+
+  # Concept: a job's cleanup is one episode with one instant, opened the first
+  # time any of it is needed and shared by everything that follows.
+  #
+  # Technical depth: the alternative -- deriving the instant from the run's
+  # deadline -- reads well and is wrong in both directions. A job that finishes
+  # cleanly a second into a sixty-second deadline would be handing each `ps` a
+  # sixty-five-second bound, which is a worse hang than the five seconds it
+  # replaced; and a job cleaning up *at* its deadline would still take one grace
+  # to terminate its group and then another to retain its receipt, because the
+  # deadline is already behind both. The episode is what makes those one number.
+  #
+  # It is opened lazily, so a job that never cleans up never starts a clock, and
+  # it is memoized in the process that owns the job for the reason the in-flight
+  # table is: it is that job's own state, it must be reachable from every step of
+  # the sequence without being threaded through the six functions between them,
+  # and a VM-global name would collide between two executors in one VM.
+  # `execute_new/4` closes the previous job's episode before it opens anything.
+  defp cleanup_until do
+    case Process.get(:loopex_cleanup_episode) do
+      nil ->
+        until = System.system_time(:millisecond) + cleanup_grace_ms()
+        Process.put(:loopex_cleanup_episode, until)
+        until
+
+      until ->
+        until
+    end
+  end
+
+  # `nil` where no cleanup has been needed, which is what lets the receipt's
+  # retention tell "join the episode already running" from "the run still owns
+  # its own instant".
+  defp cleanup_episode, do: Process.get(:loopex_cleanup_episode)
+
+  defp close_cleanup_episode, do: Process.delete(:loopex_cleanup_episode)
+
+  defp cleanup_grace_ms,
+    do: Process.get(:loopex_cleanup_grace_ms, @default_cleanup_grace_ms)
+
+  defp cleanup_remaining(until), do: max(until - System.system_time(:millisecond), 0)
 
   @doc """
   ## Concept
@@ -221,14 +376,28 @@ defmodule Loopex.Executor.Local do
     leases = Keyword.fetch!(options, :workspace_leases)
     ledger_root = Keyword.fetch!(options, :ledger_root) |> Path.expand()
     artifacts = Keyword.get(options, :artifacts)
+    cleanup_grace_ms = Keyword.get(options, :cleanup_grace_ms, @default_cleanup_grace_ms)
 
     valid =
       is_binary(identity) and byte_size(identity) > 0 and is_integer(epoch) and epoch >= 0 and
         is_integer(fencing_token) and fencing_token >= 0 and is_map(leases) and
+        is_integer(cleanup_grace_ms) and cleanup_grace_ms >= 0 and
         Enum.all?(leases, fn {id, pid} -> is_binary(id) and is_pid(pid) end)
 
     with true <- valid,
          :ok <- File.mkdir_p(ledger_root) do
+      # Concept: the configured period is kept where the code that cleans up can
+      # read it, including the code that runs outside this server.
+      #
+      # Technical depth: `cancel/2` deliberately runs in its caller rather than in
+      # this server, because this server is blocked for the duration of the job
+      # being cancelled -- so it cannot ask for the period through a call it would
+      # queue behind that job. It reads it from this process's dictionary exactly
+      # as it already reads the in-flight table, and for the same reason: state
+      # this process owns, read without waiting for it to be free, and never under
+      # a VM-global name that two executors in one VM would collide on.
+      Process.put(:loopex_cleanup_grace_ms, cleanup_grace_ms)
+
       {:ok,
        %{
          identity: identity,
@@ -237,6 +406,7 @@ defmodule Loopex.Executor.Local do
          leases: leases,
          ledger_root: ledger_root,
          artifacts: artifacts,
+         cleanup_grace_ms: cleanup_grace_ms,
          dispatches: %{}
        }}
     else
@@ -250,6 +420,9 @@ defmodule Loopex.Executor.Local do
 
   def handle_call(:stats, _from, state),
     do: {:reply, %{dispatches: state.dispatches}, state}
+
+  def handle_call(:cleanup_grace_ms, _from, state),
+    do: {:reply, state.cleanup_grace_ms, state}
 
   def handle_call({:execute, job, grant, options}, _from, state) do
     case read_receipt(state.ledger_root, Map.get(job, :job_id, "")) do
@@ -333,6 +506,8 @@ defmodule Loopex.Executor.Local do
   # blocking step inside it is a wait that carries the DOWN rather than a gap
   # between two samples of the mailbox.
   defp execute_new(state, job, grant, options) do
+    close_cleanup_episode()
+
     case final_prestart_validation(state, job, grant) do
       {:ok, tool, lease_pid, workspace, arguments} ->
         next_state =
@@ -467,15 +642,8 @@ defmodule Loopex.Executor.Local do
     port =
       Port.open(
         {:spawn_executable, String.to_charlist("/usr/bin/env")},
-        [
-          :binary,
-          :exit_status,
-          :use_stdio,
-          :stderr_to_stdout,
-          :hide,
-          args: Enum.map(args, &String.to_charlist/1),
-          cd: String.to_charlist(workspace)
-        ]
+        [args: Enum.map(args, &String.to_charlist/1)] ++
+          launcher_port_options(demonstration_environment(), workspace)
       )
 
     notify(options, {:executor_process_started, job.job_id, tool.id, [@search_path_name]})
@@ -513,7 +681,7 @@ defmodule Loopex.Executor.Local do
       {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
         retain_now(root, unproven_receipt(receipt), lease)
     after
-      0 -> stage_and_commit(root, receipt, lease, retention_bound(deadline, @cleanup_grace_ms))
+      0 -> stage_and_commit(root, receipt, lease, receipt_retention_bound(deadline))
     end
   end
 
@@ -678,7 +846,11 @@ defmodule Loopex.Executor.Local do
   defp retain_now(root, receipt, lease) do
     staging = staging_path(root, receipt)
 
-    case bounded_work(fn -> retain_receipt(root, receipt, staging) end, @cleanup_grace_ms, lease) do
+    case bounded_work(
+           fn -> retain_receipt(root, receipt, staging) end,
+           cleanup_remaining(cleanup_until()),
+           lease
+         ) do
       {:done, :ok} -> {:ok, receipt}
       {:done, {:error, reason}} -> {:error, reason}
       {:stopped, reason} -> {:error, {:receipt_retention_stopped, reason}}
@@ -1128,15 +1300,8 @@ defmodule Loopex.Executor.Local do
     port =
       Port.open(
         {:spawn_executable, launcher},
-        [
-          :binary,
-          :exit_status,
-          :use_stdio,
-          :stderr_to_stdout,
-          :hide,
-          args: Enum.map(command_arguments, &String.to_charlist/1),
-          cd: String.to_charlist(workspace)
-        ]
+        [args: Enum.map(command_arguments, &String.to_charlist/1)] ++
+          launcher_port_options(environment, workspace)
       )
 
     os_pid = port |> Port.info(:os_pid) |> elem(1)
@@ -1164,7 +1329,7 @@ defmodule Loopex.Executor.Local do
       # backgrounds work and exits has that work terminated, which is the
       # intended reading of owning the group rather than the leader.
       {:exited, status, output, group} ->
-        quiescence = quiesce_group(group)
+        quiescence = quiesce_group(group, cleanup_until())
         forget_inflight(job.job_id)
 
         case quiescence do
@@ -1179,7 +1344,7 @@ defmodule Loopex.Executor.Local do
         end
 
       {:cancelled, output, group} ->
-        confirmed = confirm_group_terminated(group)
+        confirmed = confirm_group_terminated(group, cleanup_until())
 
         {if(confirmed, do: :cancelled, else: :outcome_unknown),
          output <>
@@ -1202,7 +1367,7 @@ defmodule Loopex.Executor.Local do
       # -- confirming cleanup proves the command stopped, not that its effect
       # never landed.
       {:workspace_lease_lost, output, group} ->
-        confirmed = confirm_group_terminated(group)
+        confirmed = confirm_group_terminated(group, cleanup_until())
 
         {:outcome_unknown,
          output <>
@@ -1288,13 +1453,13 @@ defmodule Loopex.Executor.Local do
   # present, and the check runs in the instant the launcher's exit is reported,
   # which is what keeps the negated-group kill aimed at this job's own group
   # rather than at a group identifier the operating system has since reissued.
-  defp quiesce_group(group) do
-    if confirm_group_terminated(group) do
+  defp quiesce_group(group, until) do
+    if confirm_group_terminated(group, until) do
       :quiescent
     else
-      terminate_group(group)
+      terminate_group(group, until)
 
-      if confirm_group_terminated(group), do: :terminated, else: :unconfirmed
+      if confirm_group_terminated(group, until), do: :terminated, else: :unconfirmed
     end
   end
 
@@ -1416,10 +1581,24 @@ defmodule Loopex.Executor.Local do
   # The run's committed instant is used rather than the tool's effective
   # deadline, because a tool's declared budget bounds the tool and this is the
   # run retaining what the tool produced.
-  defp retention_bound(job), do: retention_bound(job.run_deadline, 0)
+  defp retention_bound(job), do: max(job.run_deadline - System.system_time(:millisecond), 0)
 
-  defp retention_bound(deadline, grace),
-    do: max(deadline - System.system_time(:millisecond), 0) + grace
+  # Concept: retaining the receipt is the last step of the same cleanup episode
+  # where one is already running, and the run's own instant where none is.
+  #
+  # Technical depth: this took the run's remaining time plus a fresh grace. On
+  # the path that matters -- a job cleaning up at or after its deadline -- the
+  # remaining time is nothing, so the receipt received a whole second grace after
+  # the sequence that terminated the group had spent the first. Joining the
+  # episode is what makes the declared period one period. Where no cleanup ran,
+  # the run has not exceeded anything and still owns its instant, so it keeps the
+  # grace it always had beyond it.
+  defp receipt_retention_bound(deadline) do
+    case cleanup_episode() do
+      nil -> max(deadline - System.system_time(:millisecond), 0) + cleanup_grace_ms()
+      until -> cleanup_remaining(until)
+    end
+  end
 
   # Concept: retaining output is work the lease still covers and the run still
   # owns, so it is waited on rather than simply called.
@@ -1461,6 +1640,65 @@ defmodule Loopex.Executor.Local do
   # here in the same shape the coding tools use so one function reports both.
   defp demonstration_environment do
     [{String.to_charlist(@search_path_name), String.to_charlist(@search_path_value)}]
+  end
+
+  # Concept: the exact port options every job of this executor is spawned with,
+  # apart from the arguments the job itself supplies.
+  #
+  # Technical depth: exposed for the reason `launcher_vector/1` is: the rule that
+  # decides what a spawned image is loaded with must not rest on a construction
+  # nothing can observe. Nothing downstream of `env -i` can see the first image's
+  # own environment -- that is the whole difficulty -- so a case reads it by
+  # spawning `/usr/bin/env` with these options and no arguments at all, which
+  # makes `env` print the environment it was itself loaded with. Building that
+  # list here rather than in the case is what keeps the observation an
+  # observation. It is a `@doc false` seam and no part of any contract.
+  @doc false
+  @spec launcher_port_options(binary()) :: keyword()
+  def launcher_port_options(workspace) when is_binary(workspace),
+    do: launcher_port_options(child_environment(), workspace)
+
+  defp launcher_port_options(environment, workspace) do
+    [
+      :binary,
+      :exit_status,
+      :use_stdio,
+      :stderr_to_stdout,
+      :hide,
+      env: spawn_environment(environment),
+      cd: String.to_charlist(workspace)
+    ]
+  end
+
+  # Concept: the first image the operating system loads for a job receives only
+  # what this executor chose, and receives it at load time.
+  #
+  # Technical depth: both spawn sites passed no `env:` at all, so `/usr/bin/env`
+  # was `execve`d with the emulator's entire environment. Supplying `-i` in its
+  # *arguments* clears the environment of the command `env` goes on to run; it
+  # cannot clear the environment `env` itself was loaded with, because the loader
+  # has already finished by the time `env` parses anything. On a platform whose
+  # loader honours an ambient `LD_PRELOAD`, the object it names is mapped into
+  # that first process -- and that first process is holding the provider
+  # credential, because the operator must export it for the runtime to work at
+  # all.
+  #
+  # A port's `env:` option extends the inherited environment rather than
+  # replacing it, and `{name, false}` unsets one name. Clearing every name this
+  # operating-system process holds and then setting the constructed ones is
+  # therefore a replacement expressed in the only vocabulary the option has. The
+  # clearing list is read from the live environment rather than declared, because
+  # a declared list of names worth removing is the filtering this module has
+  # always refused to do: it would have to be complete, and it cannot be.
+  #
+  # `env -i` in the arguments is kept. It is the boundary for the downstream
+  # command, which is a different process from this one, and the two together
+  # mean no image in the chain is ever loaded with a variable this executor did
+  # not choose.
+  defp spawn_environment(environment) do
+    cleared = for {name, _value} <- System.get_env(), do: {String.to_charlist(name), false}
+
+    cleared ++ environment
   end
 
   defp child_environment do
@@ -1538,16 +1776,23 @@ defmodule Loopex.Executor.Local do
      env_prefix(environment) ++ group_launcher() ++ ["sh", "-c", group_preamble() <> command]}
   end
 
-  # Concept: the child's environment is built, not filtered.
+  # Concept: `env -i` builds the environment of the command, which is not the
+  # environment of the process that runs `env`.
   #
-  # Technical depth: a port's `env:` option adds to the inherited environment
-  # rather than replacing it, so clearing one name there leaves every other
-  # variable of this operating-system process readable by the child. `env -i`
-  # starts from nothing and takes only the assignments that follow it, which is
-  # how the demonstration tools were always launched and is the construction the
-  # operator documentation describes. Filtering would need this executor to know
-  # every name worth removing; constructing needs it to know only the names worth
-  # keeping.
+  # Technical depth: this argument prefix was once described here as the whole
+  # boundary, on the reasoning that a port's `env:` option extends the inherited
+  # environment rather than replacing it and so could never clear anything. Half
+  # of that is right and the conclusion was wrong. `env -i` is the correct
+  # construction for the *downstream* command -- it starts from nothing and takes
+  # only the assignments that follow, so this executor needs to know only the
+  # names worth keeping rather than every name worth removing -- and it is kept
+  # for exactly that. It cannot do anything at all about the image the operating
+  # system loaded in order to parse it. `/usr/bin/env` is `execve`d with whatever
+  # the port gave it, and a loader acts on that process before its first
+  # instruction: an ambient `LD_PRELOAD` maps a model-controlled object into the
+  # process this executor started, and that process holds the provider
+  # credential while it does. `spawn_environment/1` is what closes that, and this
+  # prefix now covers only what it can honestly cover.
   #
   # These are the arguments of a `/usr/bin/env` the port has already spawned, so
   # they begin with the clearing option rather than with a path to `env` again.
@@ -1598,7 +1843,7 @@ defmodule Loopex.Executor.Local do
 
     if remaining <= 0 do
       group = group_of(acc, os_pid)
-      terminate_group(group)
+      terminate_group(group, cleanup_until())
       forget_inflight(job.job_id)
       {:cancelled, strip_group_line(acc), group}
     else
@@ -1614,7 +1859,7 @@ defmodule Loopex.Executor.Local do
 
         {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
           group = group_of(acc, os_pid)
-          terminate_group(group)
+          terminate_group(group, cleanup_until())
           forget_inflight(job.job_id)
           {:workspace_lease_lost, strip_group_line(acc), group}
       after
@@ -1638,14 +1883,48 @@ defmodule Loopex.Executor.Local do
   # Technical depth: a negative pid names the process group. TERM first so a
   # child can finish a write, then KILL, because a command interrupted mid-write
   # leaves a half-written file the operator has to notice for themselves.
-  defp terminate_group(group) when is_integer(group) and group > 1 do
-    _ = answer_within("/bin/kill", ["-TERM", "-#{group}"], @cleanup_grace_ms)
-    Process.sleep(50)
-    _ = answer_within("/bin/kill", ["-KILL", "-#{group}"], @cleanup_grace_ms)
+  defp terminate_group(group, until) when is_integer(group) and group > 1 do
+    _ = answer_within("/bin/kill", ["-TERM", "-#{group}"], cleanup_remaining(until))
+
+    unless exited_cooperatively?(group, cooperative_until(until)) do
+      _ = answer_within("/bin/kill", ["-KILL", "-#{group}"], cleanup_remaining(until))
+    end
+
     :ok
   end
 
-  defp terminate_group(_group), do: :ok
+  defp terminate_group(_group, _until), do: :ok
+
+  # Concept: the cooperative grace is a wait for the group to go, not a pause of
+  # a length nobody declared.
+  #
+  # Technical depth: this was `Process.sleep(50)` -- fifty milliseconds between
+  # `TERM` and `KILL`, which is not enough for a command to finish the write the
+  # `TERM`-first ordering exists to protect, and is not the declared period an
+  # operator configured. Looking rather than sleeping makes the common case
+  # cheaper as well as the slow case correct: a group that is gone the instant it
+  # is signalled costs one `ps` and no `KILL` at all, and a group that ignores
+  # the signal is killed the moment its share of the budget runs out rather than
+  # fifty milliseconds in.
+  defp cooperative_until(until) do
+    share = div(cleanup_grace_ms(), @cooperative_share)
+
+    System.system_time(:millisecond) + min(share, cleanup_remaining(until))
+  end
+
+  defp exited_cooperatively?(group, until) do
+    cond do
+      confirm_group_terminated(group, until) ->
+        true
+
+      cleanup_remaining(until) == 0 ->
+        false
+
+      true ->
+        Process.sleep(min(@cooperative_poll_ms, cleanup_remaining(until)))
+        exited_cooperatively?(group, until)
+    end
+  end
 
   # Concept: cleanup is confirmed by looking, not by assuming the signal worked.
   #
@@ -1653,72 +1932,154 @@ defmodule Loopex.Executor.Local do
   # descendant that left the group is outside both the kill and this check, which
   # is stated rather than papered over: the claim is about the group this
   # executor owns and no wider.
-  defp confirm_group_terminated(group) when is_integer(group) and group > 1 do
+  defp confirm_group_terminated(group, until) when is_integer(group) and group > 1 do
     "/bin/ps"
-    |> answer_within(["-o", "pid=", "-g", Integer.to_string(group)], @cleanup_grace_ms)
+    |> answer_within(["-o", "pid=", "-g", Integer.to_string(group)], cleanup_remaining(until))
     |> group_answered_empty?()
   end
 
-  defp confirm_group_terminated(_group), do: true
+  defp confirm_group_terminated(_group, _until), do: true
 
   # Concept: a program this executor runs to clean up is still a program that can
-  # fail to answer, and waiting on it forever is not cleanup.
+  # fail to answer, and a bound that only stops this runtime waiting is not a
+  # bound on the program.
   #
   # Technical depth: `System.cmd/3` takes no timeout, and both cleanup programs
   # ran inline in the process that owns the job -- so a `/bin/ps` or `/bin/kill`
   # that never returned held this executor's serialized owner, and the caller
-  # blocking on `:infinity`, with no bound at all. The wait is the declared
-  # cleanup grace rather than the run deadline because this is the sequence that
-  # runs *after* expiry: bounding it by an instant already in the past would
-  # refuse every confirmation this executor makes at a deadline.
+  # blocking on `:infinity`, with no bound at all. That was fixed by running the
+  # command in a BEAM process and killing *that* at the bound, which fixed the
+  # wrong half. The operating-system process was never this runtime's to abandon:
+  # a probe answered `:no_answer` after a hundred milliseconds and the child went
+  # on to write its file afterwards. For `/bin/kill` that is worse than untidy --
+  # it is a signal aimed at a negated group identifier, delivered at a moment
+  # this executor believes its cleanup already ended, and process-group
+  # identifiers are reissued.
+  #
+  # The program is now this process's own port, so the bound reaches the thing
+  # that has to stop: at expiry the child is signalled by the process identifier
+  # the port reported, and only then is the port closed. Signalling before
+  # closing is deliberate -- the child is still this port's child while the port
+  # is open, so the identifier still names it rather than whatever the operating
+  # system reissues next.
+  #
+  # The wait is the declared cleanup grace rather than the run deadline because
+  # this is the sequence that runs *after* expiry: bounding it by an instant
+  # already in the past would refuse every confirmation this executor makes at a
+  # deadline. Every caller now passes what remains of one absolute instant, so
+  # the whole sequence shares the budget rather than each program receiving one.
   #
   # `:no_answer` is not silence. `group_answered_empty?/1` reads an empty answer
   # as an empty group, which is only sound for an answer that arrived, so a
   # program that never answered confirms nothing and the effect stays unproven --
   # the same rule that already refuses a `ps` killed by a signal. A program that
-  # cannot be run at all raises inside the worker and arrives as the same
-  # non-answer, which is why no rescue remains here.
-  #
-  # Killing the worker closes the port and the operating-system process it owns
-  # is no longer this executor's to wait for. It is not claimed to be gone: a
-  # program that ignored its own bound is exactly the kind that may outlive the
-  # port, which is why the answer is `:no_answer` rather than a verdict.
+  # cannot be run at all raises where the port is opened and arrives as the same
+  # non-answer.
   #
   # It is exposed for the reason `group_answered_empty?/1` is: no case can make
-  # the operating system's own `ps` hang.
+  # the operating system's own `ps` hang, and a case that must prove a timed-out
+  # helper is dead has to be able to time one out.
   @doc false
   @spec answer_within(binary(), [binary()], non_neg_integer()) ::
           {binary(), integer()} | :no_answer
   def answer_within(program, arguments, bound)
       when is_binary(program) and is_list(arguments) and is_integer(bound) and bound >= 0 do
-    parent = self()
-    tag = make_ref()
+    port =
+      Port.open(
+        {:spawn_executable, String.to_charlist(program)},
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          :hide,
+          args: Enum.map(arguments, &String.to_charlist/1),
+          env: spawn_environment(demonstration_environment())
+        ]
+      )
 
-    {worker, reference} =
-      spawn_monitor(fn ->
-        send(parent, {tag, System.cmd(program, arguments, stderr_to_stdout: true)})
-      end)
+    collect_answer(port, helper_os_pid(port), <<>>, System.monotonic_time(:millisecond) + bound)
+  rescue
+    _error -> :no_answer
+  catch
+    _kind, _value -> :no_answer
+  end
+
+  defp collect_answer(port, os_pid, acc, stop) do
+    remaining = stop - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      abandon_helper(port, os_pid)
+    else
+      receive do
+        {^port, {:data, chunk}} ->
+          collect_answer(port, os_pid, acc <> chunk, stop)
+
+        {^port, {:exit_status, status}} ->
+          {acc, status}
+      after
+        remaining -> abandon_helper(port, os_pid)
+      end
+    end
+  end
+
+  # Concept: the helper is killed, and only then let go of.
+  #
+  # Technical depth: closing the port releases this runtime's handle and does not
+  # end the process behind it, which is the whole defect. `kill(2)` on the
+  # reported identifier is what ends it, and it is sent while the port still owns
+  # the child. The confirmation is bounded because a `/bin/kill` that does not
+  # answer is itself a process that has stopped answering, and the caller is
+  # already past a bound; the answer is `:no_answer` either way, because this
+  # runtime cannot prove a kill it did not see reported.
+  defp abandon_helper(port, os_pid) do
+    if is_integer(os_pid), do: signal_helper(os_pid)
+    close_helper(port)
+    :no_answer
+  end
+
+  defp signal_helper(os_pid) do
+    port =
+      Port.open(
+        {:spawn_executable, ~c"/bin/kill"},
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          :hide,
+          args: [~c"-KILL", String.to_charlist(Integer.to_string(os_pid))],
+          env: spawn_environment(demonstration_environment())
+        ]
+      )
 
     receive do
-      {^tag, answer} ->
-        Process.demonitor(reference, [:flush])
-        answer
-
-      {:DOWN, ^reference, :process, ^worker, _reason} ->
-        :no_answer
+      {^port, {:exit_status, _status}} -> :ok
     after
-      bound ->
-        Process.exit(worker, :kill)
-        Process.demonitor(reference, [:flush])
-
-        receive do
-          {^tag, _late} -> :ok
-        after
-          0 -> :ok
-        end
-
-        :no_answer
+      @helper_signal_ms -> :ok
     end
+
+    close_helper(port)
+  rescue
+    _error -> :ok
+  catch
+    _kind, _value -> :ok
+  end
+
+  defp helper_os_pid(port) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, os_pid} -> os_pid
+      _absent -> nil
+    end
+  end
+
+  defp close_helper(port) do
+    Port.close(port)
+    :ok
+  rescue
+    _error -> :ok
+  catch
+    _kind, _value -> :ok
   end
 
   # Concept: silence only means "no survivors" when it came from a `ps` that
@@ -1918,6 +2279,7 @@ defmodule Loopex.Executor.Local do
       observed_at_ms: System.system_time(:millisecond),
       child_environment_names: environment_names(environment),
       provider_credential_present: credential_present?(environment),
+      cleanup_grace_ms: state.cleanup_grace_ms,
       artifacts: artifacts
     }
   end
