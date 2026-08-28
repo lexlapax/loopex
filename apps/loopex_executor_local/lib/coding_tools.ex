@@ -3,14 +3,28 @@ defmodule Loopex.Executor.Local.CodingTools do
   ## Concept
 
   The four tools an operator actually needs: `read`, `write`, `edit`, and
-  `bash`. They act on a real workspace, and every one of them is confined to it.
+  `bash`. They act on a real workspace, and the three that take a path are
+  confined to it.
 
-  Containment is the load-bearing property here, and it is deliberately checked
-  against the resolved path rather than the requested one. A path that looks
-  contained can leave the workspace through `..`, through an absolute path, or
-  through a symlink that points elsewhere — and the last of those is invisible to
-  any amount of string inspection. Resolving first and comparing afterwards is
-  the only check that catches all three.
+  `bash` is not, and the difference is worth stating plainly rather than
+  rounding off. It takes a command, not a path; a command names its own files,
+  in a shell, at a time this module cannot inspect, so there is nothing here to
+  resolve and compare. A `bash` call reaches everything the operator running
+  Loopex reaches. What governs it is the host policy that decided the call, not
+  this module — and
+  [the operator guidance](../../../../docs/operator/tools-and-policy.md) says so
+  in the same words, because a moduledoc claiming a containment the code does
+  not perform is worse than no claim at all.
+
+  For the three that do take a path, containment is the load-bearing property
+  and is deliberately checked against the resolved path rather than the
+  requested one. A path that looks contained can leave the workspace through
+  `..`, through an absolute path, or through a symlink that points elsewhere —
+  and the last of those is invisible to any amount of string inspection.
+  Resolving first and comparing afterwards is the only check that catches all
+  three. Resolution and effect are not one kernel operation; the residual window
+  is recorded at
+  [`M2-recorded-limitations.md`](../../../../docs/evidence/M2-recorded-limitations.md).
 
   Fixed by
   [ADR 0009](../../../../docs/adr/0009-tool-executor-and-grant-contracts.md#concept).

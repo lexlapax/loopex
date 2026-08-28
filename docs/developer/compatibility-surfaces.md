@@ -84,6 +84,27 @@ widens `Loopex.Executor` with the optional `cancel/2` callback recorded in
 implementation of any of them is written against bytes that may change in the
 next milestone.
 
+The shipped local executor gains two start options, `cleanup_grace_ms` and
+`process_probe`, each with a declared default and each readable back from the
+running executor and recorded on every receipt it retains. They are the local
+executor's own configuration rather than a port change, and an embedder that
+passes neither behaves exactly as before.
+
+`Loopex.Executor` gains no second callback, but the *meaning* of one of its
+return values changed and an existing implementation is affected without
+recompiling. An executor that refused a job before its effect started says so by
+returning `{:error, {:refused_before_effect, reason}}`; the runtime commits that
+as an ordinary terminal `failed` carrying `reason`. Every other `{:error, _}` is
+read as unproven and ends the run `outcome_unknown` with a reconciliation
+reference. The runtime previously recognised a list of error *names* copied from
+the shipped local executor and applied to every implementation, which meant a
+conforming executor that lost its lease halfway through a write and returned
+`{:error, :workspace_lease_lost}` had that effect committed as `failed` and the
+loop carried on past it. Failing closed is the correct default and it is a real
+behaviour change: an executor that adopts nothing keeps compiling, stays
+conforming, and sees errors that used to end a call `failed` now end the run
+`outcome_unknown`.
+
 **Durable records.** The committed record kinds are `session_genesis`,
 `owner_advanced`, `command_admitted`, `model_request_committed`,
 `model_result_committed`, `model_attempt_abandoned`,

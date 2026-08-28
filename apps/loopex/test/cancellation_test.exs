@@ -30,6 +30,38 @@ defmodule Loopex.CancellationTestExecutor do
       :never_answers ->
         {:ok, :cleaned}
 
+      # Concept: a cancellation that takes its time, so a case can ask what this
+      # coordinator is able to do while one is running.
+      #
+      # Technical depth: `cancel/2` is host-supplied code. It used to be called
+      # from inside the coordinator's own process, so for as long as an
+      # implementation took, the coordinator answered nothing at all -- not a
+      # second interrupt, not a status query, not another session's admission.
+      # Bounding the call did not fix that: a bounded call still blocks its
+      # caller for the length of the bound.
+      :cancel_is_slow ->
+        Process.sleep(700)
+        {:ok, :cleaned}
+
+      # Concept: three ways a host-supplied cancellation fails to say anything,
+      # none of which is a statement that the process tree is gone.
+      #
+      # Technical depth: `cancel/2` is code an implementer wrote, and code
+      # raises, exits, and returns terms nobody planned for. Each of these
+      # releases the waiting job first, so the run reaches its abort with real
+      # work behind it rather than with nothing to clean up -- otherwise the
+      # case would pass for the wrong reason.
+      mode when mode in [:cancel_raises, :cancel_exits, :cancel_malformed] ->
+        waiting = Agent.get(pid, & &1.waiting)
+        if is_pid(waiting), do: send(waiting, :answer)
+        Process.sleep(120)
+
+        case mode do
+          :cancel_raises -> raise "this executor's cancellation is broken"
+          :cancel_exits -> exit(:cancellation_unavailable)
+          :cancel_malformed -> {:ok, :probably_fine}
+        end
+
       _releases ->
         waiting = Agent.get(pid, & &1.waiting)
         if is_pid(waiting), do: send(waiting, :answer)
@@ -510,12 +542,31 @@ defmodule Loopex.CancellationTest do
     assert List.last(finishes)["outcome"] == "completed"
 
     # Exactly one abort was ever admitted, so nothing was cancelled twice.
-    aborts =
-      fixture
-      |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload["command_id"] == "a1"))
+    #
+    # The abort is two records now -- the admission, and the run terminal
+    # carrying what its cleanup achieved -- because ADR 0009 orders the
+    # admission before the cleanup and the ending cannot be written until the
+    # cleanup has answered. Both name the command, which is what joins them for
+    # an operator, so the count that carries this case's meaning is the number of
+    # *admissions*.
+    records = Fixture.records(fixture, session_id)
 
-    assert length(aborts) == 1
+    admissions =
+      Enum.filter(
+        records,
+        &(&1.payload["command_id"] == "a1" and &1.payload[:kind] == "command_admitted")
+      )
+
+    assert length(admissions) == 1
+
+    terminals =
+      Enum.filter(
+        records,
+        &(&1.payload["command_id"] == "a1" and &1.payload[:kind] == "run_terminal_committed")
+      )
+
+    assert length(terminals) == 1,
+           "the abort's ending was committed #{length(terminals)} times"
   end
 
   test "the operator observes what was cancelled and what actually happened" do
@@ -558,6 +609,178 @@ defmodule Loopex.CancellationTest do
     # `cancelled` carries no reference because there is nothing to reconcile;
     # this ending must carry one, or an operator is told to reconcile nothing.
     assert is_binary(finished["reconciliation_ref"])
+  end
+
+  test "the abort is durable before its cleanup runs and its ending is a second commit" do
+    # Concept: ADR 0009 orders the abort admitted and committed, then the
+    # cleanup, then the ending. Not the other way round.
+    #
+    # Technical depth: the coordinator used to cancel while resolving the command
+    # and commit one record afterwards carrying both the admission and the run's
+    # ending. A host that died in between left no record anyone had asked to
+    # stop, while the effect process it had already cancelled was gone -- an
+    # operator's abort lost, and a cancelled effect nobody could account for.
+    #
+    # Two records now, in the order the ADR fixes, and this reads the journal
+    # rather than the events: the admission naming the command, then the ending
+    # naming the same command, with the ending's `record_sequence` after the
+    # admission's. Anything that folded them back into one, or committed the
+    # ending first, fails on the ordering rather than on the count.
+    {fixture, session_id, _observed} = abort_during_tool(:releases)
+
+    records = Fixture.records(fixture, session_id)
+
+    admission =
+      Enum.find(
+        records,
+        &(&1.payload[:kind] == "command_admitted" and &1.payload["command_type"] == "abort")
+      )
+
+    assert admission, "the abort was never admitted durably"
+    assert admission.payload["admission"] == "accepted"
+
+    refute Map.has_key?(admission.payload, "outcome"),
+           "the admission still carries the run's ending, so the cleanup had to run before it " <>
+             "could be written at all"
+
+    terminal =
+      Enum.find(
+        records,
+        &(&1.payload[:kind] == "run_terminal_committed" and
+            &1.payload["command_id"] == admission.payload["command_id"])
+      )
+
+    assert terminal, "the abort committed no ending naming the command that asked for it"
+
+    # The journal is an ordered list, so position in it is commit order.
+    assert Enum.find_index(records, &(&1 == terminal)) >
+             Enum.find_index(records, &(&1 == admission)),
+           "the run's ending was committed before the abort that asked for it"
+  end
+
+  test "the coordinator answers while a host cancellation is still running" do
+    # Concept: a cleanup that takes its time must not take the session with it.
+    #
+    # Technical depth: `cancel/2` ran inside this coordinator's own process, so a
+    # conforming executor that slept for a second left the coordinator answering
+    # nothing for that second -- no second interrupt, no status query, nothing.
+    # A reviewer measured exactly that: a second abort issued fifty milliseconds
+    # in was still unanswered a quarter of a second later. The locked case that
+    # was supposed to cover it submitted its second interrupt only after the
+    # first had returned, so it never tested the behaviour its name claimed.
+    #
+    # The host call runs in a task now and its answer arrives as a message. This
+    # measures what the earlier case assumed: an interrupt issued *while* a
+    # cleanup is running is answered long before that cleanup finishes.
+    fixture = start_with_executor(:cancel_is_slow, [%{text: "run it", calls: [call("c1")]}])
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do the work"})
+
+    :dispatched = await_dispatch(fixture)
+
+    # The first abort is issued from another process, because the whole question
+    # is what happens *while* it is being handled. Issuing it from here and then
+    # timing the second measures nothing: the second call would not begin until
+    # the first returned, which is the flaw in the case this one replaces.
+    first =
+      Task.async(fn -> Loopex.command(attachment, %{type: :abort, command_id: "abort-1"}) end)
+
+    Process.sleep(50)
+
+    {elapsed, second} =
+      :timer.tc(fn ->
+        Loopex.command(attachment, %{type: :abort, command_id: "abort-2"})
+      end)
+
+    assert {:accepted, "abort-1"} = Task.await(first, 30_000)
+
+    assert match?({:accepted, "abort-2"}, second) or match?({:error, _reason}, second),
+           "a second interrupt during cleanup was not answered at all: #{inspect(second)}"
+
+    assert div(elapsed, 1000) < 400,
+           "a second interrupt waited #{div(elapsed, 1000)}ms for a cleanup that sleeps 700ms, " <>
+             "so it was queued behind the host's cancellation rather than answered beside it"
+
+    assert settled?(fixture, session_id)
+  end
+
+  test "a run being cleaned up is still active and admits nothing new until its ending commits" do
+    # Concept: between the admission and the ending the run is not over, and the
+    # marker that says so has two jobs.
+    #
+    # Technical depth: the admission used to clear the active run and delete its
+    # pending work, because it also carried the ending. It cannot now: the
+    # cleanup has not answered and nothing knows how the run stopped. So the run
+    # stays active and carries a marker, and the marker stops the scheduler --
+    # without which the very next `:advance_work`, sent by the executor fact the
+    # cleanup itself commits, would dispatch the run's next turn instead of
+    # ending it. That is not hypothetical: it is what this change did before the
+    # scheduler learned to read the marker.
+    #
+    # A prompt is the observable form. One is refused while the run is being
+    # cleaned up and accepted once its ending is committed, which is exactly the
+    # difference between "still active" and "over".
+    fixture = start_with_executor(:cancel_is_slow, [%{text: "run it", calls: [call("c1")]}])
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do the work"})
+
+    :dispatched = await_dispatch(fixture)
+
+    aborting =
+      Task.async(fn -> Loopex.command(attachment, %{type: :abort, command_id: "abort-1"}) end)
+
+    Process.sleep(100)
+
+    assert {:error, :run_active} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p2", content: "too soon"}),
+           "a run whose cleanup had not answered admitted a second prompt, so the abort's " <>
+             "admission ended the run before anything knew how it stopped"
+
+    assert {:accepted, "abort-1"} = Task.await(aborting, 30_000)
+    assert settled?(fixture, session_id)
+
+    # And once the ending is committed the session takes work again, so the
+    # marker is cleared rather than left behind.
+    assert {:accepted, "p3"} =
+             Loopex.command(attachment, %{type: :prompt, command_id: "p3", content: "next"})
+  end
+
+  test "a cancellation this runtime cannot read is unproven rather than a confirmed clean stop" do
+    # Concept: `cancelled` is a claim that every owned process tree was confirmed
+    # cleaned. An executor that said nothing intelligible has not confirmed it.
+    #
+    # Technical depth: `Loopex.Executor.cancel/3` reads exactly two answers and
+    # treats everything else as unconfirmed. That last clause was reachable by no
+    # test: mutating it from `:unconfirmed` to `:cleaned` left every cancellation
+    # case and the whole suite green, so a raised, exited, or malformed
+    # cancellation could be committed as a clean stop -- an operator told
+    # `cancelled` about a process tree nobody established was gone, which is a
+    # report they act on by doing nothing.
+    #
+    # Three modes, because the three ways an implementation can be present and
+    # unusable are genuinely different code paths in the caller: a raise, an
+    # exit, and a plausible-looking term that is not one of the two admitted
+    # shapes.
+    for mode <- [:cancel_raises, :cancel_exits, :cancel_malformed] do
+      {_fixture, _session_id, observed} = abort_during_tool(mode)
+
+      finished = Enum.find(observed, &(&1.kind == "run.finished"))
+      assert finished, "a #{mode} cancellation never finished the run"
+
+      assert finished["outcome"] == "outcome_unknown",
+             "a #{mode} cancellation was committed as #{finished["outcome"]}"
+
+      assert is_binary(finished["reconciliation_ref"]),
+             "an unproven cleanup ended the run without naming what to reconcile against"
+    end
   end
 
   test "an abort admitted after an unprovable effect committed never rewrites the run to cancelled" do

@@ -21,16 +21,26 @@ defmodule Loopex.Executor do
   independent literal ADR oracle. M1 grants are trusted-VM data and make no
   authenticity or transport claim.
 
-  The pre-start declaration is the optional `c:refused_before_effect?/1`
-  callback, read only through `refused_before_effect?/2`. It fails closed in
-  every direction an implementation can be wrong: an executor that does not
-  export it declares nothing and every error it returns is unproven; a callback
-  that raises, exits, or answers with anything but `true` declares nothing for
-  that answer. An implementation therefore cannot be silently misread, and the
-  caller holds no list of an executor's error names.
+  An executor that refused a job before its effect started says so in the answer
+  itself, by returning `{:error, {:refused_before_effect, reason}}`. Nothing else
+  is a declaration. A bare `{:error, reason}` claims nothing about whether the
+  effect ran, and a caller must read it as unproven -- which is also the reading
+  for every executor that never adopts the tag at all, because "I did not tell
+  you when my effect started" and "my effect may have started" are the same fact
+  from outside.
+
+  The declaration travels in the result rather than in a second callback the
+  caller invokes afterwards. `{:error, term()}` already carries it, so it widens
+  no callback; and a caller reading a returned term cannot be blocked by the
+  implementation that produced it, which a caller running an implementation's
+  code inside its own process can.
   """
 
   @protocol_version 1
+
+  # How long this runtime waits for a host-supplied `cancel/2` before reporting
+  # the cleanup unproven. Not an operator budget — see `cancel/3`.
+  @cancel_bound_ms 60_000
 
   @grant_bindings [
     :operation_id,
@@ -164,34 +174,14 @@ defmodule Loopex.Executor do
 
   `{:ok, receipt}` is the terminal fact for the job. `{:error, reason}` says
   only that no receipt was produced; on its own it says nothing about whether
-  the effect started, and a caller must read it as unproven unless the executor
-  declares otherwise through `c:refused_before_effect?/1`.
+  the effect started, and a caller must read it as unproven. The one answer that
+  says more is `{:error, {:refused_before_effect, reason}}`, which an executor
+  returns only where nothing the job would have done can have happened: no
+  process started, no byte written, no request sent. `reason` is then the
+  ordinary terminal failure the conversation is owed.
   """
   @callback execute(reference :: term(), job_request(), grant(), keyword(), progress_fun()) ::
               {:ok, map()} | {:error, term()}
-
-  @doc """
-  ## Concept
-
-  Says whether one exact answer this executor returned was refused before its
-  effect started.
-
-  ## Technical depth
-
-  The callback is handed the whole answer `c:execute/5` returned, so an executor
-  that can refuse *and* fail with the same name distinguishes the two by
-  returning distinguishable terms rather than by hoping a caller guesses. It
-  answers `true` only where nothing the job would have done can have happened:
-  no process started, no byte written, no request sent. Anything an executor
-  cannot prove that of — including everything it does not recognise — is
-  `false`, because `true` is a positive claim about the workspace and `false`
-  costs only a reconciliation.
-
-  Optional. An executor that does not implement it declares nothing, and every
-  error it returns is unproven. That is the safe default and not a defect; it is
-  the correct answer for an executor that genuinely cannot tell.
-  """
-  @callback refused_before_effect?(answer :: term()) :: boolean()
 
   @doc """
   ## Concept
@@ -220,7 +210,7 @@ defmodule Loopex.Executor do
   @callback cancel(reference :: term(), job_id :: binary()) ::
               {:ok, :cleaned} | {:ok, :unconfirmed} | {:error, term()}
 
-  @optional_callbacks cancel: 2, refused_before_effect?: 1
+  @optional_callbacks cancel: 2
 
   @doc """
   ## Concept
@@ -234,60 +224,68 @@ defmodule Loopex.Executor do
   raises or returns outside the two admitted shapes is treated as unconfirmed:
   the safe reading of "I could not tell you" is that something may still be
   running, and a run must not claim `cancelled` on that basis.
+
+  The call is bounded and runs in a process of its own, because it is
+  host-supplied code that a caller invokes while a run is in flight. An
+  implementation that blocks would otherwise block the caller — and the caller
+  here is the session coordinator, which then cannot answer the operator's second
+  interrupt, arm a deadline, or admit anything at all. An answer that never comes
+  is `{:ok, :unconfirmed}`, which is the same reading as an answer that says it
+  could not tell.
+
+  The bound is this runtime's protection against an executor that does not
+  return, not an operator-facing budget: the shipped local executor bounds its
+  own cancellation by the cleanup period it was configured with, and reaches this
+  bound only if it is itself broken. It is deliberately far longer than that
+  period, so a slow-but-working executor is never cut off and reported unproven
+  when it was about to answer.
   """
   @spec cancel(module(), term(), binary()) :: {:ok, :cleaned} | {:ok, :unconfirmed}
   def cancel(module, reference, job_id) when is_atom(module) and is_binary(job_id) do
     if function_exported?(module, :cancel, 2) do
-      case module.cancel(reference, job_id) do
-        {:ok, :cleaned} -> {:ok, :cleaned}
-        {:ok, :unconfirmed} -> {:ok, :unconfirmed}
-        _other -> {:ok, :unconfirmed}
-      end
+      bounded_cancel(module, reference, job_id)
     else
       {:ok, :cleaned}
     end
-  rescue
-    _error -> {:ok, :unconfirmed}
-  catch
-    _kind, _value -> {:ok, :unconfirmed}
   end
 
-  @doc """
-  ## Concept
+  # Concept: run it somewhere it can be abandoned, and abandon it at the bound.
+  #
+  # Technical depth: `spawn_monitor` rather than a linked task, so an
+  # implementation that raises or exits takes nothing with it, and the answer
+  # travels in the exit reason so no second message shape is needed. There is
+  # deliberately no `try` around the call: a raise and an exit are then ordinary
+  # abnormal terminations that arrive on the same `DOWN` as everything else, and
+  # the three ways a cancellation can fail to say anything -- raising, exiting,
+  # and answering with a term outside the two admitted shapes -- reach exactly
+  # two branches here instead of three, both of which a case drives. Catching
+  # them inside the worker would collapse the first two into a normal answer and
+  # leave the abnormal branch reachable by nothing.
+  #
+  # The worker is killed rather than left running when the bound is reached: a
+  # caller that stopped waiting has no use for an answer that arrives later, and
+  # an abandoned worker holding a port would outlive the run that owned it.
+  defp bounded_cancel(module, reference, job_id) do
+    {pid, monitor} =
+      spawn_monitor(fn -> exit({:loopex_cancel_answer, module.cancel(reference, job_id)}) end)
 
-  Asks an executor whether one exact answer it gave preceded the effect, and
-  believes nothing it did not say.
+    receive do
+      {:DOWN, ^monitor, :process, ^pid, {:loopex_cancel_answer, answer}} ->
+        admitted_cancel(answer)
 
-  ## Technical depth
-
-  This is the only place a caller may decide that question. The alternative it
-  replaces was a list of error names held by the *consumer*, derived from one
-  shipped executor's behaviour: `:workspace_lease_lost` was read as a refusal
-  because the local executor only ever raises it before a start, so a conforming
-  executor that lost its lease mid-effect and returned the same name had that
-  effect committed as an ordinary `failed` and the loop resumed past it.
-
-  Every way of not answering resolves to `false`. A module that is not loaded or
-  does not export the callback has declared nothing. A callback that raises,
-  exits, throws, or returns any term other than `true` has declared nothing for
-  that answer — `true` is required literally rather than truthily, so a
-  three-valued or malformed implementation cannot widen into a claim. An answer
-  that is not an `{:error, _}` tuple is not an error to classify.
-  """
-  @spec refused_before_effect?(module(), term()) :: boolean()
-  def refused_before_effect?(module, {:error, _reason} = answer) when is_atom(module) do
-    if Code.ensure_loaded?(module) and function_exported?(module, :refused_before_effect?, 1) do
-      module.refused_before_effect?(answer) === true
-    else
-      false
+      {:DOWN, ^monitor, :process, ^pid, _abnormal} ->
+        {:ok, :unconfirmed}
+    after
+      @cancel_bound_ms ->
+        Process.demonitor(monitor, [:flush])
+        Process.exit(pid, :kill)
+        {:ok, :unconfirmed}
     end
-  rescue
-    _error -> false
-  catch
-    _kind, _value -> false
   end
 
-  def refused_before_effect?(_module, _answer), do: false
+  defp admitted_cancel({:ok, :cleaned}), do: {:ok, :cleaned}
+  defp admitted_cancel({:ok, :unconfirmed}), do: {:ok, :unconfirmed}
+  defp admitted_cancel(_other), do: {:ok, :unconfirmed}
 
   @doc """
   ## Concept

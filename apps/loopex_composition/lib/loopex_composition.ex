@@ -61,12 +61,12 @@ defmodule LoopexComposition do
   """
   @spec start(keyword()) :: {:ok, Loopex.Runtime.t()} | {:error, term()}
   def start(options) do
+    state_root = Keyword.fetch!(options, :state_root)
+
     with {:ok, policy} <- fetch_policy(options),
-         state_root = Keyword.fetch!(options, :state_root),
-         workspace = Keyword.fetch!(options, :workspace),
          :ok <- start_applications(),
          {:ok, store} <- open_store(state_root),
-         {:ok, executor} <- open_executor(state_root, workspace) do
+         {:ok, executor} <- open_executor(state_root, options) do
       Loopex.start_link(
         [
           runtime_id: Keyword.fetch!(options, :runtime_id),
@@ -119,31 +119,36 @@ defmodule LoopexComposition do
     end)
   end
 
-  defp open_executor(state_root, workspace) do
+  # The executor's declared periods and programs are forwarded rather than
+  # defaulted here, so an embedder that supplies neither gets the executor's own
+  # defaults and one that supplies either gets exactly what it asked for. ADR
+  # 0009 requires the cleanup grace to be session configuration; forwarding it is
+  # what makes a composed session able to declare one at all.
+  defp open_executor(state_root, options) do
     lease_id = "workspace"
+    workspace = Keyword.fetch!(options, :workspace)
+
+    placement = [identity: "executor-local", epoch: 1, fencing_token: 1]
 
     with {:ok, lease} <-
            WorkspaceLease.start_link(id: lease_id, path: workspace, fencing_token: 1),
          {:ok, spill} <- artifacts(state_root),
          {:ok, executor} <-
            Local.start_link(
-             identity: "executor-local",
-             epoch: 1,
-             fencing_token: 1,
-             workspace_leases: %{lease_id => lease},
-             ledger_root: Path.join(state_root, "receipts"),
-             artifacts: spill
+             placement ++
+               [
+                 workspace_leases: %{lease_id => lease},
+                 ledger_root: Path.join(state_root, "receipts"),
+                 artifacts: spill
+               ] ++ Keyword.take(options, [:cleanup_grace_ms, :process_probe])
            ) do
       {:ok,
-       %{
+       Map.merge(Map.new(placement), %{
          module: Local,
          reference: executor,
-         identity: "executor-local",
-         epoch: 1,
-         fencing_token: 1,
          workspace_ref: workspace,
          workspace_lease: lease_id
-       }}
+       })}
     end
   end
 end

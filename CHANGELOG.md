@@ -496,6 +496,37 @@ the exact document set its milestone must update.
 
 ### Changed
 
+- An executor that refused a job before its effect started now says so in the
+  answer, by returning `{:error, {:refused_before_effect, reason}}`. The runtime
+  commits that as an ordinary terminal `failed` carrying `reason`; every other
+  `{:error, _}` is read as unproven and ends the run `outcome_unknown` with a
+  reconciliation reference. It previously recognised a list of error *names*
+  copied from the shipped local executor and applied to every implementation, so
+  a conforming executor that lost its lease halfway through a write and returned
+  `{:error, :workspace_lease_lost}` had that effect committed as `failed` and the
+  loop carried on past an effect nobody could account for. An executor that
+  adopts nothing keeps compiling and stays conforming, and sees errors that used
+  to end a call `failed` now end the run `outcome_unknown` — failing closed, and
+  a behaviour change rather than an addition.
+- Stopping a tool draws grace, forced termination and confirmation from one
+  declared period rather than from a fresh allowance at each step, and every
+  instant in that period is measured with `System.monotonic_time/1` so a clock
+  adjustment cannot lengthen a grace mid-termination. Writing the receipt is
+  bounded by a declared share of the period instead of by whatever the earlier
+  steps left, which was nothing after a forcibly killed process group — so the
+  job whose durable record matters most produced none. Each receipt records the
+  period it ran under and the bound its own write ran under.
+- The program the local executor asks whether a process group still has members
+  is a start option, `process_probe`, defaulting to `/bin/ps` and recorded on
+  every receipt. An image that ships `ps` elsewhere previously had every command
+  reported `outcome_unknown` with nothing to say which program was missing.
+- Cancelling a job through the shipped local executor now spends the period its
+  host configured. `cancel/2` runs in its caller so it is not queued behind the
+  job it is ending, and it read the period from a process dictionary the caller
+  does not have, so it spent the compiled-in default instead.
+- ADR 0009 asks for the cleanup period as a session-level value reported in the
+  run's terminal evidence, which this milestone does not yet do — recorded at
+  [M2 recorded limitations](docs/evidence/M2-recorded-limitations.md#cleanup-grace-not-session-visible).
 - Accepted milestone governance may integrate to `main` after exact review and
   explicit protected-branch approval while product implementation remains on
   the milestone branch until closure. Once that governance checkpoint is

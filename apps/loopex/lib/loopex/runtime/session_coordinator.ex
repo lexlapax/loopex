@@ -200,6 +200,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        grant_decision: Keyword.fetch!(options, :grant_decision),
        fault_to: Keyword.fetch!(options, :fault_to),
        in_flight: %{},
+       pending_cleanup: %{},
        streams: %{},
        deadline_timers: %{},
        pending_fault: nil,
@@ -356,13 +357,29 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {{:executor, run_id, _pid}, remaining} ->
         Process.demonitor(reference, [:flush])
         dispatch_result(%{state | in_flight: remaining}, :executor, run_id, result)
+
+      {{:cleanup, run_id, _pid}, remaining} ->
+        Process.demonitor(reference, [:flush])
+        complete_cleanup(%{state | in_flight: remaining}, run_id, admitted_cleanup(result))
     end
   end
 
+  def handle_info({:cleanup_settled, run_id, disposition}, state),
+    do: complete_cleanup(state, run_id, disposition)
+
   def handle_info({:DOWN, reference, :process, _pid, reason}, state) do
     case Map.pop(state.in_flight, reference) do
-      {nil, _remaining} -> {:noreply, state}
-      {_work, remaining} -> {:stop, {:worker_failed, reason}, %{state | in_flight: remaining}}
+      {nil, _remaining} ->
+        {:noreply, state}
+
+      # A cleanup worker that died told this coordinator nothing, which is
+      # unproved cleanup rather than a reason to stop the session: the run still
+      # owes a truthful ending and stopping here would leave it without one.
+      {{:cleanup, run_id, _pid}, remaining} ->
+        complete_cleanup(%{state | in_flight: remaining}, run_id, :unconfirmed)
+
+      {_work, remaining} ->
+        {:stop, {:worker_failed, reason}, %{state | in_flight: remaining}}
     end
   end
 
@@ -383,6 +400,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
     |> Map.put(:reason, :redacted_session_coordinator_reason)
     |> Map.put(:log, [])
   end
+
+  # The executor port answers `{:ok, :cleaned}` or `{:ok, :unconfirmed}` and
+  # nothing else. Anything else arriving here is a cleanup that did not say what
+  # it achieved, which is unproved.
+  defp admitted_cleanup({:ok, :cleaned}), do: :cleaned
+  defp admitted_cleanup(_other), do: :unconfirmed
 
   defp advance_acquisition(%{phase: :recovering} = state), do: recover_committed_owner(state)
 
@@ -625,7 +648,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
                  proposal.records,
                  proposal.events
                ) do
-          apply_transaction(state, transaction, proposal)
+          state
+          |> apply_transaction(transaction, proposal)
+          |> begin_admitted_cleanup()
         else
           {:error, reason} -> {:reply, {:error, reason}, state}
         end
@@ -687,9 +712,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
        when is_map(model) do
     case Control.current_owner(state.control, state.session_id, state.owner) do
       :ok ->
-        case SessionState.pending_work(state.durable) do
-          [] -> {:noreply, state}
-          [work | _rest] -> advance_run(state, work)
+        # Concept: a run an operator aborted schedules nothing further.
+        #
+        # Technical depth: ADR 0009's second step, and what makes the first one
+        # safe. The admission now leaves the run active and its work pending --
+        # because neither is over until the cleanup's result is committed -- so
+        # without this the very next `:advance_work` would dispatch the run's
+        # next turn instead of ending it. It is checked here, at the single
+        # entry to scheduling, rather than inside a stage.
+        case SessionState.aborting_run(state.durable) do
+          nil ->
+            case SessionState.pending_work(state.durable) do
+              [] -> {:noreply, state}
+              [work | _rest] -> advance_run(state, work)
+            end
+
+          run_id ->
+            resume_aborting_run(state, run_id)
         end
 
       {:error, :superseded_owner} ->
@@ -703,6 +742,29 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp advance_work(state), do: {:noreply, state}
+
+  # Concept: an abort is on disk and this owner is not cleaning it up. Either it
+  # already is, or it never will.
+  #
+  # Technical depth: the first case is ordinary -- the cleanup is in flight and
+  # its result will commit the ending. The second is recovery: a previous owner
+  # admitted the abort and died before committing what the cleanup achieved, so
+  # this owner finds the marker with nothing in flight. It cannot prove the
+  # cleanup ran, half ran, or never started, and re-running it would be blindly
+  # retrying work whose effect is exactly what is unknown. `outcome_unknown`
+  # carrying a reconciliation reference is the only honest ending.
+  defp resume_aborting_run(state, run_id) do
+    if Map.has_key?(state.pending_cleanup, run_id) do
+      {:noreply, state}
+    else
+      commit_terminal(
+        state,
+        run_id,
+        "outcome_unknown",
+        %{reconciliation_ref: reconciliation_ref(state, run_id)}
+      )
+    end
+  end
 
   # Concept: a run holding an effect nobody could prove does nothing further.
   #
@@ -1013,31 +1075,21 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # cancellation that could not prove either, outranks it and ends the run
   # carrying the reference the operator reconciles against.
   defp finish_at_deadline(state, run_id) do
-    {state, disposition} = cancel_run(state, run_id)
     {declared, charged} = SessionState.accounting(state.durable, run_id)
-    observed = System.system_time(:millisecond)
 
     detail = %{
       bound: "deadline",
-      observed: observed,
+      observed: System.system_time(:millisecond),
       declared_limit: run_deadline(declared),
       accounting_source: charged.source && Atom.to_string(charged.source)
     }
 
-    # An unproved cleanup is this path's own finding and nothing else can see
-    # it. A committed `outcome_unknown` effect is not: the reducer outranks
-    # every proposed terminal with it, so this branch does not carry a second
-    # copy of that rule.
-    if disposition == :unconfirmed do
-      commit_terminal(
-        state,
-        run_id,
-        "outcome_unknown",
-        Map.put(detail, :reconciliation_ref, reconciliation_ref(state, run_id))
-      )
-    else
-      commit_terminal(state, run_id, "bound_reached", detail)
-    end
+    # The same cleanup an abort runs, through the same path, for the same reason
+    # -- and off this process for the same reason too. A deadline reached while a
+    # host-supplied `cancel/2` blocks would otherwise leave this coordinator
+    # unable to answer an operator's interrupt for as long as it blocked, which
+    # is the defect an abort had and this shares by construction.
+    {:noreply, begin_cleanup(state, run_id, {:deadline, detail})}
   end
 
   defp start_model_work(state, work) do
@@ -1079,7 +1131,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     turn_id = work.turn_id
     sink = state.progress_to
-    counter = :atomics.new(1, signed: false)
+    counter = new_stream_counter()
     stream = %{domain: domain, turn_id: turn_id, counter: counter}
 
     {stream,
@@ -1094,23 +1146,93 @@ defmodule Loopex.Runtime.SessionCoordinator do
          # compared with. The counter still holds the count; the sequence is the
          # value it had before this item was added, taken atomically so two
          # emissions can never claim one number.
-         sequence = :atomics.add_get(counter, 1, 1) - 1
+         case reserve_sequence(counter) do
+           :sealed ->
+             # The domain is closed and its total is published. A late delta is
+             # dropped rather than emitted past that total, and it is not
+             # counted, because the count belongs to what crossed the plane.
+             :ok
 
-         emit_progress(
-           sink,
-           Map.merge(delta, %{
-             turn_id: turn_id,
-             stream_domain_id: domain,
-             model_sequence: sequence
-           })
-         )
+           {:ok, sequence} ->
+             emit_model_delta(sink, delta, turn_id, domain, sequence)
+         end
        end
 
        :ok
      end}
   end
 
+  defp emit_model_delta(sink, delta, turn_id, domain, sequence) do
+    emit_progress(
+      sink,
+      Map.merge(delta, %{
+        turn_id: turn_id,
+        stream_domain_id: domain,
+        model_sequence: sequence
+      })
+    )
+  end
+
   defp model_operation_id(work), do: stable_id("model-operation", work.run_id, work.turn_number)
+
+  # Concept: taking a sequence and sealing a stream are one operation, or they
+  # are a race.
+  #
+  # Technical depth: a separate closed flag beside the counter is check-then-act.
+  # A producer reads the flag, is preempted, a closer publishes the closure with
+  # the count it can see, and the producer then increments and emits an item past
+  # a total already on the plane -- which is exactly the loss a consumer uses
+  # that total to detect, reported for an item that was not lost. The window is
+  # small and it is real: the callback runs in the producer's process and the
+  # closer runs in this one.
+  #
+  # The seal is therefore a bit inside the counter itself, and both operations
+  # are compare-and-exchange loops over that single word. A producer either
+  # reserves a sequence before the seal or sees the seal; a closer either seals
+  # before a reservation or counts it. There is no interleaving in which an item
+  # is emitted that the closing total does not include.
+  #
+  # Model and executor streams share this because they have the same algebra:
+  # ADR 0011 gives each domain one gapless zero-based sequence closed by one
+  # total. The model side previously had no seal at all, so a retained callback
+  # could emit into a closed domain with nothing to stop it.
+  @stream_sealed_bit 0x8000_0000_0000_0000
+
+  defp new_stream_counter, do: :atomics.new(1, signed: false)
+
+  defp reserve_sequence(counter) do
+    current = :atomics.get(counter, 1)
+
+    if Bitwise.band(current, @stream_sealed_bit) != 0 do
+      :sealed
+    else
+      case :atomics.compare_exchange(counter, 1, current, current + 1) do
+        :ok -> {:ok, current}
+        _lost_the_race -> reserve_sequence(counter)
+      end
+    end
+  end
+
+  # Returns the exact final count. Sealing an already-sealed stream returns the
+  # same count again rather than a second, different one, so a duplicate closure
+  # is impossible to derive from here.
+  defp seal_stream(counter) do
+    current = :atomics.get(counter, 1)
+
+    if Bitwise.band(current, @stream_sealed_bit) != 0 do
+      Bitwise.band(current, Bitwise.bnot(@stream_sealed_bit))
+    else
+      case :atomics.compare_exchange(
+             counter,
+             1,
+             current,
+             Bitwise.bor(current, @stream_sealed_bit)
+           ) do
+        :ok -> current
+        _lost_the_race -> seal_stream(counter)
+      end
+    end
+  end
 
   # Concept: every domain the coordinator opens is owed exactly one closure.
   #
@@ -1123,10 +1245,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp close_model_stream(state, run_id, disposition, reported_count) do
     case Map.fetch(state.streams, {:model, run_id}) do
       {:ok, stream} ->
+        # Sealing first is what makes the abandoned count exact rather than
+        # merely current: no delta can be reserved after this line, so the value
+        # it returns is the total that crossed the plane and not a sample of a
+        # counter still moving.
+        observed = seal_stream(stream.counter)
+
         count =
           case disposition do
             :complete -> reported_count
-            :abandoned -> :atomics.get(stream.counter, 1)
+            :abandoned -> observed
           end
 
         emit_progress(
@@ -1161,7 +1289,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp close_tool_stream(state, run_id, disposition) do
     case Map.fetch(state.streams, {:executor, run_id}) do
       {:ok, stream} ->
-        count = :atomics.get(stream.counter, 1)
+        # Sealing returns the exact total: no event can reserve a sequence after
+        # this line, so nothing is emitted that this count does not include.
+        count = seal_stream(stream.counter)
 
         emit_progress(
           state.progress_to,
@@ -1331,48 +1461,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # and must stay the same however the world turned out — otherwise re-presenting
   # one abort would conflict with itself because cleanup went differently the
   # second time.
-  defp resolve_command(state, command) do
-    case admitted_abort_run(state, command) do
-      {:ok, run_id} ->
-        {state, disposition} = cancel_run(state, run_id)
-        {state, %{cleanup: disposition}}
-
-      :none ->
-        {state, resolve_bounds(state, command)}
-    end
-  end
-
-  # Concept: only the reducer knows whether this exact abort is a new one.
+  # Concept: what a command needs that its caller did not supply.
   #
-  # Technical depth: the reducer is asked with a probe proposal that is computed
-  # and thrown away, so replay detection, idempotency conflict, malformed input,
-  # and "no run is active" stay decided by the one implementation that owns them
-  # instead of by a second copy of those rules living here. The probe names the
-  # cleanest disposition precisely because its answer is discarded; only the
-  # proposal built after cancellation is ever committed. The named run is
-  # compared against the run this coordinator actually holds, so an abort can
-  # never reach work it does not name.
-  defp admitted_abort_run(state, command) do
-    if Map.get(command, :type) in [:abort, "abort"] do
-      case SessionState.propose(state.durable, command, %{cleanup: :cleaned}) do
-        {:ok, %{records: [record]}} -> admitted_abort_record(state, record)
-        _replayed_or_refused -> :none
-      end
-    else
-      :none
-    end
-  end
-
-  defp admitted_abort_record(state, %{
-         "command_type" => "abort",
-         "admission" => "accepted",
-         "run_id" => run_id
-       })
-       when is_binary(run_id) do
-    if run_id == state.durable.active_run_id, do: {:ok, run_id}, else: :none
-  end
-
-  defp admitted_abort_record(_state, _record), do: :none
+  # Technical depth: an abort used to need what its cleanup achieved, which meant
+  # cleaning up before the abort could be committed at all. ADR 0009 orders the
+  # admission first, so an abort now needs nothing resolved: it is admitted, and
+  # what it achieved is a separate fact committed after the cleanup that produced
+  # it.
+  defp resolve_command(state, command), do: {state, resolve_bounds(state, command)}
 
   # Concept: end what one run still owns, and say what that actually achieved.
   #
@@ -1381,11 +1477,132 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # not answer one operator's interrupt by killing another's task. The
   # disposition is the weakest of what each owned operation proved, because a
   # terminal outcome may claim only what all of them establish together.
-  defp cancel_run(state, run_id) do
-    state = disarm_deadline(state, run_id)
-    {state, model} = cancel_model_attempt(state, run_id)
-    {state, effect} = cancel_executor_job(state, run_id)
-    {state, weakest(model, effect)}
+  # Concept: cleanup begins once the reason for it is on disk, and the part of it
+  # that is host-supplied code runs where it cannot block this process.
+  #
+  # Technical depth: reached from the reply path of a committed command, and only
+  # where the reducer marked a run aborting -- so a replayed abort, a refused
+  # one, and one naming no active run all start nothing. A second interrupt
+  # naming a run already being cleaned up is answered and starts no second
+  # cleanup, which is what Outcome 8 requires of it.
+  defp begin_admitted_cleanup({:reply, reply, state}) do
+    case SessionState.aborting_run(state.durable) do
+      nil -> {:reply, reply, state}
+      run_id -> {:reply, reply, begin_cleanup(state, run_id, :abort)}
+    end
+  end
+
+  # Concept: end what the run owns, then ask the executor to end what it owns,
+  # and commit the result of both once it is known.
+  #
+  # Technical depth: everything this coordinator owns is settled here and now --
+  # the deadline timer, the in-flight model attempt, the in-flight executor
+  # worker and its stream and fact -- because all of it is local state only this
+  # process may touch. What is left is one call into a host-supplied executor,
+  # and that runs in a task: `cancel/2` is somebody else's code, and this process
+  # must stay able to answer a second interrupt, arm a deadline, and admit
+  # anything at all while it runs. Bounding the call was not enough on its own,
+  # because a bounded call still blocks its caller for the length of the bound.
+  #
+  # The host call moved after the local settling rather than before it. Stopping
+  # our own wait and then asking the executor to stop is the same cancellation in
+  # the other order: if the worker already answered, the job is finished and the
+  # ask is a no-op; if it did not, the ask is what ends the job, and nothing is
+  # committed until it answers.
+  defp begin_cleanup(state, run_id, purpose) do
+    if Map.has_key?(state.pending_cleanup, run_id) do
+      state
+    else
+      state = disarm_deadline(state, run_id)
+      {state, model} = cancel_model_attempt(state, run_id)
+      job_id = dispatched_job_id(state, run_id)
+
+      state = %{
+        state
+        | pending_cleanup:
+            Map.put(state.pending_cleanup, run_id, %{purpose: purpose, model: model})
+      }
+
+      dispatch_host_cancel(state, run_id, job_id)
+    end
+  end
+
+  defp dispatched_job_id(state, run_id) do
+    case Map.get(state.durable.pending_work, run_id) do
+      %{job: job} -> job.job_id
+      _absent -> nil
+    end
+  end
+
+  # Nothing was dispatched to the executor, so there is nothing for it to end and
+  # the local settling above is the whole cleanup. It still completes through the
+  # same message the host call would, so one path commits the ending.
+  defp dispatch_host_cancel(state, run_id, nil) do
+    send(self(), {:cleanup_settled, run_id, :cleaned})
+    state
+  end
+
+  defp dispatch_host_cancel(state, run_id, job_id) do
+    module = state.executor.module
+    reference = state.executor.reference
+
+    task =
+      Task.Supervisor.async_nolink(state.workers, fn ->
+        Executor.cancel(module, reference, job_id)
+      end)
+
+    put_in_flight(state, task.ref, {:cleanup, run_id, task.pid})
+  end
+
+  # Concept: the cleanup answered; this is what the run ended as.
+  #
+  # Technical depth: the weakest of what every owned operation proved. `cancelled`
+  # and `bound_reached` are claims that the stopping was clean, and only a
+  # cleanup that confirmed every owned tree supports either; anything weaker is
+  # `outcome_unknown` carrying the reference an operator reconciles against.
+  # `propose_run_terminal/4` then applies the rule that one committed unprovable
+  # effect outranks whatever asked the run to stop, so that rule is not copied
+  # here.
+  defp complete_cleanup(state, run_id, host) do
+    {pending, remaining} = Map.pop(state.pending_cleanup, run_id)
+    state = %{state | pending_cleanup: remaining}
+
+    case pending do
+      nil ->
+        {:noreply, state}
+
+      %{purpose: purpose, model: model} ->
+        # Settled only now, after the executor has answered. Asking it to cancel
+        # is what makes an in-flight job finish, so a job that answers during
+        # cleanup still has its receipt taken, its stream closed on the count
+        # this runtime published, and its fact committed -- which is what keeps a
+        # validated terminal fact that landed before the abort from being thrown
+        # away by the abort.
+        {state, effect} = settle_executor_work(state, run_id)
+
+        finish_cleanup(state, run_id, purpose, weakest(model, weakest(host, effect)))
+    end
+  end
+
+  defp finish_cleanup(state, run_id, :abort, :cleaned),
+    do: commit_terminal(state, run_id, "cancelled", %{})
+
+  defp finish_cleanup(state, run_id, :abort, :unconfirmed) do
+    commit_terminal(state, run_id, "outcome_unknown", %{
+      reconciliation_ref: reconciliation_ref(state, run_id)
+    })
+  end
+
+  defp finish_cleanup(state, run_id, {:deadline, detail}, :cleaned),
+    do: commit_terminal(state, run_id, "bound_reached", detail)
+
+  defp finish_cleanup(state, run_id, {:deadline, detail}, :unconfirmed) do
+    commit_terminal(
+      state,
+      run_id,
+      "outcome_unknown",
+      Map.put(detail, :reconciliation_ref, reconciliation_ref(state, run_id))
+    )
   end
 
   defp weakest(:unconfirmed, _other), do: :unconfirmed
@@ -1438,31 +1655,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # `cancelled`, however confidently the executor reports the process tree gone:
   # a confirmed cleanup bounds the tree, it does not establish what the effect
   # did.
-  defp cancel_executor_job(state, run_id) do
-    case in_flight_of(state, :executor, run_id) do
-      nil ->
-        {state, :cleaned}
-
-      {reference, pid} ->
-        cleanup = cancel_executor_work(state, run_id)
-        _ = Task.Supervisor.terminate_child(state.workers, pid)
-        state = %{state | in_flight: Map.delete(state.in_flight, reference)}
-
-        case take_worker_result(reference) do
-          {:ok, receipt} when is_map(receipt) ->
-            state = close_tool_stream(state, run_id, :complete)
-
-            case put_executor_fact(state, run_id, receipt) do
-              {:ok, next} -> {next, cleanup}
-              {:error, _reason} -> {state, :unconfirmed}
-            end
-
-          _unproved ->
-            {close_tool_stream(state, run_id, :abandoned), :unconfirmed}
-        end
-    end
-  end
-
   # Concept: take a worker's answer out of the mailbox instead of leaving it to
   # be dropped in silence.
   #
@@ -1490,16 +1682,34 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end)
   end
 
-  defp cancel_executor_work(state, run_id) do
-    case Map.get(state.durable.pending_work, run_id) do
-      %{job: job} ->
-        {:ok, disposition} =
-          Executor.cancel(state.executor.module, state.executor.reference, job.job_id)
+  # Concept: settle everything this coordinator owns for the run, and name the
+  # job the executor still owns.
+  #
+  # Technical depth: the worker is stopped, its result taken, its stream closed
+  # and its fact committed -- all local state only this process may touch. The
+  # job id is read before any of that, because committing the fact may advance
+  # the work past the point where it is still there to read.
+  defp settle_executor_work(state, run_id) do
+    case in_flight_of(state, :executor, run_id) do
+      nil ->
+        {state, :cleaned}
 
-        disposition
+      {reference, pid} ->
+        _ = Task.Supervisor.terminate_child(state.workers, pid)
+        state = %{state | in_flight: Map.delete(state.in_flight, reference)}
 
-      _absent ->
-        :cleaned
+        case take_worker_result(reference) do
+          {:ok, receipt} when is_map(receipt) ->
+            state = close_tool_stream(state, run_id, :complete)
+
+            case put_executor_fact(state, run_id, receipt) do
+              {:ok, next} -> {next, :cleaned}
+              {:error, _reason} -> {state, :unconfirmed}
+            end
+
+          _unproved ->
+            {close_tool_stream(state, run_id, :abandoned), :unconfirmed}
+        end
     end
   end
 
@@ -1638,7 +1848,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     turn_id = work.turn_id
     tool_call_id = job.tool_call_id
     sink = state.progress_to
-    counter = :atomics.new(1, signed: false)
+    counter = new_stream_counter()
     refused = :atomics.new(1, signed: false)
     bindings = progress_bindings(job)
 
@@ -1654,18 +1864,24 @@ defmodule Loopex.Runtime.SessionCoordinator do
      fn event ->
        case project_progress(event, bindings) do
          {:ok, projected} ->
-           sequence = :atomics.add_get(counter, 1, 1) - 1
+           # The identity is judged first and the sequence reserved second, so a
+           # refused event never consumes a number. Reserving is what tests the
+           # seal: an event arriving after closure is dropped rather than emitted
+           # past a total already published, and it is not counted as a refusal
+           # either, because a refusal is this coordinator's judgement about an
+           # event's identity and this event's identity is correct -- it is only
+           # late.
+           case reserve_sequence(counter) do
+             :sealed ->
+               :ok
 
-           emit_progress(
-             sink,
-             Map.merge(projected, %{
-               kind: :tool_progress,
-               turn_id: turn_id,
-               tool_call_id: tool_call_id,
-               stream_domain_id: domain,
-               progress_sequence: sequence
-             })
-           )
+             {:ok, sequence} ->
+               emit_tool_progress(sink, projected, sequence, %{
+                 turn_id: turn_id,
+                 tool_call_id: tool_call_id,
+                 domain: domain
+               })
+           end
 
          :refused ->
            :atomics.add(refused, 1, 1)
@@ -1673,6 +1889,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
        :ok
      end}
+  end
+
+  defp emit_tool_progress(sink, projected, sequence, %{
+         turn_id: turn_id,
+         tool_call_id: tool_call_id,
+         domain: domain
+       }) do
+    emit_progress(
+      sink,
+      Map.merge(projected, %{
+        kind: :tool_progress,
+        turn_id: turn_id,
+        tool_call_id: tool_call_id,
+        stream_domain_id: domain,
+        progress_sequence: sequence
+      })
+    )
   end
 
   # Concept: the identity an event has to reproduce is the identity the job was
@@ -1901,7 +2134,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     case Map.get(state.durable.pending_work, run_id) do
       %{pending_calls: [call | _rest]} = work ->
-        case effect_disposition(state.executor.module, result) do
+        case effect_disposition(result) do
           :refused_before_effect -> commit_tool_failure(state, work, call, failure_of(result))
           :unproven -> commit_tool_unproven(state, work, call, result)
         end
@@ -1924,17 +2157,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # carrying on past an effect nobody could account for. That is the defect this
   # runtime had just repaired, reachable again through the port.
   #
-  # `Loopex.Executor.refused_before_effect?/2` asks the one party that was there.
+  # The executor now says it in the answer. A tagged refusal is the only thing
+  # read as one; anything else -- including an executor that never adopts the
+  # tag -- is unproven.
   # An executor that declares nothing is unproven, which is also the answer for
   # anything this runtime cannot read as an error at all: `failed` is a positive
   # claim that the effect did not happen, and nothing here can support it.
   # `Loopex.Executor.cancel/3` reads an unadmitted answer the same way, for the
   # same reason.
-  defp effect_disposition(module, answer) do
-    if Executor.refused_before_effect?(module, answer),
-      do: :refused_before_effect,
-      else: :unproven
-  end
+  # It is a pattern match and not a call. The shape this replaced asked the
+  # executor module a question from inside this process while a run was in
+  # flight, so an implementation that blocked in the callback blocked this
+  # coordinator's deadline and its operator's abort with it. A term that has
+  # already arrived cannot do that.
+  defp effect_disposition({:error, {:refused_before_effect, _reason}}), do: :refused_before_effect
+
+  defp effect_disposition(_answer), do: :unproven
 
   # Concept: an effect that ran and cannot be accounted for is committed as
   # unknown, naming what an operator reconciles it against.
@@ -1992,9 +2230,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp emit_diagnostic(_state, _item), do: :ok
 
-  # Only a refusal reaches this, and a refusal is always `{:error, reason}`: the
-  # shapes that are not took the unproven path before it was called.
-  defp failure_of({:error, reason}), do: reason
+  # Only a refusal reaches this, and a refusal is always the tagged shape: every
+  # other answer took the unproven path before this was called. A wider clause
+  # would be a second place deciding what an untagged error means.
+  defp failure_of({:error, {:refused_before_effect, reason}}), do: reason
 
   defp commit_executor_fact(state, run_id, receipt) do
     case put_executor_fact(state, run_id, receipt) do

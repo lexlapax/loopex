@@ -74,6 +74,17 @@ defmodule Loopex.Runtime.SessionState do
             steer: %{},
             follow_up: nil,
             charged: %{},
+            # The cleanup period the executor answering this session declared, as
+            # its receipts reported it. Held per run so the run's terminal can
+            # report what bounded the stopping, which is what ADR 0009 asks for
+            # and what no session could previously name.
+            declared_cleanup: %{},
+            # The run an operator durably aborted whose ending has not been
+            # committed yet. ADR 0009 orders the admission before the cleanup, so
+            # this is the state that exists between them: real, recoverable, and
+            # what lets a recovering owner tell "nobody asked to stop" from
+            # "somebody asked and this owner never wrote down what happened".
+            aborting: nil,
             expected_events: []
 
   @typedoc """
@@ -421,7 +432,8 @@ defmodule Loopex.Runtime.SessionState do
   @spec propose_run_terminal(t(), binary(), binary(), map()) ::
           {:ok, proposal()} | {:error, term()}
   def propose_run_terminal(%__MODULE__{} = state, run_id, proposed, detail)
-      when is_binary(run_id) and proposed in ["completed", "bound_reached", "outcome_unknown"] do
+      when is_binary(run_id) and
+             proposed in ["completed", "bound_reached", "outcome_unknown", "cancelled"] do
     outcome = run_outcome(state, run_id, proposed)
 
     record = %{
@@ -432,6 +444,24 @@ defmodule Loopex.Runtime.SessionState do
       "declared_limit" => Map.get(detail, :declared_limit),
       "accounting_source" => Map.get(detail, :accounting_source),
       "reconciliation_ref" => terminal_reference(state, run_id, outcome, detail),
+      # Concept: an ending that stopped work says what bounded the stopping.
+      #
+      # Technical depth: ADR 0009 requires the declared cleanup grace to be
+      # reported in the terminal outcome's evidence, so an operator can tell a
+      # clean cooperative stop from a forced kill that was confirmed and from a
+      # termination that could not be confirmed at all. The period is the
+      # executor's declaration, so it is read from what the executor actually
+      # reported on this run's receipts rather than from anything this session
+      # decided. A run whose executor declared none -- one with no
+      # operating-system work to bound -- carries `nil`, which is an absence
+      # rather than a default nobody named.
+      "cleanup_grace_ms" => declared_cleanup_grace(state, run_id),
+      # Concept: an ending names the command that asked for it, where one did.
+      #
+      # Technical depth: the abort's admission and its outcome are two records
+      # now, and without this nothing joins them. It used to be carried by the
+      # abort's own `run.finished`, which no longer exists.
+      "command_id" => aborting_command(state, run_id),
       kind: "run_terminal_committed"
     }
 
@@ -759,34 +789,41 @@ defmodule Loopex.Runtime.SessionState do
        ),
        do: refusal(state, command, digest, "follow_up", "rejected_no_active_run", :no_active_run)
 
+  # Concept: the admission says an abort was asked for. What it achieved is a
+  # separate fact, committed after the cleanup that produced it.
+  #
+  # Technical depth: this record used to carry the run's ending, which meant the
+  # cleanup had to have happened before it could be written at all -- so the
+  # coordinator cancelled first and committed afterwards. A host that died in
+  # between left no record anyone had asked, though the effect process might
+  # already be dead. ADR 0009 orders it the other way round, and every other run
+  # ending already uses two records: `command_admitted` and then
+  # `run_terminal_committed`. The abort was the only ending folding both into
+  # one.
+  #
+  # The queues are still resolved here, because Outcome 3 requires a durably
+  # admitted abort to resolve a queued steer and follow-up, and that is true the
+  # moment the abort is admitted rather than when its cleanup finishes.
   defp propose_new(%__MODULE__{active_run_id: run_id} = state, %{type: :abort} = command, digest)
        when is_binary(run_id) do
-    reply = {:accepted, command.command_id}
-    outcome = abort_outcome(state, run_id, command)
-
     record = %{
       "command_id" => command.command_id,
       "command_digest" => digest,
       "command_type" => "abort",
       "admission" => "accepted",
       "run_id" => run_id,
-      "outcome" => outcome,
-      "reconciliation_ref" => abort_reference(state, run_id, outcome),
       kind: "command_admitted"
     }
 
     {_patch, queue_events} = cancel_queues(state, run_id)
 
-    event =
-      abort_event(
-        state.session_id,
-        command.command_id,
-        run_id,
-        outcome,
-        abort_reference(state, run_id, outcome)
-      )
-
-    build_proposal(state, command.command_id, record, [event] ++ queue_events, reply)
+    build_proposal(
+      state,
+      command.command_id,
+      record,
+      queue_events,
+      {:accepted, command.command_id}
+    )
   end
 
   defp propose_new(%__MODULE__{} = state, %{type: :abort} = command, digest) do
@@ -1096,30 +1133,25 @@ defmodule Loopex.Runtime.SessionState do
     # more than it carries, and this is the one field carrying the
     # `outcome_unknown` precedence, so there is no honest weaker default: the
     # record names its outcome or it is refused like any other malformed abort.
-    with {:ok, ^active_run_id} <- record_binary(record, "run_id"),
-         {:ok, outcome} <- record_binary(record, "outcome") do
+    with {:ok, ^active_run_id} <- record_binary(record, "run_id") do
       # Concept: an abort cancels the queues as well as the run.
       #
       # Technical depth: a durably admitted abort resolves any queued steer and
       # any queued follow-up as cancelled, each recorded truthfully against its
       # own command_id. Leaving either queued would let work an operator
       # cancelled start itself a moment later.
+      #
+      # The run stays active and its pending work stays here, because neither is
+      # over: the cleanup has not run and its result has not been committed. What
+      # changes is the marker, and the marker is load-bearing twice over -- the
+      # coordinator stops scheduling for a run that carries it, which is ADR
+      # 0009's second step, and a recovering owner reads it to know an abort was
+      # admitted whose outcome nobody wrote down.
       {patch, queue_events} = cancel_queues(state, active_run_id)
 
-      expected_events =
-        state.expected_events ++
-          [
-            abort_event(
-              state.session_id,
-              command_id,
-              active_run_id,
-              outcome,
-              Map.get(record, "reconciliation_ref")
-            )
-          ] ++ queue_events
-
-      {:ok, {:accepted, command_id}, nil, Map.delete(state.pending_work, active_run_id),
-       expected_events, patch}
+      {:ok, {:accepted, command_id}, active_run_id, state.pending_work,
+       state.expected_events ++ queue_events,
+       Map.put(patch, :aborting, %{run_id: active_run_id, command_id: command_id})}
     else
       _other -> {:error, :invalid_abort_record}
     end
@@ -1273,6 +1305,7 @@ defmodule Loopex.Runtime.SessionState do
          kind: "executor_receipt_committed"
        }) do
     with {:ok, receipt} <- decode_receipt(receipt),
+         state = remember_declared_cleanup(state, run_id, receipt),
          %{stage: "effect_dispatched", job: job, tool_call: call} = work <-
            Map.get(state.pending_work, run_id),
          :ok <- receipt_matches_job(receipt, job),
@@ -1424,10 +1457,12 @@ defmodule Loopex.Runtime.SessionState do
          "declared_limit" => declared_limit,
          "accounting_source" => accounting_source,
          "reconciliation_ref" => reconciliation_ref,
+         "cleanup_grace_ms" => cleanup_grace_ms,
+         "command_id" => command_id,
          kind: "run_terminal_committed"
        }) do
     with %{stage: stage} <- Map.get(state.pending_work, run_id),
-         true <- outcome in ["completed", "bound_reached", "outcome_unknown"],
+         true <- outcome in ["completed", "bound_reached", "outcome_unknown", "cancelled"],
          true <- terminal_admitted?(state, run_id, stage, outcome, bound) do
       # Concept: bound_reached carries the bound and the observed value and
       # nothing else.
@@ -1437,7 +1472,14 @@ defmodule Loopex.Runtime.SessionState do
       # this record, recorded beside it rather than inside it, so the run
       # terminal algebra keeps exactly the shape the vision fixes.
       event =
-        run_finished_event(state.session_id, run_id, outcome, reconciliation_ref)
+        run_finished_event(
+          state.session_id,
+          run_id,
+          outcome,
+          reconciliation_ref,
+          cleanup_grace_ms,
+          command_id
+        )
         |> Map.merge(
           case outcome do
             "bound_reached" ->
@@ -1464,7 +1506,7 @@ defmodule Loopex.Runtime.SessionState do
       {state, steer_events} = resolve_steer(state, run_id, unapplied_reason(outcome, bound))
       {state, promotion_events} = promote_follow_up(state, run_id)
 
-      {:ok, state, [event] ++ steer_events ++ promotion_events}
+      {:ok, %{state | aborting: nil}, [event] ++ steer_events ++ promotion_events}
     else
       _other -> {:error, :invalid_run_terminal_transition}
     end
@@ -1479,7 +1521,13 @@ defmodule Loopex.Runtime.SessionState do
          true <- is_binary(reconciliation_ref) and byte_size(reconciliation_ref) > 0 do
       events = [
         tool_finished_event(state.session_id, job, "outcome_unknown"),
-        run_finished_event(state.session_id, run_id, "outcome_unknown", reconciliation_ref)
+        run_finished_event(
+          state.session_id,
+          run_id,
+          "outcome_unknown",
+          reconciliation_ref,
+          declared_cleanup_grace(state, run_id)
+        )
       ]
 
       {:ok, %{state | active_run_id: nil, pending_work: Map.delete(state.pending_work, run_id)},
@@ -1505,6 +1553,14 @@ defmodule Loopex.Runtime.SessionState do
   # was already terminal. The claim is checked rather than trusted — this admits
   # `outcome_unknown` only from a run whose committed elements actually hold an
   # unprovable effect.
+  # A run an operator durably aborted may end `cancelled`, and only such a run
+  # may: `cancelled` claims cancellation caused the termination, and a run nobody
+  # asked to stop cannot make that claim. It may also end `outcome_unknown`,
+  # which is what an unproved cleanup gives it, whatever stage it had reached.
+  defp terminal_admitted?(%{aborting: %{run_id: run_id}}, run_id, _stage, outcome, _bound)
+       when outcome in ["cancelled", "outcome_unknown"],
+       do: true
+
   defp terminal_admitted?(_state, _run_id, "turn_settled", _outcome, _bound), do: true
 
   defp terminal_admitted?(state, run_id, _stage, "outcome_unknown", _bound),
@@ -1899,10 +1955,33 @@ defmodule Loopex.Runtime.SessionState do
       :artifacts
     ]
 
+    # Concept: the executor's declared periods and programs survive
+    # reconstruction where an executor reported them, and their absence is not a
+    # malformed receipt.
+    #
+    # Technical depth: ADR 0009 asks for the cleanup grace to be readable through
+    # the session and reported in the run's terminal evidence. The shipped local
+    # executor writes it into every receipt and it was dropped here, so a
+    # coordinator rebuilding from the journal could not name the period a job ran
+    # under and the terminal had nothing to report. They are optional rather than
+    # required because the port promises `{:ok, map()}` and says nothing about
+    # them: an executor with no operating-system work to bound has no period to
+    # declare, and demanding one would refuse a conforming receipt.
+    optional = [
+      :cleanup_grace_ms,
+      :process_probe,
+      :receipt_retention_bound_ms,
+      :effective_deadline_ms,
+      :run_deadline_ms
+    ]
+
     with {:ok, receipt} <- decode_top(encoded, fields),
          {:ok, outcome} <- decode_receipt_outcome(receipt.outcome),
          {:ok, artifacts} <- decode_artifacts(receipt.artifacts) do
-      {:ok, %{receipt | outcome: outcome, artifacts: artifacts}}
+      {:ok,
+       encoded
+       |> decode_optional(optional)
+       |> Map.merge(%{receipt | outcome: outcome, artifacts: artifacts})}
     else
       _other -> {:error, :invalid_plain_receipt}
     end
@@ -1966,6 +2045,15 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp decode_top(_encoded, _fields), do: {:error, :invalid_plain_record}
+
+  defp decode_optional(encoded, fields) do
+    Enum.reduce(fields, %{}, fn field, decoded ->
+      case Map.fetch(encoded, Atom.to_string(field)) do
+        {:ok, value} -> Map.put(decoded, field, value)
+        :error -> decoded
+      end
+    end)
+  end
 
   defp record_binary(record, key) do
     case Map.fetch(record, key) do
@@ -2148,46 +2236,61 @@ defmodule Loopex.Runtime.SessionState do
     }
   end
 
-  defp run_finished_event(session_id, run_id, outcome, reconciliation_ref) do
+  defp run_finished_event(session_id, run_id, outcome, reconciliation_ref, grace),
+    do: run_finished_event(session_id, run_id, outcome, reconciliation_ref, grace, nil)
+
+  defp run_finished_event(session_id, run_id, outcome, reconciliation_ref, grace, command_id) do
     %{
       "run_id" => run_id,
       "outcome" => outcome,
       "reconciliation_ref" => reconciliation_ref,
+      "cleanup_grace_ms" => grace,
+      "command_id" => command_id,
       event_id: stable_id("event-run-finished", session_id, run_id),
       kind: "run.finished"
     }
   end
 
-  # Concept: an abort says what actually happened to the work, not merely that
-  # it was asked to stop.
-  #
-  # Technical depth: `cancelled` claims every owned operation reached a validated
-  # terminal fact and every owned process tree was confirmed cleaned. Where the
-  # executor could not confirm that, the run finishes `outcome_unknown` carrying
-  # its reconciliation reference instead, because an operator told "cancelled"
-  # about a process that may still be running has been told something false.
-  defp abort_event(session_id, command_id, run_id, outcome, reconciliation_ref) do
-    %{
-      "command_id" => command_id,
-      "run_id" => run_id,
-      "outcome" => outcome,
-      "reconciliation_ref" => reconciliation_ref,
-      event_id: stable_id("event-abort", session_id, command_id),
-      kind: "run.finished"
-    }
+  # The period every executor receipt this run produced declared. They agree by
+  # construction -- one executor answers one run -- so the first that reported
+  # one is the run's, and a run whose executor reported none has none to report.
+  defp declared_cleanup_grace(state, run_id), do: Map.get(state.declared_cleanup, run_id)
+
+  defp aborting_command(%{aborting: %{run_id: run_id, command_id: command_id}}, run_id),
+    do: command_id
+
+  defp aborting_command(_state, _run_id), do: nil
+
+  @doc """
+  ## Concept
+
+  The run an operator aborted whose ending has not been committed.
+
+  ## Technical depth
+
+  `nil` unless an abort was durably admitted and its terminal has not landed.
+  The coordinator reads it twice: to stop scheduling for that run, and on
+  recovery to tell "nobody asked to stop" from "somebody asked and this owner
+  never wrote down what happened". The second must commit `outcome_unknown`,
+  because the cleanup may have run, may have half run, and cannot be proved
+  either way -- exactly the state that must never be blindly retried.
+  """
+  @spec aborting_run(t()) :: binary() | nil
+  def aborting_run(%__MODULE__{aborting: %{run_id: run_id}}), do: run_id
+  def aborting_run(%__MODULE__{}), do: nil
+
+  # Recorded from the receipt rather than from anything this session decided: the
+  # period is the executor's declaration, and an executor that declared none
+  # leaves nothing here to report.
+  defp remember_declared_cleanup(state, run_id, receipt) do
+    case Map.get(receipt, :cleanup_grace_ms) do
+      grace when is_integer(grace) ->
+        %{state | declared_cleanup: Map.put(state.declared_cleanup, run_id, grace)}
+
+      _absent ->
+        state
+    end
   end
-
-  # Concept: what the abort achieved travels beside the command, not inside it.
-  #
-  # Technical depth: the digest covers what the caller asked for, so a
-  # re-presented abort returns its retained result rather than conflicting with
-  # itself because cleanup went differently the second time. The disposition is
-  # supplied separately, exactly as a run's resolved bounds are.
-  defp abort_outcome(state, run_id, command),
-    do: run_outcome(state, run_id, cleanup_outcome(command))
-
-  defp cleanup_outcome(%{resolved_bounds: %{cleanup: :unconfirmed}}), do: "outcome_unknown"
-  defp cleanup_outcome(_command), do: "cancelled"
 
   # Concept: `outcome_unknown` outranks whatever asked the run to stop.
   #
@@ -2214,10 +2317,6 @@ defmodule Loopex.Runtime.SessionState do
 
   defp terminal_reference(_state, _run_id, _outcome, detail),
     do: Map.get(detail, :reconciliation_ref)
-
-  defp abort_reference(_state, _run_id, "cancelled"), do: nil
-
-  defp abort_reference(state, run_id, _outcome), do: reconciliation_reference(state, run_id)
 
   defp reconciliation_reference(state, run_id),
     do: stable_id("reconciliation", state.session_id, run_id)

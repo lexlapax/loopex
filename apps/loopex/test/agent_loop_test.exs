@@ -16,21 +16,44 @@ defmodule Loopex.AgentLoopProgressExecutor do
   @behaviour Loopex.Executor
 
   def start(mode) do
-    {:ok, pid} = Agent.start_link(fn -> %{mode: mode, jobs: []} end)
+    {:ok, pid} = Agent.start_link(fn -> %{mode: mode, jobs: [], progress: nil} end)
     pid
   end
 
   def jobs(pid), do: Agent.get(pid, & &1.jobs) |> Enum.reverse()
+
+  # Concept: the executor keeps the callback it was handed, exactly as a real one
+  # does for as long as it holds the job.
+  #
+  # Technical depth: the coordinator cannot take the function back. Retaining it
+  # here is what lets a case ask the only question that matters about closure:
+  # what happens when the executor calls it once more after its job has answered.
+  # An executor with a buffered chunk, or a progress call racing its own return,
+  # does exactly this.
+  def retained_progress(pid), do: Agent.get(pid, & &1.progress)
 
   @impl Loopex.Executor
   def execute(pid, job, _grant, _options, progress \\ nil) do
     progress = progress || Loopex.Executor.discard_progress()
     :ok = Agent.update(pid, fn state -> %{state | jobs: [job | state.jobs]} end)
 
-    events = pid |> Agent.get(& &1.mode) |> events(job)
+    mode = Agent.get(pid, & &1.mode)
+    :ok = Agent.update(pid, fn state -> %{state | progress: progress} end)
+    events = events(mode, job)
     Enum.each(events, progress)
 
-    {:ok, receipt(job, length(events))}
+    # Concept: an executor that emitted progress and then could not produce a
+    # receipt at all.
+    #
+    # Technical depth: the stream is closed `abandoned` rather than `complete`,
+    # and there is no receipt, so the executor's own count does not exist to be
+    # passed along. That is precisely the closure a count taken from the receipt
+    # cannot describe, and the one a case that only ever drives a completed job
+    # never reaches.
+    case mode do
+      :one_valid_two_refused_then_lost -> {:error, {:receipt_not_retained, :enospc}}
+      _other -> {:ok, receipt(job, length(events))}
+    end
   end
 
   def identity(job) do
@@ -53,6 +76,24 @@ defmodule Loopex.AgentLoopProgressExecutor do
     do: Map.merge(identity(job), %{stream: "stdout", byte_offset: index * 8, chunk: text})
 
   defp events(:valid, job), do: [chunk(job, 0, "first"), chunk(job, 1, "second")]
+
+  # Concept: one wrong binding, chosen by the case rather than by this double,
+  # so every binding can be asked for rather than the three somebody thought of.
+  #
+  # Technical depth: three named vectors and one where every binding is missing
+  # left seven of the eleven bindings free: any subset of the eleven that still
+  # contains attempt, fencing token and digest refuses all four, so the other
+  # seven could be deleted from the coordinator's comparison at once and nothing
+  # went red. A vector per binding is the only shape that says "every".
+  #
+  # The wrong value is derived from the right one so it stays the same type. A
+  # binding compared by equality would otherwise be refused for being a string
+  # where an integer belongs, which is a different refusal from the one this is
+  # about.
+  defp events({:wrong, binding}, job) do
+    event = chunk(job, 0, "tampered")
+    [Map.put(event, binding, tamper(Map.fetch!(event, binding)))]
+  end
 
   defp events(:wrong_attempt, job),
     do: [%{chunk(job, 0, "stale") | attempt: job.attempt + 1}]
@@ -79,6 +120,11 @@ defmodule Loopex.AgentLoopProgressExecutor do
     ]
   end
 
+  # The same three events from an executor that then loses its receipt, so the
+  # stream is abandoned rather than completed.
+  defp events(:one_valid_two_refused_then_lost, job),
+    do: events(:one_valid_two_refused, job)
+
   # Only the call id, which is what the boundary used to accept as an identity.
   defp events(:call_id_only, job),
     do: [%{tool_call_id: job.tool_call_id, stream: "stdout", byte_offset: 0, chunk: "bare"}]
@@ -94,6 +140,13 @@ defmodule Loopex.AgentLoopProgressExecutor do
       %{chunk(job, 1, String.duplicate("x", 70_000)) | stream: "stdout"}
     ]
   end
+
+  # Kept below every `events/2` clause rather than beside the one that calls it:
+  # a private helper written between two clauses of the same name and arity
+  # splits them, and a split definition is a compile warning. The gate's selector
+  # runner refuses a warning, so the placement is not a style preference.
+  defp tamper(value) when is_integer(value), do: value + 1
+  defp tamper(value) when is_binary(value), do: value <> "-not-this-one"
 
   defp receipt(job, progress_count) do
     %{
@@ -152,19 +205,6 @@ defmodule Loopex.AgentLoopAnsweringExecutor do
   @impl Loopex.Executor
   def cancel(_pid, _job_id), do: {:ok, :cleaned}
 
-  # Concept: this double declares which of its own answers preceded the effect,
-  # because the port makes that the executor's statement rather than a caller's
-  # inference.
-  #
-  # Technical depth: it refuses at argument validation and nowhere else, so
-  # `:invalid_tool_arguments` is the one name it can trace to a line that runs
-  # before `effects/1` records anything. Every other answer it gives is produced
-  # after that record exists, which is why the declaration is this narrow and why
-  # `{:receipt_not_retained, _}` is absent from it.
-  @impl Loopex.Executor
-  def refused_before_effect?({:error, :invalid_tool_arguments}), do: true
-  def refused_before_effect?(_answer), do: false
-
   @impl Loopex.Executor
   def execute(pid, job, _grant, _options, progress \\ nil) do
     _progress = progress || Loopex.Executor.discard_progress()
@@ -180,9 +220,18 @@ defmodule Loopex.AgentLoopAnsweringExecutor do
 
         answer
 
-      # Refused before anything was started: no process, no workspace change.
-      {:before_effect, answer} ->
-        answer
+      # Concept: this double says in the answer which of its own answers preceded
+      # the effect, because the port makes that the executor's statement rather
+      # than a caller's inference.
+      #
+      # Technical depth: nothing was started -- no process, no workspace change --
+      # and `effects/1` has recorded nothing, so this branch is the one place this
+      # double can trace to a line that runs before the record exists. Every other
+      # answer it gives is produced after that record exists and is returned
+      # untagged, which is why `{:receipt_not_retained, _}` can never arrive
+      # wearing this tag.
+      {:before_effect, {:error, reason}} ->
+        {:error, {:refused_before_effect, reason}}
 
       :completed ->
         :ok =
@@ -219,6 +268,7 @@ defmodule Loopex.AgentLoopAnsweringExecutor do
       provider_credential_present: false,
       artifacts: []
     }
+    |> Map.merge(:persistent_term.get({__MODULE__, :receipt_extras}, %{}))
   end
 end
 
@@ -263,38 +313,32 @@ end
 defmodule Loopex.AgentLoopBrokenDeclarationExecutor do
   @moduledoc false
 
-  # Concept: an executor whose declaration is present but does not work.
+  # Concept: an executor that reaches for the declaration and misses.
   #
-  # Technical depth: an optional callback is code, and code can raise, exit, or
-  # answer with something that is not a boolean at all. None of those is a
-  # statement that the effect did not happen, so none of them may be read as one.
-  # The three modes here are the three ways this double can fail to declare, and
-  # each must reach the same unproven answer a silent executor reaches.
+  # Technical depth: the tag is a shape, and a shape can be got wrong. A bare
+  # atom where a tuple belongs, a tuple of the wrong size, a term that is not an
+  # error at all -- each is an executor that intended to say its effect never
+  # started and did not say it. None of them is a statement that the effect did
+  # not happen, so none may be read as one, and each must reach the same unproven
+  # answer a silent executor reaches. This double runs the effect first, so
+  # believing any of them would be believing a falsehood.
 
   @behaviour Loopex.Executor
 
   def start(mode) do
     {:ok, pid} = Agent.start_link(fn -> %{mode: mode, effects: []} end)
-    Process.put(:loopex_broken_declaration_mode, mode)
     pid
   end
 
+  # The three ways an answer can wear the tag without carrying it. Each is an
+  # executor that meant to declare and did not manage to, and each has to reach
+  # the same place a silent executor reaches: `true` is not a word the runtime
+  # will accept in a shape it did not define.
+  defp malformed(:bare_atom), do: {:error, :refused_before_effect}
+  defp malformed(:wrong_arity), do: {:error, {:refused_before_effect}}
+  defp malformed(:not_an_error), do: {:refused_before_effect, :invalid_tool_arguments}
+
   def effects(pid), do: Agent.get(pid, & &1.effects) |> Enum.reverse()
-
-  # The mode has to be readable without the executor reference, because the port
-  # hands the declaration only the answer. A module attribute of the test process
-  # would not survive into the coordinator, so it is a persistent term keyed by
-  # this module.
-  def arm(mode), do: :persistent_term.put({__MODULE__, :mode}, mode)
-
-  @impl Loopex.Executor
-  def refused_before_effect?(_answer) do
-    case :persistent_term.get({__MODULE__, :mode}, :raises) do
-      :raises -> raise "this executor's declaration is broken"
-      :exits -> exit(:declaration_unavailable)
-      :not_a_boolean -> :yes
-    end
-  end
 
   @impl Loopex.Executor
   def execute(pid, job, _grant, _options, progress \\ nil) do
@@ -303,7 +347,7 @@ defmodule Loopex.AgentLoopBrokenDeclarationExecutor do
     :ok =
       Agent.update(pid, fn state -> %{state | effects: [job.tool_call_id | state.effects]} end)
 
-    {:error, :workspace_lease_lost}
+    malformed(Agent.get(pid, & &1.mode))
   end
 end
 
@@ -507,7 +551,7 @@ defmodule Loopex.AgentLoopTest do
 
     # Five model requests: four that asked for a tool and one that stopped.
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 5
-    assert length(Loopex.AgentLoopTestExecutor.jobs(fixture.executor)) == 4
+    assert length(Loopex.AgentLoopAnsweringExecutor.jobs(fixture.executor)) == 4
   end
 
   test "every model request carries the committed conversation history including the original prompt" do
@@ -734,7 +778,7 @@ defmodule Loopex.AgentLoopTest do
 
     # So does every executor job the run dispatched, as a canonicalized field
     # covered by the job digest rather than a timeout the executor chose.
-    for job <- Loopex.AgentLoopTestExecutor.jobs(fixture.executor) do
+    for job <- Loopex.AgentLoopAnsweringExecutor.jobs(fixture.executor) do
       assert job.run_deadline == deadline
     end
   end
@@ -868,9 +912,10 @@ defmodule Loopex.AgentLoopTest do
     events = drain(attachment)
 
     # Only the first call was ever dispatched.
-    assert Enum.map(Loopex.AgentLoopTestExecutor.jobs(fixture.executor), & &1.tool_call_id) == [
-             "c1"
-           ]
+    assert Enum.map(Loopex.AgentLoopAnsweringExecutor.jobs(fixture.executor), & &1.tool_call_id) ==
+             [
+               "c1"
+             ]
 
     # And the second still finished, truthfully, rather than hanging or vanishing.
     finished_tools = Enum.filter(events, &(&1.kind == "tool.finished"))
@@ -1057,9 +1102,10 @@ defmodule Loopex.AgentLoopTest do
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
 
     # And no further effect was dispatched behind it.
-    assert Enum.map(Loopex.AgentLoopTestExecutor.jobs(fixture.executor), & &1.tool_call_id) == [
-             "c1"
-           ]
+    assert Enum.map(Loopex.AgentLoopAnsweringExecutor.jobs(fixture.executor), & &1.tool_call_id) ==
+             [
+               "c1"
+             ]
 
     # It carries the reference the operator reconciles against, and the
     # published reference is the one the run actually committed rather than a
@@ -1111,9 +1157,10 @@ defmodule Loopex.AgentLoopTest do
 
     {fixture, _session_id, events, finished} = unknown_effect_run(script)
 
-    assert Enum.map(Loopex.AgentLoopTestExecutor.jobs(fixture.executor), & &1.tool_call_id) == [
-             "c1"
-           ]
+    assert Enum.map(Loopex.AgentLoopAnsweringExecutor.jobs(fixture.executor), & &1.tool_call_id) ==
+             [
+               "c1"
+             ]
 
     # The second call was never announced either, so no operator is left holding
     # a `tool.started` that never finishes.
@@ -1246,11 +1293,23 @@ defmodule Loopex.AgentLoopTest do
 
     assert assistants == []
 
-    # And no assistant message reached the public plane either, so a consumer
-    # reading events sees no turn that the journal cannot justify.
-    refute fixture
-           |> Fixture.records(session_id)
-           |> Enum.any?(&(&1.payload[:kind] == "run_terminal_committed"))
+    # And the run did not end as though the attempt had succeeded, so a consumer
+    # reading events sees no turn the journal cannot justify.
+    #
+    # This asserted that no `run_terminal_committed` record existed at all, which
+    # was true only because an abort used to carry its ending inside its own
+    # admission record and produce no terminal. It therefore passed without
+    # testing anything the comment above it claimed. An abort commits an ending
+    # now, like every other way a run stops, so the assertion is what the comment
+    # always meant: whatever the run ended as, it was not `completed`.
+    terminals =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "run_terminal_committed"))
+
+    refute Enum.any?(terminals, &(&1.payload["outcome"] == "completed")),
+           "an aborted attempt's reply completed the run: " <>
+             inspect(Enum.map(terminals, & &1.payload["outcome"]))
 
     # A reply that committed before any abort does complete its turn: the loop
     # in every other case here commits its assistant message and carries on,
@@ -1302,18 +1361,43 @@ defmodule Loopex.AgentLoopTest do
     # Each of these carries the current `tool_call_id` and differs from a valid
     # event in exactly one binding. Matching the call id alone was what let a
     # stale or faulty executor speak on the live attempt's behalf.
-    for mode <- [:wrong_attempt, :wrong_fence, :wrong_digest, :call_id_only] do
+    #
+    # Every binding is asked for by name, and the list is the full identity a
+    # dispatched job carries rather than a selection. Three named vectors plus
+    # one with no bindings at all was not "any wrong binding": it left seven of
+    # the eleven unexercised, and they could be dropped from the coordinator's
+    # comparison together without a single case noticing. `tool_call_id` is
+    # covered by `:call_id_only` and by every other case in this file, since an
+    # event that does not name the live call is refused before any of this.
+    bindings = [
+      :operation_id,
+      :attempt,
+      :session_id,
+      :run_id,
+      :turn_id,
+      :canonical_request_digest,
+      :session_epoch_at_dispatch,
+      :executor_epoch,
+      :executor_identity,
+      :fencing_token
+    ]
+
+    modes = Enum.map(bindings, &{:wrong, &1}) ++ [:call_id_only]
+
+    for mode <- modes do
       _fixture = start_with_progress(mode)
 
       assert tool_progress_items() == [],
-             "an event with #{mode} was projected to the operator"
+             "an event with #{inspect(mode)} was projected to the operator"
 
       # Refused, and not refused in silence: the count reaches the diagnostics
       # plane, where it can be seen without being mistaken for progress.
       refusal =
         Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
 
-      assert refusal["refused_count"] == 1, "an event with #{mode} was dropped without a trace"
+      assert refusal["refused_count"] == 1,
+             "an event with #{inspect(mode)} was dropped without a trace"
+
       assert refusal["tool_call_id"] == "c1"
     end
   end
@@ -1413,7 +1497,7 @@ defmodule Loopex.AgentLoopTest do
     {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
     _events = drain(attachment)
 
-    dispatched = Loopex.AgentLoopTestExecutor.jobs(fixture.executor)
+    dispatched = Loopex.AgentLoopAnsweringExecutor.jobs(fixture.executor)
     assert Enum.map(dispatched, & &1.tool_call_id) == ["a", "b", "c"]
 
     # The next turn is staged only once every call of that turn has an answer.
@@ -1446,7 +1530,10 @@ defmodule Loopex.AgentLoopTest do
   # executor module the runtime holds -- one that declares, one that does not,
   # one whose declaration is broken. Composing them through one function is what
   # keeps that the only difference between them.
-  defp start_with_executor(module, executor_pid, script) do
+  defp start_with_executor(module, executor_pid, script, options \\ []) do
+    extras = Keyword.get(options, :receipt_extras, %{})
+    :persistent_term.put({AgentLoopAnsweringExecutor, :receipt_extras}, extras)
+
     model_pid = AgentLoopTestModel.start(script)
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop-answering")
     definitions = [Fixture.tool_definition()]
@@ -1651,18 +1738,20 @@ defmodule Loopex.AgentLoopTest do
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
   end
 
-  test "an executor declaration that raises exits or answers with anything but true declares nothing" do
-    # Concept: an optional callback is code an implementer wrote, and code fails.
-    # A failed declaration is not a statement that the effect did not happen.
+  test "an answer that reaches for the pre-start tag and misses its shape declares nothing" do
+    # Concept: an executor declares by returning one exact shape, and a shape can
+    # be got wrong. A missed declaration is not a statement that the effect did
+    # not happen.
     #
-    # Technical depth: `true` is required literally rather than truthily, so a
-    # declaration answering `:yes` -- plausible, and not a boolean -- claims
-    # nothing. A raise and an exit are the two other ways an implementation can
-    # be present and unusable. All three reach the same place a silent executor
-    # reaches, because the runtime believes only what an executor actually said.
-    for mode <- [:raises, :exits, :not_a_boolean] do
-      AgentLoopBrokenDeclarationExecutor.arm(mode)
-
+    # Technical depth: the tag is required literally rather than approximately. A
+    # bare `:refused_before_effect` atom, a one-element `{:refused_before_effect}`
+    # tuple, and a term that is not an `{:error, _}` at all are the three ways an
+    # implementation can plainly have meant to declare and not have declared. All
+    # three reach the same place a silent executor reaches, because the runtime
+    # believes only what an executor actually said -- and this double ran its
+    # effect before answering, so believing any of them would be believing a
+    # falsehood about a workspace.
+    for mode <- [:bare_atom, :wrong_arity, :not_an_error] do
       fixture =
         start_with_executor(
           AgentLoopBrokenDeclarationExecutor,
@@ -1677,7 +1766,7 @@ defmodule Loopex.AgentLoopTest do
       tool = Enum.find(events, &(&1.kind == "tool.finished"))
 
       assert tool["outcome"] == "outcome_unknown",
-             "a #{mode} declaration was read as a refusal that preceded the effect"
+             "a #{mode} answer was read as a refusal that preceded the effect"
 
       finished = Enum.find(events, &(&1.kind == "run.finished"))
       assert finished["outcome"] == "outcome_unknown"
@@ -1685,45 +1774,80 @@ defmodule Loopex.AgentLoopTest do
     end
   end
 
-  test "a declared pre-start refusal is read from the executor and not from the error's name" do
+  test "a pre-start refusal is read from the answer's shape and not from the error's name" do
     # Concept: the same error name means opposite things from two executors, and
     # only the executor that produced it can say which.
     #
-    # Technical depth: both cases answer `{:error, :workspace_lease_lost}`. The
-    # declaring executor refuses before it records an effect and says so; the
-    # undeclaring one has already run the effect and says nothing. A
+    # Technical depth: both executors here answer with the name
+    # `:workspace_lease_lost`. One refuses before it records an effect and wears
+    # the tag; the other has already run the effect and returns the name bare. A
     # classification that reads the name gives them the same answer, and exactly
-    # one of those answers is true of each.
-    assert Loopex.Executor.refused_before_effect?(
-             Loopex.Executor.Local,
-             {:error, :workspace_lease_lost}
-           )
+    # one of those answers is true of each -- which is the defect this milestone
+    # repaired and the one the port could reintroduce.
+    #
+    # The pair is driven end to end rather than asserted against a classifier,
+    # because what matters is the outcome an operator is shown, and because a
+    # classifier that is not on the path is not evidence that the path uses it.
+    declared =
+      start_with_executor(
+        AgentLoopAnsweringExecutor,
+        AgentLoopAnsweringExecutor.start(%{
+          "c1" => {:before_effect, {:error, :workspace_lease_lost}}
+        }),
+        one_call_script()
+      )
 
-    refute Loopex.Executor.refused_before_effect?(
-             AgentLoopUndeclaringExecutor,
-             {:error, :workspace_lease_lost}
-           )
+    declared_events = drain(declared.attachment)
 
-    # The shipped executor declares only what it can trace to a line before a
-    # start; its post-effect answers are unproven from the same module.
-    refute Loopex.Executor.refused_before_effect?(
-             Loopex.Executor.Local,
-             {:error, {:receipt_not_retained, :enotdir}}
-           )
+    assert AgentLoopAnsweringExecutor.effects(declared.executor) == [],
+           "the declaring double recorded an effect, so its refusal is not one"
 
-    refute Loopex.Executor.refused_before_effect?(
-             Loopex.Executor.Local,
-             {:error, :job_id_conflict}
-           )
+    declared_tool = Enum.find(declared_events, &(&1.kind == "tool.finished"))
 
-    # A module that is not an executor at all, and an answer that is not an
-    # error, both declare nothing rather than raising.
-    refute Loopex.Executor.refused_before_effect?(
-             :no_such_executor_module,
-             {:error, :workspace_lease_lost}
-           )
+    assert declared_tool["outcome"] == "failed",
+           "a refusal the executor tagged was not read as one"
 
-    refute Loopex.Executor.refused_before_effect?(Loopex.Executor.Local, {:ok, %{}})
+    # The committed failure carries the executor's own reason and not the
+    # wrapper it travelled in. The reason is model-facing content, so the next
+    # request is where it is observable -- and a tag left on it would be this
+    # runtime's private vocabulary leaking into a conversation.
+    declared_requests = AgentLoopAnsweringExecutor.jobs(declared.executor)
+    assert length(declared_requests) == 1
+
+    resumed =
+      inspect(AgentLoopTestModel.dispatched(declared.model),
+        limit: :infinity,
+        printable_limit: :infinity
+      )
+
+    assert resumed =~ "workspace_lease_lost",
+           "the committed failure lost the reason the executor gave"
+
+    refute resumed =~ "refused_before_effect",
+           "the runtime's own tag reached the model as part of the tool's reason"
+
+    undeclared =
+      start_with_executor(
+        AgentLoopUndeclaringExecutor,
+        AgentLoopUndeclaringExecutor.start(%{"c1" => {:error, :workspace_lease_lost}}),
+        one_call_script()
+      )
+
+    undeclared_events = drain(undeclared.attachment)
+
+    assert AgentLoopUndeclaringExecutor.effects(undeclared.executor) == ["c1"],
+           "the undeclaring double did not run the effect this case is about"
+
+    undeclared_tool = Enum.find(undeclared_events, &(&1.kind == "tool.finished"))
+
+    assert undeclared_tool["outcome"] == "outcome_unknown",
+           "the same error name from an executor that declared nothing was read as a refusal"
+
+    finished = Enum.find(undeclared_events, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "outcome_unknown"
+
+    assert length(AgentLoopTestModel.dispatched(undeclared.model)) == 1,
+           "the loop resumed past an effect nobody could account for"
   end
 
   test "a tool stream closes on the count this runtime published rather than the executor's own" do
@@ -1757,6 +1881,317 @@ defmodule Loopex.AgentLoopTest do
 
     # The two that were refused are still visible, as refusals rather than as
     # progress that went missing.
+    refusal = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
+    assert refusal["refused_count"] == 2
+  end
+
+  test "an abandoned model stream closes on the count this runtime published rather than zero" do
+    # Concept: an abandoned domain still owes a truthful total, and the only
+    # total anyone can vouch for is the one this coordinator published.
+    #
+    # Technical depth: a completed attempt closes with the producer's own
+    # `delta_count`, which it can know; an abandoned one has no reply to read a
+    # count from, so the coordinator closes it with what it counted itself. Both
+    # abandoned call sites pass zero for the reported count, so replacing the
+    # counter with that argument makes every abandoned model domain announce a
+    # total of zero -- and it left the whole suite green, because every clause-2
+    # assertion about an abandoned closure builds the closure itself with a
+    # test-supplied count and the only coordinator-driven model closure in the
+    # repository is a complete one.
+    #
+    # Scenario: a provider streams three deltas and the attempt then fails. The
+    # operator's terminal holds sequences 0, 1 and 2 and receives a closure
+    # declaring nothing was sent. A consumer doing the gap check the algebra asks
+    # for sees three items under a total of zero, and the fallback to the durable
+    # record never fires because nothing looks missing.
+    script = [
+      %{text: "", calls: [], deltas: ["a", "b", "c"], error: :provider_unavailable},
+      %{text: "done", calls: []}
+    ]
+
+    fixture = start(script: script, progress_to: self())
+    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    _events = drain(attachment)
+
+    observed = receive_progress()
+
+    closures = Enum.filter(observed, &(Map.get(&1, :kind) == :model_stream_closed))
+    abandoned = Enum.find(closures, &(&1.disposition == :abandoned))
+
+    assert abandoned, "the failed attempt's domain was never closed: #{inspect(closures)}"
+
+    delivered =
+      observed
+      |> Enum.filter(&(Map.get(&1, :kind) == :text_delta))
+      |> Enum.filter(&(&1.stream_domain_id == abandoned.stream_domain_id))
+
+    assert length(delivered) == 3,
+           "this case no longer drives an abandoned domain that carried deltas"
+
+    assert abandoned.delta_count == 3,
+           "an abandoned domain that carried #{length(delivered)} deltas closed on " <>
+             "#{abandoned.delta_count}, so a consumer's gap check reports loss that did not happen"
+
+    # The retry's own domain is separate and closes on its own count, so the two
+    # are never compared or concatenated.
+    complete = Enum.find(closures, &(&1.disposition == :complete))
+    assert complete
+    refute complete.stream_domain_id == abandoned.stream_domain_id
+  end
+
+  test "a delta carrying a field its kind does not declare is refused rather than projected" do
+    # Concept: an adapter supplies content. The domain, the sequence and the turn
+    # are this coordinator's statements about a stream it opened, and a field
+    # nobody named is neither bounded nor understood.
+    #
+    # Technical depth: two holes met here. The shape check admitted any plain
+    # map while the byte ceiling measured four recognised names, so a field
+    # nobody had named was neither refused nor counted -- a megabyte of
+    # `vendor_blob` beside a short `text` measured as the length of the text and
+    # crossed onto the progress plane. And an adapter could carry
+    # `"stream_domain_id"` and `"model_sequence"` as *string* keys, which the
+    # coordinator's atom-keyed labels do not overwrite, so an item reached a
+    # consumer wearing two contradictory sequences.
+    #
+    # Admitting an exact field set per kind closes both. A forged label is now
+    # refused outright rather than overwritten, which is the stronger answer: an
+    # item that tried to name its own domain never reaches the plane at all.
+    for forged <- [
+          %{stream_domain_id: "not-this-domain", model_sequence: 0},
+          %{"stream_domain_id" => "not-this-domain", "model_sequence" => 0},
+          %{turn_id: "not-this-turn"},
+          %{vendor_blob: String.duplicate("x", 1_000_000)}
+        ] do
+      fixture =
+        start(
+          script: [%{text: "abc", calls: [], deltas: ["a"], forged_labels: forged}],
+          progress_to: self()
+        )
+
+      {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+      _events = drain(attachment)
+
+      observed = receive_progress()
+      deltas = Enum.filter(observed, &(Map.get(&1, :kind) == :text_delta))
+
+      assert deltas == [],
+             "a delta carrying #{inspect(Map.keys(forged))} reached the operator: " <>
+               inspect(deltas)
+    end
+
+    # The ceiling still bounds an admitted field. With the field set exact,
+    # measuring "every field" and measuring the four content names are the same
+    # measurement for every admitted shape, so no mutant distinguishes them --
+    # what must be driven is that an oversized *admitted* field is refused.
+    oversized =
+      start(
+        script: [%{text: "big", calls: [], deltas: [String.duplicate("x", 1_000_000)]}],
+        progress_to: self()
+      )
+
+    {_session_id, oversized_attachment, _reply} = Fixture.run(oversized, "go")
+    _events = drain(oversized_attachment)
+
+    assert Enum.filter(receive_progress(), &(Map.get(&1, :kind) == :text_delta)) == [],
+           "a delta past the declared byte ceiling reached the operator"
+
+    # And the mechanism still projects an ordinary delta, so the case above is
+    # about the extra field rather than about the fixture.
+    clean = start(script: [%{text: "ab", calls: [], deltas: ["a", "b"]}], progress_to: self())
+    {_session_id, attachment, _reply} = Fixture.run(clean, "go")
+    _events = drain(attachment)
+
+    observed = receive_progress()
+    deltas = Enum.filter(observed, &(Map.get(&1, :kind) == :text_delta))
+
+    assert Enum.map(deltas, & &1.model_sequence) == [0, 1]
+    assert Enum.all?(deltas, &is_binary(&1.stream_domain_id))
+  end
+
+  test "the run's terminal reports the cleanup period the executor that answered it declared" do
+    # Concept: ADR 0009 requires the declared cleanup grace to be reported in the
+    # terminal outcome's evidence, so an operator can tell a clean cooperative
+    # stop from a forced kill that was confirmed and from a termination that
+    # could not be confirmed at all.
+    #
+    # Technical depth: the shipped executor wrote it into every receipt and the
+    # coordinator's receipt reconstruction dropped it, so a session rebuilt from
+    # the journal could not name the period a job had run under and no terminal
+    # reported it. That was recorded as a limitation and deferred; it is
+    # implemented instead. The value comes from the receipt rather than from
+    # anything this session decided, because the period is the executor's
+    # declaration.
+    #
+    # An executor that declares none -- one with no operating-system work to
+    # bound -- reports none. That is an absence rather than a default nobody
+    # named, which is why the field is optional on the way in.
+    declared =
+      start_with_executor(
+        AgentLoopAnsweringExecutor,
+        AgentLoopAnsweringExecutor.start(%{}),
+        one_call_script(),
+        receipt_extras: %{cleanup_grace_ms: 750}
+      )
+
+    finished = Enum.find(drain(declared.attachment), &(&1.kind == "run.finished"))
+
+    assert finished["outcome"] == "completed"
+
+    assert finished["cleanup_grace_ms"] == 750,
+           "the run's terminal did not report the period its executor declared: " <>
+             inspect(finished["cleanup_grace_ms"])
+
+    silent =
+      start_with_executor(
+        AgentLoopAnsweringExecutor,
+        AgentLoopAnsweringExecutor.start(%{}),
+        one_call_script()
+      )
+
+    silent_finished = Enum.find(drain(silent.attachment), &(&1.kind == "run.finished"))
+
+    assert silent_finished["cleanup_grace_ms"] == nil,
+           "a run whose executor declared no period reported one anyway"
+  end
+
+  test "a model delta emitted after its stream is closed is neither projected nor counted" do
+    # Concept: the model side has the same algebra as the executor side and had
+    # none of the protection.
+    #
+    # Technical depth: the executor stream carried a closed flag; the model
+    # stream carried nothing at all, so a retained adapter callback emitted into
+    # a closed domain with a sequence past the total that domain's own closure
+    # had already published. The flag was also check-then-act -- read the flag,
+    # get preempted, a closer publishes, then increment and emit -- so it was a
+    # narrower window rather than none. Both are one compare-and-exchange on the
+    # counter itself now: reserving a sequence and sealing are the same
+    # operation, and there is no interleaving in which an item is emitted that
+    # the closing total does not include.
+    #
+    # The retained callback is the reachable form of the race. It cannot
+    # schedule the preemption, but it proves the state the preemption would
+    # reach: a producer holding a live callback for a domain that has closed.
+    fixture =
+      start(script: [%{text: "ab", calls: [], deltas: ["a", "b"]}], progress_to: self())
+
+    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    _events = drain(attachment)
+
+    observed = receive_progress()
+    closure = Enum.find(observed, &(Map.get(&1, :kind) == :model_stream_closed))
+
+    assert closure, "the model stream was never closed"
+    assert closure.delta_count == 2
+
+    progress = AgentLoopTestModel.retained_progress(fixture.model)
+    assert is_function(progress, 1), "the model double did not retain its callback"
+
+    assert progress.(%{kind: :text_delta, content_index: 0, text: "after the closure"}) == :ok
+
+    late = receive_progress()
+
+    refute Enum.any?(late, &(Map.get(&1, :kind) == :text_delta)),
+           "a delta emitted after its stream closed was projected to the operator"
+
+    refute Enum.any?(late, &(Map.get(&1, :kind) == :model_stream_closed)),
+           "a second closure was emitted for a domain already closed"
+  end
+
+  test "an event emitted after its stream is closed is neither projected nor counted" do
+    # Concept: a closed domain stays closed. The executor still holding the
+    # callback cannot reopen it.
+    #
+    # Technical depth: closing emits the total and deletes this coordinator's
+    # record of the stream — but the function handed to the executor is a closure
+    # over the sink and the counter, and it outlives that deletion. Nothing in
+    # the coordinator could refuse a later call, because the coordinator no
+    # longer knew the stream existed. A buffered chunk, or a progress call
+    # racing its own return, was therefore projected into a closed domain at a
+    # sequence past the total its own closure had just declared — which is
+    # exactly the loss a consumer uses that total to detect, reported for an
+    # event that was not lost at all.
+    #
+    # The count is the assertion that matters. A late event that is merely not
+    # emitted, but still increments the counter, has corrupted a total that was
+    # already published.
+    fixture = start_with_progress(:valid)
+
+    items = receive_progress()
+    closure = Enum.find(items, &(&1.kind == :tool_stream_closed))
+
+    assert closure, "the tool stream was never closed"
+    assert closure.progress_count == 2
+
+    before = Enum.count(items, &(&1.kind == :tool_progress))
+    assert before == 2
+
+    # The executor calls the callback once more, after its job has answered and
+    # after the closure above was published. It is a well-formed event carrying
+    # the live call's whole identity: nothing about it is refusable except that
+    # it is late.
+    [job] = AgentLoopProgressExecutor.jobs(fixture.executor)
+    progress = AgentLoopProgressExecutor.retained_progress(fixture.executor)
+    assert is_function(progress, 1), "the double did not retain its callback"
+
+    late =
+      AgentLoopProgressExecutor.identity(job)
+      |> Map.merge(%{stream: "stdout", byte_offset: 999, chunk: "after the closure"})
+
+    assert progress.(late) == :ok
+
+    after_items = receive_progress()
+
+    refute Enum.any?(after_items, &(&1.kind == :tool_progress)),
+           "an event emitted after its stream closed was projected to the operator"
+
+    refute Enum.any?(after_items, &(&1.kind == :tool_stream_closed)),
+           "a second closure was emitted for a domain already closed"
+
+    # And it was not counted as a refusal either: a refusal is this runtime's
+    # judgement about an event's identity, and this event's identity is correct.
+    refusal = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
+
+    refute refusal,
+           "a late but well-formed event was reported as a binding refusal: #{inspect(refusal)}"
+  end
+
+  test "an abandoned tool stream closes on the count this runtime published rather than a claim" do
+    # Concept: a stream that was abandoned still has to say truthfully how many
+    # items crossed it, and there is nobody left to ask.
+    #
+    # Technical depth: the case above proves the completed closure. It is silent
+    # about the abandoned one, and the two reach the closing item by different
+    # paths: a completed job has a receipt whose `progress_count` is at least a
+    # number, while an abandoned one has no receipt at all. A closure built from
+    # anything but this coordinator's own count of what it published is therefore
+    # not merely wrong here, it is unsourced -- and a consumer reading a closure
+    # of three against one delivered item concludes that two were lost on the
+    # transient plane, which is the reading that matters and the thing that did
+    # not happen.
+    #
+    # This executor emits the same three events, one accepted and two refused,
+    # and then answers `{:receipt_not_retained, :enospc}`: the effect ran and its
+    # account is gone. The run ends `outcome_unknown` for that reason, which is a
+    # separate guarantee proved elsewhere and asserted here only so the case
+    # fails loudly if it stops driving the path it claims to drive.
+    _fixture = start_with_progress(:one_valid_two_refused_then_lost)
+
+    items = receive_progress()
+
+    progress = Enum.filter(items, &(&1.kind == :tool_progress))
+    assert length(progress) == 1
+    assert [%{chunk: "kept", progress_sequence: 0}] = progress
+
+    closure = Enum.find(items, &(&1.kind == :tool_stream_closed))
+    assert closure, "the abandoned tool stream was never closed"
+
+    assert closure.disposition == :abandoned,
+           "this case no longer drives an abandoned closure, so it proves nothing about one"
+
+    assert closure.progress_count == 1,
+           "the closing item on an abandoned stream carried a count of " <>
+             "#{closure.progress_count} against the one item this runtime published"
+
     refusal = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
     assert refusal["refused_count"] == 2
   end

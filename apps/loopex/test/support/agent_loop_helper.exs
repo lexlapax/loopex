@@ -19,6 +19,8 @@ defmodule Loopex.AgentLoopTestModel do
     pid
   end
 
+  def retained_progress(pid), do: Agent.get(pid, &Map.get(&1, :progress))
+
   def dispatched(pid), do: Agent.get(pid, & &1.seen) |> Enum.reverse()
 
   @impl Loopex.Model
@@ -37,8 +39,21 @@ defmodule Loopex.AgentLoopTestModel do
         {next, %{state | script: rest, seen: [request | state.seen]}}
       end)
 
+    # Concept: an adapter that names its own stream domain and sequence.
+    #
+    # Technical depth: `Loopex.Model.valid_delta?/1` admits any plain bounded map
+    # carrying a known `:kind`, so extra keys pass it. Whether the coordinator's
+    # own labels survive an adapter that supplies its own is a question only an
+    # adapter that supplies them can ask, and no fixture did.
+    forged = Map.get(turn, :forged_labels, %{})
+
+    # The adapter keeps the callback it was handed, as a real one does for as
+    # long as it holds the attempt. A case can then ask the only question that
+    # matters about closure: what happens when it is called once more afterwards.
+    :ok = Agent.update(pid, fn state -> Map.put(state, :progress, progress) end)
+
     Enum.each(Map.get(turn, :deltas, []), fn text ->
-      progress.(%{kind: :text_delta, content_index: 0, text: text})
+      progress.(Map.merge(%{kind: :text_delta, content_index: 0, text: text}, forged))
     end)
 
     # Concept: a turn that can be held open, so a test can steer a live run.
@@ -336,6 +351,15 @@ defmodule Loopex.AgentLoopFixture do
     |> Map.fetch!(:sessions)
     |> Map.keys()
     |> List.to_tuple()
+  end
+
+  # The public history beside the private records, for a case that has to rebuild
+  # a session the way a recovering owner does: `recover/3` validates the two
+  # against each other, so a record list without its events is refused.
+  def events(fixture, session_id) do
+    M1RuntimeTestStore.inspect_state(fixture.store).sessions
+    |> Map.get(session_id, %{events: []})
+    |> Map.get(:events, [])
   end
 
   def records(fixture, session_id) do

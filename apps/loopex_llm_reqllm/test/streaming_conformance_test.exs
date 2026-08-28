@@ -280,6 +280,32 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
 
     assert deltas != []
 
+    # Concept: the kinds are named here, not read from the thing under test.
+    #
+    # Technical depth: this compared the observed kinds against
+    # `Model.delta_kinds/0`, which is the list the adapter and the validator both
+    # already work from -- so a kind dropped from that list and from the adapter
+    # together left both sides of the comparison equal and the case green. The
+    # obligation says *four canonical delta kinds*; naming them is the only way
+    # this case can fail on the count.
+    #
+    # Three of the four are model deltas and belong to `Loopex.Model`. The
+    # fourth, `:tool_progress`, is a projection of executor progress rather than
+    # model output -- ADR 0011 narrows the vision's three named tool streams to
+    # one kind carrying a `stream` discriminant -- so it is deliberately not in
+    # this list and is not produced by a model adapter. Its shape and its
+    # plain-data property are proved where it is actually emitted, by
+    # `a validated executor event carries only its bounded named payload across`
+    # in `apps/loopex/test/agent_loop_test.exs`.
+    assert Enum.sort(Model.delta_kinds()) ==
+             Enum.sort([:text_delta, :reasoning_delta, :tool_call_delta]),
+           "the model delta kinds changed; the obligation names four canonical kinds, of which " <>
+             "these three are the model's: #{inspect(Model.delta_kinds())}"
+
+    refute :tool_progress in Model.delta_kinds(),
+           "the executor progress projection is not a model delta and must not be produced by " <>
+             "a model adapter"
+
     assert Enum.map(deltas, & &1.kind) |> Enum.uniq() |> Enum.sort() ==
              Enum.sort(Model.delta_kinds())
 

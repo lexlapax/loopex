@@ -64,6 +64,27 @@ defmodule Loopex.Model do
 
   @max_delta_bytes 65_536
 
+  # Concept: a delta carries the fields its kind declares and no others.
+  #
+  # Technical depth: the ceiling used to be measured over four recognised names
+  # while the shape check admitted any plain map, so a field nobody had named
+  # was neither bounded nor refused: a one-megabyte `vendor_blob` beside a
+  # short `text` measured as the length of the text and crossed onto the
+  # progress plane. The same gap let an adapter carry `"stream_domain_id"` and
+  # `"model_sequence"` as *string* keys, which the coordinator's atom-keyed
+  # labels do not overwrite, so an item reached a consumer wearing two
+  # contradictory sequences and the label the coordinator derived was no longer
+  # the only one there.
+  #
+  # Admitting an exact set per kind closes both at once. It also makes the
+  # ceiling total rather than partial, because every admitted field is now a
+  # field the measurement knows about.
+  @delta_fields %{
+    text_delta: [:kind, :content_index, :text],
+    reasoning_delta: [:kind, :content_index, :text],
+    tool_call_delta: [:kind, :call_index, :tool_call_id, :name, :arguments_fragment]
+  }
+
   @typedoc """
   ## Concept
 
@@ -253,10 +274,28 @@ defmodule Loopex.Model do
   """
   @spec valid_delta?(term()) :: boolean()
   def valid_delta?(%{kind: kind} = delta) when kind in @delta_kinds do
-    plain?(Map.delete(delta, :kind)) and delta_bytes(delta) <= @max_delta_bytes
+    admitted = Map.fetch!(@delta_fields, kind)
+
+    Enum.all?(Map.keys(delta), &(&1 in admitted)) and
+      plain?(Map.delete(delta, :kind)) and
+      delta_bytes(delta) <= @max_delta_bytes
   end
 
   def valid_delta?(_delta), do: false
+
+  @doc """
+  ## Concept
+
+  The exact fields a delta of each kind may carry.
+
+  ## Technical depth
+
+  Published so a conformance suite can assert the set rather than read it back
+  from the same predicate it is testing, and so an adapter author can see what
+  will be refused rather than discovering it as a dropped item.
+  """
+  @spec delta_fields(atom()) :: [atom()]
+  def delta_fields(kind) when kind in @delta_kinds, do: Map.fetch!(@delta_fields, kind)
 
   @doc """
   ## Concept
@@ -326,14 +365,25 @@ defmodule Loopex.Model do
   # the declared payload ceiling bounded nothing that mattered on that kind.
   # `:chunk` was counted and no delta kind in this tree carries it: a name in a
   # bound list that matches nothing reads as coverage the check does not have.
+  # Every binary the delta carries, not a named four. A partial measurement is
+  # the same defect as a partial field check: what it does not look at is
+  # unbounded.
   defp delta_bytes(delta) do
     delta
-    |> Map.take([:text, :arguments_fragment, :tool_call_id, :name])
-    |> Enum.reduce(0, fn
-      {_key, value}, total when is_binary(value) -> total + byte_size(value)
-      {_key, _value}, total -> total
+    |> Map.delete(:kind)
+    |> Enum.reduce(0, fn {_key, value}, total -> total + term_bytes(value) end)
+  end
+
+  defp term_bytes(value) when is_binary(value), do: byte_size(value)
+  defp term_bytes(value) when is_list(value), do: Enum.reduce(value, 0, &(term_bytes(&1) + &2))
+
+  defp term_bytes(value) when is_map(value) and not is_struct(value) do
+    Enum.reduce(value, 0, fn {key, inner}, total ->
+      total + term_bytes(key) + term_bytes(inner)
     end)
   end
+
+  defp term_bytes(_value), do: 0
 
   defp plain?(term) when is_binary(term) or is_integer(term) or is_boolean(term) or is_nil(term),
     do: true

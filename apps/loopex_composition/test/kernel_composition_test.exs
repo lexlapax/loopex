@@ -121,6 +121,41 @@ defmodule LoopexCompositionTest do
     end
   end
 
+  test "the composition forwards the executor's declared cleanup period and probe" do
+    # Concept: ADR 0009 asks for the cleanup grace to be a declared *session*
+    # configuration value. A period only a host that hand-builds an executor can
+    # set is not that, and the shipped composition neither accepted nor forwarded
+    # it, so a reference embedder and the command-line operator both got the
+    # default and could not choose another.
+    #
+    # Technical depth: this is a structural assertion and is written as one. The
+    # composed runtime exposes no accessor for the executor it built -- and
+    # adding a public one so a case could read it back would be widening the
+    # surface for a test rather than for an embedder. Driving it end to end needs
+    # a provider call, which this file deliberately never makes. So the
+    # forwarding is asserted here, at the one place it is decided, and the two
+    # halves it enables are proved behaviourally elsewhere: the executor honours
+    # both options in `coding_tools_test.exs`, and a run's terminal reports the
+    # declared period in `agent_loop_test.exs`.
+    source = File.read!(app_path("lib/loopex_composition.ex"))
+
+    [forwarded] =
+      Regex.run(~r/Keyword\.take\(options, \[([^\]]*)\]\)/, source, capture: :all_but_first)
+
+    assert forwarded =~ ":cleanup_grace_ms",
+           "the composition does not forward the declared cleanup period, so an embedder and " <>
+             "the command both get the default and cannot choose another: [#{forwarded}]"
+
+    assert forwarded =~ ":process_probe",
+           "the composition does not forward the declared process probe: [#{forwarded}]"
+
+    # Forwarded rather than defaulted: a key the host did not supply must stay
+    # absent so the executor's own declared default applies, rather than this
+    # module inventing one.
+    refute source =~ ~r/cleanup_grace_ms:\s*\d/,
+           "the composition names a cleanup period of its own instead of forwarding the host's"
+  end
+
   test "the shipped composition requires a host supplied policy and ships no permissive default" do
     {state_root, workspace} = roots()
 

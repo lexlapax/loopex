@@ -282,7 +282,19 @@ defmodule Loopex.EmbeddedApiTest do
     assert {:accepted, "overflow-abort"} =
              Loopex.command(live, %{type: :abort, command_id: "overflow-abort"})
 
-    assert [%{event_sequence: 3}] = drain_events(live)
+    # The abort's acceptance says it was admitted, not that the run has ended.
+    # ADR 0009 orders the admission before the cleanup, so the ending is a second
+    # transaction that lands once the cleanup answers -- which is what this waits
+    # for rather than assuming it has already happened.
+    ended =
+      Enum.reduce_while(1..400, [], fn _attempt, acc ->
+        case acc ++ drain_events(live) do
+          [] -> Process.sleep(5) && {:cont, []}
+          drained -> {:halt, drained}
+        end
+      end)
+
+    assert [%{event_sequence: 3}] = ended
 
     assert {:accepted, "second-prompt"} =
              Loopex.command(live, %{

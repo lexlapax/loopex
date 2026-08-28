@@ -257,9 +257,17 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   # Technical depth: the period is a host-supplied start option, so a case that
   # varies it composes its own executor exactly as a host would. Everything else
   # matches `executor_lease_and_ledger/2`; only the declared period differs.
-  defp executor_with_grace(root, grace) do
+  # Concept: a lease held at a token this executor was not composed with.
+  #
+  # Technical depth: every other fixture here gives the lease and the executor
+  # the same token, so the comparison between them is true whatever the code
+  # does. This one is the case that tells them apart: the workspace was fenced to
+  # a newer holder while this executor still refers to the old lease.
+  defp executor_with_stale_lease(root) do
     lease_id = "lease-#{System.unique_integer([:positive])}"
-    {:ok, lease} = WorkspaceLease.start_link(id: lease_id, path: root, fencing_token: @fence)
+
+    {:ok, lease} =
+      WorkspaceLease.start_link(id: lease_id, path: root, fencing_token: @fence + 1)
 
     ledger = temporary_root("ledger")
     on_exit(fn -> File.rm_rf(ledger) end)
@@ -270,8 +278,36 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         epoch: 3,
         fencing_token: @fence,
         workspace_leases: %{lease_id => lease},
-        ledger_root: ledger,
-        cleanup_grace_ms: grace
+        ledger_root: ledger
+      )
+
+    {executor, lease_id}
+  end
+
+  defp executor_with_probe(root, probe) do
+    executor_with_options(root, cleanup_grace_ms: 3_000, process_probe: probe)
+  end
+
+  defp executor_with_grace(root, grace) do
+    executor_with_options(root, cleanup_grace_ms: grace)
+  end
+
+  defp executor_with_options(root, extra) do
+    lease_id = "lease-#{System.unique_integer([:positive])}"
+    {:ok, lease} = WorkspaceLease.start_link(id: lease_id, path: root, fencing_token: @fence)
+
+    ledger = temporary_root("ledger")
+    on_exit(fn -> File.rm_rf(ledger) end)
+
+    {:ok, executor} =
+      Local.start_link(
+        [
+          identity: "executor-local",
+          epoch: 3,
+          fencing_token: @fence,
+          workspace_leases: %{lease_id => lease},
+          ledger_root: ledger
+        ] ++ extra
       )
 
     {executor, lease_id}
@@ -283,6 +319,20 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   # the first signal costs one look and tells a case nothing about the period.
   defp stubborn_group_command,
     do: "( trap \"\" TERM; sleep 20 ) >/dev/null 2>&1 & printf started; exit 0"
+
+  # Poll rather than sleep a guessed interval: a case that has to act on a live
+  # child needs to know the child is live, and a fixed pause is either slower
+  # than it needs to be or occasionally wrong.
+  defp wait_for_file(path, attempts \\ 200) do
+    Enum.reduce_while(1..attempts, false, fn _attempt, _acc ->
+      if File.exists?(path) do
+        {:halt, true}
+      else
+        Process.sleep(25)
+        {:cont, false}
+      end
+    end)
+  end
 
   defp elapsed(work) do
     started = System.monotonic_time(:millisecond)
@@ -553,6 +603,25 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     File.ln_s!(Path.join(root, "loop"), Path.join(root, "loop"))
 
+    # Concept: a directory beside the workspace whose name begins with the
+    # workspace's own name is outside it, and looks inside it to any comparison
+    # made on text.
+    #
+    # Technical depth: every vector above uses two roots that are not prefixes of
+    # one another, so containment passed whether or not the comparison appended a
+    # separator -- and deleting that separator, which turns the check into a bare
+    # `String.starts_with?`, left this case and the whole suite green. It is not
+    # the recorded race: nothing is being manipulated concurrently and it
+    # succeeds on the first attempt. `/workspaces/ws1` admits
+    # `../ws10/.env` because the resolved path begins with `/workspaces/ws1`,
+    # which is exactly the multi-tenant placement the workspace root exists to
+    # separate. `read` returns the outside file whole; `edit` leaks a line of it
+    # through the mismatch diagnostic before any directory guard runs.
+    adjacent = root <> "-adjacent"
+    File.mkdir_p!(adjacent)
+    File.write!(Path.join(adjacent, "secret.txt"), "not yours")
+    on_exit(fn -> File.rm_rf(adjacent) end)
+
     # The vectors this case claims, each named once and asked of all three tools.
     vectors = [
       {"a relative traversal", Path.join(["..", Path.basename(outside), "secret.txt"])},
@@ -560,7 +629,10 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       {"a static symlink to a directory outside", "link/secret.txt"},
       {"a static symlink as the final component", "leak"},
       {"a static symlink whose target is relative", "relative"},
-      {"a symlink that points at itself", "loop"}
+      {"a symlink that points at itself", "loop"},
+      {"a sibling directory whose name extends the root's",
+       Path.join(["..", Path.basename(adjacent), "secret.txt"])},
+      {"an absolute path into that sibling", Path.join(adjacent, "secret.txt")}
     ]
 
     # `loopex.bash` is deliberately absent: it declares no path parameter, so
@@ -600,13 +672,16 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         refute refusal =~ "not yours", "#{tool} returned the outside file's content"
       end
 
-      # The refusal is checked in the filesystem too: the outside file is
-      # untouched and no new name appeared beside it.
-      assert File.read!(Path.join(outside, "secret.txt")) == "not yours",
-             "#{tool} changed the outside file through #{described}"
+      # The refusal is checked in the filesystem too, in both directories a
+      # vector can reach: the outside file is untouched and no new name appeared
+      # beside it.
+      for directory <- [outside, adjacent] do
+        assert File.read!(Path.join(directory, "secret.txt")) == "not yours",
+               "#{tool} changed a file outside the workspace through #{described}"
 
-      assert File.ls!(outside) == ["secret.txt"],
-             "#{tool} created something outside the workspace through #{described}"
+        assert File.ls!(directory) == ["secret.txt"],
+               "#{tool} created something outside the workspace through #{described}"
+      end
     end
   end
 
@@ -1762,16 +1837,17 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # thing that reaches it.
     #
     # `env` with no arguments at all prints the environment it was itself given,
-    # so spawning it with this executor's real port options and nothing else is a
-    # direct reading of the first image's own environment with no second image
-    # anywhere in it.
-    options = Local.launcher_port_options(root)
-
-    assert Keyword.has_key?(options, :env),
-           "the launcher is spawned with no env: option, so the first image inherits this " <>
-             "operating system process's whole environment: #{inspect(options)}"
-
-    first_image = Port.open({:spawn_executable, ~c"/usr/bin/env"}, [args: []] ++ options)
+    # so this is a direct reading of the first image's own environment with no
+    # second image anywhere in it.
+    #
+    # It is taken through `launcher_probe_port/1`, which reaches the same
+    # `open_launcher/4` -- the same option list, the same `Port.open` -- that a
+    # `loopex.bash` job reaches. An earlier version of this case built its own
+    # port from an options helper, which meant deleting `env:` from the
+    # production spawn alone left it green while the real launcher inherited
+    # everything. An observation of a construction is not an observation of the
+    # spawn.
+    first_image = Local.launcher_probe_port(root)
 
     loaded =
       Enum.reduce_while(1..200, <<>>, fn _attempt, acc ->
@@ -1805,6 +1881,59 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert demonstration.outcome == :completed
     assert demonstration.child_environment_names == ["PATH"]
     refute demonstration.provider_credential_present
+  end
+
+  test "no image this executor loads inherits an environment it did not choose" do
+    # Concept: what a spawned image is loaded with is decided at the spawn, so
+    # the guarantee is only as good as the number of spawns there are.
+    #
+    # Technical depth: the environment cases above observe one spawn. They are
+    # silent about every other, and that silence is exactly how the previous
+    # shape of this module failed: the job spawn and the demonstration spawn each
+    # assembled their own option list, and the option that clears the loaded
+    # environment could be dropped from one of them without any case noticing.
+    #
+    # There are three spawns and they are not interchangeable. One is the job
+    # launcher, now built in a single place so that one observation covers every
+    # job. The other two run `ps` and `kill` on this executor's own behalf; they
+    # take no workspace and no operator input, but they are still images the
+    # operating system loads while this process holds the provider credential,
+    # so the loader reaches them on exactly the same terms. The invariant is
+    # therefore about every spawn rather than about how many there are: none of
+    # them may be opened without an environment this executor constructed.
+    #
+    # Reading the source is the only way to ask a question of that shape. A
+    # behavioural case can prove what one spawn does and can never prove that no
+    # other spawn exists.
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    spawns =
+      source
+      |> String.split(~r/^\s*Port\.open\(\s*$/m)
+      |> Enum.drop(1)
+      |> Enum.map(&(&1 |> String.split(~r/^\s*\)\s*$/m) |> hd()))
+
+    assert length(spawns) == 3,
+           "this executor now opens #{length(spawns)} ports; every one of them is an image the " <>
+             "loader reaches, so each needs its own constructed environment and this case needs " <>
+             "to have been told about it"
+
+    # The job launcher reaches its `env:` through `launcher_port_options/2`,
+    # which the probe case above observes behaviourally at the spawn; the two
+    # helpers carry theirs literally. Either is a constructed environment. What
+    # no spawn may do is name neither.
+    for spawn <- spawns do
+      assert spawn =~ "env:" or spawn =~ "launcher_port_options(",
+             "a port is opened with no env: option, so the image it loads inherits this " <>
+               "operating system process's whole environment: #{inspect(spawn)}"
+    end
+
+    # The job launcher's option list is built once. A second construction of it
+    # is how the two spawn sites drifted apart before, and it is also how a
+    # mutation escapes: `open_launcher/4` is observable and a call site is not.
+    assert length(String.split(source, "launcher_port_options(")) - 1 == 2,
+           "the job launcher's port options are constructed in more than one place, so the " <>
+             "observation above covers only whichever construction it happened to reach"
   end
 
   test "the run deadline bounds retaining a spilled artifact and the abandonment is reported" do
@@ -2047,17 +2176,26 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     group
   end
 
-  test "the cleanup budget is one configured period an operator can read and every receipt records it" do
-    # Concept: ADR 0009 asks for one visible, configured grace. A private module
-    # attribute is neither.
+  test "the cleanup budget is one configured period with a declared default and every receipt records it" do
+    # Concept: the period is one configured value with a declared default, and
+    # the record of a job says which one bounded it.
     #
     # Technical depth: the period was `@cleanup_grace_ms 5_000`, absent from the
-    # start options, from anything an operator could read back, and from the
-    # terminal evidence of the job it bounded -- so a run that spent it left no
-    # record of what it had been spending. It is now a start option with a
-    # declared default, readable from the composed executor, and written into
-    # every receipt, which is what makes the live configuration and the durable
-    # record of a job the same fact rather than two.
+    # start options, from anything that could read it back, and from the record
+    # of the job it bounded -- so a run that spent it left no evidence of what it
+    # had been spending. It is now an executor start option with a declared
+    # default, readable from the running executor, and written into every
+    # receipt, which makes the live configuration and the durable record of a job
+    # the same fact rather than two.
+    #
+    # ADR 0009 asks for more than this: a *session* configuration value reported
+    # in the run's terminal evidence, which would mean threading it through the
+    # shipped composition and projecting it onto the terminal. M2 does not do
+    # that, the gap is recorded at
+    # `docs/evidence/M2-recorded-limitations.md#cleanup-grace-not-session-visible`
+    # as an approved deferral, and this case deliberately claims only what the
+    # code performs. A case whose comment claims the ADR sentence would be the
+    # third round of words reaching further than the code.
     root = workspace()
 
     {default_executor, default_lease} = executor_with_grace(root, 5_000)
@@ -2083,6 +2221,67 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # per-instance configuration and not a global.
     assert Local.cleanup_grace_ms(default_executor) == 5_000
     assert is_binary(default_lease)
+  end
+
+  test "the declared cleanup period is partitioned so the receipt is never left with nothing to write" do
+    # Concept: the record of what happened gets a share of the declared period
+    # that no earlier step can spend.
+    #
+    # Technical depth: the period used to be taken first-come. Every step drew
+    # what remained, which is right for the signal, the kill and the
+    # confirmation, and wrong for the last step: a job that spent its period on a
+    # group refusing to die reached its receipt with nothing left, so
+    # `retain_receipt_under_lease/4` answered `{:receipt_not_retained, _}` and
+    # exactly the job whose durable record matters most produced none. The run
+    # stayed truthful -- the coordinator reads that as unproven -- but
+    # reconciliation had nothing to reconcile against.
+    #
+    # The receipt is bounded by a declared share of the period now, rather than by
+    # what is left of it. The termination sequence keeps the whole period, so the
+    # worst case for the whole stop is the period plus that share -- not one flat
+    # period, and this comment said otherwise until a reviewer read the code.
+    # Reserving the share on the termination side as well was written and
+    # deleted: the cooperative window already caps that sequence at half the
+    # period, so the subtraction could never bind and no case could observe it.
+    #
+    # What matters is that the share is never a second full period and never
+    # nothing. Every receipt records the bound its own write ran under, so this is
+    # a fact on the durable record rather than an argument about a line.
+    root = workspace()
+    grace = 800
+    reserve = div(grace, 4)
+
+    {executor, lease_id} = executor_with_grace(root, grace)
+    where = %{executor: executor, lease_id: lease_id}
+
+    assert {:ok, quiet} =
+             run(root, "loopex.write", %{"path" => "quiet.txt", "content" => "x"}, where)
+
+    assert quiet.cleanup_grace_ms == grace
+
+    # A job that needed no cleanup never opened an episode and still owns its own
+    # instant, so it carries more than the period rather than the reserve.
+    assert quiet.receipt_retention_bound_ms >= grace,
+           "a job that needed no cleanup was charged against an episode it never opened: " <>
+             "#{quiet.receipt_retention_bound_ms}ms"
+
+    # A group that refuses `TERM` spends the termination sequence's whole share.
+    # The receipt is still written, and it is written under the reserve.
+    assert {:ok, cleaned} =
+             run(root, "loopex.bash", %{"command" => stubborn_group_command()}, where),
+           "a job that spent its cleanup period could not write its receipt at all"
+
+    assert cleaned.output =~ "confirmed cleaned"
+
+    assert cleaned.receipt_retention_bound_ms == reserve,
+           "the receipt was retained under #{cleaned.receipt_retention_bound_ms}ms rather than " <>
+             "the #{reserve}ms reserved out of a #{grace}ms period"
+
+    # The durable record carries it, so this is what a recovering coordinator or
+    # an operator reads rather than a value that existed only in a reply.
+    assert {:ok, retained} = Local.receipt(executor, cleaned.job_id)
+    assert retained.receipt_retention_bound_ms == reserve
+    assert retained.cleanup_grace_ms == grace
   end
 
   test "the configured cleanup budget bounds the whole termination sequence rather than each step of it" do
@@ -2140,6 +2339,550 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # no single declared period described.
     assert small_ms < 600 + 2_000, "cleanup at a 600ms budget took #{small_ms}ms"
     assert large_ms < 3_000 + 2_000, "cleanup at a 3000ms budget took #{large_ms}ms"
+
+    # Concept: a period is a length of time, and a length of time is not measured
+    # with a clock somebody can set.
+    #
+    # Technical depth: the two measurements above are indifferent to the clock's
+    # base, because nothing moved it while they ran -- and nothing can: a case
+    # cannot step the host's clock, cannot enable the emulator's time-warp mode
+    # for one test, and cannot make an NTP correction or a container snapshot
+    # resume happen on demand. Swapping `System.monotonic_time/1` for
+    # `System.system_time/1` here therefore left the whole suite green while a
+    # declared five-second grace became five seconds plus however far the clock
+    # moved mid-termination, or expired instantly if it moved the other way.
+    #
+    # So the base is asserted where it is decided. This is a structural
+    # assertion and is written as one. The cleanup domain is closed -- every
+    # instant in it is created at one of three sites and consumed only through
+    # `cleanup_remaining/1` -- which is what makes asserting the base sufficient
+    # rather than merely indicative, and what would stop being true if a fourth
+    # site appeared reaching for the wall clock directly.
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    assert source =~ ~r/defp cleanup_now_ms, do: System\.monotonic_time\(:millisecond\)/,
+           "the cleanup period is measured on a clock an operator, an NTP step, or a resumed " <>
+             "container snapshot can move"
+
+    instants = Regex.scan(~r/cleanup_now_ms\(\) \+/, source)
+
+    assert length(instants) == 3,
+           "the cleanup domain now opens #{length(instants)} instants against its own base; each " <>
+             "one has to take that base, so a new one means this case needs to have been told " <>
+             "about it"
+
+    refute Regex.match?(~r/^\s+until = .*System\.system_time/m, source),
+           "a cleanup instant is opened against the wall clock"
+
+    [remaining] =
+      Regex.run(~r/defp cleanup_remaining\(until\), do: (.+)/, source, capture: :all_but_first)
+
+    assert remaining =~ "cleanup_now_ms()",
+           "what is left of the cleanup period is measured against the wall clock: #{remaining}"
+
+    [cooperative] =
+      Regex.run(
+        ~r/defp cooperative_episode\(\{until, grace, probe\}\) do\n.*?\n\n    \{(.+?),/s,
+        source,
+        capture: :all_but_first
+      )
+
+    assert cooperative =~ "cleanup_now_ms()",
+           "the cooperative share is measured against the wall clock: #{cooperative}"
+  end
+
+  test "cancelling a running job answers only for the cleanup it could confirm" do
+    # Concept: an operator abort reaches the shipped executor, and what it
+    # answers has to be what it established rather than what it attempted.
+    #
+    # Technical depth: nothing in this repository called `Local.cancel/2`. The
+    # cancellation cases upstream drive a double, the command's cases compose
+    # fixtures that declare their own cleanup answer, and this file drove the
+    # deadline path instead -- yet the coordinator calls this function on every
+    # abort and on every deadline expiry, and the shipped composition wires this
+    # executor in. Both of its branches were free: it could ignore the configured
+    # period for a compiled-in constant, or report `:cleaned` without confirming
+    # anything, and an operator would be told a process group in their workspace
+    # was gone when this executor never established that.
+    #
+    # The two halves are one configured period apart. A workable period signals
+    # the group, the group goes, `ps` finds nothing and the answer is `:cleaned`.
+    # A period of zero leaves nothing for the signal or for the `ps` that would
+    # confirm it, so the honest answer is `:unconfirmed` -- and a cancellation
+    # drawing on a compiled-in five seconds instead of the declared zero would
+    # confirm a clean stop here and answer `:cleaned`.
+    root = workspace()
+    marker = Path.join(root, "up.txt")
+    survived = Path.join(root, "survived.txt")
+
+    command =
+      "printf ready > #{marker}; sleep 20; printf survived > #{survived}"
+
+    {executor, lease_id} = executor_with_grace(root, 3_000)
+    job_id = "cancel-#{System.unique_integer([:positive])}"
+
+    running =
+      Task.async(fn ->
+        run(root, "loopex.bash", %{"command" => command}, %{
+          executor: executor,
+          lease_id: lease_id,
+          job_id: job_id
+        })
+      end)
+
+    assert wait_for_file(marker), "the command never started, so there was nothing to cancel"
+
+    assert Local.cancel(executor, job_id) == {:ok, :cleaned},
+           "a cancellation that ended the group did not say so"
+
+    assert {:ok, %{outcome: outcome}} = Task.await(running, 30_000)
+
+    assert outcome in [:cancelled, :outcome_unknown, :failed, :completed],
+           "the cancelled job produced no terminal fact: #{inspect(outcome)}"
+
+    # The group is gone in the filesystem as well as in the answer: the command
+    # had seventeen seconds left to run and never reached its second write.
+    refute File.exists?(survived),
+           "the cancellation answered `cleaned` while the group carried on working"
+
+    # A period of zero cannot signal and cannot confirm, and says so.
+    tight_marker = Path.join(root, "tight-up.txt")
+    tight_command = "printf ready > #{tight_marker}; sleep 20"
+
+    {tight, tight_lease} = executor_with_grace(root, 0)
+    tight_job = "cancel-tight-#{System.unique_integer([:positive])}"
+
+    tight_running =
+      Task.async(fn ->
+        run(root, "loopex.bash", %{"command" => tight_command}, %{
+          executor: tight,
+          lease_id: tight_lease,
+          job_id: tight_job
+        })
+      end)
+
+    assert wait_for_file(tight_marker), "the second command never started"
+
+    assert Local.cancel(tight, tight_job) == {:ok, :unconfirmed},
+           "a cancellation with no period left to confirm anything reported a clean stop"
+
+    # It settles rather than running to completion. A period of zero also leaves
+    # nothing for the receipt's own write, so this job answers
+    # `{:receipt_not_retained, _}` rather than with a receipt -- one declared
+    # period means an exhausted period is exhausted for the last step too, which
+    # is the guarantee `retaining the receipt joins the cleanup episode already
+    # running rather than opening a second` locks. What matters here is that the
+    # task settled and did not run its twenty seconds out.
+    settled = Task.await(tight_running, 30_000)
+
+    assert match?({:ok, %{outcome: _outcome}}, settled) or
+             match?({:error, {:receipt_not_retained, _reason}}, settled),
+           "the cancelled job never settled: #{inspect(settled)}"
+
+    # A job this executor has no record of never started or already finished, so
+    # there is nothing running and the answer is clean by construction.
+    assert Local.cancel(executor, "no-such-job") == {:ok, :cleaned}
+
+    # Concept: a cancellation confirms with the program its host named, not with
+    # the one this module was written against.
+    #
+    # Technical depth: `cancel/2` reaches `confirm_group_terminated/2` by a path
+    # of its own, and a mutation that made that path use `/bin/ps` regardless of
+    # the configured probe left this whole file green: the probe was exercised
+    # only through ordinary quiescence, and this case ran only under the default.
+    # On an image whose `ps` is at `/usr/bin/ps`, cancellation would then quietly
+    # confirm with a program the operator did not name -- and where the named
+    # program is genuinely absent it would report a clean stop it never
+    # established.
+    #
+    # A probe that is not there cannot confirm anything, so the honest answer for
+    # a group this executor really did signal is `:unconfirmed`. That is the
+    # assertion: the answer follows the configured program even when the group is
+    # gone.
+    blind_marker = Path.join(root, "blind-up.txt")
+    blind_command = "printf ready > #{blind_marker}; sleep 20"
+
+    {blind, blind_lease} = executor_with_probe(root, "/nonexistent/loopex-ps")
+    blind_job = "cancel-blind-#{System.unique_integer([:positive])}"
+
+    blind_running =
+      Task.async(fn ->
+        run(root, "loopex.bash", %{"command" => blind_command}, %{
+          executor: blind,
+          lease_id: blind_lease,
+          job_id: blind_job
+        })
+      end)
+
+    assert wait_for_file(blind_marker), "the command under the blind probe never started"
+
+    assert Local.cancel(blind, blind_job) == {:ok, :unconfirmed},
+           "a cancellation confirmed cleanup with a program its host did not name"
+
+    assert Task.await(blind_running, 30_000) != nil
+
+    # Concept: a cancellation spends the period the host configured, not the one
+    # this module was compiled with.
+    #
+    # Technical depth: `cancel/2` deliberately runs in its caller so it is not
+    # queued behind the job it is ending, and the cooperative share was read from
+    # the process dictionary -- which in the caller is empty. So a cancellation
+    # computed its share from the compiled-in default: an executor composed with
+    # five hundred milliseconds gave a cancellation two and a half seconds, and
+    # one composed with thirty seconds gave it two and a half. The declared
+    # period was the one thing it did not use.
+    #
+    # A group that ignores `TERM` is what makes the share observable, because it
+    # is spent rather than short-circuited. At three seconds the sequence waits
+    # its half and kills; reading the default instead waits five seconds' half,
+    # which is the whole period, and takes about a second longer.
+    stubborn_marker = Path.join(root, "stubborn-up.txt")
+
+    stubborn_command =
+      "printf ready > #{stubborn_marker}; ( trap \"\" TERM; sleep 20 ) & sleep 20"
+
+    {slow, slow_lease} = executor_with_grace(root, 3_000)
+    stubborn_job = "cancel-stubborn-#{System.unique_integer([:positive])}"
+
+    stubborn_running =
+      Task.async(fn ->
+        run(root, "loopex.bash", %{"command" => stubborn_command}, %{
+          executor: slow,
+          lease_id: slow_lease,
+          job_id: stubborn_job
+        })
+      end)
+
+    assert wait_for_file(stubborn_marker), "the stubborn command never started"
+
+    {stubborn_ms, stubborn_answer} = elapsed(fn -> Local.cancel(slow, stubborn_job) end)
+
+    assert stubborn_answer == {:ok, :cleaned},
+           "a cancellation that killed the group did not say so: #{inspect(stubborn_answer)}"
+
+    assert stubborn_ms < 2_200,
+           "cancelling under a 3000ms period spent #{stubborn_ms}ms, which is the compiled-in " <>
+             "default's share rather than the configured period's"
+
+    assert Task.await(stubborn_running, 30_000) != nil
+  end
+
+  test "each of the three quiescence answers reaches a distinct outcome and only one is proved" do
+    # Concept: bringing a group to quiescence has three answers, and `completed`
+    # belongs to exactly one of them.
+    #
+    # Technical depth: two of the three were already driven -- the ordinary
+    # command is `:quiescent` and the backgrounding one is `:terminated`. The
+    # third, `:unconfirmed`, is what an image whose `ps` is not where this
+    # executor looks produces, and what a `ps` starved past the remaining cleanup
+    # budget produces. Dropping the `unproven/1` around that branch left the whole
+    # suite green while the receipt reported `:completed` carrying, in its own
+    # output, the note saying whether its effect is complete is unproven -- a
+    # receipt contradicting itself.
+    #
+    # It was a hardcoded `/bin/ps`, so no case could reach the branch and it was
+    # asserted from the source instead. Naming the probe is a real configuration
+    # question -- an image that ships `ps` only at `/usr/bin/ps` gets every
+    # command reported unproven -- and it also makes the branch drivable: an
+    # executor composed with a probe that is not there cannot confirm anything,
+    # with its period otherwise intact, which is precisely the operating
+    # condition this branch exists for.
+    root = workspace()
+
+    assert {:ok, %{outcome: :completed, output: plain}} =
+             run(root, "loopex.bash", %{"argv" => ["echo", "quiet"]})
+
+    refute plain =~ "could not be confirmed"
+
+    assert {:ok, %{outcome: :completed, output: ended}} =
+             run(root, "loopex.bash", %{"command" => stubborn_group_command()})
+
+    assert ended =~ "confirmed cleaned"
+
+    {blind, blind_lease} = executor_with_probe(root, "/nonexistent/loopex-ps")
+    assert Local.process_probe(blind) == "/nonexistent/loopex-ps"
+
+    assert {:ok, unconfirmed} =
+             run(root, "loopex.bash", %{"command" => stubborn_group_command()}, %{
+               executor: blind,
+               lease_id: blind_lease
+             })
+
+    assert unconfirmed.outcome == :outcome_unknown,
+           "a group that could not be confirmed quiescent was reported " <>
+             "#{unconfirmed.outcome} on a receipt whose own output denies it"
+
+    assert unconfirmed.output =~ "could not be confirmed"
+
+    # The receipt names what could not confirm it, so an operator reading an
+    # unproven outcome is not left guessing which program was asked.
+    assert unconfirmed.process_probe == "/nonexistent/loopex-ps"
+
+    # The shipped default is the one every other case in this file runs under.
+    {default, _default_lease} = executor_with_grace(root, 3_000)
+    assert Local.process_probe(default) == "/bin/ps"
+  end
+
+  test "an answer this executor gives after an effect ran never wears the pre-start tag" do
+    # Concept: the tag is a claim that nothing happened. A conflict at a job
+    # identity is this executor saying something already did.
+    #
+    # Technical depth: `:job_id_conflict` is answered when a receipt already
+    # exists on disk at this job identity and its digest is a different one --
+    # so an effect ran, under this identity, and this call is not it. `job_id` is
+    # derived from the run and tool-call identity while the digest covers the
+    # deadline and the session epoch, so a resumed session re-dispatching the
+    # same tool call reaches exactly this answer.
+    #
+    # Wrapping it in the pre-start tag makes the coordinator commit an ordinary
+    # terminal `failed`: the model is told the tool did not run, the loop resumes,
+    # and the run can finish `completed` past an effect that already landed in the
+    # workspace. That is the silent resume this milestone exists to have closed,
+    # and the coordinator's own cases prove the classification only against
+    # doubles, so nothing else in this repository asks what the shipped executor
+    # answers here.
+    root = workspace()
+    {executor, lease_id} = executor_for(root)
+    job_id = "conflict-#{System.unique_integer([:positive])}"
+    where = %{executor: executor, lease_id: lease_id, job_id: job_id}
+
+    assert {:ok, %{outcome: :completed}} =
+             run(root, "loopex.write", %{"path" => "first.txt", "content" => "one"}, where)
+
+    # The same job identity with different canonicalized bytes: `run/4` mints a
+    # fresh operation and tool-call identity every time, so the second job's
+    # digest cannot be the first's.
+    second = run(root, "loopex.write", %{"path" => "second.txt", "content" => "two"}, where)
+
+    assert second == {:error, :job_id_conflict},
+           "the executor's answer for a conflicting job identity changed: #{inspect(second)}"
+
+    refute match?({:error, {:refused_before_effect, _reason}}, second),
+           "an answer given after an effect ran claimed to precede it"
+
+    # And the second write did not happen, which is what makes the first clause
+    # of this case a statement about an effect rather than about a name.
+    refute File.exists?(Path.join(root, "second.txt"))
+  end
+
+  test "a job is bounded by the tool's declared budget when that is sooner than the run's" do
+    # Concept: the instant a job is bounded at is the earlier of the run's
+    # committed deadline and the budget the tool itself declares.
+    #
+    # Technical depth: this executor once ignored the tool's declared
+    # `wall_time_ms` entirely -- the bound was a literal two minutes and the
+    # declared budget was read nowhere in the tree. Reintroducing that, by
+    # returning the run's deadline unconditionally, left every case here green:
+    # each of them sets a run deadline of a few hundred milliseconds, far shorter
+    # than any shipped budget, so the minimum and "the run's deadline" are the
+    # same number in every case that can afford to wait for a bound to fire.
+    #
+    # Waiting is what makes it unobservable. The shipped budgets are thirty
+    # seconds and two minutes, so a case watching the tool's budget actually stop
+    # a job would run for thirty seconds. The receipt records the instant the job
+    # was bounded at instead, which is the value the code used rather than a
+    # value a test computed, and this reads it.
+    root = workspace()
+    File.write!(Path.join(root, "small.txt"), "hello")
+
+    far = System.system_time(:millisecond) + 600_000
+    before = System.system_time(:millisecond)
+
+    assert {:ok, receipt} =
+             run(root, "loopex.read", %{"path" => "small.txt"}, %{run_deadline: far})
+
+    assert receipt.run_deadline_ms == far
+
+    declared =
+      CodingTools.definitions()
+      |> Enum.find(&(&1["tool_id"] == "loopex.read"))
+      |> get_in(["budgets", "wall_time_ms"])
+
+    assert is_integer(declared) and declared < 600_000,
+           "this case assumes loopex.read declares a budget shorter than the run it was given"
+
+    assert receipt.effective_deadline_ms < far,
+           "the job was bounded by the run's deadline while the tool declared a shorter budget"
+
+    # Concept: the instant recorded is the instant the job actually ran under.
+    #
+    # Technical depth: the receipt used to recompute this after the tool had
+    # finished, and `min(run_deadline, now + budget)` is a function of *now*, so
+    # recomputing moved it later by however long the job took. A five-second
+    # tolerance and a fast read hid that completely. The tolerance is one second
+    # now and the command deliberately takes longer than that, so a recomputed
+    # value lands outside the window while a threaded one cannot.
+    assert receipt.effective_deadline_ms <= before + declared + 1_000,
+           "the job was bounded later than the budget the tool declares: " <>
+             "#{receipt.effective_deadline_ms - before}ms out against a declared #{declared}ms"
+
+    slow_before = System.system_time(:millisecond)
+
+    assert {:ok, slow} =
+             run(root, "loopex.bash", %{"command" => "sleep 2"}, %{run_deadline: far})
+
+    slow_declared =
+      CodingTools.definitions()
+      |> Enum.find(&(&1["tool_id"] == "loopex.bash"))
+      |> get_in(["budgets", "wall_time_ms"])
+
+    assert slow.effective_deadline_ms <= slow_before + slow_declared + 1_000,
+           "a job that took two seconds recorded a deadline " <>
+             "#{slow.effective_deadline_ms - slow_before}ms after it began, against a declared " <>
+             "#{slow_declared}ms -- the value was recomputed after the work rather than " <>
+             "carried from before it"
+  end
+
+  test "a deadline stop whose cleanup could not be confirmed is unproven rather than cancelled" do
+    # Concept: reaching a deadline and stopping the command is not the same as
+    # establishing that its process group is gone.
+    #
+    # Technical depth: the deadline branch reports `:cancelled` where the group
+    # was confirmed and `:outcome_unknown` where it was not, and only the first
+    # of those was ever driven: under the default probe the confirmation always
+    # succeeds. Deleting the distinction left every case green while the receipt
+    # said `:cancelled` and its own output text said the cleanup could not be
+    # confirmed -- a receipt contradicting itself, and a coordinator told a
+    # process tree is gone that nobody established was gone.
+    #
+    # A probe that is not there is the reachable form of "the confirmation could
+    # not run", exactly as it is for the quiescence path.
+    root = workspace()
+    {blind, blind_lease} = executor_with_probe(root, "/nonexistent/loopex-ps")
+
+    assert {:ok, receipt} =
+             run(root, "loopex.bash", %{"command" => "sleep 20"}, %{
+               executor: blind,
+               lease_id: blind_lease,
+               run_deadline: System.system_time(:millisecond) + 400
+             })
+
+    assert receipt.outcome == :outcome_unknown,
+           "a deadline stop that could confirm nothing was reported #{receipt.outcome}"
+
+    assert receipt.output =~ "could not be confirmed",
+           "the receipt does not say what was left unproven: #{receipt.output}"
+  end
+
+  test "a job is refused when the lease it names is held at another fencing token" do
+    # Concept: the lease that authorises the effect must be the one this executor
+    # was fenced with, not merely a lease with the right name.
+    #
+    # Technical depth: `validate_grant/3` is handed this executor's own token and
+    # so compares the *grant* against it. The only check that the *lease holder*
+    # carries that token is a separate line in the pre-start validation, and
+    # deleting it left the whole suite green: every other fixture composes the
+    # lease and the executor with the same token, so the comparison is true
+    # whatever the code does.
+    #
+    # Scenario: the workspace is re-leased to a newer holder at a higher token
+    # while this executor still refers to the old lease. The grant validates,
+    # because it is checked against this executor's state rather than against the
+    # lease, and the effect runs inside a workspace another holder has already
+    # fenced.
+    root = workspace()
+    {executor, lease_id} = executor_with_stale_lease(root)
+
+    answer =
+      run(root, "loopex.write", %{"path" => "fenced.txt", "content" => "x"}, %{
+        executor: executor,
+        lease_id: lease_id
+      })
+
+    assert {:error, {:refused_before_effect, :executor_prestart_mismatch}} = answer,
+           "a job ran against a lease fenced to another holder: #{inspect(answer)}"
+
+    refute File.exists?(Path.join(root, "fenced.txt")),
+           "the effect happened despite the lease being fenced to another holder"
+  end
+
+  test "the two containment mechanisms obligation four names by name are the ones the code uses" do
+    # Concept: the obligation names two mechanisms, not two outcomes. A case can
+    # prove an outcome; only reading the code can prove which mechanism produced
+    # it.
+    #
+    # Technical depth: this is a structural assertion and is written as one
+    # rather than dressed up as behavioural. Both mechanisms were mutated away
+    # with the entire suite green, and in each case the reason is the same: the
+    # property is a statement about *how* an operation is performed, and the
+    # operation's observable result is identical either way until a race that no
+    # case can schedule fires.
+    #
+    # The create-exclusive open. Obligation 4 says a write or an edit is
+    # committed "by a create-exclusive and rename that cannot follow a link".
+    # Dropping `:exclusive` leaves every write and edit working exactly as
+    # before: the staging name carries seventy-two random bits, so nothing is
+    # ever there to collide with, and the open that would have refused a symlink
+    # planted at that name simply follows it instead. To drive it a case would
+    # have to predict the staging name, which is the point of the random bits.
+    #
+    # The identity re-check. The obligation says containment is "resolved and
+    # checked immediately before the effect", and `read_verified/3` enforces that
+    # by comparing what was checked with what was opened. The comparison is by
+    # device and inode; collapsing it to device and file type makes it vacuous,
+    # because the clause head has already pinned the type to `:regular`, so every
+    # same-filesystem swap of one regular file for another compares equal. The
+    # two swap cases in this file swap an intermediate *directory* component and
+    # are caught by `ensure_directories/3`, not by this comparison; swapping the
+    # final regular file between the check and the open is the window recorded at
+    # `docs/evidence/M2-recorded-limitations.md#operator-path-race`, and a case
+    # that could schedule it reliably would be a case that had closed it.
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    [staging_open] =
+      Regex.run(~r/case :file\.open\(temporary, \[(.+?)\]\) do/, source, capture: :all_but_first)
+
+    assert staging_open =~ ":exclusive",
+           "a write or an edit no longer commits through a create-exclusive open, so the " <>
+             "staging name follows a symlink planted at it: [#{staging_open}]"
+
+    assert staging_open =~ ":write" and staging_open =~ ":binary",
+           "the staging open is no longer the write this obligation describes: [#{staging_open}]"
+
+    [identity] =
+      Regex.run(
+        ~r/\{:ok, %File\.Stat\{type: :regular\} = stat\} ->\n\s*\{:ok, \{(.+?)\}\}/s,
+        source,
+        capture: :all_but_first
+      )
+
+    assert identity =~ "stat.inode",
+           "the identity a path is re-checked against no longer identifies a file, so a swap " <>
+             "of one regular file for another compares equal: {#{identity}}"
+
+    assert identity =~ "stat.major_device",
+           "the identity omits the device, so two files with equal inode numbers on different " <>
+             "filesystems compare equal: {#{identity}}"
+
+    # Constructing an identity is half of it. A reviewer's mutation weakened the
+    # *comparison* instead -- accepting any inode on the same device -- and the
+    # whole suite stayed green, because this case only ever looked at the tuple
+    # being built. The comparison is a pin on the entire identity, and it is
+    # asserted here as one.
+    [comparison] =
+      Regex.run(~r/defp read_verified\(resolved, path, identity\) do\n(.*?)\n  end\n/s, source,
+        capture: :all_but_first
+      )
+
+    assert comparison =~ "{:ok, ^identity} ->",
+           "the re-check no longer compares the whole identity it captured, so a file swapped " <>
+             "for another on the same filesystem is read as though it were the one that was " <>
+             "checked: #{comparison}"
+
+    refute comparison =~ ~r/elem\(identity, 0\)|match\?\(\{_/,
+           "the re-check compares part of the identity rather than all of it: #{comparison}"
+
+    # Anchored to behaviour rather than standing alone: the outcomes both
+    # mechanisms exist to produce are driven elsewhere in this file, and a write
+    # still replaces its target rather than appending to it.
+    root = workspace()
+    File.write!(Path.join(root, "target.txt"), "old content that is longer")
+
+    assert {:ok, %{outcome: :completed}} =
+             run(root, "loopex.write", %{"path" => "target.txt", "content" => "new"})
+
+    assert File.read!(Path.join(root, "target.txt")) == "new"
+    assert File.ls!(root) |> Enum.reject(&(&1 == "target.txt")) == []
   end
 
   test "a cleanup helper that outlives its bound is terminated rather than left running" do
