@@ -88,6 +88,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Loopex.ArtifactStore
   alias Loopex.Executor.Local
   alias Loopex.Executor.Local.CodingTools
@@ -1437,6 +1439,404 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # Its own diagnostics arrive on the same stream this executor captures, so
     # an error is already non-empty.
     refute Local.group_answered_empty?({"ps: process group too large: 999999\n", 1})
+  end
+
+  test "an edit cannot be redirected outside the workspace by a component swapped under it" do
+    # Concept: `edit` is a read and a write, and only its read half was ever
+    # checked against the file it had contained.
+    #
+    # Technical depth: `write` commits through `ensure_directories/3` and
+    # `replace_atomically/2` -- every level of the path confirmed to be a real
+    # directory rather than a link, and the bytes created exclusively and renamed
+    # onto the target name. `edit` resolved a path, verified the file it opened,
+    # transformed the content, and then handed the same stale pathname straight
+    # to `replace_atomically/2` with no confirmation of the levels above it. The
+    # exclusive create and the rename protect the final component only: an
+    # intermediate directory swapped for a link to somewhere else is followed by
+    # both, so the temporary is created outside and renamed onto a name that now
+    # means an outside file.
+    #
+    # `edit`'s window is wider than `write`'s, because a whole file is read,
+    # searched and rewritten inside it. A background loop alternating one
+    # in-workspace directory between a real directory holding the target and a
+    # symlink to an outside directory modified `<outside>/target.txt` on attempt
+    # 11 against a three megabyte file.
+    #
+    # The racing loop is a shell loop for the reason the `write` case gives: a
+    # loop driven from this virtual machine flips too slowly against dirty IO
+    # schedulers to enter the window at all. The target is hard-linked rather
+    # than copied so that recreating it costs one inode operation instead of
+    # three megabytes, which is what lets the loop flip faster than the tool
+    # runs.
+    root = workspace()
+    outside = temporary_root("outside")
+    File.mkdir_p!(outside)
+    on_exit(fn -> File.rm_rf(outside) end)
+
+    File.write!(Path.join(outside, "target.txt"), "OUTSIDE-UNTOUCHED")
+
+    File.write!(
+      Path.join(root, "big.txt"),
+      "INSIDE-MARKER\n" <> String.duplicate("x", 3_000_000)
+    )
+
+    {executor, lease_id} = executor_for(root)
+
+    racers =
+      for _racer <- 1..3 do
+        Port.open({:spawn_executable, ~c"/bin/sh"}, [
+          :binary,
+          :exit_status,
+          :hide,
+          args: [
+            "-c",
+            "while [ ! -e stop-race ]; do " <>
+              "/bin/rm -rf switch; " <>
+              "/bin/mkdir switch 2>/dev/null && /bin/ln big.txt switch/target.txt 2>/dev/null; " <>
+              "/bin/rm -rf switch; /bin/ln -s #{outside} switch 2>/dev/null; /bin/rm -f switch; " <>
+              "done >/dev/null 2>&1"
+          ],
+          cd: String.to_charlist(root)
+        ])
+      end
+
+    on_exit(fn -> File.write(Path.join(root, "stop-race"), "stop") end)
+
+    # Concept: the attempt count is what gives the window a chance to be entered.
+    #
+    # Technical depth: most attempts refuse or miss -- the name is a link, or
+    # absent, or the directory is being rebuilt -- and only the ones that read
+    # the contained file and then reach the filesystem in the instant the name is
+    # a link can escape. Two hundred attempts entered that instant on every run
+    # of the reverted implementation. A failure here is a real containment escape
+    # rather than a flake: correct code puts nothing outside at all.
+    Enum.each(1..200, fn index ->
+      run(
+        root,
+        "loopex.edit",
+        %{"path" => "switch/target.txt", "old" => "INSIDE-MARKER", "new" => "EDITED-#{index}"},
+        %{executor: executor, lease_id: lease_id}
+      )
+    end)
+
+    File.write!(Path.join(root, "stop-race"), "stop")
+
+    Enum.each(racers, fn racer ->
+      assert_receive {^racer, {:exit_status, _status}}, 15_000
+    end)
+
+    # Concept: what must not be there is anything this executor put there.
+    #
+    # Technical depth: the assertion names the edit's own two products -- content
+    # carrying the replacement text, and the private name the content is created
+    # under, since a temporary that escaped is the same containment failure
+    # wearing a different name. It does not assert the outside directory is
+    # empty, because the racing loops also race each other: a hard link made onto
+    # a name another loop has already pointed at the outside directory lands
+    # inside it, which is the probe's own artifact and carries the original
+    # marker rather than the replacement.
+    escaped =
+      Enum.filter(File.ls!(outside), fn entry ->
+        String.starts_with?(entry, ".loopex-write-") or
+          match?({:ok, _found}, find_replacement(Path.join(outside, entry)))
+      end)
+
+    assert escaped == [],
+           "an edit escaped the workspace through a component swapped under it: " <>
+             inspect(escaped)
+  end
+
+  test "the first process the launcher starts holds no ambient environment" do
+    # Concept: the boundary is the first thing the operating system runs, not the
+    # first thing that happens to be credential-free further down the chain.
+    #
+    # Technical depth: the port spawned `/usr/bin/env` and `env_prefix/1` supplied
+    # a *second* `"/usr/bin/env", "-i"` as that process's arguments. `env` treats
+    # its first non-option operand as the command to execute, so the operand was
+    # `/usr/bin/env` and the `-i` behind it was merely an argument handed to it:
+    # the first image ran, and then executed a second image, with this operating
+    # system process's entire inherited environment -- the provider credential in
+    # it -- still present. Only that second `env` cleared anything.
+    #
+    # Nothing downstream can see this. The receipt derives its fields from the
+    # environment this executor intended, and the shell at the end of the chain
+    # is credential-free either way, which is exactly why the existing credential
+    # case passed while an extra image was being loaded and executed under the
+    # ambient environment. On a platform whose loader honours an ambient
+    # `LD_PRELOAD`, that is a model-controlled object mapped into a process this
+    # executor started.
+    #
+    # The observation is made where `env` itself decides: the first operand that
+    # is neither an option nor a `NAME=VALUE` assignment is what `env` executes,
+    # so a recorder put there reports the environment the first child actually
+    # receives. Under the defect that position is the second `/usr/bin/env` and
+    # the recorder sees the operator's whole environment; correct, it is the
+    # shell and the recorder sees only what this executor constructed.
+    root = workspace()
+
+    System.put_env("LOOPEX_PROVIDER_API_KEY", "sk-sentinel-first-child")
+    System.put_env("LOOPEX_SENTINEL_UNRELATED", "also-not-for-a-first-child")
+
+    on_exit(fn ->
+      System.delete_env("LOOPEX_PROVIDER_API_KEY")
+      System.delete_env("LOOPEX_SENTINEL_UNRELATED")
+    end)
+
+    recorded = Path.join(root, "first-child-environment.txt")
+    recorder = Path.join(root, "recorder")
+
+    File.write!(recorder, """
+    #!/bin/sh
+    /usr/bin/env > #{recorded}
+    """)
+
+    File.chmod!(recorder, 0o755)
+
+    for arguments <- [%{command: "printf ran"}, %{argv: ["printf", "ran"]}] do
+      assert {"/usr/bin/env", vector} = Local.launcher_vector(arguments)
+
+      # `env`'s own rule for where its command begins, applied to the vector this
+      # executor builds rather than to the vector it ought to build.
+      command_index =
+        Enum.find_index(vector, fn argument ->
+          not String.starts_with?(argument, "-") and not String.contains?(argument, "=")
+        end)
+
+      assert is_integer(command_index),
+             "the launcher's arguments name nothing for env to execute: #{inspect(vector)}"
+
+      File.rm(recorded)
+
+      port =
+        Port.open({:spawn_executable, ~c"/usr/bin/env"}, [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          :hide,
+          args: Enum.take(vector, command_index) ++ [recorder]
+        ])
+
+      assert_receive {^port, {:exit_status, 0}}, 15_000
+
+      assert {:ok, first_child} = File.read(recorded)
+
+      refute first_child =~ "sk-sentinel-first-child",
+             "the first process the launcher started held the provider credential"
+
+      refute first_child =~ "also-not-for-a-first-child",
+             "the first process the launcher started held this process's environment"
+
+      # The recorder ran with the environment this executor constructed, so the
+      # observation is of a real child and not of a command that never started.
+      assert first_child =~ "PATH=/usr/bin:/bin"
+    end
+
+    # The demonstration launcher is the other spawn site and already begins with
+    # the clearing option rather than with an executable path; asserting it keeps
+    # the two vectors from drifting apart again.
+    assert {:ok, demonstration} =
+             run(root, "loopex.demo.write", %{
+               "relative_path" => "demonstrated.txt",
+               "content" => "ran"
+             })
+
+    assert demonstration.outcome == :completed
+    assert demonstration.child_environment_names == ["PATH"]
+    refute demonstration.provider_credential_present
+  end
+
+  test "the run deadline bounds retaining a spilled artifact and the abandonment is reported" do
+    # Concept: the deadline is the run's bound on everything the run owns, not
+    # only on the tool.
+    #
+    # Technical depth: the filesystem effect was abandoned at the effective
+    # deadline, and the artifact retention that follows it waited on exactly
+    # three alternatives -- the store answering, the worker dying, and the lease
+    # holder going down. The run's committed instant was not among them, so a
+    # store that blocked carried the whole job past its deadline and the receipt
+    # still said `completed`. A `loopex.read` whose deadline was three hundred
+    # milliseconds away spilled into a store that delayed four seconds and
+    # returned after about four seconds.
+    root = workspace()
+    delay = 4_000
+
+    {executor, lease_id} =
+      executor_for(root, %{
+        module: Loopex.Executor.Local.CodingToolsTest.BlockingStore,
+        handle: {self(), delay}
+      })
+
+    full = String.duplicate("x", CodingTools.limits().read_bytes + 5_000)
+    File.write!(Path.join(root, "large.txt"), full)
+
+    started = System.monotonic_time(:millisecond)
+
+    assert {:ok, receipt} =
+             run(root, "loopex.read", %{"path" => "large.txt"}, %{
+               executor: executor,
+               lease_id: lease_id,
+               run_deadline: System.system_time(:millisecond) + 300
+             })
+
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    assert elapsed < div(delay, 2),
+           "the run outlived its deadline waiting for a store it cannot bound"
+
+    # Concept: the effect is exactly as proved as it was; what was lost is the
+    # retrieval of the overflow.
+    #
+    # Technical depth: the read produced its bytes and this executor holds them,
+    # so the outcome does not weaken. What the abandonment costs is the artifact:
+    # nothing this executor can name was retained, so the model is shown the
+    # plain truncation marker and the receipt carries no reference it cannot
+    # honour.
+    assert receipt.outcome == :completed
+    assert receipt.artifacts == []
+    assert receipt.output =~ "truncated"
+    assert receipt.output =~ "run deadline"
+    assert String.starts_with?(receipt.output, binary_part(full, 0, 100))
+  end
+
+  test "a receipt that could not be retained is reported rather than answered as a result" do
+    # Concept: a receipt nobody can read is not a receipt, and the reply must say
+    # so.
+    #
+    # Technical depth: the retention's own failure was the one branch nothing
+    # asserted on. Treating `{:error, reason}` from the writer as a success left
+    # every case in this file green while `execute/5` answered `{:ok, receipt}`
+    # for a receipt that had never reached the ledger -- a coordinator would
+    # record a proved terminal fact for a job with no durable record, and
+    # recovery would find nothing to reconcile against.
+    root = workspace()
+    File.write!(Path.join(root, "notes.txt"), "readable")
+
+    {executor, lease_id, _lease, ledger} = executor_lease_and_ledger(root)
+
+    # The ledger stays readable so the duplicate-job lookup still answers
+    # `:absent`; only the write is refused, which is the failure a full or
+    # read-only ledger presents.
+    File.chmod!(ledger, 0o500)
+    on_exit(fn -> File.chmod(ledger, 0o700) end)
+
+    assert {:error, {:receipt_not_retained, :eacces}} =
+             run(root, "loopex.read", %{"path" => "notes.txt"}, %{
+               executor: executor,
+               lease_id: lease_id
+             })
+
+    # Nothing was left behind in the ledger either, so a later reader cannot find
+    # a partial receipt where this executor reported none.
+    assert {:ok, []} = File.ls(ledger)
+  end
+
+  test "work this executor cannot bound is abandoned at its bound and a program that never answers confirms nothing" do
+    # Concept: the two waits nothing in this suite can reach through the
+    # operating system.
+    #
+    # Technical depth: a healthy local ledger never takes longer than the run's
+    # remaining time plus the declared grace, and the operating system's own `ps`
+    # cannot be made to hang, so the branch that decides whether a receipt is
+    # reported durable and the branch that decides whether a process group is
+    # confirmed clean would otherwise rest on waits no case can enter. Both
+    # mechanisms are exposed and asked directly, exactly as
+    # `group_answered_empty?/1` is.
+    root = workspace()
+    {_executor, _lease_id, lease} = executor_and_lease(root)
+    monitor = Process.monitor(lease)
+    on_exit(fn -> Process.demonitor(monitor, [:flush]) end)
+
+    # Work that answers is answered, and its value is carried back rather than
+    # reduced to a verdict.
+    assert {:done, {:ok, :retained}} =
+             Local.bounded_work(fn -> {:ok, :retained} end, 5_000, {monitor, lease})
+
+    # Work that outlasts its bound is abandoned there, and the abandonment
+    # reports that the worker was confirmed stopped and produced nothing.
+    started = System.monotonic_time(:millisecond)
+
+    assert {:abandoned, :bound_reached, true, :none} =
+             Local.bounded_work(fn -> Process.sleep(30_000) end, 150, {monitor, lease})
+
+    assert System.monotonic_time(:millisecond) - started < 5_000,
+           "the bound did not end the wait"
+
+    # Work that crashes is neither an answer nor an abandonment.
+    assert {:stopped, _reason} =
+             Local.bounded_work(fn -> exit(:deliberate) end, 5_000, {monitor, lease})
+
+    # A cleanup program that answers is answered.
+    assert {output, 0} = Local.answer_within("/bin/echo", ["answered"], 5_000)
+    assert String.trim(output) == "answered"
+
+    # A cleanup program that never answers within its bound is a non-answer.
+    started = System.monotonic_time(:millisecond)
+    assert Local.answer_within("/bin/sh", ["-c", "sleep 30"], 150) == :no_answer
+
+    assert System.monotonic_time(:millisecond) - started < 5_000,
+           "a cleanup program that never answered was waited on past its bound"
+
+    # And a non-answer is not an empty process group. It reaches the same rule
+    # that already refuses a `ps` killed by a signal, because silence from a
+    # program that never spoke is the weaker fact of the two.
+    refute Local.group_answered_empty?(:no_answer)
+
+    # A program that cannot be run at all arrives as the same non-answer, which
+    # is what the removed rescue used to produce.
+    assert capture_log(fn ->
+             assert Local.answer_within("/bin/loopex-no-such-cleanup-program", [], 5_000) ==
+                      :no_answer
+           end) =~ ""
+  end
+
+  test "the run deadline bounds the demonstration launcher as well as the coding tools" do
+    # Concept: the run's instant bounds every tool this executor starts, not only
+    # the ones this milestone added.
+    #
+    # Technical depth: enumerating what the run owns between dispatch and durable
+    # receipt turned this up beside the two retentions. `await_port/5` named the
+    # port and the lease and nothing else, so the second launcher in this module
+    # -- the one M1's demonstration tools still use, and the one whose registry
+    # entries this executor deliberately keeps resolvable -- had no deadline
+    # among its alternatives at all. A `loopex.demo.wait_write` declaring a five
+    # second delay ran for five seconds under a run deadline three hundred
+    # milliseconds away and reported `:completed`.
+    #
+    # The outcome is `:outcome_unknown` rather than a cancellation because this
+    # path captures no process group: closing the port releases the child without
+    # proving it stopped or that its write did not land.
+    root = workspace()
+    delay = 5_000
+
+    started = System.monotonic_time(:millisecond)
+
+    assert {:ok, receipt} =
+             run(
+               root,
+               "loopex.demo.wait_write",
+               %{"relative_path" => "delayed.txt", "content" => "late", "delay_ms" => delay},
+               %{run_deadline: System.system_time(:millisecond) + 300}
+             )
+
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    assert elapsed < div(delay, 2),
+           "the demonstration launcher outlived the run's committed deadline"
+
+    assert receipt.outcome == :outcome_unknown
+    assert receipt.output =~ "run deadline"
+    assert receipt.output =~ "unproven"
+  end
+
+  defp find_replacement(path) do
+    case File.read(path) do
+      {:ok, bytes} ->
+        if String.contains?(bytes, "EDITED-"), do: {:ok, path}, else: :error
+
+      {:error, _reason} ->
+        :error
+    end
   end
 
   # Concept: a real process group identifier that no longer has any members.

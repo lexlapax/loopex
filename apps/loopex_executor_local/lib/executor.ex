@@ -28,6 +28,23 @@ defmodule Loopex.Executor.Local do
   alias Loopex.Executor.Local.WorkspaceLease
 
   @max_output_bytes 1_048_576
+
+  # Concept: the declared grace the cancellation sequence gets once the run's own
+  # instant has passed.
+  #
+  # Technical depth: obligation 4 runs termination and its confirmations *after*
+  # expiry, so the work that follows a deadline cannot be bounded by the deadline
+  # -- that instant is already behind it. This is the one budget that work gets:
+  # the bound on each cleanup program, and the grace added to whatever remains of
+  # the run when the receipt is retained. Everything the run owns before its
+  # deadline is bounded by the deadline itself and never by this.
+  @cleanup_grace_ms 5_000
+
+  # The wait for a killed worker to be confirmed dead. It is a fixed bound rather
+  # than a deadline for the same reason: it is asked only once a bound has
+  # already been exceeded, and a worker blocked in a dirty scheduler may never
+  # answer at all.
+  @abandon_confirmation_ms 1_000
   @tool_version "1.0.0"
   @write_tool "loopex.demo.write"
   @wait_write_tool "loopex.demo.wait_write"
@@ -42,6 +59,11 @@ defmodule Loopex.Executor.Local do
   @group_unconfirmed_note "\n[loopex: the command exited while members of its own process " <>
                             "group were still running, and the group could not be confirmed " <>
                             "cleaned. Whether its effect is complete is unproven.]"
+
+  @deadline_released_note "\n[loopex: the run deadline passed while this tool was running. " <>
+                            "This path captures no process group, so the child was released " <>
+                            "rather than confirmed stopped and whether its effect landed is " <>
+                            "unproven.]"
 
   @lease_lost_note "\n[loopex: the workspace lease was lost before this job's receipt was " <>
                      "durably retained. Whether its effect landed in the workspace this job " <>
@@ -323,7 +345,12 @@ defmodule Loopex.Executor.Local do
         try do
           receipt = run_tool(next_state, job, tool, workspace, arguments, options, lease)
 
-          case retain_receipt_under_lease(next_state.ledger_root, receipt, lease) do
+          case retain_receipt_under_lease(
+                 next_state.ledger_root,
+                 receipt,
+                 lease,
+                 job.run_deadline
+               ) do
             {:ok, retained} -> {:reply, {:ok, retained}, next_state}
             {:error, reason} -> {:reply, {:error, {:receipt_not_retained, reason}}, next_state}
           end
@@ -452,7 +479,7 @@ defmodule Loopex.Executor.Local do
       )
 
     notify(options, {:executor_process_started, job.job_id, tool.id, [@search_path_name]})
-    {outcome, output} = await_port(port, monitor, lease_pid, <<>>)
+    {outcome, output} = await_port(port, monitor, lease_pid, <<>>, effective_deadline(job, tool))
 
     receipt(state, job, tool, outcome, output, demonstration_environment(), [])
   end
@@ -481,39 +508,136 @@ defmodule Loopex.Executor.Local do
   # The peek that remains is not the guarantee; it is the cheap branch for a DOWN
   # that has already arrived, which lets this executor write the truthful receipt
   # once rather than write a false one and then replace it.
-  defp retain_receipt_under_lease(root, receipt, {monitor, lease_pid} = lease) do
+  defp retain_receipt_under_lease(root, receipt, {monitor, lease_pid} = lease, deadline) do
     receive do
       {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-        retain_now(root, unproven_receipt(receipt))
+        retain_now(root, unproven_receipt(receipt), lease)
     after
-      0 -> stage_and_commit(root, receipt, lease)
+      0 -> stage_and_commit(root, receipt, lease, retention_bound(deadline, @cleanup_grace_ms))
     end
   end
 
-  defp stage_and_commit(root, receipt, {monitor, lease_pid}) do
-    parent = self()
-    tag = make_ref()
+  defp stage_and_commit(root, receipt, lease, bound) do
     staging = staging_path(root, receipt)
 
-    {worker, reference} =
-      spawn_monitor(fn -> send(parent, {tag, retain_receipt(root, receipt, staging)}) end)
-
-    receive do
-      {^tag, :ok} ->
-        Process.demonitor(reference, [:flush])
+    case bounded_work(fn -> retain_receipt(root, receipt, staging) end, bound, lease) do
+      {:done, :ok} ->
         {:ok, receipt}
 
-      {^tag, {:error, reason}} ->
-        Process.demonitor(reference, [:flush])
+      {:done, {:error, reason}} ->
         {:error, reason}
 
-      {:DOWN, ^reference, :process, ^worker, reason} ->
+      {:stopped, reason} ->
         File.rm(staging)
         {:error, {:receipt_retention_stopped, reason}}
 
-      {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-        abandon_retention(root, receipt, staging, {worker, reference, tag})
+      {:abandoned, :workspace_lease_lost, stopped, _late} ->
+        abandon_retention(root, receipt, staging, stopped, lease)
+
+      {:abandoned, :bound_reached, stopped, late} ->
+        abandon_retention_at_bound(receipt, staging, stopped, late)
     end
+  end
+
+  # Concept: the run ran out of time while its receipt was being written, and
+  # what that costs is knowledge of the bytes rather than knowledge of the
+  # effect.
+  #
+  # Technical depth: the effect is exactly as proved as the receipt already says
+  # it is -- a deadline bounds how long this executor may keep working, not what
+  # the tool did -- so nothing here weakens the outcome. What is genuinely
+  # unknown is whether the receipt is durable: only `File.rename/2` makes it
+  # readable, and the writer is killed somewhere in `File.open/2`,
+  # `IO.binwrite/2`, `:file.sync/1` or that rename.
+  #
+  # A late answer saying the rename completed is admitted, because the bytes are
+  # then on disk and reporting otherwise would be false. Otherwise a writer
+  # confirmed stopped left a staging file and no receipt, which is removed; a
+  # writer that could not be confirmed stopped may still rename after this
+  # returns, so its staging file is left where it is and which bytes are durable
+  # is unknown either way.
+  #
+  # No replacement receipt is written here. The operation that just exceeded its
+  # bound is not made safe by being run a second time, and the caller's
+  # `{:receipt_not_retained, reason}` already says the one true thing.
+  defp abandon_retention_at_bound(receipt, _staging, _stopped, {:late, :ok}), do: {:ok, receipt}
+
+  defp abandon_retention_at_bound(_receipt, staging, stopped, _unfinished) do
+    if stopped, do: File.rm(staging)
+    {:error, :receipt_retention_abandoned_at_run_deadline}
+  end
+
+  # Concept: work this executor did not write and cannot bound is done where it
+  # can be abandoned, and the abandonment is confirmed rather than assumed.
+  #
+  # Technical depth: a filesystem effect blocks in the operating system, a spilled
+  # artifact is handed to a host-supplied store, and a receipt is written through
+  # the local file layer. None of the three answers within any interval this
+  # executor can state, and each used to sit in its own near-identical wait --
+  # which is how two of them ended up with the lease as their only alternative
+  # and no bound at all, while the third had both. One mechanism is what keeps
+  # them from drifting apart again: a monitored unlinked worker, four
+  # alternatives, and a confirmed kill.
+  #
+  # The result is delivered as a message tagged with a fresh reference rather
+  # than as an exit reason, so a large value is not copied twice. A late answer
+  # is drained after an abandonment because a result produced in the instant
+  # before the kill would otherwise be left in this server's mailbox, and it is
+  # returned rather than discarded because for the receipt it is the difference
+  # between bytes that reached the ledger and bytes that did not.
+  #
+  # It is exposed for the reason `group_answered_empty?/1` is. No case can make a
+  # healthy local ledger take longer than the run's remaining time plus the
+  # declared grace, so the branch deciding whether a receipt is reported durable
+  # would otherwise rest on a wait nothing can reach.
+  @doc false
+  @spec bounded_work((-> term()), non_neg_integer(), {reference(), pid()}) ::
+          {:done, term()}
+          | {:stopped, term()}
+          | {:abandoned, :workspace_lease_lost | :bound_reached, boolean(),
+             :none | {:late, term()}}
+  def bounded_work(work, bound, {monitor, lease_pid})
+      when is_function(work, 0) and is_integer(bound) and bound >= 0 do
+    parent = self()
+    tag = make_ref()
+
+    {worker, reference} = spawn_monitor(fn -> send(parent, {tag, work.()}) end)
+
+    receive do
+      {^tag, result} ->
+        Process.demonitor(reference, [:flush])
+        {:done, result}
+
+      {:DOWN, ^reference, :process, ^worker, reason} ->
+        {:stopped, reason}
+
+      {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
+        abandon_worker(:workspace_lease_lost, worker, reference, tag)
+    after
+      bound -> abandon_worker(:bound_reached, worker, reference, tag)
+    end
+  end
+
+  defp abandon_worker(cause, worker, reference, tag) do
+    Process.exit(worker, :kill)
+
+    stopped =
+      receive do
+        {:DOWN, ^reference, :process, ^worker, _reason} -> true
+      after
+        @abandon_confirmation_ms -> false
+      end
+
+    if not stopped, do: Process.demonitor(reference, [:flush])
+
+    late =
+      receive do
+        {^tag, result} -> {:late, result}
+      after
+        0 -> :none
+      end
+
+    {:abandoned, cause, stopped, late}
   end
 
   # Concept: a lease lost while the receipt was being written leaves the effect
@@ -534,27 +658,10 @@ defmodule Loopex.Executor.Local do
   # still land after this one, so which receipt is durable is genuinely unknown;
   # saying the receipt was not retained is honest, and claiming an outcome for
   # bytes this executor cannot vouch for is not.
-  defp abandon_retention(root, receipt, staging, {worker, reference, tag}) do
-    Process.exit(worker, :kill)
-
-    stopped =
-      receive do
-        {:DOWN, ^reference, :process, ^worker, _reason} -> true
-      after
-        1_000 -> false
-      end
-
-    if not stopped, do: Process.demonitor(reference, [:flush])
-
-    receive do
-      {^tag, _late} -> :ok
-    after
-      0 -> :ok
-    end
-
+  defp abandon_retention(root, receipt, staging, stopped, lease) do
     if stopped do
       File.rm(staging)
-      retain_now(root, unproven_receipt(receipt))
+      retain_now(root, unproven_receipt(receipt), lease)
     else
       {:error, :workspace_lease_lost_during_retention}
     end
@@ -563,10 +670,20 @@ defmodule Loopex.Executor.Local do
   defp unproven_receipt(receipt),
     do: %{receipt | outcome: :outcome_unknown, output: receipt.output <> @lease_lost_note}
 
-  defp retain_now(root, receipt) do
-    case retain_receipt(root, receipt, staging_path(root, receipt)) do
-      :ok -> {:ok, receipt}
-      {:error, reason} -> {:error, reason}
+  # The replacement receipt is written the same way the first attempt was.
+  # Writing it inline would put the last unbounded call in the job exactly where
+  # the lease is already gone and nothing is left to notice a ledger that never
+  # answers. It gets the declared cleanup grace rather than what remains of the
+  # run, because it is reached only once the lease has been lost.
+  defp retain_now(root, receipt, lease) do
+    staging = staging_path(root, receipt)
+
+    case bounded_work(fn -> retain_receipt(root, receipt, staging) end, @cleanup_grace_ms, lease) do
+      {:done, :ok} -> {:ok, receipt}
+      {:done, {:error, reason}} -> {:error, reason}
+      {:stopped, reason} -> {:error, {:receipt_retention_stopped, reason}}
+      {:abandoned, _cause, _stopped, {:late, :ok}} -> {:ok, receipt}
+      {:abandoned, _cause, _stopped, _unfinished} -> {:error, :receipt_retention_abandoned}
     end
   end
 
@@ -624,29 +741,21 @@ defmodule Loopex.Executor.Local do
   # arrives first decides the result: the effect's own answer, the worker dying
   # on its own, the lease holder going down, or the remaining deadline elapsing.
   #
-  # The result is delivered as a message tagged with a fresh reference rather
-  # than as an exit reason, so a large read is not copied twice, and the tag is
-  # drained after an abandonment because a result produced in the instant before
-  # the kill would otherwise be left in this server's mailbox.
-  defp run_bounded_tool(workspace, arguments, remaining, {monitor, lease_pid}) do
-    parent = self()
-    tag = make_ref()
-
-    {worker, reference} =
-      spawn_monitor(fn -> send(parent, {tag, filesystem_effect(workspace, arguments)}) end)
-
-    receive do
-      {^tag, result} ->
-        Process.demonitor(reference, [:flush])
+  # The mechanics of the wait live in `bounded_work/3`, which the two retentions
+  # that follow the effect use as well.
+  defp run_bounded_tool(workspace, arguments, remaining, lease) do
+    case bounded_work(fn -> filesystem_effect(workspace, arguments) end, remaining, lease) do
+      {:done, result} ->
         result
 
-      {:DOWN, ^reference, :process, ^worker, reason} ->
+      {:stopped, reason} ->
         {:failed, "the tool stopped before it produced a result: #{inspect(reason)}"}
 
-      {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-        abandon(worker, reference, tag, arguments, :workspace_lease_lost)
-    after
-      remaining -> abandon(worker, reference, tag, arguments, :deadline)
+      {:abandoned, :workspace_lease_lost, stopped, _late} ->
+        abandoned(:workspace_lease_lost, arguments, stopped)
+
+      {:abandoned, :bound_reached, stopped, _late} ->
+        abandoned(:deadline, arguments, stopped)
     end
   end
 
@@ -664,24 +773,7 @@ defmodule Loopex.Executor.Local do
   # A worker that does not die is the same kind of fact as a process group that
   # cannot be confirmed cleaned: it may still act, so nothing about the effect is
   # known regardless of which tool it was.
-  defp abandon(worker, reference, tag, arguments, cause) do
-    Process.exit(worker, :kill)
-
-    stopped =
-      receive do
-        {:DOWN, ^reference, :process, ^worker, _reason} -> true
-      after
-        1_000 -> false
-      end
-
-    if not stopped, do: Process.demonitor(reference, [:flush])
-
-    receive do
-      {^tag, _late} -> :ok
-    after
-      0 -> :ok
-    end
-
+  defp abandoned(cause, arguments, stopped) do
     {abandoned_outcome(cause, arguments, stopped), abandoned_message(cause, arguments, stopped)}
   end
 
@@ -749,46 +841,69 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # Concept: an edit that cannot be made says what it found instead.
+  # Concept: an edit that cannot be made says what it found instead, and an edit
+  # that can be made commits the same way a write does.
   #
   # Technical depth: a blank failure costs a model a guess and another turn. The
   # diagnostics below distinguish absent from ambiguous, and an absent match
   # reports the nearest line it did find, because "your string is not here" and
   # "your string is here twice" call for different corrections.
+  #
+  # The write half used to hand `replace_atomically/2` the pathname resolved
+  # before the read, with nothing between them but a whole file being read,
+  # searched and rewritten. The exclusive create and the rename protect the
+  # final component and nothing above it, so an intermediate directory swapped
+  # for a link out of the workspace was followed by both: the temporary was
+  # created outside and renamed onto a name that had come to mean an outside
+  # file. A loop alternating one in-workspace directory between a real directory
+  # holding the target and a symlink to an outside directory modified the outside
+  # target on attempt 11 against a three megabyte file.
+  #
+  # `ensure_directories/3` is the check `write` already makes, and running it
+  # here is what makes the two tools one mechanism -- read, verify, transform,
+  # confirm every level is a directory rather than a link, then replace the name
+  # atomically. It narrows the window to the same one `write` documents rather
+  # than closing it, for the reason stated there: nothing available here can pin
+  # a directory between the confirmation and the next syscall.
   defp filesystem_effect(workspace, %{kind: :edit} = arguments) do
     %{path: path, old: old, new: new} = arguments
 
-    with {:ok, resolved} <- CodingTools.resolve(workspace, path),
+    with {:ok, root} <- CodingTools.resolve(workspace, "."),
+         {:ok, resolved} <- CodingTools.resolve(workspace, path),
          {:ok, identity} <- ordinary_file(resolved, path, :required),
-         {:ok, content} <- read_verified(resolved, path, identity) do
-      case occurrences(content, old) do
-        1 ->
-          updated = String.replace(content, old, new)
-
-          case replace_atomically(resolved, updated) do
-            :ok -> {:completed, "replaced 1 occurrence in #{path}"}
-            {:error, reason} -> {:failed, "edit failed: #{:file.format_error(reason)}"}
-          end
-
-        0 ->
-          {:failed,
-           "edit failed: the exact text was not found in #{path}. " <>
-             nearest_hint(content, old)}
-
-        count ->
-          {:failed,
-           "edit failed: the text appears #{count} times in #{path}. " <>
-             "Include more surrounding context so exactly one occurrence matches."}
-      end
+         {:ok, content} <- read_verified(resolved, path, identity),
+         {:ok, updated} <- replaced_once(content, old, new, path),
+         :ok <- ensure_directories(root, Path.dirname(resolved), path),
+         :ok <- replace_atomically(resolved, updated) do
+      {:completed, "replaced 1 occurrence in #{path}"}
     else
       {:refused, message} ->
         {:failed, message}
+
+      {:failed, _message} = mismatch ->
+        mismatch
 
       {:error, reason} when is_atom(reason) ->
         {:failed, "edit failed: #{:file.format_error(reason)}"}
 
       {:error, reason} ->
         {:failed, containment_message(reason)}
+    end
+  end
+
+  defp replaced_once(content, old, new, path) do
+    case occurrences(content, old) do
+      1 ->
+        {:ok, String.replace(content, old, new)}
+
+      0 ->
+        {:failed,
+         "edit failed: the exact text was not found in #{path}. " <> nearest_hint(content, old)}
+
+      count ->
+        {:failed,
+         "edit failed: the text appears #{count} times in #{path}. " <>
+           "Include more surrounding context so exactly one occurrence matches."}
     end
   end
 
@@ -1249,13 +1364,29 @@ defmodule Loopex.Executor.Local do
 
     %{module: module, handle: handle} = state.artifacts
 
-    case retain_under_lease(module, handle, full, metadata, lease) do
+    case retain_under_lease(module, handle, full, metadata, lease, retention_bound(job)) do
       {:ok, reference} ->
         {outcome, Loopex.ArtifactStore.truncation_notice(kept, byte_size(full), reference),
          [reference]}
 
       {:error, _reason} ->
         {outcome, truncation_marker(kept, byte_size(full)), []}
+
+      # Concept: the run's own instant ended the retention, and the result it was
+      # retaining is untouched by that.
+      #
+      # Technical depth: the effect produced its bytes and this executor holds
+      # them, so the outcome stays exactly what the tool proved. What the
+      # abandonment costs is the retrieval: no reference this executor can honour
+      # exists, so the model is shown the plain truncation marker and the receipt
+      # names no artifact. That is the same loss the store's own refusal causes
+      # above, said with the reason that actually applies.
+      :run_deadline_passed ->
+        {outcome,
+         truncation_marker(kept, byte_size(full)) <>
+           "\n[loopex: the run deadline passed while this job's output was being" <>
+           " retained, and the retention was abandoned. The result above is what the" <>
+           " tool produced; nothing beyond it was retained.]", []}
 
       :workspace_lease_lost ->
         {:outcome_unknown,
@@ -1266,42 +1397,46 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # Concept: retaining output is work the lease still covers, so it is waited on
-  # rather than simply called.
+  # Concept: retention is work the run owns, so what remains of the run is what
+  # it gets -- plus, for the receipt alone, the declared cleanup grace.
+  #
+  # Technical depth: both retentions had no bound of any kind, so the run's own
+  # instant was not among the ways either wait could end. One expression derives
+  # both, because they are the same decision with different stakes and two
+  # copies would drift.
+  #
+  # The spilled artifact takes no grace: it is a retrieval an operator loses
+  # while the tool's own result survives without it, so there is nothing for a
+  # grace to protect. The receipt takes it, because bounding the receipt by the
+  # deadline alone would be worse than unbounded rather than better -- the
+  # cancellation sequence runs *after* expiry, so the job whose deadline branch
+  # this is would arrive at its retention with nothing left and could never write
+  # the one durable record a recovering coordinator reads.
+  #
+  # The run's committed instant is used rather than the tool's effective
+  # deadline, because a tool's declared budget bounds the tool and this is the
+  # run retaining what the tool produced.
+  defp retention_bound(job), do: retention_bound(job.run_deadline, 0)
+
+  defp retention_bound(deadline, grace),
+    do: max(deadline - System.system_time(:millisecond), 0) + grace
+
+  # Concept: retaining output is work the lease still covers and the run still
+  # owns, so it is waited on rather than simply called.
   #
   # Technical depth: `put/3` belongs to a host-supplied store and this executor
   # cannot bound it. Calling it inline made the lease unwatchable for as long as
-  # it ran. The call is made in a monitored unlinked worker for the same reason
-  # the filesystem effects are, so the DOWN of the lease holder is a message this
-  # server is sitting in rather than an event it discovers afterwards. The
-  # abandoned worker's late answer is drained, because a reference produced in
-  # the instant before the kill would otherwise be left in this server's mailbox.
-  defp retain_under_lease(module, handle, bytes, metadata, {monitor, lease_pid}) do
-    parent = self()
-    tag = make_ref()
-
-    {worker, reference} =
-      spawn_monitor(fn -> send(parent, {tag, module.put(handle, bytes, metadata)}) end)
-
-    receive do
-      {^tag, result} ->
-        Process.demonitor(reference, [:flush])
-        result
-
-      {:DOWN, ^reference, :process, ^worker, reason} ->
-        {:error, {:artifact_retention_stopped, reason}}
-
-      {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-        Process.exit(worker, :kill)
-        Process.demonitor(reference, [:flush])
-
-        receive do
-          {^tag, _late} -> :ok
-        after
-          0 -> :ok
-        end
-
-        :workspace_lease_lost
+  # it ran, and waiting on the lease alone left the run's committed instant out
+  # of the alternatives entirely -- a `loopex.read` with three hundred
+  # milliseconds left spilled into a store that delayed four seconds and returned
+  # after about four seconds, reporting `completed`. Both are alternatives of the
+  # one wait now.
+  defp retain_under_lease(module, handle, bytes, metadata, lease, bound) do
+    case bounded_work(fn -> module.put(handle, bytes, metadata) end, bound, lease) do
+      {:done, result} -> result
+      {:stopped, reason} -> {:error, {:artifact_retention_stopped, reason}}
+      {:abandoned, :workspace_lease_lost, _stopped, _late} -> :workspace_lease_lost
+      {:abandoned, :bound_reached, _stopped, _late} -> :run_deadline_passed
     end
   end
 
@@ -1371,6 +1506,26 @@ defmodule Loopex.Executor.Local do
   # the first thing executed. It clears the environment, sets the one `PATH` this
   # executor chose, and only then resolves `setsid` -- from that `PATH`, not the
   # operator's. The group setup now runs inside the boundary it used to precede.
+  #
+  # Concept: the launcher's own arguments are the whole of the boundary, and no
+  # process inside the tree can look back at them.
+  #
+  # Technical depth: every image in this chain replaces the last with `execve`,
+  # so the launcher, the group setup and the shell are one operating-system
+  # process and the argument vector the first image was handed no longer exists
+  # by the time anything a case can talk to does. The vector is therefore exposed
+  # for direct inspection, for the reason `group_answered_empty?/1` is: the rule
+  # that decides what runs before the environment is cleared must not rest on a
+  # branch nothing can observe. A case places a recorder at the first operand
+  # `env` will execute -- the first argument that is neither an option nor a
+  # `NAME=VALUE` assignment, which is `env`'s own parsing rule and not a
+  # restatement of this vector -- and reads the environment that operand
+  # receives. It is a `@doc false` seam and no part of any contract.
+  @doc false
+  @spec launcher_vector(map()) :: {binary(), [binary()]}
+  def launcher_vector(arguments) when is_map(arguments),
+    do: process_launcher(arguments, child_environment())
+
   defp process_launcher(%{argv: [program | rest]}, environment) do
     {"/usr/bin/env",
      env_prefix(environment) ++
@@ -1393,8 +1548,19 @@ defmodule Loopex.Executor.Local do
   # operator documentation describes. Filtering would need this executor to know
   # every name worth removing; constructing needs it to know only the names worth
   # keeping.
+  #
+  # These are the arguments of a `/usr/bin/env` the port has already spawned, so
+  # they begin with the clearing option rather than with a path to `env` again.
+  # A second executable path here is not a redundant spelling of the same thing:
+  # `env` executes its first non-option operand, so naming one made the clearing
+  # option an argument of the command rather than an option of the clearing
+  # process, and the spawned image ran and then executed a further image with
+  # this operating-system process's whole inherited environment -- the provider
+  # credential in it -- before anything was cleared. `launcher_arguments/1`, the
+  # other spawn site in this module, has always begun with `-i`; this is the same
+  # shape.
   defp env_prefix(environment) do
-    ["/usr/bin/env", "-i"] ++
+    ["-i"] ++
       for {name, value} <- environment,
           value != false,
           do: List.to_string(name) <> "=" <> List.to_string(value)
@@ -1473,9 +1639,9 @@ defmodule Loopex.Executor.Local do
   # child can finish a write, then KILL, because a command interrupted mid-write
   # leaves a half-written file the operator has to notice for themselves.
   defp terminate_group(group) when is_integer(group) and group > 1 do
-    _ = System.cmd("/bin/kill", ["-TERM", "-#{group}"], stderr_to_stdout: true)
+    _ = answer_within("/bin/kill", ["-TERM", "-#{group}"], @cleanup_grace_ms)
     Process.sleep(50)
-    _ = System.cmd("/bin/kill", ["-KILL", "-#{group}"], stderr_to_stdout: true)
+    _ = answer_within("/bin/kill", ["-KILL", "-#{group}"], @cleanup_grace_ms)
     :ok
   end
 
@@ -1489,13 +1655,71 @@ defmodule Loopex.Executor.Local do
   # executor owns and no wider.
   defp confirm_group_terminated(group) when is_integer(group) and group > 1 do
     "/bin/ps"
-    |> System.cmd(["-o", "pid=", "-g", Integer.to_string(group)], stderr_to_stdout: true)
+    |> answer_within(["-o", "pid=", "-g", Integer.to_string(group)], @cleanup_grace_ms)
     |> group_answered_empty?()
-  rescue
-    _error -> false
   end
 
   defp confirm_group_terminated(_group), do: true
+
+  # Concept: a program this executor runs to clean up is still a program that can
+  # fail to answer, and waiting on it forever is not cleanup.
+  #
+  # Technical depth: `System.cmd/3` takes no timeout, and both cleanup programs
+  # ran inline in the process that owns the job -- so a `/bin/ps` or `/bin/kill`
+  # that never returned held this executor's serialized owner, and the caller
+  # blocking on `:infinity`, with no bound at all. The wait is the declared
+  # cleanup grace rather than the run deadline because this is the sequence that
+  # runs *after* expiry: bounding it by an instant already in the past would
+  # refuse every confirmation this executor makes at a deadline.
+  #
+  # `:no_answer` is not silence. `group_answered_empty?/1` reads an empty answer
+  # as an empty group, which is only sound for an answer that arrived, so a
+  # program that never answered confirms nothing and the effect stays unproven --
+  # the same rule that already refuses a `ps` killed by a signal. A program that
+  # cannot be run at all raises inside the worker and arrives as the same
+  # non-answer, which is why no rescue remains here.
+  #
+  # Killing the worker closes the port and the operating-system process it owns
+  # is no longer this executor's to wait for. It is not claimed to be gone: a
+  # program that ignored its own bound is exactly the kind that may outlive the
+  # port, which is why the answer is `:no_answer` rather than a verdict.
+  #
+  # It is exposed for the reason `group_answered_empty?/1` is: no case can make
+  # the operating system's own `ps` hang.
+  @doc false
+  @spec answer_within(binary(), [binary()], non_neg_integer()) ::
+          {binary(), integer()} | :no_answer
+  def answer_within(program, arguments, bound)
+      when is_binary(program) and is_list(arguments) and is_integer(bound) and bound >= 0 do
+    parent = self()
+    tag = make_ref()
+
+    {worker, reference} =
+      spawn_monitor(fn ->
+        send(parent, {tag, System.cmd(program, arguments, stderr_to_stdout: true)})
+      end)
+
+    receive do
+      {^tag, answer} ->
+        Process.demonitor(reference, [:flush])
+        answer
+
+      {:DOWN, ^reference, :process, ^worker, _reason} ->
+        :no_answer
+    after
+      bound ->
+        Process.exit(worker, :kill)
+        Process.demonitor(reference, [:flush])
+
+        receive do
+          {^tag, _late} -> :ok
+        after
+          0 -> :ok
+        end
+
+        :no_answer
+    end
+  end
 
   # Concept: silence only means "no survivors" when it came from a `ps` that
   # actually answered.
@@ -1515,15 +1739,24 @@ defmodule Loopex.Executor.Local do
   # output, so an error is already non-empty. Anything outside those two statuses
   # is not an answer.
   #
+  # A program that never answered within its bound, or could not be run at all,
+  # arrives here as `:no_answer` rather than as an empty answer. It is the same
+  # rule the abnormal status above states, reaching the same place: this decides
+  # between a proved and an unproven effect, so it is one function rather than a
+  # mapping at each call site that a later change can get wrong in only one of
+  # them.
+  #
   # It is exposed rather than private because no test can make the operating
   # system's `ps` die abnormally, and a rule that decides between a proved and an
   # unproven effect should not rest on an unreachable branch.
   @doc false
-  @spec group_answered_empty?({binary(), integer()}) :: boolean()
+  @spec group_answered_empty?({binary(), integer()} | :no_answer) :: boolean()
   def group_answered_empty?({output, status}) when status in 0..1,
     do: String.trim(output) == ""
 
   def group_answered_empty?({_output, _status}), do: false
+
+  def group_answered_empty?(:no_answer), do: false
 
   defp occurrences(content, needle) when needle != "" do
     content |> String.split(needle) |> length() |> Kernel.-(1)
@@ -1610,27 +1843,55 @@ defmodule Loopex.Executor.Local do
     ]
   end
 
-  defp await_port(port, monitor, lease_pid, output) do
-    receive do
-      {^port, {:data, data}} ->
-        combined = output <> data
+  # Concept: the demonstration tools are launched by this executor too, so the
+  # run's instant bounds them for the same reason it bounds everything else.
+  #
+  # Technical depth: this wait named the port and the lease and nothing else, so
+  # a `loopex.demo.wait_write` declaring a thirty second delay ran for thirty
+  # seconds under a two hundred millisecond run deadline and reported
+  # `:completed`. It is the same defect the coding tools' filesystem and
+  # retention waits had, in the path M1 left behind, and the same requirement
+  # covers it: no operation the run owns may outlast the run's committed instant.
+  #
+  # The outcome is `:outcome_unknown` rather than a cancellation. This path
+  # captures no process group -- only the coding path's shell announces one -- so
+  # closing the port releases this executor's handle on the child without
+  # proving the child stopped or that its write did not land. A cancellation
+  # would claim the stop; `:outcome_unknown` claims only what was observed, and
+  # is what stops a coordinator blindly retrying an effectful job.
+  defp await_port(port, monitor, lease_pid, output, deadline) do
+    remaining = deadline - System.system_time(:millisecond)
 
-        if byte_size(combined) <= @max_output_bytes do
-          await_port(port, monitor, lease_pid, combined)
-        else
-          Port.close(port)
-          {:failed_output_limit, binary_part(combined, 0, @max_output_bytes)}
-        end
+    if remaining <= 0 do
+      if Port.info(port), do: Port.close(port)
+      {:outcome_unknown, output <> @deadline_released_note}
+    else
+      receive do
+        {^port, {:data, data}} ->
+          combined = output <> data
 
-      {^port, {:exit_status, 0}} ->
-        {:completed, output}
+          if byte_size(combined) <= @max_output_bytes do
+            await_port(port, monitor, lease_pid, combined, deadline)
+          else
+            Port.close(port)
+            {:failed_output_limit, binary_part(combined, 0, @max_output_bytes)}
+          end
 
-      {^port, {:exit_status, status}} ->
-        {{:failed, status}, output}
+        {^port, {:exit_status, 0}} ->
+          {:completed, output}
 
-      {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-        if Port.info(port), do: Port.close(port)
-        {:cancelled_workspace_lease_lost, output}
+        {^port, {:exit_status, status}} ->
+          {{:failed, status}, output}
+
+        {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
+          if Port.info(port), do: Port.close(port)
+          {:cancelled_workspace_lease_lost, output}
+      after
+        # Polled in the same shape and for the same reason `collect_output/7`
+        # polls: the deadline is an instant rather than a message, so it has to
+        # be looked at between waits.
+        min(remaining, 50) -> await_port(port, monitor, lease_pid, output, deadline)
+      end
     end
   end
 
