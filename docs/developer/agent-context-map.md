@@ -979,3 +979,39 @@ consume the frame, after it none can. No check is removed, no threshold moves,
 no lane is exempted, and nothing that was refused before is admitted now. The
 normative envelopes of the accepted plan pair are untouched, no outcome changes,
 and no lifecycle state moves.
+
+<a id="disposition-adrs-0012-and-0013-acceptance-2026-08-29"></a>
+### ADR 0012 and ADR 0013 acceptance — 2026-08-29
+
+The maintainer explicitly accepted
+[ADR 0012](../adr/0012-executor-cancellation-capability.md#concept) and
+[ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept)
+as the Proposed pairs existing at candidate
+`137a4105ef35aeeac3ab9486348d211cf09910cf`, after independent review of that
+exact candidate and the four binding digests. Acceptance binds each Concept
+file and its Technical depth companion:
+
+| Decision | Concept | Technical depth |
+| --- | --- | --- |
+| ADR 0012 | `sha256:585724e32d0ee638b23deacca5a21d593d1992007fbed38537b6274fbfcb7b08` | `sha256:91187684c54de447478fe9d52f03e3c2fa680a57dce5155af2d3d3619cf14887` |
+| ADR 0013 | `sha256:059b3d8cdb7ff924f2e264a7eff25d2420e6e6bb9ff3c419c0f47ead20204662` | `sha256:dcdb04d9956c3b32292a0efec4553f223110fae295d15278db40d9b64cd15637` |
+
+ADR 0012 adds one required job-scoped cancellation callback and supersedes only
+the earlier claim that progress was the whole `M2` executor-port change. ADR
+0013 commits the absolute run deadline at first request staging and supersedes
+only the earlier admission timing and literal promotion-record shape. Every
+other accepted clause of ADR 0009, ADR 0010, and ADR 0011 remains in force.
+
+The independent review also identified closure evidence and documentation that
+the accepted decisions require. Those findings are obligations for the pending
+`M2` gate amendment and closure candidate; they do not change either decision's
+accepted text or broaden this disposition.
+
+**Scope of this record.** It accepts ADR 0012 and ADR 0013 alone. It does not
+accept an `M2` amendment, rebind the accepted plan pair or gate, close `M2`,
+authorize product integration, or authorize a release.
+
+This record is the maintainer's disposition evidence, not the independent
+review. The administrative transition changes only the two ADR status lines and
+governance rows, this disposition, and the ADR index that reports their accepted
+status.

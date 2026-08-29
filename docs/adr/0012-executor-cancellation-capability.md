@@ -5,7 +5,7 @@
 
 Technical depth: [Cancellation boundary and evidence](0012-executor-cancellation-capability-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-29
 - **Decision owner:** Maintainer
 - **Prerequisite for:** `M2` closure
@@ -20,7 +20,7 @@ is incorporated unchanged.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adrs-0012-and-0013-acceptance-2026-08-29) | candidate `137a4105ef35aeeac3ab9486348d211cf09910cf`; concept `sha256:585724e32d0ee638b23deacca5a21d593d1992007fbed38537b6274fbfcb7b08`; technical `sha256:91187684c54de447478fe9d52f03e3c2fa680a57dce5155af2d3d3619cf14887` |
 
 <a id="concept-adr-0012-context"></a>
 ## Context

@@ -5,7 +5,7 @@
 
 Technical depth: [Deadline records, recovery, and evidence](0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-29
 - **Decision owner:** Maintainer
 - **Prerequisite for:** `M2` closure
@@ -23,7 +23,7 @@ in ADR 0010 and ADR 0011 is incorporated unchanged.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adrs-0012-and-0013-acceptance-2026-08-29) | candidate `137a4105ef35aeeac3ab9486348d211cf09910cf`; concept `sha256:059b3d8cdb7ff924f2e264a7eff25d2420e6e6bb9ff3c419c0f47ead20204662`; technical `sha256:dcdb04d9956c3b32292a0efec4553f223110fae295d15278db40d9b64cd15637` |
 
 <a id="concept-adr-0013-context"></a>
 ## Context
