@@ -109,6 +109,24 @@ defmodule Loopex.RuntimeTest do
     assert {:error, :invalid_runtime_options} = Loopex.start_link(runtime_id: "r")
     assert {:error, :invalid_runtime_options} = Loopex.start_link(store: store)
 
+    # Concept: a declared session value is validated where it is declared.
+    #
+    # Technical depth: ADR 0009 makes the cleanup period a session configuration
+    # value with a default, and a period of nothing is not a cooperative window,
+    # it is a kill. A host that means that should ask for the smallest period it
+    # actually wants to wait, so every non-positive and non-integer value is
+    # refused at start rather than becoming a grace an operator cannot observe
+    # until something has already gone wrong.
+    for refused <- [0, -1, "5000", 1.5, :never] do
+      assert {:error, :invalid_runtime_options} =
+               Loopex.start_link(
+                 runtime_id: "bad-grace-#{System.unique_integer([:positive])}",
+                 store: store,
+                 cleanup_grace_ms: refused
+               ),
+             "cleanup_grace_ms: #{inspect(refused)} started a runtime"
+    end
+
     {:ok, runtime} =
       Loopex.start_link(
         runtime_id: "supervised-runtime",

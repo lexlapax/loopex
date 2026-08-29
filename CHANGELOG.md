@@ -524,9 +524,52 @@ the exact document set its milestone must update.
   host configured. `cancel/2` runs in its caller so it is not queued behind the
   job it is ending, and it read the period from a process dictionary the caller
   does not have, so it spent the compiled-in default instead.
-- ADR 0009 asks for the cleanup period as a session-level value reported in the
-  run's terminal evidence, which this milestone does not yet do — recorded at
-  [M2 recorded limitations](docs/evidence/M2-recorded-limitations.md#cleanup-grace-not-session-visible).
+- The cleanup period is a declared session configuration value with a default,
+  as ADR 0009 requires. `Loopex.start_link(cleanup_grace_ms: …)` declares it,
+  `loopex run --cleanup-grace-ms …` is the operator's way to name it, and
+  `LoopexComposition.start/1` hands the same number to the session and to the
+  executor so the ending cannot report a period the cleanup did not run under.
+  Every run terminal and every `run.finished` reports it, from the session's own
+  declaration rather than from whatever receipt happened to arrive — a run that
+  dispatched no tool, an abort admitted before any executor answered, and every
+  recovery previously reported nothing at all. The one default lives on the port
+  as `Loopex.Executor.default_cleanup_grace_ms/0`, because the session and the
+  hand both need the same number. The program that confirms a process group
+  remains executor configuration, recorded at
+  [M2 recorded limitations](docs/evidence/M2-recorded-limitations.md#process-probe-not-session-visible).
+- A tool's declared wall-time budget is carried on the job it is dispatched
+  with, as `resource_budgets["max_wall_time_ms"]`, beside the output ceiling
+  that was already declared there. The local executor bounds a job by the
+  smallest of the run's committed instant, that declared budget, and the budget
+  its own copy of the definition names, so a caller can neither widen a tool's
+  budget nor outlast the run. The budget was previously read only from the
+  executor's own registry, which made the bound a fact about the hand rather
+  than about the dispatch and left nothing durable naming it.
+- An abort accepted through `Loopex.command/2` is an *admission*, not an ending.
+  The run stays active until its cleanup commits a terminal, which is ADR 0009's
+  order and is a real consequence for callers: a prompt submitted between the
+  two is queued as a follow-up on the still-active run rather than starting a
+  new one. A caller that needs the run over waits for its `run.finished`.
+- Every item of a stream domain, including its closing item, is emitted by one
+  process that ends when it closes. ADR 0011 requires the closure to be the last
+  item of its domain in every case, and a producer and a closer in two processes
+  order nothing between them: a producer preempted between taking a sequence and
+  emitting it could put a delta on the plane after its own closure. A delta
+  handed to a closed domain now reaches a process that no longer exists, which is
+  what the same ADR says happens to a delta offered after closure.
+- A closure states what ADR 0011 assigns it: a complete domain states its
+  producer's own `delta_count` or `progress_count`, and an abandoned one states
+  the count this runtime published. An earlier revision of this milestone
+  substituted the published count on both, which erased the only live evidence a
+  refusal leaves — the refusal record is durable and private, so a consumer
+  comparing the stated total against what reached it is the only way a refused
+  item is visible at all.
+- A canonical model delta must carry exactly the fields its kind declares.
+  Carrying a name nobody declared was already refused; omitting one everybody
+  declares now is too, so a `text_delta` with no text and a `tool_call_delta`
+  naming no call are no longer sequenced, published, and counted. The payload
+  ceiling measures every field, including ones whose type the measurement does
+  not otherwise know: an unbounded integer previously measured as nothing.
 - Accepted milestone governance may integrate to `main` after exact review and
   explicit protected-branch approval while product implementation remains on
   the milestone branch until closure. Once that governance checkpoint is

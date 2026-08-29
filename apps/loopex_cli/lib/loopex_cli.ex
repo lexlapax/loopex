@@ -476,6 +476,7 @@ defmodule LoopexCli do
   defp start_runtime(flags, policy) do
     with {:ok, workspace} <- workspace(flags),
          {:ok, root} <- state_root(flags),
+         {:ok, cleanup} <- cleanup_grace(flags),
          :ok <- own_placement(root) do
       {:ok, placement} = Loopex.runtime_placement_id(root)
 
@@ -491,14 +492,52 @@ defmodule LoopexCli do
       decision = ProjectResources.decide(manifest, workspace)
 
       LoopexComposition.start(
-        runtime_id: placement,
-        state_root: root,
-        workspace: workspace,
-        policy: policy,
-        project_manifest: manifest,
-        project_decision: decision,
-        progress_to: self()
+        [
+          runtime_id: placement,
+          state_root: root,
+          workspace: workspace,
+          policy: policy,
+          project_manifest: manifest,
+          project_decision: decision,
+          progress_to: self()
+        ] ++ cleanup
       )
+    end
+  end
+
+  @cleanup_grace_refusal "--cleanup-grace-ms takes a positive whole number of milliseconds"
+
+  # Concept: the operator can say how long a stopped run may spend stopping.
+  #
+  # Technical depth: ADR 0009 makes the cleanup grace a declared session
+  # configuration value with a default, and a host that cannot name it leaves an
+  # operator with whatever the default happens to be on a workspace where the
+  # default is wrong -- a build that always needs eight seconds to unwind, or a
+  # terminal session where waiting five is already too long. The flag is absent
+  # by default rather than defaulted here, so an operator who names nothing gets
+  # the one number the port declares rather than a second one this command
+  # invented. A value that is not a positive whole number of milliseconds is
+  # refused before a runtime starts, because a cleanup period is the kind of
+  # mistake that only shows up when something has already gone wrong.
+  defp cleanup_grace(flags) do
+    case Map.get(flags, "cleanup-grace-ms") do
+      nil ->
+        {:ok, []}
+
+      value when is_binary(value) ->
+        case Integer.parse(value) do
+          {milliseconds, ""} when milliseconds > 0 ->
+            {:ok, [cleanup_grace_ms: milliseconds]}
+
+          _other ->
+            {:error, @cleanup_grace_refusal}
+        end
+
+      # A bare `--cleanup-grace-ms` parses as a switch rather than a value, and
+      # a switch is not a period. It is refused with the same sentence, because
+      # what the operator has to do about it is the same.
+      _bare_switch ->
+        {:error, @cleanup_grace_refusal}
     end
   end
 
@@ -519,7 +558,7 @@ defmodule LoopexCli do
   # and a surface that accepted an unrecognised flag would be inferring on its
   # behalf — silently, by dropping it. An operator who typed `--nudge` meant
   # something, and being told nothing happened is the only answer that is true.
-  @known_flags ~w(policy state-root workspace steer follow-up)
+  @known_flags ~w(policy state-root workspace steer follow-up cleanup-grace-ms)
 
   defp known_flags(flags) do
     case Map.keys(flags) -- @known_flags do
@@ -557,6 +596,7 @@ defmodule LoopexCli do
       loopex run --policy allow-all "describe the change"
       loopex run --policy allow-all --steer "actually, do it this way"
       loopex run --policy allow-all --follow-up "then do this next"
+      loopex run --policy allow-all --cleanup-grace-ms 8000 "describe the change"
       loopex sessions
       loopex resume <session> --policy allow-all
       loopex cancel <session> [--policy <name>]

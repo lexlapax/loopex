@@ -83,7 +83,7 @@ defmodule Loopex.AgentLoopTestModel do
            identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
            usage: Map.get(turn, :usage, %{}),
            tool_calls: Map.get(turn, :calls, []),
-           delta_count: length(Map.get(turn, :deltas, [])),
+           delta_count: Map.get(turn, :delta_count, length(Map.get(turn, :deltas, []))),
            streamed: Map.get(turn, :deltas, []) != [],
            canonical_request_bytes: request.canonical_request_bytes,
            staged_request_digest: request.staged_request_digest

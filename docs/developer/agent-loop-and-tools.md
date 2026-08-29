@@ -321,16 +321,28 @@ executor's event is stamped only after validation has proved it belongs to the
 attempt that was dispatched — a domain an adapter could name is a domain an
 adapter could misattribute. `Loopex.Model.valid_delta?/1` gates the progress
 function: an item is forwarded and counted only when its `kind` is one of
-`text_delta`, `reasoning_delta`, or `tool_call_delta`, its payload is plain
-data, and its `text`, `arguments_fragment`, and `chunk` bytes total at most
-65536. Progress items reach a host as `{:loopex_progress, item}` messages to the
+`text_delta`, `reasoning_delta`, or `tool_call_delta`, it carries exactly the
+fields that kind declares — no more, so nothing unbounded rides along, and no
+fewer, so an item that says nothing is never sequenced and published — its
+payload is plain data, and every field it carries totals at most 65536 bytes,
+measured by encoding anything whose size the named clauses do not otherwise
+know. Progress items reach a host as `{:loopex_progress, item}` messages to the
 runtime's `:progress_to` pid; diagnostics arrive as `{:loopex_diagnostic, item}`.
 
 Every domain the coordinator opens is owed exactly one content-free closing item
 — `model_stream_closed` or `tool_stream_closed` — carrying a disposition and a
-count. A `:complete` domain closes with the producer's own count; an
-`:abandoned` one closes with the count the coordinator observed, which is exact
-because it stops accepting items for a domain once it has closed it. Closure is
+count. A `:complete` domain closes with its producer's own figure — an adapter's
+`delta_count`, a receipt's `progress_count` — and an `:abandoned` one with the
+count this coordinator published, which is exact. The two differ whenever an item
+was refused, and that difference is the signal: a consumer comparing the stated
+total against what reached it learns something did not arrive, and the refusal
+record that explains it is durable and private.
+
+`Loopex.Runtime.StreamRelay` is the sole emitter of a domain. It assigns every
+sequence, emits every item, emits the closing item itself as the last thing it
+does, and then ends — so the closure is the last item of its domain in every
+case, and an item handed to a closed domain reaches a process that no longer
+exists. Closure is
 an *emission* obligation, not a delivery guarantee: it rides the transient plane
 like any other item and may be coalesced away, dropped, or lost with the plane
 when its owner changes. A consumer that receives no closure falls back to the
@@ -524,7 +536,7 @@ facts, so a successor resumes from the journal rather than from anyone's memory:
    receipt before any adapter sees them.
 2. `model_dispatched` — dispatch exactly those bytes through `Loopex.Model` with
    a progress function closed over the derived model domain.
-3. On reply — close the model domain with the producer's `delta_count`, charge
+3. On reply — close the model domain with the reply's own `delta_count`, charge
    the turn, and commit the assistant message and its `assistant.message_appended`
    event. A reply that never arrives closes the domain `:abandoned`, is charged
    in full, and is redispatched under a newly recorded attempt, up to two model

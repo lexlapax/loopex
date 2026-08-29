@@ -245,7 +245,18 @@ defmodule Loopex.Executor do
     if function_exported?(module, :cancel, 2) do
       bounded_cancel(module, reference, job_id)
     else
-      {:ok, :cleaned}
+      # Concept: an executor that declares no cancellation has confirmed
+      # nothing, and silence is not a clean stop.
+      #
+      # Technical depth: this used to answer `cleaned`, on the reasoning that an
+      # implementation without the callback has nothing to leave behind. That is
+      # a statement about the implementation this repository ships, not about the
+      # port: a conforming third-party executor may own an operating-system
+      # process and not export `cancel/2`, and reading its silence as confirmed
+      # cleanup committed `cancelled` for a tree nobody signalled and nobody
+      # looked at. `unconfirmed` is what this runtime actually knows, and it ends
+      # the run `outcome_unknown` with a reconciliation reference instead.
+      {:ok, :unconfirmed}
     end
   end
 
@@ -300,6 +311,28 @@ defmodule Loopex.Executor do
   """
   @spec discard_progress() :: progress_fun()
   def discard_progress, do: fn _event -> :ok end
+
+  @doc """
+  ## Concept
+
+  The cleanup period a session declares when its host names none.
+
+  ## Technical depth
+
+  ADR 0009 makes the cleanup grace a declared session configuration value with a
+  default, reported in the run's terminal evidence, so an operator can tell a
+  clean cooperative stop from a forced kill that was confirmed and from a
+  termination that could not be confirmed at all. The number lives here, on the
+  port, because two parties need the same one: the session declares it, and the
+  executor that performs the cleanup is handed it. A default defined twice is two
+  numbers that agree until one of them is edited, and a terminal reporting a
+  period the hand did not actually use is exactly the false record reporting it
+  is meant to prevent.
+  """
+  @default_cleanup_grace_ms 5_000
+
+  @spec default_cleanup_grace_ms() :: pos_integer()
+  def default_cleanup_grace_ms, do: @default_cleanup_grace_ms
 
   @doc """
   ## Concept

@@ -107,6 +107,7 @@ defmodule Loopex.Runtime.Control do
        sampling: Keyword.get(options, :sampling),
        grant_decision: Keyword.fetch!(options, :grant_decision),
        fault_to: Keyword.fetch!(options, :fault_to),
+       cleanup_grace_ms: Keyword.fetch!(options, :cleanup_grace_ms),
        progress_to: Keyword.get(options, :progress_to),
        diagnostics_to: Keyword.get(options, :diagnostics_to),
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
@@ -444,7 +445,8 @@ defmodule Loopex.Runtime.Control do
         project_decision: state.project_decision,
         sampling: state.sampling,
         grant_decision: state.grant_decision,
-        fault_to: state.fault_to
+        fault_to: state.fault_to,
+        cleanup_grace_ms: state.cleanup_grace_ms
       ]
 
       case DynamicSupervisor.start_child(session_supervisor, {SessionCoordinator, options}) do

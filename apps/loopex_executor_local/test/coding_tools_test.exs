@@ -996,6 +996,90 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert ArtifactStore.roles() == ["tool_output"]
   end
 
+  test "the wall time budget the session declared bounds the job and not merely the run" do
+    # Concept: a tool's declared wall-time budget has to stop the work, not merely
+    # be recorded beside it.
+    #
+    # Technical depth: the previous case for this obligation asserted the
+    # `effective_deadline_ms` the receipt reported and nothing else, because the
+    # shipped budgets are thirty seconds and two minutes and watching one bind
+    # would have taken thirty seconds. So passing `job.run_deadline` to the work
+    # while still recording the computed instant left the whole suite green: the
+    # bound was written down and did not apply. The budget is declared in the job
+    # now -- the coordinator already declares this job's output ceiling the same
+    # way -- so a case can name one short enough to observe, and the executor
+    # takes the smallest of the run's instant, the session's declared budget, and
+    # the definition's own.
+    root = workspace()
+    started = System.monotonic_time(:millisecond)
+    dispatched = System.system_time(:millisecond)
+    far = dispatched + 600_000
+
+    assert {:ok, %{outcome: outcome, output: output} = receipt} =
+             run(
+               root,
+               "loopex.bash",
+               %{"command" => "sleep 30"},
+               %{
+                 run_deadline: far,
+                 resource_budgets: %{
+                   "max_output_bytes" => 65_536,
+                   "max_wall_time_ms" => 300
+                 }
+               }
+             )
+
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    assert elapsed < 10_000,
+           "the job ran #{elapsed}ms under a declared three hundred millisecond budget, so it " <>
+             "was bounded by the run's deadline rather than by the budget"
+
+    assert outcome in [:cancelled, :outcome_unknown]
+    assert output =~ "deadline passed"
+
+    # And the instant it reports is the one it actually ran under rather than the
+    # run's, so the record and the behaviour name the same number.
+    assert receipt.run_deadline_ms == far
+    assert receipt.effective_deadline_ms < far
+
+    assert receipt.effective_deadline_ms <= dispatched + 300 + 1_000,
+           "the instant recorded is #{receipt.effective_deadline_ms - dispatched}ms after " <>
+             "dispatch, against a declared three hundred millisecond budget"
+
+    # A declared budget wider than the definition's own does not widen it: the
+    # smallest of the three wins, so a caller cannot buy a tool more time than
+    # the tool asked for.
+    shipped =
+      CodingTools.definitions()
+      |> Enum.find(&(&1["tool_id"] == "loopex.read"))
+      |> get_in(["budgets", "wall_time_ms"])
+
+    assert is_integer(shipped) and shipped > 0 and shipped < 599_000,
+           "this half assumes loopex.read declares a budget narrower than the one the session " <>
+             "declares below, and it declares #{inspect(shipped)}"
+
+    before = System.system_time(:millisecond)
+    File.write!(Path.join(root, "small.txt"), "hello")
+
+    assert {:ok, generous} =
+             run(
+               root,
+               "loopex.read",
+               %{"path" => "small.txt"},
+               %{
+                 run_deadline: far,
+                 resource_budgets: %{
+                   "max_output_bytes" => 65_536,
+                   "max_wall_time_ms" => 599_000
+                 }
+               }
+             )
+
+    assert generous.effective_deadline_ms <= before + shipped + 1_000,
+           "a session declaring a wider budget than the tool's own widened the tool's bound"
+  end
+
   test "a job whose workspace lease is lost mid flight is ended and reported unproven" do
     # Concept: the lease is the claim that authorises these effects, and ADR 0007
     # requires it held for the job's full lifetime.
@@ -2188,18 +2272,30 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # receipt, which makes the live configuration and the durable record of a job
     # the same fact rather than two.
     #
-    # ADR 0009 asks for more than this: a *session* configuration value reported
-    # in the run's terminal evidence, which would mean threading it through the
-    # shipped composition and projecting it onto the terminal. M2 does not do
-    # that, the gap is recorded at
-    # `docs/evidence/M2-recorded-limitations.md#cleanup-grace-not-session-visible`
-    # as an approved deferral, and this case deliberately claims only what the
-    # code performs. A case whose comment claims the ADR sentence would be the
-    # third round of words reaching further than the code.
+    # ADR 0009 asks for a *session* configuration value reported in the run's
+    # terminal evidence, and `M2` now does that: the session declares the period,
+    # the shipped composition hands the same number to this executor, and the
+    # run's terminal reports the session's declaration. That half is proved where
+    # it happens, in `apps/loopex/test/agent_loop_test.exs` and
+    # `apps/loopex_composition/test/kernel_composition_test.exs`. What this case
+    # proves is the hand's half: that the number reaching it is the number it
+    # spends and the number its receipts record.
+    #
+    # The default is the port's rather than this executor's, because the session
+    # and the hand both need one number and a default written twice is two
+    # numbers that agree until one is edited. An executor started with no period
+    # at all must therefore land on exactly that number, which is asserted rather
+    # than passed in.
     root = workspace()
 
-    {default_executor, default_lease} = executor_with_grace(root, 5_000)
-    assert Local.cleanup_grace_ms(default_executor) == 5_000
+    {default_executor, default_lease} = executor_with_options(root, [])
+
+    assert Local.cleanup_grace_ms(default_executor) == 5_000,
+           "an executor started with no declared period did not take the five seconds the " <>
+             "operator guidance promises"
+
+    assert Loopex.Executor.default_cleanup_grace_ms() == 5_000,
+           "the port's declared default and this executor's are no longer one number"
 
     {executor, lease_id} = executor_with_grace(root, 750)
     assert Local.cleanup_grace_ms(executor) == 750

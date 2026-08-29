@@ -272,6 +272,24 @@ defmodule Loopex.AgentLoopAnsweringExecutor do
   end
 end
 
+defmodule Loopex.AgentLoopSilentExecutor do
+  @moduledoc false
+
+  # Concept: a conforming executor that exports no cancellation at all.
+  #
+  # Technical depth: `cancel/2` is optional, so this is a legitimate
+  # implementation of the port rather than a broken one. What it is here to say
+  # is what this runtime may conclude from its silence, which is nothing.
+
+  @behaviour Loopex.Executor
+
+  @impl Loopex.Executor
+  def execute(_reference, _job, _grant, _options, progress \\ nil) do
+    _progress = progress || Loopex.Executor.discard_progress()
+    {:error, {:refused_before_effect, :not_implemented}}
+  end
+end
+
 defmodule Loopex.AgentLoopUndeclaringExecutor do
   @moduledoc false
 
@@ -364,6 +382,7 @@ defmodule Loopex.AgentLoopTest do
   alias Loopex.AgentLoopTestModel
   alias Loopex.Bounds
   alias Loopex.M1RuntimeTestStore
+  alias Loopex.Runtime.StreamRelay
   alias LoopexProtocol.ToolDefinition
 
   defp call(id), do: %{id: id, name: "write", arguments: %{"path" => id}}
@@ -875,21 +894,32 @@ defmodule Loopex.AgentLoopTest do
     assert {:ok, ^session_id} =
              Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
 
-    # The successor redispatches the attempt it inherited — attempt two, not a
-    # fresh attempt one — and when that fails the allowance is spent.
+    # The successor abandons the attempt it inherited rather than re-running it
+    # under the same identity, and dispatches the next one. Re-running it would
+    # give two owners one stream domain, because ADR 0011 makes a domain one
+    # attempt's progress stream; abandoning it also charges the call the
+    # predecessor actually made, which a silent reuse did not.
     assert await_dispatch_count(fixture, 3)
     Process.sleep(300)
-    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 3
 
-    # Two abandoned attempts are on the journal, numbered by the run rather than
-    # by whichever owner observed them.
     attempts =
       fixture
       |> Fixture.records(session_id)
       |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
       |> Enum.map(& &1.payload["attempt"])
 
-    assert attempts == [1, 2]
+    # Numbered by the run rather than by whichever owner observed them, and never
+    # restarted at one: attempt two is the inherited one the successor gave up,
+    # and attempt three is the successor's own.
+    assert Enum.take(attempts, 2) == [1, 2]
+
+    refute length(attempts) > length(Enum.uniq(attempts)),
+           "an attempt number was abandoned twice: #{inspect(attempts)}"
+
+    dispatched = length(AgentLoopTestModel.dispatched(fixture.model))
+
+    assert dispatched == 3,
+           "the successor made #{dispatched - 2} further provider calls rather than one"
   end
 
   test "a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" do
@@ -1533,6 +1563,7 @@ defmodule Loopex.AgentLoopTest do
   defp start_with_executor(module, executor_pid, script, options \\ []) do
     extras = Keyword.get(options, :receipt_extras, %{})
     :persistent_term.put({AgentLoopAnsweringExecutor, :receipt_extras}, extras)
+    declared = Keyword.take(options, [:cleanup_grace_ms])
 
     model_pid = AgentLoopTestModel.start(script)
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop-answering")
@@ -1540,28 +1571,30 @@ defmodule Loopex.AgentLoopTest do
 
     {:ok, runtime} =
       Loopex.start_link(
-        runtime_id: "answering-runtime-#{System.unique_integer([:positive])}",
-        store: store,
-        model: %{
-          module: AgentLoopTestModel,
-          model: "scripted:v1",
-          options: [script: model_pid, max_tokens: 256]
-        },
-        executor: %{
-          module: module,
-          reference: executor_pid,
-          identity: "answering-executor",
-          epoch: 1,
-          fencing_token: 3,
-          workspace_ref: "workspace-ref",
-          workspace_lease: "workspace-lease"
-        },
-        tool: nil,
-        bounds: %{max_turns: 8, token_budget: 1_000_000, deadline_ms: 600_000},
-        tools: definitions,
-        active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
-        policy: Loopex.AgentLoopTestPolicy,
-        grant_decision: {:host_policy, :allow}
+        [
+          runtime_id: "answering-runtime-#{System.unique_integer([:positive])}",
+          store: store,
+          model: %{
+            module: AgentLoopTestModel,
+            model: "scripted:v1",
+            options: [script: model_pid, max_tokens: 256]
+          },
+          executor: %{
+            module: module,
+            reference: executor_pid,
+            identity: "answering-executor",
+            epoch: 1,
+            fencing_token: 3,
+            workspace_ref: "workspace-ref",
+            workspace_lease: "workspace-lease"
+          },
+          tool: nil,
+          bounds: %{max_turns: 8, token_budget: 1_000_000, deadline_ms: 600_000},
+          tools: definitions,
+          active_tools: Enum.map(definitions, &Map.fetch!(&1, "tool_id")),
+          policy: Loopex.AgentLoopTestPolicy,
+          grant_decision: {:host_policy, :allow}
+        ] ++ declared
       )
 
     on_exit(fn ->
@@ -1850,19 +1883,20 @@ defmodule Loopex.AgentLoopTest do
            "the loop resumed past an effect nobody could account for"
   end
 
-  test "a tool stream closes on the count this runtime published rather than the executor's own" do
-    # Concept: the closing item is this coordinator's statement about the stream
-    # it published, so it cannot be an executor's claim passed along.
+  test "a complete tool stream closes on its receipt's own progress count" do
+    # Concept: ADR 0011 assigns a complete closure the producer's own statement,
+    # and the difference between that statement and what a consumer received is
+    # the signal the closure exists to give.
     #
-    # Technical depth: a completed stream closed with the receipt's
-    # `progress_count`. That is the executor's count of what it emitted, and the
-    # port declares no relationship between it and what a coordinator accepted --
-    # it could not, because refusal happens here, after the executor is done. The
-    # executor below emits three events and reports three; two carry a wrong
-    # binding and never reach the operator, so the stream carried one. Closing it
-    # at three tells a consumer that two items were lost on the transient plane,
-    # which is the one reading of a closing count that matters and the one thing
-    # that did not happen.
+    # Technical depth: an earlier round of this amendment substituted the count
+    # this runtime published, on the reasoning that refusals are not loss. That
+    # was a departure from an accepted decision, and it erased the only live
+    # evidence a refusal leaves: the refusal record is durable and private, so a
+    # consumer watching the transient plane has nothing but the stated total to
+    # compare against what arrived. The executor below emits three events and
+    # reports three; two carry a wrong binding and never reach the operator. The
+    # closure states three, one item arrived, and the two that did not are
+    # separately recorded as refusals rather than being silently subtracted.
     _fixture = start_with_progress(:one_valid_two_refused)
 
     items = receive_progress()
@@ -1875,12 +1909,12 @@ defmodule Loopex.AgentLoopTest do
     assert closure, "the tool stream was never closed"
     assert closure.disposition == :complete
 
-    assert closure.progress_count == 1,
-           "the closing item carried the executor's count of three rather than the one item " <>
-             "this runtime published"
+    assert closure.progress_count == 3,
+           "the closing item carried #{closure.progress_count} rather than the count its " <>
+             "receipt reported, so a consumer cannot tell that two items never arrived"
 
-    # The two that were refused are still visible, as refusals rather than as
-    # progress that went missing.
+    # And the two that were refused are recorded as refusals, so the difference
+    # the closure exposes is explained rather than merely visible.
     refusal = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
     assert refusal["refused_count"] == 2
   end
@@ -2008,29 +2042,28 @@ defmodule Loopex.AgentLoopTest do
     assert Enum.all?(deltas, &is_binary(&1.stream_domain_id))
   end
 
-  test "the run's terminal reports the cleanup period the executor that answered it declared" do
+  test "the run's terminal reports the cleanup period this session declared" do
     # Concept: ADR 0009 requires the declared cleanup grace to be reported in the
     # terminal outcome's evidence, so an operator can tell a clean cooperative
     # stop from a forced kill that was confirmed and from a termination that
     # could not be confirmed at all.
     #
-    # Technical depth: the shipped executor wrote it into every receipt and the
-    # coordinator's receipt reconstruction dropped it, so a session rebuilt from
-    # the journal could not name the period a job had run under and no terminal
-    # reported it. That was recorded as a limitation and deferred; it is
-    # implemented instead. The value comes from the receipt rather than from
-    # anything this session decided, because the period is the executor's
-    # declaration.
+    # Technical depth: ADR 0009 calls it a declared *session* configuration value
+    # with a default. This runtime read it back off whatever the answering
+    # executor had written into a receipt instead, which is a different thing
+    # wearing the same name: a run that produced no receipt reported `nil`, and
+    # those are exactly the endings the period matters for -- an abort admitted
+    # before any executor answered, a run stopped between turns, and every
+    # recovery. The session declares it, the composed executor is handed the same
+    # value, and the terminal names it whatever happened.
     #
-    # An executor that declares none -- one with no operating-system work to
-    # bound -- reports none. That is an absence rather than a default nobody
-    # named, which is why the field is optional on the way in.
+    # The second half is what the receipt-derived version could not do at all.
     declared =
       start_with_executor(
         AgentLoopAnsweringExecutor,
         AgentLoopAnsweringExecutor.start(%{}),
         one_call_script(),
-        receipt_extras: %{cleanup_grace_ms: 750}
+        cleanup_grace_ms: 750
       )
 
     finished = Enum.find(drain(declared.attachment), &(&1.kind == "run.finished"))
@@ -2038,20 +2071,584 @@ defmodule Loopex.AgentLoopTest do
     assert finished["outcome"] == "completed"
 
     assert finished["cleanup_grace_ms"] == 750,
-           "the run's terminal did not report the period its executor declared: " <>
+           "the run's terminal did not report the period this session declared: " <>
              inspect(finished["cleanup_grace_ms"])
 
-    silent =
+    # Concept: the bounds a job runs under are declared where they are journaled.
+    #
+    # Technical depth: the output ceiling was always declared on the job; the
+    # wall-time ceiling was read only from the executor's own copy of the
+    # definition, which made the bound a fact about the hand rather than about
+    # the dispatch and left nothing durable naming it. Both come from the
+    # definition this call resolved through now, and Outcome 4 proves the
+    # executor honours the smaller of them.
+    [job | _rest] = AgentLoopAnsweringExecutor.jobs(declared.executor)
+    budgets = Fixture.tool_definition() |> Map.fetch!("budgets")
+
+    assert job.resource_budgets == %{
+             "max_output_bytes" => Map.fetch!(budgets, "output_bytes"),
+             "max_wall_time_ms" => Map.fetch!(budgets, "wall_time_ms")
+           },
+           "the dispatched job declared #{inspect(job.resource_budgets)} rather than the " <>
+             "ceilings its tool definition names"
+
+    # Concept: a declared bound that the digest does not cover is a bound nobody
+    # signed for.
+    #
+    # Technical depth: reaching the job is not enough. `canonical_request_digest`
+    # is what an executor revalidates against and what reconciliation matches an
+    # attempt by, so a ceiling omitted from the canonical encoding could be
+    # changed between the journal and the hand without either noticing. Dropping
+    # `max_wall_time_ms` before that encoding left two jobs bounded at ten and
+    # twenty milliseconds with identical bytes and identical digests, and left
+    # every case in this repository green -- the assertion above proves the field
+    # travelled, and nothing proved it was covered.
+    signed =
+      for milliseconds <- [10, 20] do
+        fields =
+          job
+          |> Map.take(Loopex.Executor.job_fields())
+          |> Map.put(:resource_budgets, %{
+            "max_output_bytes" => 1024,
+            "max_wall_time_ms" => milliseconds
+          })
+
+        {:ok, request} = Loopex.Executor.job(fields)
+
+        {request.canonical_request_bytes, request.canonical_request_digest}
+      end
+
+    assert [{first_bytes, first_digest}, {second_bytes, second_digest}] = signed
+
+    assert first_bytes != second_bytes,
+           "two jobs differing only in their declared wall-time ceiling canonicalized to the " <>
+             "same bytes, so the ceiling is outside what the digest covers"
+
+    assert first_digest != second_digest,
+           "two jobs differing only in their declared wall-time ceiling carry one digest"
+
+    # A session that declares none reports the port's default rather than an
+    # absence: ADR 0009 says "with a default", and a terminal carrying `nil` is a
+    # terminal an operator cannot read the stopping out of.
+    #
+    # The number is written out rather than read back from
+    # `Loopex.Executor.default_cleanup_grace_ms/0`. Comparing the reported value
+    # against the same function the runtime reads it from asserts only that one
+    # value reached two places; five seconds is what the operator guidance
+    # promises, so changing it is a change to a documented promise and this case
+    # is one of the places that has to be edited to make it.
+    defaulted =
       start_with_executor(
         AgentLoopAnsweringExecutor,
         AgentLoopAnsweringExecutor.start(%{}),
         one_call_script()
       )
 
-    silent_finished = Enum.find(drain(silent.attachment), &(&1.kind == "run.finished"))
+    defaulted_finished = Enum.find(drain(defaulted.attachment), &(&1.kind == "run.finished"))
 
-    assert silent_finished["cleanup_grace_ms"] == nil,
-           "a run whose executor declared no period reported one anyway"
+    assert defaulted_finished["cleanup_grace_ms"] == 5_000,
+           "a session that declared no period reported " <>
+             "#{inspect(defaulted_finished["cleanup_grace_ms"])} rather than the five seconds " <>
+             "the operator guidance promises"
+
+    assert Loopex.Executor.default_cleanup_grace_ms() == 5_000,
+           "the port's declared default and the period a run reports are no longer one number"
+  end
+
+  test "no item of a stream domain is emitted after that domain's closure" do
+    # Concept: ADR 0011 says the closure is the last item of its domain in every
+    # case. Not usually, and not within a window.
+    #
+    # Technical depth: this was two processes emitting into one domain -- a
+    # producer running an adapter's or an executor's callback, and the
+    # coordinator closing it -- and nothing either of them did alone made "last"
+    # true. A seal stopped the next reservation and said nothing about a sequence
+    # already handed out, so a producer preempted between reserving and emitting
+    # put a delta on the plane after its own closure; a review demonstrated
+    # exactly that. Waiting for the stranded item bounded the window rather than
+    # closing it, and the wait had to be bounded because the waiter is the
+    # session's serial writer.
+    #
+    # Neither of them emits now. `Loopex.Runtime.StreamRelay` is the only emitter
+    # of its domain: it assigns every sequence, emits every item, emits the
+    # closure itself as the last thing it does, and then ends -- so a producer
+    # handing an item to a closed domain is sending to a process that no longer
+    # exists, which is what ADR 0011 says happens to a delta offered after
+    # closure.
+    #
+    # The assertion is the rule itself, driven with a producer racing the closer
+    # from another process. How many items arrive is not fixed and does not need
+    # to be: what is fixed is that the closure is last, that its total is exactly
+    # the number of items before it, and that their sequences are gapless from
+    # zero.
+    supervisor =
+      start_supervised!({Task.Supervisor, name: :"relay-#{System.unique_integer([:positive])}"})
+
+    {:ok, relay} =
+      StreamRelay.open(
+        supervisor,
+        self(),
+        fn item, sequence -> %{kind: :item, item: item, model_sequence: sequence} end,
+        fn disposition, count ->
+          %{kind: :closed, disposition: disposition, delta_count: count}
+        end
+      )
+
+    producer = spawn(fn -> Enum.each(1..500, &StreamRelay.emit(relay, &1)) end)
+    on_exit(fn -> Process.exit(producer, :kill) end)
+
+    count = StreamRelay.close(relay, :abandoned)
+    observed = receive_progress()
+
+    closure_at = Enum.find_index(observed, &(&1.kind == :closed))
+
+    assert closure_at,
+           "the domain was never closed; #{length(observed)} items reached the plane"
+
+    assert closure_at == length(observed) - 1,
+           "#{length(observed) - 1 - closure_at} item(s) of this domain were emitted after " <>
+             "its own closure"
+
+    assert closure_at == count,
+           "the closure stated #{count} while #{closure_at} items preceded it"
+
+    assert observed |> Enum.take(closure_at) |> Enum.map(& &1.model_sequence) ==
+             Enum.to_list(0..(closure_at - 1)//1)
+  end
+
+  test "a closed stream domain accepts nothing further and its relay is gone" do
+    # Concept: closing is not a flag that a later emission might read too late.
+    #
+    # Technical depth: the relay ends when it closes, so there is no state left
+    # for a stale progress function to race. Handing an item to it afterwards is
+    # a send to a dead process, which succeeds and does nothing -- a producer
+    # needs no answer and has none to misread. A second close has no relay to ask
+    # and says so rather than inventing a second, different total.
+    supervisor =
+      start_supervised!({Task.Supervisor, name: :"relay-#{System.unique_integer([:positive])}"})
+
+    {:ok, relay} =
+      StreamRelay.open(
+        supervisor,
+        self(),
+        fn item, sequence -> %{kind: :item, item: item, model_sequence: sequence} end,
+        fn disposition, count ->
+          %{kind: :closed, disposition: disposition, delta_count: count}
+        end
+      )
+
+    StreamRelay.emit(relay, :first)
+    assert StreamRelay.close(relay, :abandoned) == 1
+
+    assert StreamRelay.emit(relay, :late) == :ok
+    assert StreamRelay.close(relay, :abandoned) == :unavailable
+
+    observed = receive_progress()
+
+    assert Enum.map(observed, & &1.kind) == [:item, :closed],
+           "a late item reached the plane: #{inspect(Enum.map(observed, & &1.kind))}"
+
+    # A complete domain states its producer's own figure rather than the relay's,
+    # which is the other half of ADR 0011's disposition table.
+    {:ok, complete} =
+      StreamRelay.open(
+        supervisor,
+        self(),
+        fn item, sequence -> %{kind: :item, item: item, model_sequence: sequence} end,
+        fn disposition, count ->
+          %{kind: :closed, disposition: disposition, delta_count: count}
+        end
+      )
+
+    StreamRelay.emit(complete, :only)
+    assert StreamRelay.close(complete, {:complete, 4}) == 4
+
+    assert Enum.find(receive_progress(), &(&1.kind == :closed)) == %{
+             kind: :closed,
+             disposition: :complete,
+             delta_count: 4
+           }
+  end
+
+  test "a succession never gives two owners one stream domain" do
+    # Concept: ADR 0011 makes a stream domain one attempt's progress stream, and
+    # its closure the last item of that domain. Two owners producing into one
+    # label breaks both at once.
+    #
+    # Technical depth: a predecessor that died with a model call in flight left
+    # the run at `model_dispatched`, and the successor dispatched the same staged
+    # bytes under the same attempt — so it derived the same domain. A review drove
+    # it: the successor emitted sequence zero and a complete closure, and the
+    # predecessor's producer, resumed afterwards, emitted sequences zero, one and
+    # two under the identical label. The closure was no longer last and sequence
+    # zero appeared twice.
+    #
+    # Two things changed and this drives both. The successor abandons the attempt
+    # it inherited, so its dispatch opens a *different* domain; and a relay is
+    # linked to the owner that opened it, so the predecessor's relay dies with
+    # its owner rather than draining a backlog afterwards. The producer here is
+    # held open across the succession, which is what makes the old domain still
+    # live at the moment the new one opens.
+    parent = self()
+
+    fixture =
+      start(
+        script: [
+          %{text: "", calls: [], error: :provider_unavailable, hold: parent, deltas: ["a"]},
+          %{text: "done", calls: [], deltas: ["b"]}
+        ],
+        progress_to: self()
+      )
+
+    {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 5_000
+
+    coordinator = coordinator_of(fixture.runtime)
+    reference = Process.monitor(coordinator)
+    Process.exit(coordinator, :kill)
+    assert_receive {:DOWN, ^reference, :process, ^coordinator, _reason}, 5_000
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
+
+    # The predecessor's producer is released only now, so anything it still had
+    # to say arrives after the successor has opened and closed its own domain.
+    send(model, :release)
+    Process.sleep(300)
+
+    observed = receive_progress()
+    domains = observed |> Enum.map(& &1.stream_domain_id) |> Enum.uniq()
+
+    for domain <- domains do
+      items = Enum.filter(observed, &(&1.stream_domain_id == domain))
+      closures = Enum.filter(items, &(&1.kind == :model_stream_closed))
+
+      assert length(closures) <= 1,
+             "domain #{domain} was closed #{length(closures)} times"
+
+      if closures != [] do
+        assert List.last(items).kind == :model_stream_closed,
+               "an item of domain #{domain} was emitted after its own closure"
+      end
+
+      sequences =
+        items
+        |> Enum.reject(&(&1.kind == :model_stream_closed))
+        |> Enum.map(& &1.model_sequence)
+
+      assert sequences == Enum.uniq(sequences),
+             "domain #{domain} handed out a sequence twice: #{inspect(sequences)}"
+    end
+
+    # And the successor's own domain is a different one, because it abandoned the
+    # attempt it inherited rather than re-running it under the same identity.
+    attempts =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+      |> Enum.map(& &1.payload["attempt"])
+
+    assert 1 in attempts,
+           "the successor re-ran the attempt it inherited, so both owners derived one domain"
+  end
+
+  test "a stream relay ends with the owner that opened it, ahead of its own backlog" do
+    # Concept: a relay is a process, and a process nobody will ever close is a
+    # leak. A relay that outlives its owner for even one message is worse than a
+    # leak: it emits into a domain that owner no longer speaks for.
+    #
+    # Technical depth: the task supervisor relays run under belongs to the
+    # runtime rather than to one session, so it survives a coordinator that stops
+    # mid-run — which is what a refused commit on the cleanup path makes the
+    # coordinator do. A relay that only ended on `close/2` would sit in `receive`
+    # for the life of the runtime, one for every domain that never got closed.
+    #
+    # A monitor is not enough, and this case is written to say why. Its `:DOWN`
+    # is a message, so it queues behind whatever a producer has already handed
+    # the relay, and the relay drains that backlog before it ever learns its
+    # owner is gone. An exit signal is not a message and does not wait behind
+    # one. The relay is suspended with five items already queued and its owner is
+    # then killed; a linked relay is dead before it can be resumed, and none of
+    # those five reaches the plane.
+    supervisor =
+      start_supervised!({Task.Supervisor, name: :"relay-#{System.unique_integer([:positive])}"})
+
+    parent = self()
+
+    owner =
+      spawn(fn ->
+        {:ok, relay} =
+          StreamRelay.open(
+            supervisor,
+            parent,
+            fn item, sequence -> %{kind: :item, item: item, model_sequence: sequence} end,
+            fn disposition, count ->
+              %{kind: :closed, disposition: disposition, delta_count: count}
+            end
+          )
+
+        send(parent, {:opened, relay})
+
+        receive do
+          :never -> :ok
+        end
+      end)
+
+    assert_receive {:opened, relay}, 5_000
+    assert Process.alive?(relay)
+
+    :erlang.suspend_process(relay)
+    Enum.each(1..5, &StreamRelay.emit(relay, &1))
+
+    reference = Process.monitor(relay)
+    Process.exit(owner, :kill)
+
+    assert_receive {:DOWN, ^reference, :process, ^relay, _reason},
+                   5_000,
+                   "the relay outlived the owner that opened it"
+
+    assert receive_progress() == [],
+           "a relay emitted its backlog into a domain whose owner was already gone"
+  end
+
+  test "two attempts of one tool operation never share a stream domain" do
+    # Concept: ADR 0011 makes a stream domain one `(operation_id, attempt)`
+    # pair's progress stream. Two attempts of one operation sharing a label runs
+    # their sequences together and makes each closing total describe the other's
+    # items.
+    #
+    # Technical depth: the coordinator named the attempt at the dispatch site,
+    # and nothing drove it. Replacing `job.attempt` with the literal one left the
+    # whole suite green, because `build_job/4` dispatches attempt one and this
+    # milestone never dispatches a second attempt of a tool operation — an
+    # unproven effect is never blindly retried, which is a non-negotiable rather
+    # than an omission. So the branch was unreachable from the loop, and a seam
+    # that injected an attempt the design refuses to produce would have been a
+    # case observing the seam rather than the runtime.
+    #
+    # The derivation has one home instead. `StreamDomain.for_job/1` is what the
+    # coordinator calls, and it takes two real job requests here — identical
+    # except for the attempt the reconciliation contract distinguishes them by.
+    # The dispatch site no longer names the attempt at all, so it cannot name a
+    # different one than the job carries.
+    base = %{
+      protocol_version: 1,
+      job_id: "job-1",
+      operation_id: "operation-1",
+      attempt: 1,
+      session_id: "s1",
+      run_id: "r1",
+      turn_id: "t1",
+      tool_call_id: "c1",
+      origin_session_epoch: 1,
+      origin_executor_epoch: 1,
+      executor_identity: "executor-1",
+      required_capabilities: ["workspace_write"],
+      tool_id: "example.write",
+      tool_version: "1.0.0",
+      effect_class: "workspace_write",
+      validated_arguments: %{"path" => "x"},
+      workspace_ref: "w",
+      workspace_lease: "l",
+      run_deadline: 4_102_444_800_000,
+      resource_budgets: %{"max_output_bytes" => 1024, "max_wall_time_ms" => 30_000},
+      idempotency_class: "reconcile_then_retry",
+      fencing_token: 1,
+      artifact_policy: %{"retain" => true},
+      output_policy: %{"capture" => true}
+    }
+
+    {:ok, first} = Loopex.Executor.job(base)
+    {:ok, second} = Loopex.Executor.job(%{base | attempt: 2})
+
+    assert first.operation_id == second.operation_id,
+           "the two jobs are not two attempts of one operation"
+
+    assert Loopex.StreamDomain.for_job(first) != Loopex.StreamDomain.for_job(second),
+           "two attempts of one operation derived the same stream domain"
+
+    # And the label is the one the identity tuple derives, rather than something
+    # this function invents beside it.
+    assert Loopex.StreamDomain.for_job(first) ==
+             Loopex.StreamDomain.derive(:executor, "s1", "operation-1", 1)
+  end
+
+  test "an executor that declares no cancellation confirms nothing" do
+    # Concept: `cancel/2` is optional, and an executor that does not export it
+    # has told this runtime nothing about what its cleanup achieved.
+    #
+    # Technical depth: the absence used to read as `cleaned`, which is a claim
+    # about the executor this repository ships rather than about the port. A
+    # conforming third-party executor may own an operating-system process and
+    # export no cancellation; reading its silence as confirmed cleanup committed
+    # `cancelled` over a process tree nobody signalled and nobody looked at. What
+    # this runtime knows is `unconfirmed`, which ends the run `outcome_unknown`
+    # carrying a reconciliation reference the operator can act on.
+    assert Loopex.Executor.cancel(AgentLoopSilentExecutor, :ignored, "job-1") ==
+             {:ok, :unconfirmed},
+           "an executor that declares no cancellation had its silence read as a clean stop"
+
+    # And an executor that does declare one is still asked and still answered.
+    assert Loopex.Executor.cancel(AgentLoopAnsweringExecutor, :ignored, "job-1") ==
+             {:ok, :cleaned}
+  end
+
+  test "a stream statistic that is not a count is refused rather than published or committed" do
+    # Concept: `delta_count` and `progress_count` are the numbers ADR 0011 closes
+    # a complete domain on, and the numbers a consumer compares against what
+    # arrived to detect loss. A negative one describes no stream.
+    #
+    # Technical depth: nothing checked either. An adapter returning
+    # `delta_count: -1` had that value published on the closing item and
+    # committed into the durable assistant message, so the durable record carried
+    # a statistic that cannot be true and the loss comparison became meaningless.
+    # An executor receipt reporting `progress_count: -1` did the same on its own
+    # plane.
+    #
+    # The model half takes the abandoned path rather than killing the owner,
+    # because an answer this runtime cannot read is what that path is for: the
+    # domain closes on what the relay actually emitted, the attempt is charged,
+    # and the turn is retried.
+    fixture =
+      start(
+        script: [
+          %{text: "one", calls: [], deltas: ["a"], delta_count: -1},
+          %{text: "two", calls: [], deltas: ["b"]}
+        ],
+        progress_to: self()
+      )
+
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    events = drain(attachment)
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed",
+           "a malformed count killed the run instead of costing it one attempt"
+
+    observed = receive_progress()
+    closures = Enum.filter(observed, &(Map.get(&1, :kind) == :model_stream_closed))
+
+    for closure <- closures do
+      assert is_integer(closure.delta_count) and closure.delta_count >= 0,
+             "a closing item published #{inspect(closure.delta_count)} as a count"
+    end
+
+    assert Enum.any?(closures, &(&1.disposition == :abandoned)),
+           "the attempt whose count could not be read was not abandoned"
+
+    counts =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "model_result_committed"))
+      |> Enum.map(&get_in(&1.payload, ["reply", "delta_count"]))
+
+    assert Enum.all?(counts, &(is_nil(&1) or (is_integer(&1) and &1 >= 0))),
+           "a durable assistant message carries #{inspect(counts)} as a count"
+
+    # And the two closing-item constructors refuse it directly, which is what
+    # makes the rule a property of the public boundary rather than of the two
+    # callers that happen to validate before reaching it.
+    assert_raise FunctionClauseError, fn ->
+      Loopex.StreamDomain.model_closed("t1", "d1", 0, :complete, -1)
+    end
+
+    assert_raise FunctionClauseError, fn ->
+      Loopex.StreamDomain.tool_closed("t1", "d1", "c1", 0, :complete, -1)
+    end
+
+    assert %{delta_count: 0} = Loopex.StreamDomain.model_closed("t1", "d1", 0, :complete, 0)
+
+    # The executor half is refused durably rather than coerced: a receipt this
+    # runtime cannot read is not a receipt.
+    answering =
+      start_with_executor(
+        AgentLoopAnsweringExecutor,
+        AgentLoopAnsweringExecutor.start(%{}),
+        one_call_script(),
+        receipt_extras: %{progress_count: -1}
+      )
+
+    coordinator = coordinator_of(answering.runtime)
+    reference = Process.monitor(coordinator)
+
+    assert_receive {:DOWN, ^reference, :process, ^coordinator, reason},
+                   10_000,
+                   "a receipt reporting a negative progress count was committed"
+
+    assert match?({:executor_fact_failed, _}, reason),
+           "the owner stopped for #{inspect(reason)} rather than for the malformed receipt"
+
+    refute answering.session_id
+           |> then(&Fixture.records(answering, &1))
+           |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed")),
+           "a receipt reporting a negative progress count reached the journal"
+  end
+
+  test "a complete model stream closes on its reply's own delta count" do
+    # Concept: ADR 0011 assigns a complete closure the producer's own statement,
+    # and the executor side of that table is proved by
+    # `a complete tool stream closes on its receipt's own progress count`. This
+    # is the model side of the same rule.
+    #
+    # Technical depth: the adapter below emits two deltas and reports two. One is
+    # past the declared payload ceiling and is refused here, so one item reaches
+    # the operator under a closure stating two. That difference is the signal: a
+    # consumer comparing the stated total against what it received learns that
+    # something did not arrive, whether the transient plane coalesced it away or
+    # this runtime refused it. Substituting the count this runtime published --
+    # which an earlier round of this amendment did, on both sides -- makes the
+    # two numbers agree and leaves a live consumer with no evidence at all.
+    fixture =
+      start(
+        script: [
+          %{text: "ab", calls: [], deltas: ["a", String.duplicate("x", 1_000_000)]}
+        ],
+        progress_to: self()
+      )
+
+    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    _events = drain(attachment)
+
+    observed = receive_progress()
+
+    closure = Enum.find(observed, &(Map.get(&1, :kind) == :model_stream_closed))
+    assert closure, "the model domain was never closed"
+    assert closure.disposition == :complete
+
+    deltas = Enum.filter(observed, &(Map.get(&1, :kind) == :text_delta))
+
+    assert length(deltas) == 1,
+           "the fixture did not produce one accepted and one refused delta"
+
+    assert closure.delta_count == 2,
+           "the closure stated #{closure.delta_count} rather than the two its adapter reported, " <>
+             "so a consumer has no evidence that a delta never arrived"
+  end
+
+  test "a run that no executor answered still reports the period it would have stopped under" do
+    # Concept: the ending that most needs the period is the one with no receipt
+    # in it.
+    #
+    # Technical depth: this run's model answers on its first turn and requests no
+    # tool, so no executor is ever dispatched and nothing writes a
+    # `cleanup_grace_ms` anywhere. Under the receipt-derived reading the terminal
+    # carried `nil`, and an operator had no way to tell a period of zero from a
+    # period nobody recorded. It is a session declaration now, so the run reports
+    # it regardless of what ran.
+    fixture =
+      start_with_executor(
+        AgentLoopAnsweringExecutor,
+        AgentLoopAnsweringExecutor.start(%{}),
+        [%{text: "no tools here", calls: []}],
+        cleanup_grace_ms: 1_250
+      )
+
+    finished = Enum.find(drain(fixture.attachment), &(&1.kind == "run.finished"))
+
+    assert finished["outcome"] == "completed"
+
+    assert finished["cleanup_grace_ms"] == 1_250,
+           "a run that dispatched no tool reported #{inspect(finished["cleanup_grace_ms"])} " <>
+             "instead of the period its session declared"
   end
 
   test "a model delta emitted after its stream is closed is neither projected nor counted" do

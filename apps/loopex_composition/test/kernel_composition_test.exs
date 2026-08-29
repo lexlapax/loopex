@@ -150,10 +150,27 @@ defmodule LoopexCompositionTest do
            "the composition does not forward the declared process probe: [#{forwarded}]"
 
     # Forwarded rather than defaulted: a key the host did not supply must stay
-    # absent so the executor's own declared default applies, rather than this
+    # absent so the one default the port declares applies, rather than this
     # module inventing one.
     refute source =~ ~r/cleanup_grace_ms:\s*\d/,
            "the composition names a cleanup period of its own instead of forwarding the host's"
+
+    # Concept: the cleanup period reaches the session as well as the hand.
+    #
+    # Technical depth: ADR 0009 makes it a *session* configuration value. The
+    # period a run's terminal reports is the session's declaration, so a
+    # composition that handed it only to the executor would let the two differ:
+    # the ending would name a number the cleanup did not run under. Both halves
+    # are read out of the one list this module forwards to `Loopex.start_link/1`,
+    # asserted here for the same reason as the half above — this is where it is
+    # decided, and there is no accessor to read it back from without widening the
+    # surface for a case.
+    [host_supplied] =
+      Regex.run(~r/@host_supplied ~w\(([^)]*)\)a/, source, capture: :all_but_first)
+
+    assert host_supplied =~ "cleanup_grace_ms",
+           "the composition does not forward the declared cleanup period to the session, so a " <>
+             "run's ending can report a period its cleanup never ran under: [#{host_supplied}]"
   end
 
   test "the shipped composition requires a host supplied policy and ships no permissive default" do

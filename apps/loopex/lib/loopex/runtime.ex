@@ -22,6 +22,7 @@ defmodule Loopex.Runtime do
   """
 
   alias Loopex.Attachment
+  alias Loopex.Executor
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Store
@@ -397,7 +398,8 @@ defmodule Loopex.Runtime do
              project_manifest: nil,
              project_decision: nil,
              grant_decision: nil,
-             fault_to: nil
+             fault_to: nil,
+             cleanup_grace_ms: nil
            ),
          {:ok, runtime_id} <- fetch_identifier(validated, :runtime_id),
          {:ok, %Store{} = store} <- Keyword.fetch(validated, :store),
@@ -415,6 +417,7 @@ defmodule Loopex.Runtime do
          {:ok, sampling} <- validate_sampling(validated[:sampling]),
          {:ok, grant_decision} <- validate_grant_decision(validated[:grant_decision]),
          {:ok, fault_to} <- validate_sink(validated[:fault_to]),
+         {:ok, cleanup_grace_ms} <- validate_cleanup_grace(validated[:cleanup_grace_ms]),
          :ok <-
            validate_loop_configuration(
              model,
@@ -441,7 +444,8 @@ defmodule Loopex.Runtime do
          project_manifest: validated[:project_manifest],
          project_decision: validated[:project_decision],
          grant_decision: grant_decision,
-         fault_to: fault_to
+         fault_to: fault_to,
+         cleanup_grace_ms: cleanup_grace_ms
        ]}
     else
       # Concept: a missing host policy says so, rather than reading as a typo.
@@ -579,6 +583,21 @@ defmodule Loopex.Runtime do
        do: {:ok, value}
 
   defp validate_capacity(_value), do: {:error, :invalid_attachment_capacity}
+
+  # Concept: the session declares how long its cleanup may take, or takes the
+  # port's number.
+  #
+  # Technical depth: ADR 0009 makes this a session configuration value with a
+  # default. A host that names none gets the default rather than an absence, so
+  # every run terminal can report the period it stopped under. Zero is refused
+  # along with everything else non-positive: a period of nothing is not a
+  # cooperative window, it is a kill, and a host that means that should say so by
+  # asking for the smallest period it actually wants to wait.
+  defp validate_cleanup_grace(nil), do: {:ok, Executor.default_cleanup_grace_ms()}
+
+  defp validate_cleanup_grace(value) when is_integer(value) and value > 0, do: {:ok, value}
+
+  defp validate_cleanup_grace(_value), do: {:error, :invalid_cleanup_grace_ms}
 
   defp validate_sink(nil), do: {:ok, nil}
   defp validate_sink(pid) when is_pid(pid), do: {:ok, pid}

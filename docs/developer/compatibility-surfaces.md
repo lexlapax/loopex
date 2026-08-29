@@ -74,7 +74,7 @@ so nothing has welded two surfaces together by shipping them in one artifact.
 `state_root/0`, `runtime_placement_id/1`, `track_session/3`, `list_sessions/1`,
 and `version/0`. The runtime start options are part of this surface, including
 `:tools`, `:active_tools`, `:policy`, `:bounds`, `:sampling`, `:progress_to`,
-and `:diagnostics_to`.
+`:diagnostics_to`, and `:cleanup_grace_ms`.
 
 **Ports.** Core declares exactly five behaviours: `Loopex.Store`,
 `Loopex.Model`, `Loopex.Executor`, `Loopex.Policy`, and
@@ -85,10 +85,33 @@ implementation of any of them is written against bytes that may change in the
 next milestone.
 
 The shipped local executor gains two start options, `cleanup_grace_ms` and
-`process_probe`, each with a declared default and each readable back from the
-running executor and recorded on every receipt it retains. They are the local
-executor's own configuration rather than a port change, and an embedder that
-passes neither behaves exactly as before.
+`process_probe`, each readable back from the running executor and recorded on
+every receipt it retains. `process_probe` is the local executor's own
+configuration and defaults to `/bin/ps`. `cleanup_grace_ms` is not: ADR 0009
+makes the cleanup period a declared *session* configuration value, so the
+default lives on the port as `Loopex.Executor.default_cleanup_grace_ms/0` and the
+session declares it. `LoopexComposition.start/1` hands one number to both, which
+is what stops a run's terminal naming a period its cleanup did not run under. An
+embedder that passes neither behaves exactly as before.
+
+`Loopex.Executor`'s job request gains one declared budget,
+`resource_budgets["max_wall_time_ms"]`, beside the output ceiling already there.
+`resource_budgets` is an open plain map, so this is additive: an executor that
+ignores the key behaves as before, and the shipped local executor bounds a job by
+the smallest of the run's instant, that budget, and the budget its own copy of
+the definition declares. The key is covered by the job's canonical digest like
+every other semantic field, so a job built by an M2 coordinator and one built by
+hand without it are different jobs.
+
+**An abort's acceptance is an admission, not an ending.** `Loopex.command/2`
+returns `{:accepted, command_id}` once the abort commits durably; ADR 0009 then
+orders the cleanup, then the run's terminal. The run is still active between the
+two, so a prompt submitted there is queued as a follow-up on that run rather
+than starting a new one, and a caller that needs the run over waits for its
+`run.finished` event. The previous shape committed the admission and the ending
+as one record after the cleanup, which is why no caller had to think about the
+gap — and is also why a host that died inside the cleanup left no record that
+anyone had asked to stop.
 
 `Loopex.Executor` gains no second callback, but the *meaning* of one of its
 return values changed and an existing implementation is affected without
@@ -104,6 +127,23 @@ loop carried on past it. Failing closed is the correct default and it is a real
 behaviour change: an executor that adopts nothing keeps compiling, stays
 conforming, and sees errors that used to end a call `failed` now end the run
 `outcome_unknown`.
+
+**Progress plane.** Every item of a stream domain, including its closing item, is
+now emitted by one process per open domain rather than by the producer's callback
+and the coordinator between them. Nothing about the items changes — same shapes,
+same labels, same sequences — but a consumer can now rely on the rule ADR 0011
+already stated and this runtime only approximated: no item of a domain appears
+after that domain's closure.
+
+**Canonical model deltas.** `Loopex.Model.valid_delta?/1` now requires a delta to
+carry *exactly* the fields `Loopex.Model.delta_fields/1` declares for its kind.
+Carrying an undeclared name was already refused; omitting a declared one now is
+too, so an adapter that emitted `%{kind: :text_delta, text: "x"}` without a
+`content_index` had that item published and counted before and has it dropped
+now. The payload ceiling is also total: any field whose size the named
+measurements do not otherwise know is measured by encoding it, so an unbounded
+integer no longer measures as nothing. Both are behaviour changes for an adapter
+that compiles unchanged, and the shipped adapter already emitted complete deltas.
 
 **Durable records.** The committed record kinds are `session_genesis`,
 `owner_advanced`, `command_admitted`, `model_request_committed`,
@@ -137,9 +177,12 @@ breaking change to every retained digest. See
 [Agent loop and tools](agent-loop-and-tools.md#technical-depth).
 
 **Reference composition.** `LoopexComposition.start/1` requires `:runtime_id`,
-`:state_root`, `:workspace`, and `:policy`, and accepts `:progress_to` and
-`:diagnostics_to`, and passes `:project_manifest` and `:project_decision`
-through to the runtime. It names four concrete implementations, so an embedder that
+`:state_root`, `:workspace`, and `:policy`, and accepts `:progress_to`,
+`:diagnostics_to`, and `:cleanup_grace_ms`; it passes `:project_manifest` and
+`:project_decision` through to the runtime, and hands `:cleanup_grace_ms` to the
+session and the executor together so a run's ending cannot report a period its
+cleanup did not run under. `:process_probe` reaches the executor alone, which is
+where that option belongs. It names four concrete implementations, so an embedder that
 depends on it transitively acquires the reference adapters and their external
 dependency whether or not every one is used. An embedder who wants a different
 Store, Model, Executor, or ArtifactStore composes the ports and the `Loopex`
@@ -148,7 +191,7 @@ facade directly instead. See
 
 **Operator command.** `loopex run`, `sessions`, `resume`, `cancel`, and
 `artifact`, with the flags `--policy`, `--state-root`, `--workspace`,
-`--steer`, and `--follow-up`. An unrecognised flag is refused rather than
+`--steer`, `--follow-up`, and `--cleanup-grace-ms`. An unrecognised flag is refused rather than
 ignored, which means adding a flag is observable and removing one is breaking.
 `loopex artifact` reads objects through the `Loopex.ArtifactStore` port, so the
 subcommand follows whatever artifact store a composition supplies rather than

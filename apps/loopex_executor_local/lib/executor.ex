@@ -51,7 +51,13 @@ defmodule Loopex.Executor.Local do
   # confirmation, and retaining the receipt -- draws what remains of that one
   # instant. Reaching it means the cleanup is over, not that the next step starts
   # its own allowance.
-  @default_cleanup_grace_ms 5_000
+  #
+  # The number itself is the port's, not this executor's. ADR 0009 makes the
+  # cleanup grace a session configuration value, and a session that declares one
+  # hands it here; a session and a hand that each kept their own default would
+  # agree only until one was edited, and the run's terminal would then report a
+  # period the cleanup did not run under.
+  @default_cleanup_grace_ms Executor.default_cleanup_grace_ms()
 
   # Concept: the program this executor asks whether a process group still has
   # members, and the share of the declared period reserved for writing down what
@@ -228,15 +234,16 @@ defmodule Loopex.Executor.Local do
 
   ## Technical depth
 
-  ADR 0009 asks for a single visible, configured *session* grace reported in the
-  run's terminal evidence. This milestone does not do that, and this function is
-  not it: it is where a **host that composed this executor** reads back the value
-  it passed. A session cannot reach it, the shipped composition does not forward
-  it, and no terminal reports it -- recorded at
-  `docs/evidence/M2-recorded-limitations.md#cleanup-grace-not-session-visible`.
-  It is the same
-  number every receipt this executor retains reports as `cleanup_grace_ms`, so
-  the terminal evidence of a job and the live configuration cannot disagree.
+  ADR 0009 asks for a single configured *session* grace reported in the run's
+  terminal evidence, and that is where the number comes from: the session
+  declares it, the shipped composition hands the same value here, and the run's
+  terminal reports the session's declaration. This function is not that
+  declaration — it is where a **host that composed this executor** reads back the
+  value it passed, which is the number this executor actually spends and the
+  number every receipt it retains reports as `cleanup_grace_ms`. A host that
+  composed the two halves with different numbers would see them disagree here,
+  which is the point of being able to read it at all. The one default they share
+  is `Loopex.Executor.default_cleanup_grace_ms/0`.
   """
   @spec cleanup_grace_ms(t()) :: non_neg_integer()
   def cleanup_grace_ms(executor) when is_pid(executor),
@@ -1585,18 +1592,41 @@ defmodule Loopex.Executor.Local do
   # tool that declares a shorter budget than the run now genuinely ends sooner
   # rather than merely being compared against the clock once and then left to
   # run.
+  #
+  # The bound is the smallest of the three numbers that claim to hold: the run's
+  # own instant, the budget the session declared for this job, and the budget the
+  # definition this executor resolved declares. The session's declaration is read
+  # because it is the one that was journaled with the effect intent -- the
+  # coordinator already declares this job's output ceiling the same way, and a
+  # wall-time ceiling invented here alone was a bound no record named and no case
+  # could drive without waiting out a shipped thirty-second budget. Taking the
+  # minimum rather than the session's number is what keeps it fail-closed: a
+  # caller cannot widen a tool's declared budget by declaring a larger one.
   defp effective_deadline(job, tool) do
-    case declared_wall_time(tool) do
+    case declared_wall_time(job, tool) do
       nil -> job.run_deadline
       budget -> min(job.run_deadline, System.system_time(:millisecond) + budget)
     end
   end
 
-  defp declared_wall_time(%{coding: %{"budgets" => %{"wall_time_ms" => budget}}})
+  defp declared_wall_time(job, tool) do
+    case Enum.reject([job_wall_time(job), tool_wall_time(tool)], &is_nil/1) do
+      [] -> nil
+      declared -> Enum.min(declared)
+    end
+  end
+
+  defp job_wall_time(%{resource_budgets: %{"max_wall_time_ms" => budget}})
        when is_integer(budget) and budget > 0,
        do: budget
 
-  defp declared_wall_time(_tool), do: nil
+  defp job_wall_time(_job), do: nil
+
+  defp tool_wall_time(%{coding: %{"budgets" => %{"wall_time_ms" => budget}}})
+       when is_integer(budget) and budget > 0,
+       do: budget
+
+  defp tool_wall_time(_tool), do: nil
 
   # Concept: output beyond a tool's bound is retained, not discarded.
   #

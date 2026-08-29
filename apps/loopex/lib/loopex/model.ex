@@ -266,17 +266,25 @@ defmodule Loopex.Model do
 
   ## Technical depth
 
-  Enforces the payload ceiling and the plain-data rule at the boundary, so an
-  adapter cannot put an unbounded binary or a provider struct on the progress
-  plane. A delta that fails this check is dropped and counted rather than
-  projected, because a malformed item must not be able to break a sequence a
-  consumer uses to detect loss.
+  Enforces the exact field set, the payload ceiling, and the plain-data rule at
+  the boundary, so an adapter cannot put an unbounded term or a provider struct
+  on the progress plane. A delta that fails this check is dropped rather than
+  projected, and it reserves no sequence, so it never appears in the count its
+  domain's closure publishes -- a malformed item must not be able to break a
+  sequence a consumer uses to detect loss.
+
+  The set is exact in both directions. Admitting only declared names stops a
+  field nobody bounded from riding along; requiring every declared name stops the
+  opposite defect, which is a delta whose meaning is missing: a `text_delta`
+  carrying no `text` reconstructs to nothing, and a `tool_call_delta` carrying no
+  `tool_call_id` names no call, yet both were admitted, sequenced, and published
+  as though they said something.
   """
   @spec valid_delta?(term()) :: boolean()
   def valid_delta?(%{kind: kind} = delta) when kind in @delta_kinds do
     admitted = Map.fetch!(@delta_fields, kind)
 
-    Enum.all?(Map.keys(delta), &(&1 in admitted)) and
+    Enum.sort(Map.keys(delta)) == Enum.sort(admitted) and
       plain?(Map.delete(delta, :kind)) and
       delta_bytes(delta) <= @max_delta_bytes
   end
@@ -368,6 +376,14 @@ defmodule Loopex.Model do
   # Every binary the delta carries, not a named four. A partial measurement is
   # the same defect as a partial field check: what it does not look at is
   # unbounded.
+  #
+  # The measurement is total for the same reason. Everything that is not a
+  # binary, a list, or a plain map used to measure as zero, and an integer is
+  # neither -- so a `content_index` of two raised to the one-point-six-millionth
+  # power measured as nothing and crossed the plane as two hundred kilobytes
+  # under a sixty-four kilobyte ceiling. A term whose size the named clauses do
+  # not know is measured by encoding it, which is exactly what putting it on the
+  # plane will cost.
   defp delta_bytes(delta) do
     delta
     |> Map.delete(:kind)
@@ -383,7 +399,7 @@ defmodule Loopex.Model do
     end)
   end
 
-  defp term_bytes(_value), do: 0
+  defp term_bytes(value), do: byte_size(:erlang.term_to_binary(value))
 
   defp plain?(term) when is_binary(term) or is_integer(term) or is_boolean(term) or is_nil(term),
     do: true

@@ -322,13 +322,101 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     {_reply, fake_deltas} = collect(Streaming)
     assert Enum.all?(fake_deltas, &Model.valid_delta?/1)
 
-    # A delta carrying a host term is refused rather than projected.
-    refute Model.valid_delta?(%{kind: :text_delta, text: "x", owner: self()})
-    refute Model.valid_delta?(%{kind: :not_a_kind, text: "x"})
+    # A delta carrying a host term is refused rather than projected. Each of
+    # these is otherwise exactly a valid delta, so the refusal is about the one
+    # thing named rather than about a second defect the shape happens to have.
+    refute Model.valid_delta?(%{kind: :text_delta, content_index: 0, text: "x", owner: self()})
+    refute Model.valid_delta?(%{kind: :not_a_kind, content_index: 0, text: "x"})
 
     # And one past the declared payload ceiling is refused too.
-    refute Model.valid_delta?(%{kind: :text_delta, text: String.duplicate("x", 70_000)})
+    refute Model.valid_delta?(%{
+             kind: :text_delta,
+             content_index: 0,
+             text: String.duplicate("x", 70_000)
+           })
   end
+
+  test "a delta missing a field its kind declares is refused rather than projected" do
+    # Concept: the field set is exact in both directions.
+    #
+    # Technical depth: the predicate checked only that the names a delta carried
+    # were declared, so a delta carrying *none* of them passed. `%{kind:
+    # :text_delta}` reconstructs to nothing and `%{kind: :tool_call_delta}` names
+    # no call, yet both were admitted, handed a sequence, published, and counted
+    # in their domain's closing total -- a consumer replaying that stream gets a
+    # gapless sequence of items that say nothing. Admitting a name nobody
+    # declared and omitting a name everybody declared are the same defect seen
+    # from two sides.
+    # The expected sets are written out rather than read from
+    # `Model.delta_fields/1`, because a case that builds its samples from the
+    # same list the predicate checks against proves nothing about that list: drop
+    # `:text` from both and the sample no longer carries it, the predicate no
+    # longer wants it, and the case stays green while every text delta on the
+    # plane says nothing. That is the shape of the defect an earlier round found
+    # in this same file, where the observed kinds were compared against
+    # `Model.delta_kinds/0` itself.
+    expected = %{
+      text_delta: [:kind, :content_index, :text],
+      reasoning_delta: [:kind, :content_index, :text],
+      tool_call_delta: [:kind, :call_index, :tool_call_id, :name, :arguments_fragment]
+    }
+
+    assert Enum.sort(Map.keys(expected)) == Enum.sort(Model.delta_kinds())
+
+    for {kind, fields} <- expected do
+      assert Enum.sort(Model.delta_fields(kind)) == Enum.sort(fields),
+             "#{inspect(kind)} declares #{inspect(Model.delta_fields(kind))} rather than " <>
+               "#{inspect(fields)}"
+
+      refute Model.valid_delta?(%{kind: kind}),
+             "a bare #{inspect(kind)} carrying none of its declared fields was admitted"
+
+      declared = fields -- [:kind]
+      complete = Map.new(declared, &{&1, sample_field(&1)}) |> Map.put(:kind, kind)
+
+      assert Model.valid_delta?(complete),
+             "the sample #{inspect(kind)} this case builds is not itself valid"
+
+      for omitted <- declared do
+        refute Model.valid_delta?(Map.delete(complete, omitted)),
+               "a #{inspect(kind)} missing #{inspect(omitted)} was admitted"
+      end
+    end
+  end
+
+  test "a delta field whose size the ceiling cannot see is refused rather than projected" do
+    # Concept: the payload ceiling is total, or it is not a ceiling.
+    #
+    # Technical depth: the measurement named binaries, lists, and plain maps and
+    # measured everything else as zero. An integer is none of those, so a
+    # `content_index` of two raised to the one-point-six-millionth power measured
+    # as nothing, passed a sixty-four kilobyte ceiling, and crossed the progress
+    # plane as roughly two hundred kilobytes -- through a field an adapter fills
+    # from its provider's stream. Anything the named clauses do not know is
+    # measured by encoding it now, which is what putting it on the plane
+    # actually costs.
+    huge = Bitwise.<<<(1, 1_600_000)
+
+    assert byte_size(:erlang.term_to_binary(huge)) > 65_536,
+           "this case assumes its integer is larger than the declared delta ceiling"
+
+    refute Model.valid_delta?(%{kind: :text_delta, content_index: huge, text: "x"}),
+           "an unbounded number reached the progress plane through a field the ceiling " <>
+             "measured as nothing"
+
+    # An ordinary index is unaffected, so the ceiling refuses the size rather
+    # than the type.
+    assert Model.valid_delta?(%{kind: :text_delta, content_index: 3, text: "x"})
+  end
+
+  # One valid value per declared field name, so a case can build a complete
+  # delta of any kind and then remove exactly one thing.
+  defp sample_field(:content_index), do: 0
+  defp sample_field(:call_index), do: 0
+  defp sample_field(:text), do: "x"
+  defp sample_field(:tool_call_id), do: "toolu_1"
+  defp sample_field(:name), do: "write"
+  defp sample_field(:arguments_fragment), do: ~s({"path":"a.txt"})
 
   test "the delta payload ceiling counts the provider-controlled call identifier and tool name" do
     # The defect this case holds down: the ceiling counted only the two fields

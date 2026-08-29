@@ -96,6 +96,31 @@ defmodule Loopex.StreamDomain do
   @doc """
   ## Concept
 
+  The domain an executor job's progress belongs to.
+
+  ## Technical depth
+
+  ADR 0011 makes a stream domain one `(operation_id, attempt)` pair's progress
+  stream, and a job request carries both. Deriving it from the job here rather
+  than naming its parts at the dispatch site is what stops the two drifting: a
+  coordinator that wrote the attempt out by hand could write a different one than
+  the job it dispatched carries, and two attempts of one operation would then
+  share a label, run their sequences together, and have each closing total
+  describe the other's items.
+
+  `M2` dispatches exactly one attempt per tool operation — an unproven effect is
+  never blindly retried — so the second attempt this exists for is the
+  reconciliation contract's, not this loop's. Which is precisely why it lives
+  here, where a case can hand it two real job requests, rather than inside a
+  branch nothing can reach.
+  """
+  @spec for_job(map()) :: id()
+  def for_job(%{session_id: session_id, operation_id: operation_id, attempt: attempt}),
+    do: derive(:executor, session_id, operation_id, attempt)
+
+  @doc """
+  ## Concept
+
   Derives the domain identifier for one attempt.
 
   ## Technical depth
@@ -129,7 +154,7 @@ defmodule Loopex.StreamDomain do
   """
   @spec model_closed(binary(), id(), non_neg_integer(), disposition(), non_neg_integer()) :: map()
   def model_closed(turn_id, domain_id, base_event_sequence, disposition, delta_count)
-      when disposition in @dispositions do
+      when disposition in @dispositions and is_integer(delta_count) and delta_count >= 0 do
     %{
       kind: :model_stream_closed,
       turn_id: turn_id,
@@ -159,7 +184,7 @@ defmodule Loopex.StreamDomain do
           non_neg_integer()
         ) :: map()
   def tool_closed(turn_id, domain_id, tool_call_id, base_event_sequence, disposition, count)
-      when disposition in @dispositions do
+      when disposition in @dispositions and is_integer(count) and count >= 0 do
     %{
       kind: :tool_stream_closed,
       turn_id: turn_id,

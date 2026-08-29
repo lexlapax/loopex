@@ -46,7 +46,13 @@ defmodule LoopexComposition do
   # trust decision travels beside the manifest it binds: a composition that
   # forwarded only the manifest could never stage a project block at all, which
   # made the withheld path the only path an embedder could reach.
-  @host_supplied [:project_manifest, :project_decision, :progress_to, :diagnostics_to]
+  # `:cleanup_grace_ms` reaches both halves: the session declares it, and the
+  # executor that performs the cleanup is handed the same option, so the period a
+  # run's terminal reports is the period the hand actually stopped under. Neither
+  # is defaulted here -- an option the host did not supply stays absent, and each
+  # side falls back to the one number the port declares.
+  @host_supplied ~w(project_manifest project_decision progress_to diagnostics_to
+                    cleanup_grace_ms)a
 
   @doc """
   ## Concept

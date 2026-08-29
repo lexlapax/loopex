@@ -29,6 +29,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Conversation
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.SessionState
+  alias Loopex.Runtime.StreamRelay
   alias Loopex.Executor
   alias Loopex.Model
   alias Loopex.Policy
@@ -199,6 +200,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
        sampling: Keyword.get(options, :sampling),
        grant_decision: Keyword.fetch!(options, :grant_decision),
        fault_to: Keyword.fetch!(options, :fault_to),
+       cleanup_grace_ms: Keyword.fetch!(options, :cleanup_grace_ms),
+       # The runs whose model dispatch this owner staged itself. A run at
+       # `model_dispatched` that is not in here was dispatched by a predecessor,
+       # and its attempt is abandoned rather than re-run under the same identity.
+       adopted: MapSet.new(),
        in_flight: %{},
        pending_cleanup: %{},
        streams: %{},
@@ -535,6 +541,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     with {:ok, records} <- load_all_records(state.store, state.session_id),
          {:ok, events} <- load_all_events(state.store, state.session_id),
          {:ok, durable} <- SessionState.recover(state.session_id, records, events),
+         durable = SessionState.declare_cleanup_grace(durable, state.cleanup_grace_ms),
          true <- durable.owner_epoch == state.owner.owner_epoch,
          true <- durable.owner_incarnation_id == state.owner.owner_incarnation_id,
          true <- durable.owner_transaction_id == state.owner.transaction_id do
@@ -753,16 +760,29 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # cleanup ran, half ran, or never started, and re-running it would be blindly
   # retrying work whose effect is exactly what is unknown. `outcome_unknown`
   # carrying a reconciliation reference is the only honest ending.
+  #
+  # The operation is settled before the run, because ADR 0009 derives the run
+  # outcome from the owned operation outcomes rather than from the fact that an
+  # abort was admitted. A recovering owner that committed only the run terminal
+  # left the dispatched call with no ending of its own: an operator saw
+  # `tool.started` and nothing after it, and the run's outcome was a second,
+  # independent statement of the same unknown rather than a consequence of it.
   defp resume_aborting_run(state, run_id) do
     if Map.has_key?(state.pending_cleanup, run_id) do
       {:noreply, state}
     else
-      commit_terminal(
-        state,
-        run_id,
-        "outcome_unknown",
-        %{reconciliation_ref: reconciliation_ref(state, run_id)}
-      )
+      case commit_owned_operation_unknown(state, run_id) do
+        {:ok, settled} ->
+          commit_terminal(
+            settled,
+            run_id,
+            "outcome_unknown",
+            %{reconciliation_ref: reconciliation_ref(state, run_id)}
+          )
+
+        {:error, reason} ->
+          {:stop, {:tool_result_failed, reason}, state}
+      end
     end
   end
 
@@ -842,7 +862,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
            ),
          {:ok, next} <- commit_internal(state, proposal) do
       send(self(), :advance_work)
-      {:noreply, next}
+      {:noreply, adopt_run(next, run_id)}
     else
       {:error, reason} -> {:stop, {:model_request_failed, reason}, state}
     end
@@ -940,7 +960,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
     with {:ok, proposal} <-
            SessionState.propose_run_terminal(state.durable, run_id, outcome, detail),
          {:ok, next} <- commit_internal(state, proposal) do
-      {:noreply, next}
+      # A run that has ended is no longer this owner's to adopt, and a session
+      # that runs for a long time should not accumulate one identifier per run
+      # it has finished.
+      {:noreply, %{next | adopted: MapSet.delete(next.adopted, run_id)}}
     else
       {:error, reason} -> {:stop, {:run_terminal_failed, reason}, state}
     end
@@ -1093,24 +1116,93 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp start_model_work(state, work) do
-    if in_flight?(state, :model, work.run_id) do
-      {:noreply, state}
-    else
-      module = state.model.module
-      request = work.request
-      options = state.model.options
-      {stream, progress} = model_progress_fun(state, work)
+    cond do
+      in_flight?(state, :model, work.run_id) ->
+        {:noreply, state}
 
-      task =
-        Task.Supervisor.async_nolink(state.workers, fn ->
-          module.complete(request, options, progress)
-        end)
+      not MapSet.member?(state.adopted, work.run_id) ->
+        adopt_inherited_attempt(state, work)
 
-      state = %{state | streams: Map.put(state.streams, {:model, work.run_id}, stream)}
-      state = arm_deadline(state, work.run_id)
-      {:noreply, put_in_flight(state, task.ref, {:model, work.run_id, task.pid})}
+      true ->
+        module = state.model.module
+        request = work.request
+        options = state.model.options
+        {stream, progress} = model_progress_fun(state, work)
+
+        task =
+          Task.Supervisor.async_nolink(state.workers, fn ->
+            module.complete(request, options, progress)
+          end)
+
+        state = %{state | streams: Map.put(state.streams, {:model, work.run_id}, stream)}
+        state = arm_deadline(state, work.run_id)
+        {:noreply, put_in_flight(state, task.ref, {:model, work.run_id, task.pid})}
     end
   end
+
+  # Concept: a provider call this owner did not make is not this owner's
+  # attempt, and dispatching those bytes again is a second call.
+  #
+  # Technical depth: a predecessor that died with a model call in flight leaves
+  # the run at `model_dispatched`, and a successor used to dispatch the same
+  # staged bytes under the same attempt. ADR 0011 makes a stream domain one
+  # *attempt's* progress stream, so reusing the attempt reuses the domain and two
+  # owners produce into one label. A review drove it end to end: the successor
+  # emitted sequence zero and a complete closure, and the predecessor's producer
+  # then emitted sequences zero, one and two under the identical domain, so the
+  # closure was no longer last and sequence zero appeared twice.
+  #
+  # Abandoning the inherited attempt is what the abandonment record already
+  # exists to do, and its own reducer says so: the increment is what makes a
+  # redispatch open a new domain rather than reuse the abandoned one, and what
+  # bounds retries across succession. It also charges the call the predecessor
+  # actually made, which a successor silently reusing the attempt did not.
+  #
+  # A run this owner staged itself is adopted at that commit, so the ordinary
+  # first dispatch is never mistaken for an inherited one, and the abandonment
+  # adopts the run so the retry that follows is this owner's own.
+  #
+  # The predecessor's domain gets no closing item, because this owner never
+  # opened it, and ADR 0011 tells a consumer to read a missing closure as an
+  # incomplete transient view rather than as an abandoned attempt.
+  defp adopt_inherited_attempt(state, work) do
+    state = adopt_run(state, work.run_id)
+
+    case commit_abandoned_attempt(state, work.run_id) do
+      {:ok, next} ->
+        send(self(), :advance_work)
+        {:noreply, next}
+
+      {:error, :no_attempt_pending} ->
+        send(self(), :advance_work)
+        {:noreply, state}
+
+      {:error, reason} ->
+        {:stop, {:model_attempt_failed, reason}, state}
+    end
+  end
+
+  defp accept_counted_model_result(state, run_id, reply, count) do
+    state = close_model_stream(state, run_id, {:complete, count})
+    state = disarm_deadline(state, run_id)
+
+    with {:ok, proposal} <-
+           SessionState.propose_model_result(
+             state.durable,
+             run_id,
+             reply,
+             active_generations(state)
+           ),
+         {:ok, next} <- commit_internal(state, proposal) do
+      send(self(), :advance_work)
+      {:noreply, next}
+    else
+      {:error, reason} -> {:stop, {:model_result_failed, reason}, state}
+    end
+  end
+
+  defp adopt_run(state, run_id),
+    do: %{state | adopted: MapSet.put(state.adopted, run_id)}
 
   # Concept: the coordinator names the stream, not the adapter.
   #
@@ -1130,138 +1222,68 @@ defmodule Loopex.Runtime.SessionCoordinator do
       )
 
     turn_id = work.turn_id
-    sink = state.progress_to
-    counter = new_stream_counter()
-    stream = %{domain: domain, turn_id: turn_id, counter: counter}
+
+    # Concept: the first delta of a domain is sequence zero.
+    #
+    # Technical depth: ADR 0011 fixes the algebra as zero-based, so a closing
+    # count of `n` and a last sequence of `n - 1` describe the same stream.
+    # Incrementing before reading made the first item one, which left every
+    # consumer's gap check off by one against the count it is compared with. The
+    # relay hands out the value it holds and then advances, in one process, so
+    # two emissions can never claim one number and nothing has to be reconciled
+    # afterwards.
+    {:ok, relay} =
+      StreamRelay.open(
+        state.workers,
+        state.progress_to,
+        fn delta, sequence ->
+          Map.merge(delta, %{
+            turn_id: turn_id,
+            stream_domain_id: domain,
+            model_sequence: sequence
+          })
+        end,
+        fn disposition, count ->
+          StreamDomain.model_closed(turn_id, domain, 0, disposition, count)
+        end
+      )
+
+    stream = %{domain: domain, turn_id: turn_id, relay: relay}
 
     {stream,
      fn delta ->
-       if Model.valid_delta?(delta) do
-         # Concept: the first delta of a domain is sequence zero.
-         #
-         # Technical depth: ADR 0011 fixes the algebra as zero-based, so a
-         # closing count of `n` and a last sequence of `n - 1` describe the same
-         # stream. Incrementing before reading made the first item one, which
-         # left every consumer's gap check off by one against the count it is
-         # compared with. The counter still holds the count; the sequence is the
-         # value it had before this item was added, taken atomically so two
-         # emissions can never claim one number.
-         case reserve_sequence(counter) do
-           :sealed ->
-             # The domain is closed and its total is published. A late delta is
-             # dropped rather than emitted past that total, and it is not
-             # counted, because the count belongs to what crossed the plane.
-             :ok
-
-           {:ok, sequence} ->
-             emit_model_delta(sink, delta, turn_id, domain, sequence)
-         end
-       end
-
+       # A malformed delta is dropped here rather than handed on, so it never
+       # consumes a sequence and never appears in any total.
+       if Model.valid_delta?(delta), do: StreamRelay.emit(relay, delta)
        :ok
      end}
   end
 
-  defp emit_model_delta(sink, delta, turn_id, domain, sequence) do
-    emit_progress(
-      sink,
-      Map.merge(delta, %{
-        turn_id: turn_id,
-        stream_domain_id: domain,
-        model_sequence: sequence
-      })
-    )
-  end
-
   defp model_operation_id(work), do: stable_id("model-operation", work.run_id, work.turn_number)
-
-  # Concept: taking a sequence and sealing a stream are one operation, or they
-  # are a race.
-  #
-  # Technical depth: a separate closed flag beside the counter is check-then-act.
-  # A producer reads the flag, is preempted, a closer publishes the closure with
-  # the count it can see, and the producer then increments and emits an item past
-  # a total already on the plane -- which is exactly the loss a consumer uses
-  # that total to detect, reported for an item that was not lost. The window is
-  # small and it is real: the callback runs in the producer's process and the
-  # closer runs in this one.
-  #
-  # The seal is therefore a bit inside the counter itself, and both operations
-  # are compare-and-exchange loops over that single word. A producer either
-  # reserves a sequence before the seal or sees the seal; a closer either seals
-  # before a reservation or counts it. There is no interleaving in which an item
-  # is emitted that the closing total does not include.
-  #
-  # Model and executor streams share this because they have the same algebra:
-  # ADR 0011 gives each domain one gapless zero-based sequence closed by one
-  # total. The model side previously had no seal at all, so a retained callback
-  # could emit into a closed domain with nothing to stop it.
-  @stream_sealed_bit 0x8000_0000_0000_0000
-
-  defp new_stream_counter, do: :atomics.new(1, signed: false)
-
-  defp reserve_sequence(counter) do
-    current = :atomics.get(counter, 1)
-
-    if Bitwise.band(current, @stream_sealed_bit) != 0 do
-      :sealed
-    else
-      case :atomics.compare_exchange(counter, 1, current, current + 1) do
-        :ok -> {:ok, current}
-        _lost_the_race -> reserve_sequence(counter)
-      end
-    end
-  end
-
-  # Returns the exact final count. Sealing an already-sealed stream returns the
-  # same count again rather than a second, different one, so a duplicate closure
-  # is impossible to derive from here.
-  defp seal_stream(counter) do
-    current = :atomics.get(counter, 1)
-
-    if Bitwise.band(current, @stream_sealed_bit) != 0 do
-      Bitwise.band(current, Bitwise.bnot(@stream_sealed_bit))
-    else
-      case :atomics.compare_exchange(
-             counter,
-             1,
-             current,
-             Bitwise.bor(current, @stream_sealed_bit)
-           ) do
-        :ok -> current
-        _lost_the_race -> seal_stream(counter)
-      end
-    end
-  end
 
   # Concept: every domain the coordinator opens is owed exactly one closure.
   #
-  # Technical depth: a complete attempt closes with the producer's own count; an
-  # abandoned one closes with the count the coordinator itself observed, which is
-  # exact because it stops accepting items for a domain once it has closed it.
+  # Technical depth: ADR 0011 fixes what each disposition states. A complete
+  # attempt produced the durable artifact of its kind, so its closure carries
+  # that producer's own figure -- the reply's `delta_count` -- and the difference
+  # between that figure and what a consumer received is the signal the closure
+  # exists to give: something did not arrive, whether the plane coalesced it away
+  # or this coordinator refused it. An abandoned attempt produced no such figure,
+  # so its closure carries the count the relay actually emitted.
+  #
+  # The relay emits the closure itself, as the last thing it does before it ends,
+  # which is what makes ADR 0011's "the closure is the last item of its domain"
+  # true rather than nearly true: one process emits every item of a domain, in
+  # its own mailbox order, and a producer handing an item to a closed domain is
+  # sending to a process that no longer exists.
+  #
   # Emission is the obligation — delivery is not guaranteed, because the closure
   # rides the transient plane like any other item and may be coalesced away or
   # lost with the plane when its owner changes.
-  defp close_model_stream(state, run_id, disposition, reported_count) do
+  defp close_model_stream(state, run_id, disposition) do
     case Map.fetch(state.streams, {:model, run_id}) do
       {:ok, stream} ->
-        # Sealing first is what makes the abandoned count exact rather than
-        # merely current: no delta can be reserved after this line, so the value
-        # it returns is the total that crossed the plane and not a sample of a
-        # counter still moving.
-        observed = seal_stream(stream.counter)
-
-        count =
-          case disposition do
-            :complete -> reported_count
-            :abandoned -> observed
-          end
-
-        emit_progress(
-          state.progress_to,
-          StreamDomain.model_closed(stream.turn_id, stream.domain, 0, disposition, count)
-        )
-
+        _stated = StreamRelay.close(stream.relay, disposition)
         %{state | streams: Map.delete(state.streams, {:model, run_id})}
 
       :error ->
@@ -1272,39 +1294,37 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Concept: the closing item says how many items this coordinator put on the
   # stream, which is the only count it can vouch for.
   #
-  # Technical depth: a completed stream closed with the executor's own
-  # `progress_count` -- the executor's claim about what it emitted, taken as this
-  # runtime's statement about what it published. Those are different numbers
-  # whenever `project_progress/2` refuses an event: an executor that emitted
-  # three, two of them with a wrong binding, had one item reach the operator
-  # under a closure declaring three, so a consumer using the closure to detect
-  # loss on the transient plane concluded that two items had been coalesced away.
-  # The refusals are not loss and are already reported as refusals.
+  # Technical depth: ADR 0011 fixes what each disposition states. A completed
+  # attempt returned a terminal receipt, so its closure carries that receipt's
+  # own `progress_count`; an abandoned one returned none, so its closure carries
+  # the count the relay emitted, which is exact because the relay emitted all of
+  # it and then ended.
   #
-  # The port declares no relationship between that field and what a coordinator
-  # accepted -- it could not, because refusal is the coordinator's decision and
-  # the executor has not heard of it. So the number is counted here, from what
-  # was emitted, and the executor's own figure stays where it belongs: in the
-  # receipt, as that executor's record of what it sent.
+  # The two numbers differ whenever `project_progress/2` refuses an event, and
+  # that difference is a signal rather than a defect: a consumer comparing the
+  # stated total against what reached it learns that something did not arrive.
+  # Substituting this runtime's own count would erase the only live evidence a
+  # refusal leaves, since the refusal record itself is durable and private.
+  # Concept: an executor that reported no count emitted nothing.
+  #
+  # Technical depth: ADR 0011 says a domain that emitted nothing states zero,
+  # which is exact and needs no sentinel, so anything that is not a count reads
+  # as none rather than being trusted. That default governs only the closure,
+  # and only for a receipt this runtime is about to refuse anyway: the field is
+  # required, and the reducer that commits the fact rejects a receipt without it
+  # a moment later. It is here so the closure a consumer already received states
+  # a number rather than crashing the owner between the two.
+  defp progress_count(receipt) do
+    case Map.get(receipt, :progress_count) do
+      count when is_integer(count) and count >= 0 -> count
+      _not_a_count -> 0
+    end
+  end
+
   defp close_tool_stream(state, run_id, disposition) do
     case Map.fetch(state.streams, {:executor, run_id}) do
       {:ok, stream} ->
-        # Sealing returns the exact total: no event can reserve a sequence after
-        # this line, so nothing is emitted that this count does not include.
-        count = seal_stream(stream.counter)
-
-        emit_progress(
-          state.progress_to,
-          StreamDomain.tool_closed(
-            stream.turn_id,
-            stream.domain,
-            stream.tool_call_id,
-            0,
-            disposition,
-            count
-          )
-        )
-
+        _stated = StreamRelay.close(stream.relay, disposition)
         state = report_refused_progress(state, run_id, stream)
         %{state | streams: Map.delete(state.streams, {:executor, run_id})}
 
@@ -1361,13 +1381,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
             state
         end
     end
-  end
-
-  defp emit_progress(nil, _item), do: :ok
-
-  defp emit_progress(sink, item) when is_pid(sink) do
-    send(sink, {:loopex_progress, item})
-    :ok
   end
 
   defp prepare_effect(state, work) do
@@ -1579,8 +1592,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # validated terminal fact that landed before the abort from being thrown
         # away by the abort.
         {state, effect} = settle_executor_work(state, run_id)
+        disposition = weakest(model, weakest(host, effect))
 
-        finish_cleanup(state, run_id, purpose, weakest(model, weakest(host, effect)))
+        case settle_owned_operation(state, run_id, disposition) do
+          {:ok, settled} ->
+            finish_cleanup(settled, run_id, purpose, disposition)
+
+          {:error, reason} ->
+            {:stop, {:tool_result_failed, reason}, state}
+        end
     end
   end
 
@@ -1628,7 +1648,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           _ = Task.Supervisor.terminate_child(state.workers, pid)
           _ = take_worker_result(reference)
           state = %{state | in_flight: Map.delete(state.in_flight, reference)}
-          close_model_stream(state, run_id, :abandoned, 0)
+          close_model_stream(state, run_id, :abandoned)
       end
 
     # The charge follows the dispatched turn rather than the live task: a
@@ -1686,9 +1706,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # job the executor still owns.
   #
   # Technical depth: the worker is stopped, its result taken, its stream closed
-  # and its fact committed -- all local state only this process may touch. The
-  # job id is read before any of that, because committing the fact may advance
-  # the work past the point where it is still there to read.
+  # and its fact committed -- all local state only this process may touch. The job id is read before any of that, because
+  # committing the fact may advance the work past the point where it is still
+  # there to read.
+  #
   defp settle_executor_work(state, run_id) do
     case in_flight_of(state, :executor, run_id) do
       nil ->
@@ -1700,7 +1721,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
         case take_worker_result(reference) do
           {:ok, receipt} when is_map(receipt) ->
-            state = close_tool_stream(state, run_id, :complete)
+            state = close_tool_stream(state, run_id, {:complete, progress_count(receipt)})
 
             case put_executor_fact(state, run_id, receipt) do
               {:ok, next} -> {next, :cleaned}
@@ -1710,6 +1731,63 @@ defmodule Loopex.Runtime.SessionCoordinator do
           _unproved ->
             {close_tool_stream(state, run_id, :abandoned), :unconfirmed}
         end
+    end
+  end
+
+  # Concept: a cleanup that could not prove what it stopped still owes the
+  # operation it was stopping a fact of its own.
+  #
+  # Technical depth: this covers every way the disposition reaches
+  # `:unconfirmed` with a call still dispatched -- an executor that produced no
+  # readable receipt, one whose receipt could not be committed, a host
+  # cancellation that answered nothing intelligible -- rather than only the
+  # branch the defect was found in. A run whose executor answered and whose fact
+  # committed has already left `effect_dispatched`, so this is a no-op there, and
+  # a `:cleaned` cleanup has nothing unproved to record.
+  defp settle_owned_operation(state, run_id, :unconfirmed),
+    do: commit_owned_operation_unknown(state, run_id)
+
+  defp settle_owned_operation(state, _run_id, :cleaned), do: {:ok, state}
+
+  # Concept: an operation this coordinator dispatched ends with a fact of its
+  # own, and the run does not end until it has.
+  #
+  # Technical depth: ADR 0009's ordering is operation first, run second, and its
+  # run-outcome table is a function of the owned operation outcomes. Committing
+  # the call's `outcome_unknown` here is what makes the run's own
+  # `outcome_unknown` derived rather than decided a second time: `run_outcome/3`
+  # reads the committed element and outranks whatever the caller proposed, so the
+  # two can no longer disagree and the run terminal cannot claim a clean stop
+  # over an operation nobody could prove.
+  #
+  # A run with no dispatched call owes nothing and is left alone.
+  #
+  # A refused commit is fatal here, and swallowing it was a durability hole
+  # rather than a tidy fallback: a Store that refused this one transaction left
+  # the run committing its terminal anyway, so an operator got `tool.started`,
+  # then `run.finished`, and nothing about the call in between -- the exact shape
+  # this function exists to prevent, reachable whenever a Store answers no. It
+  # also made the run's outcome an independent decision again, because nothing
+  # was committed for `run_outcome/3` to read. Stopping is what every sibling
+  # commit here already does: the abort's admission is durable, so a successor
+  # finds the marker and settles the operation before it settles the run.
+  defp commit_owned_operation_unknown(state, run_id) do
+    case Map.get(state.durable.pending_work, run_id) do
+      %{stage: "effect_dispatched", tool_call: call} ->
+        with {:ok, proposal} <-
+               SessionState.propose_tool_result(
+                 state.durable,
+                 run_id,
+                 call.tool_call_id,
+                 :outcome_unknown,
+                 reconciliation_ref(state, run_id)
+               ),
+             {:ok, next} <- commit_internal(state, proposal) do
+          {:ok, next}
+        end
+
+      _no_dispatched_call ->
+        {:ok, state}
     end
   end
 
@@ -1844,18 +1922,34 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # allowed to affect an outcome, a bound, or a receipt.
   defp executor_progress_fun(state, work) do
     job = work.job
-    domain = StreamDomain.derive(:executor, state.session_id, job.operation_id, job.attempt)
+    domain = StreamDomain.for_job(job)
     turn_id = work.turn_id
     tool_call_id = job.tool_call_id
-    sink = state.progress_to
-    counter = new_stream_counter()
     refused = :atomics.new(1, signed: false)
     bindings = progress_bindings(job)
+
+    {:ok, relay} =
+      StreamRelay.open(
+        state.workers,
+        state.progress_to,
+        fn projected, sequence ->
+          Map.merge(projected, %{
+            kind: :tool_progress,
+            turn_id: turn_id,
+            tool_call_id: tool_call_id,
+            stream_domain_id: domain,
+            progress_sequence: sequence
+          })
+        end,
+        fn disposition, count ->
+          StreamDomain.tool_closed(turn_id, domain, tool_call_id, 0, disposition, count)
+        end
+      )
 
     stream = %{
       domain: domain,
       turn_id: turn_id,
-      counter: counter,
+      relay: relay,
       refused: refused,
       tool_call_id: tool_call_id
     }
@@ -1864,24 +1958,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
      fn event ->
        case project_progress(event, bindings) do
          {:ok, projected} ->
-           # The identity is judged first and the sequence reserved second, so a
-           # refused event never consumes a number. Reserving is what tests the
-           # seal: an event arriving after closure is dropped rather than emitted
-           # past a total already published, and it is not counted as a refusal
+           # The identity is judged here and the sequence assigned by the relay,
+           # so a refused event never consumes a number and an event arriving
+           # after closure reaches a relay that has ended -- dropped rather than
+           # emitted past a total already published, and not counted as a refusal
            # either, because a refusal is this coordinator's judgement about an
-           # event's identity and this event's identity is correct -- it is only
+           # event's identity and this event's identity is correct: it is only
            # late.
-           case reserve_sequence(counter) do
-             :sealed ->
-               :ok
-
-             {:ok, sequence} ->
-               emit_tool_progress(sink, projected, sequence, %{
-                 turn_id: turn_id,
-                 tool_call_id: tool_call_id,
-                 domain: domain
-               })
-           end
+           StreamRelay.emit(relay, projected)
 
          :refused ->
            :atomics.add(refused, 1, 1)
@@ -1889,23 +1973,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
        :ok
      end}
-  end
-
-  defp emit_tool_progress(sink, projected, sequence, %{
-         turn_id: turn_id,
-         tool_call_id: tool_call_id,
-         domain: domain
-       }) do
-    emit_progress(
-      sink,
-      Map.merge(projected, %{
-        kind: :tool_progress,
-        turn_id: turn_id,
-        tool_call_id: tool_call_id,
-        stream_domain_id: domain,
-        progress_sequence: sequence
-      })
-    )
   end
 
   # Concept: the identity an event has to reproduce is the identity the job was
@@ -1986,7 +2053,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
       workspace_ref: executor.workspace_ref,
       workspace_lease: executor.workspace_lease,
       run_deadline: declared.deadline,
-      resource_budgets: %{"max_output_bytes" => Map.fetch!(budgets, "output_bytes")},
+      # Concept: the bounds this job runs under are declared where they are
+      # journaled, not invented by the hand that runs it.
+      #
+      # Technical depth: both ceilings come from the definition this call
+      # resolved through, so the effect intent that commits records the exact
+      # numbers the job was dispatched under. The wall-time ceiling used to be
+      # read only from the executor's own copy of the definition, which made the
+      # bound a fact about the hand rather than about the dispatch, and left
+      # nothing durable naming it.
+      resource_budgets: %{
+        "max_output_bytes" => Map.fetch!(budgets, "output_bytes"),
+        "max_wall_time_ms" => Map.fetch!(budgets, "wall_time_ms")
+      },
       idempotency_class: Map.fetch!(definition, "idempotency_class"),
       fencing_token: executor.fencing_token,
       artifact_policy: %{"retain" => true},
@@ -2010,22 +2089,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: a reply whose stream statistic is not a count is an answer this
+  # runtime cannot use, not an answer it publishes anyway.
+  #
+  # Technical depth: `delta_count` reached the closing item and the durable
+  # assistant message unchecked, so an adapter returning minus one published a
+  # closure a consumer can compare nothing against and committed the same value.
+  # It takes the abandoned path rather than killing the owner, because that is
+  # what a provider answer this runtime cannot read already means: the domain
+  # closes on what the relay actually emitted, the attempt is charged, and the
+  # turn is retried under a new attempt.
   defp accept_model_result(state, run_id, {:ok, reply}) when is_map(reply) do
-    state = close_model_stream(state, run_id, :complete, Map.get(reply, :delta_count, 0))
-    state = disarm_deadline(state, run_id)
+    case Map.get(reply, :delta_count, 0) do
+      count when is_integer(count) and count >= 0 ->
+        accept_counted_model_result(state, run_id, reply, count)
 
-    with {:ok, proposal} <-
-           SessionState.propose_model_result(
-             state.durable,
-             run_id,
-             reply,
-             active_generations(state)
-           ),
-         {:ok, next} <- commit_internal(state, proposal) do
-      send(self(), :advance_work)
-      {:noreply, next}
-    else
-      {:error, reason} -> {:stop, {:model_result_failed, reason}, state}
+      _not_a_count ->
+        accept_model_result(state, run_id, {:error, :invalid_delta_count})
     end
   end
 
@@ -2033,7 +2113,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     # An attempt that returned no reply still owes its closure, so a consumer can
     # tell an abandoned stream from one that merely went quiet, and still owes
     # its charge, so giving up is not cheaper than finishing.
-    state = close_model_stream(state, run_id, :abandoned, 0)
+    state = close_model_stream(state, run_id, :abandoned)
 
     # Concept: a provider retry redispatches the bytes that were already
     # committed.
@@ -2094,7 +2174,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp accept_executor_result(state, run_id, {:ok, receipt}) when is_map(receipt) do
-    state = close_tool_stream(state, run_id, :complete)
+    state = close_tool_stream(state, run_id, {:complete, progress_count(receipt)})
 
     case state.fault_to do
       pid when is_pid(pid) ->

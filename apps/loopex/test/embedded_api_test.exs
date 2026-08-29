@@ -140,6 +140,13 @@ defmodule Loopex.EmbeddedApiTest do
     assert {:accepted, "finish-before-snapshot"} =
              Loopex.command(original, %{type: :abort, command_id: "finish-before-snapshot"})
 
+    # An accepted abort is an admission, not an ending: ADR 0009 orders the
+    # admission, then the cleanup, then the run's terminal, so the ending is
+    # still to come when `command/2` returns. Draining immediately reads an empty
+    # queue about a third of the time, which is a race in this case rather than
+    # in the runtime.
+    eventually(fn -> committed_event_count(fixture, session_id) == 3 end)
+
     assert [%{event_sequence: 3, kind: "run.finished"}] = drain_events(original)
     :ok = M1RuntimeTestStore.block_next_event_read(fixture.store_pid, self())
 
@@ -183,6 +190,18 @@ defmodule Loopex.EmbeddedApiTest do
       paged_session = create_session!(paged, "create-paged-snapshot")
       {:ok, command_attachment} = Loopex.attach(paged.runtime, paged_session)
 
+      # Concept: an accepted abort is an admission, not an ending.
+      #
+      # Technical depth: ADR 0009 orders the abort admitted and committed, then
+      # the cleanup, then the run's terminal. `command/2` returns once the
+      # admission commits, so the run is still active for as long as its cleanup
+      # takes. A loop that submits the next prompt immediately therefore races
+      # its own predecessor's ending: the prompt lands on a still-active run and
+      # is queued as a follow-up instead of starting one, and the count this case
+      # reads a moment later is short by exactly the endings that had not landed.
+      # That is not a flake in the loop -- it is what two-phase cancellation means
+      # for any caller, and it is why each iteration waits for its own ending
+      # here rather than being retried until it passes.
       Enum.each(1..342, fn index ->
         prompt_id = "paged-prompt-#{index}"
         abort_id = "paged-abort-#{index}"
@@ -199,6 +218,8 @@ defmodule Loopex.EmbeddedApiTest do
                    type: :abort,
                    command_id: abort_id
                  })
+
+        eventually(fn -> committed_event_count(paged, paged_session) == index * 3 end)
       end)
 
       paged_events =
@@ -388,6 +409,15 @@ defmodule Loopex.EmbeddedApiTest do
       {:ok, event} -> drain_events(attachment, [event | accumulated])
       {:error, :empty} -> Enum.reverse(accumulated)
     end
+  end
+
+  defp committed_event_count(fixture, session_id) do
+    fixture.store_pid
+    |> M1RuntimeTestStore.inspect_state()
+    |> Map.fetch!(:sessions)
+    |> Map.fetch!(session_id)
+    |> Map.fetch!(:events)
+    |> length()
   end
 
   defp eventually(assertion, attempts \\ 400)

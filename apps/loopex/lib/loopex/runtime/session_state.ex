@@ -74,11 +74,16 @@ defmodule Loopex.Runtime.SessionState do
             steer: %{},
             follow_up: nil,
             charged: %{},
-            # The cleanup period the executor answering this session declared, as
-            # its receipts reported it. Held per run so the run's terminal can
-            # report what bounded the stopping, which is what ADR 0009 asks for
-            # and what no session could previously name.
-            declared_cleanup: %{},
+            # The cleanup period this session declares, which ADR 0009 makes a
+            # session configuration value with a default rather than something
+            # read back from whatever the hand happened to report. The run's
+            # terminal reports it, so an operator can tell a clean cooperative
+            # stop from a forced kill that was confirmed and from a termination
+            # that could not be confirmed at all. It defaults to the port's own
+            # number so a coordinator that declared none still names a period
+            # rather than an absence, and the same number is handed to the
+            # executor that performs the cleanup.
+            cleanup_grace_ms: Loopex.Executor.default_cleanup_grace_ms(),
             # The run an operator durably aborted whose ending has not been
             # committed yet. ADR 0009 orders the admission before the cleanup, so
             # this is the state that exists between them: real, recoverable, and
@@ -418,6 +423,24 @@ defmodule Loopex.Runtime.SessionState do
   @doc """
   ## Concept
 
+  Records the cleanup period this session was configured with.
+
+  ## Technical depth
+
+  ADR 0009 makes the grace a declared session configuration value, so it is
+  applied to the reconstructed state once, by the owner that holds the
+  configuration, rather than being replayed from history: it describes how this
+  owner will stop work, not what already happened. Every run terminal this owner
+  commits reports it.
+  """
+  @spec declare_cleanup_grace(t(), pos_integer()) :: t()
+  def declare_cleanup_grace(%__MODULE__{} = state, grace)
+      when is_integer(grace) and grace > 0,
+      do: %{state | cleanup_grace_ms: grace}
+
+  @doc """
+  ## Concept
+
   The follow-up waiting to become the next run, if one is queued.
 
   ## Technical depth
@@ -449,13 +472,15 @@ defmodule Loopex.Runtime.SessionState do
       # Technical depth: ADR 0009 requires the declared cleanup grace to be
       # reported in the terminal outcome's evidence, so an operator can tell a
       # clean cooperative stop from a forced kill that was confirmed and from a
-      # termination that could not be confirmed at all. The period is the
-      # executor's declaration, so it is read from what the executor actually
-      # reported on this run's receipts rather than from anything this session
-      # decided. A run whose executor declared none -- one with no
-      # operating-system work to bound -- carries `nil`, which is an absence
-      # rather than a default nobody named.
-      "cleanup_grace_ms" => declared_cleanup_grace(state, run_id),
+      # termination that could not be confirmed at all. It is the session's own
+      # declared value, which is what ADR 0009 makes it, and the same value the
+      # composed executor is handed -- so the terminal names the period the
+      # cleanup actually ran under. Reading it back off a receipt instead left
+      # every ending that produced no receipt reporting `nil`: an abort admitted
+      # before any executor answered, a run stopped between turns, and every
+      # recovery, which are precisely the endings an operator needs the period
+      # for.
+      "cleanup_grace_ms" => state.cleanup_grace_ms,
       # Concept: an ending names the command that asked for it, where one did.
       #
       # Technical depth: the abort's admission and its outcome are two records
@@ -499,6 +524,25 @@ defmodule Loopex.Runtime.SessionState do
   @spec propose_model_result(t(), binary(), map(), map()) :: {:ok, proposal()} | {:error, term()}
   def propose_model_result(%__MODULE__{} = state, run_id, reply, generations \\ %{})
       when is_binary(run_id) and is_map(reply) and is_map(generations) do
+    with :ok <- validate_stream_count(Map.get(reply, :delta_count, 0)) do
+      propose_validated_model_result(state, run_id, reply, generations)
+    end
+  end
+
+  # Concept: a stream statistic that is not a count is refused before it becomes
+  # durable, not after.
+  #
+  # Technical depth: `delta_count` and `progress_count` are the numbers ADR 0011
+  # closes a complete domain on, and a consumer compares them against what
+  # arrived to detect loss. Nothing checked either. A model adapter returning
+  # `delta_count: -1` had that value committed into the assistant message and
+  # published on the closure, so the durable record carried a statistic that
+  # describes no stream and the loss comparison became meaningless. Zero is exact
+  # and needs no sentinel; anything below it is not a count.
+  defp validate_stream_count(count) when is_integer(count) and count >= 0, do: :ok
+  defp validate_stream_count(_count), do: {:error, :invalid_stream_count}
+
+  defp propose_validated_model_result(state, run_id, reply, generations) do
     record = %{
       "run_id" => run_id,
       "reply" => encode_plain(reply),
@@ -1305,7 +1349,6 @@ defmodule Loopex.Runtime.SessionState do
          kind: "executor_receipt_committed"
        }) do
     with {:ok, receipt} <- decode_receipt(receipt),
-         state = remember_declared_cleanup(state, run_id, receipt),
          %{stage: "effect_dispatched", job: job, tool_call: call} = work <-
            Map.get(state.pending_work, run_id),
          :ok <- receipt_matches_job(receipt, job),
@@ -1526,7 +1569,7 @@ defmodule Loopex.Runtime.SessionState do
           run_id,
           "outcome_unknown",
           reconciliation_ref,
-          declared_cleanup_grace(state, run_id)
+          state.cleanup_grace_ms
         )
       ]
 
@@ -1886,12 +1929,15 @@ defmodule Loopex.Runtime.SessionState do
     # to say about them, and refusing its reply would make the arity change a
     # behaviour change for exactly the adapters ADR 0011 says stay conformant.
     # They default to "emitted nothing", which is what their absence means.
+    delta_count = Map.get(encoded, "delta_count", 0)
+
     with {:ok, reply} <- decode_top(encoded, fields),
-         {:ok, calls} <- decode_tool_calls(reply.tool_calls) do
+         {:ok, calls} <- decode_tool_calls(reply.tool_calls),
+         :ok <- validate_stream_count(delta_count) do
       {:ok,
        reply
        |> Map.put(:tool_calls, calls)
-       |> Map.put(:delta_count, Map.get(encoded, "delta_count", 0))
+       |> Map.put(:delta_count, delta_count)
        |> Map.put(:streamed, Map.get(encoded, "streamed", false))}
     end
   end
@@ -1977,6 +2023,7 @@ defmodule Loopex.Runtime.SessionState do
 
     with {:ok, receipt} <- decode_top(encoded, fields),
          {:ok, outcome} <- decode_receipt_outcome(receipt.outcome),
+         :ok <- validate_stream_count(receipt.progress_count),
          {:ok, artifacts} <- decode_artifacts(receipt.artifacts) do
       {:ok,
        encoded
@@ -2251,11 +2298,6 @@ defmodule Loopex.Runtime.SessionState do
     }
   end
 
-  # The period every executor receipt this run produced declared. They agree by
-  # construction -- one executor answers one run -- so the first that reported
-  # one is the run's, and a run whose executor reported none has none to report.
-  defp declared_cleanup_grace(state, run_id), do: Map.get(state.declared_cleanup, run_id)
-
   defp aborting_command(%{aborting: %{run_id: run_id, command_id: command_id}}, run_id),
     do: command_id
 
@@ -2278,19 +2320,6 @@ defmodule Loopex.Runtime.SessionState do
   @spec aborting_run(t()) :: binary() | nil
   def aborting_run(%__MODULE__{aborting: %{run_id: run_id}}), do: run_id
   def aborting_run(%__MODULE__{}), do: nil
-
-  # Recorded from the receipt rather than from anything this session decided: the
-  # period is the executor's declaration, and an executor that declared none
-  # leaves nothing here to report.
-  defp remember_declared_cleanup(state, run_id, receipt) do
-    case Map.get(receipt, :cleanup_grace_ms) do
-      grace when is_integer(grace) ->
-        %{state | declared_cleanup: Map.put(state.declared_cleanup, run_id, grace)}
-
-      _absent ->
-        state
-    end
-  end
 
   # Concept: `outcome_unknown` outranks whatever asked the run to stop.
   #

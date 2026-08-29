@@ -34,6 +34,17 @@ defmodule Loopex.M1RuntimeTestStore do
   def injected(pid), do: GenServer.call(pid, :injected)
   def fail_reads(pid, enabled), do: GenServer.call(pid, {:fail_reads, enabled})
 
+  # Concept: refuse one named kind of record, once.
+  #
+  # Technical depth: a Store may answer `not_committed` to any transaction, and a
+  # coordinator that treats one particular refusal as a tidy fallback rather than
+  # as a failure is what lets a run commit its ending with the operation it owns
+  # unsettled. Refusing by record kind rather than by transition identity is what
+  # lets a case name the transaction it means without knowing the identity a
+  # given run happened to derive for it.
+  def refuse_next_record(pid, kind) when is_binary(kind),
+    do: GenServer.call(pid, {:refuse_next_record, kind})
+
   @impl Store
   def transact(pid, transaction), do: GenServer.call(pid, {:transact, transaction}, :infinity)
 
@@ -70,7 +81,8 @@ defmodule Loopex.M1RuntimeTestStore do
        recovery_setup: MapSet.new(),
        delayed: %{},
        event_read_block: nil,
-       fail_reads: false
+       fail_reads: false,
+       refuse_records: MapSet.new()
      }}
   end
 
@@ -102,6 +114,10 @@ defmodule Loopex.M1RuntimeTestStore do
     {:reply, :ok, %{state | fail_reads: enabled == true}}
   end
 
+  def handle_call({:refuse_next_record, kind}, _from, state) do
+    {:reply, :ok, %{state | refuse_records: MapSet.put(state.refuse_records, kind)}}
+  end
+
   def handle_call(:observed, _from, state), do: {:reply, state.observed, state}
   def handle_call(:injected, _from, state), do: {:reply, state.injected, state}
 
@@ -111,22 +127,13 @@ defmodule Loopex.M1RuntimeTestStore do
   end
 
   def handle_call({:transact, transaction}, from, state) do
-    with :ok <- Store.validate_transaction(transaction),
-         {:ok, transition} <- Transitions.id(transaction),
-         {:ok, binding} <- Store.immutable_binding(transaction) do
-      case retained(state, transaction) do
-        {:ok, %{binding: ^binding, outcome: outcome}} ->
-          {checkpoint, state} = checkpoint(state, transition, :recovery_representation)
-          reply_checkpoint(checkpoint, from, state, transaction, outcome)
+    case refused_kind(state, transaction) do
+      nil ->
+        admit(state, from, transaction)
 
-        {:ok, _other_binding} ->
-          {:reply, {:not_committed, :tx_id_conflict}, state}
-
-        :absent ->
-          transact_new(state, from, transition, transaction, binding)
-      end
-    else
-      _other -> {:reply, {:not_committed, :invalid_transaction}, state}
+      kind ->
+        {:reply, {:not_committed, :refused_by_test_store},
+         %{state | refuse_records: MapSet.delete(state.refuse_records, kind)}}
     end
   end
 
@@ -214,6 +221,38 @@ defmodule Loopex.M1RuntimeTestStore do
 
       nil ->
         {:reply, result, state}
+    end
+  end
+
+  defp refused_kind(%{refuse_records: refused} = _state, transaction) do
+    transaction
+    |> Map.get(:records, [])
+    |> Enum.map(&record_kind/1)
+    |> Enum.find(&MapSet.member?(refused, &1))
+  end
+
+  defp record_kind(record) when is_map(record),
+    do: Map.get(record, :kind) || Map.get(record, "kind")
+
+  defp record_kind(_record), do: nil
+
+  defp admit(state, from, transaction) do
+    with :ok <- Store.validate_transaction(transaction),
+         {:ok, transition} <- Transitions.id(transaction),
+         {:ok, binding} <- Store.immutable_binding(transaction) do
+      case retained(state, transaction) do
+        {:ok, %{binding: ^binding, outcome: outcome}} ->
+          {checkpoint, state} = checkpoint(state, transition, :recovery_representation)
+          reply_checkpoint(checkpoint, from, state, transaction, outcome)
+
+        {:ok, _other_binding} ->
+          {:reply, {:not_committed, :tx_id_conflict}, state}
+
+        :absent ->
+          transact_new(state, from, transition, transaction, binding)
+      end
+    else
+      _other -> {:reply, {:not_committed, :invalid_transaction}, state}
     end
   end
 

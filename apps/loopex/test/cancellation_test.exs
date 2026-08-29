@@ -753,6 +753,326 @@ defmodule Loopex.CancellationTest do
              Loopex.command(attachment, %{type: :prompt, command_id: "p3", content: "next"})
   end
 
+  test "an executor that never answered leaves its call a terminal fact of its own" do
+    # Concept: ADR 0009 commits the operation first and derives the run from it.
+    # A run that ends `outcome_unknown` over an effect nobody could prove owes
+    # that effect its own ending too.
+    #
+    # Technical depth: the cleanup closed the abandoned call's stream and
+    # committed nothing else, then the run's terminal was committed on its own.
+    # An operator therefore saw `tool.started` for the call and never anything
+    # after it: the only statement about an effect whose truth is exactly what is
+    # unknown was a sentence about the run. Worse, the run's outcome was a second
+    # independent decision rather than a consequence of the operation's, so the
+    # two could disagree.
+    #
+    # Both facts are asserted, and so is their order, because the order is the
+    # part ADR 0009 fixes.
+    {_fixture, _session_id, observed} = abort_during_tool(:never_answers)
+
+    tool_finished =
+      Enum.find(observed, &(&1.kind == "tool.finished" and &1["tool_call_id"] == "c1"))
+
+    assert tool_finished,
+           "the abandoned call never finished on the public plane, so an operator saw a tool " <>
+             "start and nothing end"
+
+    assert tool_finished["outcome"] == "outcome_unknown",
+           "the abandoned call reported #{inspect(tool_finished["outcome"])}, which claims to " <>
+             "know something about an effect nobody could prove"
+
+    run_finished = Enum.find(observed, &(&1.kind == "run.finished"))
+    assert run_finished["outcome"] == "outcome_unknown"
+
+    assert Enum.find_index(observed, &(&1 == tool_finished)) <
+             Enum.find_index(observed, &(&1 == run_finished)),
+           "the run ended before the operation it owned did"
+  end
+
+  test "a recovering owner ends the abandoned call before it ends the run" do
+    # Concept: the state ADR 0009's two-phase abort creates is an abort admitted
+    # whose ending has not been committed. A successor that finds it must resolve
+    # both the operation and the run, in that order.
+    #
+    # Technical depth: this is the recovery half of the case above, and it was
+    # the one nothing drove at all: mutating the recovered ending from
+    # `outcome_unknown` to `cancelled` left the whole suite green, so the rule
+    # that a recovering owner cannot claim a clean stop was locked by inspection
+    # only. The successor cannot prove the cleanup ran, half ran, or never
+    # started, and re-running it would be blindly retrying work whose effect is
+    # exactly what is unknown.
+    #
+    # The predecessor is killed while its cleanup is genuinely in flight -- the
+    # host cancellation sleeps -- so the marker is on disk with nothing in flight
+    # when the successor arrives, which is the state being tested rather than one
+    # arranged by writing records directly.
+    fixture = start_with_executor(:cancel_is_slow, [%{text: "run it", calls: [call("c1")]}])
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do the work"})
+
+    :dispatched = await_dispatch(fixture)
+
+    aborting =
+      Task.async(fn -> Loopex.command(attachment, %{type: :abort, command_id: "abort-1"}) end)
+
+    assert {:accepted, "abort-1"} = Task.await(aborting, 30_000)
+
+    # Concept: this case is about recovery, so the state it recovers from has to
+    # exist when the owner dies.
+    #
+    # Technical depth: `command/2` returns on the admission and the cleanup this
+    # executor performs sleeps, so the ending has not landed. Asserting that
+    # rather than assuming it is what stops the case passing for the wrong
+    # reason: if the ending had already committed, everything below would still
+    # hold -- the ordinary cleanup path settles the operation too -- and nothing
+    # would have exercised the successor at all.
+    records = Fixture.records(fixture, session_id)
+
+    assert Enum.any?(
+             records,
+             &(&1.payload[:kind] == "command_admitted" and &1.payload["command_type"] == "abort")
+           ),
+           "the abort was never admitted durably, so there is nothing for a successor to find"
+
+    refute Enum.any?(records, &(&1.payload[:kind] == "run_terminal_committed")),
+           "the run had already ended before the owner was killed, so this case would have " <>
+             "proved the ordinary cleanup path rather than recovery"
+
+    coordinator = coordinator_of(fixture.runtime)
+    reference = Process.monitor(coordinator)
+    Process.exit(coordinator, :kill)
+    assert_receive {:DOWN, ^reference, :process, ^coordinator, _reason}, 5_000
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
+
+    # The successor commits the operation's ending and then the run's, both after
+    # `resume_session/3` has returned. Reading the plane straight away reads it
+    # mid-transaction, which is a race in this case rather than in the runtime.
+    assert settled?(fixture, session_id),
+           "the successor never settled the run it inherited"
+
+    {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+    observed = events(resumed)
+
+    tool_finished =
+      Enum.find(observed, &(&1.kind == "tool.finished" and &1["tool_call_id"] == "c1"))
+
+    assert tool_finished,
+           "the successor ended the run and left the call it inherited with no ending at all"
+
+    assert tool_finished["outcome"] == "outcome_unknown"
+
+    run_finished = Enum.find(observed, &(&1.kind == "run.finished"))
+
+    assert run_finished["outcome"] == "outcome_unknown",
+           "a recovering owner reported #{inspect(run_finished["outcome"])} for a cleanup it " <>
+             "cannot prove ran, half ran, or never started"
+
+    assert is_binary(run_finished["reconciliation_ref"])
+
+    assert Enum.find_index(observed, &(&1 == tool_finished)) <
+             Enum.find_index(observed, &(&1 == run_finished)),
+           "the successor ended the run before the operation it owned"
+  end
+
+  test "a run does not end while the operation it owns has no committed ending" do
+    # Concept: ADR 0009 commits the operation and derives the run from it. A
+    # coordinator that could not commit the operation has not established what
+    # the run's outcome is.
+    #
+    # Technical depth: the operation's commit failure was swallowed and the run's
+    # terminal committed anyway, so a Store refusing that one transaction
+    # produced `tool.started`, no `tool.finished`, and `run.finished` -- exactly
+    # the shape settling the operation exists to prevent, reachable whenever a
+    # Store answers no rather than only under a code defect. It also put the run
+    # outcome back to being decided independently, because nothing was committed
+    # for `run_outcome/3` to read.
+    #
+    # The refusal is fatal now, as it already is for every sibling commit on this
+    # path. What an operator gets instead is a run that has not ended yet and an
+    # owner that died trying, which a successor resolves -- and the abort's
+    # admission is durable, so the successor knows there is something to resolve.
+    fixture = start_with_executor(:never_answers, [%{text: "run it", calls: [call("c1")]}])
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do the work"})
+
+    :dispatched = await_dispatch(fixture)
+
+    coordinator = coordinator_of(fixture.runtime)
+    reference = Process.monitor(coordinator)
+    :ok = M1RuntimeTestStore.refuse_next_record(fixture.store, "tool_result_committed")
+
+    {:accepted, "abort-1"} = Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
+
+    assert_receive {:DOWN, ^reference, :process, ^coordinator, reason}, 30_000
+
+    assert match?({:tool_result_failed, _}, reason),
+           "the owner survived a refused operation terminal: #{inspect(reason)}"
+
+    records = Fixture.records(fixture, session_id)
+
+    refute Enum.any?(records, &(&1.payload[:kind] == "run_terminal_committed")),
+           "the run committed its ending while the operation it owned had none"
+
+    assert Enum.any?(
+             records,
+             &(&1.payload[:kind] == "command_admitted" and &1.payload["command_type"] == "abort")
+           ),
+           "the abort's admission is what tells a successor there is work to finish"
+  end
+
+  test "a recovering owner does not end a run whose operation it could not settle" do
+    # Concept: the rule is the same on both halves of the ordering, and a rule
+    # proved on one half is proved on one half.
+    #
+    # Technical depth: the live cleanup path is driven by the sibling case above.
+    # This is the recovery half, and it was locked by inspection only: mutating
+    # the recovering owner's error branch to commit the run terminal anyway left
+    # the whole cancellation corpus and the whole suite green. A successor whose
+    # Store refuses the operation's fact would then produce `tool.started`, no
+    # `tool.finished`, and `run.finished` — the same shape the live half is
+    # protected against.
+    fixture = start_with_executor(:never_answers, [%{text: "run it", calls: [call("c1")]}])
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do the work"})
+
+    :dispatched = await_dispatch(fixture)
+
+    # The predecessor admits the abort and then cannot settle the call it owns,
+    # so it dies leaving exactly the state a successor has to resolve: an abort
+    # admitted, a dispatched call with no ending, and no run terminal.
+    coordinator = coordinator_of(fixture.runtime)
+    reference = Process.monitor(coordinator)
+    :ok = M1RuntimeTestStore.refuse_next_record(fixture.store, "tool_result_committed")
+
+    {:accepted, "abort-1"} = Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
+    assert_receive {:DOWN, ^reference, :process, ^coordinator, _reason}, 30_000
+
+    records = Fixture.records(fixture, session_id)
+
+    refute Enum.any?(records, &(&1.payload[:kind] == "tool_result_committed")),
+           "the call was settled, so the successor has nothing left to settle"
+
+    refute Enum.any?(records, &(&1.payload[:kind] == "run_terminal_committed")),
+           "the run had already ended, so this case would prove the live path"
+
+    # Now the successor's own attempt to settle that call is refused too.
+    :ok = M1RuntimeTestStore.refuse_next_record(fixture.store, "tool_result_committed")
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
+
+    # The successor is not monitored, because it may already be gone by the time
+    # a monitor could be installed and a `:noproc` would be a race rather than a
+    # finding. What is observed instead is that the refusal fired: the successor
+    # presented the operation's fact, the Store answered no, and the armed
+    # refusal was consumed by that presentation.
+    assert refusal_consumed?(fixture, "tool_result_committed"),
+           "the successor never tried to settle the call it inherited"
+
+    refute fixture
+           |> Fixture.records(session_id)
+           |> Enum.any?(&(&1.payload[:kind] == "run_terminal_committed")),
+           "a recovering owner ended the run while the operation it owned had no ending"
+
+    refute fixture
+           |> Fixture.records(session_id)
+           |> Enum.any?(&(&1.payload[:kind] == "tool_result_committed")),
+           "the operation was settled after all, so the refusal proved nothing"
+  end
+
+  # Concept: an armed refusal that has fired is evidence the presentation
+  # happened, which is what a case about a refused commit needs to know.
+  defp refusal_consumed?(fixture, kind, attempts \\ 300) do
+    refused = M1RuntimeTestStore.inspect_state(fixture.store).refuse_records
+
+    cond do
+      not MapSet.member?(refused, kind) -> true
+      attempts > 0 -> Process.sleep(10) && refusal_consumed?(fixture, kind, attempts - 1)
+      true -> false
+    end
+  end
+
+  test "a recovering owner ends a run with no dispatched effect outcome unknown" do
+    # Concept: a successor that finds an abort admitted and no ending committed
+    # cannot claim a clean stop, whether or not the run owned an effect.
+    #
+    # Technical depth: the sibling case above this one covers recovery with a
+    # dispatched call, where the operation's committed `outcome_unknown` outranks
+    # whatever the recovering owner proposes -- so mutating that proposal to
+    # `cancelled` changes nothing there. It changes everything here: this run
+    # never dispatched a tool, so nothing outranks the proposal and the rule is
+    # the only thing standing between an operator and a report that a cleanup
+    # nobody observed went cleanly. Without this case the rule is locked by
+    # inspection on the one path where it is load-bearing.
+    fixture =
+      start_with_executor(:releases, [%{text: "thinking", calls: [], hold: self()}])
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do the work"})
+
+    assert_receive {:holding, _model}, 5_000
+
+    # The predecessor dies committing the ending rather than being killed at a
+    # guessed moment, so the state the successor inherits -- an abort admitted,
+    # nothing in flight, and no ending -- is arranged by the Store refusing one
+    # transaction rather than by winning a race.
+    coordinator = coordinator_of(fixture.runtime)
+    reference = Process.monitor(coordinator)
+    :ok = M1RuntimeTestStore.refuse_next_record(fixture.store, "run_terminal_committed")
+
+    {:accepted, "abort-1"} = Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
+    assert_receive {:DOWN, ^reference, :process, ^coordinator, _reason}, 30_000
+
+    records = Fixture.records(fixture, session_id)
+
+    refute Enum.any?(records, &(&1.payload[:kind] == "run_terminal_committed")),
+           "the run had already ended, so this case would prove the ordinary path"
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
+
+    assert settled?(fixture, session_id),
+           "the successor never settled the run it inherited"
+
+    {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+    observed = events(resumed)
+
+    refute Enum.any?(observed, &(&1.kind == "tool.finished")),
+           "this run dispatched no tool, so it owes no operation ending"
+
+    run_finished = Enum.find(observed, &(&1.kind == "run.finished"))
+
+    assert run_finished["outcome"] == "outcome_unknown",
+           "a recovering owner reported #{inspect(run_finished["outcome"])} for a cleanup it " <>
+             "cannot prove ran, half ran, or never started"
+
+    assert is_binary(run_finished["reconciliation_ref"])
+  end
+
+  defp coordinator_of(runtime) do
+    {:ok, children} = Loopex.Runtime.Supervisor.children(runtime.supervisor)
+
+    [{_id, pid, _type, _modules} | _rest] = DynamicSupervisor.which_children(children.sessions)
+    pid
+  end
+
   test "a cancellation this runtime cannot read is unproven rather than a confirmed clean stop" do
     # Concept: `cancelled` is a claim that every owned process tree was confirmed
     # cleaned. An executor that said nothing intelligible has not confirmed it.

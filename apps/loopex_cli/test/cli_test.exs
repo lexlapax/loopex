@@ -259,6 +259,96 @@ defmodule LoopexCliTest do
     end
   end
 
+  test "the operator declares how long a stopped run may spend stopping and a bad value is refused" do
+    # Concept: ADR 0009 makes the cleanup period a declared session
+    # configuration value, and a host that cannot name it leaves an operator with
+    # whatever the default happens to be on a workspace where it is wrong.
+    #
+    # Technical depth: the flag is recognised, so it is not answered with the
+    # message an unrecognised flag gets — that difference is the whole assertion
+    # in the second half, because dropping the flag from the recognised set is a
+    # regression that looks like a refusal either way until the messages are
+    # compared. A value that is not a positive whole number of milliseconds is
+    # refused before a runtime, a store, or an executor is started, because a
+    # cleanup period is the kind of mistake that only shows up once something has
+    # already gone wrong.
+    for bad <- ["abc", "0", "-5", "5000ms", "1.5", ""] do
+      assert {:error, message} =
+               LoopexCli.dispatch([
+                 "run",
+                 "--policy",
+                 "allow-all",
+                 "--cleanup-grace-ms",
+                 bad,
+                 "do the thing"
+               ]),
+             "--cleanup-grace-ms #{inspect(bad)} was accepted"
+
+      assert message =~ "--cleanup-grace-ms takes a positive whole number of milliseconds",
+             "--cleanup-grace-ms #{inspect(bad)} was refused with #{inspect(message)}"
+    end
+
+    # A bare switch is not a period either, and it reaches a different clause.
+    assert {:error, bare} =
+             LoopexCli.dispatch([
+               "run",
+               "--policy",
+               "allow-all",
+               "--cleanup-grace-ms",
+               "--workspace",
+               "/tmp",
+               "do the thing"
+             ])
+
+    assert bare =~ "--cleanup-grace-ms takes a positive whole number of milliseconds"
+
+    # And a well-formed value is not refused as an unrecognised flag. Pairing it
+    # with an ambiguity refused later in the same command reaches the answer
+    # without starting a runtime: an unrecognised flag is refused first and by
+    # name, so the two are told apart by which sentence comes back.
+    assert {:error, recognised} =
+             LoopexCli.dispatch([
+               "run",
+               "--policy",
+               "allow-all",
+               "--cleanup-grace-ms",
+               "8000",
+               "--steer",
+               "one way",
+               "--follow-up",
+               "another way",
+               "do the thing"
+             ])
+
+    assert recognised =~ "different requests",
+           "a well-formed --cleanup-grace-ms was answered with #{inspect(recognised)}"
+
+    # The usage text names it, so an operator can find it without reading the
+    # source.
+    usage = capture_io(fn -> LoopexCli.dispatch(["nonsense"]) end)
+    assert usage =~ "--cleanup-grace-ms"
+
+    # Concept: a value that is read and then dropped is worse than a flag that
+    # was never offered.
+    #
+    # Technical depth: this half is a structural assertion and is written as one.
+    # Reaching the period behaviourally from here means starting the shipped
+    # composition, which means a provider call this file deliberately never
+    # makes; and adding an accessor so a case could read the parsed options back
+    # would widen the command's surface for a test. So the one place the parsed
+    # value is handed on is asserted here, and the two links after it are proved
+    # behaviourally elsewhere: `kernel_composition_test.exs` proves the
+    # composition forwards it to the session, and `agent_loop_test.exs` proves
+    # the session's terminal reports it.
+    source = File.read!(app_path("lib/loopex_cli.ex"))
+
+    assert source =~ "cleanup_grace_ms: milliseconds",
+           "the command parses the period and never turns it into the option the runtime reads"
+
+    assert Regex.match?(~r/LoopexComposition\.start\(\s*\[.*\]\s*\+\+\s*cleanup\s*\)/s, source),
+           "the command does not hand the parsed period to the composition it starts"
+  end
+
   test "tool progress from a running executor job reaches the operator's terminal before the tool finishes" do
     fixture =
       fixture(
