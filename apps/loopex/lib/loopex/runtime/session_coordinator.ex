@@ -1345,8 +1345,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # to observe their fencing result.
   #
   # Technical depth: owner death is only one succession shape. Control can
-  # install a successor over a live coordinator, and in that shape the relay's
-  # owner monitor never fires. Closing here makes supersession itself the
+  # install a successor over a live coordinator, and in that shape the linked
+  # relay does not end with its still-live owner. Closing here makes supersession itself the
   # terminal event for every open attempt; the relay then drops any late producer
   # item, so its abandoned closure remains last and appears exactly once.
   defp abandon_open_streams(state) do

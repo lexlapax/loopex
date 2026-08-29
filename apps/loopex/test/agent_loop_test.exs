@@ -2537,7 +2537,7 @@ defmodule Loopex.AgentLoopTest do
     events = drain(resumed)
 
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed",
-           "the successor did not durably finish before the predecessor was released"
+           "the successor did not durably finish after the predecessor was terminated"
 
     successor = receive_progress()
 
