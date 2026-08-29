@@ -123,6 +123,21 @@ defmodule Loopex.Runtime.ExecutorStream do
   @doc """
   ## Concept
 
+  Ends an executor progress plane without claiming how its effect ended.
+
+  ## Technical depth
+
+  A live owner that has been superseded still owns the effectful worker but no
+  longer owns a truthful durable disposition. Delegating to the relay's discard
+  path stops projection without constructing an `abandoned` closure from that
+  loss of authority.
+  """
+  @spec discard(t()) :: :ok | :unavailable
+  def discard(%{relay: relay}), do: StreamRelay.discard(relay)
+
+  @doc """
+  ## Concept
+
   Reports how many offered events this domain refused.
 
   ## Technical depth

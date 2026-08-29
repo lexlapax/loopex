@@ -45,7 +45,11 @@ defmodule Loopex.Runtime.StreamRelay do
   transient plane does not fabricate a disposition: the durable result may have
   committed immediately before the owner died. ADR 0011 therefore tells a
   consumer to read a missing closure as an incomplete transient view, never as
-  abandonment.
+  abandonment. A monitor would turn owner death into an ordinary `:DOWN` mailbox
+  message behind progress the producer already queued, so the relay would emit
+  that backlog after its plane owner was gone. The untrapped exit signal carried
+  by the link terminates the relay without waiting for its mailbox, which is what
+  makes owner death end ahead of queued transient work.
 
   A relay never takes its owner down with it. Its own body is wrapped so that
   anything it raises ends it normally rather than propagating into the session.
@@ -118,16 +122,32 @@ defmodule Loopex.Runtime.StreamRelay do
   def open(supervisor, sink, build, close)
       when is_function(build, 2) and is_function(close, 2) do
     owner = self()
+    ready = make_ref()
 
-    Task.Supervisor.start_child(supervisor, fn ->
-      Process.link(owner)
+    case Task.Supervisor.start_child(supervisor, fn ->
+           try do
+             Process.link(owner)
+             send(owner, {ready, self()})
+             relay(%{sink: sink, build: build, close: close, count: 0})
+           catch
+             _kind, _reason -> :ok
+           end
+         end) do
+      {:ok, relay} ->
+        reference = Process.monitor(relay)
 
-      try do
-        relay(%{sink: sink, build: build, close: close, count: 0})
-      catch
-        _kind, _reason -> :ok
-      end
-    end)
+        receive do
+          {^ready, ^relay} ->
+            Process.demonitor(reference, [:flush])
+            {:ok, relay}
+
+          {:DOWN, ^reference, :process, ^relay, reason} ->
+            {:error, {:relay_start_failed, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   @doc """
@@ -175,6 +195,35 @@ defmodule Loopex.Runtime.StreamRelay do
       {^reference, count} ->
         Process.demonitor(reference, [:flush])
         count
+
+      {:DOWN, ^reference, :process, ^relay, _reason} ->
+        :unavailable
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Ends a transient domain without stating a disposition or count.
+
+  ## Technical depth
+
+  Used only where the process that still owns the relay has lost authority
+  before it can prove whether the underlying effect completed. `open/4` does not
+  return until the owner link exists, so this owner can unlink it, send an exit
+  signal, and wait for `:DOWN` without risking that the relay's exit takes the
+  owner with it. The exit signal ends the relay ahead of queued progress and
+  without building a closure. Later producer messages reach a dead process.
+  """
+  @spec discard(t()) :: :ok | :unavailable
+  def discard(relay) when is_pid(relay) do
+    reference = Process.monitor(relay)
+    Process.unlink(relay)
+    Process.exit(relay, :shutdown)
+
+    receive do
+      {:DOWN, ^reference, :process, ^relay, :shutdown} ->
+        :ok
 
       {:DOWN, ^reference, :process, ^relay, _reason} ->
         :unavailable

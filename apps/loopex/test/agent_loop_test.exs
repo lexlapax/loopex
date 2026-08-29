@@ -16,11 +16,14 @@ defmodule Loopex.AgentLoopProgressExecutor do
   @behaviour Loopex.Executor
 
   def start(mode) do
-    {:ok, pid} = Agent.start_link(fn -> %{mode: mode, jobs: [], progress: nil} end)
+    {:ok, pid} =
+      Agent.start_link(fn -> %{mode: mode, jobs: [], effects: [], progress: nil} end)
+
     pid
   end
 
   def jobs(pid), do: Agent.get(pid, & &1.jobs) |> Enum.reverse()
+  def effects(pid), do: Agent.get(pid, & &1.effects) |> Enum.reverse()
 
   @impl Loopex.Executor
   def cancel(_pid, _job_id), do: {:ok, :cleaned}
@@ -45,6 +48,27 @@ defmodule Loopex.AgentLoopProgressExecutor do
     events = events(mode, job)
     Enum.each(events, progress)
 
+    case mode do
+      {:held_after_effect, observer} when is_pid(observer) ->
+        :ok =
+          Agent.update(pid, fn state ->
+            %{state | effects: [job.tool_call_id | state.effects]}
+          end)
+
+        send(observer, {:executor_effect_held, self()})
+
+        receive do
+          :release -> :ok
+        after
+          5_000 -> :ok
+        end
+
+        progress.(chunk(job, 1, "after succession"))
+
+      _other ->
+        :ok
+    end
+
     # Concept: an executor that emitted progress and then could not produce a
     # receipt at all.
     #
@@ -55,6 +79,7 @@ defmodule Loopex.AgentLoopProgressExecutor do
     # never reaches.
     case mode do
       :one_valid_two_refused_then_lost -> {:error, {:receipt_not_retained, :enospc}}
+      {:held_after_effect, _observer} -> {:ok, receipt(job, length(events) + 1)}
       _other -> {:ok, receipt(job, length(events))}
     end
   end
@@ -79,6 +104,7 @@ defmodule Loopex.AgentLoopProgressExecutor do
     do: Map.merge(identity(job), %{stream: "stdout", byte_offset: index * 8, chunk: text})
 
   defp events(:valid, job), do: [chunk(job, 0, "first"), chunk(job, 1, "second")]
+  defp events({:held_after_effect, _observer}, job), do: [chunk(job, 0, "before succession")]
 
   # Concept: one wrong binding, chosen by the case rather than by this double,
   # so every binding can be asked for rather than the three somebody thought of.
@@ -560,6 +586,22 @@ defmodule Loopex.AgentLoopTest do
       true ->
         false
     end
+  end
+
+  defp await_superseded(coordinator, attempts \\ 300) do
+    case :sys.get_state(coordinator) do
+      %{superseded: true} ->
+        true
+
+      _state when attempts > 0 ->
+        Process.sleep(10)
+        await_superseded(coordinator, attempts - 1)
+
+      _state ->
+        false
+    end
+  catch
+    :exit, _reason -> false
   end
 
   defp diagnostics(acc \\ []) do
@@ -2637,6 +2679,91 @@ defmodule Loopex.AgentLoopTest do
 
     assert 1 in attempts,
            "the successor re-ran the attempt it inherited, so both owners derived one domain"
+  end
+
+  test "a live executor supersession ends its old stream without claiming the effect abandoned" do
+    # Concept: losing session authority says nothing about an effect that is
+    # already running. The old progress plane ends, but it cannot call that
+    # effect abandoned merely because a successor now owns reconciliation.
+    #
+    # Technical depth: the executor records its effect, emits one fully bound
+    # progress item, and holds the receipt across a real Control succession. The
+    # predecessor remains alive long enough to process the supersession cast, so
+    # this distinguishes live supersession from the abrupt-owner-death relay
+    # case below. The successor reaches the public reconciliation API from the
+    # durable `effect_dispatched` fact and dispatches no second job. Restoring
+    # the blanket `close_tool_stream(..., :abandoned)` branch publishes the
+    # exact false closure this case refuses.
+    executor = AgentLoopProgressExecutor.start({:held_after_effect, self()})
+
+    fixture =
+      start_with_executor(
+        AgentLoopProgressExecutor,
+        executor,
+        one_call_script(),
+        progress_to: self()
+      )
+
+    assert_receive {:executor_effect_held, worker}, 5_000
+    worker_reference = Process.monitor(worker)
+    predecessor = coordinator_of(fixture.runtime)
+
+    before_succession = receive_progress()
+
+    assert [progress] = Enum.filter(before_succession, &(&1.kind == :tool_progress))
+    assert AgentLoopProgressExecutor.effects(executor) == ["c1"]
+
+    assert {:ok, fixture.session_id} ==
+             Loopex.resume_session(
+               fixture.runtime,
+               fixture.session_id,
+               command_id: "resume-executor-1"
+             )
+
+    assert await_superseded(predecessor),
+           "the live predecessor never processed the supersession notification"
+
+    after_succession = receive_progress()
+    old_domain = progress.stream_domain_id
+
+    refute Enum.any?(after_succession, fn item ->
+             item.kind == :tool_stream_closed and item.stream_domain_id == old_domain
+           end),
+           "live supersession called an unproved executor effect abandoned"
+
+    assert Process.alive?(worker),
+           "supersession terminated the effectful executor worker instead of reconciling it"
+
+    {:ok, resumed} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    assert {:ok, query} = Loopex.reconciliation_query(resumed)
+    assert query.current_session_epoch > query.original_session_epoch
+    assert query.original_attempt == 1
+
+    assert length(AgentLoopProgressExecutor.jobs(executor)) == 1,
+           "the successor retried the executor effect before asking for reconciliation"
+
+    assert :ok = Loopex.reconcile(resumed, Map.put(query, :evidence, "outcome_unknown"))
+
+    events = drain(resumed)
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+
+    assert finished["outcome"] == "outcome_unknown"
+
+    assert length(AgentLoopProgressExecutor.jobs(executor)) == 1,
+           "the successor retried an executor effect before reconciling it"
+
+    send(worker, :release)
+
+    assert_receive {:DOWN, ^worker_reference, :process, ^worker, _reason},
+                   5_000,
+                   "the predecessor's executor worker did not settle after its receipt was released"
+
+    refute Enum.any?(receive_progress(), &(&1.stream_domain_id == old_domain)),
+           "the fenced predecessor projected an item under its old domain after reconciliation"
+
+    assert length(AgentLoopProgressExecutor.jobs(executor)) == 1
   end
 
   test "a stream relay ends with the owner that opened it, ahead of its own backlog" do

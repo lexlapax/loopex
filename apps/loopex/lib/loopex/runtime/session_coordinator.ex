@@ -1340,21 +1340,34 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  defp discard_tool_stream(state, run_id) do
+    case Map.fetch(state.streams, {:executor, run_id}) do
+      {:ok, stream} ->
+        _ended = ExecutorStream.discard(stream)
+        %{state | streams: Map.delete(state.streams, {:executor, run_id})}
+
+      :error ->
+        state
+    end
+  end
+
   # Concept: supersession ends every transient domain the prior owner opened,
-  # even though that coordinator and its workers may still be alive long enough
-  # to observe their fencing result.
+  # but only a model domain can truthfully call that ending abandoned merely
+  # because authority moved.
   #
   # Technical depth: owner death is only one succession shape. Control can
   # install a successor over a live coordinator, and in that shape the linked
-  # relay does not end with its still-live owner. Closing here makes supersession itself the
-  # terminal event for every open attempt; the relay then drops any late producer
-  # item, so its abandoned closure remains last and appears exactly once.
+  # relay does not end with its still-live owner. Model work has no host effect,
+  # so the terminated and drained model worker earns an abandoned closure. An
+  # executor effect may already have happened and may still produce evidence;
+  # its old plane ends without a closure while the worker is left for durable
+  # reconciliation. In both cases the ended relay drops later producer items.
   defp abandon_open_streams(state) do
     state.streams
     |> Map.keys()
     |> Enum.reduce(state, fn
       {:model, run_id}, next -> close_model_stream(next, run_id, :abandoned)
-      {:executor, run_id}, next -> close_tool_stream(next, run_id, :abandoned)
+      {:executor, run_id}, next -> discard_tool_stream(next, run_id)
     end)
   end
 
