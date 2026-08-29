@@ -2590,7 +2590,7 @@ defmodule Loopex.AgentLoopTest do
            "the successor re-ran the attempt it inherited, so both owners derived one domain"
   end
 
-  test "a stream relay ends with the owner that opened it ahead of its own backlog" do
+  test "a stream relay ends with the owner that opened it, ahead of its own backlog" do
     # Concept: an owner death ends its transient plane without inventing a
     # disposition the durable record may contradict.
     #
