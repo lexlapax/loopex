@@ -291,8 +291,10 @@ the transaction it is holding. Once fixed, the instant is read back from
 committed history, so a recovering owner re-presents the deadline the run
 actually had instead of being handed back the downtime it slept through.
 `decide/2` therefore reads `:deadline`, the instant, while `declare/1` validates
-`:deadline_ms`, the duration. ADR 0011 asks for that instant at the promotion
-commit; the deviation and its bounded consequence are recorded in
+`:deadline_ms`, the duration. ADR 0010 asks prompt admission to carry that
+instant and ADR 0011 asks promotion to carry it; ADR 0013 replaces both timing
+clauses with the first-staged-request boundary. The deviation and its bounded
+consequence are recorded in
 [M2 recorded limitations](../evidence/M2-recorded-limitations.md).
 
 Reaching the deadline is not a promised clean stop. `settle_turn/2` commits
@@ -403,11 +405,12 @@ epoch, identity, and fence at its own final serialized pre-start boundary.
 A coordinator that somehow reaches dispatch with no configured policy denies
 with `:policy_unavailable`.
 
-Cancellation of a running job uses the optional `Loopex.Executor.cancel/2`
-callback, which stops one named job and reports `{:ok, :cleaned}` or
-`{:ok, :unconfirmed}`; an executor that does not implement it is treated as
-having nothing to leave behind. That widening of the executor boundary is
-recorded in
+Cancellation of a running job uses the required `Loopex.Executor.cancel/2`
+callback, which stops one named job and reports `{:ok, :cleaned}`,
+`{:ok, :unconfirmed}`, or `{:error, term()}`. Only the first answer confirms
+cleanup. The facade maps the other answers, a raise, exit, timeout, malformed
+answer, and the defensive case of a legacy module missing the required callback
+to unconfirmed cleanup. That widening of the executor boundary is recorded in
 [M2 recorded limitations](../evidence/M2-recorded-limitations.md).
 
 ### Tool Output, Spill, and Artifacts

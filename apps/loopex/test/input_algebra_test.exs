@@ -58,6 +58,27 @@ defmodule Loopex.InputAlgebraTest do
     end
   end
 
+  defp await_dispatch_count(fixture, wanted, attempts \\ 300) do
+    cond do
+      length(AgentLoopTestModel.dispatched(fixture.model)) >= wanted ->
+        true
+
+      attempts > 0 ->
+        Process.sleep(10)
+        await_dispatch_count(fixture, wanted, attempts - 1)
+
+      true ->
+        false
+    end
+  end
+
+  defp coordinator_of(runtime) do
+    {:ok, children} = Loopex.Runtime.Supervisor.children(runtime.supervisor)
+
+    [{_id, pid, _type, _modules} | _rest] = DynamicSupervisor.which_children(children.sessions)
+    pid
+  end
+
   test "a prompt starts a run only while the session is settled and is otherwise refused" do
     {fixture, attachment, session_id, _run_id, model} = start_held()
 
@@ -240,6 +261,94 @@ defmodule Loopex.InputAlgebraTest do
     events = drain_events(attachment)
     prompts = Enum.filter(events, &(&1.kind == "user.message_appended"))
     assert Enum.map(prompts, & &1["command_id"]) == ["p1", "f1"]
+  end
+
+  test "a promoted follow up fixes its deadline when its first request stages" do
+    # Concept: promotion inherits the duration chosen for the active run, not an
+    # already-ticking instant. A follow-up that has become durable but has staged
+    # no request receives the full duration once its first provider request is
+    # committed.
+    #
+    # Technical depth: the first run's terminal transaction also performs the
+    # deterministic promotion. Pausing that exact record after linearization,
+    # killing the owner and waiting longer than the duration leaves the successor
+    # run durable but unstaged. Recovery must dispatch it once with a deadline
+    # derived at staging; carrying the predecessor's instant or inventing one at
+    # promotion would instead end it before the provider call.
+    parent = self()
+    duration_ms = 200
+
+    fixture =
+      start(
+        script: [
+          %{text: "first done", calls: [], hold: parent},
+          %{text: "follow up done", calls: []}
+        ],
+        bounds_deadline_ms: duration_ms
+      )
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "first"})
+
+    assert_receive {:holding, model}, 2_000
+
+    assert {:accepted, "f1"} =
+             Loopex.command(attachment, %{
+               type: :follow_up,
+               command_id: "f1",
+               content: "then this"
+             })
+
+    :ok =
+      Loopex.M1RuntimeTestStore.delay_after_record(
+        fixture.store,
+        "run_terminal_committed",
+        self()
+      )
+
+    send(model, :release)
+
+    assert_receive {:record_linearized, waiter, _store, "run_terminal_committed",
+                    :session_journal_commit, {:committed, _tx, _receipt}},
+                   5_000
+
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1,
+           "the promoted run dispatched before its terminal-and-promotion transaction returned"
+
+    coordinator = coordinator_of(fixture.runtime)
+    coordinator_reference = Process.monitor(coordinator)
+    Process.exit(coordinator, :kill)
+    assert_receive {:DOWN, ^coordinator_reference, :process, ^coordinator, _reason}, 5_000
+    Loopex.M1RuntimeTestStore.release(waiter)
+
+    Process.sleep(duration_ms + 100)
+    staging_floor = System.system_time(:millisecond)
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
+
+    assert await_dispatch_count(fixture, 2),
+           "a promoted run with only pre-staging downtime was treated as expired"
+
+    assert :settled = settle(fixture, session_id)
+
+    assert [first, promoted] = AgentLoopTestModel.dispatched(fixture.model)
+
+    staged_run_ids =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "model_request_committed"))
+      |> Enum.map(& &1.payload["run_id"])
+
+    assert length(Enum.uniq(staged_run_ids)) == 2,
+           "the follow-up was not staged under a distinct promoted run"
+
+    assert first.deadline < staging_floor
+    assert promoted.deadline >= staging_floor + duration_ms
+    assert promoted.deadline <= System.system_time(:millisecond) + duration_ms
   end
 
   test "a follow up submitted while the session is settled is refused" do

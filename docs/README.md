@@ -52,6 +52,8 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0009 — tool, executor, and grant contracts | [Decision](adr/0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](adr/0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
 | 0010 — provider continuation and exact context staging | [Decision](adr/0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](adr/0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
 | 0011 — session input algebra and streaming progress | [Decision](adr/0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](adr/0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
+| 0012 — executor cancellation capability | [Decision](adr/0012-executor-cancellation-capability.md#concept) | [Technical depth](adr/0012-executor-cancellation-capability-technical.md#technical-depth) |
+| 0013 — run-deadline commitment at first request staging | [Decision](adr/0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](adr/0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.

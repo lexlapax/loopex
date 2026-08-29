@@ -79,10 +79,12 @@ and `version/0`. The runtime start options are part of this surface, including
 **Ports.** Core declares exactly five behaviours: `Loopex.Store`,
 `Loopex.Model`, `Loopex.Executor`, `Loopex.Policy`, and
 `Loopex.ArtifactStore`. M1 declared the first three; M2 adds the last two, and
-widens `Loopex.Executor` with the optional `cancel/2` callback recorded in
-[M2 recorded limitations](../evidence/M2-recorded-limitations.md). An
-implementation of any of them is written against bytes that may change in the
-next milestone.
+widens `Loopex.Executor` with the required `cancel/2` callback recorded in
+[M2 recorded limitations](../evidence/M2-recorded-limitations.md). It returns
+`{:ok, :cleaned}`, `{:ok, :unconfirmed}`, or `{:error, term()}`. The facade maps
+the latter two, a malformed or failed call, and the defensive case of a legacy
+module missing the required callback to unconfirmed cleanup. An implementation
+of any port is written against bytes that may change in the next milestone.
 
 The shipped local executor gains two start options, `cleanup_grace_ms` and
 `process_probe`, each readable back from the running executor and recorded on

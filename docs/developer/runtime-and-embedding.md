@@ -66,10 +66,12 @@ inventory and every direction above.
 Core defines five boundary behaviours. M1's three — `Loopex.Store`,
 `Loopex.Model`, and `Loopex.Executor` — are joined by `Loopex.Policy`, the host
 authority port, and `Loopex.ArtifactStore`, the spill port. `Loopex.Executor`
-also gains one optional `cancel/2` callback, recorded in
-[M2 recorded limitations](../evidence/M2-recorded-limitations.md). Runtime,
-composition, and client code introduce no sixth behaviour, broker, generic
-operation layer, global registry, or alternate loop.
+also gains one required `cancel/2` callback, recorded in
+[M2 recorded limitations](../evidence/M2-recorded-limitations.md). Its exact
+answers are `{:ok, :cleaned}`, `{:ok, :unconfirmed}`, and `{:error, term()}`;
+the runtime treats every answer except confirmed cleanup as unconfirmed.
+Runtime, composition, and client code introduce no sixth behaviour, broker,
+generic operation layer, global registry, or alternate loop.
 
 ### Runtime Composition
 
@@ -101,6 +103,13 @@ there is exactly one way a tool reaches a model. Configured defaults exist for
 the bounds — 16 turns, a 1_000_000-token budget, and a 600_000 ms deadline
 duration — and for `max_tokens`; they serve a host that said nothing, and a host
 that explicitly supplies a malformed value is refused at start.
+
+Prompt admission records the deadline duration, and a queued follow-up
+deterministically inherits it at promotion. The first staged model request turns
+that duration into the absolute instant committed in its canonical bytes; later
+turns, executor jobs, timers, and recovery reuse that exact instant. A run lost
+before first staging therefore retains its full duration, while every outage
+after staging consumes the already-committed deadline.
 
 The root supervisor is unnamed and uses `:rest_for_one`. The tool registry now
 comes first, because runtime control and every session coordinator resolve tools

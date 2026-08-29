@@ -22,6 +22,9 @@ defmodule Loopex.AgentLoopProgressExecutor do
 
   def jobs(pid), do: Agent.get(pid, & &1.jobs) |> Enum.reverse()
 
+  @impl Loopex.Executor
+  def cancel(_pid, _job_id), do: {:ok, :cleaned}
+
   # Concept: the executor keeps the callback it was handed, exactly as a real one
   # does for as long as it holds the job.
   #
@@ -194,7 +197,9 @@ defmodule Loopex.AgentLoopAnsweringExecutor do
   @behaviour Loopex.Executor
 
   def start(answers) when is_map(answers) do
-    {:ok, pid} = Agent.start_link(fn -> %{answers: answers, jobs: [], effects: []} end)
+    {:ok, pid} =
+      Agent.start_link(fn -> %{answers: answers, jobs: [], effects: [], waiting: nil} end)
+
     pid
   end
 
@@ -203,7 +208,18 @@ defmodule Loopex.AgentLoopAnsweringExecutor do
   def effects(pid), do: Agent.get(pid, & &1.effects) |> Enum.reverse()
 
   @impl Loopex.Executor
-  def cancel(_pid, _job_id), do: {:ok, :cleaned}
+  def cancel(pid, _job_id) do
+    case Agent.get(pid, & &1.waiting) do
+      waiting when is_pid(waiting) ->
+        send(waiting, :answer)
+        Process.sleep(120)
+
+      nil ->
+        :ok
+    end
+
+    {:ok, :cleaned}
+  end
 
   @impl Loopex.Executor
   def execute(pid, job, _grant, _options, progress \\ nil) do
@@ -232,6 +248,33 @@ defmodule Loopex.AgentLoopAnsweringExecutor do
       # wearing this tag.
       {:before_effect, {:error, reason}} ->
         {:error, {:refused_before_effect, reason}}
+
+      # Concept: a receipt that becomes available while cancellation is being
+      # reduced, rather than before or after it.
+      #
+      # Technical depth: `cancel/2` releases this worker and waits long enough
+      # for its answer to reach the coordinator mailbox. Cleanup must validate
+      # that answer before choosing the stream's complete disposition, exactly
+      # as the ordinary result path does.
+      {:held_after_effect, observer} when is_pid(observer) ->
+        worker = self()
+
+        :ok =
+          Agent.update(pid, fn state ->
+            %{state | effects: [job.tool_call_id | state.effects], waiting: worker}
+          end)
+
+        send(observer, {:executor_receipt_held, worker})
+
+        receive do
+          :answer -> :ok
+        after
+          4_000 -> :ok
+        end
+
+        :ok = Agent.update(pid, &%{&1 | waiting: nil})
+
+        {:ok, receipt(job)}
 
       :completed ->
         :ok =
@@ -275,15 +318,12 @@ end
 defmodule Loopex.AgentLoopSilentExecutor do
   @moduledoc false
 
-  # Concept: a conforming executor that exports no cancellation at all.
+  # Concept: an older or nonconforming executor that exports no cancellation at
+  # all.
   #
-  # Technical depth: `cancel/2` is optional, so this is a legitimate
-  # implementation of the port rather than a broken one. What it is here to say
-  # is what this runtime may conclude from its silence, which is nothing.
-
-  @behaviour Loopex.Executor
-
-  @impl Loopex.Executor
+  # Technical depth: the facade remains fail-closed when it encounters this
+  # shape at runtime even though a conforming executor must implement the
+  # callback. What it may conclude from silence is still nothing.
   def execute(_reference, _job, _grant, _options, progress \\ nil) do
     _progress = progress || Loopex.Executor.discard_progress()
     {:error, {:refused_before_effect, :not_implemented}}
@@ -315,6 +355,9 @@ defmodule Loopex.AgentLoopUndeclaringExecutor do
   def jobs(pid), do: Agent.get(pid, & &1.jobs) |> Enum.reverse()
 
   def effects(pid), do: Agent.get(pid, & &1.effects) |> Enum.reverse()
+
+  @impl Loopex.Executor
+  def cancel(_pid, _job_id), do: {:ok, :unconfirmed}
 
   @impl Loopex.Executor
   def execute(pid, job, _grant, _options, progress \\ nil) do
@@ -359,6 +402,9 @@ defmodule Loopex.AgentLoopBrokenDeclarationExecutor do
   def effects(pid), do: Agent.get(pid, & &1.effects) |> Enum.reverse()
 
   @impl Loopex.Executor
+  def cancel(_pid, _job_id), do: {:ok, :unconfirmed}
+
+  @impl Loopex.Executor
   def execute(pid, job, _grant, _options, progress \\ nil) do
     _progress = progress || Loopex.Executor.discard_progress()
 
@@ -382,6 +428,7 @@ defmodule Loopex.AgentLoopTest do
   alias Loopex.AgentLoopTestModel
   alias Loopex.Bounds
   alias Loopex.M1RuntimeTestStore
+  alias Loopex.Runtime.ExecutorStream
   alias Loopex.Runtime.StreamRelay
   alias LoopexProtocol.ToolDefinition
 
@@ -528,6 +575,29 @@ defmodule Loopex.AgentLoopTest do
       {:loopex_progress, item} -> receive_progress([item | acc])
     after
       50 -> Enum.reverse(acc)
+    end
+  end
+
+  # Concept: wait for the terminal item of a tool progress domain.
+  #
+  # Technical depth: a Store refusal deliberately kills the session owner, so
+  # there is no run terminal for `drain/2` to await. The closure itself is the
+  # observable under test; polling it by message rather than sleeping keeps the
+  # case deterministic even on a loaded scheduler.
+  defp await_tool_closure(acc \\ [], attempts \\ 500) do
+    receive do
+      {:loopex_progress, %{kind: :tool_stream_closed} = closure} ->
+        {Enum.reverse(acc), closure}
+
+      {:loopex_progress, item} ->
+        await_tool_closure([item | acc], attempts)
+    after
+      10 ->
+        if attempts > 0 do
+          await_tool_closure(acc, attempts - 1)
+        else
+          flunk("no tool stream closure arrived; progress: #{inspect(Enum.reverse(acc))}")
+        end
     end
   end
 
@@ -800,6 +870,90 @@ defmodule Loopex.AgentLoopTest do
     for job <- Loopex.AgentLoopAnsweringExecutor.jobs(fixture.executor) do
       assert job.run_deadline == deadline
     end
+  end
+
+  test "a prompt fixes its deadline at first request staging and not at admission" do
+    # Concept: admitting a prompt commits the duration the operator chose. The
+    # absolute instant starts only when the first provider request becomes a
+    # durable dispatch, so downtime before any provider work does not consume a
+    # run that has not started spending that allowance.
+    #
+    # Technical depth: the Store pauses the admitting transaction after it is
+    # durable but before the coordinator receives its result. Killing that owner
+    # leaves a recoverable `model_pending` run with no staged request. Downtime
+    # longer than the duration distinguishes the rule: an instant computed at
+    # admission would already be expired, while the staged-request rule dispatches
+    # once and commits a fresh instant derived from the retained duration.
+    parent = self()
+    duration_ms = 200
+    fixture = start(script: [%{text: "done", calls: []}], bounds_deadline_ms: duration_ms)
+
+    {:ok, session_id} =
+      Loopex.create_session(fixture.runtime, %{"tenant" => "t"}, command_id: "create-1")
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    :ok =
+      M1RuntimeTestStore.delay_after_record(
+        fixture.store,
+        "command_admitted",
+        self()
+      )
+
+    caller =
+      spawn(fn ->
+        result =
+          try do
+            Loopex.command(attachment, %{type: :prompt, command_id: "prompt-1", content: "go"})
+          catch
+            :exit, reason -> {:caller_exit, reason}
+          end
+
+        send(parent, {:prompt_caller_finished, self(), result})
+      end)
+
+    assert_receive {:record_linearized, waiter, _store, "command_admitted",
+                    :session_journal_commit, {:committed, "prompt-1", _receipt}},
+                   5_000
+
+    assert AgentLoopTestModel.dispatched(fixture.model) == [],
+           "the provider was called before the admitting transaction returned"
+
+    coordinator = coordinator_of(fixture.runtime)
+    coordinator_reference = Process.monitor(coordinator)
+    Process.exit(coordinator, :kill)
+    assert_receive {:DOWN, ^coordinator_reference, :process, ^coordinator, _reason}, 5_000
+
+    M1RuntimeTestStore.release(waiter)
+
+    assert_receive {:prompt_caller_finished, ^caller, caller_result}, 5_000
+
+    assert caller_result == {:error, :session_unavailable} or
+             match?({:caller_exit, _}, caller_result)
+
+    Process.sleep(duration_ms + 100)
+    staging_floor = System.system_time(:millisecond)
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
+
+    assert await_dispatch_count(fixture, 1),
+           "a run with only pre-staging downtime was treated as expired"
+
+    {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+    _events = drain(resumed)
+
+    assert [request] = AgentLoopTestModel.dispatched(fixture.model)
+    assert request.deadline >= staging_floor + duration_ms
+    assert request.deadline <= System.system_time(:millisecond) + duration_ms
+
+    records = Fixture.records(fixture, session_id)
+    admitted = Enum.find(records, &(&1.payload[:kind] == "command_admitted"))
+    staged = Enum.find(records, &(&1.payload[:kind] == "model_request_committed"))
+
+    assert admitted.payload["deadline_ms"] == duration_ms
+    refute Map.has_key?(admitted.payload, "deadline")
+    assert staged.payload["request"]["deadline"] == request.deadline
   end
 
   test "every sampling bound is a declared committed value with no implicit default" do
@@ -1563,7 +1717,7 @@ defmodule Loopex.AgentLoopTest do
   defp start_with_executor(module, executor_pid, script, options \\ []) do
     extras = Keyword.get(options, :receipt_extras, %{})
     :persistent_term.put({AgentLoopAnsweringExecutor, :receipt_extras}, extras)
-    declared = Keyword.take(options, [:cleanup_grace_ms])
+    declared = Keyword.take(options, [:cleanup_grace_ms, :progress_to])
 
     model_pid = AgentLoopTestModel.start(script)
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop-answering")
@@ -1613,6 +1767,11 @@ defmodule Loopex.AgentLoopTest do
 
     {:ok, session_id} = Loopex.create_session(runtime, %{"t" => "x"}, command_id: "create-1")
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+
+    case Keyword.get(options, :before_prompt) do
+      prepare when is_function(prepare, 1) -> prepare.(store_pid)
+      nil -> :ok
+    end
 
     {:accepted, "prompt-1"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "prompt-1", content: "go"})
@@ -1917,6 +2076,47 @@ defmodule Loopex.AgentLoopTest do
     # the closure exposes is explained rather than merely visible.
     refusal = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
     assert refusal["refused_count"] == 2
+  end
+
+  test "a receipt the Store refuses cannot complete its tool stream" do
+    # Concept: a complete closure is a claim that a valid executor receipt was
+    # retained. A receipt the Store refused never earned that claim, however
+    # complete its in-memory shape looked before the transaction.
+    #
+    # Technical depth: this is distinct from an executor returning
+    # `receipt_not_retained` and from a malformed receipt. The executor returns a
+    # fully valid receipt after emitting one accepted and two refused events;
+    # the Store alone refuses `executor_receipt_committed`. The stream must close
+    # abandoned on the one item this runtime emitted. Mutating only the Store
+    # error branch to close complete previously left every locked case green.
+    executor = AgentLoopProgressExecutor.start(:one_valid_two_refused)
+
+    fixture =
+      start_with_executor(
+        AgentLoopProgressExecutor,
+        executor,
+        one_call_script(),
+        progress_to: self(),
+        before_prompt: fn store ->
+          :ok = M1RuntimeTestStore.refuse_next_record(store, "executor_receipt_committed")
+        end
+      )
+
+    {progress, closure} = await_tool_closure()
+
+    assert [%{chunk: "kept", progress_sequence: 0}] =
+             Enum.filter(progress, &(&1.kind == :tool_progress))
+
+    assert closure.disposition == :abandoned,
+           "a receipt the Store refused was published as a completed stream"
+
+    assert closure.progress_count == 1,
+           "the abandoned closure did not state the count this runtime emitted"
+
+    refute fixture.session_id
+           |> then(&Fixture.records(fixture, &1))
+           |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed")),
+           "the Store refusal did not reach the receipt transaction this case names"
   end
 
   test "an abandoned model stream closes on the count this runtime published rather than zero" do
@@ -2303,6 +2503,12 @@ defmodule Loopex.AgentLoopTest do
     {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
     assert_receive {:holding, model}, 5_000
 
+    predecessor = receive_progress()
+
+    assert [predecessor_delta] =
+             Enum.filter(predecessor, &(&1.kind == :text_delta)),
+           "the predecessor did not publish exactly the delta that keeps its domain observable"
+
     coordinator = coordinator_of(fixture.runtime)
     reference = Process.monitor(coordinator)
     Process.exit(coordinator, :kill)
@@ -2311,13 +2517,43 @@ defmodule Loopex.AgentLoopTest do
     assert {:ok, ^session_id} =
              Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
 
-    # The predecessor's producer is released only now, so anything it still had
-    # to say arrives after the successor has opened and closed its own domain.
-    send(model, :release)
-    Process.sleep(300)
+    {:ok, resumed} =
+      Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
 
-    observed = receive_progress()
+    assert await_dispatch_count(fixture, 2),
+           "the successor did not dispatch its replacement attempt"
+
+    events = drain(resumed)
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed",
+           "the successor did not durably finish before the predecessor was released"
+
+    successor = receive_progress()
+
+    # The predecessor's producer is released only after the successor has
+    # opened, closed and durably finished its own domain. Anything the old
+    # producer can still say therefore tests the closure-last rule directly.
+    model_reference = Process.monitor(model)
+    send(model, :release)
+    assert_receive {:DOWN, ^model_reference, :process, ^model, _reason}, 5_000
+
+    assert receive_progress() == [],
+           "the predecessor emitted after its owner and relay were gone"
+
+    observed = predecessor ++ successor
     domains = observed |> Enum.map(& &1.stream_domain_id) |> Enum.uniq()
+
+    assert length(domains) == 2,
+           "the predecessor and successor used #{length(domains)} domains: #{inspect(domains)}"
+
+    assert predecessor_delta.stream_domain_id !=
+             successor
+             |> Enum.find(&(&1.kind == :text_delta))
+             |> Map.fetch!(:stream_domain_id),
+           "the successor reused the predecessor's stream domain"
+
+    assert Enum.count(observed, &(&1.kind == :model_stream_closed)) == 1,
+           "the succession did not publish exactly the successor's closure"
 
     for domain <- domains do
       items = Enum.filter(observed, &(&1.stream_domain_id == domain))
@@ -2336,8 +2572,8 @@ defmodule Loopex.AgentLoopTest do
         |> Enum.reject(&(&1.kind == :model_stream_closed))
         |> Enum.map(& &1.model_sequence)
 
-      assert sequences == Enum.uniq(sequences),
-             "domain #{domain} handed out a sequence twice: #{inspect(sequences)}"
+      assert sequences == Enum.to_list(0..(length(sequences) - 1)),
+             "domain #{domain} was not independently gapless: #{inspect(sequences)}"
     end
 
     # And the successor's own domain is a different one, because it abandoned the
@@ -2426,11 +2662,12 @@ defmodule Loopex.AgentLoopTest do
     # that injected an attempt the design refuses to produce would have been a
     # case observing the seam rather than the runtime.
     #
-    # The derivation has one home instead. `StreamDomain.for_job/1` is what the
+    # The opener has one production home instead. It is exactly what the
     # coordinator calls, and it takes two real job requests here — identical
     # except for the attempt the reconciliation contract distinguishes them by.
     # The dispatch site no longer names the attempt at all, so it cannot name a
-    # different one than the job carries.
+    # different one than the job carries; opening, sequencing and closure are
+    # driven through the same relay path an executor job uses in a live run.
     base = %{
       protocol_version: 1,
       job_id: "job-1",
@@ -2464,32 +2701,95 @@ defmodule Loopex.AgentLoopTest do
     assert first.operation_id == second.operation_id,
            "the two jobs are not two attempts of one operation"
 
-    assert Loopex.StreamDomain.for_job(first) != Loopex.StreamDomain.for_job(second),
+    supervisor =
+      start_supervised!(
+        {Task.Supervisor, name: :"executor-stream-#{System.unique_integer([:positive])}"}
+      )
+
+    {:ok, first_stream, first_progress} = ExecutorStream.open(supervisor, self(), first)
+    {:ok, second_stream, second_progress} = ExecutorStream.open(supervisor, self(), second)
+
+    first_progress.(
+      Map.merge(AgentLoopProgressExecutor.identity(first), %{
+        stream: "stdout",
+        byte_offset: 0,
+        chunk: "first-a"
+      })
+    )
+
+    first_progress.(
+      Map.merge(AgentLoopProgressExecutor.identity(first), %{
+        stream: "stdout",
+        byte_offset: 7,
+        chunk: "first-b"
+      })
+    )
+
+    second_progress.(
+      Map.merge(AgentLoopProgressExecutor.identity(second), %{
+        stream: "stderr",
+        byte_offset: 0,
+        chunk: "second"
+      })
+    )
+
+    assert ExecutorStream.close(first_stream, :abandoned) == 2
+    assert ExecutorStream.close(second_stream, {:complete, 1}) == 1
+
+    observed = receive_progress()
+    by_domain = Enum.group_by(observed, & &1.stream_domain_id)
+
+    assert map_size(by_domain) == 2,
+           "two attempts of one operation opened #{map_size(by_domain)} stream domains"
+
+    first_domain = Loopex.StreamDomain.for_job(first)
+    second_domain = Loopex.StreamDomain.for_job(second)
+
+    assert first_domain != second_domain,
            "two attempts of one operation derived the same stream domain"
 
-    # And the label is the one the identity tuple derives, rather than something
-    # this function invents beside it.
-    assert Loopex.StreamDomain.for_job(first) ==
-             Loopex.StreamDomain.derive(:executor, "s1", "operation-1", 1)
+    assert Map.has_key?(by_domain, first_domain)
+    assert Map.has_key?(by_domain, second_domain)
+
+    assert_domain = fn domain, disposition, progress_count ->
+      items = Map.fetch!(by_domain, domain)
+      progress = Enum.reject(items, &(&1.kind == :tool_stream_closed))
+      closure = List.last(items)
+
+      assert Enum.map(progress, & &1.progress_sequence) == Enum.to_list(0..(progress_count - 1))
+      assert closure.kind == :tool_stream_closed
+      assert closure.disposition == disposition
+      assert closure.progress_count == progress_count
+      assert closure == Enum.find(items, &(&1.kind == :tool_stream_closed))
+    end
+
+    assert_domain.(first_domain, :abandoned, 2)
+    assert_domain.(second_domain, :complete, 1)
   end
 
   test "an executor that declares no cancellation confirms nothing" do
-    # Concept: `cancel/2` is optional, and an executor that does not export it
-    # has told this runtime nothing about what its cleanup achieved.
+    # Concept: `cancel/2` is required for a conforming executor. An older or
+    # nonconforming module that does not export it has still told this runtime
+    # nothing about what its cleanup achieved.
     #
     # Technical depth: the absence used to read as `cleaned`, which is a claim
     # about the executor this repository ships rather than about the port. A
-    # conforming third-party executor may own an operating-system process and
-    # export no cancellation; reading its silence as confirmed cleanup committed
+    # third-party executor may own an operating-system process and omit the
+    # required callback; reading its silence as confirmed cleanup committed
     # `cancelled` over a process tree nobody signalled and nobody looked at. What
     # this runtime knows is `unconfirmed`, which ends the run `outcome_unknown`
     # carrying a reconciliation reference the operator can act on.
+    assert {:cancel, 2} in Loopex.Executor.behaviour_info(:callbacks)
+    refute {:cancel, 2} in Loopex.Executor.behaviour_info(:optional_callbacks)
+
     assert Loopex.Executor.cancel(AgentLoopSilentExecutor, :ignored, "job-1") ==
              {:ok, :unconfirmed},
            "an executor that declares no cancellation had its silence read as a clean stop"
 
     # And an executor that does declare one is still asked and still answered.
-    assert Loopex.Executor.cancel(AgentLoopAnsweringExecutor, :ignored, "job-1") ==
+    answering = AgentLoopAnsweringExecutor.start(%{})
+
+    assert Loopex.Executor.cancel(AgentLoopAnsweringExecutor, answering, "job-1") ==
              {:ok, :cleaned}
   end
 
@@ -2564,23 +2864,68 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopAnsweringExecutor,
         AgentLoopAnsweringExecutor.start(%{}),
         one_call_script(),
-        receipt_extras: %{progress_count: -1}
+        receipt_extras: %{progress_count: -1},
+        progress_to: self()
       )
 
-    coordinator = coordinator_of(answering.runtime)
-    reference = Process.monitor(coordinator)
+    answering_events = drain(answering.attachment)
+    answering_tool = Enum.find(answering_events, &(&1.kind == "tool.finished"))
+    answering_finished = Enum.find(answering_events, &(&1.kind == "run.finished"))
 
-    assert_receive {:DOWN, ^reference, :process, ^coordinator, reason},
-                   10_000,
-                   "a receipt reporting a negative progress count was committed"
+    assert answering_tool["outcome"] == "outcome_unknown"
+    assert answering_finished["outcome"] == "outcome_unknown"
 
-    assert match?({:executor_fact_failed, _}, reason),
-           "the owner stopped for #{inspect(reason)} rather than for the malformed receipt"
+    assert Process.alive?(coordinator_of(answering.runtime)),
+           "a malformed receipt killed the session owner instead of settling the effect unproven"
 
     refute answering.session_id
            |> then(&Fixture.records(answering, &1))
            |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed")),
            "a receipt reporting a negative progress count reached the journal"
+
+    tool_closures =
+      receive_progress()
+      |> Enum.filter(&(&1.kind == :tool_stream_closed))
+
+    assert [%{disposition: :abandoned, progress_count: 0}] = tool_closures
+
+    refute Enum.any?(tool_closures, &(&1.disposition == :complete)),
+           "a malformed receipt was published as a completed tool stream"
+
+    # The same validation order governs a receipt that arrives while an abort is
+    # settling the executor worker. This is a different production branch: the
+    # ordinary result handler never sees the answer, and cleanup adopts it from
+    # the worker mailbox after host cancellation returns.
+    cleanup =
+      start_with_executor(
+        AgentLoopAnsweringExecutor,
+        AgentLoopAnsweringExecutor.start(%{"c1" => {:held_after_effect, self()}}),
+        one_call_script(),
+        receipt_extras: %{progress_count: -1},
+        progress_to: self()
+      )
+
+    assert_receive {:executor_receipt_held, _worker}, 5_000
+
+    assert {:accepted, "abort-1"} =
+             Loopex.command(cleanup.attachment, %{type: :abort, command_id: "abort-1"})
+
+    cleanup_events = drain(cleanup.attachment)
+    cleanup_finished = Enum.find(cleanup_events, &(&1.kind == "run.finished"))
+
+    assert cleanup_finished["outcome"] == "outcome_unknown",
+           "cleanup treated a malformed receipt as a proved terminal effect"
+
+    cleanup_closures =
+      receive_progress()
+      |> Enum.filter(&(&1.kind == :tool_stream_closed))
+
+    assert [%{disposition: :abandoned, progress_count: 0}] = cleanup_closures
+
+    refute cleanup.session_id
+           |> then(&Fixture.records(cleanup, &1))
+           |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed")),
+           "cleanup committed a receipt whose progress count was malformed"
   end
 
   test "a complete model stream closes on its reply's own delta count" do

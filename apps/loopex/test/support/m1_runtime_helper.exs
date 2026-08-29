@@ -24,6 +24,17 @@ defmodule Loopex.M1RuntimeTestStore do
   def delay_after_commit(pid, transition, observer) when is_pid(observer),
     do: GenServer.call(pid, {:delay_after_commit, transition, observer})
 
+  # Concept: pause the caller after one transaction carrying a named record has
+  # become durable.
+  #
+  # Technical depth: several session semantics are distinguished by records
+  # inside the common `session_journal_commit` transaction shape. Delaying by
+  # record kind lets a test crash the owner at that exact durable boundary
+  # without inventing a product hook or accidentally stopping an earlier commit
+  # that uses the same Store transition.
+  def delay_after_record(pid, kind, observer) when is_binary(kind) and is_pid(observer),
+    do: GenServer.call(pid, {:delay_after_record, kind, observer})
+
   def block_next_event_read(pid, observer) when is_pid(observer),
     do: GenServer.call(pid, {:block_next_event_read, observer})
 
@@ -80,6 +91,7 @@ defmodule Loopex.M1RuntimeTestStore do
        faults: %{},
        recovery_setup: MapSet.new(),
        delayed: %{},
+       delayed_records: %{},
        event_read_block: nil,
        fail_reads: false,
        refuse_records: MapSet.new()
@@ -106,6 +118,10 @@ defmodule Loopex.M1RuntimeTestStore do
     {:reply, :ok, %{state | delayed: Map.put(state.delayed, transition, observer)}}
   end
 
+  def handle_call({:delay_after_record, kind, observer}, _from, state) do
+    {:reply, :ok, %{state | delayed_records: Map.put(state.delayed_records, kind, observer)}}
+  end
+
   def handle_call({:block_next_event_read, observer}, _from, state) do
     {:reply, :ok, %{state | event_read_block: observer}}
   end
@@ -122,7 +138,7 @@ defmodule Loopex.M1RuntimeTestStore do
   def handle_call(:injected, _from, state), do: {:reply, state.injected, state}
 
   def handle_call(:inspect_state, _from, state) do
-    visible = Map.drop(state, [:faults, :delayed, :event_read_block])
+    visible = Map.drop(state, [:faults, :delayed, :delayed_records, :event_read_block])
     {:reply, visible, state}
   end
 
@@ -269,24 +285,64 @@ defmodule Loopex.M1RuntimeTestStore do
         {after_checkpoint, state} =
           checkpoint(state, transition, :after_linearization_before_result)
 
-        cond do
-          Map.has_key?(state.delayed, transition) ->
-            {observer, delayed} = Map.pop(state.delayed, transition)
+        case delayed_record(state, transaction) do
+          {kind, observer} ->
             waiter = delayed_reply(from, outcome)
-            send(observer, {:transaction_linearized, waiter, self(), transition, outcome})
-            {:noreply, %{state | delayed: delayed}}
+            send(observer, {:record_linearized, waiter, self(), kind, transition, outcome})
 
-          MapSet.member?(state.recovery_setup, transition) ->
-            {:reply, unknown(transaction),
-             %{state | recovery_setup: MapSet.delete(state.recovery_setup, transition)}}
+            {:noreply, %{state | delayed_records: Map.delete(state.delayed_records, kind)}}
 
-          after_checkpoint == :unknown ->
-            {:reply, unknown(transaction), state}
-
-          true ->
-            {:reply, outcome, state}
+          nil ->
+            reply_after_linearization(
+              state,
+              from,
+              transition,
+              transaction,
+              outcome,
+              after_checkpoint
+            )
         end
     end
+  end
+
+  defp reply_after_linearization(
+         state,
+         from,
+         transition,
+         transaction,
+         outcome,
+         after_checkpoint
+       ) do
+    cond do
+      Map.has_key?(state.delayed, transition) ->
+        {observer, delayed} = Map.pop(state.delayed, transition)
+        waiter = delayed_reply(from, outcome)
+        send(observer, {:transaction_linearized, waiter, self(), transition, outcome})
+        {:noreply, %{state | delayed: delayed}}
+
+      MapSet.member?(state.recovery_setup, transition) ->
+        {:reply, unknown(transaction),
+         %{state | recovery_setup: MapSet.delete(state.recovery_setup, transition)}}
+
+      after_checkpoint == :unknown ->
+        {:reply, unknown(transaction), state}
+
+      true ->
+        {:reply, outcome, state}
+    end
+  end
+
+  defp delayed_record(%{delayed_records: delayed}, transaction) do
+    transaction
+    |> Map.get(:records, [])
+    |> Enum.find_value(fn record ->
+      kind = record_kind(record)
+
+      case Map.fetch(delayed, kind) do
+        {:ok, observer} -> {kind, observer}
+        :error -> nil
+      end
+    end)
   end
 
   defp reply_checkpoint(:unknown, _from, state, transaction, _outcome),

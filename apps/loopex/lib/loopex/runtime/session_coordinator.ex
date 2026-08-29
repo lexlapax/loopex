@@ -28,6 +28,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Bounds
   alias Loopex.Conversation
   alias Loopex.Runtime.Control
+  alias Loopex.Runtime.ExecutorStream
   alias Loopex.Runtime.SessionState
   alias Loopex.Runtime.StreamRelay
   alias Loopex.Executor
@@ -997,13 +998,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: a run's bounds become absolute when the run is admitted.
+  # Concept: a command chooses the declared bounds its run will use.
   #
-  # Technical depth: the configured deadline is a duration; this is the one place
-  # it becomes an instant, and it is committed with the admitting record. A
+  # Technical depth: the configured deadline stays a duration here and in the
+  # admitting record. `run_deadline/1` converts it to an instant only while the
+  # first model request is staged, and that request commits the instant. A
   # command may name its own bounds and they win, which is how a host with a
-  # per-run policy overrides the runtime default without either of them being
-  # implicit.
+  # per-run policy overrides the runtime default without either being implicit.
   defp resolve_bounds(state, command) do
     case Map.get(command, :bounds) do
       %{} = supplied -> Map.merge(state.bounds, supplied)
@@ -1305,26 +1306,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # stated total against what reached it learns that something did not arrive.
   # Substituting this runtime's own count would erase the only live evidence a
   # refusal leaves, since the refusal record itself is durable and private.
-  # Concept: an executor that reported no count emitted nothing.
+  # Concept: only a validated receipt may state a completed stream's count.
   #
-  # Technical depth: ADR 0011 says a domain that emitted nothing states zero,
-  # which is exact and needs no sentinel, so anything that is not a count reads
-  # as none rather than being trusted. That default governs only the closure,
-  # and only for a receipt this runtime is about to refuse anyway: the field is
-  # required, and the reducer that commits the fact rejects a receipt without it
-  # a moment later. It is here so the closure a consumer already received states
-  # a number rather than crashing the owner between the two.
-  defp progress_count(receipt) do
-    case Map.get(receipt, :progress_count) do
-      count when is_integer(count) and count >= 0 -> count
-      _not_a_count -> 0
-    end
-  end
+  # Technical depth: every call is after `put_executor_fact/3` accepted and
+  # durably committed the receipt, whose reducer requires this field to be a
+  # non-negative integer. Keeping this clause strict prevents a malformed
+  # receipt from being projected as a truthful complete closure before the
+  # durable boundary refuses it.
+  defp progress_count(%{progress_count: count}) when is_integer(count) and count >= 0,
+    do: count
 
   defp close_tool_stream(state, run_id, disposition) do
     case Map.fetch(state.streams, {:executor, run_id}) do
       {:ok, stream} ->
-        _stated = StreamRelay.close(stream.relay, disposition)
+        _stated = ExecutorStream.close(stream, disposition)
         state = report_refused_progress(state, run_id, stream)
         %{state | streams: Map.delete(state.streams, {:executor, run_id})}
 
@@ -1351,7 +1346,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # at stream close, because no further event can arrive by then and the count
   # is therefore stable across any recomputation of this proposal.
   defp report_refused_progress(state, run_id, stream) do
-    case :atomics.get(stream.refused, 1) do
+    case ExecutorStream.refused_count(stream) do
       0 ->
         state
 
@@ -1713,7 +1708,20 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp settle_executor_work(state, run_id) do
     case in_flight_of(state, :executor, run_id) do
       nil ->
-        {state, :cleaned}
+        # A successor owns no local Task for an effect its predecessor
+        # dispatched. That absence proves only who owns the worker, never what
+        # the effect did. Treating it as a clean cancellation let a fresh abort
+        # commit `cancelled` with a durable `effect_dispatched` operation and no
+        # terminal fact. The stream may likewise belong to the predecessor, so
+        # closing the local entry is deliberately best-effort; the durable
+        # operation fact below is the authoritative ending.
+        case Map.get(state.durable.pending_work, run_id) do
+          %{stage: "effect_dispatched"} ->
+            {close_tool_stream(state, run_id, :abandoned), :unconfirmed}
+
+          _nothing_dispatched ->
+            {state, :cleaned}
+        end
 
       {reference, pid} ->
         _ = Task.Supervisor.terminate_child(state.workers, pid)
@@ -1721,11 +1729,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
         case take_worker_result(reference) do
           {:ok, receipt} when is_map(receipt) ->
-            state = close_tool_stream(state, run_id, {:complete, progress_count(receipt)})
-
-            case put_executor_fact(state, run_id, receipt) do
+            case retain_executor_fact(state, run_id, receipt) do
               {:ok, next} -> {next, :cleaned}
-              {:error, _reason} -> {state, :unconfirmed}
+              {:invalid, next, _reason} -> {next, :unconfirmed}
+              {:error, next, _reason} -> {next, :unconfirmed}
             end
 
           _unproved ->
@@ -1888,7 +1895,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:noreply, state}
     else
       executor = state.executor
-      {stream, progress} = executor_progress_fun(state, work)
+
+      {:ok, stream, progress} =
+        ExecutorStream.open(state.workers, state.progress_to, work.job)
 
       task =
         Task.Supervisor.async_nolink(state.workers, fn ->
@@ -1899,134 +1908,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:noreply, put_in_flight(state, task.ref, {:executor, work.run_id, task.pid})}
     end
   end
-
-  # Concept: an executor's progress must prove which attempt it belongs to
-  # before any of it is shown to an operator.
-  #
-  # Technical depth: the domain is derived from the `(operation_id, attempt)`
-  # this coordinator dispatched and journaled, and every binding the dispatched
-  # job carries — operation and attempt, session, run and turn, the attempt-bound
-  # canonical request digest, both origin epochs, the executor's identity, and
-  # its fencing token — is compared against the job rather than read off the
-  # event. Matching a `tool_call_id` alone was not a check: a stale or faulty
-  # executor that echoed the live call id could carry any other binding it liked,
-  # and the whole map it supplied was then merged into the item the operator
-  # sees, so an unbounded chunk, a pid, or a credential reached the progress
-  # plane on the strength of one field.
-  #
-  # A missing binding and a present-but-wrong binding are refused identically,
-  # because `Map.fetch/2` distinguishes them and equality does not. What survives
-  # is projected as a named bounded subset that this coordinator builds; the
-  # executor's map is never forwarded. A refused event is dropped and counted on
-  # the attempt's stream state, and never projected, journaled, published, or
-  # allowed to affect an outcome, a bound, or a receipt.
-  defp executor_progress_fun(state, work) do
-    job = work.job
-    domain = StreamDomain.for_job(job)
-    turn_id = work.turn_id
-    tool_call_id = job.tool_call_id
-    refused = :atomics.new(1, signed: false)
-    bindings = progress_bindings(job)
-
-    {:ok, relay} =
-      StreamRelay.open(
-        state.workers,
-        state.progress_to,
-        fn projected, sequence ->
-          Map.merge(projected, %{
-            kind: :tool_progress,
-            turn_id: turn_id,
-            tool_call_id: tool_call_id,
-            stream_domain_id: domain,
-            progress_sequence: sequence
-          })
-        end,
-        fn disposition, count ->
-          StreamDomain.tool_closed(turn_id, domain, tool_call_id, 0, disposition, count)
-        end
-      )
-
-    stream = %{
-      domain: domain,
-      turn_id: turn_id,
-      relay: relay,
-      refused: refused,
-      tool_call_id: tool_call_id
-    }
-
-    {stream,
-     fn event ->
-       case project_progress(event, bindings) do
-         {:ok, projected} ->
-           # The identity is judged here and the sequence assigned by the relay,
-           # so a refused event never consumes a number and an event arriving
-           # after closure reaches a relay that has ended -- dropped rather than
-           # emitted past a total already published, and not counted as a refusal
-           # either, because a refusal is this coordinator's judgement about an
-           # event's identity and this event's identity is correct: it is only
-           # late.
-           StreamRelay.emit(relay, projected)
-
-         :refused ->
-           :atomics.add(refused, 1, 1)
-       end
-
-       :ok
-     end}
-  end
-
-  # Concept: the identity an event has to reproduce is the identity the job was
-  # dispatched under.
-  #
-  # Technical depth: taken from the journaled job, so the comparison is against
-  # state this coordinator already holds. Nothing here is derived from the event,
-  # which is what makes the check fail closed rather than merely self-consistent.
-  defp progress_bindings(job) do
-    %{
-      tool_call_id: job.tool_call_id,
-      operation_id: job.operation_id,
-      attempt: job.attempt,
-      session_id: job.session_id,
-      run_id: job.run_id,
-      turn_id: job.turn_id,
-      canonical_request_digest: job.canonical_request_digest,
-      session_epoch_at_dispatch: job.origin_session_epoch,
-      executor_epoch: job.origin_executor_epoch,
-      executor_identity: job.executor_identity,
-      fencing_token: job.fencing_token
-    }
-  end
-
-  @max_progress_chunk_bytes 65_536
-  @progress_streams ["stdout", "stderr"]
-
-  defp project_progress(event, bindings) when is_map(event) do
-    bound? =
-      Enum.all?(bindings, fn {field, expected} -> Map.fetch(event, field) == {:ok, expected} end)
-
-    if bound? do
-      bounded_progress(event)
-    else
-      :refused
-    end
-  end
-
-  defp project_progress(_event, _bindings), do: :refused
-
-  # Concept: what an operator is shown is a small, named, plain shape.
-  #
-  # Technical depth: three fields, each bounded and each checked. A chunk past
-  # the declared ceiling, an offset that is not a byte position, or a stream name
-  # this boundary does not define is refused rather than truncated, because
-  # silently repairing an event would hide the producer that emitted it. Nothing
-  # else the executor supplied is carried, so no pid, function, or arbitrary term
-  # can cross by riding along in an unexamined key.
-  defp bounded_progress(%{stream: stream, byte_offset: offset, chunk: chunk})
-       when stream in @progress_streams and is_integer(offset) and offset >= 0 and
-              is_binary(chunk) and byte_size(chunk) <= @max_progress_chunk_bytes,
-       do: {:ok, %{stream: stream, byte_offset: offset, chunk: chunk}}
-
-  defp bounded_progress(_event), do: :refused
 
   defp build_job(state, work, call, definition) do
     {declared, _charged} = SessionState.accounting(state.durable, work.run_id)
@@ -2174,8 +2055,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp accept_executor_result(state, run_id, {:ok, receipt}) when is_map(receipt) do
-    state = close_tool_stream(state, run_id, {:complete, progress_count(receipt)})
-
     case state.fault_to do
       pid when is_pid(pid) ->
         reference = make_ref()
@@ -2316,13 +2195,48 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp failure_of({:error, {:refused_before_effect, reason}}), do: reason
 
   defp commit_executor_fact(state, run_id, receipt) do
-    case put_executor_fact(state, run_id, receipt) do
+    case retain_executor_fact(state, run_id, receipt) do
       {:ok, next} ->
         send(self(), :advance_work)
         {:noreply, next}
 
-      {:error, reason} ->
+      {:invalid, state, reason} ->
+        case Map.get(state.durable.pending_work, run_id) do
+          %{pending_calls: [call | _rest]} = work ->
+            commit_tool_unproven(
+              state,
+              work,
+              call,
+              {:error, {:invalid_executor_receipt, reason}}
+            )
+
+          _other ->
+            {:stop, {:executor_fact_failed, reason}, state}
+        end
+
+      {:error, state, reason} ->
         {:stop, {:executor_fact_failed, reason}, state}
+    end
+  end
+
+  # Concept: a tool stream earns `complete` only with the durable receipt that
+  # states its count.
+  #
+  # Technical depth: both ordinary result handling and cancellation cleanup use
+  # this one boundary. Validation and retention happen first; only their success
+  # selects the receipt's count and the complete disposition. An invalid or
+  # unretained receipt closes the relay abandoned on the number it actually
+  # emitted, so neither caller can publish a fact the journal refused.
+  defp retain_executor_fact(state, run_id, receipt) do
+    case put_executor_fact(state, run_id, receipt) do
+      {:ok, next} ->
+        {:ok, close_tool_stream(next, run_id, {:complete, progress_count(receipt)})}
+
+      {:invalid, reason} ->
+        {:invalid, close_tool_stream(state, run_id, :abandoned), reason}
+
+      {:error, reason} ->
+        {:error, close_tool_stream(state, run_id, :abandoned), reason}
     end
   end
 
@@ -2332,8 +2246,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # reduction, where a `:noreply` tuple would be the wrong shape and scheduling
   # more work would be exactly wrong.
   defp put_executor_fact(state, run_id, receipt) do
-    with {:ok, proposal} <- SessionState.propose_executor_fact(state.durable, run_id, receipt) do
-      commit_internal(state, proposal)
+    case SessionState.propose_executor_fact(state.durable, run_id, receipt) do
+      {:ok, proposal} -> commit_internal(state, proposal)
+      {:error, reason} -> {:invalid, reason}
     end
   end
 

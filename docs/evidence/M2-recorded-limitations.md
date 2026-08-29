@@ -9,6 +9,144 @@ authority that disposed it. An independent reviewer reads these as declared
 limitations rather than as undiscovered defects; nothing here authorises work or
 changes a commitment.
 
+<a id="operator-path-race"></a>
+## Path resolution and the effect are not one operation
+
+**Rule.** `M2-technical.md` obligation 4 requires refusal by every filesystem
+tool of every path that escapes the workspace root through traversal, a symlink,
+or a link chain. This entry is the detail behind the narrowing that obligation
+now carries. `docs/operator/tools-and-policy.md` already discloses this race in
+plain language rather than promising containment it cannot deliver, and says
+separately that `bash` is not path-checked at all; the rule this entry qualifies
+is the filesystem tools' containment, not a promise that guidance still makes.
+
+**What this milestone does instead.** Containment is resolved and checked, and
+the effect is then performed as a separate operation. Erlang's `:file` exposes
+neither `openat` nor `O_NOFOLLOW`, so the check and the use cannot be made one
+kernel operation without starting a child process, which the same obligation says
+these tools do not do.
+
+The dominant windows are closed, and each closure is proved by reverting it.
+Directory creation walked the path with `mkdir_p`, which follows a symlinked
+component, so a name swapped under a write could redirect it outside the
+workspace: a reviewer's probe wrote `escaped-354.txt` outside a workspace and
+escaped eight times in nine runs. Each level is now created with `File.mkdir/1`
+and, where it exists, required by `File.lstat/1` to be a real directory. `edit`
+had the same hole for longer: it committed through the same create-exclusive and
+rename as `write`, which protects the final component, but never ran the
+directory guard, so a reviewer redirected an edit onto a file outside the
+workspace on the eleventh attempt. `edit` now runs the identical sequence.
+Reverting either guard alone reproduces its escape in the retained cases.
+
+What survives is narrow and applies to `read`, `write` and `edit` alike. A write
+or an edit creates under a private name with `O_CREAT|O_EXCL`, which refuses a
+symlink outright, and renames onto the target, which replaces a link rather than
+following it, so the final component cannot be redirected. But nothing pins an
+intermediate directory between the `mkdir`/`lstat` and the create, and a read
+verifies the identity of what it opened only after opening it. A workspace being
+manipulated concurrently can therefore still be raced, with low probability, to
+read a file outside the workspace or to land a write or an edit outside it.
+
+**What an operator can observe.** A coding tool acting on a workspace nothing
+else is changing is contained. A model that runs a background process in its own
+workspace through `loopex.bash` -- which it may -- and uses it to swap a path
+component in a tight loop can, with low probability, cause a read to return bytes
+from outside the workspace, or a write or an edit to land outside it. Both are
+reachable only from inside the workspace the operator already granted, and
+neither escapes the machine.
+
+There is a second consequence, on availability rather than containment, and it is
+recorded here because the same gap produces it. A path checked as a regular file
+and swapped to a FIFO before it is opened leaves that open outstanding, and one
+outstanding blocked open stalls every other `File.read` in the emulator until it
+is paired -- with idle dirty IO schedulers, and whether or not the blocked
+process is abandoned. Every session sharing the runtime is affected for as long
+as it lasts. The static case is refused before anything is opened; the raced case
+is the same window as above.
+
+**Disposition.** Maintainer, 2026-08-27: record the limitation and amend the
+promises it contradicts, rather than close the windows. A limitation cannot waive
+an obligation the plan still asserts, so obligation 4 and the operator guidance
+were both narrowed in the same revision to say what is true; this entry is the
+detail behind that wording, not a substitute for it.
+
+The alternative was shown and declined: performing the effects in a controlled
+child process. It is worth stating precisely what that would and would not buy,
+because an earlier draft of this record overstated it. Anchoring such a child's
+working directory to the verified resolved parent closes the intermediate
+directory window, and a child is killable by the operating system, which also
+closes the stall above. It does **not** by itself close the final component: a
+basename can still be swapped to an outside symlink before the open, and refusing
+that needs a no-follow-capable open or a handle opened before the check --
+neither of which `:file` provides, and both of which the child would have to
+carry. That is the work a milestone revisiting this would take on, and the cost
+is the distinction obligation 4 draws between tools that execute a command and
+tools that do not.
+
+<a id="cleanup-grace-not-session-visible"></a>
+## Withdrawn: the cleanup period is session configuration after all
+
+**This limitation was recorded and is withdrawn.** It said the cleanup grace was
+executor configuration that no session could reach, against accepted ADR 0009's
+requirement that it be a declared session configuration value with a default,
+reported in the terminal outcome's evidence, and it carried a maintainer
+disposition to defer that to a later milestone.
+
+An independent review rejected the deferral: a recorded limitation cannot stand
+in for an accepted ADR while the plan says that ADR is consumed unchanged, and
+the choice was to implement or to amend the ADR. The maintainer chose to
+implement. The first attempt was rejected in turn, and correctly: forwarding an
+*executor* option and reading the number back off whatever receipt happened to
+arrive is not a session configuration value. A run that produced no receipt
+reported `nil` — an abort admitted before any executor answered, a run stopped
+between turns, every recovery — which are exactly the endings the period matters
+for, and no default existed at the session at all.
+
+What `M2` does now:
+
+- `Loopex.Executor.default_cleanup_grace_ms/0` is the one default, on the port,
+  because two parties need the same number and a default written twice is two
+  numbers that agree until one is edited;
+- `Loopex.start_link(cleanup_grace_ms: …)` is a declared session option
+  validated at start, and `loopex run --cleanup-grace-ms …` is the operator's
+  way to name it;
+- `LoopexComposition.start/1` forwards it to the session and to the executor
+  together, so the number the ending reports is the number the cleanup ran
+  under;
+- every run terminal record and every `run.finished` event reports it, from the
+  session's own declaration, whatever the run did or did not dispatch.
+
+The anchor is kept so links to it resolve. Nothing here is a live limitation.
+
+<a id="process-probe-not-session-visible"></a>
+## The program that confirms a process group is executor configuration
+
+**Rule.** ADR 0009 requires the cleanup grace to be a declared session
+configuration value. It says nothing about the program that confirms a process
+group is gone, which is this executor's own mechanism rather than a contract
+term.
+
+**What is true.** `process_probe` is a start option of the shipped local
+executor. A host embedding Loopex names it
+(`Loopex.Executor.Local.start_link(process_probe: "/usr/bin/ps")`); the `loopex`
+command does not expose a flag for it and takes `/bin/ps`. Every receipt records
+which program was asked, so an outcome that could not be confirmed says what
+failed to confirm it.
+
+**Why it is recorded rather than fixed here.** An image that ships `ps` at
+another path has every command reported `outcome_unknown` under the shipped
+command, which is correct and useless. Making it an operator flag is a small
+change; making it *unnecessary* is not, and the alternatives — reading
+`/proc`, `kill(pid, 0)` over a retained group, or a platform-specific syscall —
+are portability decisions rather than plumbing. This milestone names the program
+and records the choice; it does not settle which mechanism a later milestone
+should use.
+
+**Consequence for an operator.** On an image without `/bin/ps`, cancel and
+deadline endings report `outcome_unknown` with a reconciliation reference rather
+than `cancelled`. That is truthful, and it is not the same as the cleanup having
+failed.
+
 ## Executor cancellation callback
 
 **Rule.**
@@ -18,9 +156,11 @@ names the cancellation sequence among the things that are unchanged. M1's only
 cancellation signal is workspace-lease loss: the executor watches the lease
 process and terminates the job when it dies.
 
-**What this milestone does instead.** `Loopex.Executor` gains one optional
-callback, `cancel/2`, which stops a single named job and reports whether its
-cleanup could be confirmed.
+**What this milestone does instead.** `Loopex.Executor` gains one required
+callback, `cancel/2`, which stops a single named job. Its exact return algebra is
+`{:ok, :cleaned}`, `{:ok, :unconfirmed}`, or `{:error, term()}`. Only
+`{:ok, :cleaned}` confirms cleanup; every other answer fails closed to
+unconfirmed cleanup at the runtime facade.
 
 **Why.** Outcome 8 requires an abort to cancel the in-flight executor job and
 confirm cleanup before committing `cancelled`, and lease loss cannot express
@@ -32,10 +172,12 @@ could only ever commit `outcome_unknown`, which fails the locked case and leaves
 a real operating-system process running on the operator's machine after they
 pressed Ctrl-C.
 
-**Observable consequence.** The boundary is wider by one optional callback. An
-executor that does not implement it is treated as having nothing to leave
-behind, so existing implementations remain conformant without change. The
-isolated executor named as the second implementation will have to satisfy it.
+**Observable consequence.** The boundary is wider by one required callback. An
+existing executor that omits it is no longer conformant without change. The
+runtime facade remains defensive toward such a legacy or nonconforming module:
+it reports cleanup unconfirmed rather than treating absence as proof that
+nothing remains. The isolated executor named as the second implementation will
+have to satisfy the callback.
 
 **Disposition.** Maintainer, 2026-08-24: add `cancel/2` to the executor
 behaviour. The alternatives considered and not taken were routing cancellation
@@ -43,16 +185,39 @@ through lease revocation, refactoring the local executor to non-blocking
 execution first, and cancelling only the BEAM side while always reporting
 `outcome_unknown`.
 
-## Promoted follow-up deadline instant
+**What the absence now means.** A legacy or nonconforming executor that does not
+export required `cancel/2` answers `unconfirmed` rather than `cleaned`. The
+absence previously read as a clean stop, which is a statement about the executor
+this repository ships and not about an arbitrary module: one may own an
+operating-system process and export no cancellation, and `cancelled` was then
+committed over a process tree nobody signalled and nobody looked at. The run
+ends `outcome_unknown` with a reconciliation reference instead.
 
-**Rule.** [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept)
-requires a promoted follow-up's absolute deadline instant to be computed at the
-promotion commit, so that a recovering owner re-presents it rather than handing
-the run back the downtime it slept through.
+**The instrument this still owes.** Three independent reviews have now made the
+same point, and it is correct: a recorded limitation cannot amend an accepted
+ADR. The maintainer's decision above is explicit and dated, so the milestone is
+authorized to do what it does; what is missing is that ADR 0009's own text still
+says the opposite, and a reader of that ADR alone would be misled. This
+repository freezes an accepted ADR byte-for-byte — `Mix.Tasks.Loopex.Status`
+requires an accepted ADR to equal the candidate it binds apart from its status
+and governance row — so there is no in-place amendment to make. The instrument is
+[ADR 0012](../adr/0012-executor-cancellation-capability.md#concept) records this
+extension. `M2` does not close until it carries recorded acceptance, which its
+plan pair states as a closure obligation. The ADR and
+[ADR index](../adr/README.md) remain the canonical current-status sources.
 
-**What this milestone does instead.** The promotion commits the declared
-*duration*. The absolute instant is fixed when the promoted run stages its first
-request, and is reused unchanged by every later turn of that run.
+## Pre-staging deadline instant
+
+**Rule.** [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept)
+requires a prompt's absolute deadline instant at admission, and
+[ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept) requires a
+promoted follow-up's instant in the promotion commit, so that a recovering owner
+re-presents it rather than handing the run back the downtime it slept through.
+
+**What this milestone does instead.** Prompt admission commits the declared
+*duration*, and promotion deterministically inherits that duration. The absolute
+instant is fixed when either kind of run stages its first request, and is reused
+unchanged by every later turn of that run.
 
 **Why.** A clock reading inside a durable record that a successor may rebuild is
 exactly what made a command-admission record a function of the clock rather than
@@ -62,21 +227,33 @@ transaction it was holding. M1's `commit_unknown` fault-injection lane caught
 that during this milestone's own implementation, and the same hazard applies to
 any record a successor may rebuild — including a run's terminal record.
 
-Satisfying ADR 0011 literally requires a durable commit instant. The Store
-contract stamps none, and adding one is a persistent-schema decision in
+Satisfying ADR 0010 and ADR 0011 literally requires a durable commit instant.
+The Store contract stamps none, and adding one is a persistent-schema decision in
 [ADR 0006](../adr/0006-store-transaction-and-owner-epoch.md#concept) territory.
 That decision was deliberately not taken inside this milestone.
 
-**Observable consequence.** Bounded to one commit. Only a failure between
-committing a promotion and staging that run's first turn is affected, and its
-effect is that the promoted run receives its full declared budget again instead
-of the remainder. Nothing is lost, corrupted, or dispatched twice. The error is
-one of generosity, not of safety or determinism.
+**Observable consequence.** Bounded to one pre-staging interval per run. A
+failure between prompt admission or follow-up promotion and that run's first
+staged request gives the run its full declared duration at staging instead of
+charging the outage. Nothing is lost, corrupted, or dispatched twice. The
+difference is one of generosity, not of safety or determinism; after the first
+request commits, all downtime counts against the immutable instant.
 
 **Disposition.** Maintainer, 2026-08-24: keep the duration split and record the
 deviation. The alternative considered and not taken was adding a durable commit
 instant to the Store contract, which remains the conforming fix whenever that
 decision is made.
+
+**The instrument this still owes.** As above: the decision is explicit and
+dated, and ADR 0010 and ADR 0011 still say the opposite. The conforming code fix
+is not smaller than the documentary one — a Store-stamped commit instant is a
+change to a public port every Store implementation must satisfy, and ADR 0006 is
+frozen in exactly the same way those ADRs are, so it needs a new accepted ADR too.
+Both roads end at a maintainer-accepted decision, and the deadline decision is
+[ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept)
+records this deviation. `M2` does not close until it carries recorded
+acceptance. The ADR and [ADR index](../adr/README.md) remain the canonical
+current-status sources.
 
 ## Provider selection is not reachable from the command
 

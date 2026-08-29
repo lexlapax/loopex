@@ -200,29 +200,32 @@ defmodule Loopex.Executor do
   The return says what actually happened rather than what was attempted.
   `{:ok, :cleaned}` means no member of the job's owned process tree remains;
   `{:ok, :unconfirmed}` means the executor could not establish that, and the run
-  must then finish `outcome_unknown` rather than claiming a clean stop. A job
-  that was never running, or already finished, is trivially clean.
+  must then finish `outcome_unknown` rather than claiming a clean stop;
+  `{:error, reason}` means the executor could not complete or report its
+  cancellation attempt, and callers likewise treat cleanup as unconfirmed. A
+  job that was never running, or already finished, is trivially clean.
 
-  Optional, because an executor with nothing to cancel — one that performs only
-  in-VM work — has nothing to implement. A caller treats its absence as
-  `{:ok, :cleaned}` for the same reason.
+  Every conforming executor implements this callback, including one that
+  performs only in-VM work. Such an executor can answer `{:ok, :cleaned}` for a
+  job it never started or has already completed; callback absence proves
+  nothing about work an implementation may own.
   """
   @callback cancel(reference :: term(), job_id :: binary()) ::
               {:ok, :cleaned} | {:ok, :unconfirmed} | {:error, term()}
 
-  @optional_callbacks cancel: 2
-
   @doc """
   ## Concept
 
-  Asks an executor to stop a job, tolerating one that cannot.
+  Asks an executor to stop a job and fails closed when cleanup is not proved.
 
   ## Technical depth
 
-  An executor that does not implement `cancel/2` has no operating-system work to
-  leave behind, so its cleanup is confirmed by construction. Anything the call
-  raises or returns outside the two admitted shapes is treated as unconfirmed:
-  the safe reading of "I could not tell you" is that something may still be
+  Every conforming executor implements `cancel/2`. The facade retains a
+  defensive path for a legacy or nonconforming module that does not: absence is
+  treated as unconfirmed, never as evidence that nothing remains. The same
+  fail-closed result applies when the callback returns `{:error, reason}`, raises,
+  exits, times out, or returns anything outside the two admitted success shapes.
+  The safe reading of "I could not tell you" is that something may still be
   running, and a run must not claim `cancelled` on that basis.
 
   The call is bounded and runs in a process of its own, because it is
@@ -251,11 +254,11 @@ defmodule Loopex.Executor do
       # Technical depth: this used to answer `cleaned`, on the reasoning that an
       # implementation without the callback has nothing to leave behind. That is
       # a statement about the implementation this repository ships, not about the
-      # port: a conforming third-party executor may own an operating-system
-      # process and not export `cancel/2`, and reading its silence as confirmed
-      # cleanup committed `cancelled` for a tree nobody signalled and nobody
-      # looked at. `unconfirmed` is what this runtime actually knows, and it ends
-      # the run `outcome_unknown` with a reconciliation reference instead.
+      # port: a legacy or nonconforming module may own an operating-system process
+      # and not export `cancel/2`, and reading its silence as confirmed cleanup
+      # committed `cancelled` for a tree nobody signalled and nobody looked at.
+      # `unconfirmed` is what this runtime actually knows, and it ends the run
+      # `outcome_unknown` with a reconciliation reference instead.
       {:ok, :unconfirmed}
     end
   end

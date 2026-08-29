@@ -484,9 +484,11 @@ defmodule Loopex.Runtime do
   #
   # The deadline is configured as a duration, not an instant. An absolute instant
   # cannot be configured at runtime start, because the runtime outlives any one
-  # run; each run's absolute deadline is computed once when it is admitted or
-  # promoted and is then immutable, so a recovering owner re-presents it rather
-  # than recomputing one from its own clock.
+  # run; each run's absolute deadline is computed once when its first provider
+  # request is staged and is then immutable. Admission and follow-up promotion
+  # commit the duration instead, so a recovering owner with an already-staged
+  # request re-presents its instant while a run that staged nothing still has no
+  # instant to extend or expire.
   @default_bounds %{max_turns: 16, token_budget: 1_000_000, deadline_ms: 600_000}
   @default_sampling %{"max_tokens" => 4_096}
 

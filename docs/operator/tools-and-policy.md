@@ -44,6 +44,22 @@ anything that escapes it, whether by `..` traversal or through a symbolic link.
 The check is against the *resolved* path, so a link pointing outside is refused
 even though the name that reached the tool looked contained.
 
+Resolving the path and acting on it are two operations, not one. A workspace
+nothing else is changing is contained. A workspace being changed underneath the
+tool — which a model can arrange, since `bash` can run a background process in
+the workspace it was given — can in principle race that gap: a read could return
+bytes from outside the workspace, and a write or an edit could land outside it.
+
+**Be precise about what that means.** The workspace root is a check this runtime
+performs, not isolation the operating system enforces. A raced path resolves with
+your own user's permissions, so what it can reach is everything your account can
+reach — `~/.ssh/id_rsa` included — not merely the workspace you granted. An
+earlier version of this page said such a read reached "nothing the operator did
+not already grant"; that conflated the ambient access your OS user has with the
+workspace you named to Loopex, and it was wrong. Granting a workspace is not a
+sandbox, and this milestone does not claim to be one. It is recorded in full as
+[a known limitation](../evidence/M2-recorded-limitations.md#operator-path-race).
+
 `bash` is not path-checked and cannot be. It runs a command, and a command can
 name any path its process can reach; it starts in the workspace and is confined
 to it by nothing. That is the honest boundary, and the next paragraph is the
@@ -60,12 +76,27 @@ is `/usr/bin/env -i`, and the only variable the child receives is a fixed `PATH`
 so no shell variable of yours — the provider credential included — reaches a tool
 child by accident.
 
+Every run declares a deadline duration when its prompt is admitted or its queued
+follow-up is promoted. The absolute deadline begins when that run's first model
+request is durably staged. A process loss before first staging therefore does
+not spend the duration; once staging commits, owner downtime counts and recovery
+never extends the instant.
+
 Every child runs in its own process group, and termination signals the group
 rather than the leader, so a leader that spawned children and exited cannot leave
-them running with nobody's name on them. Each job carries the run's committed
-absolute deadline and runs under the earlier of that instant and the tool's own
-declared wall-time budget; expiry enters the same cancellation sequence and the
-owned process tree is confirmed cleaned before the run commits its bound.
+them running with nobody's name on them. Each job carries that committed absolute
+deadline and the wall-time budget the session declared for it, and runs under the
+earliest of that instant, that budget, and the budget the tool's own definition
+names — so a bound cannot be widened by declaring a larger one.
+Expiry enters the same cancellation sequence and the owned process tree is
+confirmed cleaned before the run commits its bound, and the receipt records the
+instant the work actually ran under.
+
+An executor integration participates in that sequence through required
+`cancel/2`, whose answers are `{:ok, :cleaned}`, `{:ok, :unconfirmed}`, or
+`{:error, term()}`. Only confirmed cleanup permits a clean cancellation result;
+an error, unconfirmed answer, failed call, or legacy module missing the required
+callback is reported as `outcome_unknown`.
 
 <a id="operator-tools-policy"></a>
 ## Host Policy

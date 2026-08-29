@@ -27,6 +27,19 @@ defmodule Loopex.CancellationTestExecutor do
   @impl Loopex.Executor
   def cancel(pid, _job_id) do
     case Agent.get(pid, & &1.mode) do
+      {:held_across_succession, _observer} ->
+        waiting = Agent.get(pid, & &1.waiting)
+        reference = Process.monitor(waiting)
+        send(waiting, :answer)
+
+        receive do
+          {:DOWN, ^reference, :process, ^waiting, _reason} -> :ok
+        after
+          5_000 -> raise "the inherited executor worker did not stop"
+        end
+
+        {:ok, :cleaned}
+
       :never_answers ->
         {:ok, :cleaned}
 
@@ -101,6 +114,12 @@ defmodule Loopex.CancellationTestExecutor do
   # schedule, so a case differs from its neighbour in the schedule alone.
   defp answer(:unknown_receipt_before_abort, _tool_call_id), do: {:held, "outcome_unknown"}
   defp answer(:unknown_then_held, "c1"), do: {:now, "outcome_unknown"}
+
+  defp answer({:held_across_succession, observer}, tool_call_id) do
+    send(observer, {:effect_happened, tool_call_id})
+    {:held, "completed"}
+  end
+
   defp answer(_mode, _tool_call_id), do: {:held, "completed"}
 
   def receipt(job, outcome \\ "completed") do
@@ -337,12 +356,18 @@ defmodule Loopex.CancellationTest do
       )
 
     dispatched_before = length(AgentLoopTestModel.dispatched(fixture.model))
+    model_monitor = Process.monitor(model)
 
     assert {:accepted, "abort-1"} =
              Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
 
-    send(model, :release)
+    assert_receive {:DOWN, ^model_monitor, :process, ^model, _reason}, 1_000
     assert settled?(fixture, session_id)
+
+    finished = Enum.find(events(attachment), &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "cancelled"
+    assert finished["reconciliation_ref"] == nil
+
     Process.sleep(150)
 
     # The run ended and nothing further was staged: the script had two more turns
@@ -878,6 +903,67 @@ defmodule Loopex.CancellationTest do
     assert Enum.find_index(observed, &(&1 == tool_finished)) <
              Enum.find_index(observed, &(&1 == run_finished)),
            "the successor ended the run before the operation it owned"
+  end
+
+  test "an abort after succession cannot report a clean stop for the predecessor's unproved effect" do
+    # Concept: a clean executor cancellation proves that the process tree is
+    # gone; it does not recover a receipt delivered to an owner that already
+    # died. The successor must end the inherited operation before it ends the
+    # run, and both endings must say that the effect is unproved.
+    #
+    # Technical depth: the executor records that the effect happened and holds
+    # its valid receipt. The coordinator then dies before that receipt exists.
+    # Its successor inherits only the durable `effect_dispatched` fact and no
+    # local Task. A fresh abort asks the executor to cancel; cancellation releases
+    # the old worker and waits for it to stop, so its `:cleaned` answer is
+    # truthful while the receipt is delivered only to the dead predecessor.
+    # Treating the absence of a successor-local Task as a clean effect produced
+    # `tool.started`, no `tool.finished`, and `run.finished=cancelled`.
+    fixture =
+      start_with_executor(
+        {:held_across_succession, self()},
+        [%{text: "run it", calls: [call("c1")]}]
+      )
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "do the work"})
+
+    assert_receive {:effect_happened, "c1"}, 5_000
+
+    predecessor = coordinator_of(fixture.runtime)
+    reference = Process.monitor(predecessor)
+    Process.exit(predecessor, :kill)
+    assert_receive {:DOWN, ^reference, :process, ^predecessor, _reason}, 5_000
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
+
+    {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    assert {:accepted, "abort-1"} =
+             Loopex.command(resumed, %{type: :abort, command_id: "abort-1"})
+
+    assert settled?(fixture, session_id), "the successor never settled the inherited run"
+    observed = events(resumed)
+
+    tool_finished =
+      Enum.find(observed, &(&1.kind == "tool.finished" and &1["tool_call_id"] == "c1"))
+
+    assert tool_finished,
+           "the successor ended the run without an ending for the inherited operation"
+
+    assert tool_finished["outcome"] == "outcome_unknown"
+
+    run_finished = Enum.find(observed, &(&1.kind == "run.finished"))
+    assert run_finished["outcome"] == "outcome_unknown"
+    assert is_binary(run_finished["reconciliation_ref"])
+
+    assert Enum.find_index(observed, &(&1 == tool_finished)) <
+             Enum.find_index(observed, &(&1 == run_finished)),
+           "the successor ended the run before the inherited operation"
   end
 
   test "a run does not end while the operation it owns has no committed ending" do

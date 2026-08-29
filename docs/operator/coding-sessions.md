@@ -52,12 +52,14 @@ anywhere on your `PATH`. It reads the provider credential from
 named the authority that governs it; see
 [Tools and policy](tools-and-policy.md#operator-tools-policy).
 
-Two options decide where the session's data and work live:
+Three options decide where the session's data and work live and how long a
+stopped run may spend stopping:
 
 | Option | Meaning | Default |
 | --- | --- | --- |
 | `--state-root` | Where durable session records and artifacts are kept | resolved from `LOOPEX_HOME` |
 | `--workspace` | The directory the tools act on | the current directory |
+| `--cleanup-grace-ms` | How long stopping a running tool may take, in milliseconds | 5000 |
 
 The answer reaches standard output as the model produces it, in whatever
 granularity the model adapter delivers. The shipped adapter streams, so an
@@ -112,6 +114,11 @@ loopex: reconcile with reconciliation_9f2c…
 have taken effect. It is never retried blindly, and the terminal never reports it
 as a cancellation, because an operator told "cancelled" about a process that may
 still be running has been told something false.
+
+That fail-closed rule also covers an executor integration that cannot report
+cleanup. Every conforming executor supplies cancellation; a legacy integration
+that omits it, or an executor that reports an error or unconfirmed cleanup, ends
+the run `outcome_unknown` rather than letting absence stand for a clean stop.
 
 **Ctrl-C is not one of the signals the command can handle.** The Erlang emulator
 reserves `SIGINT` for its own break handler and refuses to hand it to a program,
@@ -214,7 +221,8 @@ Developer companion:
 ### Commands
 
 ```text
-loopex run --policy <name> [--state-root DIR] [--workspace DIR] "<prompt>"
+loopex run --policy <name> [--state-root DIR] [--workspace DIR]
+           [--cleanup-grace-ms MS] "<prompt>"
 loopex run --policy <name> --steer "<text>" "<prompt>"
 loopex run --policy <name> --follow-up "<text>" "<prompt>"
 loopex sessions [--state-root DIR]
@@ -224,7 +232,9 @@ loopex artifact <reference> [--state-root DIR]
 ```
 
 Recognised flags are exactly `--policy`, `--state-root`, `--workspace`,
-`--steer`, and `--follow-up`. Any other flag is refused by name. The parser
+`--steer`, `--follow-up`, and `--cleanup-grace-ms`. Any other flag is refused by
+name, and `--cleanup-grace-ms` is refused before a runtime starts unless it is a
+positive whole number of milliseconds. The parser
 accepts `--flag value`, `--flag=value`, and bare positional words, and uses the
 standard library only: a dependency here would land in an operator's install for
 the sake of flag parsing.
@@ -292,6 +302,47 @@ never halted after the fact.
 `SIGINT` is absent because `os:set_signal/2` refuses the name: the emulator
 reserves it for the break handler. No amount of handler installation changes
 that, and this documentation does not imply otherwise.
+
+Stopping a tool is one budget, not a sequence of them. When a run ends while a
+`bash` command is still going, the executor gives the command's process group a
+cooperative window to leave, then signals it, then confirms it is gone — and all
+of that draws on **one** period, so that sequence cannot outlast it however many
+steps it takes. It defaults to five seconds.
+
+Writing the receipt afterwards is bounded separately, by a declared share of the
+period — a quarter — rather than by whatever the sequence left. The worst case
+for the whole stop is therefore the period plus that share: six and a quarter
+seconds at the default, not five. It is that rather than a flat period
+deliberately, because a job that spent everything fighting a stubborn process
+group would otherwise reach its receipt with nothing left to write it with, and
+the job whose durable record matters most would produce none. Every receipt names both the period it ran under, as
+`cleanup_grace_ms`, and the bound its own write ran under, as
+`receipt_retention_bound_ms`. The command itself is not consulted: a program that
+ignores the first signal is killed when the period is spent, and a group that
+cannot be confirmed gone makes the run's outcome `outcome_unknown` rather than
+`cancelled`.
+
+Confirming that a group is gone means running a program, and Loopex runs
+`/bin/ps`. On an image that ships `ps` somewhere else, or not at all, nothing can
+be confirmed and every command is reported `outcome_unknown` — correct, and
+useless. A host embedding Loopex names the program
+(`Loopex.Executor.Local.start_link(process_probe: "/usr/bin/ps")`), and every
+receipt records which program was asked, so an unproven outcome says what could
+not confirm it.
+
+The period is yours to choose. `loopex run --cleanup-grace-ms 8000` declares it
+for that session, and the run's ending reports whichever period applied, so an
+operator reading `run.finished` always sees the number the stop was bounded by
+rather than having to know what the default is. A host embedding Loopex passes
+the same option to `LoopexComposition.start/1`, which hands it to the session and
+to the executor together — one number, in both halves, so the ending cannot name
+a period the cleanup did not run under.
+
+The program is not yours to choose. A host embedding Loopex names it when it
+starts the executor
+(`Loopex.Executor.Local.start_link(process_probe: "/usr/bin/ps")`); the `loopex`
+command takes `/bin/ps`. That gap is recorded as
+[a known limitation](../evidence/M2-recorded-limitations.md#process-probe-not-session-visible).
 
 ### Migration From M1
 
