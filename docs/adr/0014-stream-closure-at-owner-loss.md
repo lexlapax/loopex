@@ -5,7 +5,7 @@
 
 Technical depth: [Closure ownership, failure windows, and evidence](0014-stream-closure-at-owner-loss-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-29
 - **Decision owner:** Maintainer
 - **Prerequisite for:** `M2` closure
@@ -31,7 +31,7 @@ remain in force.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adr-0014-acceptance-2026-08-29) | candidate `788df465b9710900979a66a311573512caef7092`; concept `sha256:c31a095dca52ac03851143bc82a0b385e14afdfa3cfd3b6525c643a2bb0ff5ae`; technical `sha256:67ac03b605a2b1e9758837d6a8241dbc2baae890f17154ce22c6a64b377c52c7` |
 
 <a id="concept-adr-0014-context"></a>
 ## Context

@@ -20,10 +20,10 @@ a decision adds a new record rather than rewriting the old one.
 | 0008 | Owner succession recovery and runtime placement | Accepted | [Decision](0008-owner-succession-recovery-and-runtime-placement.md#concept) | [Technical depth](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth) |
 | 0009 | Tool, executor, and grant contracts | Accepted (partially superseded by 0012) | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
 | 0010 | Provider continuation and exact context staging | Accepted (partially superseded by 0013) | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
-| 0011 | Session input algebra and streaming progress | Accepted (partially superseded by 0012 and 0013) | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
+| 0011 | Session input algebra and streaming progress | Accepted (partially superseded by 0012, 0013, and 0014) | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
 | 0012 | Executor cancellation capability | Accepted | [Decision](0012-executor-cancellation-capability.md#concept) | [Technical depth](0012-executor-cancellation-capability-technical.md#technical-depth) |
 | 0013 | Run-deadline commitment at first request staging | Accepted | [Decision](0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
-| 0014 | Stream closure at owner loss | Proposed | [Decision](0014-stream-closure-at-owner-loss.md#concept) | [Technical depth](0014-stream-closure-at-owner-loss-technical.md#technical-depth) |
+| 0014 | Stream closure at owner loss | Accepted | [Decision](0014-stream-closure-at-owner-loss.md#concept) | [Technical depth](0014-stream-closure-at-owner-loss-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -57,10 +57,10 @@ absolute-deadline-at-admission or promotion clauses; their remaining provider,
 staging, input, and streaming decisions stay in force. 0014 supersedes only ADR
 0011's universal stream-closure obligation where the transient plane's owner
 dies or loses authority before it can state a truthful disposition and count,
-and ADR 0006's stale-originator publication ban for the one transient closure a
-retained terminal operation fact already proves. ADR 0006's other stale-owner
-prohibitions and ADR 0011's domain, sequencing, loss-detection, and
-durable-fallback rules stay in force.
+and its rule that every closure precedes the attempt outcome's publication,
+solely where a terminal fact commits before handoff and its reply reaches the
+originating coordinator afterwards. ADR 0011's domain, sequencing,
+loss-detection, and durable-fallback rules stay in force.
 
 0004 and 0005 are both parked. They designed correction paths for a defect
 found in an accepted plan, then the defect that prompted them turned out to be

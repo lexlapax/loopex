@@ -1015,3 +1015,32 @@ This record is the maintainer's disposition evidence, not the independent
 review. The administrative transition changes only the two ADR status lines and
 governance rows, this disposition, and the ADR index that reports their accepted
 status.
+
+<a id="disposition-adr-0014-acceptance-2026-08-29"></a>
+### ADR 0014 acceptance — 2026-08-29
+
+The maintainer explicitly accepted
+[ADR 0014](../adr/0014-stream-closure-at-owner-loss.md#concept) as the Proposed
+pair existing at candidate
+`788df465b9710900979a66a311573512caef7092`. Acceptance binds its Concept file
+and Technical depth companion:
+
+| Decision | Concept | Technical depth |
+| --- | --- | --- |
+| ADR 0014 | `sha256:c31a095dca52ac03851143bc82a0b385e14afdfa3cfd3b6525c643a2bb0ff5ae` | `sha256:67ac03b605a2b1e9758837d6a8241dbc2baae890f17154ce22c6a64b377c52c7` |
+
+ADR 0014 narrows only ADR 0011's universal closure and
+closure-before-publication promises in the owner-loss and delayed retained-fact
+windows it names. ADR 0006 continues to govern durable commit, current-cache
+mutation, durable public and outbox publication, and dispatch. ADR 0014 changes
+no other accepted clause; the already-recorded ADR 0012 and ADR 0013
+supersessions remain in force.
+
+**Scope of this record.** It accepts ADR 0014 alone. It does not accept an
+`M2` amendment, rebind the accepted plan pair or gate, close `M2`, authorize
+product integration, or authorize a release.
+
+This record is the maintainer's disposition evidence, not the independent
+review. The administrative transition changes only ADR 0014's status and
+governance row, this disposition, and the ADR index that reports its accepted
+status and exact supersession scope.
