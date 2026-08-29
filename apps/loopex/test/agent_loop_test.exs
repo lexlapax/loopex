@@ -2119,6 +2119,55 @@ defmodule Loopex.AgentLoopTest do
            "the Store refusal did not reach the receipt transaction this case names"
   end
 
+  test "a reply the Store refuses cannot complete its model stream" do
+    # Concept: a complete model closure is a claim that the assistant message is
+    # durable. A reply the Store refused never earned that claim.
+    #
+    # Technical depth: the model is held after publishing one delta so this case
+    # can monitor the live owner before the reply reaches the refused
+    # `model_result_committed` transaction. The owner then stops and its linked
+    # relay ends without inventing a disposition. Restoring the old
+    # close-before-commit order publishes `complete` before that refusal and
+    # makes this case fail on the exact false statement.
+    parent = self()
+
+    fixture =
+      start_with_executor(
+        Loopex.AgentLoopTestExecutor,
+        Loopex.AgentLoopTestExecutor.start(),
+        [%{text: "answer", calls: [], deltas: ["partial"], hold: parent}],
+        progress_to: self(),
+        before_prompt: fn store ->
+          :ok = M1RuntimeTestStore.refuse_next_record(store, "model_result_committed")
+        end
+      )
+
+    assert_receive {:holding, model}, 5_000
+    owner = coordinator_of(fixture.runtime)
+    owner_reference = Process.monitor(owner)
+    send(model, :release)
+
+    assert_receive {:DOWN, ^owner_reference, :process, ^owner, _reason},
+                   5_000,
+                   "the Store refusal did not stop the owner whose result it refused"
+
+    observed = receive_progress()
+
+    assert Enum.any?(observed, &(&1.kind == :text_delta)),
+           "the model did not open the stream whose false closure is under test"
+
+    refute Enum.any?(
+             observed,
+             &(&1.kind == :model_stream_closed and &1.disposition == :complete)
+           ),
+           "a reply the Store refused was published as a completed stream"
+
+    refute fixture.session_id
+           |> then(&Fixture.records(fixture, &1))
+           |> Enum.any?(&(&1.payload[:kind] == "model_result_committed")),
+           "the Store refusal did not reach the model-result transaction this case names"
+  end
+
   test "an abandoned model stream closes on the count this runtime published rather than zero" do
     # Concept: an abandoned domain still owes a truthful total, and the only
     # total anyone can vouch for is the one this coordinator published.

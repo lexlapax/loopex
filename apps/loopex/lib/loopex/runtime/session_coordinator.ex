@@ -1196,7 +1196,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp accept_counted_model_result(state, run_id, reply, count) do
-    state = close_model_stream(state, run_id, {:complete, count})
     state = disarm_deadline(state, run_id)
 
     with {:ok, proposal} <-
@@ -1207,6 +1206,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
              active_generations(state)
            ),
          {:ok, next} <- commit_internal(state, proposal) do
+      next = close_model_stream(next, run_id, {:complete, count})
       send(self(), :advance_work)
       {:noreply, next}
     else
