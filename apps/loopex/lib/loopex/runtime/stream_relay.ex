@@ -40,22 +40,15 @@ defmodule Loopex.Runtime.StreamRelay do
 
   A relay also ends with the process that opened it, and it ends by link rather
   than by message. The task supervisor it runs under belongs to the runtime
-  rather than to one session, so a coordinator that stops mid-run -- which is
-  what a refused commit on the cleanup path makes it do -- would otherwise leave
-  a relay blocked in `receive` for the life of the runtime, one for every domain
-  that never got closed. A monitor would not do: its `:DOWN` is a message, so it
-  queues behind whatever a producer has already handed the relay, and the relay
-  would emit that backlog before ever learning its owner was gone. An exit signal
-  is not a message and does not wait behind one.
+  rather than to one session, so a coordinator that stops mid-run would otherwise
+  leave a relay blocked in `receive` for the life of the runtime. Ending the
+  transient plane does not fabricate a disposition: the durable result may have
+  committed immediately before the owner died. ADR 0011 therefore tells a
+  consumer to read a missing closure as an incomplete transient view, never as
+  abandonment.
 
   A relay never takes its owner down with it. Its own body is wrapped so that
-  anything it raises ends it normally, which a linked process does not
-  propagate: a builder that cannot render an item costs that domain its closure,
-  not the session.
-
-  A domain whose relay ended without closing gets no closing item, which ADR 0011
-  already tells a consumer to read as an incomplete transient view rather than as
-  an abandoned attempt.
+  anything it raises ends it normally rather than propagating into the session.
   """
 
   @typedoc """
@@ -116,7 +109,7 @@ defmodule Loopex.Runtime.StreamRelay do
   ## Technical depth
 
   Started under the runtime's task supervisor and linked to the caller, so a
-  relay outlives neither the domain it carries nor the process that opened it.
+  relay outlives neither the transient plane nor the process that opened it.
   `build` renders one item and its sequence into what crosses the plane; `close`
   renders the closing item.
   """
@@ -127,10 +120,6 @@ defmodule Loopex.Runtime.StreamRelay do
     owner = self()
 
     Task.Supervisor.start_child(supervisor, fn ->
-      # Linking rather than monitoring is the whole point: an owner that dies
-      # kills this relay out of band and at once, ahead of anything a producer
-      # has already queued here. Linking to an owner that is already gone ends
-      # this relay the same way.
       Process.link(owner)
 
       try do

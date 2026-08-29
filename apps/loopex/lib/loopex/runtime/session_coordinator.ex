@@ -301,6 +301,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @impl GenServer
   def handle_cast({:superseded, generation}, state) do
     superseded = is_map(state.owner) and generation != state.owner.generation
+
+    state =
+      if superseded and not state.superseded do
+        state
+        |> terminate_superseded_model_work()
+        |> abandon_open_streams()
+      else
+        state
+      end
+
     {:noreply, %{state | superseded: superseded or state.superseded}}
   end
 
@@ -1163,9 +1173,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # first dispatch is never mistaken for an inherited one, and the abandonment
   # adopts the run so the retry that follows is this owner's own.
   #
-  # The predecessor's domain gets no closing item, because this owner never
-  # opened it, and ADR 0011 tells a consumer to read a missing closure as an
-  # incomplete transient view rather than as an abandoned attempt.
+  # A live predecessor closes its relay when Control supersedes it. If it dies
+  # first, its linked transient plane ends without fabricating a disposition;
+  # absence is the incomplete view ADR 0011 defines. This successor never
+  # fabricates that closure or its count; it advances the durable attempt and
+  # opens a different domain for the replacement dispatch.
   defp adopt_inherited_attempt(state, work) do
     state = adopt_run(state, work.run_id)
 
@@ -1326,6 +1338,49 @@ defmodule Loopex.Runtime.SessionCoordinator do
       :error ->
         state
     end
+  end
+
+  # Concept: supersession ends every transient domain the prior owner opened,
+  # even though that coordinator and its workers may still be alive long enough
+  # to observe their fencing result.
+  #
+  # Technical depth: owner death is only one succession shape. Control can
+  # install a successor over a live coordinator, and in that shape the relay's
+  # owner monitor never fires. Closing here makes supersession itself the
+  # terminal event for every open attempt; the relay then drops any late producer
+  # item, so its abandoned closure remains last and appears exactly once.
+  defp abandon_open_streams(state) do
+    state.streams
+    |> Map.keys()
+    |> Enum.reduce(state, fn
+      {:model, run_id}, next -> close_model_stream(next, run_id, :abandoned)
+      {:executor, run_id}, next -> close_tool_stream(next, run_id, :abandoned)
+    end)
+  end
+
+  # Concept: a superseded owner cannot keep spending the operator's model budget
+  # after its successor has taken the run.
+  #
+  # Technical depth: deadline messages deliberately no-op after supersession,
+  # because the old owner cannot commit their decision. A model call has no host
+  # effect to reconcile, so every in-flight model worker is terminated here,
+  # its monitor/result is drained, and its timer is disarmed before the domain is
+  # closed abandoned. Executor and cleanup workers are left alone: killing an
+  # effectful operation is evidence-destroying and its own deadline/lease path
+  # must settle it truthfully.
+  defp terminate_superseded_model_work(state) do
+    Enum.reduce(state.in_flight, state, fn
+      {reference, {:model, run_id, pid}}, next ->
+        _ = Task.Supervisor.terminate_child(next.workers, pid)
+        _ = take_worker_result(reference)
+
+        next
+        |> Map.update!(:in_flight, &Map.delete(&1, reference))
+        |> disarm_deadline(run_id)
+
+      {_reference, _work}, next ->
+        next
+    end)
   end
 
   # Concept: an executor whose progress was refused should not be refused in

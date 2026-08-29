@@ -47,10 +47,11 @@ defmodule Loopex.Executor.Local do
   # and unrelated to the declared period.
   #
   # `cleanup_until/1` turns the grace into one absolute instant per job, and
-  # every step of the sequence -- cooperative grace, forced termination, each
-  # confirmation, and retaining the receipt -- draws what remains of that one
-  # instant. Reaching it means the cleanup is over, not that the next step starts
-  # its own allowance.
+  # every step of the termination sequence -- cooperative grace, forced
+  # termination, and each confirmation -- draws what remains of that one
+  # instant. Retaining the receipt afterwards gets the separately declared
+  # quarter-period reserve, so a stubborn group cannot spend the time needed to
+  # write the durable account of what happened.
   #
   # The number itself is the port's, not this executor's. ADR 0009 makes the
   # cleanup grace a session configuration value, and a session that declares one
@@ -280,16 +281,17 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # Concept: a job's cleanup is one episode with one instant, opened the first
-  # time any of it is needed and shared by everything that follows.
+  # Concept: a job's process cleanup is one episode with one instant, opened the
+  # first time termination or confirmation needs it and shared by those steps.
   #
   # Technical depth: the alternative -- deriving the instant from the run's
   # deadline -- reads well and is wrong in both directions. A job that finishes
   # cleanly a second into a sixty-second deadline would be handing each `ps` a
   # sixty-five-second bound, which is a worse hang than the five seconds it
-  # replaced; and a job cleaning up *at* its deadline would still take one grace
-  # to terminate its group and then another to retain its receipt, because the
-  # deadline is already behind both. The episode is what makes those one number.
+  # replaced; and a job cleaning up *at* its deadline needs a bound independent
+  # of that already-spent instant. The episode is what makes every termination
+  # and confirmation step draw from one process-cleanup period rather than one
+  # fresh period apiece. Receipt retention follows under its separate reserve.
   #
   # It is opened lazily, so a job that never cleans up never starts a clock, and
   # it is memoized in the process that owns the job for the reason the in-flight
@@ -309,9 +311,9 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # `nil` where no cleanup has been needed, which is what lets the receipt's
-  # retention tell "join the episode already running" from "the run still owns
-  # its own instant".
+  # `nil` where no cleanup has been needed, which is what lets receipt retention
+  # distinguish the ordinary run-bound path from the separate post-cleanup
+  # reserve.
   defp cleanup_episode, do: Process.get(:loopex_cleanup_episode)
 
   defp close_cleanup_episode, do: Process.delete(:loopex_cleanup_episode)
@@ -945,8 +947,8 @@ defmodule Loopex.Executor.Local do
   # The replacement receipt is written the same way the first attempt was.
   # Writing it inline would put the last unbounded call in the job exactly where
   # the lease is already gone and nothing is left to notice a ledger that never
-  # answers. It gets the declared cleanup grace rather than what remains of the
-  # run, because it is reached only once the lease has been lost.
+  # answers. It gets the declared quarter-period receipt reserve rather than what
+  # remains of the run, because it is reached only once the lease has been lost.
   defp retain_now(root, receipt, lease) do
     staging = staging_path(root, receipt)
 
@@ -1691,53 +1693,46 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # Concept: retention is work the run owns, so what remains of the run is what
-  # it gets -- plus, for the receipt alone, the declared cleanup grace.
+  # Concept: artifact retention is work the run owns, so it gets only what
+  # remains of the run.
   #
-  # Technical depth: both retentions had no bound of any kind, so the run's own
-  # instant was not among the ways either wait could end. One expression derives
-  # both, because they are the same decision with different stakes and two
-  # copies would drift.
-  #
-  # The spilled artifact takes no grace: it is a retrieval an operator loses
-  # while the tool's own result survives without it, so there is nothing for a
-  # grace to protect. The receipt takes it, because bounding the receipt by the
-  # deadline alone would be worse than unbounded rather than better -- the
-  # cancellation sequence runs *after* expiry, so the job whose deadline branch
-  # this is would arrive at its retention with nothing left and could never write
-  # the one durable record a recovering coordinator reads.
+  # Technical depth: spilled-artifact retention had no bound of any kind, so the
+  # run's own instant was not among the ways the wait could end. It takes no
+  # cleanup reserve: an operator may lose the retrieval while the tool's own
+  # bounded result still survives, so there is no process-cleanup fact for that
+  # reserve to protect. Receipt retention makes the different decision below.
   #
   # The run's committed instant is used rather than the tool's effective
   # deadline, because a tool's declared budget bounds the tool and this is the
   # run retaining what the tool produced.
   defp retention_bound(job), do: max(job.run_deadline - System.system_time(:millisecond), 0)
 
-  # Concept: the receipt says how much of the cleanup period was left when it was
-  # written.
+  # Concept: the receipt says the bound its own retention received.
   #
-  # Technical depth: whether retention joins the episode already running or opens
-  # a second one is the difference between one declared period and two, and it is
-  # otherwise invisible: a fast ledger finishes either way, so no elapsed time
-  # and no outcome differs. Recording the value the write was actually bounded by
-  # makes the guarantee a fact on the durable record rather than an argument
-  # about a line, and it is worth an operator's while on its own -- a receipt
-  # written with nothing left is one whose bytes were nearly lost.
+  # Technical depth: whether retention gets the separate quarter-period reserve
+  # or whatever the process-cleanup episode left is otherwise invisible: a fast
+  # ledger finishes either way, so no elapsed time and no outcome differs.
+  # Recording the value the write was actually bounded by makes the guarantee a
+  # fact on the durable record rather than an argument about a line.
   #
-  # `cleanup_grace_ms` beside it is the period this executor was configured with;
-  # this is what remained of it. A receipt for a job that needed no cleanup
-  # carries more than the configured period, because that job never exceeded
-  # anything and still owns its own instant.
+  # `cleanup_grace_ms` beside it is the process-cleanup period this executor was
+  # configured with. A receipt following cleanup carries one quarter of it. A
+  # receipt for a job that needed no cleanup carries more than the configured
+  # period, because that job never exceeded anything and still owns its run
+  # instant.
 
-  # Concept: retaining the receipt is the last step of the same cleanup episode
-  # where one is already running, and the run's own instant where none is.
+  # Concept: retaining the receipt follows a cleanup episode under its own
+  # declared quarter-period reserve, and uses the run's own instant where no
+  # cleanup episode ran.
   #
   # Technical depth: this took the run's remaining time plus a fresh grace. On
   # the path that matters -- a job cleaning up at or after its deadline -- the
   # remaining time is nothing, so the receipt received a whole second grace after
-  # the sequence that terminated the group had spent the first. Joining the
-  # episode is what makes the declared period one period. Where no cleanup ran,
-  # the run has not exceeded anything and still owns its instant, so it keeps the
-  # grace it always had beyond it.
+  # the sequence that terminated the group had spent the first. A quarter-period
+  # reserve is sufficient to retain the bounded record without giving the write
+  # a second full cleanup period. Where no cleanup ran, the run has not exceeded
+  # anything and still owns its instant, so it keeps the grace it always had
+  # beyond it.
   defp receipt_retention_bound(deadline) do
     case cleanup_episode() do
       nil -> max(deadline - System.system_time(:millisecond), 0) + cleanup_grace_ms()
@@ -1764,8 +1759,9 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # Concept: a tool child receives an environment this executor constructed, not
-  # the one this operating-system process happens to be holding.
+  # Concept: every process this executor starts explicitly excludes the provider
+  # credential, and a model-supplied command receives only the environment this
+  # executor constructed.
   #
   # Technical depth: a port opened without `env:` inherits the emulator's whole
   # environment. The demonstration tools were launched through `/usr/bin/env -i`
@@ -1775,9 +1771,11 @@ defmodule Loopex.Executor.Local do
   # all. The receipt then journalled `provider_credential_present: false`, which
   # made the durable record assert an absence that was not true.
   #
-  # `env:` replaces rather than extends, and clearing a name is `{name, false}`.
-  # The credential is cleared explicitly as well as omitted, so the intent is
-  # visible at the boundary rather than resting on the list being complete.
+  # `env:` extends rather than replaces, and clearing a name is `{name, false}`.
+  # The ambient snapshot clears stable names, while the credential is cleared
+  # explicitly after that snapshot so the security claim never rests on the
+  # snapshot being complete. The downstream `env -i` boundary constructs the
+  # exact PATH-only command environment recorded by the receipt.
   # Concept: the demonstration tools construct their environment in argv.
   #
   # Technical depth: `launcher_arguments/1` passes `-i` and one assignment to
@@ -1787,7 +1785,7 @@ defmodule Loopex.Executor.Local do
     [{String.to_charlist(@search_path_name), String.to_charlist(@search_path_value)}]
   end
 
-  # Concept: the one place this executor starts an operating-system process.
+  # Concept: the one place this executor starts a model-supplied command.
   #
   # Technical depth: both spawn sites built their own option list around their
   # own `Port.open`, and a case observed the environment through a third
@@ -1795,17 +1793,23 @@ defmodule Loopex.Executor.Local do
   # the helper rather than about the spawn: deleting `env:` from the production
   # call site alone left every environment case green while the real launcher
   # inherited this operating-system process's whole environment. A guarantee
-  # about what a spawned image is loaded with can only be observed at the spawn,
-  # so there is exactly one spawn, and the case drives it.
+  # about what that spawned image is loaded with can only be observed at the
+  # spawn, so there is exactly one job-launch spawn, and the case drives it.
   #
-  # A case asserts that `Port.open` appears exactly once in this module. That
-  # assertion is what stops the collapse from being undone by adding a second
-  # site rather than by editing this one.
+  # A case enumerates every `Port.open` in this module. That assertion stops the
+  # collapse from being undone by adding a second job-launch site or by letting a
+  # process-management helper bypass the central credential removal.
   defp open_launcher(launcher, arguments, environment, workspace) do
+    open_launcher(launcher, arguments, environment, workspace, fn -> :ok end)
+  end
+
+  defp open_launcher(launcher, arguments, environment, workspace, before_open) do
+    options = launcher_port_options(environment, workspace)
+    before_open.()
+
     Port.open(
       {:spawn_executable, String.to_charlist(launcher)},
-      [args: Enum.map(arguments, &String.to_charlist/1)] ++
-        launcher_port_options(environment, workspace)
+      [args: Enum.map(arguments, &String.to_charlist/1)] ++ options
     )
   end
 
@@ -1826,6 +1830,20 @@ defmodule Loopex.Executor.Local do
   def launcher_probe_port(workspace) when is_binary(workspace),
     do: open_launcher("/usr/bin/env", [], child_environment(), workspace)
 
+  @doc false
+  @spec launcher_probe_port(binary(), :coding | :demonstration, (-> term())) :: port()
+  def launcher_probe_port(workspace, kind, before_open)
+      when is_binary(workspace) and kind in [:coding, :demonstration] and
+             is_function(before_open, 0) do
+    environment =
+      case kind do
+        :coding -> child_environment()
+        :demonstration -> demonstration_environment()
+      end
+
+    open_launcher("/usr/bin/env", [], environment, workspace, before_open)
+  end
+
   defp launcher_port_options(environment, workspace) do
     [
       :binary,
@@ -1838,8 +1856,8 @@ defmodule Loopex.Executor.Local do
     ]
   end
 
-  # Concept: the first image the operating system loads for a job receives only
-  # what this executor chose, and receives it at load time.
+  # Concept: every first image explicitly excludes the provider credential, and
+  # every downstream command receives only what this executor chose.
   #
   # Technical depth: both spawn sites passed no `env:` at all, so `/usr/bin/env`
   # was `execve`d with the emulator's entire environment. Supplying `-i` in its
@@ -1853,20 +1871,24 @@ defmodule Loopex.Executor.Local do
   #
   # A port's `env:` option extends the inherited environment rather than
   # replacing it, and `{name, false}` unsets one name. Clearing every name this
-  # operating-system process holds and then setting the constructed ones is
-  # therefore a replacement expressed in the only vocabulary the option has. The
-  # clearing list is read from the live environment rather than declared, because
-  # a declared list of names worth removing is the filtering this module has
-  # always refused to do: it would have to be complete, and it cannot be.
+  # operating-system process currently holds and then setting the constructed
+  # ones approximates replacement in the only vocabulary the option has. It is
+  # not atomic replacement: another process in this VM can add a differently
+  # named variable after the snapshot and before the spawn. The provider
+  # credential is therefore removed explicitly after the snapshot, whatever the
+  # intended environment contains and whenever that key was added.
   #
-  # `env -i` in the arguments is kept. It is the boundary for the downstream
-  # command, which is a different process from this one, and the two together
-  # mean no image in the chain is ever loaded with a variable this executor did
-  # not choose.
+  # `env -i` in the arguments is kept. It is the exact construction boundary for
+  # the downstream command, which receives only the declared `PATH`. M2 makes no
+  # broader claim that the first image is atomically empty against concurrent
+  # mutation of arbitrary environment names inside this VM.
   defp spawn_environment(environment) do
     cleared = for {name, _value} <- System.get_env(), do: {String.to_charlist(name), false}
+    credential = String.to_charlist(@credential_name)
 
-    cleared ++ environment
+    (cleared ++ environment)
+    |> Enum.reject(fn {name, _value} -> name == credential end)
+    |> Kernel.++([{credential, false}])
   end
 
   defp child_environment do
@@ -1876,12 +1898,13 @@ defmodule Loopex.Executor.Local do
     ]
   end
 
-  # Concept: what the receipt reports is what the child was given.
+  # Concept: what the receipt reports is the environment intentionally given to
+  # the downstream command.
   #
   # Technical depth: the names were a hardcoded list, so the receipt said `PATH`
-  # whatever the child actually received. Deriving them from the environment that
-  # was passed makes the journalled claim an observation, which is the only thing
-  # that makes it worth journalling.
+  # whatever environment was actually declared. Deriving them from the same list
+  # passed to the downstream `env -i` boundary makes the journalled claim an
+  # exact statement of that construction rather than an OS observation.
   defp environment_names(environment) do
     for {name, value} <- environment, value != false, do: List.to_string(name)
   end
@@ -1897,8 +1920,8 @@ defmodule Loopex.Executor.Local do
   # Technical depth: for argv the program and its arguments are passed through
   # untouched, so a `$` or a space in an argument is data. For a raw command a
   # shell is asked for explicitly, which is the whole point of that form.
-  # Concept: nothing runs with this process's environment, including the thing
-  # that sets up the process group.
+  # Concept: the first image explicitly excludes the provider credential, and
+  # the downstream process-group setup runs with only the constructed PATH.
   #
   # Technical depth: the launcher used to be `setsid`, resolved from the ambient
   # `PATH`, with `env -i` further along the argument vector. That ordering hands

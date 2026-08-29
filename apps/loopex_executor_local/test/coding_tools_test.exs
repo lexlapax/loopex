@@ -367,7 +367,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert byte_size(truncated) < limit + 200
   end
 
-  test "write creates or replaces a file only beneath the workspace root" do
+  test "write creates or replaces a file beneath the workspace root and refuses static escapes" do
     root = workspace()
 
     assert {:ok, %{outcome: :completed}} =
@@ -713,7 +713,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     refute_received {:kept, _event}
   end
 
-  test "a coding tool child receives a constructed credential free environment and its receipt reports what it received" do
+  test "a coding tool command receives a constructed provider credential free environment and its receipt records that declared environment" do
     root = workspace()
 
     # The credential is exported exactly as an operator must export it for the
@@ -773,11 +773,14 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     refute argv_named.output =~ "LOOPEX_PROVIDER_API_KEY"
     refute argv_named.output =~ "LOOPEX_SENTINEL_UNRELATED"
 
-    # Concept: the receipt reports what the child received, not a constant.
+    # Concept: the receipt records the environment declared for the downstream
+    # command, not a constant.
     #
-    # Technical depth: both fields were hardcoded, so the journal asserted an
-    # absence it had not observed. A durable record that states a credential was
-    # absent when it was present is worse than one that states nothing.
+    # Technical depth: both fields were hardcoded, so the journal could drift
+    # from the same environment list passed to the downstream `env -i` boundary.
+    # The separate behavioural assertion above observes the command; these fields
+    # retain the declaration that produced it and do not claim to observe the
+    # first launcher's complete environment.
     assert receipt.child_environment_names == ["PATH"]
     refute receipt.provider_credential_present
 
@@ -1822,7 +1825,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              inspect(escaped)
   end
 
-  test "the first process the launcher starts holds no ambient environment" do
+  test "the first process the launcher starts explicitly excludes the provider credential" do
     # Concept: the boundary is the first thing the operating system runs, not the
     # first thing that happens to be credential-free further down the chain.
     #
@@ -1908,8 +1911,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       assert first_child =~ "PATH=/usr/bin:/bin"
     end
 
-    # Concept: the environment the *first* image was loaded with, observed at the
-    # first image and not at anything it later executed.
+    # Concept: the environment the *first* image was loaded with must exclude the
+    # provider credential, and its stable ambient snapshot must be cleared.
     #
     # Technical depth: everything above reads the environment of the command
     # `env` goes on to run, which `-i` has already cleared. It is the wrong
@@ -1922,7 +1925,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     #
     # `env` with no arguments at all prints the environment it was itself given,
     # so this is a direct reading of the first image's own environment with no
-    # second image anywhere in it.
+    # second image anywhere in it. A separate interleaving below proves the named
+    # credential guarantee when that key appears after the ambient snapshot.
     #
     # It is taken through `launcher_probe_port/1`, which reaches the same
     # `open_launcher/4` -- the same option list, the same `Port.open` -- that a
@@ -1947,11 +1951,58 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "the first image was loaded holding the provider credential: #{loaded}"
 
     refute loaded =~ "also-not-for-a-first-child",
-           "the first image was loaded holding this process's environment: #{loaded}"
+           "the stable ambient snapshot was not cleared before the first image loaded: #{loaded}"
 
-    # A loader acts on names, so the assertion is that the first image holds
-    # exactly the constructed environment and nothing beside it.
+    # With no concurrent environment mutation, the snapshot clears every ambient
+    # name and leaves only the chosen PATH. The provider credential has the
+    # stronger guarantee below: it is explicitly absent even when introduced
+    # after that snapshot.
     assert loaded |> String.split("\n", trim: true) |> Enum.sort() == ["PATH=/usr/bin:/bin"]
+
+    # Concept: the provider credential is the named secret this executor must
+    # keep out of every first image, including one started by its own helpers.
+    #
+    # Technical depth: Port's env option extends the inherited environment. A
+    # snapshot of names to clear is therefore not atomic: another BEAM process
+    # can add a name between that snapshot and Port.open. The probe pauses the
+    # actual production spawn in precisely that interval and adds the provider
+    # key. Both intended environment kinds must still clear it explicitly.
+    System.delete_env("LOOPEX_PROVIDER_API_KEY")
+    parent = self()
+
+    for kind <- [:coding, :demonstration] do
+      raced =
+        Task.async(fn ->
+          port =
+            Local.launcher_probe_port(root, kind, fn ->
+              send(parent, {:launcher_environment_snapshotted, self()})
+
+              receive do
+                :continue_launcher_spawn -> :ok
+              end
+            end)
+
+          Enum.reduce_while(1..200, <<>>, fn _attempt, acc ->
+            receive do
+              {^port, {:data, chunk}} -> {:cont, acc <> chunk}
+              {^port, {:exit_status, 0}} -> {:halt, acc}
+            after
+              15_000 -> {:halt, acc}
+            end
+          end)
+        end)
+
+      assert_receive {:launcher_environment_snapshotted, launcher}, 5_000
+      System.put_env("LOOPEX_PROVIDER_API_KEY", "sk-added-after-snapshot")
+      send(launcher, :continue_launcher_spawn)
+      raced_environment = Task.await(raced, 20_000)
+
+      refute raced_environment =~ "sk-added-after-snapshot",
+             "the #{kind} first image inherited a provider credential introduced after its " <>
+               "ambient snapshot: #{raced_environment}"
+
+      System.delete_env("LOOPEX_PROVIDER_API_KEY")
+    end
 
     # The demonstration launcher is the other spawn site and already begins with
     # the clearing option rather than with an executable path; asserting it keeps
@@ -1967,15 +2018,15 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     refute demonstration.provider_credential_present
   end
 
-  test "no image this executor loads inherits an environment it did not choose" do
-    # Concept: what a spawned image is loaded with is decided at the spawn, so
-    # the guarantee is only as good as the number of spawns there are.
+  test "every executor spawn supplies an environment override that excludes the provider credential" do
+    # Concept: explicit provider-credential removal has to reach every spawn,
+    # not only the coding-tool path a behavioural case happened to exercise.
     #
     # Technical depth: the environment cases above observe one spawn. They are
     # silent about every other, and that silence is exactly how the previous
     # shape of this module failed: the job spawn and the demonstration spawn each
-    # assembled their own option list, and the option that clears the loaded
-    # environment could be dropped from one of them without any case noticing.
+    # assembled their own option list, and the option that removes the provider
+    # credential could be dropped from one of them without any case noticing.
     #
     # There are three spawns and they are not interchangeable. One is the job
     # launcher, now built in a single place so that one observation covers every
@@ -1984,7 +2035,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # operating system loads while this process holds the provider credential,
     # so the loader reaches them on exactly the same terms. The invariant is
     # therefore about every spawn rather than about how many there are: none of
-    # them may be opened without an environment this executor constructed.
+    # them may omit the central environment override that explicitly removes the
+    # named credential.
     #
     # Reading the source is the only way to ask a question of that shape. A
     # behavioural case can prove what one spawn does and can never prove that no
@@ -2004,13 +2056,19 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     # The job launcher reaches its `env:` through `launcher_port_options/2`,
     # which the probe case above observes behaviourally at the spawn; the two
-    # helpers carry theirs literally. Either is a constructed environment. What
-    # no spawn may do is name neither.
-    for spawn <- spawns do
-      assert spawn =~ "env:" or spawn =~ "launcher_port_options(",
-             "a port is opened with no env: option, so the image it loads inherits this " <>
-               "operating system process's whole environment: #{inspect(spawn)}"
-    end
+    # helpers carry theirs literally. What no spawn may do is name neither.
+    assert source =~ "options = launcher_port_options(environment, workspace)",
+           "the job launcher no longer derives the option list whose environment the " <>
+             "production-path probe observes"
+
+    assert Enum.count(spawns, &String.contains?(&1, "++ options")) == 1,
+           "the single job-launch port no longer receives the production option list"
+
+    assert Enum.count(
+             spawns,
+             &String.contains?(&1, "env: spawn_environment(demonstration_environment())")
+           ) == 2,
+           "each helper spawn must use the central provider-credential removal path"
 
     # The job launcher's option list is built once. A second construction of it
     # is how the two spawn sites drifted apart before, and it is also how a
@@ -2319,9 +2377,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert is_binary(default_lease)
   end
 
-  test "the declared cleanup period is partitioned so the receipt is never left with nothing to write" do
-    # Concept: the record of what happened gets a share of the declared period
-    # that no earlier step can spend.
+  test "a job requiring process cleanup retains its receipt under a separate quarter period bound" do
+    # Concept: the record of what happened gets a separately declared share that
+    # no process-cleanup step can spend.
     #
     # Technical depth: the period used to be taken first-come. Every step drew
     # what remained, which is right for the signal, the kill and the
@@ -2334,12 +2392,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     #
     # The receipt is bounded by a declared share of the period now, rather than by
     # what is left of it. The termination sequence keeps the whole period, so the
-    # worst case for the whole stop is the period plus that share -- not one flat
-    # period, and this comment said otherwise until a reviewer read the code.
-    # Reserving the share on the termination side as well was written and
-    # deleted: the cooperative window already caps that sequence at half the
-    # period, so the subtraction could never bind and no case could observe it.
-    #
+    # declared work allowance is the period plus that share -- not one flat
+    # period. Bounded defensive teardown of a helper may add overhead outside
+    # those two work bounds.
     # What matters is that the share is never a second full period and never
     # nothing. Every receipt records the bound its own write ran under, so this is
     # a fact on the durable record rather than an argument about a line.
@@ -2361,17 +2416,17 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "a job that needed no cleanup was charged against an episode it never opened: " <>
              "#{quiet.receipt_retention_bound_ms}ms"
 
-    # A group that refuses `TERM` spends the termination sequence's whole share.
-    # The receipt is still written, and it is written under the reserve.
+    # A group that refuses `TERM` requires the process-cleanup sequence. The
+    # receipt is still written, and it is written under the separate reserve.
     assert {:ok, cleaned} =
              run(root, "loopex.bash", %{"command" => stubborn_group_command()}, where),
-           "a job that spent its cleanup period could not write its receipt at all"
+           "a job that required process cleanup could not write its receipt at all"
 
     assert cleaned.output =~ "confirmed cleaned"
 
     assert cleaned.receipt_retention_bound_ms == reserve,
            "the receipt was retained under #{cleaned.receipt_retention_bound_ms}ms rather than " <>
-             "the #{reserve}ms reserved out of a #{grace}ms period"
+             "the separate #{reserve}ms reserve derived from a #{grace}ms period"
 
     # The durable record carries it, so this is what a recovering coordinator or
     # an operator reads rather than a value that existed only in a reply.
@@ -2562,13 +2617,10 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert Local.cancel(tight, tight_job) == {:ok, :unconfirmed},
            "a cancellation with no period left to confirm anything reported a clean stop"
 
-    # It settles rather than running to completion. A period of zero also leaves
-    # nothing for the receipt's own write, so this job answers
-    # `{:receipt_not_retained, _}` rather than with a receipt -- one declared
-    # period means an exhausted period is exhausted for the last step too, which
-    # is the guarantee `retaining the receipt joins the cleanup episode already
-    # running rather than opening a second` locks. What matters here is that the
-    # task settled and did not run its twenty seconds out.
+    # It settles rather than running to completion. A process-cleanup period of
+    # zero derives a separate receipt reserve of zero too, so this job may answer
+    # `{:receipt_not_retained, _}` rather than with a receipt. What matters here
+    # is that the task settled and did not run its twenty seconds out.
     settled = Task.await(tight_running, 30_000)
 
     assert match?({:ok, %{outcome: _outcome}}, settled) or

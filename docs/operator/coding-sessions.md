@@ -305,17 +305,20 @@ that, and this documentation does not imply otherwise.
 
 Stopping a tool is one budget, not a sequence of them. When a run ends while a
 `bash` command is still going, the executor gives the command's process group a
-cooperative window to leave, then signals it, then confirms it is gone — and all
-of that draws on **one** period, so that sequence cannot outlast it however many
-steps it takes. It defaults to five seconds.
+cooperative window to leave, then signals it, then confirms it is gone — and
+each of those steps receives only what remains of **one** process-cleanup period.
+It defaults to five seconds. Bounded defensive teardown of a timed-out helper
+may follow after that work allowance is spent.
 
 Writing the receipt afterwards is bounded separately, by a declared share of the
-period — a quarter — rather than by whatever the sequence left. The worst case
-for the whole stop is therefore the period plus that share: six and a quarter
-seconds at the default, not five. It is that rather than a flat period
-deliberately, because a job that spent everything fighting a stubborn process
-group would otherwise reach its receipt with nothing left to write it with, and
-the job whose durable record matters most would produce none. Every receipt names both the period it ran under, as
+period — a quarter — rather than by whatever the sequence left. The declared
+work allowances therefore total five quarters of the configured period: six and
+a quarter seconds at the default. That is an allowance total rather than a
+strict wall-clock ceiling because bounded teardown may follow an exceeded bound.
+The separate share is deliberate:
+a job that spent everything fighting a stubborn process group would otherwise
+reach its receipt with nothing left to write it with, and the job whose durable
+record matters most would produce none. Every receipt names both the period it ran under, as
 `cleanup_grace_ms`, and the bound its own write ran under, as
 `receipt_retention_bound_ms`. The command itself is not consulted: a program that
 ignores the first signal is killed when the period is spent, and a group that

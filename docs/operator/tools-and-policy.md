@@ -71,10 +71,15 @@ Loopex does not isolate a tool child from your machine in this milestone, and th
 protection that exists is the host policy you name plus the workspace-root
 containment above.
 
-The child's environment is built from nothing rather than inherited. The launcher
-is `/usr/bin/env -i`, and the only variable the child receives is a fixed `PATH`,
-so no shell variable of yours — the provider credential included — reaches a tool
-child by accident.
+Every process the executor starts explicitly removes the provider credential.
+The model-supplied command then crosses `/usr/bin/env -i` and receives only a
+fixed `PATH`, so no shell variable of yours reaches that command by accident.
+The first launcher image is also given an override that clears the ambient names
+present when it is assembled. Erlang's port environment extends the process
+environment rather than atomically replacing it, so M2 does not claim that an
+arbitrary name introduced concurrently elsewhere in the same VM cannot reach
+that first image; the provider credential is removed explicitly after the
+snapshot and does not depend on that broader claim.
 
 Every run declares a deadline duration when its prompt is admitted or its queued
 follow-up is promoted. The absolute deadline begins when that run's first model
@@ -283,13 +288,14 @@ empty content.
 ### Credential Boundary
 
 The provider credential is read from `LOOPEX_PROVIDER_API_KEY` by the model
-adapter and nowhere else. Every controlled tool child is launched through
-`/usr/bin/env -i` with `PATH` as its only variable, so the credential-free child
-environment is constructed rather than filtered — there is no inherited variable
-for a filter to miss. The receipt records the child's environment variable names
-and whether a provider credential was present, so the claim is journalled rather
-than asserted. A provider error is bounded and has the credential's bytes
-substituted out before any caller, report, or terminal can see it.
+adapter and nowhere else. Every executor spawn explicitly removes that named
+credential, including the launcher and the executor's own process-management
+helpers. A model-supplied command is then launched through `/usr/bin/env -i`
+with `PATH` as its only variable. The receipt records that constructed downstream
+environment and whether the provider credential was present, so the command-side
+claim is journalled rather than asserted. A provider error is bounded and has the
+credential's bytes substituted out before any caller, report, or terminal can
+see it.
 
 ## Related
 

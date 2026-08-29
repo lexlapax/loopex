@@ -2475,20 +2475,19 @@ defmodule Loopex.AgentLoopTest do
     # its closure the last item of that domain. Two owners producing into one
     # label breaks both at once.
     #
-    # Technical depth: a predecessor that died with a model call in flight left
-    # the run at `model_dispatched`, and the successor dispatched the same staged
-    # bytes under the same attempt — so it derived the same domain. A review drove
-    # it: the successor emitted sequence zero and a complete closure, and the
-    # predecessor's producer, resumed afterwards, emitted sequences zero, one and
-    # two under the identical label. The closure was no longer last and sequence
-    # zero appeared twice.
+    # Technical depth: a predecessor superseded while still alive with a model
+    # call in flight left the run at `model_dispatched`, and the successor
+    # dispatched the same staged bytes under the same attempt — so it derived the
+    # same domain. A review drove it: the successor emitted sequence zero and a
+    # complete closure, and the predecessor's producer, resumed afterwards,
+    # emitted sequences zero, one and two under the identical label. The closure
+    # was no longer last and sequence zero appeared twice.
     #
     # Two things changed and this drives both. The successor abandons the attempt
-    # it inherited, so its dispatch opens a *different* domain; and a relay is
-    # linked to the owner that opened it, so the predecessor's relay dies with
-    # its owner rather than draining a backlog afterwards. The producer here is
-    # held open across the succession, which is what makes the old domain still
-    # live at the moment the new one opens.
+    # it inherited, so its dispatch opens a *different* domain; and supersession
+    # closes every domain the predecessor opened even where that process remains
+    # alive. The producer here is held open across the succession, which is what
+    # makes the old domain still live at the moment the new one opens.
     parent = self()
 
     fixture =
@@ -2502,6 +2501,7 @@ defmodule Loopex.AgentLoopTest do
 
     {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
     assert_receive {:holding, model}, 5_000
+    model_reference = Process.monitor(model)
 
     predecessor = receive_progress()
 
@@ -2509,13 +2509,24 @@ defmodule Loopex.AgentLoopTest do
              Enum.filter(predecessor, &(&1.kind == :text_delta)),
            "the predecessor did not publish exactly the delta that keeps its domain observable"
 
-    coordinator = coordinator_of(fixture.runtime)
-    reference = Process.monitor(coordinator)
-    Process.exit(coordinator, :kill)
-    assert_receive {:DOWN, ^reference, :process, ^coordinator, _reason}, 5_000
-
     assert {:ok, ^session_id} =
              Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
+
+    assert_receive {:loopex_progress,
+                    %{
+                      kind: :model_stream_closed,
+                      disposition: :abandoned,
+                      delta_count: 1
+                    } = predecessor_closure},
+                   5_000,
+                   "the predecessor's open domain was not closed abandoned when it was superseded"
+
+    assert predecessor_closure.stream_domain_id == predecessor_delta.stream_domain_id
+    predecessor = predecessor ++ [predecessor_closure]
+
+    assert_receive {:DOWN, ^model_reference, :process, ^model, _reason},
+                   1_000,
+                   "the superseded provider task kept running after its successor took the run"
 
     {:ok, resumed} =
       Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
@@ -2530,15 +2541,8 @@ defmodule Loopex.AgentLoopTest do
 
     successor = receive_progress()
 
-    # The predecessor's producer is released only after the successor has
-    # opened, closed and durably finished its own domain. Anything the old
-    # producer can still say therefore tests the closure-last rule directly.
-    model_reference = Process.monitor(model)
-    send(model, :release)
-    assert_receive {:DOWN, ^model_reference, :process, ^model, _reason}, 5_000
-
     assert receive_progress() == [],
-           "the predecessor emitted after its owner and relay were gone"
+           "the predecessor emitted after supersession closed its domain"
 
     observed = predecessor ++ successor
     domains = observed |> Enum.map(& &1.stream_domain_id) |> Enum.uniq()
@@ -2552,20 +2556,18 @@ defmodule Loopex.AgentLoopTest do
              |> Map.fetch!(:stream_domain_id),
            "the successor reused the predecessor's stream domain"
 
-    assert Enum.count(observed, &(&1.kind == :model_stream_closed)) == 1,
-           "the succession did not publish exactly the successor's closure"
+    assert Enum.count(observed, &(&1.kind == :model_stream_closed)) == 2,
+           "the succession did not publish exactly one closure for each owner's domain"
 
     for domain <- domains do
       items = Enum.filter(observed, &(&1.stream_domain_id == domain))
       closures = Enum.filter(items, &(&1.kind == :model_stream_closed))
 
-      assert length(closures) <= 1,
-             "domain #{domain} was closed #{length(closures)} times"
+      assert length(closures) == 1,
+             "domain #{domain} was closed #{length(closures)} times rather than exactly once"
 
-      if closures != [] do
-        assert List.last(items).kind == :model_stream_closed,
-               "an item of domain #{domain} was emitted after its own closure"
-      end
+      assert List.last(items).kind == :model_stream_closed,
+             "an item of domain #{domain} was emitted after its own closure"
 
       sequences =
         items
@@ -2588,10 +2590,9 @@ defmodule Loopex.AgentLoopTest do
            "the successor re-ran the attempt it inherited, so both owners derived one domain"
   end
 
-  test "a stream relay ends with the owner that opened it, ahead of its own backlog" do
-    # Concept: a relay is a process, and a process nobody will ever close is a
-    # leak. A relay that outlives its owner for even one message is worse than a
-    # leak: it emits into a domain that owner no longer speaks for.
+  test "a stream relay ends with the owner that opened it ahead of its own backlog" do
+    # Concept: an owner death ends its transient plane without inventing a
+    # disposition the durable record may contradict.
     #
     # Technical depth: the task supervisor relays run under belongs to the
     # runtime rather than to one session, so it survives a coordinator that stops
@@ -2599,13 +2600,11 @@ defmodule Loopex.AgentLoopTest do
     # coordinator do. A relay that only ended on `close/2` would sit in `receive`
     # for the life of the runtime, one for every domain that never got closed.
     #
-    # A monitor is not enough, and this case is written to say why. Its `:DOWN`
-    # is a message, so it queues behind whatever a producer has already handed
-    # the relay, and the relay drains that backlog before it ever learns its
-    # owner is gone. An exit signal is not a message and does not wait behind
-    # one. The relay is suspended with five items already queued and its owner is
-    # then killed; a linked relay is dead before it can be resumed, and none of
-    # those five reaches the plane.
+    # A monitor's `:DOWN` would queue behind whatever a producer already handed
+    # the relay and would have to guess whether the durable result committed
+    # immediately before the owner died. A link ends this plane without draining
+    # the backlog or fabricating `abandoned`; ADR 0011 defines the resulting
+    # missing closure as an incomplete transient view.
     supervisor =
       start_supervised!({Task.Supervisor, name: :"relay-#{System.unique_integer([:positive])}"})
 
@@ -2644,7 +2643,7 @@ defmodule Loopex.AgentLoopTest do
                    "the relay outlived the owner that opened it"
 
     assert receive_progress() == [],
-           "a relay emitted its backlog into a domain whose owner was already gone"
+           "the dead owner's relay drained backlog or fabricated a closure after its plane ended"
   end
 
   test "two attempts of one tool operation never share a stream domain" do
