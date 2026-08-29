@@ -56,6 +56,20 @@ defmodule Loopex.CancellationTestExecutor do
         Process.sleep(700)
         {:ok, :cleaned}
 
+      # Concept: a conforming executor may answer that cancellation itself
+      # failed, which confirms no cleanup and must never be read as a clean
+      # stop.
+      #
+      # Technical depth: release the job first and let its valid receipt reach
+      # the coordinator. The returned error is then the only unproved part of
+      # the abort, so the terminal outcome specifically proves normalization of
+      # `{:error, reason}` rather than a missing receipt or an idle run.
+      :cancel_returns_error ->
+        waiting = Agent.get(pid, & &1.waiting)
+        if is_pid(waiting), do: send(waiting, :answer)
+        Process.sleep(120)
+        {:error, :cleanup_unavailable}
+
       # Concept: three ways a host-supplied cancellation fails to say anything,
       # none of which is a statement that the process tree is gone.
       #
@@ -1187,6 +1201,19 @@ defmodule Loopex.CancellationTest do
       assert is_binary(finished["reconciliation_ref"]),
              "an unproven cleanup ended the run without naming what to reconcile against"
     end
+  end
+
+  test "an abort during an in flight tool call treats an executor cancellation error as outcome unknown with a reconciliation reference" do
+    {_fixture, _session_id, observed} = abort_during_tool(:cancel_returns_error)
+
+    finished = Enum.find(observed, &(&1.kind == "run.finished"))
+    assert finished, "an executor cancellation error never finished the run"
+
+    assert finished["outcome"] == "outcome_unknown",
+           "an executor cancellation error was committed as #{finished["outcome"]}"
+
+    assert is_binary(finished["reconciliation_ref"]),
+           "an unproven cleanup ended the run without naming what to reconcile against"
   end
 
   test "an abort admitted after an unprovable effect committed never rewrites the run to cancelled" do

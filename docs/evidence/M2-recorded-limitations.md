@@ -193,18 +193,16 @@ operating-system process and export no cancellation, and `cancelled` was then
 committed over a process tree nobody signalled and nobody looked at. The run
 ends `outcome_unknown` with a reconciliation reference instead.
 
-**The instrument this still owes.** Three independent reviews have now made the
-same point, and it is correct: a recorded limitation cannot amend an accepted
-ADR. The maintainer's decision above is explicit and dated, so the milestone is
-authorized to do what it does; what is missing is that ADR 0009's own text still
-says the opposite, and a reader of that ADR alone would be misled. This
-repository freezes an accepted ADR byte-for-byte — `Mix.Tasks.Loopex.Status`
-requires an accepted ADR to equal the candidate it binds apart from its status
-and governance row — so there is no in-place amendment to make. The instrument is
-[ADR 0012](../adr/0012-executor-cancellation-capability.md#concept) records this
-extension. `M2` does not close until it carries recorded acceptance, which its
-plan pair states as a closure obligation. The ADR and
-[ADR index](../adr/README.md) remain the canonical current-status sources.
+**Accepted instrument.** Three independent reviews made the same point, and it
+is correct: a recorded limitation cannot amend an accepted ADR. This repository
+freezes an accepted ADR byte-for-byte — `Mix.Tasks.Loopex.Status` requires an
+accepted ADR to equal the candidate it binds apart from its status and
+governance row — so there was no in-place amendment to make. The maintainer has
+accepted
+[ADR 0012](../adr/0012-executor-cancellation-capability.md#concept), which
+records this narrow extension and exactly supersedes the conflicting executor
+boundary clauses in ADR 0009 and ADR 0011. The ADR and
+[ADR index](../adr/README.md) are the canonical current-status sources.
 
 ## Pre-staging deadline instant
 
@@ -244,16 +242,14 @@ deviation. The alternative considered and not taken was adding a durable commit
 instant to the Store contract, which remains the conforming fix whenever that
 decision is made.
 
-**The instrument this still owes.** As above: the decision is explicit and
-dated, and ADR 0010 and ADR 0011 still say the opposite. The conforming code fix
-is not smaller than the documentary one — a Store-stamped commit instant is a
-change to a public port every Store implementation must satisfy, and ADR 0006 is
-frozen in exactly the same way those ADRs are, so it needs a new accepted ADR too.
-Both roads end at a maintainer-accepted decision, and the deadline decision is
-[ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept)
-records this deviation. `M2` does not close until it carries recorded
-acceptance. The ADR and [ADR index](../adr/README.md) remain the canonical
-current-status sources.
+**Accepted instrument.** The conforming code fix was not smaller than the
+documentary one — a Store-stamped commit instant would change a public port that
+every Store implementation must satisfy, and ADR 0006 is frozen in the same way
+as ADR 0010 and ADR 0011. The maintainer has accepted
+[ADR 0013](../adr/0013-run-deadline-commitment-at-first-request-staging.md#concept),
+which records this deviation and exactly supersedes the conflicting deadline
+clauses in ADR 0010 and ADR 0011. The ADR and
+[ADR index](../adr/README.md) are the canonical current-status sources.
 
 ## Provider selection is not reachable from the command
 

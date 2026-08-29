@@ -18,9 +18,9 @@ a decision adds a new record rather than rewriting the old one.
 | 0006 | Store transaction contract and owner epoch | Accepted | [Decision](0006-store-transaction-and-owner-epoch.md#concept) | [Technical depth](0006-store-transaction-and-owner-epoch-technical.md#technical-depth) |
 | 0007 | Local executor grant, job, and receipt | Accepted | [Decision](0007-local-executor-grant-job-receipt.md#concept) | [Technical depth](0007-local-executor-grant-job-receipt-technical.md#technical-depth) |
 | 0008 | Owner succession recovery and runtime placement | Accepted | [Decision](0008-owner-succession-recovery-and-runtime-placement.md#concept) | [Technical depth](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth) |
-| 0009 | Tool, executor, and grant contracts | Accepted | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
-| 0010 | Provider continuation and exact context staging | Accepted | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
-| 0011 | Session input algebra and streaming progress | Accepted | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
+| 0009 | Tool, executor, and grant contracts | Accepted (partially superseded by 0012) | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
+| 0010 | Provider continuation and exact context staging | Accepted (partially superseded by 0013) | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
+| 0011 | Session input algebra and streaming progress | Accepted (partially superseded by 0012 and 0013) | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
 | 0012 | Executor cancellation capability | Accepted | [Decision](0012-executor-cancellation-capability.md#concept) | [Technical depth](0012-executor-cancellation-capability-technical.md#technical-depth) |
 | 0013 | Run-deadline commitment at first request staging | Accepted | [Decision](0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
 
@@ -48,6 +48,12 @@ admits, how steering and queued follow-up work are ordered and journaled, and
 how a turn streams without letting transient progress become durable truth. All
 three must be dispositioned before `M2` is accepted, not merely before the loop
 they govern is implemented.
+
+0012 supersedes only ADR 0009's `execute/4` exclusivity and ADR 0011's claim
+that `execute/5` was the whole executor-boundary change; the remaining decisions
+in both ADRs stay in force. 0013 supersedes only ADR 0010's and ADR 0011's
+absolute-deadline-at-admission or promotion clauses; their remaining provider,
+staging, input, and streaming decisions stay in force.
 
 0004 and 0005 are both parked. They designed correction paths for a defect
 found in an accepted plan, then the defect that prompted them turned out to be
