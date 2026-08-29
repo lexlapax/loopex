@@ -67,11 +67,12 @@ defmodule Loopex.AgentLoopTestModel do
 
       waiter when is_pid(waiter) ->
         send(waiter, {:holding, self()})
+        hold_timeout_ms = Map.get(turn, :hold_timeout_ms, 5_000)
 
         receive do
           :release -> :ok
         after
-          5_000 -> :ok
+          hold_timeout_ms -> :ok
         end
     end
 

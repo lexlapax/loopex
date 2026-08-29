@@ -49,7 +49,13 @@ defmodule Loopex.AgentLoopProgressExecutor do
     Enum.each(events, progress)
 
     case mode do
-      {:held_after_effect, observer} when is_pid(observer) ->
+      {held_mode, observer}
+      when held_mode in [
+             :held_after_effect,
+             :held_after_effect_and_progress,
+             :held_after_effect_with_refusal,
+             :held_after_effect_then_lost
+           ] and is_pid(observer) ->
         :ok =
           Agent.update(pid, fn state ->
             %{state | effects: [job.tool_call_id | state.effects]}
@@ -65,6 +71,16 @@ defmodule Loopex.AgentLoopProgressExecutor do
 
         progress.(chunk(job, 1, "after succession"))
 
+        if held_mode == :held_after_effect_and_progress do
+          send(observer, {:executor_progress_held, self()})
+
+          receive do
+            :release_after_progress -> :ok
+          after
+            5_000 -> :ok
+          end
+        end
+
       _other ->
         :ok
     end
@@ -78,9 +94,22 @@ defmodule Loopex.AgentLoopProgressExecutor do
     # cannot describe, and the one a case that only ever drives a completed job
     # never reaches.
     case mode do
-      :one_valid_two_refused_then_lost -> {:error, {:receipt_not_retained, :enospc}}
-      {:held_after_effect, _observer} -> {:ok, receipt(job, length(events) + 1)}
-      _other -> {:ok, receipt(job, length(events))}
+      :one_valid_two_refused_then_lost ->
+        {:error, {:receipt_not_retained, :enospc}}
+
+      {held_mode, _observer}
+      when held_mode in [
+             :held_after_effect,
+             :held_after_effect_and_progress,
+             :held_after_effect_with_refusal
+           ] ->
+        {:ok, receipt(job, length(events) + 1)}
+
+      {:held_after_effect_then_lost, _observer} ->
+        {:error, {:receipt_not_retained, :enospc}}
+
+      _other ->
+        {:ok, receipt(job, length(events))}
     end
   end
 
@@ -105,6 +134,19 @@ defmodule Loopex.AgentLoopProgressExecutor do
 
   defp events(:valid, job), do: [chunk(job, 0, "first"), chunk(job, 1, "second")]
   defp events({:held_after_effect, _observer}, job), do: [chunk(job, 0, "before succession")]
+
+  defp events({:held_after_effect_then_lost, _observer}, job),
+    do: [chunk(job, 0, "before succession")]
+
+  defp events({:held_after_effect_and_progress, _observer}, job),
+    do: [chunk(job, 0, "before succession")]
+
+  defp events({:held_after_effect_with_refusal, _observer}, job) do
+    [
+      chunk(job, 0, "before succession"),
+      %{chunk(job, 1, "refused before succession") | attempt: job.attempt + 1}
+    ]
+  end
 
   # Concept: one wrong binding, chosen by the case rather than by this double,
   # so every binding can be asked for rather than the three somebody thought of.
@@ -177,7 +219,7 @@ defmodule Loopex.AgentLoopProgressExecutor do
   defp tamper(value) when is_integer(value), do: value + 1
   defp tamper(value) when is_binary(value), do: value <> "-not-this-one"
 
-  defp receipt(job, progress_count) do
+  def receipt(job, progress_count) do
     %{
       protocol_version: 1,
       job_id: job.job_id,
@@ -202,6 +244,80 @@ defmodule Loopex.AgentLoopProgressExecutor do
       provider_credential_present: false,
       artifacts: []
     }
+  end
+end
+
+defmodule Loopex.AgentLoopControlBoundaryProxy do
+  @moduledoc false
+
+  # Concept: expose the one ownership operation a predecessor is about to use,
+  # without replacing the runtime Control that actually owns succession.
+  #
+  # Technical depth: the production coordinator is pointed at this forwarding
+  # process only inside one test. A raw `current_owner` precheck is forwarded
+  # before the test starts handoff and its answer is held; an atomic
+  # `close_progress` call is held before it reaches Control. Releasing either
+  # after Control has begun acquisition deterministically distinguishes a stale
+  # check-then-close from the serialized close operation.
+  def start(real_control, observer, armed \\ true)
+      when is_pid(real_control) and is_pid(observer) and is_boolean(armed) do
+    spawn_link(fn -> loop(real_control, observer, armed) end)
+  end
+
+  def arm(proxy) when is_pid(proxy), do: GenServer.call(proxy, :arm)
+
+  def release(proxy, reference) when is_pid(proxy) and is_reference(reference),
+    do: send(proxy, {:release, reference})
+
+  defp loop(real_control, observer, true = armed) do
+    receive do
+      {:"$gen_call", from, {:current_owner, _session_id, _owner} = request} ->
+        reply = GenServer.call(real_control, request, :infinity)
+        hold_and_reply(real_control, observer, from, request, :current_owner, reply)
+
+      {:"$gen_call", from, {:close_progress, _session_id, _owner, _relay, _disposition} = request} ->
+        hold_and_reply(real_control, observer, from, request, :close_progress, :forward)
+
+      {:"$gen_call", from, {:project_progress, _session_id, _owner, _relay, _item} = request} ->
+        hold_and_reply(real_control, observer, from, request, :project_progress, :forward)
+
+      {:"$gen_call", from, {:post_commit, _session_id, _owner, _positions, _receipt} = request} ->
+        reply = GenServer.call(real_control, request, :infinity)
+        hold_and_reply(real_control, observer, from, request, :post_commit, reply)
+
+      {:"$gen_call", from, request} ->
+        GenServer.reply(from, GenServer.call(real_control, request, :infinity))
+        loop(real_control, observer, armed)
+    end
+  end
+
+  defp loop(real_control, observer, false) do
+    receive do
+      {:"$gen_call", from, :arm} ->
+        GenServer.reply(from, :ok)
+        loop(real_control, observer, true)
+
+      {:"$gen_call", from, request} ->
+        GenServer.reply(from, GenServer.call(real_control, request, :infinity))
+        loop(real_control, observer, false)
+    end
+  end
+
+  defp hold_and_reply(real_control, observer, from, request, boundary, prepared) do
+    reference = make_ref()
+    send(observer, {:control_boundary_waiting, self(), reference, boundary})
+
+    receive do
+      {:release, ^reference} ->
+        reply =
+          case prepared do
+            :forward -> GenServer.call(real_control, request, :infinity)
+            reply -> reply
+          end
+
+        GenServer.reply(from, reply)
+        loop(real_control, observer, false)
+    end
   end
 end
 
@@ -604,6 +720,26 @@ defmodule Loopex.AgentLoopTest do
     :exit, _reason -> false
   end
 
+  defp await_process_message(process, matches?, attempts \\ 300) do
+    case Process.info(process, :messages) do
+      {:messages, messages} ->
+        cond do
+          Enum.any?(messages, matches?) ->
+            true
+
+          attempts > 0 ->
+            Process.sleep(10)
+            await_process_message(process, matches?, attempts - 1)
+
+          true ->
+            false
+        end
+
+      nil ->
+        false
+    end
+  end
+
   defp diagnostics(acc \\ []) do
     receive do
       {:loopex_diagnostic, item} -> diagnostics([item | acc])
@@ -983,6 +1119,7 @@ defmodule Loopex.AgentLoopTest do
            "a run with only pre-staging downtime was treated as expired"
 
     {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
     _events = drain(resumed)
 
     assert [request] = AgentLoopTestModel.dispatched(fixture.model)
@@ -1759,7 +1896,7 @@ defmodule Loopex.AgentLoopTest do
   defp start_with_executor(module, executor_pid, script, options \\ []) do
     extras = Keyword.get(options, :receipt_extras, %{})
     :persistent_term.put({AgentLoopAnsweringExecutor, :receipt_extras}, extras)
-    declared = Keyword.take(options, [:cleanup_grace_ms, :progress_to])
+    declared = Keyword.take(options, [:cleanup_grace_ms, :progress_to, :diagnostics_to])
 
     model_pid = AgentLoopTestModel.start(script)
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop-answering")
@@ -2575,10 +2712,11 @@ defmodule Loopex.AgentLoopTest do
     # was no longer last and sequence zero appeared twice.
     #
     # Two things changed and this drives both. The successor abandons the attempt
-    # it inherited, so its dispatch opens a *different* domain; and supersession
-    # closes every domain the predecessor opened even where that process remains
-    # alive. The producer here is held open across the succession, which is what
-    # makes the old domain still live at the moment the new one opens.
+    # it inherited, so its dispatch opens a *different* domain; and recognized
+    # model supersession closes the predecessor's model domain even where that
+    # process remains alive. The producer here is held open across the
+    # succession, which is what makes the old domain still live at the moment
+    # the new one opens.
     parent = self()
 
     fixture =
@@ -2681,6 +2819,760 @@ defmodule Loopex.AgentLoopTest do
            "the successor re-ran the attempt it inherited, so both owners derived one domain"
   end
 
+  test "a prior ownership verdict cannot suppress notified model cleanup" do
+    # Concept: the handoff notification still ends effect-free model work even
+    # if another ownership fence already marked the coordinator stale.
+    #
+    # Technical depth: a deadline, progress, or terminal-result fence can set
+    # `superseded` before Control delivers its cast. Pre-marking that exact state
+    # makes the ordering deterministic. The later cast must still terminate and
+    # drain the model worker, close its model domain abandoned, and reap the
+    # settled coordinator. Restoring the old `not state.superseded` guard leaves
+    # all three alive and fails only this case.
+    fixture =
+      start(
+        script: [
+          %{
+            text: "",
+            calls: [],
+            error: :provider_unavailable,
+            hold: self(),
+            hold_timeout_ms: 30_000,
+            deltas: ["open"]
+          }
+        ],
+        progress_to: self()
+      )
+
+    {_session_id, _attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 5_000
+    model_reference = Process.monitor(model)
+
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+    predecessor_state = :sys.get_state(predecessor)
+
+    assert [{{:model, _run_id}, stream}] = Map.to_list(predecessor_state.streams)
+    relay = stream.relay
+    relay_reference = Process.monitor(relay)
+    workers = predecessor_state.workers
+
+    assert [%{kind: :text_delta} = delta] = receive_progress()
+    :sys.replace_state(predecessor, &%{&1 | superseded: true})
+
+    :sys.suspend(workers)
+
+    try do
+      GenServer.cast(predecessor, {:superseded, "replacement-generation"})
+
+      assert await_process_message(workers, fn
+               {:"$gen_call", {^predecessor, _tag}, {:terminate_child, ^model}} -> true
+               _other -> false
+             end),
+             "the notified predecessor never tried to terminate its model worker"
+
+      assert Process.alive?(relay),
+             "the notified model domain closed before its worker terminated and drained"
+    after
+      :sys.resume(workers)
+    end
+
+    assert_receive {:DOWN, ^model_reference, :process, ^model, _reason},
+                   5_000,
+                   "the prior fence suppressed model-worker termination"
+
+    assert_receive {:loopex_progress,
+                    %{
+                      kind: :model_stream_closed,
+                      stream_domain_id: domain,
+                      disposition: :abandoned,
+                      delta_count: 1
+                    }},
+                   5_000,
+                   "the prior fence suppressed the notified model closure"
+
+    assert domain == delta.stream_domain_id
+
+    assert_receive {:DOWN, ^relay_reference, :process, _relay, _reason},
+                   5_000,
+                   "the notified model relay stayed alive"
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the settled notified predecessor stayed alive"
+  end
+
+  test "a superseded coordinator is not reaped while cleanup is still pending" do
+    # Concept: owner loss does not erase cleanup the predecessor already owns;
+    # it may leave only after every cleanup disposition has settled.
+    #
+    # Technical depth: a cleanup with no host job can sit in `pending_cleanup`
+    # while its `cleanup_settled` message is queued, so `in_flight` alone is not
+    # the lifecycle authority. A settled run supplies an otherwise empty real
+    # coordinator, and an exact pending entry makes that mailbox interval
+    # deterministic. Deleting the pending-cleanup term from the reaper predicate
+    # stops the coordinator at the first cast and fails only this case.
+    fixture = start(script: [%{text: "done", calls: []}])
+    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+    before = :sys.get_state(predecessor)
+
+    assert before.in_flight == %{}
+    assert before.pending_cleanup == %{}
+    assert before.streams == %{}
+    assert before.pending_fault == nil
+
+    pending = %{"queued-cleanup" => %{purpose: :abort, model: nil}}
+    :sys.replace_state(predecessor, &%{&1 | pending_cleanup: pending})
+
+    GenServer.cast(predecessor, {:superseded, "replacement-generation"})
+
+    assert %{superseded: true, pending_cleanup: ^pending} = :sys.get_state(predecessor),
+           "owner loss reaped the coordinator before its queued cleanup settled"
+
+    :sys.replace_state(predecessor, &%{&1 | pending_cleanup: %{}})
+    GenServer.cast(predecessor, {:superseded, "replacement-generation"})
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the coordinator remained after its pending cleanup was settled"
+  end
+
+  test "an abrupt model owner death never gives its successor the same stream domain" do
+    # Concept: abrupt owner death leaves the old transient model view
+    # incomplete, but it must not let the successor reuse that attempt's domain.
+    #
+    # Technical depth: unlike the recognized-supersession case above, the
+    # predecessor is killed while its producer is held. Its linked relay must
+    # disappear without a closure, the successor must durably advance the
+    # inherited attempt before dispatch, and releasing the orphaned producer
+    # after the successor finishes must project nothing. This keeps abrupt death
+    # and live supersession as distinct full-runtime evidence.
+    fixture =
+      start(
+        script: [
+          %{text: "", calls: [], error: :provider_unavailable, hold: self(), deltas: ["a"]},
+          %{text: "done", calls: [], deltas: ["b"]}
+        ],
+        progress_to: self()
+      )
+
+    {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 5_000
+
+    predecessor = receive_progress()
+
+    assert [predecessor_delta] =
+             Enum.filter(predecessor, &(&1.kind == :text_delta)),
+           "the predecessor did not publish the delta that makes its domain observable"
+
+    coordinator = coordinator_of(fixture.runtime)
+    coordinator_reference = Process.monitor(coordinator)
+    Process.exit(coordinator, :kill)
+
+    assert_receive {:DOWN, ^coordinator_reference, :process, ^coordinator, :killed},
+                   5_000
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(
+               fixture.runtime,
+               session_id,
+               command_id: "resume-after-abrupt-model-owner-death"
+             )
+
+    {:ok, resumed} =
+      Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    assert await_dispatch_count(fixture, 2),
+           "the successor did not dispatch its replacement attempt"
+
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    successor = receive_progress()
+    model_reference = Process.monitor(model)
+    send(model, :release)
+
+    assert_receive {:DOWN, ^model_reference, :process, ^model, _reason},
+                   5_000,
+                   "the orphaned provider task did not settle after release"
+
+    assert receive_progress() == [],
+           "the predecessor emitted after abrupt owner and relay death"
+
+    observed = predecessor ++ successor
+    domains = observed |> Enum.map(& &1.stream_domain_id) |> Enum.uniq()
+
+    assert length(domains) == 2,
+           "the dead predecessor and successor used #{length(domains)} domains"
+
+    successor_domain =
+      successor
+      |> Enum.find(&(&1.kind == :text_delta))
+      |> Map.fetch!(:stream_domain_id)
+
+    assert predecessor_delta.stream_domain_id != successor_domain,
+           "the successor reused the abruptly dead predecessor's stream domain"
+
+    refute Enum.any?(predecessor, &(&1.kind == :model_stream_closed)),
+           "abrupt owner death fabricated a predecessor closure"
+
+    assert Enum.count(successor, &(&1.kind == :model_stream_closed)) == 1,
+           "the successor did not close exactly its own model domain"
+
+    attempts =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+      |> Enum.map(& &1.payload["attempt"])
+
+    assert 1 in attempts,
+           "the successor re-ran the attempt inherited from the dead predecessor"
+  end
+
+  test "a model error before its supersession notification cannot close the old domain" do
+    # Concept: an error returned by model work does not authorize a predecessor
+    # to describe that attempt after the runtime has begun transferring the
+    # session. The successor owns the durable abandonment and retry decision.
+    #
+    # Technical depth: a forwarding proxy pauses the predecessor at the first
+    # ownership operation its model-error path attempts. The successor then
+    # begins acquisition and is held after durable owner advancement but before
+    # `owner_ready` sends the supersession cast. The conforming path reaches one
+    # atomic `close_progress` operation, which Control refuses after acquisition
+    # starts. Restoring a separate `current_owner` precheck makes that check
+    # answer `:ok` before handoff and resume afterwards into a stale raw close;
+    # bypassing the atomic close reaches no boundary at all. Either mutation
+    # fails this case instead of passing through an early discard.
+    fixture =
+      start(
+        script: [
+          %{
+            text: "",
+            calls: [],
+            error: :provider_unavailable,
+            hold: self(),
+            deltas: ["before handoff"]
+          },
+          %{text: "done", calls: [], deltas: ["after handoff"]}
+        ],
+        progress_to: self()
+      )
+
+    {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 5_000
+    model_reference = Process.monitor(model)
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+
+    assert [{{:model, _run_id}, stream}] =
+             predecessor
+             |> :sys.get_state()
+             |> Map.fetch!(:streams)
+             |> Map.to_list()
+
+    relay = stream.relay
+    relay_reference = Process.monitor(relay)
+
+    assert [first_delta] =
+             receive_progress()
+             |> Enum.filter(&(&1.kind == :text_delta))
+
+    old_domain = first_delta.stream_domain_id
+    real_control = :sys.get_state(predecessor).control
+    control_proxy = Loopex.AgentLoopControlBoundaryProxy.start(real_control, self())
+
+    :sys.replace_state(predecessor, &Map.put(&1, :control, control_proxy))
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store,
+        :session_journal_advance_owner,
+        self()
+      )
+
+    send(model, :release)
+
+    assert_receive {:control_boundary_waiting, ^control_proxy, boundary_reference, boundary},
+                   5_000
+
+    assert boundary == :close_progress,
+           "the model error used #{inspect(boundary)} instead of one atomic close boundary"
+
+    resume =
+      Task.async(fn ->
+        Loopex.resume_session(
+          fixture.runtime,
+          session_id,
+          command_id: "resume-model-error-before-notify"
+        )
+      end)
+
+    assert_receive {:transaction_linearized, owner_waiter, _store, :session_journal_advance_owner,
+                    {:committed, _tx_id, _owner_receipt}},
+                   5_000
+
+    assert Task.yield(resume, 0) == nil,
+           "the successor became ready before the delayed owner result was released"
+
+    Loopex.AgentLoopControlBoundaryProxy.release(control_proxy, boundary_reference)
+
+    assert_receive {:DOWN, ^model_reference, :process, ^model, _reason},
+                   5_000,
+                   "the old model worker did not return its error"
+
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+                   5_000,
+                   "the model error did not end the old transient plane"
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the settled stale model coordinator was not reaped"
+
+    refute Enum.any?(receive_progress(), fn item ->
+             item.stream_domain_id == old_domain and item.kind == :model_stream_closed
+           end),
+           "the stale predecessor described its model error as an abandoned attempt"
+
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1,
+           "the successor dispatched a retry before it owned and recovered the run"
+
+    M1RuntimeTestStore.release(owner_waiter)
+    assert {:ok, session_id} == Task.await(resume, 5_000)
+
+    resumed =
+      case Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0) do
+        {:ok, resumed} ->
+          resumed
+
+        other ->
+          flunk(
+            "successor unavailable after model-error recovery: #{inspect(other)}; " <>
+              "records=#{inspect(Enum.map(Fixture.records(fixture, session_id), & &1.payload[:kind]))}; " <>
+              "dispatches=#{length(AgentLoopTestModel.dispatched(fixture.model))}"
+          )
+      end
+
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
+
+    attempts =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+      |> Enum.map(& &1.payload["attempt"])
+
+    assert attempts == [1],
+           "the stale predecessor, rather than only its successor, recorded abandonment"
+  end
+
+  test "handoff cannot move between progress admission and relay emission" do
+    # Concept: an item belongs to the owner that emits it. Once Control begins
+    # replacing that owner, the old callback cannot add another item to its
+    # transient domain.
+    #
+    # Technical depth: the proxy is installed before dispatch but armed only
+    # after the model has retained its callback. A conforming callback reaches
+    # one atomic project_progress call, which is forwarded only after durable
+    # ownership advancement and is refused. Splitting it into current_owner
+    # followed by StreamRelay.emit prepares :ok before handoff, resumes after
+    # handoff, and leaks the injected delta into the predecessor's live relay.
+    fixture =
+      start(
+        script: [
+          %{text: "", calls: [], hold: self(), hold_timeout_ms: 30_000},
+          %{text: "done", calls: []}
+        ],
+        progress_to: self()
+      )
+
+    {:ok, session_id} =
+      Loopex.create_session(fixture.runtime, %{"tenant" => "t"}, command_id: "create-1")
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_state = :sys.get_state(predecessor)
+
+    control_proxy =
+      Loopex.AgentLoopControlBoundaryProxy.start(
+        predecessor_state.control,
+        self(),
+        false
+      )
+
+    :sys.replace_state(predecessor, &Map.put(&1, :control, control_proxy))
+
+    assert {:accepted, "prompt-1"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "prompt-1",
+               content: "go"
+             })
+
+    assert_receive {:holding, model}, 5_000
+
+    assert [{{:model, _run_id}, stream}] =
+             predecessor
+             |> :sys.get_state()
+             |> Map.fetch!(:streams)
+             |> Map.to_list()
+
+    old_domain = stream.domain
+    progress = AgentLoopTestModel.retained_progress(fixture.model)
+
+    :ok = Loopex.AgentLoopControlBoundaryProxy.arm(control_proxy)
+
+    emission =
+      Task.async(fn ->
+        progress.(%{kind: :text_delta, content_index: 0, text: "after the check"})
+      end)
+
+    assert_receive {:control_boundary_waiting, ^control_proxy, boundary_reference, boundary},
+                   5_000,
+                   "the model delta never reached the ownership boundary"
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store,
+        :session_journal_advance_owner,
+        self()
+      )
+
+    resume =
+      Task.async(fn ->
+        Loopex.resume_session(
+          fixture.runtime,
+          session_id,
+          command_id: "resume-progress-admission"
+        )
+      end)
+
+    assert_receive {:transaction_linearized, owner_waiter, _store, :session_journal_advance_owner,
+                    {:committed, _tx_id, _owner_receipt}},
+                   5_000,
+                   "the successor did not durably advance ownership"
+
+    Loopex.AgentLoopControlBoundaryProxy.release(control_proxy, boundary_reference)
+    assert Task.await(emission, 5_000) == :ok
+
+    refute Enum.any?(receive_progress(), fn item ->
+             item.kind == :text_delta and item.stream_domain_id == old_domain
+           end),
+           "a predecessor delta crossed the plane after ownership advancement"
+
+    assert boundary == :project_progress,
+           "progress used #{inspect(boundary)} instead of one atomic admission-and-send boundary"
+
+    M1RuntimeTestStore.release(owner_waiter)
+    assert {:ok, ^session_id} = Task.await(resume, 5_000)
+
+    assert_receive {:loopex_progress,
+                    %{
+                      kind: :model_stream_closed,
+                      stream_domain_id: ^old_domain,
+                      disposition: :abandoned,
+                      delta_count: 0
+                    }},
+                   5_000,
+                   "the notified predecessor did not close its empty domain abandoned"
+
+    {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+    refute Process.alive?(model)
+  end
+
+  test "a stale Store refusal of a model result leaves closure and abandonment to the successor" do
+    # Concept: a complete provider answer that meets the stale-owner Store fence
+    # is not a retained fact. The predecessor therefore ends its transient view
+    # without a closure, while the successor owns the durable abandonment and
+    # distinct retry.
+    #
+    # Technical depth: owner advancement is held after Store linearization and
+    # before `owner_ready`, so no supersession cast can explain the result. The
+    # successful held model answer reaches the Store under the old epoch and is
+    # refused there. Treating that as a generic model-result failure kills the
+    # coordinator abnormally; closing from the unretained reply fabricates a
+    # complete domain. Both mutations fail this case.
+    fixture =
+      start(
+        script: [
+          %{text: "stale", calls: [], hold: self(), deltas: ["before fence"]},
+          %{text: "done", calls: [], deltas: ["after recovery"]}
+        ],
+        progress_to: self()
+      )
+
+    {session_id, _attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 5_000
+    model_reference = Process.monitor(model)
+
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+
+    assert [{{:model, _run_id}, stream}] =
+             predecessor
+             |> :sys.get_state()
+             |> Map.fetch!(:streams)
+             |> Map.to_list()
+
+    relay_reference = Process.monitor(stream.relay)
+
+    assert [%{kind: :text_delta} = first_delta] = receive_progress()
+    old_domain = first_delta.stream_domain_id
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store,
+        :session_journal_advance_owner,
+        self()
+      )
+
+    resume =
+      Task.async(fn ->
+        Loopex.resume_session(
+          fixture.runtime,
+          session_id,
+          command_id: "resume-before-stale-model-result"
+        )
+      end)
+
+    assert_receive {:transaction_linearized, owner_waiter, _store, :session_journal_advance_owner,
+                    {:committed, _tx_id, _owner_receipt}},
+                   5_000
+
+    refute :sys.get_state(predecessor).superseded,
+           "the ordinary supersession cast arrived before the Store refusal"
+
+    send(model, :release)
+
+    assert_receive {:DOWN, ^model_reference, :process, ^model, _reason},
+                   5_000,
+                   "the predecessor's model worker did not return its answer"
+
+    assert_receive {:DOWN, ^relay_reference, :process, _relay, _reason},
+                   5_000,
+                   "the stale Store refusal left the old model relay alive"
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the terminal stale-owner refusal killed the predecessor abnormally"
+
+    refute Enum.any?(receive_progress(), fn item ->
+             item.stream_domain_id == old_domain and item.kind == :model_stream_closed
+           end),
+           "an unretained model result fabricated a complete or abandoned closure"
+
+    M1RuntimeTestStore.release(owner_waiter)
+    assert {:ok, ^session_id} = Task.await(resume, 5_000)
+
+    {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+    assert await_dispatch_count(fixture, 2)
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    refute Enum.any?(receive_progress(), fn item ->
+             item.stream_domain_id == old_domain and item.kind == :model_stream_closed
+           end),
+           "the successor fabricated a closure under the predecessor's domain"
+
+    attempts =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+      |> Enum.map(& &1.payload["attempt"])
+
+    assert attempts == [1]
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
+  end
+
+  test "a retained model result closes complete after Control handoff" do
+    # Concept: ownership moving after a model result commits does not make that
+    # retained reply untrue. Its originating domain still gets the exact
+    # `complete` closure the durable result and producer count prove.
+    #
+    # Technical depth: the Store holds the predecessor after the
+    # `model_result_committed` record linearizes. A successor recovers that fact
+    # and becomes current in Control before the predecessor receives its Store
+    # result. Releasing the result makes the old coordinator's `post_commit`
+    # fence refuse it, but the retained result still authorizes the direct close.
+    # Replacing that close with `close_current_model_stream/3`, or treating the
+    # refused cache projection as an uncommitted result, leaves the old domain
+    # without its truthful terminal item and fails this case.
+    fixture =
+      start(
+        script: [%{text: "done", calls: [], deltas: ["retained"], hold: self()}],
+        progress_to: self()
+      )
+
+    :ok =
+      M1RuntimeTestStore.delay_after_record(
+        fixture.store,
+        "model_result_committed",
+        self()
+      )
+
+    {session_id, _attachment, reply} = Fixture.run(fixture, "go")
+    assert reply == {:accepted, "prompt-1"}
+    assert_receive {:holding, model}, 5_000
+
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+
+    assert [{{:model, _run_id}, stream}] =
+             predecessor
+             |> :sys.get_state()
+             |> Map.fetch!(:streams)
+             |> Map.to_list()
+
+    relay = stream.relay
+    relay_reference = Process.monitor(relay)
+
+    assert [delta] =
+             receive_progress()
+             |> Enum.filter(&(&1.kind == :text_delta))
+
+    old_domain = delta.stream_domain_id
+
+    send(model, :release)
+
+    assert_receive {:record_linearized, result_waiter, _store, "model_result_committed",
+                    :session_journal_commit, {:committed, _tx_id, _receipt}},
+                   5_000
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(
+               fixture.runtime,
+               session_id,
+               command_id: "resume-after-retained-model-result"
+             )
+
+    M1RuntimeTestStore.release(result_waiter)
+
+    assert_receive {:loopex_progress,
+                    %{
+                      kind: :model_stream_closed,
+                      stream_domain_id: ^old_domain,
+                      disposition: :complete,
+                      delta_count: 1
+                    }},
+                   5_000,
+                   "the retained model result did not close its originating domain complete"
+
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+                   5_000,
+                   "the retained model result left its originating relay alive"
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the settled superseded coordinator was not reaped after retaining its result"
+
+    refute Enum.any?(receive_progress(), fn item ->
+             item.stream_domain_id == old_domain and item.kind == :model_stream_closed
+           end),
+           "the retained model result closed its originating domain more than once"
+
+    {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    records = Fixture.records(fixture, session_id)
+
+    assert Enum.count(records, &(&1.payload[:kind] == "model_result_committed")) == 1
+    refute Enum.any?(records, &(&1.payload[:kind] == "model_attempt_abandoned"))
+  end
+
+  test "a model result admitted before handoff still closes complete after ownership moves" do
+    # Concept: once the Store has retained a model result, a later handoff
+    # cannot make its complete disposition or producer count untrue.
+    #
+    # Technical depth: the forwarding proxy first lets the predecessor's
+    # `post_commit` call update Control successfully, then withholds that `:ok`
+    # reply. A successor takes ownership while the predecessor is paused between
+    # that admitted cache update and its direct close. Releasing the reply must
+    # still produce the retained fact's exact complete closure. Adding a second
+    # ownership gate around that close discards it and fails this case.
+    fixture =
+      start(
+        script: [%{text: "done", calls: [], deltas: ["retained before handoff"], hold: self()}],
+        progress_to: self()
+      )
+
+    {session_id, _attachment, reply} = Fixture.run(fixture, "go")
+    assert reply == {:accepted, "prompt-1"}
+    assert_receive {:holding, model}, 5_000
+
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+    predecessor_state = :sys.get_state(predecessor)
+
+    assert [{{:model, _run_id}, stream}] = Map.to_list(predecessor_state.streams)
+
+    relay = stream.relay
+    relay_reference = Process.monitor(relay)
+
+    assert [delta] =
+             receive_progress()
+             |> Enum.filter(&(&1.kind == :text_delta))
+
+    old_domain = delta.stream_domain_id
+
+    control_proxy =
+      Loopex.AgentLoopControlBoundaryProxy.start(predecessor_state.control, self())
+
+    :sys.replace_state(predecessor, &Map.put(&1, :control, control_proxy))
+    send(model, :release)
+
+    assert_receive {:control_boundary_waiting, ^control_proxy, boundary_reference, :post_commit},
+                   5_000,
+                   "the retained result did not reach its successful post-commit boundary"
+
+    assert Enum.count(
+             Fixture.records(fixture, session_id),
+             &(&1.payload[:kind] == "model_result_committed")
+           ) == 1,
+           "the case reached Control before the model result was durable"
+
+    assert receive_progress() == [],
+           "the old domain closed before the post-commit result returned"
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(
+               fixture.runtime,
+               session_id,
+               command_id: "resume-after-admitted-model-result"
+             )
+
+    Loopex.AgentLoopControlBoundaryProxy.release(control_proxy, boundary_reference)
+
+    assert_receive {:loopex_progress,
+                    %{
+                      kind: :model_stream_closed,
+                      stream_domain_id: ^old_domain,
+                      disposition: :complete,
+                      delta_count: 1
+                    }},
+                   5_000,
+                   "the admitted retained result lost its complete closure after handoff"
+
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+                   5_000,
+                   "the admitted retained result left its originating relay alive"
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the settled superseded coordinator was not reaped after its admitted result"
+
+    {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    records = Fixture.records(fixture, session_id)
+    refute Enum.any?(records, &(&1.payload[:kind] == "model_attempt_abandoned"))
+  end
+
   test "a live executor supersession ends its old stream without claiming the effect abandoned" do
     # Concept: losing session authority says nothing about an effect that is
     # already running. The old progress plane ends, but it cannot call that
@@ -2701,12 +3593,14 @@ defmodule Loopex.AgentLoopTest do
         AgentLoopProgressExecutor,
         executor,
         one_call_script(),
-        progress_to: self()
+        progress_to: self(),
+        diagnostics_to: self()
       )
 
     assert_receive {:executor_effect_held, worker}, 5_000
     worker_reference = Process.monitor(worker)
     predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
 
     before_succession = receive_progress()
 
@@ -2760,9 +3654,670 @@ defmodule Loopex.AgentLoopTest do
                    5_000,
                    "the predecessor's executor worker did not settle after its receipt was released"
 
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the settled superseded coordinator was not reaped after its executor returned"
+
     refute Enum.any?(receive_progress(), &(&1.stream_domain_id == old_domain)),
            "the fenced predecessor projected an item under its old domain after reconciliation"
 
+    assert length(AgentLoopProgressExecutor.jobs(executor)) == 1
+  end
+
+  test "an executor progress ownership refusal ends the stale plane without terminating its worker" do
+    # Concept: Control refusing one executor item is the ownership verdict for
+    # the whole transient plane. The old relay ends immediately, while the
+    # already-dispatched effect keeps running so its receipt can be reconciled.
+    #
+    # Technical depth: the successor's owner transaction is held after it
+    # linearizes but before Control can send the ordinary supersession cast. The
+    # executor then offers another fully bound item and pauses again. Only that
+    # progress-side Control refusal can tell the predecessor it lost ownership;
+    # deleting the callback notification leaves the coordinator and relay live,
+    # while turning the notification into worker termination loses the receipt.
+    executor = AgentLoopProgressExecutor.start({:held_after_effect_and_progress, self()})
+
+    fixture =
+      start_with_executor(
+        AgentLoopProgressExecutor,
+        executor,
+        one_call_script(),
+        progress_to: self(),
+        diagnostics_to: self()
+      )
+
+    assert_receive {:executor_effect_held, worker}, 5_000
+    worker_reference = Process.monitor(worker)
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+
+    assert [{{:executor, _run_id}, stream}] =
+             predecessor
+             |> :sys.get_state()
+             |> Map.fetch!(:streams)
+             |> Map.to_list()
+
+    relay = ExecutorStream.relay(stream)
+    relay_reference = Process.monitor(relay)
+
+    assert [first_progress] =
+             receive_progress()
+             |> Enum.filter(&(&1.kind == :tool_progress))
+
+    old_domain = first_progress.stream_domain_id
+    [job] = AgentLoopProgressExecutor.jobs(executor)
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store,
+        :session_journal_advance_owner,
+        self()
+      )
+
+    resume =
+      Task.async(fn ->
+        Loopex.resume_session(
+          fixture.runtime,
+          fixture.session_id,
+          command_id: "resume-after-progress-fence"
+        )
+      end)
+
+    assert_receive {:transaction_linearized, owner_waiter, _store, :session_journal_advance_owner,
+                    {:committed, _tx_id, owner_receipt}},
+                   5_000
+
+    refute :sys.get_state(predecessor).superseded,
+           "the ordinary supersession notification arrived before the progress-side verdict"
+
+    send(worker, :release)
+    assert_receive {:executor_progress_held, ^worker}, 5_000
+
+    assert await_superseded(predecessor),
+           "the progress-side Control refusal did not reach the coordinator"
+
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+                   5_000,
+                   "the refused item left the stale executor relay alive"
+
+    assert Process.alive?(worker),
+           "ending the stale progress plane terminated the effectful executor worker"
+
+    refute Enum.any?(receive_progress(), fn item ->
+             item.stream_domain_id == old_domain
+           end),
+           "the refused item or an invented closure crossed the stale executor domain"
+
+    refute Enum.any?(diagnostics(), &(&1["kind"] == "executor_progress_refused")),
+           "the ownership refusal itself was misreported as refused executor progress"
+
+    M1RuntimeTestStore.release(owner_waiter)
+    assert {:ok, fixture.session_id} == Task.await(resume, 5_000)
+
+    send(worker, :release_after_progress)
+
+    assert_receive {:DOWN, ^worker_reference, :process, ^worker, _reason},
+                   5_000,
+                   "the effectful executor worker did not settle after producing its receipt"
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the settled superseded coordinator was not reaped"
+
+    {:ok, resumed} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    assert {:ok, query} = Loopex.reconciliation_query(resumed)
+    assert query.current_session_epoch == owner_receipt.owner_epoch
+
+    reconciliation =
+      query
+      |> Map.put(:evidence, "receipt")
+      |> Map.put(:retained_receipt, AgentLoopProgressExecutor.receipt(job, 2))
+
+    assert :ok = Loopex.reconcile(resumed, reconciliation)
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    refute Enum.any?(receive_progress(), &(&1.stream_domain_id == old_domain)),
+           "the old domain emitted after the successor reconciled the receipt"
+  end
+
+  test "a durable owner handoff fences executor progress and closure before its notification arrives" do
+    # Concept: the Store can make the successor the durable owner before the old
+    # coordinator receives Control's supersession cast. That interval does not
+    # let the old transient plane describe an effect it no longer has authority
+    # to describe.
+    #
+    # Technical depth: the test Store pauses the successor after `advance_owner`
+    # linearizes but before its result reaches recovery and `owner_ready`. The
+    # predecessor is therefore demonstrably not yet marked superseded when its
+    # held executor emits one more item and returns its receipt. Control has
+    # already serialized the handoff, so it refuses both the item and any
+    # ordinary closure. Restoring an unguarded progress send or changing the
+    # stale-owner receipt branch back to `close_tool_stream(..., :abandoned)`
+    # makes this case fail while the recognized-supersession case above remains
+    # green.
+    executor = AgentLoopProgressExecutor.start({:held_after_effect, self()})
+
+    fixture =
+      start_with_executor(
+        AgentLoopProgressExecutor,
+        executor,
+        one_call_script(),
+        progress_to: self()
+      )
+
+    assert_receive {:executor_effect_held, worker}, 5_000
+    worker_reference = Process.monitor(worker)
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+
+    assert [{{:executor, _run_id}, stream}] =
+             predecessor
+             |> :sys.get_state()
+             |> Map.fetch!(:streams)
+             |> Map.to_list()
+
+    relay = ExecutorStream.relay(stream)
+    relay_reference = Process.monitor(relay)
+
+    assert [progress] =
+             receive_progress()
+             |> Enum.filter(&(&1.kind == :tool_progress))
+
+    old_domain = progress.stream_domain_id
+    [job] = AgentLoopProgressExecutor.jobs(executor)
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store,
+        :session_journal_advance_owner,
+        self()
+      )
+
+    resume =
+      Task.async(fn ->
+        Loopex.resume_session(
+          fixture.runtime,
+          fixture.session_id,
+          command_id: "resume-executor-before-notify"
+        )
+      end)
+
+    assert_receive {:transaction_linearized, owner_waiter, _store, :session_journal_advance_owner,
+                    {:committed, _tx_id, owner_receipt}},
+                   5_000
+
+    assert owner_receipt.owner_epoch > job.origin_session_epoch
+
+    refute :sys.get_state(predecessor).superseded,
+           "the case no longer holds the successor before its notification"
+
+    assert Task.yield(resume, 0) == nil,
+           "the successor became ready before the delayed owner result was released"
+
+    send(worker, :release)
+
+    assert_receive {:DOWN, ^worker_reference, :process, ^worker, _reason},
+                   5_000,
+                   "the old executor worker did not finish after its receipt was released"
+
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+                   5_000,
+                   "the old executor stream did not end after its receipt met the ownership fence"
+
+    refute Enum.any?(receive_progress(), fn item ->
+             item.stream_domain_id == old_domain and
+               item.kind in [:tool_progress, :tool_stream_closed]
+           end),
+           "the stale predecessor projected progress or a closure after ownership moved"
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the stale coordinator was not reaped after its executor receipt was refused"
+
+    assert length(AgentLoopProgressExecutor.jobs(executor)) == 1,
+           "the successor retried the executor effect before reconciliation"
+
+    M1RuntimeTestStore.release(owner_waiter)
+    assert {:ok, fixture.session_id} == Task.await(resume, 5_000)
+
+    {:ok, resumed} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    assert {:ok, query} = Loopex.reconciliation_query(resumed)
+    assert query.current_session_epoch == owner_receipt.owner_epoch
+    assert query.original_attempt == 1
+
+    reconciliation =
+      query
+      |> Map.put(:evidence, "receipt")
+      |> Map.put(:retained_receipt, AgentLoopProgressExecutor.receipt(job, 2))
+
+    assert :ok = Loopex.reconcile(resumed, reconciliation)
+
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    assert length(AgentLoopProgressExecutor.jobs(executor)) == 1
+  end
+
+  test "a malformed executor receipt cannot close the old domain across an owner handoff" do
+    # Concept: malformed evidence gives the predecessor no disposition it may
+    # publish after Control has begun moving the session to another owner.
+    # Invalidity does not turn lost authority into proof of abandonment.
+    #
+    # Technical depth: the executor holds a receipt whose progress count cannot
+    # be a count. The successor's owner transaction is paused after it becomes
+    # durable but before the predecessor receives the supersession cast, then
+    # the malformed receipt is released. Its validation fails before a Store
+    # commit, so this drives the `{:invalid, reason}` branch rather than the
+    # stale-owner branch above. The ownership-fenced close must discard the
+    # relay without a closure. Replacing it with raw `close_tool_stream/3`
+    # publishes `abandoned` and fails this case.
+    executor =
+      AgentLoopAnsweringExecutor.start(%{"c1" => {:held_after_effect, self()}})
+
+    fixture =
+      start_with_executor(
+        AgentLoopAnsweringExecutor,
+        executor,
+        one_call_script(),
+        receipt_extras: %{progress_count: -1},
+        progress_to: self(),
+        diagnostics_to: self()
+      )
+
+    assert_receive {:executor_receipt_held, worker}, 5_000
+    worker_reference = Process.monitor(worker)
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+
+    assert [{{:executor, _run_id}, stream}] =
+             predecessor
+             |> :sys.get_state()
+             |> Map.fetch!(:streams)
+             |> Map.to_list()
+
+    relay = ExecutorStream.relay(stream)
+    relay_reference = Process.monitor(relay)
+    old_domain = stream.domain
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store,
+        :session_journal_advance_owner,
+        self()
+      )
+
+    resume =
+      Task.async(fn ->
+        Loopex.resume_session(
+          fixture.runtime,
+          fixture.session_id,
+          command_id: "resume-malformed-receipt-before-notify"
+        )
+      end)
+
+    assert_receive {:transaction_linearized, owner_waiter, _store, :session_journal_advance_owner,
+                    {:committed, _tx_id, owner_receipt}},
+                   5_000
+
+    refute :sys.get_state(predecessor).superseded,
+           "the case no longer holds the successor before its notification"
+
+    send(worker, :answer)
+
+    assert_receive {:DOWN, ^worker_reference, :process, ^worker, _reason},
+                   5_000,
+                   "the old executor worker did not return its malformed receipt"
+
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+                   5_000,
+                   "the malformed receipt did not end the old executor stream"
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the malformed stale receipt kept its settled predecessor alive"
+
+    refute Enum.any?(diagnostics(), &(&1["kind"] == "executor_effect_unproven")),
+           "the stale predecessor diagnosed and attempted later run work"
+
+    refute Enum.any?(receive_progress(), fn item ->
+             item.stream_domain_id == old_domain and item.kind == :tool_stream_closed
+           end),
+           "the fenced predecessor described the malformed receipt as an abandoned effect"
+
+    assert length(AgentLoopAnsweringExecutor.jobs(executor)) == 1,
+           "the successor retried before recovering the unproved effect"
+
+    M1RuntimeTestStore.release(owner_waiter)
+    assert {:ok, fixture.session_id} == Task.await(resume, 5_000)
+
+    {:ok, resumed} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    assert {:ok, query} = Loopex.reconciliation_query(resumed)
+    assert query.current_session_epoch == owner_receipt.owner_epoch
+    assert query.original_attempt == 1
+
+    assert :ok = Loopex.reconcile(resumed, Map.put(query, :evidence, "outcome_unknown"))
+
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] ==
+             "outcome_unknown"
+
+    assert length(AgentLoopAnsweringExecutor.jobs(executor)) == 1
+  end
+
+  test "a stale non receipt executor answer leaves diagnosis and reconciliation to the successor" do
+    # Concept: once ownership moves, an executor answer without a retained
+    # receipt cannot authorize a diagnostic, a terminal fact, or later run work
+    # from the predecessor.
+    #
+    # Technical depth: the executor has performed its effect and remains held
+    # across a real full-runtime succession. The supersession notification ends
+    # the old plane but deliberately leaves the evidence-producing worker alive.
+    # Releasing it returns no receipt. The stale coordinator must stop normally
+    # without emitting `executor_effect_unproven`; the successor alone exposes
+    # and settles the reconciliation query. Disabling the superseded guard in
+    # the non-receipt result path fails only this case.
+    executor = AgentLoopProgressExecutor.start({:held_after_effect_then_lost, self()})
+
+    fixture =
+      start_with_executor(
+        AgentLoopProgressExecutor,
+        executor,
+        one_call_script(),
+        progress_to: self(),
+        diagnostics_to: self()
+      )
+
+    assert_receive {:executor_effect_held, worker}, 5_000
+    worker_reference = Process.monitor(worker)
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+
+    assert [{{:executor, _run_id}, stream}] =
+             predecessor
+             |> :sys.get_state()
+             |> Map.fetch!(:streams)
+             |> Map.to_list()
+
+    relay = ExecutorStream.relay(stream)
+    relay_reference = Process.monitor(relay)
+
+    assert [first_progress] =
+             receive_progress()
+             |> Enum.filter(&(&1.kind == :tool_progress))
+
+    old_domain = first_progress.stream_domain_id
+
+    assert {:ok, fixture.session_id} ==
+             Loopex.resume_session(
+               fixture.runtime,
+               fixture.session_id,
+               command_id: "resume-before-non-receipt-answer"
+             )
+
+    assert await_superseded(predecessor),
+           "the predecessor did not receive the full-runtime ownership handoff"
+
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+                   5_000,
+                   "the handoff left the predecessor's old executor plane alive"
+
+    refute Enum.any?(receive_progress(), fn item ->
+             item.stream_domain_id == old_domain and item.kind == :tool_stream_closed
+           end),
+           "owner loss fabricated a closure for the unproved executor effect"
+
+    send(worker, :release)
+
+    assert_receive {:DOWN, ^worker_reference, :process, ^worker, _reason},
+                   5_000,
+                   "the evidence-producing executor worker did not return its error"
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the stale non-receipt answer killed or retained the predecessor"
+
+    refute Enum.any?(diagnostics(), &(&1["kind"] == "executor_effect_unproven")),
+           "the stale predecessor diagnosed an effect only the successor may reconcile"
+
+    records = Fixture.records(fixture, fixture.session_id)
+
+    refute Enum.any?(records, &(&1.payload[:kind] == "outcome_unknown_committed")),
+           "the stale predecessor committed a terminal operation fact after handoff"
+
+    {:ok, resumed} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    assert {:ok, query} = Loopex.reconciliation_query(resumed)
+    assert :ok = Loopex.reconcile(resumed, Map.put(query, :evidence, "outcome_unknown"))
+
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] ==
+             "outcome_unknown"
+
+    assert length(AgentLoopProgressExecutor.jobs(executor)) == 1
+  end
+
+  test "an executor receipt admitted before handoff still closes complete after ownership moves" do
+    # Concept: a retained executor receipt fixes its originating stream even
+    # when Control admitted it before a handoff and the coordinator receives
+    # that admission reply afterwards.
+    #
+    # Technical depth: the forwarding proxy lets `post_commit` update Control,
+    # then withholds the successful reply. A successor takes ownership while the
+    # predecessor is paused between that admission and its direct close. The
+    # closure must still carry the receipt's exact count, while the now-stale
+    # coordinator must not start the separate refused-progress transaction.
+    # Replacing the direct close with the current-owner-gated close loses the
+    # terminal item and fails only this case.
+    executor = AgentLoopProgressExecutor.start({:held_after_effect_with_refusal, self()})
+
+    fixture =
+      start_with_executor(
+        AgentLoopProgressExecutor,
+        executor,
+        one_call_script(),
+        progress_to: self(),
+        diagnostics_to: self()
+      )
+
+    assert_receive {:executor_effect_held, worker}, 5_000
+    worker_reference = Process.monitor(worker)
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+    predecessor_state = :sys.get_state(predecessor)
+
+    assert [{{:executor, _run_id}, stream}] = Map.to_list(predecessor_state.streams)
+
+    relay = ExecutorStream.relay(stream)
+    relay_reference = Process.monitor(relay)
+
+    assert [first_progress] =
+             receive_progress()
+             |> Enum.filter(&(&1.kind == :tool_progress))
+
+    old_domain = first_progress.stream_domain_id
+
+    control_proxy =
+      Loopex.AgentLoopControlBoundaryProxy.start(predecessor_state.control, self())
+
+    :sys.replace_state(predecessor, &Map.put(&1, :control, control_proxy))
+    send(worker, :release)
+
+    assert_receive {:control_boundary_waiting, ^control_proxy, boundary_reference, :post_commit},
+                   5_000,
+                   "the retained receipt did not reach its successful post-commit boundary"
+
+    assert_receive {:DOWN, ^worker_reference, :process, ^worker, _reason},
+                   5_000,
+                   "the executor worker did not return the retained receipt"
+
+    assert Enum.any?(
+             Fixture.records(fixture, fixture.session_id),
+             &(&1.payload[:kind] == "executor_receipt_committed")
+           ),
+           "the case reached Control before the executor receipt was durable"
+
+    refute Enum.any?(receive_progress(), &(&1.kind == :tool_stream_closed)),
+           "the old domain closed before the admitted post-commit result returned"
+
+    assert {:ok, fixture.session_id} ==
+             Loopex.resume_session(
+               fixture.runtime,
+               fixture.session_id,
+               command_id: "resume-after-admitted-executor-receipt"
+             )
+
+    Loopex.AgentLoopControlBoundaryProxy.release(control_proxy, boundary_reference)
+
+    assert_receive {:loopex_progress,
+                    %{
+                      kind: :tool_stream_closed,
+                      stream_domain_id: ^old_domain,
+                      disposition: :complete,
+                      progress_count: 3
+                    }},
+                   5_000,
+                   "the admitted retained receipt lost its complete closure after handoff"
+
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+                   5_000,
+                   "the admitted retained receipt left its originating relay alive"
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the settled predecessor stayed alive after its admitted receipt"
+
+    refute Enum.any?(diagnostics(), &(&1["kind"] == "executor_progress_refused")),
+           "the stale coordinator emitted refusal diagnostics after handoff"
+
+    records = Fixture.records(fixture, fixture.session_id)
+
+    refute Enum.any?(records, &(&1.payload[:kind] == "executor_progress_refused")),
+           "the stale coordinator retained refusal accounting after handoff"
+
+    {:ok, resumed} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+    assert length(AgentLoopProgressExecutor.jobs(executor)) == 1
+  end
+
+  test "a retained executor receipt closes complete after Control handoff" do
+    # Concept: a receipt that became durable under the predecessor remains true
+    # after Control installs the successor. Losing the runtime-local owner slot
+    # must not turn that committed fact into a failed executor operation or
+    # discard the truthful complete closure it supports.
+    #
+    # Technical depth: the Store pauses the executor-receipt transaction after
+    # linearization. The successor reads that new journal head, advances
+    # ownership, recovers the retained receipt, and becomes current in Control
+    # while the predecessor still waits for its Store result. Releasing the
+    # result makes the predecessor's `post_commit` fence answer
+    # `:superseded_owner`. The receipt still fixes the old domain's complete
+    # disposition and producer count. Treating that answer as an uncommitted
+    # receipt kills the predecessor; guarding the close by current ownership
+    # discards the truthful terminal item. Either mutation fails this case.
+    executor = AgentLoopProgressExecutor.start({:held_after_effect_with_refusal, self()})
+
+    fixture =
+      start_with_executor(
+        AgentLoopProgressExecutor,
+        executor,
+        one_call_script(),
+        progress_to: self(),
+        diagnostics_to: self()
+      )
+
+    assert_receive {:executor_effect_held, worker}, 5_000
+    worker_reference = Process.monitor(worker)
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+
+    assert [{{:executor, _run_id}, stream}] =
+             predecessor
+             |> :sys.get_state()
+             |> Map.fetch!(:streams)
+             |> Map.to_list()
+
+    relay = ExecutorStream.relay(stream)
+    relay_reference = Process.monitor(relay)
+
+    assert [first_progress] =
+             receive_progress()
+             |> Enum.filter(&(&1.kind == :tool_progress))
+
+    old_domain = first_progress.stream_domain_id
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store,
+        :session_journal_commit,
+        self()
+      )
+
+    send(worker, :release)
+
+    assert_receive {:transaction_linearized, receipt_waiter, _store, :session_journal_commit,
+                    {:committed, _tx_id, _receipt}},
+                   5_000
+
+    assert_receive {:DOWN, ^worker_reference, :process, ^worker, _reason},
+                   5_000,
+                   "the old executor worker did not return the receipt the Store retained"
+
+    assert Enum.any?(receive_progress(), fn item ->
+             item.kind == :tool_progress and item.stream_domain_id == old_domain
+           end),
+           "the executor did not publish its held progress before succession began"
+
+    assert {:ok, fixture.session_id} ==
+             Loopex.resume_session(
+               fixture.runtime,
+               fixture.session_id,
+               command_id: "resume-after-retained-receipt"
+             )
+
+    assert length(AgentLoopProgressExecutor.jobs(executor)) == 1,
+           "the successor retried an executor operation whose receipt was durable"
+
+    M1RuntimeTestStore.release(receipt_waiter)
+
+    assert_receive {:loopex_progress,
+                    %{
+                      kind: :tool_stream_closed,
+                      stream_domain_id: ^old_domain,
+                      disposition: :complete,
+                      progress_count: 3
+                    }},
+                   5_000,
+                   "the retained executor receipt did not close its originating domain complete"
+
+    assert_receive {:DOWN, ^relay_reference, :process, ^relay, _reason},
+                   5_000,
+                   "the predecessor's old executor stream remained live after Control handoff"
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal},
+                   5_000,
+                   "the settled superseded coordinator was not reaped after retaining its receipt"
+
+    refute Enum.any?(diagnostics(), &(&1["kind"] == "executor_progress_refused")),
+           "the stale coordinator emitted a refusal diagnostic after ownership moved"
+
+    records = Fixture.records(fixture, fixture.session_id)
+
+    assert Enum.any?(records, &(&1.payload[:kind] == "executor_receipt_committed")),
+           "the delayed Store result did not retain the receipt this case depends on"
+
+    refute Enum.any?(records, &(&1.payload[:kind] == "executor_progress_refused")),
+           "the stale coordinator retained a second refusal transaction after ownership moved"
+
+    {:ok, resumed} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
     assert length(AgentLoopProgressExecutor.jobs(executor)) == 1
   end
 
@@ -2881,8 +4436,11 @@ defmodule Loopex.AgentLoopTest do
         {Task.Supervisor, name: :"executor-stream-#{System.unique_integer([:positive])}"}
       )
 
-    {:ok, first_stream, first_progress} = ExecutorStream.open(supervisor, self(), first)
-    {:ok, second_stream, second_progress} = ExecutorStream.open(supervisor, self(), second)
+    {:ok, first_stream, first_progress} =
+      ExecutorStream.open(supervisor, self(), first, &StreamRelay.emit/2)
+
+    {:ok, second_stream, second_progress} =
+      ExecutorStream.open(supervisor, self(), second, &StreamRelay.emit/2)
 
     first_progress.(
       Map.merge(AgentLoopProgressExecutor.identity(first), %{

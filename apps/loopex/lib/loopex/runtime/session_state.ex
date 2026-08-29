@@ -543,6 +543,11 @@ defmodule Loopex.Runtime.SessionState do
   defp validate_stream_count(_count), do: {:error, :invalid_stream_count}
 
   defp propose_validated_model_result(state, run_id, reply, generations) do
+    attempt =
+      state.pending_work
+      |> Map.get(run_id, %{})
+      |> Map.get(:model_attempt, 1)
+
     record = %{
       "run_id" => run_id,
       "reply" => encode_plain(reply),
@@ -552,7 +557,14 @@ defmodule Loopex.Runtime.SessionState do
 
     internal_proposal(
       state,
-      stable_id("model-result", run_id, reply.staged_request_digest),
+      # ADR 0010 keeps the staged request bytes and their digest unchanged
+      # across provider attempts. ADR 0006 separately requires a new
+      # transaction ID after a proved non-commit. Binding the result transaction
+      # to both values preserves those two distinct identities: exact
+      # re-presentation within one attempt is stable, while a successor's
+      # recorded retry cannot collide with its predecessor's terminal
+      # non-commit merely because it dispatched the same bytes.
+      stable_id("model-result", run_id, {reply.staged_request_digest, attempt}),
       record
     )
   end
@@ -587,6 +599,33 @@ defmodule Loopex.Runtime.SessionState do
     }
 
     internal_proposal(state, stable_id("executor-fact", run_id, receipt.job_id), record)
+  end
+
+  @doc false
+  @spec propose_reconciled_executor_fact(t(), binary(), map(), binary()) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_reconciled_executor_fact(%__MODULE__{} = state, run_id, receipt, query_id)
+      when is_binary(run_id) and is_map(receipt) and is_binary(query_id) do
+    record = %{
+      "run_id" => run_id,
+      "receipt" => encode_plain(receipt),
+      "reconciliation_query_id" => query_id,
+      kind: "executor_receipt_committed"
+    }
+
+    # Concept: a solicited current-owner receipt is a new reconciliation
+    # decision, not a retry of the stale predecessor's live-result transaction.
+    #
+    # Technical depth: ADR 0006 makes every proved non-commit terminal for its
+    # transaction ID. A predecessor may already have consumed the live
+    # `executor-fact` ID with `stale_owner_epoch`; reusing it with current-owner
+    # bindings must then conflict. The query ID names the separately validated
+    # current-epoch decision and is already bound by the reconciliation response.
+    internal_proposal(
+      state,
+      stable_id("executor-reconciliation-fact", run_id, query_id),
+      record
+    )
   end
 
   @doc """

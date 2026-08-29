@@ -82,6 +82,56 @@ defmodule Loopex.SessionLifecycleTest do
     assert Control.current_owner(control, session_id, entry.owner) == :ok
   end
 
+  test "progress reports runtime unavailability without inventing owner supersession",
+       fixture do
+    {:ok, session_id} =
+      Loopex.create_session(fixture.runtime, %{"workspace" => "progress-fence"},
+        command_id: "create-progress-fence"
+      )
+
+    entry = current_entry(fixture.runtime, session_id)
+    absent = start_supervised!({SlowControl, 0}, id: :absent_progress_control)
+    :ok = stop_supervised!(:absent_progress_control)
+    refute Process.alive?(absent)
+
+    assert Control.project_progress(
+             absent,
+             session_id,
+             entry.owner,
+             self(),
+             %{kind: :test_progress}
+           ) == {:error, :runtime_unavailable}
+
+    # Unavailability made no ownership decision: the real owner is unchanged.
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    assert Control.current_owner(control, session_id, entry.owner) == :ok
+  end
+
+  test "progress closure reports runtime unavailability without inventing owner supersession",
+       fixture do
+    {:ok, session_id} =
+      Loopex.create_session(fixture.runtime, %{"workspace" => "closure-fence"},
+        command_id: "create-closure-fence"
+      )
+
+    entry = current_entry(fixture.runtime, session_id)
+    absent = start_supervised!({SlowControl, 0}, id: :absent_closure_control)
+    :ok = stop_supervised!(:absent_closure_control)
+    refute Process.alive?(absent)
+
+    assert Control.close_progress(
+             absent,
+             session_id,
+             entry.owner,
+             self(),
+             :abandoned
+           ) == {:error, :runtime_unavailable}
+
+    # Unavailability made no ownership decision: the real owner is unchanged.
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    assert Control.current_owner(control, session_id, entry.owner) == :ok
+  end
+
   test "session creation atomically records its runtime command mapping and genesis re-presents identical bytes idempotently and conflicts on changed bytes",
        fixture do
     assert {:ok, session_id} =
@@ -272,6 +322,7 @@ defmodule Loopex.SessionLifecycleTest do
 
     control_before_reply = control_projection(fixture.runtime, session_id)
     store_before_reply = M1RuntimeTestStore.inspect_state(fixture.store_pid)
+    old_reference = Process.monitor(old.coordinator)
 
     M1RuntimeTestStore.release(waiter)
 
@@ -282,7 +333,10 @@ defmodule Loopex.SessionLifecycleTest do
     assert store_before_reply == M1RuntimeTestStore.inspect_state(fixture.store_pid)
     assert {:error, :empty} = Loopex.next_event(current_attachment)
 
-    assert {:error, :superseded_owner} =
+    assert_receive {:DOWN, ^old_reference, :process, old_coordinator, :normal}, 5_000
+    assert old_coordinator == old.coordinator
+
+    assert {:error, :session_unavailable} =
              SessionCoordinator.command(old.coordinator, old.owner, %{
                type: :abort,
                command_id: "old-owner-authority"
@@ -381,11 +435,13 @@ defmodule Loopex.SessionLifecycleTest do
   test "only one coordinator owns a session at a time after durable succession", fixture do
     session_id = create_session!(fixture, "create-owner-series")
     first = current_entry(fixture.runtime, session_id)
+    first_reference = Process.monitor(first.coordinator)
 
     assert {:ok, ^session_id} =
              Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-owner-2")
 
     second = current_entry(fixture.runtime, session_id)
+    second_reference = Process.monitor(second.coordinator)
 
     assert {session_id, "session", first.owner.transaction_id} in M1RuntimeTestStore.inspect_state(
              fixture.store_pid
@@ -406,8 +462,14 @@ defmodule Loopex.SessionLifecycleTest do
              MapSet.new(Enum.map([first, second, third], & &1.owner.owner_incarnation_id))
            ) == 3
 
-    assert Process.alive?(first.coordinator)
-    assert Process.alive?(second.coordinator)
+    assert_receive {:DOWN, ^first_reference, :process, _coordinator, :normal},
+                   5_000,
+                   "the first superseded coordinator was not reaped"
+
+    assert_receive {:DOWN, ^second_reference, :process, _coordinator, :normal},
+                   5_000,
+                   "the second superseded coordinator was not reaped"
+
     assert Process.alive?(third.coordinator)
 
     {:ok, %{control: control}} = Runtime.children(fixture.runtime)
@@ -420,14 +482,17 @@ defmodule Loopex.SessionLifecycleTest do
 
     assert Control.current_owner(control, session_id, third.owner) == :ok
 
-    assert {:error, :superseded_owner} =
+    # Control retains the authoritative ownership verdict independently of the
+    # obsolete processes. Calling a reaped coordinator itself can only report
+    # that the process is unavailable; neither answer can authorize work.
+    assert {:error, :session_unavailable} =
              SessionCoordinator.command(first.coordinator, first.owner, %{
                type: :prompt,
                command_id: "stale-first",
                content: "refused"
              })
 
-    assert {:error, :superseded_owner} =
+    assert {:error, :session_unavailable} =
              SessionCoordinator.command(second.coordinator, second.owner, %{
                type: :prompt,
                command_id: "stale-second",

@@ -45,20 +45,13 @@ defmodule Loopex.Runtime.ExecutorStream do
             required(:tool_call_id) => binary()
           }
 
-  @doc """
-  ## Concept
+  @typedoc false
+  @type publish :: (StreamRelay.t(), term() -> :ok | {:error, term()})
 
-  Opens the progress domain carried by one validated executor job.
-
-  ## Technical depth
-
-  The domain is derived from `job.operation_id` and `job.attempt` through
-  `Loopex.StreamDomain.for_job/1`. Every identity binding is copied from that
-  same job and compared fail-closed before a projected event reaches the relay.
-  """
-  @spec open(Supervisor.supervisor(), pid() | nil, Executor.job_request()) ::
+  @doc false
+  @spec open(Supervisor.supervisor(), pid() | nil, Executor.job_request(), publish()) ::
           {:ok, t(), Executor.progress_fun()} | {:error, term()}
-  def open(supervisor, sink, job) when is_map(job) do
+  def open(supervisor, sink, job, publish) when is_map(job) and is_function(publish, 2) do
     domain = StreamDomain.for_job(job)
     turn_id = job.turn_id
     tool_call_id = job.tool_call_id
@@ -93,7 +86,7 @@ defmodule Loopex.Runtime.ExecutorStream do
       progress = fn event ->
         case project_progress(event, bindings) do
           {:ok, projected} ->
-            StreamRelay.emit(relay, projected)
+            _admitted = publish.(relay, projected)
 
           :refused ->
             :atomics.add(refused, 1, 1)
@@ -105,6 +98,10 @@ defmodule Loopex.Runtime.ExecutorStream do
       {:ok, stream, progress}
     end
   end
+
+  @doc false
+  @spec relay(t()) :: StreamRelay.t()
+  def relay(%{relay: relay}), do: relay
 
   @doc """
   ## Concept

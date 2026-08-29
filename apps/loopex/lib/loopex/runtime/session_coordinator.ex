@@ -303,7 +303,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
     superseded = is_map(state.owner) and generation != state.owner.generation
 
     state =
-      if superseded and not state.superseded do
+      if superseded do
+        # An earlier Control or Store fence may already have marked this owner
+        # stale without ending its effect-free model work. The actual handoff
+        # notification is still the event that terminates and drains that worker
+        # and states the model domain abandoned; the boolean must not suppress
+        # those idempotent local actions.
         state
         |> terminate_superseded_model_work()
         |> abandon_open_streams()
@@ -311,7 +316,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         state
       end
 
-    {:noreply, %{state | superseded: superseded or state.superseded}}
+    continue_after_owner_loss(%{state | superseded: superseded or state.superseded})
   end
 
   @impl GenServer
@@ -321,6 +326,25 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   def handle_info(:advance_work, state), do: advance_work(state)
+
+  def handle_info({:executor_progress_owner_lost, run_id, relay}, state) do
+    next =
+      case Map.fetch(state.streams, {:executor, run_id}) do
+        {:ok, stream} ->
+          if ExecutorStream.relay(stream) == relay do
+            state
+            |> discard_tool_stream(run_id)
+            |> Map.put(:superseded, true)
+          else
+            state
+          end
+
+        :error ->
+          state
+      end
+
+    continue_after_owner_loss(next)
+  end
 
   # Concept: the deadline fires against the run that committed it, and only
   # while this owner still speaks for that run.
@@ -1198,19 +1222,45 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp accept_counted_model_result(state, run_id, reply, count) do
     state = disarm_deadline(state, run_id)
 
-    with {:ok, proposal} <-
-           SessionState.propose_model_result(
-             state.durable,
-             run_id,
-             reply,
-             active_generations(state)
-           ),
-         {:ok, next} <- commit_internal(state, proposal) do
-      next = close_model_stream(next, run_id, {:complete, count})
-      send(self(), :advance_work)
-      {:noreply, next}
-    else
-      {:error, reason} -> {:stop, {:model_result_failed, reason}, state}
+    case SessionState.propose_model_result(
+           state.durable,
+           run_id,
+           reply,
+           active_generations(state)
+         ) do
+      {:ok, proposal} ->
+        case retain_terminal_operation_fact(state, proposal) do
+          {:ok, next} ->
+            next = close_model_stream(next, run_id, {:complete, count})
+            send(self(), :advance_work)
+            {:noreply, next}
+
+          {:retained, next} ->
+            # The Store already fixed the reply and its producer count before
+            # Control moved to the successor. That retained fact, rather than
+            # this stale coordinator's authority, is what makes `complete`
+            # truthful. The successor never closes or reuses this relay.
+            next
+            |> close_model_stream(run_id, {:complete, count})
+            |> continue_after_owner_loss()
+
+          {:error, reason}
+          when reason in [:stale_owner_epoch, :stale_owner_incarnation_id, :superseded_owner] ->
+            # No model result committed under this transaction, so the stale
+            # owner has no retained fact and no authority for a closure. Ending
+            # the relay without one leaves the successor to own abandonment and
+            # retry under the durable attempt transition.
+            state
+            |> discard_model_stream(run_id)
+            |> Map.put(:superseded, true)
+            |> continue_after_owner_loss()
+
+          {:error, reason} ->
+            {:stop, {:model_result_failed, reason}, state}
+        end
+
+      {:error, reason} ->
+        {:stop, {:model_result_failed, reason}, state}
     end
   end
 
@@ -1267,14 +1317,25 @@ defmodule Loopex.Runtime.SessionCoordinator do
      fn delta ->
        # A malformed delta is dropped here rather than handed on, so it never
        # consumes a sequence and never appears in any total.
-       if Model.valid_delta?(delta), do: StreamRelay.emit(relay, delta)
+       if Model.valid_delta?(delta) do
+         _admitted =
+           Control.project_progress(
+             state.control,
+             state.session_id,
+             state.owner,
+             relay,
+             delta
+           )
+       end
+
        :ok
      end}
   end
 
   defp model_operation_id(work), do: stable_id("model-operation", work.run_id, work.turn_number)
 
-  # Concept: every domain the coordinator opens is owed exactly one closure.
+  # Concept: an authoritative coordinator closes every ordinary terminal domain
+  # exactly once.
   #
   # Technical depth: ADR 0011 fixes what each disposition states. A complete
   # attempt produced the durable artifact of its kind, so its closure carries
@@ -1290,13 +1351,52 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # its own mailbox order, and a producer handing an item to a closed domain is
   # sending to a process that no longer exists.
   #
-  # Emission is the obligation — delivery is not guaranteed, because the closure
-  # rides the transient plane like any other item and may be coalesced away or
-  # lost with the plane when its owner changes.
+  # A complete close follows the durable result that makes it truthful. An
+  # abandoned close with no retained fact uses `close_current_model_stream/3`
+  # below, whose Control admission prevents a handoff from beginning between
+  # its ownership check and its closing send.
   defp close_model_stream(state, run_id, disposition) do
     case Map.fetch(state.streams, {:model, run_id}) do
       {:ok, stream} ->
         _stated = StreamRelay.close(stream.relay, disposition)
+        %{state | streams: Map.delete(state.streams, {:model, run_id})}
+
+      :error ->
+        state
+    end
+  end
+
+  defp close_current_model_stream(state, run_id, disposition) do
+    case Map.fetch(state.streams, {:model, run_id}) do
+      {:ok, stream} ->
+        case Control.close_progress(
+               state.control,
+               state.session_id,
+               state.owner,
+               stream.relay,
+               disposition
+             ) do
+          {:ok, _stated} ->
+            %{state | streams: Map.delete(state.streams, {:model, run_id})}
+
+          {:error, :superseded_owner} ->
+            state
+            |> discard_model_stream(run_id)
+            |> Map.put(:superseded, true)
+
+          {:error, _reason} ->
+            discard_model_stream(state, run_id)
+        end
+
+      :error ->
+        state
+    end
+  end
+
+  defp discard_model_stream(state, run_id) do
+    case Map.fetch(state.streams, {:model, run_id}) do
+      {:ok, stream} ->
+        _ended = StreamRelay.discard(stream.relay)
         %{state | streams: Map.delete(state.streams, {:model, run_id})}
 
       :error ->
@@ -1332,8 +1432,71 @@ defmodule Loopex.Runtime.SessionCoordinator do
     case Map.fetch(state.streams, {:executor, run_id}) do
       {:ok, stream} ->
         _stated = ExecutorStream.close(stream, disposition)
-        state = report_refused_progress(state, run_id, stream)
+
+        # A retained receipt may authorize this complete closure after Control
+        # has moved ownership. It does not authorize a second stale-owner
+        # transaction or diagnostic for refusal accounting; the successor owns
+        # every later durable and diagnostic consequence.
+        state = maybe_report_refused_progress(state, run_id, stream)
+
         %{state | streams: Map.delete(state.streams, {:executor, run_id})}
+
+      :error ->
+        state
+    end
+  end
+
+  # Concept: refusal accounting belongs to the owner that still has authority
+  # after the receipt's closure is fixed.
+  #
+  # Technical depth: a retained receipt can authorize its direct closure after
+  # handoff, including the ordering where `post_commit` updated Control before
+  # the handoff but its reply was delayed until afterwards. The cached
+  # `superseded` flag is false in that ordering. Rechecking the serialized owner
+  # boundary prevents the stale coordinator from starting the separate refusal
+  # transaction merely because its terminal fact remains true. A handoff that
+  # races after an `:ok` answer is still fenced atomically by the Store commit.
+  defp maybe_report_refused_progress(%{superseded: true} = state, _run_id, _stream),
+    do: state
+
+  defp maybe_report_refused_progress(state, run_id, stream) do
+    case Control.current_owner(state.control, state.session_id, state.owner) do
+      :ok ->
+        report_refused_progress(state, run_id, stream)
+
+      {:error, :superseded_owner} ->
+        %{state | superseded: true}
+
+      {:error, :runtime_unavailable} ->
+        # No successor has been established. The refusal fact remains a valid
+        # observation of this attempt and its Store transaction still owns the
+        # authority decision.
+        report_refused_progress(state, run_id, stream)
+    end
+  end
+
+  defp close_current_tool_stream(state, run_id, disposition) do
+    case Map.fetch(state.streams, {:executor, run_id}) do
+      {:ok, stream} ->
+        case Control.close_progress(
+               state.control,
+               state.session_id,
+               state.owner,
+               ExecutorStream.relay(stream),
+               disposition
+             ) do
+          {:ok, _stated} ->
+            state = report_refused_progress(state, run_id, stream)
+            %{state | streams: Map.delete(state.streams, {:executor, run_id})}
+
+          {:error, :superseded_owner} ->
+            state
+            |> discard_tool_stream(run_id)
+            |> Map.put(:superseded, true)
+
+          {:error, _reason} ->
+            discard_tool_stream(state, run_id)
+        end
 
       :error ->
         state
@@ -1394,6 +1557,28 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {_reference, _work}, next ->
         next
     end)
+  end
+
+  # Concept: a superseded coordinator stays only while it still carries live
+  # evidence-producing work; once settled, it leaves no stale session owner
+  # process behind.
+  #
+  # Technical depth: an executor or cleanup worker may still return the receipt
+  # reconciliation needs, and a pending fault hook may already hold such a
+  # receipt, so none of those is killed for lifecycle tidiness. Every stream is
+  # ended first. When those maps are empty, the successor has all durable truth
+  # and stopping normally lets Control remove its obsolete monitor without
+  # changing the active successor entry.
+  defp continue_after_owner_loss(state) do
+    settled =
+      map_size(state.in_flight) == 0 and
+        map_size(state.pending_cleanup) == 0 and
+        map_size(state.streams) == 0 and
+        is_nil(state.pending_fault)
+
+    if state.superseded and settled,
+      do: {:stop, :normal, state},
+      else: {:noreply, state}
   end
 
   # Concept: an executor whose progress was refused should not be refused in
@@ -1711,7 +1896,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           _ = Task.Supervisor.terminate_child(state.workers, pid)
           _ = take_worker_result(reference)
           state = %{state | in_flight: Map.delete(state.in_flight, reference)}
-          close_model_stream(state, run_id, :abandoned)
+          close_current_model_stream(state, run_id, :abandoned)
       end
 
     # The charge follows the dispatched turn rather than the live task: a
@@ -1785,7 +1970,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # operation fact below is the authoritative ending.
         case Map.get(state.durable.pending_work, run_id) do
           %{stage: "effect_dispatched"} ->
-            {close_tool_stream(state, run_id, :abandoned), :unconfirmed}
+            {close_current_tool_stream(state, run_id, :abandoned), :unconfirmed}
 
           _nothing_dispatched ->
             {state, :cleaned}
@@ -1801,10 +1986,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
               {:ok, next} -> {next, :cleaned}
               {:invalid, next, _reason} -> {next, :unconfirmed}
               {:error, next, _reason} -> {next, :unconfirmed}
+              {:superseded, next} -> {next, :unconfirmed}
             end
 
           _unproved ->
-            {close_tool_stream(state, run_id, :abandoned), :unconfirmed}
+            {close_current_tool_stream(state, run_id, :abandoned), :unconfirmed}
         end
     end
   end
@@ -1963,9 +2149,32 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:noreply, state}
     else
       executor = state.executor
+      coordinator = self()
+      run_id = work.run_id
+
+      publish = fn relay, item ->
+        case Control.project_progress(
+               state.control,
+               state.session_id,
+               state.owner,
+               relay,
+               item
+             ) do
+          {:error, :superseded_owner} = error ->
+            # The callback runs in the executor worker, so Control's refusal
+            # must be reflected back into the coordinator that owns the relay.
+            # It ends only the transient executor plane; the effectful worker
+            # stays alive to produce the receipt reconciliation still needs.
+            send(coordinator, {:executor_progress_owner_lost, run_id, relay})
+            error
+
+          other ->
+            other
+        end
+      end
 
       {:ok, stream, progress} =
-        ExecutorStream.open(state.workers, state.progress_to, work.job)
+        ExecutorStream.open(state.workers, state.progress_to, work.job, publish)
 
       task =
         Task.Supervisor.async_nolink(state.workers, fn ->
@@ -2027,7 +2236,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Technical depth: the pending-work map is the authority. If the run is gone —
   # aborted, or already terminal — the result is late and takes the evidence
   # path; otherwise it is applied normally.
-  defp dispatch_result(state, kind, run_id, result) do
+  # Model replies and executor receipts both reach their final Store/Control
+  # fence. That boundary can retain a fact that raced the handoff, name a stale
+  # owner exactly, or refuse an unproved closure in the same serialized Control
+  # operation that would emit it. A generic precheck here creates a
+  # check-then-action interval and also makes those final branches impossible to
+  # exercise: the precheck answers first and the claimed close never runs.
+  defp dispatch_result(state, kind, run_id, result) when kind in [:model, :executor],
+    do: dispatch_current_result(state, kind, run_id, result)
+
+  defp dispatch_current_result(state, kind, run_id, result) do
     if Map.has_key?(state.durable.pending_work, run_id) do
       case kind do
         :model -> accept_model_result(state, run_id, result)
@@ -2062,31 +2280,40 @@ defmodule Loopex.Runtime.SessionCoordinator do
     # An attempt that returned no reply still owes its closure, so a consumer can
     # tell an abandoned stream from one that merely went quiet, and still owes
     # its charge, so giving up is not cheaper than finishing.
-    state = close_model_stream(state, run_id, :abandoned)
+    state = close_current_model_stream(state, run_id, :abandoned)
 
-    # Concept: a provider retry redispatches the bytes that were already
-    # committed.
-    #
-    # Technical depth: nothing is recomputed. The same staged bytes and the same
-    # staged_request_digest go out again under a newly recorded attempt, because
-    # the model request has no operation or attempt member for a digest to cover.
-    # That is the opposite of the executor rule, where each attempt canonicalizes
-    # its own attempt identity and therefore computes its own digest — which is
-    # exactly why the two digests no longer share one name.
-    case commit_abandoned_attempt(state, run_id) do
-      {:ok, next} ->
-        if retry_available?(next, run_id) do
-          send(self(), :advance_work)
-          {:noreply, next}
-        else
-          {:stop, {:model_failed, result}, next}
-        end
+    if state.superseded do
+      # The successor owns the abandonment once Control's closing fence says
+      # this coordinator no longer owns the plane. Attempting the same
+      # deterministic abandonment transaction here lets the Store retain a
+      # stale-owner non-commit under the identity the successor must use, so the
+      # successor sees a binding conflict instead of advancing the attempt.
+      continue_after_owner_loss(state)
+    else
+      # Concept: a provider retry redispatches the bytes that were already
+      # committed.
+      #
+      # Technical depth: nothing is recomputed. The same staged bytes and the same
+      # staged_request_digest go out again under a newly recorded attempt, because
+      # the model request has no operation or attempt member for a digest to cover.
+      # That is the opposite of the executor rule, where each attempt canonicalizes
+      # its own attempt identity and therefore computes its own digest — which is
+      # exactly why the two digests no longer share one name.
+      case commit_abandoned_attempt(state, run_id) do
+        {:ok, next} ->
+          if retry_available?(next, run_id) do
+            send(self(), :advance_work)
+            {:noreply, next}
+          else
+            {:stop, {:model_failed, result}, next}
+          end
 
-      {:error, :no_attempt_pending} ->
-        {:stop, {:model_failed, result}, state}
+        {:error, :no_attempt_pending} ->
+          {:stop, {:model_failed, result}, state}
 
-      {:error, reason} ->
-        {:stop, {:model_attempt_failed, reason}, state}
+        {:error, reason} ->
+          {:stop, {:model_attempt_failed, reason}, state}
+      end
     end
   end
 
@@ -2157,17 +2384,25 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # terminal fact and `advance_run/2` remains the single place a run ends,
   # which is why one unknown effect ends the run whatever else was true of it.
   defp accept_executor_result(state, run_id, result) do
-    state = close_tool_stream(state, run_id, :abandoned)
+    state = close_current_tool_stream(state, run_id, :abandoned)
 
-    case Map.get(state.durable.pending_work, run_id) do
-      %{pending_calls: [call | _rest]} = work ->
-        case effect_disposition(result) do
-          :refused_before_effect -> commit_tool_failure(state, work, call, failure_of(result))
-          :unproven -> commit_tool_unproven(state, work, call, result)
-        end
+    if state.superseded do
+      # The result supplied no retained receipt, so ownership loss leaves this
+      # coordinator with no terminal fact it may commit. The successor recovers
+      # the dispatched operation and reconciles it; turning the local error into
+      # a stale-epoch failure or unknown record would be later run work.
+      continue_after_owner_loss(state)
+    else
+      case Map.get(state.durable.pending_work, run_id) do
+        %{pending_calls: [call | _rest]} = work ->
+          case effect_disposition(result) do
+            :refused_before_effect -> commit_tool_failure(state, work, call, failure_of(result))
+            :unproven -> commit_tool_unproven(state, work, call, result)
+          end
 
-      _other ->
-        {:stop, {:executor_failed, result}, state}
+        _other ->
+          {:stop, {:executor_failed, result}, state}
+      end
     end
   end
 
@@ -2268,18 +2503,28 @@ defmodule Loopex.Runtime.SessionCoordinator do
         send(self(), :advance_work)
         {:noreply, next}
 
-      {:invalid, state, reason} ->
-        case Map.get(state.durable.pending_work, run_id) do
-          %{pending_calls: [call | _rest]} = work ->
-            commit_tool_unproven(
-              state,
-              work,
-              call,
-              {:error, {:invalid_executor_receipt, reason}}
-            )
+      {:superseded, next} ->
+        continue_after_owner_loss(next)
 
-          _other ->
-            {:stop, {:executor_fact_failed, reason}, state}
+      {:invalid, state, reason} ->
+        if state.superseded do
+          # Receipt validation produced no fact. Once the closing fence also
+          # reports owner loss, only the successor may turn that uncertainty
+          # into a reconciliation decision.
+          continue_after_owner_loss(state)
+        else
+          case Map.get(state.durable.pending_work, run_id) do
+            %{pending_calls: [call | _rest]} = work ->
+              commit_tool_unproven(
+                state,
+                work,
+                call,
+                {:error, {:invalid_executor_receipt, reason}}
+              )
+
+            _other ->
+              {:stop, {:executor_fact_failed, reason}, state}
+          end
         end
 
       {:error, state, reason} ->
@@ -2293,18 +2538,35 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Technical depth: both ordinary result handling and cancellation cleanup use
   # this one boundary. Validation and retention happen first; only their success
   # selects the receipt's count and the complete disposition. An invalid or
-  # unretained receipt closes the relay abandoned on the number it actually
-  # emitted, so neither caller can publish a fact the journal refused.
+  # current-owner unretained receipt closes the relay abandoned on the number it
+  # actually emitted, so neither caller can publish a fact the journal refused.
+  # A retained receipt whose later Control projection loses ownership remains a
+  # truthful complete fact and closes directly. A stale-owner Store refusal is
+  # different: no receipt committed under that transaction, so this plane has
+  # no standing to state a disposition; it discards the relay and leaves the
+  # successor to reconcile the already-dispatched effect.
   defp retain_executor_fact(state, run_id, receipt) do
     case put_executor_fact(state, run_id, receipt) do
       {:ok, next} ->
         {:ok, close_tool_stream(next, run_id, {:complete, progress_count(receipt)})}
 
+      {:retained, next} ->
+        {:superseded, close_tool_stream(next, run_id, {:complete, progress_count(receipt)})}
+
       {:invalid, reason} ->
-        {:invalid, close_tool_stream(state, run_id, :abandoned), reason}
+        {:invalid, close_current_tool_stream(state, run_id, :abandoned), reason}
+
+      {:error, reason}
+      when reason in [:stale_owner_epoch, :stale_owner_incarnation_id, :superseded_owner] ->
+        next =
+          state
+          |> discard_tool_stream(run_id)
+          |> Map.put(:superseded, true)
+
+        {:superseded, next}
 
       {:error, reason} ->
-        {:error, close_tool_stream(state, run_id, :abandoned), reason}
+        {:error, close_current_tool_stream(state, run_id, :abandoned), reason}
     end
   end
 
@@ -2315,12 +2577,37 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # more work would be exactly wrong.
   defp put_executor_fact(state, run_id, receipt) do
     case SessionState.propose_executor_fact(state.durable, run_id, receipt) do
-      {:ok, proposal} -> commit_internal(state, proposal)
+      {:ok, proposal} -> retain_terminal_operation_fact(state, proposal)
       {:error, reason} -> {:invalid, reason}
     end
   end
 
   defp commit_internal(state, proposal) do
+    case commit_internal_result(state, proposal) do
+      {:ok, next, :current_owner} -> {:ok, next}
+      {:ok, _next, {:owner_lost, reason}} -> {:error, reason}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Concept: a durable terminal operation fact remains true when runtime-local
+  # ownership moves before the committing owner receives its Store result.
+  #
+  # Technical depth: ordinary internal commits still treat a refused
+  # post-commit projection as an ownership error. A model reply or executor
+  # receipt is different: once the Store retained it, it fixes the originating
+  # stream's disposition and producer count. The caller may therefore emit that
+  # one truthful closure, but the returned state is marked superseded so it can
+  # perform no later run work.
+  defp retain_terminal_operation_fact(state, proposal) do
+    case commit_internal_result(state, proposal) do
+      {:ok, next, :current_owner} -> {:ok, next}
+      {:ok, next, {:owner_lost, _reason}} -> {:retained, %{next | superseded: true}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp commit_internal_result(state, proposal) do
     with {:ok, transaction} <-
            Store.session_commit(
              state.session_id,
@@ -2337,19 +2624,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       case outcome do
         {:committed, tx_id, receipt} when tx_id == proposal.tx_id ->
-          with {:ok, next} <- SessionState.commit_proposal(proposal, receipt),
-               :ok <-
-                 Control.post_commit(
+          with {:ok, durable} <- SessionState.commit_proposal(proposal, receipt) do
+            next = %{state | durable: durable}
+
+            case Control.post_commit(
                    state.control,
                    state.session_id,
                    state.owner,
                    %{
-                     journal_version: next.journal_version,
-                     event_sequence: next.event_sequence
+                     journal_version: durable.journal_version,
+                     event_sequence: durable.event_sequence
                    },
                    receipt
                  ) do
-            {:ok, %{state | durable: next}}
+              :ok -> {:ok, next, :current_owner}
+              {:error, :superseded_owner} -> {:ok, next, {:owner_lost, :superseded_owner}}
+              {:error, reason} -> {:error, reason}
+            end
           end
 
         {:not_committed, reason} ->
@@ -2447,9 +2738,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
          state,
          run_id,
          %{evidence: "receipt", retained_receipt: receipt},
-         _query
+         query
        ),
-       do: SessionState.propose_executor_fact(state, run_id, receipt)
+       do:
+         SessionState.propose_reconciled_executor_fact(
+           state,
+           run_id,
+           receipt,
+           query.reconciliation_query_id
+         )
 
   defp reconciliation_proposal(state, run_id, %{evidence: "outcome_unknown"}, query),
     do: SessionState.propose_outcome_unknown(state, run_id, query.reconciliation_query_id)

@@ -27,6 +27,7 @@ defmodule Loopex.Runtime.Control do
 
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.SessionCoordinator
+  alias Loopex.Runtime.StreamRelay
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
   alias Loopex.Owner
   alias Loopex.Store
@@ -66,6 +67,64 @@ defmodule Loopex.Runtime.Control do
   def current_owner(control, session_id, owner) do
     try do
       GenServer.call(control, {:current_owner, session_id, owner}, :infinity)
+    catch
+      :exit, _reason -> {:error, :runtime_unavailable}
+    end
+  end
+
+  # Concept: an item crosses a transient session plane only while the process
+  # that opened its domain is still the runtime-local current owner.
+  #
+  # Technical depth: checking here and emitting here are one serialized Control
+  # operation. A separate `current_owner/3` call followed by a send leaves a
+  # handoff-sized gap in which a successor can begin acquisition between the
+  # answer and the emission. Control already serializes that handoff, so an item
+  # is either admitted before the session entry moves away from the exact owner
+  # or refused afterwards; it is never checked on one side and emitted on the
+  # other.
+  @doc false
+  @spec project_progress(pid(), binary(), SessionCoordinator.owner(), StreamRelay.t(), term()) ::
+          :ok | {:error, :superseded_owner} | {:error, :runtime_unavailable}
+  def project_progress(control, session_id, owner, relay, item) when is_pid(relay) do
+    try do
+      GenServer.call(
+        control,
+        {:project_progress, session_id, owner, relay, item},
+        :infinity
+      )
+    catch
+      :exit, _reason -> {:error, :runtime_unavailable}
+    end
+  end
+
+  # Concept: an ordinary stream closure is admitted under the same ownership
+  # decision as the items it closes.
+  #
+  # Technical depth: the relay's bounded close runs inside Control's serialized
+  # ownership operation. A succession therefore linearizes either after the
+  # closure or before its refusal. The recognized-supersession model path is the
+  # deliberate exception: its old coordinator has already received the handoff
+  # and closes that model domain directly as abandoned after draining the model
+  # worker.
+  @doc false
+  @spec close_progress(
+          pid(),
+          binary(),
+          SessionCoordinator.owner(),
+          StreamRelay.t(),
+          StreamRelay.disposition()
+        ) ::
+          {:ok, non_neg_integer()}
+          | {:error, :stream_unavailable}
+          | {:error, :superseded_owner}
+          | {:error, :runtime_unavailable}
+  def close_progress(control, session_id, owner, relay, disposition) when is_pid(relay) do
+    try do
+      GenServer.call(
+        control,
+        {:close_progress, session_id, owner, relay, disposition},
+        :infinity
+      )
     catch
       :exit, _reason -> {:error, :runtime_unavailable}
     end
@@ -203,6 +262,30 @@ defmodule Loopex.Runtime.Control do
 
   def handle_call({:current_owner, session_id, owner}, _from, state) do
     {:reply, current_owner_post_commit_fence(state, session_id, owner), state}
+  end
+
+  def handle_call({:project_progress, session_id, owner, relay, item}, _from, state) do
+    case current_owner_post_commit_fence(state, session_id, owner) do
+      :ok ->
+        :ok = StreamRelay.emit(relay, item)
+        {:reply, :ok, state}
+
+      {:error, :superseded_owner} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:close_progress, session_id, owner, relay, disposition}, _from, state) do
+    case current_owner_post_commit_fence(state, session_id, owner) do
+      :ok ->
+        case StreamRelay.close(relay, disposition) do
+          :unavailable -> {:reply, {:error, :stream_unavailable}, state}
+          count -> {:reply, {:ok, count}, state}
+        end
+
+      {:error, :superseded_owner} = error ->
+        {:reply, error, state}
+    end
   end
 
   def handle_call({:post_commit, session_id, owner, positions, receipt}, _from, state) do
