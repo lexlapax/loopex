@@ -679,14 +679,25 @@ require_feature \
   "a session binds one active model visible name to one generation and refuses a name conflict at start" \
   "a model request records the exact tool definition generation it used"
 
+# The Control service is the authority that distinguishes a real owner handoff
+# from runtime unavailability. These supporting cases stop progress, closure,
+# or post-commit admission from converting an unavailable answer into an
+# invented supersession.
+require_feature \
+  "progress closure and post commit cannot distinguish Control unavailability from owner loss" \
+  apps/loopex/test/session_lifecycle_test.exs \
+  "progress reports runtime unavailability without inventing owner supersession" \
+  "progress closure reports runtime unavailability without inventing owner supersession" \
+  "post commit reports runtime unavailability without inventing owner supersession"
+
 require_feature \
   "the operator has no coding tools; read, write, edit, and bash do not exist" \
   apps/loopex_executor_local/test/coding_tools_test.exs \
   "read returns bounded chunked content and reports truncation" \
-  "write creates or replaces a file only beneath the workspace root" \
+  "write creates or replaces a file beneath the workspace root and refuses static escapes" \
   "edit applies an exact match change and names what differed on a mismatch" \
   "bash runs an argv command and an explicit raw shell command with distinct semantics" \
-  "every tool refuses a path that escapes the workspace root through traversal or a symlink" \
+  "every filesystem tool refuses a path that escapes the workspace root through traversal or a symlink" \
   "executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted" \
   "a tool child process group is owned and terminated with its job and no group member survives" \
   "a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound"
@@ -1300,7 +1311,7 @@ run_selector() {
   fi
 }
 
-run_selector 1 apps/loopex/test/agent_loop_test.exs default 17 zero \
+run_selector 1 apps/loopex/test/agent_loop_test.exs default 67 zero \
   "passed=a prompt runs until the model stops requesting tools rather than after a fixed number of turns" \
   "passed=every model request carries the committed conversation history including the original prompt" \
   "passed=an assistant tool call and its real tool result are committed and replayed to the model" \
@@ -1310,16 +1321,66 @@ run_selector 1 apps/loopex/test/agent_loop_test.exs default 17 zero \
   "passed=the maximum turn bound ends the run bound reached before another provider call" \
   "passed=the cumulative token budget ends the run bound reached before another provider call" \
   "passed=the wall clock deadline ends the run bound reached before another provider call" \
-  "passed=a reached deadline whose cleanup cannot be confirmed ends outcome unknown rather than bound reached" \
-  "passed=a retried tool operation keeps its operation identity and reconciles against its own attempt bound request digest" \
-  "passed=a provider retry of a model call redispatches the same staged request bytes and reuses their staged request digest under a new recorded attempt" \
-  "passed=a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" \
   "passed=the committed absolute deadline is propagated into the model call rather than an independent per call timeout" \
-  "passed=a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" \
+  "passed=a prompt fixes its deadline at first request staging and not at admission" \
+  "passed=every sampling bound is a declared committed value with no implicit default" \
+  "passed=a provider retry of a model call redispatches the same staged request bytes and reuses their staged request digest under a new recorded attempt" \
+  "passed=the retry allowance a run has already spent is not handed back by a succession" \
+  "passed=a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" \
+  "passed=a committed request that expired while its owner was down is not redispatched to the provider" \
   "passed=a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated" \
-  "passed=every sampling bound is a declared committed value with no implicit default"
+  "passed=a reached deadline whose cleanup cannot be confirmed ends outcome unknown rather than bound reached" \
+  "passed=an unproven effect ends the run rather than letting the model be asked again" \
+  "passed=an unproven effect outranks the model stopping on its own and the run never finishes completed" \
+  "passed=an unproven effect stops the tool calls still queued behind it in the same batch" \
+  "passed=an unproven effect outranks the maximum turn bound" \
+  "passed=an unproven effect outranks the cumulative token budget" \
+  "passed=a retried tool operation keeps its operation identity and reconciles against its own attempt bound request digest" \
+  "passed=a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" \
+  "passed=a receipt lost after the effect ran ends the run outcome unknown rather than failed" \
+  "passed=a refusal that precedes the effect stays a terminal failed and the loop carries on" \
+  "passed=an executor error the runtime cannot place before the effect is unproven" \
+  "passed=an executor that declares nothing has every error read as unproven" \
+  "passed=an answer that reaches for the pre-start tag and misses its shape declares nothing" \
+  "passed=a pre-start refusal is read from the answer's shape and not from the error's name" \
+  "passed=a complete tool stream closes on its receipt's own progress count" \
+  "passed=a receipt the Store refuses cannot complete its tool stream" \
+  "passed=a reply the Store refuses cannot complete its model stream" \
+  "passed=an abandoned model stream closes on the count this runtime published rather than zero" \
+  "passed=a delta carrying a field its kind does not declare is refused rather than projected" \
+  "passed=the run's terminal reports the cleanup period this session declared" \
+  "passed=no item of a stream domain is emitted after that domain's closure" \
+  "passed=a closed stream domain accepts nothing further and its relay is gone" \
+  "passed=a succession never gives two owners one stream domain" \
+  "passed=a prior ownership verdict cannot suppress notified model cleanup" \
+  "passed=a superseded coordinator is not reaped while cleanup is still pending" \
+  "passed=an abrupt model owner death never gives its successor the same stream domain" \
+  "passed=a model error before its supersession notification cannot close the old domain" \
+  "passed=runtime unavailability while closing a model error does not invent owner supersession" \
+  "passed=handoff cannot move between progress admission and relay emission" \
+  "passed=a stale Store refusal of a model result leaves closure and abandonment to the successor" \
+  "passed=a retained model result closes complete after Control handoff" \
+  "passed=a model result admitted before handoff still closes complete after ownership moves" \
+  "passed=a live executor supersession ends its old stream without claiming the effect abandoned" \
+  "passed=an executor progress ownership refusal ends the stale plane without terminating its worker" \
+  "passed=runtime unavailability during executor progress does not invent owner loss" \
+  "passed=runtime unavailability while closing a refused tool does not invent owner loss" \
+  "passed=a durable owner handoff fences executor progress and closure before its notification arrives" \
+  "passed=a malformed executor receipt cannot close the old domain across an owner handoff" \
+  "passed=a stale non receipt executor answer leaves diagnosis and reconciliation to the successor" \
+  "passed=an executor receipt admitted before handoff still closes complete after ownership moves" \
+  "passed=a retained executor receipt closes complete after Control handoff" \
+  "passed=a stream relay ends with the owner that opened it, ahead of its own backlog" \
+  "passed=two attempts of one tool operation never share a stream domain" \
+  "passed=an executor that declares no cancellation confirms nothing" \
+  "passed=a stream statistic that is not a count is refused rather than published or committed" \
+  "passed=a complete model stream closes on its reply's own delta count" \
+  "passed=a run that no executor answered still reports the period it would have stopped under" \
+  "passed=a model delta emitted after its stream is closed is neither projected nor counted" \
+  "passed=an event emitted after its stream is closed is neither projected nor counted" \
+  "passed=an abandoned tool stream closes on the count this runtime published rather than a claim"
 
-run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs default 12 zero \
+run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs default 15 zero \
   "passed=every model adapter satisfies one streaming conformance suite" \
   "passed=each canonical delta kind is bounded plain data carrying no provider or host term" \
   "passed=a text delta is observable while its operation is still incomplete rather than after the reply returns" \
@@ -1331,27 +1392,62 @@ run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs defaul
   "passed=a retried executor operation attempt opens its own stream domain closed by its own closure item and count" \
   "passed=the committed assistant message is built from the reply and never assembled from deltas" \
   "passed=a cancelled stream commits no assistant message and a late reply never becomes canonical" \
-  "passed=an adapter that emits no deltas is conformant and declares that it does not stream"
+  "passed=an adapter that emits no deltas is conformant and declares that it does not stream" \
+  "passed=a delta missing a field its kind declares is refused rather than projected" \
+  "passed=a delta field whose size the ceiling cannot see is refused rather than projected" \
+  "passed=an abandoned domain is closed and stated rather than guessed from a stream that stopped"
 
-run_selector 3 apps/loopex/test/input_algebra_test.exs default 8 zero \
+run_selector 3 apps/loopex/test/input_algebra_test.exs default 9 zero \
   "passed=a prompt starts a run only while the session is settled and is otherwise refused" \
   "passed=the runtime never infers whether new input is steering or follow up and a steer must name its active run" \
   "passed=a steer joins the active run after the current tool batch and before the next model request" \
   "passed=a steer is recorded applied only when a committed request carried it" \
   "passed=a follow up starts a new run only after the active run and its steering settle" \
+  "passed=a promoted follow up fixes its deadline when its first request stages" \
   "passed=a steer that arrives after its run is terminal commits unapplied with a reason and is never promoted" \
   "passed=at most one unapplied steer and one queued follow up exist and both survive owner succession" \
   "passed=an abort resolves any unapplied steer and queued follow up as cancelled"
 
-run_selector 4 apps/loopex_executor_local/test/coding_tools_test.exs default 8 zero \
+run_selector 4 apps/loopex_executor_local/test/coding_tools_test.exs default 39 zero \
   "passed=read returns bounded chunked content and reports truncation" \
-  "passed=write creates or replaces a file only beneath the workspace root" \
+  "passed=write creates or replaces a file beneath the workspace root and refuses static escapes" \
   "passed=edit applies an exact match change and names what differed on a mismatch" \
   "passed=bash runs an argv command and an explicit raw shell command with distinct semantics" \
-  "passed=every tool refuses a path that escapes the workspace root through traversal or a symlink" \
+  "passed=bash reports a nonzero exit as failed and names the status the command exited with" \
+  "passed=every filesystem tool refuses a path that escapes the workspace root through traversal or a symlink" \
   "passed=executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted" \
+  "passed=a coding tool command receives a constructed provider credential free environment and its receipt records that declared environment" \
   "passed=a tool child process group is owned and terminated with its job and no group member survives" \
-  "passed=a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound"
+  "passed=a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound" \
+  "passed=an already expired job is refused before the local executor opens a port" \
+  "passed=the wall time budget the session declared bounds the job and not merely the run" \
+  "passed=a job whose workspace lease is lost mid flight is ended and reported unproven" \
+  "passed=a filesystem tool is bounded while it runs rather than only before it starts" \
+  "passed=write refuses a name that is not an ordinary file and replaces the one it names atomically" \
+  "passed=edit refuses a name that is not an ordinary file before it opens anything" \
+  "passed=a lease lost while a job's output is being retained abandons the retention and reports it unproven" \
+  "passed=a command that backgrounds work and exits is not completed until its group is quiescent" \
+  "passed=a lease lost while a job's group is brought to quiescence is reported unproven" \
+  "passed=a lease lost while a job's receipt is being retained is reported unproven" \
+  "passed=a process group is confirmed clean only by a ps that answered" \
+  "passed=the first process the launcher starts explicitly excludes the provider credential" \
+  "passed=every executor spawn supplies an environment override that excludes the provider credential" \
+  "passed=the run deadline bounds retaining a spilled artifact and the abandonment is reported" \
+  "passed=a receipt that could not be retained is reported rather than answered as a result" \
+  "passed=work this executor cannot bound is abandoned at its bound and a program that never answers confirms nothing" \
+  "passed=the run deadline bounds the demonstration launcher as well as the coding tools" \
+  "passed=the cleanup budget is one configured period with a declared default and every receipt records it" \
+  "passed=a job requiring process cleanup retains its receipt under a separate quarter period bound" \
+  "passed=the configured cleanup budget bounds the whole termination sequence rather than each step of it" \
+  "passed=cancelling a running job answers only for the cleanup it could confirm" \
+  "passed=cancelling an unknown job id leaves another running job untouched" \
+  "passed=each of the three quiescence answers reaches a distinct outcome and only one is proved" \
+  "passed=an answer this executor gives after an effect ran never wears the pre-start tag" \
+  "passed=a job is bounded by the tool's declared budget when that is sooner than the run's" \
+  "passed=a deadline stop whose cleanup could not be confirmed is unproven rather than cancelled" \
+  "passed=a job is refused when the lease it names is held at another fencing token" \
+  "passed=the two containment mechanisms obligation four names by name are the ones the code uses" \
+  "passed=a cleanup helper that outlives its bound is terminated rather than left running"
 
 run_selector 5 apps/loopex_store_local/test/artifact_store_conformance_test.exs default 6 zero \
   "passed=every artifact store implementation satisfies one conformance suite" \
@@ -1384,15 +1480,31 @@ run_selector 7 apps/loopex/test/project_resource_trust_test.exs default 7 zero \
   "passed=an ordinary workspace read stays a policy governed tool effect and is never context staging" \
   "passed=an admitted project block changes no tool set policy decision bound or grant"
 
-run_selector 8 apps/loopex/test/cancellation_test.exs default 8 zero \
+run_selector 8 apps/loopex/test/cancellation_test.exs default 24 zero \
   "passed=an interrupt reaches the run through the public facade and through no private path" \
   "passed=an abort admitted during a model call cancels the run and schedules no new work" \
   "passed=an abort admitted during a tool call cancels the executor job and confirms cleanup before committing cancelled" \
+  "passed=cleanup commits a valid executor receipt queued behind its own settlement" \
   "passed=a run finishes cancelled only when every owned operation is validated terminal and every owned process tree is confirmed cleaned" \
   "passed=a validated terminal tool fact committed before the abort is preserved and not overwritten" \
   "passed=an effect without sufficient evidence ends outcome unknown and is never blindly retried" \
   "passed=a second interrupt reports what is still being cleaned up rather than abandoning the session" \
-  "passed=the operator observes what was cancelled and what actually happened"
+  "passed=a second interrupt during cleanup starts no second executor cancellation" \
+  "passed=the operator observes what was cancelled and what actually happened" \
+  "passed=an abort reduced while an unprovable receipt settles finishes the run outcome unknown" \
+  "passed=the abort is durable before its cleanup runs and its ending is a second commit" \
+  "passed=the coordinator answers while a host cancellation is still running" \
+  "passed=a host cancellation that never answers is bounded and settles unconfirmed" \
+  "passed=a run being cleaned up is still active and admits nothing new until its ending commits" \
+  "passed=an executor that never answered leaves its call a terminal fact of its own" \
+  "passed=a recovering owner ends the abandoned call before it ends the run" \
+  "passed=an abort after succession cannot report a clean stop for the predecessor's unproved effect" \
+  "passed=a run does not end while the operation it owns has no committed ending" \
+  "passed=a recovering owner does not end a run whose operation it could not settle" \
+  "passed=a recovering owner ends a run with no dispatched effect outcome unknown" \
+  "passed=a cancellation this runtime cannot read is unproven rather than a confirmed clean stop" \
+  "passed=an abort during an in flight tool call treats an executor cancellation error as outcome unknown with a reconciliation reference" \
+  "passed=an abort admitted after an unprovable effect committed never rewrites the run to cancelled"
 
 run_selector 9 apps/loopex/test/session_directory_test.exs default 5 zero \
   "passed=a fresh operating system process lists the sessions in a resolved state root" \
@@ -1401,7 +1513,7 @@ run_selector 9 apps/loopex/test/session_directory_test.exs default 5 zero \
   "passed=resuming a session through a different runtime identity is refused with an explicit reason" \
   "passed=a repeated resume command identity returns its historical result while a fresh identity acquires ownership"
 
-run_selector 10 apps/loopex_cli/test/cli_test.exs default 16 zero \
+run_selector 10 apps/loopex_cli/test/cli_test.exs default 17 zero \
   "passed=loopex run submits a prompt and streams the answer with its tool calls and results" \
   "passed=the operator steers a running task and queues a follow-up from the same terminal" \
   "passed=prompt steer follow up and abort have distinct explicit affordances and input naming neither is refused" \
@@ -1417,13 +1529,15 @@ run_selector 10 apps/loopex_cli/test/cli_test.exs default 16 zero \
   "passed=the command surface drives only the public facade and owns no loop store cursor or authority" \
   "passed=a dropped stream closure leaves the terminal falling back to the durable record without inferring abandonment or starting a timer" \
   "passed=the base system prompt and active tool definitions measure under one thousand tokens" \
-  "passed=argument parsing and terminal output use only the standard library"
+  "passed=argument parsing and terminal output use only the standard library" \
+  "passed=the operator declares how long a stopped run may spend stopping and a bad value is refused"
 
-run_selector 11 apps/loopex_composition/test/kernel_composition_test.exs default 4 zero \
+run_selector 11 apps/loopex_composition/test/kernel_composition_test.exs default 5 zero \
   "passed=one page of shipped code starts the application tree a runtime a session a prompt and its events" \
   "passed=an independent embedder fixture composes the kernel without depending on the command application" \
   "passed=the shipped composition requires a host supplied policy and ships no permissive default" \
-  "passed=the composition resolves its state root explicitly and never through application environment"
+  "passed=the composition resolves its state root explicitly and never through application environment" \
+  "passed=the composition forwards the executor's declared cleanup period and probe"
 
 # The tool registry is the internal mechanism the loop and the tools resolve
 # through. It is locked supporting coverage, not an outcome of its own.
@@ -1433,6 +1547,14 @@ run_selector registry apps/loopex/test/tool_registry_test.exs default 5 zero \
   "passed=a conflicting tool id and version registration is refused with an explicit reason" \
   "passed=a session binds one active model visible name to one generation and refuses a name conflict at start" \
   "passed=a model request records the exact tool definition generation it used"
+
+# Owner-loss admission is cross-cutting stream machinery rather than an
+# operator outcome. These cases protect the distinction between an unavailable
+# Control process and an actual owner-loss verdict.
+run_selector stream-mechanics apps/loopex/test/session_lifecycle_test.exs default 3 zero \
+  "passed=progress reports runtime unavailability without inventing owner supersession" \
+  "passed=progress closure reports runtime unavailability without inventing owner supersession" \
+  "passed=post commit reports runtime unavailability without inventing owner supersession"
 
 # Mandatory closure evidence: the attended real-provider demonstration.
 run_selector demonstration apps/loopex_cli/test/coding_task_test.exs default 5 positive \

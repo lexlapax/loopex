@@ -331,25 +331,33 @@ measured by encoding anything whose size the named clauses do not otherwise
 know. Progress items reach a host as `{:loopex_progress, item}` messages to the
 runtime's `:progress_to` pid; diagnostics arrive as `{:loopex_diagnostic, item}`.
 
-Every domain the coordinator opens is owed exactly one content-free closing item
-— `model_stream_closed` or `tool_stream_closed` — carrying a disposition and a
-count. A `:complete` domain closes with its producer's own figure — an adapter's
-`delta_count`, a receipt's `progress_count` — and an `:abandoned` one with the
-count this coordinator published, which is exact. The two differ whenever an item
-was refused, and that difference is the signal: a consumer comparing the stated
-total against what reached it learns something did not arrive, and the refusal
-record that explains it is durable and private.
+While its coordinator remains authoritative, a domain is owed exactly one
+content-free closing item — `model_stream_closed` or `tool_stream_closed` —
+carrying a disposition and a count. A `:complete` domain closes with its
+producer's retained figure — an adapter's `delta_count`, a receipt's
+`progress_count` — and an `:abandoned` one with the count this coordinator
+published. The two differ whenever an item was refused, and that difference is
+the signal: a consumer comparing the stated total against what reached it learns
+something did not arrive, and the refusal record that explains it is durable and
+private.
 
 `Loopex.Runtime.StreamRelay` is the sole emitter of a domain. It assigns every
 sequence, emits every item, emits the closing item itself as the last thing it
-does, and then ends — so the closure is the last item of its domain in every
-case, and an item handed to a closed domain reaches a process that no longer
-exists. Closure is
-an *emission* obligation, not a delivery guarantee: it rides the transient plane
-like any other item and may be coalesced away, dropped, or lost with the plane
-when its owner changes. A consumer that receives no closure falls back to the
-durable record exactly as it does for a sequence gap, and never reads an absence
-as abandonment, because that inference needs a timeout and a timeout is a guess.
+does, and then ends — so a closure is the last item of a domain that receives
+one, and an item handed to a closed domain reaches a process that no longer
+exists. [ADR 0014](../adr/0014-stream-closure-at-owner-loss.md#concept) names the
+owner-loss boundary: abrupt owner death and recognized executor owner loss
+without a retained terminal fact end the relay without a closure; a successor
+never reuses or closes that domain. A retained reply or receipt can still close
+its originating domain `complete`, and delivered live-model supersession closes
+`abandoned` only after the effect-free worker is terminated and drained.
+
+Closure is an *emission* obligation while its owner can state it truthfully, not
+a delivery guarantee. It rides the transient plane and may be coalesced away,
+dropped, or lost with that plane. A consumer that receives no closure falls back
+to the durable record exactly as it does for a sequence gap, and never reads an
+absence as abandonment, because that inference needs a timeout and a timeout is
+a guess.
 
 Continuity, count agreement, and closure are evaluated strictly within one
 domain; no comparison between two domains is defined.

@@ -266,9 +266,13 @@ they are what a reconnecting reader replays. Progress deltas are transient
 decoration that make the answer appear as it is produced.
 
 Every delta and both closure items carry an opaque `stream_domain_id` naming the
-one attempt that produced them. Closure is an emission obligation and **not** a
-delivery guarantee: a closure item rides the transient plane and may be coalesced
-away, dropped under backpressure, or lost with the plane when its owner changes.
+one attempt that produced them. While the process-local owner remains able to
+state the result truthfully, closure is an emission obligation and **not** a
+delivery guarantee: a closure item rides the transient plane and may be
+coalesced away or dropped under backpressure. Abrupt owner death, or recognized
+executor owner loss before a durable terminal fact exists, may instead end that
+plane without emitting a closure. A successor neither reuses nor closes the old
+domain; it recovers the operation from the durable record.
 
 A terminal that receives no closure therefore falls back to the durable record
 exactly as it does for a sequence gap. It never reads an absence as abandonment

@@ -42,8 +42,11 @@ the exact document set its milestone must update.
   executor progress are separate gapless sequences within one stream domain,
   each closed by its own content-free item carrying its total, so a coalesced,
   dropped, or truncated tail is detectable rather than silent — and a missing
-  closure sends a consumer to the durable record instead of a timer. An adapter
-  that does not stream is equally conformant and says so.
+  closure sends a consumer to the durable record instead of a timer. A closure
+  is emitted only while its process-local owner can state it truthfully: abrupt
+  owner death and executor owner loss without a retained terminal fact end that
+  plane without inventing abandonment, and recovery uses the durable operation
+  record. An adapter that does not stream is equally conformant and says so.
 - Four coding tools against a real workspace: `read`, `write`, `edit`, and
   `bash`, sharing one conformance suite for bounded output, workspace-root
   resolution, symlink and traversal containment, exact edit preconditions, and
@@ -550,13 +553,14 @@ the exact document set its milestone must update.
   order and is a real consequence for callers: a prompt submitted between the
   two is queued as a follow-up on the still-active run rather than starting a
   new one. A caller that needs the run over waits for its `run.finished`.
-- Every item of a stream domain, including its closing item, is emitted by one
-  process that ends when it closes. ADR 0011 requires the closure to be the last
-  item of its domain in every case, and a producer and a closer in two processes
-  order nothing between them: a producer preempted between taking a sequence and
-  emitting it could put a delta on the plane after its own closure. A delta
-  handed to a closed domain now reaches a process that no longer exists, which is
-  what the same ADR says happens to a delta offered after closure.
+- Every item of a stream domain that receives a closing item is emitted by one
+  process that ends when it closes. ADR 0011 requires a closure to be the last
+  item of its domain, and a producer and a closer in two processes order nothing
+  between them: a producer preempted between taking a sequence and emitting it
+  could put a delta on the plane after its own closure. A delta handed to a
+  closed domain now reaches a process that no longer exists. ADR 0014 separately
+  governs owner loss, where the transient plane may end without a closure rather
+  than letting another owner fabricate one.
 - A closure states what ADR 0011 assigns it: a complete domain states its
   producer's own `delta_count` or `progress_count`, and an abandoned one states
   the count this runtime published. An earlier revision of this milestone

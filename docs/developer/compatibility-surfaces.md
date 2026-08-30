@@ -140,7 +140,13 @@ now emitted by one process per open domain rather than by the producer's callbac
 and the coordinator between them. Nothing about the items changes — same shapes,
 same labels, same sequences — but a consumer can now rely on the rule ADR 0011
 already stated and this runtime only approximated: no item of a domain appears
-after that domain's closure.
+after that domain's closure. ADR 0014 narrows the producer-liveness promise, not
+the consumer input algebra: abrupt owner death and recognized executor owner
+loss without a retained terminal fact may end the process-local plane without a
+closure, while a retained terminal fact may still close its originating domain
+truthfully after handoff. Consumers already had to tolerate a missing closure
+because delivery is transient; they keep the same durable fallback and infer no
+abandonment.
 
 **Canonical model deltas.** `Loopex.Model.valid_delta?/1` now requires a delta to
 carry *exactly* the fields `Loopex.Model.delta_fields/1` declares for its kind.
