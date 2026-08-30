@@ -83,6 +83,22 @@ carry. That is the work a milestone revisiting this would take on, and the cost
 is the distinction obligation 4 draws between tools that execute a command and
 tools that do not.
 
+**Retained manual probes.** The write and edit component-swap cases remain in
+`apps/loopex_executor_local/test/coding_tools_test.exs`, tagged
+`retained_manual_probe`. Run them only as a diagnostic, in an otherwise idle
+checkout:
+
+```sh
+MIX_ENV=test mix test apps/loopex_executor_local/test/coding_tools_test.exs \
+  --only retained_manual_probe --seed 0 --trace
+```
+
+They are defined only for that explicit include and are absent from the ordinary
+suite and M2's deterministic Outcome 4 selector. Winning or missing a scheduler
+race is not closure evidence: the locked deterministic containment cases and
+their mutation records carry that burden, while these two probes preserve the
+known reproduction shapes for investigation.
+
 <a id="cleanup-grace-not-session-visible"></a>
 ## Withdrawn: the cleanup period is session configuration after all
 
