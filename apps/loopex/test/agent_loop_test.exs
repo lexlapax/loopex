@@ -1034,15 +1034,34 @@ defmodule Loopex.AgentLoopTest do
     # a run left waiting on a stalled provider is a run whose declared deadline
     # did nothing.
     parent = self()
+    deadline_ms = 500
     script = [%{text: "stalling", calls: [call("c1")], hold: parent}]
 
     script =
       script ++ for index <- 2..20, do: %{text: "turn #{index}", calls: [call("c#{index}")]}
 
-    fixture = start(script: script, bounds_deadline_ms: 200)
-    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    fixture = start(script: script, bounds_deadline_ms: deadline_ms)
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
 
     assert_receive {:holding, _model}, 2_000
+
+    coordinator_state = fixture.runtime |> coordinator_of() |> :sys.get_state()
+    run_id = coordinator_state.durable.active_run_id
+
+    {declared, _charged} =
+      Loopex.Runtime.SessionState.accounting(coordinator_state.durable, run_id)
+
+    timer = Map.fetch!(coordinator_state.deadline_timers, run_id)
+    timer_remaining = Process.read_timer(timer)
+    committed_remaining = max(declared.deadline - System.system_time(:millisecond), 0)
+
+    assert is_integer(timer_remaining),
+           "the supervised model call had no live timer for its committed deadline"
+
+    assert timer_remaining <= committed_remaining + 100,
+           "the supervised model timer can outlast the run's committed deadline"
+
+    assert coordinator_state.session_id == session_id
     events = drain(attachment)
 
     finished = Enum.find(events, &(&1.kind == "run.finished"))
@@ -3225,7 +3244,8 @@ defmodule Loopex.AgentLoopTest do
             text: "",
             calls: [],
             error: :provider_unavailable,
-            deltas: ["before unavailable close"]
+            deltas: ["before unavailable close"],
+            hold: self()
           },
           %{text: "done", calls: [], deltas: ["after retry"]}
         ],
@@ -3257,6 +3277,14 @@ defmodule Loopex.AgentLoopTest do
                command_id: "prompt-runtime-unavailable-close",
                content: "go"
              })
+
+    assert_receive {:holding, model}, 5_000
+
+    assert_receive {:loopex_progress, %{kind: :text_delta} = first_delta},
+                   5_000,
+                   "the first attempt did not publish its delta before the close boundary"
+
+    send(model, :release)
 
     assert_receive {:control_boundary_injected, ^control_proxy, :close_progress,
                     {:error, :runtime_unavailable}},
@@ -3291,7 +3319,7 @@ defmodule Loopex.AgentLoopTest do
     assert Enum.count(progress, &(&1.kind == :model_stream_closed)) == 1,
            "the unavailable first close fabricated a closure or the successful retry did not close"
 
-    [first_delta, retry_delta] = Enum.filter(progress, &(&1.kind == :text_delta))
+    assert [retry_delta] = Enum.filter(progress, &(&1.kind == :text_delta))
 
     refute first_delta.stream_domain_id == retry_delta.stream_domain_id,
            "the retry reused the unavailable attempt's stream domain"

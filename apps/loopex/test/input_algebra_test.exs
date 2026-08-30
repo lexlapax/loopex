@@ -324,7 +324,15 @@ defmodule Loopex.InputAlgebraTest do
     public_events = Fixture.events(fixture, session_id)
     assert {:ok, rebuilt} = SessionState.recover(session_id, records, public_events)
     promoted_run_id = rebuilt.active_run_id
+    admitted = Enum.find(records, &(&1.payload[:kind] == "command_admitted"))
+    first_run_id = admitted.payload["run_id"]
+    {first_bounds, _charged} = SessionState.accounting(rebuilt, first_run_id)
     {promoted_bounds, _charged} = SessionState.accounting(rebuilt, promoted_run_id)
+
+    assert Map.take(promoted_bounds, [:max_turns, :token_budget, :deadline_ms]) ==
+             Map.take(first_bounds, [:max_turns, :token_budget, :deadline_ms]),
+           "promotion did not inherit all three declared bounds together"
+
     assert promoted_bounds.deadline_ms == duration_ms
 
     assert promoted_bounds.deadline == nil,
