@@ -11,17 +11,21 @@ defmodule Loopex.StreamDomain do
   new domain, so several domains under one turn are the ordinary shape of a
   retried turn rather than a defect.
 
-  Each domain the coordinator opens is owed exactly one content-free closing
-  item, an abandoned domain included. Closure is an emission obligation and not
-  a delivery guarantee: it rides the transient plane like any other progress
-  item and may be coalesced away, dropped under backpressure, or lost with the
-  plane when its owner changes. A consumer that receives no closure has an
-  incomplete transient view and falls back to the durable record exactly as it
-  does for a sequence gap. It must never read an absence as abandonment, because
-  that inference needs a timeout, and a timeout is a guess.
+  While its process-local owner can state the disposition truthfully, a domain
+  is owed exactly one content-free closing item, an abandoned domain included.
+  Abrupt owner death and recognized executor owner loss without a retained
+  terminal fact instead end the transient plane without inventing a closure; a
+  successor never reuses or closes that domain. Closure is an emission
+  obligation and not a delivery guarantee: it rides the transient plane like
+  any other progress item and may be coalesced away or dropped under
+  backpressure. A consumer that receives no closure has an incomplete transient
+  view and falls back to the durable record exactly as it does for a sequence
+  gap. It must never read an absence as abandonment, because that inference
+  needs a timeout, and a timeout is a guess.
 
-  Fixed by
-  [ADR 0011](../../../../docs/adr/0011-session-input-algebra-and-streaming.md#concept).
+  Fixed by [ADR 0011](../../../../docs/adr/0011-session-input-algebra-and-streaming.md#concept)
+  as narrowed at owner loss by
+  [ADR 0014](../../../../docs/adr/0014-stream-closure-at-owner-loss.md#concept).
 
   ## Technical depth
 

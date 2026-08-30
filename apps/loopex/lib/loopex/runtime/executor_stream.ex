@@ -4,15 +4,18 @@ defmodule Loopex.Runtime.ExecutorStream do
 
   The progress stream for one executor job attempt. It derives the attempt's
   domain from the job the coordinator dispatched, validates every event against
-  that job, assigns the per-domain sequence, and emits the domain's closure.
+  that job, assigns the per-domain sequence, and either emits a truthful closure
+  or ends the transient plane without one when owner loss leaves the effect
+  unproved.
 
   ## Technical depth
 
   This is the coordinator's one executor-stream implementation rather than a
   test seam beside it. A job is the complete authority for the stream identity:
   neither an executor event nor a caller supplies a domain or an attempt again.
-  The relay remains the sole emitter, including the closing item, so sequences
-  are gapless within the domain and nothing can appear after its closure.
+  The relay remains the sole emitter, including any closing item, so sequences
+  are gapless within the domain and nothing can appear after its closure or
+  after an owner-loss discard.
 
   Events that fail one identity binding or the bounded payload projection are
   dropped and counted. The count is private attempt evidence; it never consumes

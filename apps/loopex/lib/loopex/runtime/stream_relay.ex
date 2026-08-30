@@ -7,12 +7,14 @@ defmodule Loopex.Runtime.StreamRelay do
 
   ## Technical depth
 
-  ADR 0011 gives every stream domain one gapless zero-based sequence closed by
-  exactly one total, and says the closure is the last item of its domain in
-  every case. Two parties would otherwise be emitting into one domain: a
-  producer running an adapter's or an executor's callback, and the coordinator
-  closing the domain. Nothing either of them does alone makes "last" true,
-  because they are different processes and neither orders the other.
+  ADR 0011 gives every stream domain one gapless zero-based sequence and makes
+  any closure the last item of its domain. ADR 0014 narrows the universal
+  producer-liveness promise: abrupt owner death and recognized executor owner
+  loss without a retained terminal fact end the transient plane without a
+  closure. Two parties would otherwise be emitting into one domain: a producer
+  running an adapter's or an executor's callback, and the coordinator closing
+  the domain. Nothing either of them does alone makes "last" true, because they
+  are different processes and neither orders the other.
 
   So neither of them emits. A relay does, and it is the only emitter of its
   domain: producers hand it items, the closer asks it to close, and it assigns
