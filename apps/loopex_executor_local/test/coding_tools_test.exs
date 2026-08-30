@@ -1330,6 +1330,25 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert System.monotonic_time(:millisecond) - plain_started < 1_000
   end
 
+  test "read refuses a device special file rather than treating it as ordinary" do
+    # Concept: device nodes are not files the model may read through the
+    # workspace tool, even when the host deliberately mounts one beneath the
+    # configured workspace root.
+    #
+    # Technical depth: the named-pipe case above protects `:other`, but a
+    # mutation admitting `File.Stat.type == :device` still left the locked lane
+    # green and let `loopex.read` complete against `/dev/null`. Drive that exact
+    # host-visible shape so every non-regular branch of `ordinary_file/3` cannot
+    # be weakened to a type allowlist without detection.
+    assert File.lstat!("/dev/null").type == :device
+
+    assert {:ok, %{outcome: :failed, output: output}} =
+             run("/dev", "loopex.read", %{"path" => "null"})
+
+    assert output =~ "refused:"
+    assert output =~ "is a device, not a regular file"
+  end
+
   test "write refuses a name that is not an ordinary file and replaces the one it names atomically" do
     # Concept: the guard the filesystem case exercised was `read`'s alone.
     #
