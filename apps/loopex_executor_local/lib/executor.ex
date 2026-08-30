@@ -1396,11 +1396,12 @@ defmodule Loopex.Executor.Local do
   # happened to be on top of it. A leader that forks and exits would otherwise
   # leave its children running with nobody's name on them.
   #
-  # The group comes from the spawn rather than from `setsid`, which is not
-  # installed on every supported platform. Attributing it to `setsid` would make
-  # the guarantee conditional on a program Darwin does not ship -- and the
-  # negated-group kill below is only safe *because* the group is unconditionally
-  # the child's own and never this runtime's.
+  # No later launcher may fork or replace the group identity established by the
+  # spawn. The Port, the command, and descendants that remain in the inherited
+  # group therefore keep one stable ownership identity from admission through
+  # receipt. A descendant can deliberately leave that group; ADR 0009 records
+  # that limit. The negated-group kill below is safe *because* the captured group
+  # is unconditionally the child's own and never this runtime's.
   #
   # The group id is captured by the child itself and printed on its first line,
   # because the BEAM gives a port's os_pid but not the group the child chose. A
@@ -1921,7 +1922,7 @@ defmodule Loopex.Executor.Local do
   # untouched, so a `$` or a space in an argument is data. For a raw command a
   # shell is asked for explicitly, which is the whole point of that form.
   # Concept: the first image explicitly excludes the provider credential, and
-  # the downstream process-group setup runs with only the constructed PATH.
+  # the downstream command runs with only the constructed PATH.
   #
   # Technical depth: the launcher used to be `setsid`, resolved from the ambient
   # `PATH`, with `env -i` further along the argument vector. That ordering hands
@@ -1933,15 +1934,15 @@ defmodule Loopex.Executor.Local do
   #
   # `/usr/bin/env` is an absolute path, so it cannot be substituted, and it is
   # the first thing executed. It clears the environment, sets the one `PATH` this
-  # executor chose, and only then resolves `setsid` -- from that `PATH`, not the
-  # operator's. The group setup now runs inside the boundary it used to precede.
+  # executor chose, and only then resolves the shell or argv command from that
+  # PATH rather than the operator's.
   #
   # Concept: the launcher's own arguments are the whole of the boundary, and no
   # process inside the tree can look back at them.
   #
   # Technical depth: every image in this chain replaces the last with `execve`,
-  # so the launcher, the group setup and the shell are one operating-system
-  # process and the argument vector the first image was handed no longer exists
+  # so the launcher and the shell are one operating-system process and the
+  # argument vector the first image was handed no longer exists
   # by the time anything a case can talk to does. The vector is therefore exposed
   # for direct inspection, for the reason `group_answered_empty?/1` is: the rule
   # that decides what runs before the environment is cleared must not rest on a
@@ -1958,13 +1959,11 @@ defmodule Loopex.Executor.Local do
   defp process_launcher(%{argv: [program | rest]}, environment) do
     {"/usr/bin/env",
      env_prefix(environment) ++
-       group_launcher() ++
        ["sh", "-c", group_preamble() <> "exec \"$0\" \"$@\"", program] ++ rest}
   end
 
   defp process_launcher(%{command: command}, environment) do
-    {"/usr/bin/env",
-     env_prefix(environment) ++ group_launcher() ++ ["sh", "-c", group_preamble() <> command]}
+    {"/usr/bin/env", env_prefix(environment) ++ ["sh", "-c", group_preamble() <> command]}
   end
 
   # Concept: `env -i` builds the environment of the command, which is not the
@@ -2006,27 +2005,6 @@ defmodule Loopex.Executor.Local do
   # so termination confirms a group the operating system assigned rather than one
   # this executor assumed.
   defp group_preamble, do: "printf 'loopex-pgid:%s\\n' \"$(ps -o pgid= -p $$ | tr -d ' ')\" >&2; "
-
-  # Concept: where a session launcher exists it is looked for where this
-  # executor says, not where the operator's shell says.
-  #
-  # Technical depth: `setsid` adds a new session on top of the process group the
-  # spawn already establishes, detaching the child from the controlling
-  # terminal. It is an addition, not the source of the group: where none is
-  # found -- Darwin ships none -- the child still leads its own group and the
-  # cleanup confirmation covers it exactly as it does elsewhere.
-  #
-  # Presence is decided against the same fixed directories the child receives,
-  # so the answer cannot be changed by a workspace that puts a `setsid` earlier
-  # on the ambient `PATH`.
-  defp group_launcher do
-    case Enum.find(@search_path_value |> String.split(":"), fn dir ->
-           File.exists?(Path.join(dir, "setsid"))
-         end) do
-      nil -> []
-      _found -> ["setsid"]
-    end
-  end
 
   defp collect_output(port, os_pid, deadline, acc, options, job, lease) do
     {monitor, lease_pid} = lease
@@ -2074,12 +2052,17 @@ defmodule Loopex.Executor.Local do
   # Technical depth: a negative pid names the process group. TERM first so a
   # child can finish a write, then KILL, because a command interrupted mid-write
   # leaves a half-written file the operator has to notice for themselves.
+  # `--` is the portable end-of-options boundary for that negative operand.
+  # Darwin's `/bin/kill` accepts the operand without it; the `/bin/kill` in the
+  # locked Linux lane instead treats the number as an option and returns success
+  # without signalling the group, which makes every later cleanup confirmation
+  # truthfully fail.
   defp terminate_group(group, {until, _grace, _probe} = episode)
        when is_integer(group) and group > 1 do
-    _ = answer_within("/bin/kill", ["-TERM", "-#{group}"], cleanup_remaining(until))
+    _ = answer_within("/bin/kill", ["-TERM", "--", "-#{group}"], cleanup_remaining(until))
 
     unless exited_cooperatively?(group, cooperative_episode(episode)) do
-      _ = answer_within("/bin/kill", ["-KILL", "-#{group}"], cleanup_remaining(until))
+      _ = answer_within("/bin/kill", ["-KILL", "--", "-#{group}"], cleanup_remaining(until))
     end
 
     :ok

@@ -556,6 +556,11 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # nothing arrived as `:completed` with empty output, which a model reads as
     # a silent success and acts on. The status was discarded at the port and the
     # receipt carries no field that could recover it.
+    #
+    # An intermediate session launcher reproduced the same false success on
+    # Linux by forking away from a Port child that already led its own group.
+    # The executor therefore keeps the Port-established group as the only
+    # ownership identity and observes this command's seven directly.
     assert {:ok, %{outcome: :failed, output: silent}} =
              run(root, "loopex.bash", %{"command" => "exit 7"})
 
@@ -836,36 +841,18 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert receipt.child_environment_names == ["PATH"]
     refute receipt.provider_credential_present
 
-    # Concept: a workspace that plants a `setsid` cannot receive the operator's
-    # environment.
+    # Concept: no intermediate session launcher can receive the operator's
+    # environment or replace the process group the Port owns.
     #
-    # Technical depth: the launcher used to be `setsid` resolved from the ambient
-    # `PATH`, with `env -i` further along the argument vector -- so whatever
-    # `setsid` resolved to ran with the credential still in its environment,
-    # before anything was cleared, while the receipt reported the credential
-    # absent from the environment the downstream child would get. The planted
-    # program here writes whatever it can see; a run that reaches it at all
-    # leaves evidence behind.
-    planted = Path.join(root, "planted-bin")
-    File.mkdir_p!(planted)
-    stolen = Path.join(root, "stolen.txt")
-
-    File.write!(Path.join(planted, "setsid"), """
-    #!/bin/sh
-    printf '%s' "$LOOPEX_PROVIDER_API_KEY" > #{stolen}
-    exec "$@"
-    """)
-
-    File.chmod!(Path.join(planted, "setsid"), 0o755)
-    original_path = System.get_env("PATH")
-    System.put_env("PATH", planted <> ":" <> original_path)
-    on_exit(fn -> System.put_env("PATH", original_path) end)
-
-    assert {:ok, planted_run} = run(root, "loopex.bash", %{"command" => "printf ran"})
-    assert planted_run.outcome == :completed
-    refute File.exists?(stolen), "a planted setsid on PATH received the operator's environment"
-
-    System.put_env("PATH", original_path)
+    # Technical depth: `setsid` used to appear after `env -i`. That closed the
+    # credential leak but still forked away from the Port-established group on
+    # Linux, losing the command's exit status and cleanup identity. Inspect both
+    # launch forms directly so reintroducing that topology cannot make this
+    # credential case vacuous merely because ambient PATH substitution is gone.
+    for arguments <- [%{command: "printf ran"}, %{argv: ["printf", "ran"]}] do
+      assert {"/usr/bin/env", vector} = Local.launcher_vector(arguments)
+      refute "setsid" in vector
+    end
 
     # A tool that starts no child holds no environment, and says so rather than
     # reporting one it never had.
@@ -976,7 +963,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     refute File.exists?(marker), "a descendant survived its job's process group"
   end
 
-  test "the child leads its own process group whether or not a session launcher was found" do
+  test "the child leads its own process group without a session launcher" do
     # Concept: the guarantee is that the group is the executor's own, and it does
     # not depend on a program that may not be installed.
     #
@@ -984,10 +971,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # the group to `setsid`, and said that where none is found the child leads no
     # new group. Neither is true: the port spawn puts the child in a group of its
     # own before the command runs, so the group the child announces is never this
-    # runtime's. `setsid` where present adds a new *session* -- detaching the
-    # controlling terminal -- on top of a group the spawn already established.
-    # Darwin ships no `setsid` at all, so on that platform the stated limitation
-    # described the only configuration the tool ever ran in.
+    # runtime's. Adding a session launcher after that spawn can fork away from the
+    # stable group identity and make exit status and cleanup observe different
+    # processes, so the executor deliberately has no such intermediate layer.
     #
     # This matters beyond documentation: had the group actually been this
     # runtime's, terminating it by negated group id would signal the runtime
