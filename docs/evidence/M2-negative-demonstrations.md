@@ -26,49 +26,49 @@ carries its own mutation record rather than resting on source inspection.
 ## Outcome 1: committed history projection
 
 ```json
-{"mechanism_disabled":"committed_history_projection","selector":"apps/loopex/test/agent_loop_test.exs","observed_failure":"the projection kept only the first committed element, so later requests carried neither the assistant tool call nor its real result; 24 of 73 diagnostic cases failed, including eight amended locked cases, as runs stalled after tool.finished without run.finished or suppressed their next turn","candidate":"523b5866306ca856e001d8baf77480196736feb7","artifact":"apps/loopex/lib/loopex/conversation.ex","restored_sha256":"sha256:1b24ee744f7944e91aa489fcdb49027d588d195bc037a55315fe5091beddc5c0"}
+{"mechanism_disabled":"committed_history_projection","selector":"apps/loopex/test/agent_loop_test.exs","observed_failure":"project_elements/1 kept only the first committed element, so requests after the first lost the committed assistant/tool-result history; the bound selector refused (SELECTOR_EXIT=1), and the diagnostic run reported 49/73 passed, 24 failed, with affected runs commonly stopping after tool.finished and no run.finished within 5000ms","candidate":"2c6b3a1367d699f71bf127abfc2668033c60392d","artifact":"apps/loopex/lib/loopex/conversation.ex","restored_sha256":"sha256:1b24ee744f7944e91aa489fcdb49027d588d195bc037a55315fe5091beddc5c0"}
 ```
 
 ## Outcome 2: stream delta reconstruction
 
 ```json
-{"mechanism_disabled":"stream_delta_reconstruction","selector":"apps/loopex_llm_reqllm/test/streaming_conformance_test.exs","observed_failure":"every attempt returned one frozen stream domain id, so model and executor domains shared the same label, four sampled identities collapsed to one, and provider retries executor retries and a cancelled stream reused an earlier domain; 5 of 22 diagnostic cases failed","candidate":"523b5866306ca856e001d8baf77480196736feb7","artifact":"apps/loopex/lib/loopex/stream_domain.ex","restored_sha256":"sha256:bfbd13b3659a9a2b5c5fcc2ccbed95c08038f16e1abe0bda55a505df719ebef4"}
+{"mechanism_disabled":"stream_delta_reconstruction","selector":"apps/loopex_llm_reqllm/test/streaming_conformance_test.exs","observed_failure":"derive/4 returned the same frozen stream domain c0f3e65d684f89214bb1cf701488545c for every identity, so model/executor domains and retry attempts collided; the bound selector refused (SELECTOR_EXIT=1), and the diagnostic run reported 17/22 passed, 5 failed","candidate":"2c6b3a1367d699f71bf127abfc2668033c60392d","artifact":"apps/loopex/lib/loopex/stream_domain.ex","restored_sha256":"sha256:bfbd13b3659a9a2b5c5fcc2ccbed95c08038f16e1abe0bda55a505df719ebef4"}
 ```
 
 ## Tool registry: tool definition generation binding
 
 ```json
-{"mechanism_disabled":"tool_definition_generation_binding","selector":"apps/loopex/test/tool_registry_test.exs","observed_failure":"every definition returned the frozen generation loopex.frozen 0.0.0 with an all-zero digest, so resolved definitions no longer carried their real identity and changed bytes retained the same generation; 3 of 5 diagnostic cases failed","candidate":"523b5866306ca856e001d8baf77480196736feb7","artifact":"apps/loopex_protocol/lib/loopex_protocol/tool_definition.ex","restored_sha256":"sha256:08a9c7b347c4b5f4774e1bc20b7db08eaeb7b29ec7f242a09882ded07696e2e5"}
+{"mechanism_disabled":"tool_definition_generation_binding","selector":"apps/loopex/test/tool_registry_test.exs","observed_failure":"generation/1 returned loopex.frozen 0.0.0 and one constant digest for every definition, so resolved and staged definitions lost their real identity and changed bytes retained a generation; the bound selector refused (SELECTOR_EXIT=1), and the diagnostic run reported 2/5 passed, 3 failed","candidate":"2c6b3a1367d699f71bf127abfc2668033c60392d","artifact":"apps/loopex_protocol/lib/loopex_protocol/tool_definition.ex","restored_sha256":"sha256:08a9c7b347c4b5f4774e1bc20b7db08eaeb7b29ec7f242a09882ded07696e2e5"}
 ```
 
 ## Outcome 4: workspace path scope containment
 
 ```json
-{"mechanism_disabled":"workspace_path_scope_containment","selector":"apps/loopex_executor_local/test/coding_tools_test.exs","observed_failure":"containment always returned true, so a traversal read completed and returned the outside file bytes instead of refusing the path; 1 of 43 diagnostic cases failed, the amended locked filesystem-containment case","candidate":"523b5866306ca856e001d8baf77480196736feb7","artifact":"apps/loopex_executor_local/lib/coding_tools.ex","restored_sha256":"sha256:d347179f2f9a706cc1e5e4612912080663fd05a1b27492dd56c86e266810c7bf"}
+{"mechanism_disabled":"workspace_path_scope_containment","selector":"apps/loopex_executor_local/test/coding_tools_test.exs","observed_failure":"containment always returned true, so a loopex.read of a traversal path completed instead of refusing and returned the outside file bytes \"not yours\"; the gate-bound selector refused, and the diagnostic run failed exactly 1 of 42 cases: every filesystem tool refuses a path that escapes the workspace root through traversal or a symlink","candidate":"2c6b3a1367d699f71bf127abfc2668033c60392d","artifact":"apps/loopex_executor_local/lib/coding_tools.ex","restored_sha256":"sha256:d347179f2f9a706cc1e5e4612912080663fd05a1b27492dd56c86e266810c7bf"}
 ```
 
 ## Outcome 6: host policy deny pre-start refusal
 
 ```json
-{"mechanism_disabled":"host_policy_deny_prestart_refusal","selector":"apps/loopex_executor_local/test/host_policy_test.exs","observed_failure":"the policy port admitted a host callback that raised instead of failing closed: the locked case a policy that raises times out or returns a malformed value fails closed into denial received {:allow, nil} rather than {:deny, :policy_unavailable}","candidate":"523b5866306ca856e001d8baf77480196736feb7","artifact":"apps/loopex/lib/loopex/policy.ex","restored_sha256":"sha256:e2c850a06d89151e62fd7f53bf6da9e812926730904ab730bea75ecca98bcfe0"}
+{"mechanism_disabled":"host_policy_deny_prestart_refusal","selector":"apps/loopex_executor_local/test/host_policy_test.exs","observed_failure":"the policy boundary converted timeout or crash rescue and catch paths to {:allow, nil}; a raising policy therefore returned {:allow, nil} instead of {:deny, :policy_unavailable}; the gate-bound selector refused, and the diagnostic run failed exactly 1 of 9 cases: a policy that raises times out or returns a malformed value fails closed into denial","candidate":"2c6b3a1367d699f71bf127abfc2668033c60392d","artifact":"apps/loopex/lib/loopex/policy.ex","restored_sha256":"sha256:e2c850a06d89151e62fd7f53bf6da9e812926730904ab730bea75ecca98bcfe0"}
 ```
 
 ## Outcome 7: project resource trust admission
 
 ```json
-{"mechanism_disabled":"project_resource_trust_admission","selector":"apps/loopex/test/project_resource_trust_test.exs","observed_failure":"the trust stage admitted both an absent decision and a decision bound to changed content: the locked headless case staged the AGENTS.md project block instead of none, and the locked binding-change case returned :staged for changed content instead of {:declined, :binding_changed, ...}","candidate":"523b5866306ca856e001d8baf77480196736feb7","artifact":"apps/loopex/lib/loopex/project_resource.ex","restored_sha256":"sha256:d93e2fdd6cf10467e3d36ebdff62aed988d1493d9300ada3dffee1b2a302c0b9"}
+{"mechanism_disabled":"project_resource_trust_admission","selector":"apps/loopex/test/project_resource_trust_test.exs","observed_failure":"resolution admitted the manifest for any map and substituted an empty map when no decision existed, so changed content returned :staged instead of :binding_changed and a headless run without a positive decision staged its project block instead of withholding it; the gate-bound selector refused, and the diagnostic run failed exactly 2 of 9 cases: a changed workspace revision manifest or content invalidates the decision, and a headless run without a matching positive decision stages no project block journals a declined receipt and still runs","candidate":"2c6b3a1367d699f71bf127abfc2668033c60392d","artifact":"apps/loopex/lib/loopex/project_resource.ex","restored_sha256":"sha256:d93e2fdd6cf10467e3d36ebdff62aed988d1493d9300ada3dffee1b2a302c0b9"}
 ```
 
 ## Outcome 8: cancellation cleanup confirmation
 
 ```json
-{"mechanism_disabled":"cancellation_cleanup_confirmation","selector":"apps/loopex/test/cancellation_test.exs","observed_failure":"forcing every aborting run terminal to cancelled overwrote ten unproven-effect outcomes: recovery without a dispatched effect, unconfirmed process-tree cleanup, executor cancellation error, unreadable cancellation, nonreturning host cancellation, an executor that never answered, an unprovable receipt settling during abort, recovery after an abandoned call, succession with a predecessor unproved effect, and the basic insufficient-evidence path all reported cancelled instead of outcome_unknown","candidate":"523b5866306ca856e001d8baf77480196736feb7","artifact":"apps/loopex/lib/loopex/runtime/session_state.ex","restored_sha256":"sha256:cc8120f907afd78bb3eb15f43376cf11d26e54c06cf90f1d2260b2b3561e80ef"}
+{"mechanism_disabled":"cancellation_cleanup_confirmation","selector":"apps/loopex/test/cancellation_test.exs","observed_failure":"forcing every aborting run terminal to cancelled overwrote ten unproven-effect outcomes: recovery without a dispatched effect, unconfirmed process-tree cleanup, executor cancellation error, unreadable cancellation, nonreturning host cancellation, an executor that never answered, an unprovable receipt settling during abort, recovery after an abandoned call, succession with a predecessor unproved effect, and the basic insufficient-evidence path all reported cancelled instead of outcome_unknown","candidate":"2c6b3a1367d699f71bf127abfc2668033c60392d","artifact":"apps/loopex/lib/loopex/runtime/session_state.ex","restored_sha256":"sha256:cc8120f907afd78bb3eb15f43376cf11d26e54c06cf90f1d2260b2b3561e80ef"}
 ```
 
 ## Outcome 10: command surface facade only
 
 ```json
-{"mechanism_disabled":"command_surface_facade_only","selector":"apps/loopex_cli/test/cli_test.exs","observed_failure":"the artifact subcommand read through Loopex.Store.Local.Artifacts instead of the port: the locked facade case found the concrete adapter name, and the locked retrieval case raised FunctionClauseError because the composition returned a port wrapper rather than the concrete handle the bypass expected","candidate":"523b5866306ca856e001d8baf77480196736feb7","artifact":"apps/loopex_cli/lib/loopex_cli.ex","restored_sha256":"sha256:beaf3a354bf94cbf4f21b6077233864ca6d48e6866dbce6148a27e65b3981564"}
+{"mechanism_disabled":"command_surface_facade_only","selector":"apps/loopex_cli/test/cli_test.exs","observed_failure":"the artifact subcommand read through Loopex.Store.Local.Artifacts instead of the port: the locked facade case found the concrete adapter name, and the locked retrieval case raised FunctionClauseError because the composition returned a port wrapper rather than the concrete handle the bypass expected","candidate":"2c6b3a1367d699f71bf127abfc2668033c60392d","artifact":"apps/loopex_cli/lib/loopex_cli.ex","restored_sha256":"sha256:beaf3a354bf94cbf4f21b6077233864ca6d48e6866dbce6148a27e65b3981564"}
 ```
 
 ## How these were produced
@@ -94,17 +94,16 @@ record names is the failure the gate would observe.
 what makes "restored" a claim about bytes rather than prose. Every digest above
 matches this revision.
 
-All eight name one candidate, `523b586`, and were taken against its exact bytes.
+All eight name one candidate, `2c6b3a1`, and were taken against its exact bytes.
 Running them at one candidate is not a formality: evidence assembled from
 several moments cannot be read as one account of one revision.
 
-Records 1–4 and 5–8 ran concurrently in two disposable detached clones. Within
-each clone the records ran serially, the source tree was verified clean before
-every mutation and after every restore, and the clone was verified clean before
-deletion. No mutation in either half could leak into the one that followed.
+Every record ran in its own disposable detached clone. The source tree was
+verified clean before its mutation and after its exact restore, and each clone
+was verified clean before deletion. No mutation could leak into another record.
 
 They have been re-taken whenever milestone repairs changed a bound artifact,
-including again at `523b586`. An earlier version of this record argued they did
+including again at `2c6b3a1`. An earlier version of this record argued they did
 not need re-taking because every artifact was then byte-identical to the
 candidate named by the record and the gate accepts an ancestor. That stopped
 being true when later repairs changed those artifacts. A stale digest here is

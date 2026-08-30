@@ -94,7 +94,8 @@ so a reviewer reads what the run did rather than inferring it from a pass. The
 gate's selector runner suppresses the test formatter, and without this a failed
 assertion reaches an operator as "the selector failed" and nothing else.
 
-Observed at the closure candidate `49dcc1c`, the attended run reported:
+Observed at the captured product source candidate `2c6b3a1`, the attended run
+reported:
 
 ```text
 loopex demonstration observed: tools=loopex.read,loopex.edit,loopex.write,loopex.bash files=.git,notes.md,summary.txt ending=done
