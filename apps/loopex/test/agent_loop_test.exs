@@ -4028,6 +4028,90 @@ defmodule Loopex.AgentLoopTest do
            "the completed executor operation did not close its domain complete"
   end
 
+  test "runtime unavailability while closing a refused tool does not invent owner loss" do
+    # Concept: Control unavailability does not prove that a successor exists.
+    # The current coordinator keeps its authority and continues the run after
+    # discarding the transient plane whose close could not be admitted.
+    #
+    # Technical depth: a pre-effect refusal reaches the ordinary abandoned tool
+    # close without emitting progress. A one-shot proxy refuses exactly that
+    # `close_progress`; all later operations reach the unchanged real Control.
+    # Treating the catch-all as owner loss marks the coordinator superseded and
+    # deterministically prevents the second model dispatch.
+    parent = self()
+
+    executor =
+      AgentLoopAnsweringExecutor.start(%{
+        "c1" => {:before_effect, {:error, :invalid_tool_arguments}}
+      })
+
+    fixture =
+      start_with_executor(
+        AgentLoopAnsweringExecutor,
+        executor,
+        one_call_script(),
+        progress_to: self(),
+        before_prompt: fn runtime, session_id, _store ->
+          predecessor = coordinator_of(runtime)
+          predecessor_state = :sys.get_state(predecessor)
+          real_control = predecessor_state.control
+
+          control_proxy =
+            Loopex.AgentLoopControlBoundaryProxy.start(
+              real_control,
+              parent,
+              {:reply_once, :close_progress, {:error, :runtime_unavailable}}
+            )
+
+          :sys.replace_state(predecessor, &Map.put(&1, :control, control_proxy))
+
+          send(
+            parent,
+            {:runtime_unavailable_tool_close_fixture, predecessor, real_control,
+             predecessor_state.owner, session_id, control_proxy}
+          )
+        end
+      )
+
+    assert_receive {:runtime_unavailable_tool_close_fixture, predecessor, real_control, owner,
+                    session_id, control_proxy},
+                   5_000
+
+    assert_receive {:control_boundary_injected, ^control_proxy, :close_progress,
+                    {:error, :runtime_unavailable}},
+                   5_000,
+                   "the refused-tool path never reached the unavailable Control boundary"
+
+    assert await_dispatch_count(fixture, 2),
+           "runtime unavailability was treated as owner loss and suppressed the next turn"
+
+    events = drain(fixture.attachment)
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "completed"
+    assert finished["reconciliation_ref"] == nil
+
+    assert Process.alive?(predecessor),
+           "the live coordinator was reaped after an unavailable ownership answer"
+
+    assert coordinator_of(fixture.runtime) == predecessor,
+           "runtime unavailability replaced the owner without a succession"
+
+    refute :sys.get_state(predecessor).superseded,
+           "runtime unavailability was recorded as an owner supersession"
+
+    assert Control.current_owner(real_control, session_id, owner) == :ok,
+           "the real Control no longer recognizes the unchanged owner"
+
+    assert AgentLoopAnsweringExecutor.effects(executor) == []
+    assert length(AgentLoopAnsweringExecutor.jobs(executor)) == 1
+
+    tool = Enum.find(events, &(&1.kind == "tool.finished"))
+    assert tool["outcome"] == "failed"
+
+    refute Enum.any?(receive_progress(), &(&1.kind == :tool_stream_closed)),
+           "the unavailable close fabricated a tool-stream closure"
+  end
+
   test "a durable owner handoff fences executor progress and closure before its notification arrives" do
     # Concept: the Store can make the successor the durable owner before the old
     # coordinator receives Control's supersession cast. That interval does not
