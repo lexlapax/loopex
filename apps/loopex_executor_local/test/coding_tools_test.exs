@@ -195,6 +195,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   end
 
   defp run(root, tool_id, arguments, overrides \\ %{}) do
+    {execute_options, overrides} = Map.pop(overrides, :execute_options, [])
+
     # A case that composed its own executor passes it in; everything else gets a
     # fresh one, as before.
     {overrides, {executor, lease_id}} =
@@ -248,7 +250,13 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         System.system_time(:millisecond) + 60_000
       )
 
-    Local.execute(executor, job, grant, [], Loopex.Executor.discard_progress())
+    Local.execute(
+      executor,
+      job,
+      grant,
+      execute_options,
+      Loopex.Executor.discard_progress()
+    )
   end
 
   # Concept: a case about the cleanup budget needs an executor composed with the
@@ -997,6 +1005,43 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # implicit, so a caller can refuse before producing bytes it cannot keep.
     assert CodingTools.limits().output_bytes > 0
     assert ArtifactStore.roles() == ["tool_output"]
+  end
+
+  test "an already expired job is refused before the local executor opens a port" do
+    # Concept: the local executor independently checks the run's committed
+    # deadline at its final effect boundary. A coordinator that already checked
+    # it cannot authorize the hand to begin an expired job later.
+    #
+    # Technical depth: `:executor_process_started` is emitted synchronously only
+    # after the production `Port.open/2` returns, so it is a deterministic marker
+    # for the boundary rather than a race against a child writing a file. The
+    # argv command is harmless and would leave a second marker if it ran.
+    root = workspace()
+    file_marker = Path.join(root, "expired-job-ran.txt")
+
+    answer =
+      run(
+        root,
+        "loopex.bash",
+        %{
+          "argv" => [
+            "/bin/sh",
+            "-c",
+            "printf ran > \"$1\"",
+            "loopex-expired-job",
+            file_marker
+          ]
+        },
+        %{
+          run_deadline: System.system_time(:millisecond) - 1,
+          execute_options: [notify: self()]
+        }
+      )
+
+    assert {:error, {:refused_before_effect, :executor_prestart_mismatch}} = answer
+
+    refute_receive {:executor_process_started, _job_id, "loopex.bash", _environment}, 100
+    refute File.exists?(file_marker), "an already expired job reached its workspace effect"
   end
 
   test "the wall time budget the session declared bounds the job and not merely the run" do
