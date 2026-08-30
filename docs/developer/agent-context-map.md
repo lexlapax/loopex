@@ -1044,3 +1044,38 @@ This record is the maintainer's disposition evidence, not the independent
 review. The administrative transition changes only ADR 0014's status and
 governance row, this disposition, and the ADR index that reports its accepted
 status and exact supersession scope.
+
+<a id="disposition-m2-gate-amendment-2-2026-08-30"></a>
+### M2 gate Amendment 2 acceptance — 2026-08-30
+
+The maintainer explicitly accepted
+[Amendment 2](../plans/M2-gate.md#amendment-2) to the accepted `M2` plan pair
+and locked gate as proposed at exact candidate
+`5b0d1c1f629681622ae12eadb8120d9077ba140b`, after independent review of that
+exact candidate. Acceptance binds the amended normative envelopes and gate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept envelope | `sha256:83ace70588d90135a4da12475a2e29f4cdbbbb6564b10d9e8a52a9ae5c468ce0` |
+| Technical depth envelope | `sha256:a8c4a97e056ac3537fbebe2c580559febb17ac45c1925cb107176e4b110f67ab` |
+| Gate | `sha256:1b24752f6068efaa4eada3758566ff05c0ff950e5af2a81a6cec0a0e2f8d3306` |
+
+Amendment 2 aligns the closure contract with the delivered runtime behavior,
+declares accepted ADR 0012, ADR 0013, and ADR 0014 as closure prerequisites,
+and strengthens the locked evidence around cancellation, deadline commitment,
+workspace containment, stream ownership, and recovery. It also repairs the two
+renamed containment selectors and the retained-evidence document count without
+removing a check, lowering a threshold, exempting a lane, or changing the
+milestone lifecycle.
+
+**Scope of this record.** It accepts Amendment 2 alone and rebinds the `M2`
+Acceptance row to its exact proposal. It does not close `M2`, dispose of the
+recorded containment limitation, authorize the race-test move or evidence
+capture, accept a closure candidate, authorize product integration, or
+authorize a release. The milestone remains `In review`.
+
+This record is the maintainer's disposition evidence, not the independent
+review. The administrative transition changes only the `M2` Acceptance row and
+this new disposition record; the accepted amendment section, normative
+envelopes, locked gate, portable enforcement, register, and product bytes are
+unchanged.
