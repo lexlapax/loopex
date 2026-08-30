@@ -348,6 +348,15 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     {System.monotonic_time(:millisecond) - started, result}
   end
 
+  defp parse_environment(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Map.new(fn entry ->
+      [name, value] = String.split(entry, "=", parts: 2)
+      {name, value}
+    end)
+  end
+
   defp effect_class_of("loopex.read"), do: "read_only"
   defp effect_class_of("loopex.bash"), do: "process"
   defp effect_class_of(_other), do: "workspace_write"
@@ -777,7 +786,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     refute argv_credential.output =~ "sk-sentinel"
 
     assert {:ok, argv_named} = run(root, "loopex.bash", %{"argv" => ["env"]})
-    assert argv_named.output =~ "PATH="
+    assert Map.has_key?(parse_environment(argv_named.output), "PATH")
     refute argv_named.output =~ "LOOPEX_PROVIDER_API_KEY"
     refute argv_named.output =~ "LOOPEX_SENTINEL_UNRELATED"
 
@@ -1953,7 +1962,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
       # The recorder ran with the environment this executor constructed, so the
       # observation is of a real child and not of a command that never started.
-      assert first_child =~ "PATH=/usr/bin:/bin"
+      assert Map.fetch!(parse_environment(first_child), "PATH") == "/usr/bin:/bin"
     end
 
     # Concept: the environment the *first* image was loaded with must exclude the
@@ -2002,7 +2011,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # name and leaves only the chosen PATH. The provider credential has the
     # stronger guarantee below: it is explicitly absent even when introduced
     # after that snapshot.
-    assert loaded |> String.split("\n", trim: true) |> Enum.sort() == ["PATH=/usr/bin:/bin"]
+    loaded_environment = parse_environment(loaded)
+    assert map_size(loaded_environment) == 1
+    assert Map.fetch!(loaded_environment, "PATH") == "/usr/bin:/bin"
 
     # Concept: the provider credential is the named secret this executor must
     # keep out of every first image, including one started by its own helpers.
