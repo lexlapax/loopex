@@ -2715,6 +2715,52 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert Task.await(stubborn_running, 30_000) != nil
   end
 
+  test "cancelling an unknown job id leaves another running job untouched" do
+    # Concept: cancellation names one operator job. A typo, replay for a job
+    # already settled, or stale command must never stop different live work.
+    #
+    # Technical depth: keep exactly one job in the executor's in-flight table,
+    # then cancel a distinct identifier. Looking up an arbitrary table member
+    # instead of the requested key kills this command before its second marker;
+    # the conforming keyed lookup leaves it alone until this case cancels the
+    # actual identifier during cleanup.
+    root = workspace()
+    ready = Path.join(root, "wrong-cancel-ready.txt")
+    continued = Path.join(root, "wrong-cancel-continued.txt")
+    job_id = "cancel-owned-#{System.unique_integer([:positive])}"
+    wrong_job_id = "cancel-other-#{System.unique_integer([:positive])}"
+    {executor, lease_id} = executor_with_grace(root, 3_000)
+
+    command =
+      "printf ready > #{ready}; sleep 1; printf continued > #{continued}; sleep 20"
+
+    running =
+      Task.async(fn ->
+        run(root, "loopex.bash", %{"command" => command}, %{
+          executor: executor,
+          lease_id: lease_id,
+          job_id: job_id
+        })
+      end)
+
+    try do
+      assert wait_for_file(ready), "the owned command never entered the in-flight table"
+
+      assert Local.cancel(executor, wrong_job_id) == {:ok, :cleaned},
+             "an unknown job should have no process tree left to clean"
+
+      assert wait_for_file(continued),
+             "cancelling #{wrong_job_id} stopped the different live job #{job_id}"
+    after
+      _answer = Local.cancel(executor, job_id)
+
+      case Task.yield(running, 10_000) do
+        nil -> Task.shutdown(running, :brutal_kill)
+        _settled -> :ok
+      end
+    end
+  end
+
   test "each of the three quiescence answers reaches a distinct outcome and only one is proved" do
     # Concept: bringing a group to quiescence has three answers, and `completed`
     # belongs to exactly one of them.

@@ -259,9 +259,11 @@ defmodule Loopex.AgentLoopControlBoundaryProxy do
   # `close_progress` call is held before it reaches Control. Releasing either
   # after Control has begun acquisition deterministically distinguishes a stale
   # check-then-close from the serialized close operation.
-  def start(real_control, observer, armed \\ true)
-      when is_pid(real_control) and is_pid(observer) and is_boolean(armed) do
-    spawn_link(fn -> loop(real_control, observer, armed) end)
+  def start(real_control, observer, mode \\ true)
+      when is_pid(real_control) and is_pid(observer) and
+             (is_boolean(mode) or
+                (is_tuple(mode) and tuple_size(mode) == 3 and elem(mode, 0) == :reply_once)) do
+    spawn_link(fn -> loop(real_control, observer, mode) end)
   end
 
   def arm(proxy) when is_pid(proxy), do: GenServer.call(proxy, :arm)
@@ -302,6 +304,41 @@ defmodule Loopex.AgentLoopControlBoundaryProxy do
         loop(real_control, observer, false)
     end
   end
+
+  # Concept: make one unavailable ownership answer observable without replacing
+  # the runtime Control that still owns the session.
+  #
+  # Technical depth: this is a boundary fault, not a substitute implementation.
+  # Every non-target call reaches the real Control, the matching call receives
+  # exactly one injected reply, and the proxy then disarms. That lets a runtime
+  # case distinguish unavailability from a real owner-loss verdict while the
+  # live current-owner slot remains authoritative and independently checkable.
+  defp loop(real_control, observer, {:reply_once, boundary, reply} = mode) do
+    receive do
+      {:"$gen_call", from, request} ->
+        if boundary_of(request) == boundary do
+          send(observer, {:control_boundary_injected, self(), boundary, reply})
+          GenServer.reply(from, reply)
+          loop(real_control, observer, false)
+        else
+          GenServer.reply(from, GenServer.call(real_control, request, :infinity))
+          loop(real_control, observer, mode)
+        end
+    end
+  end
+
+  defp boundary_of({:current_owner, _session_id, _owner}), do: :current_owner
+
+  defp boundary_of({:close_progress, _session_id, _owner, _relay, _disposition}),
+    do: :close_progress
+
+  defp boundary_of({:project_progress, _session_id, _owner, _relay, _item}),
+    do: :project_progress
+
+  defp boundary_of({:post_commit, _session_id, _owner, _positions, _receipt}),
+    do: :post_commit
+
+  defp boundary_of(_request), do: :other
 
   defp hold_and_reply(real_control, observer, from, request, boundary, prepared) do
     reference = make_ref()
@@ -570,6 +607,7 @@ defmodule Loopex.AgentLoopTest do
   alias Loopex.AgentLoopTestModel
   alias Loopex.Bounds
   alias Loopex.M1RuntimeTestStore
+  alias Loopex.Runtime.Control
   alias Loopex.Runtime.ExecutorStream
   alias Loopex.Runtime.StreamRelay
   alias LoopexProtocol.ToolDefinition
@@ -3166,6 +3204,101 @@ defmodule Loopex.AgentLoopTest do
 
     assert attempts == [1],
            "the stale predecessor, rather than only its successor, recorded abandonment"
+  end
+
+  test "runtime unavailability while closing a model error does not invent owner supersession" do
+    # Concept: losing the ownership service is not evidence that another owner
+    # exists. The live session therefore keeps running once Control is available
+    # again instead of silently abandoning work under an invented succession.
+    #
+    # Technical depth: inject exactly one `:runtime_unavailable` answer at the
+    # real coordinator's `close_progress` boundary. The proxy leaves the real
+    # Control and its current-owner slot untouched and forwards every later
+    # operation. Marking this coordinator superseded in the catch-all error
+    # branch stops it before the retry and makes this case fail on both process
+    # identity and completed behavior.
+    fixture =
+      start(
+        script: [
+          %{
+            text: "",
+            calls: [],
+            error: :provider_unavailable,
+            deltas: ["before unavailable close"]
+          },
+          %{text: "done", calls: [], deltas: ["after retry"]}
+        ],
+        progress_to: self()
+      )
+
+    {:ok, session_id} =
+      Loopex.create_session(fixture.runtime, %{"tenant" => "t"},
+        command_id: "create-runtime-unavailable-close"
+      )
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_state = :sys.get_state(predecessor)
+    real_control = predecessor_state.control
+
+    control_proxy =
+      Loopex.AgentLoopControlBoundaryProxy.start(
+        real_control,
+        self(),
+        {:reply_once, :close_progress, {:error, :runtime_unavailable}}
+      )
+
+    :sys.replace_state(predecessor, &Map.put(&1, :control, control_proxy))
+
+    assert {:accepted, "prompt-runtime-unavailable-close"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "prompt-runtime-unavailable-close",
+               content: "go"
+             })
+
+    assert_receive {:control_boundary_injected, ^control_proxy, :close_progress,
+                    {:error, :runtime_unavailable}},
+                   5_000,
+                   "the model-error path never reached the unavailable Control boundary"
+
+    assert await_dispatch_count(fixture, 2),
+           "runtime unavailability was treated as owner loss and suppressed the retry"
+
+    assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] ==
+             "completed"
+
+    assert Process.alive?(predecessor),
+           "the live coordinator was reaped after an unavailable ownership answer"
+
+    assert coordinator_of(fixture.runtime) == predecessor,
+           "runtime unavailability replaced the owner without a succession"
+
+    refute :sys.get_state(predecessor).superseded,
+           "runtime unavailability was recorded as an owner supersession"
+
+    assert Control.current_owner(real_control, session_id, predecessor_state.owner) == :ok,
+           "the real Control no longer recognizes the unchanged owner"
+
+    records = Fixture.records(fixture, session_id)
+
+    assert Enum.count(records, &(&1.payload[:kind] == "model_attempt_abandoned")) == 1
+    assert Enum.count(records, &(&1.payload[:kind] == "model_result_committed")) == 1
+
+    progress = receive_progress()
+
+    assert Enum.count(progress, &(&1.kind == :model_stream_closed)) == 1,
+           "the unavailable first close fabricated a closure or the successful retry did not close"
+
+    [first_delta, retry_delta] = Enum.filter(progress, &(&1.kind == :text_delta))
+
+    refute first_delta.stream_domain_id == retry_delta.stream_domain_id,
+           "the retry reused the unavailable attempt's stream domain"
+
+    [closure] = Enum.filter(progress, &(&1.kind == :model_stream_closed))
+
+    assert closure.stream_domain_id == retry_delta.stream_domain_id,
+           "the only truthful closure did not belong to the completed retry"
   end
 
   test "handoff cannot move between progress admission and relay emission" do
