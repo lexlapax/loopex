@@ -132,6 +132,35 @@ defmodule Loopex.SessionLifecycleTest do
     assert Control.current_owner(control, session_id, entry.owner) == :ok
   end
 
+  test "post commit reports runtime unavailability without inventing owner supersession",
+       fixture do
+    # Concept: losing the runtime's Control process proves no successor exists.
+    # The post-commit fence therefore reports an unavailable authority rather
+    # than manufacturing a stale-owner verdict for a still-current owner.
+    #
+    # Technical depth: exercise the public Control boundary against a pid that
+    # was real and is now gone, matching the current-owner and progress cases
+    # above. The positions and receipt never reach a dead process; only the
+    # catch normalization is under test. The unchanged real Control must still
+    # recognize the session's owner afterwards.
+    {:ok, session_id} =
+      Loopex.create_session(fixture.runtime, %{"workspace" => "post-commit-fence"},
+        command_id: "create-post-commit-fence"
+      )
+
+    entry = current_entry(fixture.runtime, session_id)
+    absent = start_supervised!({SlowControl, 0}, id: :absent_post_commit_control)
+    :ok = stop_supervised!(:absent_post_commit_control)
+    refute Process.alive?(absent)
+
+    assert Control.post_commit(absent, session_id, entry.owner, %{}, %{}) ==
+             {:error, :runtime_unavailable}
+
+    # Unavailability made no ownership decision: the live owner is unchanged.
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    assert Control.current_owner(control, session_id, entry.owner) == :ok
+  end
+
   test "session creation atomically records its runtime command mapping and genesis re-presents identical bytes idempotently and conflicts on changed bytes",
        fixture do
     assert {:ok, session_id} =
