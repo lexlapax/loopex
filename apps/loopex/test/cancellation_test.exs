@@ -35,6 +35,15 @@ defmodule Loopex.CancellationTestExecutor do
       end)
 
     case Agent.get(pid, & &1.mode) do
+      {:cleanup_before_receipt, observer} ->
+        send(observer, {:cleanup_cancel_waiting, self()})
+
+        receive do
+          :confirm_cleaned -> {:ok, :cleaned}
+        after
+          5_000 -> raise "the ordered cancellation was never released"
+        end
+
       {:held_across_succession, _observer} ->
         waiting = Agent.get(pid, & &1.waiting)
         reference = Process.monitor(waiting)
@@ -136,6 +145,11 @@ defmodule Loopex.CancellationTestExecutor do
   # schedule, so a case differs from its neighbour in the schedule alone.
   defp answer(:unknown_receipt_before_abort, _tool_call_id), do: {:held, "outcome_unknown"}
   defp answer(:unknown_then_held, "c1"), do: {:now, "outcome_unknown"}
+
+  defp answer({:cleanup_before_receipt, observer}, tool_call_id) do
+    send(observer, {:executor_receipt_waiting, self(), tool_call_id})
+    {:held, "completed"}
+  end
 
   defp answer({:held_across_succession, observer}, tool_call_id) do
     send(observer, {:effect_happened, tool_call_id})
@@ -317,6 +331,26 @@ defmodule Loopex.CancellationTest do
     end
   end
 
+  defp await_process_messages(process, matches?, attempts \\ 300) do
+    case Process.info(process, :messages) do
+      {:messages, messages} ->
+        cond do
+          matches?.(messages) ->
+            {:ok, messages}
+
+          attempts > 0 ->
+            Process.sleep(10)
+            await_process_messages(process, matches?, attempts - 1)
+
+          true ->
+            :timeout
+        end
+
+      nil ->
+        :process_gone
+    end
+  end
+
   defp events(attachment, acc \\ []) do
     case Loopex.next_event(attachment) do
       {:ok, event} -> events(attachment, [event | acc])
@@ -441,6 +475,93 @@ defmodule Loopex.CancellationTest do
       |> Enum.filter(&(&1.payload[:kind] == "executor_receipt_committed"))
 
     assert length(receipts) == 1
+  end
+
+  test "cleanup commits a valid executor receipt queued behind its own settlement" do
+    # Concept: a clean cancellation may finish while the executor's valid
+    # terminal fact is waiting immediately behind it. Cleanup still preserves
+    # what actually happened rather than replacing that fact with unknown.
+    #
+    # Technical depth: suspend only the coordinator after both workers are
+    # independently blocked. Release cancellation first and observe its Task
+    # result in the coordinator mailbox; then release the executor and observe
+    # its valid receipt later in that same mailbox. Resuming forces
+    # `complete_cleanup/3` to handle the first message and
+    # `settle_executor_work/2` to take the queued receipt by Task reference.
+    fixture =
+      start_with_executor(
+        {:cleanup_before_receipt, self()},
+        [%{text: "run it", calls: [call("c1")]}]
+      )
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "p1",
+               content: "do the work"
+             })
+
+    assert_receive {:executor_receipt_waiting, executor_worker, "c1"}, 5_000
+
+    assert {:accepted, "abort-1"} =
+             Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
+
+    assert_receive {:cleanup_cancel_waiting, cancellation_worker}, 5_000
+
+    coordinator = coordinator_of(fixture.runtime)
+    :ok = :sys.suspend(coordinator)
+
+    on_exit(fn ->
+      if Process.alive?(coordinator) do
+        try do
+          :sys.resume(coordinator)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end)
+
+    send(cancellation_worker, :confirm_cleaned)
+
+    cleanup_result? = fn
+      {_reference, {:ok, :cleaned}} -> true
+      _message -> false
+    end
+
+    assert {:ok, cleanup_messages} =
+             await_process_messages(coordinator, &Enum.any?(&1, cleanup_result?))
+
+    send(executor_worker, :answer)
+
+    receipt_result? = fn
+      {_reference, {:ok, %{tool_call_id: "c1"}}} -> true
+      _message -> false
+    end
+
+    assert {:ok, queued_messages} =
+             await_process_messages(coordinator, fn messages ->
+               Enum.any?(messages, cleanup_result?) and Enum.any?(messages, receipt_result?)
+             end)
+
+    cleanup_index = Enum.find_index(queued_messages, cleanup_result?)
+    receipt_index = Enum.find_index(queued_messages, receipt_result?)
+
+    assert cleanup_index < receipt_index,
+           "the executor receipt was not queued behind cleanup settlement: #{inspect(cleanup_messages)}"
+
+    :ok = :sys.resume(coordinator)
+    assert settled?(fixture, session_id)
+
+    receipts =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "executor_receipt_committed"))
+
+    assert length(receipts) == 1,
+           "cleanup discarded the valid executor receipt queued behind its own result"
   end
 
   test "a run finishes cancelled only when every owned operation is validated terminal and every owned process tree is confirmed cleaned" do
