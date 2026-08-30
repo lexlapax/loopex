@@ -35,6 +35,15 @@ defmodule Loopex.CancellationTestExecutor do
       end)
 
     case Agent.get(pid, & &1.mode) do
+      {:cancel_never_returns, observer} ->
+        observer_reference = Process.monitor(observer)
+        send(observer, {:cancellation_worker_waiting, self()})
+
+        receive do
+          {:DOWN, ^observer_reference, :process, ^observer, _reason} ->
+            exit(:test_owner_gone)
+        end
+
       {:cleanup_before_receipt, observer} ->
         send(observer, {:cleanup_cancel_waiting, self()})
 
@@ -932,6 +941,68 @@ defmodule Loopex.CancellationTest do
              "so it was queued behind the host's cancellation rather than answered beside it"
 
     assert settled?(fixture, session_id)
+  end
+
+  @tag timeout: 90_000
+  test "a host cancellation that never answers is bounded and settles unconfirmed" do
+    # Concept: host-supplied cancellation cannot hold a run open forever. The
+    # coordinator remains available while the host call is outstanding, and the
+    # defensive bound turns silence into an unconfirmed cleanup rather than
+    # inventing a clean stop.
+    #
+    # Technical depth: the callback publishes its own pid and then waits only
+    # for this test owner to die. Production's sixty-second facade bound must
+    # kill that callback process, after which the cleanup Task reports
+    # `:unconfirmed` and the run settles. Monitoring the test owner keeps the
+    # deliberately non-returning fixture from leaking if this case times out
+    # under a mutant that removes the bound.
+    fixture =
+      start_with_executor(
+        {:cancel_never_returns, self()},
+        [%{text: "run it", calls: [call("c1")]}]
+      )
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "p1",
+               content: "do the work"
+             })
+
+    assert :dispatched = await_dispatch(fixture)
+
+    assert {:accepted, "abort-1"} =
+             Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
+
+    assert_receive {:cancellation_worker_waiting, cancellation_worker}, 5_000
+    cancellation_reference = Process.monitor(cancellation_worker)
+
+    {elapsed, status} =
+      :timer.tc(fn ->
+        Loopex.session_status(fixture.runtime, session_id)
+      end)
+
+    assert {:ok, %{active_run_id: active_run_id}} = status
+    assert is_binary(active_run_id), "cleanup stopped reporting the run as active"
+
+    assert div(elapsed, 1_000) < 400,
+           "status waited #{div(elapsed, 1_000)}ms behind a host cancellation that never answers"
+
+    assert_receive {:DOWN, ^cancellation_reference, :process, ^cancellation_worker, :killed},
+                   70_000
+
+    refute Process.alive?(cancellation_worker),
+           "the facade stopped waiting but left the host cancellation worker alive"
+
+    assert settled?(fixture, session_id), "the defensive cancellation bound never settled the run"
+
+    finished = Enum.find(events(attachment), &(&1.kind == "run.finished"))
+
+    assert finished["outcome"] == "outcome_unknown"
+    assert is_binary(finished["reconciliation_ref"])
   end
 
   test "a run being cleaned up is still active and admits nothing new until its ending commits" do
