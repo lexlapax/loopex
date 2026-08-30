@@ -323,3 +323,31 @@ one provider.
 **Disposition.** Maintainer, 2026-08-24: record the gap and defer operator-facing
 provider selection to a later milestone. The adapter's provider neutrality is
 proved at the boundary and is not in question.
+
+<a id="m0-gate-runner-known-issues"></a>
+## Closed M0 gate runner defects observed during M2
+
+**Rule.** M2 requires one exact-candidate re-proof of the immutable M0 gate on
+each locked toolchain pair. A retry is diagnostic, not a pass, and unavailable
+evidence is not GREEN.
+
+**What was observed.** The closed runner has two operational defects. First,
+`bash scripts/check-m0-gate.sh` is not re-runnable in a used checkout: fixture
+residue from an earlier invocation can make a later invocation fail. Second, its
+interpreter-absence probe maps every nonzero
+`bash scripts/check-bootstrap.sh` exit to
+`the aggregate still depends on python3 or jq (outcome 8)`. A status-digest
+failure can therefore end with that unrelated final `M0 gate RED:` line.
+
+**Evidence consequence.** Each required M0 lane is run once from a fresh clone
+after `mix deps.get`, with `LOOPEX_PROVIDER_API_KEY` exported. Read the failure
+body rather than treating the final `M0 gate RED:` line as the diagnosis. Neither
+defect waives either required GREEN row, and a retry in the used checkout is not
+retained as a pass.
+
+**Disposition.** Maintainer, 2026-08-30: record both as known inherited-gate
+issues and fix them after M2 closes through an M0 gate generation under
+`amendment-transaction-v2`. This record does not amend M0, accept a future
+proposal, weaken either M0 re-proof, or add the repair to M2 scope. Any future
+proposal `A` still requires exact-SHA review and explicit acceptance, and its
+`R` still requires the prescribed transition review.
