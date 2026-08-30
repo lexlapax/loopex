@@ -754,7 +754,10 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert receipt.fencing_token == @fence
     assert receipt.session_epoch_at_dispatch == 1
     assert is_binary(receipt.canonical_request_digest)
-    assert receipt.progress_count >= 0
+    # This executor accepts the progress callback but deliberately emits no
+    # progress items. A floor would admit a receipt that invents items the
+    # transient plane never carried and make the stream closure report loss.
+    assert receipt.progress_count == 0
 
     # An event whose call identity does not match the dispatched one is dropped
     # rather than relabelled, which is why the coordinator stamps the stream
