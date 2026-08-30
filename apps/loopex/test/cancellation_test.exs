@@ -18,14 +18,22 @@ defmodule Loopex.CancellationTestExecutor do
   @behaviour Loopex.Executor
 
   def start(mode) do
-    {:ok, pid} = Agent.start_link(fn -> %{mode: mode, jobs: [], waiting: nil} end)
+    {:ok, pid} =
+      Agent.start_link(fn -> %{mode: mode, jobs: [], waiting: nil, cancellations: []} end)
+
     pid
   end
 
   def jobs(pid), do: Agent.get(pid, & &1.jobs) |> Enum.reverse()
+  def cancellations(pid), do: Agent.get(pid, & &1.cancellations) |> Enum.reverse()
 
   @impl Loopex.Executor
-  def cancel(pid, _job_id) do
+  def cancel(pid, job_id) do
+    :ok =
+      Agent.update(pid, fn state ->
+        %{state | cancellations: [job_id | state.cancellations]}
+      end)
+
     case Agent.get(pid, & &1.mode) do
       {:held_across_succession, _observer} ->
         waiting = Agent.get(pid, & &1.waiting)
@@ -293,6 +301,22 @@ defmodule Loopex.CancellationTest do
     end
   end
 
+  defp await_cancellation_count(executor, wanted, attempts \\ 300) do
+    cancellations = Loopex.CancellationTestExecutor.cancellations(executor)
+
+    cond do
+      length(cancellations) >= wanted ->
+        cancellations
+
+      attempts > 0 ->
+        Process.sleep(10)
+        await_cancellation_count(executor, wanted, attempts - 1)
+
+      true ->
+        cancellations
+    end
+  end
+
   defp events(attachment, acc \\ []) do
     case Loopex.next_event(attachment) do
       {:ok, event} -> events(attachment, [event | acc])
@@ -524,6 +548,48 @@ defmodule Loopex.CancellationTest do
 
     send(model, :release)
     assert settled?(fixture, session_id)
+  end
+
+  test "a second interrupt during cleanup starts no second executor cancellation" do
+    # Concept: pressing interrupt again reports the cleanup already under way;
+    # it never starts a second attempt to stop the same operator job.
+    #
+    # Technical depth: the executor records the job identifier at the boundary
+    # before its deliberately slow answer. The second abort is issued only after
+    # that first call is observably running, so dispatching from the
+    # `pending_cleanup` branch produces a deterministic duplicate rather than a
+    # timing-dependent one.
+    fixture = start_with_executor(:cancel_is_slow, [%{text: "run it", calls: [call("c1")]}])
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    assert {:accepted, "p1"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "p1",
+               content: "do the work"
+             })
+
+    assert :dispatched = await_dispatch(fixture)
+    [job] = Loopex.CancellationTestExecutor.jobs(fixture.executor)
+
+    first =
+      Task.async(fn ->
+        Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
+      end)
+
+    assert await_cancellation_count(fixture.executor, 1) == [job.job_id],
+           "the first interrupt never reached the executor cancellation boundary"
+
+    second = Loopex.command(attachment, %{type: :abort, command_id: "abort-2"})
+
+    assert match?({:accepted, "abort-2"}, second) or match?({:error, _reason}, second)
+    assert {:accepted, "abort-1"} = Task.await(first, 30_000)
+    assert settled?(fixture, session_id)
+
+    assert Loopex.CancellationTestExecutor.cancellations(fixture.executor) == [job.job_id],
+           "the second interrupt dispatched a duplicate cancellation for the same job"
   end
 
   test "a replayed abort returns its retained answer and never cancels the run that is active now" do

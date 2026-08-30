@@ -1986,6 +1986,7 @@ defmodule Loopex.AgentLoopTest do
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
     case Keyword.get(options, :before_prompt) do
+      prepare when is_function(prepare, 3) -> prepare.(runtime, session_id, store_pid)
       prepare when is_function(prepare, 1) -> prepare.(store_pid)
       nil -> :ok
     end
@@ -3913,6 +3914,90 @@ defmodule Loopex.AgentLoopTest do
 
     refute Enum.any?(receive_progress(), &(&1.stream_domain_id == old_domain)),
            "the old domain emitted after the successor reconciled the receipt"
+  end
+
+  test "runtime unavailability during executor progress does not invent owner loss" do
+    # Concept: a temporary failure to reach Control drops that progress item but
+    # does not transfer the session, end the operator's task, or turn its effect
+    # into a reconciliation problem.
+    #
+    # Technical depth: install a one-shot unavailable answer before the prompt,
+    # so the executor worker's retained callback captures the proxy as its real
+    # production boundary. The real Control and current-owner slot remain
+    # untouched. Broadening the owner-loss branch to include unavailability
+    # sends a false verdict to the coordinator before the same worker's receipt,
+    # suppressing the next model dispatch deterministically.
+    parent = self()
+    executor = AgentLoopProgressExecutor.start(:valid)
+
+    fixture =
+      start_with_executor(
+        AgentLoopProgressExecutor,
+        executor,
+        one_call_script(),
+        progress_to: self(),
+        before_prompt: fn runtime, session_id, _store ->
+          predecessor = coordinator_of(runtime)
+          predecessor_state = :sys.get_state(predecessor)
+          real_control = predecessor_state.control
+
+          control_proxy =
+            Loopex.AgentLoopControlBoundaryProxy.start(
+              real_control,
+              parent,
+              {:reply_once, :project_progress, {:error, :runtime_unavailable}}
+            )
+
+          :sys.replace_state(predecessor, &Map.put(&1, :control, control_proxy))
+
+          send(
+            parent,
+            {:runtime_unavailable_progress_fixture, predecessor, real_control,
+             predecessor_state.owner, session_id, control_proxy}
+          )
+        end
+      )
+
+    assert_receive {:runtime_unavailable_progress_fixture, predecessor, real_control, owner,
+                    session_id, control_proxy},
+                   5_000
+
+    assert_receive {:control_boundary_injected, ^control_proxy, :project_progress,
+                    {:error, :runtime_unavailable}},
+                   5_000,
+                   "executor progress never reached the unavailable Control boundary"
+
+    assert await_dispatch_count(fixture, 2),
+           "runtime unavailability was treated as owner loss and suppressed the next turn"
+
+    assert Enum.find(drain(fixture.attachment), &(&1.kind == "run.finished"))["outcome"] ==
+             "completed"
+
+    assert Process.alive?(predecessor),
+           "the live coordinator was reaped after unavailable executor progress"
+
+    assert coordinator_of(fixture.runtime) == predecessor,
+           "unavailable executor progress replaced the owner without a succession"
+
+    refute :sys.get_state(predecessor).superseded,
+           "unavailable executor progress was recorded as owner loss"
+
+    assert Control.current_owner(real_control, session_id, owner) == :ok,
+           "the real Control no longer recognizes the unchanged owner"
+
+    assert length(AgentLoopProgressExecutor.jobs(executor)) == 1,
+           "the unavailable progress item caused the executor operation to be retried"
+
+    progress = receive_progress()
+
+    assert Enum.count(progress, &(&1.kind == :tool_stream_closed)) == 1,
+           "the completed executor operation did not close exactly one truthful domain"
+
+    assert Enum.any?(progress, fn
+             %{kind: :tool_stream_closed, disposition: :complete} -> true
+             _other -> false
+           end),
+           "the completed executor operation did not close its domain complete"
   end
 
   test "a durable owner handoff fences executor progress and closure before its notification arrives" do

@@ -8,6 +8,7 @@ defmodule Loopex.InputAlgebraTest do
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopTestModel
+  alias Loopex.Runtime.SessionState
 
   defp call(id), do: %{id: id, name: "write", arguments: %{"path" => id}}
 
@@ -314,6 +315,20 @@ defmodule Loopex.InputAlgebraTest do
     assert_receive {:record_linearized, waiter, _store, "run_terminal_committed",
                     :session_journal_commit, {:committed, _tx, _receipt}},
                    5_000
+
+    # The terminal-and-promotion record has linearized but no request for the
+    # promoted run has staged. Rebuilding those same durable bytes must preserve
+    # that distinction: replay is a pure function of the record and cannot
+    # sample a fresh absolute instant that merely looks correct after recovery.
+    records = Fixture.records(fixture, session_id)
+    public_events = Fixture.events(fixture, session_id)
+    assert {:ok, rebuilt} = SessionState.recover(session_id, records, public_events)
+    promoted_run_id = rebuilt.active_run_id
+    {promoted_bounds, _charged} = SessionState.accounting(rebuilt, promoted_run_id)
+    assert promoted_bounds.deadline_ms == duration_ms
+
+    assert promoted_bounds.deadline == nil,
+           "promotion replay installed an absolute deadline before first request staging"
 
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1,
            "the promoted run dispatched before its terminal-and-promotion transaction returned"
