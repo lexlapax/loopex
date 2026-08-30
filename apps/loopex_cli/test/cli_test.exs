@@ -354,29 +354,30 @@ defmodule LoopexCliTest do
       fixture(
         script: [%{text: "", calls: [call()]}, %{text: "done"}],
         progress_to: self(),
-        tool_delay_ms: 30
+        tool_progress_gate: self()
       )
 
     {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "run the tool")
+
+    assert_receive {:tool_progress_emitted, "c1", worker}, 2_000
+
+    assert_receive {:loopex_progress,
+                    %{kind: :tool_progress, tool_call_id: "c1", chunk: "working"}},
+                   2_000,
+                   "no executor progress reached the terminal while the tool was held open"
+
+    # Completion is impossible until this release. The assertion above is thus
+    # causal evidence, rather than a comparison of messages from two senders
+    # whose delivery order a scheduler may legitimately swap.
+    send(worker, :release)
+
     observed = observe(attachment)
 
-    progress_at =
-      Enum.find_index(observed, fn
-        {:progress, %{tool_call_id: "c1"}} -> true
-        _other -> false
-      end)
-
-    finished_at =
-      Enum.find_index(observed, fn
-        {:event, %{kind: "tool.finished"}} -> true
-        _other -> false
-      end)
-
-    assert is_integer(progress_at), "no executor progress reached the terminal"
-    assert is_integer(finished_at), "the tool never finished"
-
-    assert progress_at < finished_at,
-           "progress must reach the terminal while the tool is still running"
+    assert Enum.any?(observed, fn
+             {:event, %{kind: "tool.finished"}} -> true
+             _other -> false
+           end),
+           "the tool never finished after its progress was observed"
 
     # And the terminal writes it as it arrives rather than collecting it. The run
     # is already over and its terminal event already consumed, so this names a

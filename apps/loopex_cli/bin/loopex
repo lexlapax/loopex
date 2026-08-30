@@ -18,8 +18,9 @@
 #
 #   * the child's standard input would be redirected from /dev/null, which would
 #     silently disable the project-resource prompt and break every piped
-#     invocation, so it is explicitly redirected from this process's own
-#     standard input instead;
+#     invocation. Some shells apply that asynchronous-list default before a
+#     command's `<&0` redirection, so the incoming descriptor is saved first and
+#     the child reads from that saved copy;
 #   * SIGINT and SIGQUIT are ignored in the child, which is exactly what is
 #     wanted here: a terminal delivers Ctrl-C to the whole foreground process
 #     group, and the child ignoring it is what leaves the forwarded SIGTERM as
@@ -58,8 +59,13 @@ fi
 child=''
 trap 'if [ -n "$child" ]; then kill -TERM "$child" 2>/dev/null; fi' INT TERM HUP QUIT
 
-"$escript" "$@" <&0 &
+# Preserve a pipe or terminal before the shell gives an asynchronous command
+# its default /dev/null input. Redirections are applied left to right: the child
+# duplicates the saved descriptor onto stdin and then closes the extra copy.
+exec 3<&0 || exit 1
+"$escript" "$@" <&3 3<&- &
 child=$!
+exec 3<&-
 
 wait "$child"
 status=$?

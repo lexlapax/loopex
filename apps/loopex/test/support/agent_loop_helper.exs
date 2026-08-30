@@ -107,10 +107,16 @@ defmodule Loopex.AgentLoopTestExecutor do
 
   @behaviour Loopex.Executor
 
-  def start(outcomes \\ %{}, delay_ms \\ 0, cleanup \\ :cleaned) do
+  def start(outcomes \\ %{}, delay_ms \\ 0, cleanup \\ :cleaned, progress_gate \\ nil) do
     {:ok, pid} =
       Agent.start_link(fn ->
-        %{outcomes: outcomes, jobs: [], delay_ms: delay_ms, cleanup: cleanup}
+        %{
+          outcomes: outcomes,
+          jobs: [],
+          delay_ms: delay_ms,
+          cleanup: cleanup,
+          progress_gate: progress_gate
+        }
       end)
 
     pid
@@ -152,10 +158,41 @@ defmodule Loopex.AgentLoopTestExecutor do
 
     progress.(%{
       tool_call_id: job.tool_call_id,
+      operation_id: job.operation_id,
+      attempt: job.attempt,
+      session_id: job.session_id,
+      run_id: job.run_id,
+      turn_id: job.turn_id,
+      canonical_request_digest: job.canonical_request_digest,
+      session_epoch_at_dispatch: job.origin_session_epoch,
+      executor_epoch: job.origin_executor_epoch,
+      executor_identity: job.executor_identity,
+      fencing_token: job.fencing_token,
       stream: "stdout",
       byte_offset: 0,
       chunk: "working"
     })
+
+    # Concept: a case can keep the tool unfinished after progress was emitted.
+    #
+    # Technical depth: progress and durable events reach a test from different
+    # processes, so comparing their mailbox arrival order is a scheduler race.
+    # This optional gate makes the operator claim causal instead: the executor
+    # cannot return, and therefore `tool.finished` cannot be committed, until
+    # the case has observed the transient item and releases this worker.
+    case Agent.get(pid, & &1.progress_gate) do
+      waiter when is_pid(waiter) ->
+        send(waiter, {:tool_progress_emitted, job.tool_call_id, self()})
+
+        receive do
+          :release -> :ok
+        after
+          5_000 -> raise "tool progress gate was never released"
+        end
+
+      _none ->
+        :ok
+    end
 
     {:ok,
      %{
@@ -249,7 +286,8 @@ defmodule Loopex.AgentLoopFixture do
       Loopex.AgentLoopTestExecutor.start(
         outcomes,
         Keyword.get(options, :tool_delay_ms, 0),
-        Keyword.get(options, :cleanup, :cleaned)
+        Keyword.get(options, :cleanup, :cleaned),
+        Keyword.get(options, :tool_progress_gate)
       )
 
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop")
