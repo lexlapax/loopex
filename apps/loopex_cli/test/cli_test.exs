@@ -478,6 +478,62 @@ defmodule LoopexCliTest do
       end)
 
     assert output =~ "working"
+
+    # The temporal half above uses a runtime fixture so it can hold the executor
+    # causally. Prove separately that the public command's *default* composition
+    # preserves the same transient route. The composition itself remains real;
+    # its caller-local conformance observer replaces only the provider edge with
+    # the deterministic model, so this path needs no credential or network call.
+    {state_root, workspace} = roots()
+
+    model =
+      Loopex.AgentLoopTestModel.start([
+        %{
+          text: "authoritative default-composition reply",
+          calls: [],
+          deltas: ["streamed through the default composition"]
+        }
+      ])
+
+    observer = fn
+      Loopex, :start_link, [options] ->
+        model_options = %{
+          module: Loopex.AgentLoopTestModel,
+          model: "scripted:v1",
+          options: [script: model, max_tokens: 256]
+        }
+
+        apply(Loopex, :start_link, [Keyword.put(options, :model, model_options)])
+
+      module, function, arguments ->
+        apply(module, function, arguments)
+    end
+
+    Process.put(:"$loopex_composition_edge_observer", observer)
+
+    default_output =
+      try do
+        capture_io(fn ->
+          assert :ok =
+                   LoopexCli.dispatch([
+                     "run",
+                     "--policy",
+                     "allow-all",
+                     "--state-root",
+                     state_root,
+                     "--workspace",
+                     workspace,
+                     "show the streamed reply"
+                   ])
+        end)
+      after
+        Process.delete(:"$loopex_composition_edge_observer")
+      end
+
+    assert default_output =~ "streamed through the default composition",
+           "the shipped command lost the transient recipient supplied to its default composition"
+
+    assert default_output =~ "authoritative default-composition reply"
   end
 
   test "loopex sessions lists the operator's sessions and loopex resume continues one" do
