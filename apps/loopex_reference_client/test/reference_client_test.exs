@@ -52,6 +52,62 @@ defmodule Loopex.ReferenceClientTest do
              )
   end
 
+  test "the reference prompt commits a five minute duration and derives its instant at staging" do
+    fixture =
+      Fixture.start(
+        "prompt-deadline",
+        Loopex.ReferenceClientTestModel,
+        observer: self(),
+        relative_path: "prompt-deadline.txt",
+        content: "prompt-deadline-effect"
+      )
+      |> Fixture.create("prompt-deadline")
+
+    on_exit(fn -> Fixture.stop(fixture) end)
+
+    staging_floor = System.system_time(:millisecond)
+
+    assert {:accepted, "prompt-deadline"} =
+             ReferenceClient.prompt(fixture.client, "prompt-deadline", "do the work")
+
+    assert_receive {:model_request, request}, 2_000
+    staging_ceiling = System.system_time(:millisecond)
+    Fixture.await_terminal(fixture)
+
+    records = Fixture.records(fixture, fixture.client.session_id)
+    admitted = Enum.find(records, &(&1.payload.kind == "command_admitted"))
+    staged = Enum.find(records, &(&1.payload.kind == "model_request_committed"))
+
+    assert admitted.payload["deadline_ms"] == 300_000
+    refute Map.has_key?(admitted.payload, "deadline")
+    assert staged.payload["request"]["deadline"] == request.deadline
+    assert request.deadline >= staging_floor + 300_000
+    assert request.deadline <= staging_ceiling + 300_000
+    assert request.deadline < staging_floor + 600_000
+  end
+
+  test "the reference prompt refuses an unknown bound key before admitting a command" do
+    fixture =
+      Fixture.start("unknown-prompt-bound", Loopex.ReferenceClientTestModel)
+      |> Fixture.create("unknown-prompt-bound")
+
+    on_exit(fn -> Fixture.stop(fixture) end)
+
+    assert {:error, :invalid_declared_bounds} =
+             ReferenceClient.prompt(fixture.client, "prompt-typo", "do the work",
+               bounds: %{
+                 max_turns: 8,
+                 token_budget: 1_000_000,
+                 deadline_ms: 300_000,
+                 deadine_ms: 300_000
+               }
+             )
+
+    refute Enum.any?(Fixture.records(fixture, fixture.client.session_id), fn record ->
+             record.payload.kind == "command_admitted"
+           end)
+  end
+
   test "the reference client owns no policy durable state or alternate loop" do
     source = File.read!(Path.join(__DIR__, "../lib/reference_client.ex"))
     recovery = File.read!(Path.join(__DIR__, "../lib/recovery.ex"))

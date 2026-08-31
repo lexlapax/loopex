@@ -21,6 +21,9 @@ defmodule Loopex.ReferenceClient do
           }
   defstruct [:runtime, :session_id, :attachment]
 
+  @prompt_bound_keys [:max_turns, :token_budget, :deadline_ms]
+  @prompt_bounds %{max_turns: 8, token_budget: 1_000_000, deadline_ms: 300_000}
+
   @doc """
   ## Concept
 
@@ -96,19 +99,37 @@ defmodule Loopex.ReferenceClient do
     # Technical depth: there is no default for any of the three, so this client
     # names them explicitly on the caller's behalf. A host embedding Loopex
     # decides its own; these are the reference client's, not the kernel's.
-    bounds =
-      Keyword.get(options, :bounds, %{
-        max_turns: 8,
-        token_budget: 1_000_000,
-        deadline: System.system_time(:millisecond) + 300_000
+    with {:ok, bounds} <- prompt_bounds(options) do
+      Loopex.command(attachment, %{
+        type: :prompt,
+        command_id: command_id,
+        content: content,
+        bounds: bounds
       })
+    end
+  end
 
-    Loopex.command(attachment, %{
-      type: :prompt,
-      command_id: command_id,
-      content: content,
-      bounds: bounds
-    })
+  # Concept: the reference client names one visible five-minute allowance and
+  # refuses to reinterpret misspelled caller input as a runtime default.
+  #
+  # Technical depth: `deadline_ms` is the accepted duration key. The runtime
+  # converts it to an absolute instant when the first request is staged. An
+  # unknown key is refused here before a command can become durable; otherwise a
+  # misspelling survives `Map.merge/2` beside the runtime's ten-minute default
+  # and the operator silently receives a different bound than the one supplied.
+  defp prompt_bounds(options) do
+    case Keyword.fetch(options, :bounds) do
+      :error ->
+        {:ok, @prompt_bounds}
+
+      {:ok, bounds} when is_map(bounds) and not is_struct(bounds) ->
+        if Map.keys(bounds) -- @prompt_bound_keys == [],
+          do: {:ok, bounds},
+          else: {:error, :invalid_declared_bounds}
+
+      {:ok, _invalid} ->
+        {:error, :invalid_declared_bounds}
+    end
   end
 
   @doc """
