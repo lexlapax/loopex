@@ -606,6 +606,35 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     end
   end
 
+  test "provider diagnostics redact a credential before bounding an echoed error" do
+    for bytes <- [511, 512, 513, 1_024] do
+      credential = "sk-" <> String.duplicate("x", bytes - 3)
+      leaked_prefix = binary_part(credential, 0, min(256, byte_size(credential)))
+
+      diagnostic =
+        Loopex.LLM.ReqLLM.scrub_error(
+          %{provider_error: "request refused for #{credential}", retryable: false},
+          credential
+        )
+
+      assert diagnostic =~ "[redacted credential]"
+      refute diagnostic =~ credential
+      refute diagnostic =~ leaked_prefix
+      assert byte_size(diagnostic) <= 4_096
+    end
+
+    escaped_credential = "sk-\"escaped\\credential\n"
+
+    escaped_diagnostic =
+      Loopex.LLM.ReqLLM.scrub_error(
+        %{provider_error: escaped_credential},
+        escaped_credential
+      )
+
+    assert escaped_diagnostic =~ "[redacted credential]"
+    refute escaped_diagnostic =~ "escaped"
+  end
+
   test "a completion the provider finished with nothing to say is a success and not an interruption" do
     # The distinction the failure rule turns on: emptiness is not evidence of
     # interruption. A model that finished its turn having produced no text and

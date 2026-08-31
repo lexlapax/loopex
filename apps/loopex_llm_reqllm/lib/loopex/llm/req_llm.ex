@@ -353,7 +353,7 @@ defmodule Loopex.LLM.ReqLLM do
         drain(response, request, identity, progress, credential)
 
       {:error, error} ->
-        {:error, {:provider_call_failed, scrub(error, credential)}}
+        {:error, {:provider_call_failed, scrub_error(error, credential)}}
     end
   end
 
@@ -418,10 +418,10 @@ defmodule Loopex.LLM.ReqLLM do
       streamed = text |> Enum.reverse() |> IO.iodata_to_binary()
       {:ok, reply(request, identity, metadata, streamed, calls, deltas)}
     else
-      {:error, {tag, reason}} -> {:error, {tag, scrub(reason, credential)}}
+      {:error, {tag, reason}} -> {:error, {tag, scrub_error(reason, credential)}}
     end
   rescue
-    interrupted -> {:error, {:stream_interrupted, scrub(interrupted, credential)}}
+    interrupted -> {:error, {:stream_interrupted, scrub_error(interrupted, credential)}}
   end
 
   defp reply(request, identity, metadata, text, calls, deltas) do
@@ -810,14 +810,55 @@ defmodule Loopex.LLM.ReqLLM do
   # credential -- the conformance suite's -- still gets the bound, because the
   # bound is what makes the term plain boundary data and only the substitution
   # depends on there being a secret.
-  defp scrub(error, credential) do
-    bounded = inspect(error, limit: 8, printable_limit: 512)
+  @doc false
+  @spec scrub_error(term(), binary() | nil) :: binary()
+  def scrub_error(error, credential) do
+    # The credential must remain visible to the scrubber before the diagnostic
+    # is shortened. Truncating first can retain a long credential's prefix while
+    # removing the complete value that replacement needs to find.
+    {printable_limit, escaped_body} =
+      case credential do
+        value when is_binary(value) and value != "" ->
+          escaped = inspect(value, printable_limit: :infinity)
+
+          escaped_body =
+            if String.starts_with?(escaped, "\"") and String.ends_with?(escaped, "\"") do
+              binary_part(escaped, 1, byte_size(escaped) - 2)
+            else
+              escaped
+            end
+
+          # Any credential beginning inside the retained diagnostic must remain
+          # complete long enough to be replaced. The escaped form can be larger
+          # than the source bytes, so budget for the larger representation.
+          {4_096 + max(byte_size(value), byte_size(escaped_body)), escaped_body}
+
+        _absent ->
+          {4_096, nil}
+      end
+
+    inspected = inspect(error, limit: 8, printable_limit: printable_limit)
 
     case credential do
-      value when is_binary(value) and value != "" -> String.replace(bounded, value, @redacted)
-      _absent -> bounded
+      value when is_binary(value) and value != "" ->
+        inspected
+        |> redact_inspected_credential(value, escaped_body)
+        |> inspect_bound()
+
+      _absent ->
+        inspect_bound(inspected)
     end
   end
+
+  defp redact_inspected_credential(inspected, credential, escaped_body) do
+    inspected
+    |> String.replace(credential, @redacted)
+    |> String.replace(escaped_body, @redacted)
+  end
+
+  # `inspect/2` bounds collection members and printable members, not the complete
+  # rendered diagnostic. Keep the public failure plane bounded after redaction.
+  defp inspect_bound(inspected), do: String.slice(inspected, 0, 4_096)
 
   defp endpoint(%{base_url: url}) when is_binary(url) and url != "", do: url
   defp endpoint(%{provider: provider}), do: provider_default_endpoint(provider)
