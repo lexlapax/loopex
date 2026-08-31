@@ -32,7 +32,7 @@ defmodule Loopex.ReferenceClient.AllowAllPolicyTest do
   end
 
   setup do
-    :persistent_term.erase({AllowAll, :announced})
+    AllowAll.reset_notice_for_test()
     :ok
   end
 
@@ -81,5 +81,24 @@ defmodule Loopex.ReferenceClient.AllowAllPolicyTest do
     # read it.
     quiet = capture_io(:stderr, fn -> AllowAll.decide(request()) end)
     refute quiet =~ AllowAll.notice()
+  end
+
+  test "concurrent permissive decisions still emit one authority notice in the VM" do
+    output =
+      capture_io(:stderr, fn ->
+        1..64
+        |> Task.async_stream(
+          fn _index -> AllowAll.decide(request()) end,
+          max_concurrency: 64,
+          ordered: false,
+          timeout: 5_000
+        )
+        |> Enum.each(fn result -> assert result == {:ok, {:allow, nil}} end)
+      end)
+
+    occurrences = output |> String.split(AllowAll.notice()) |> length() |> Kernel.-(1)
+
+    assert occurrences == 1,
+           "concurrent decisions emitted #{occurrences} permissive authority notices"
   end
 end

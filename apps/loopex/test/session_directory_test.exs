@@ -117,6 +117,32 @@ defmodule Loopex.SessionDirectoryTest do
     assert session_owner_epoch(store_pid, session_id) == before_epoch + 1
   end
 
+  test "the runtime identity is synced as a file and directory entry before it is returned", %{
+    root: root
+  } do
+    # Concept: a runtime identity returned to a host must be the identity a
+    # process after a crash can re-present, not merely bytes still resident in
+    # the writer's cache.
+    #
+    # Technical depth: crash durability cannot be induced portably in ExUnit, so
+    # this case pairs a production round trip with the narrow structural proof
+    # of the two fsync boundaries. Removing either syscall makes this selector
+    # fail while ordinary healthy-disk tests would continue to pass.
+    source = File.read!(Path.expand("../lib/loopex/session_directory.ex", __DIR__))
+
+    assert source =~
+             ~r/IO\.binwrite\(io, candidate\).*?:file\.sync\(io\)/s,
+           "the generated identity is returned without syncing its bytes"
+
+    assert source =~
+             ~r/defp sync_runtime_id_directory\(path\).*?:file\.open\(directory, \[:raw, :read, :directory\]\).*?:file\.sync\(io\)/s,
+           "the generated identity is returned without syncing its directory entry"
+
+    assert {:ok, runtime_id} = SessionDirectory.runtime_id(root)
+    assert {:ok, ^runtime_id} = SessionDirectory.runtime_id(root)
+    assert File.read!(Path.join(root, "runtime_id")) == runtime_id
+  end
+
   test "resuming a session through a different runtime identity is refused with an explicit reason",
        %{root: root} do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "mismatch-store")

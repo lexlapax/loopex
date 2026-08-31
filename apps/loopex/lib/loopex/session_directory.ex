@@ -347,9 +347,29 @@ defmodule Loopex.SessionDirectory do
 
     case File.open(path, [:write, :exclusive]) do
       {:ok, io} ->
-        IO.binwrite(io, candidate)
-        File.close(io)
-        {:ok, candidate}
+        write_result =
+          with :ok <- IO.binwrite(io, candidate),
+               :ok <- :file.sync(io) do
+            :ok
+          end
+
+        close_result = File.close(io)
+
+        result =
+          case {write_result, close_result} do
+            {:ok, :ok} -> sync_runtime_id_directory(path)
+            {{:error, reason}, _close} -> {:error, {:runtime_id_write_failed, reason}}
+            {:ok, {:error, reason}} -> {:error, {:runtime_id_close_failed, reason}}
+          end
+
+        case result do
+          :ok ->
+            {:ok, candidate}
+
+          {:error, _reason} = error ->
+            _ = File.rm(path)
+            error
+        end
 
       {:error, :eexist} ->
         case File.read(path) do
@@ -359,6 +379,25 @@ defmodule Loopex.SessionDirectory do
 
       {:error, reason} ->
         {:error, {:runtime_id_persist_failed, reason}}
+    end
+  end
+
+  defp sync_runtime_id_directory(path) do
+    directory = path |> Path.dirname() |> String.to_charlist()
+
+    case :file.open(directory, [:raw, :read, :directory]) do
+      {:ok, io} ->
+        result = :file.sync(io)
+        close_result = :file.close(io)
+
+        case {result, close_result} do
+          {:ok, :ok} -> :ok
+          {{:error, reason}, _close} -> {:error, {:runtime_id_directory_sync_failed, reason}}
+          {:ok, {:error, reason}} -> {:error, {:runtime_id_directory_close_failed, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, {:runtime_id_directory_unavailable, reason}}
     end
   end
 

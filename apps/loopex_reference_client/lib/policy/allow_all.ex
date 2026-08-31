@@ -35,6 +35,7 @@ defmodule Loopex.ReferenceClient.Policy.AllowAll do
   @notice "loopex: the allow-all host policy is active. " <>
             "This is permissive local authority, not a permission model: " <>
             "every tool call this session makes will be allowed."
+  @notice_table Loopex.ReferenceClient.Policy.AllowAll.Notices
 
   @doc """
   ## Concept
@@ -63,14 +64,37 @@ defmodule Loopex.ReferenceClient.Policy.AllowAll do
   # runtimes in one VM both using this policy are both permissive for the same
   # reason, and repeating the line adds nothing an operator did not already read.
   defp announce do
-    case :persistent_term.get({__MODULE__, :announced}, false) do
-      true ->
-        :ok
+    if :ets.insert_new(notice_table(), {:announced, true}), do: IO.puts(:stderr, @notice)
+    :ok
+  end
 
-      false ->
-        :persistent_term.put({__MODULE__, :announced}, true)
-        IO.puts(:stderr, @notice)
-        :ok
+  defp notice_table do
+    case :ets.whereis(@notice_table) do
+      :undefined ->
+        try do
+          :ets.new(@notice_table, [
+            :named_table,
+            :public,
+            :set,
+            {:heir, Process.whereis(:init), :loopex_notice_table}
+          ])
+        rescue
+          ArgumentError -> @notice_table
+        end
+
+      table ->
+        table
     end
+  end
+
+  @doc false
+  @spec reset_notice_for_test() :: :ok
+  def reset_notice_for_test do
+    case :ets.whereis(@notice_table) do
+      :undefined -> :ok
+      table -> :ets.delete(table, :announced)
+    end
+
+    :ok
   end
 end
