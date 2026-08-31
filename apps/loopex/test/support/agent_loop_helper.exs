@@ -15,7 +15,7 @@ defmodule Loopex.AgentLoopTestModel do
   @behaviour Loopex.Model
 
   def start(script) when is_list(script) do
-    {:ok, pid} = Agent.start_link(fn -> %{script: script, seen: []} end)
+    {:ok, pid} = Agent.start_link(fn -> %{script: script, seen: [], previous_worker: nil} end)
     pid
   end
 
@@ -27,8 +27,9 @@ defmodule Loopex.AgentLoopTestModel do
   def complete(request, options, progress \\ nil) do
     pid = Keyword.fetch!(options, :script)
     progress = progress || Loopex.Model.discard_progress()
+    worker = self()
 
-    turn =
+    {turn, previous_worker} =
       Agent.get_and_update(pid, fn state ->
         {next, rest} =
           case state.script do
@@ -36,8 +37,14 @@ defmodule Loopex.AgentLoopTestModel do
             [next | rest] -> {next, rest}
           end
 
-        {next, %{state | script: rest, seen: [request | state.seen]}}
+        {{next, state.previous_worker},
+         %{state | script: rest, seen: [request | state.seen], previous_worker: worker}}
       end)
+
+    if Map.get(turn, :require_previous_worker_down, false) and
+         is_pid(previous_worker) and Process.alive?(previous_worker) do
+      raise "the replacement model call began before its predecessor terminated"
+    end
 
     # Concept: an adapter that names its own stream domain and sequence.
     #

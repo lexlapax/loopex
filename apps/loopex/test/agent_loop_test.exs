@@ -1403,6 +1403,80 @@ defmodule Loopex.AgentLoopTest do
     refute in_flight_kind?(settled, :policy, run_id)
   end
 
+  test "a queued policy result processed after the committed deadline cannot authorize an effect" do
+    Loopex.AgentLoopBlockingPolicy.observe(self())
+    on_exit(&Loopex.AgentLoopBlockingPolicy.clear/0)
+
+    fixture =
+      start(
+        script: [%{text: "ask permission", calls: [call("c1")]}],
+        policy: Loopex.AgentLoopBlockingPolicy,
+        bounds_deadline_ms: 500
+      )
+
+    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:policy_consulting, policy_pid, run_id}, 2_000
+
+    coordinator = coordinator_of(fixture.runtime)
+    state = :sys.get_state(coordinator)
+
+    [{reference, {:policy, ^run_id, ^policy_pid}}] =
+      Enum.filter(state.in_flight, fn
+        {_reference, {:policy, ^run_id, ^policy_pid}} -> true
+        _other -> false
+      end)
+
+    deadline =
+      state.durable
+      |> Loopex.Runtime.SessionState.accounting(run_id)
+      |> elem(0)
+      |> Map.fetch!(:deadline)
+
+    :ok = :sys.suspend(coordinator)
+
+    on_exit(fn ->
+      if Process.alive?(coordinator), do: :sys.resume(coordinator)
+    end)
+
+    send(policy_pid, :release)
+
+    assert await_process_message(coordinator, fn
+             {^reference, {:allow, nil}} -> true
+             _other -> false
+           end),
+           "the policy result was not queued while the coordinator was suspended"
+
+    refute await_process_message(
+             coordinator,
+             fn
+               {:run_deadline, ^run_id, ^deadline} -> true
+               _other -> false
+             end,
+             0
+           ),
+           "the deadline timer queued before the policy result"
+
+    Process.sleep(max(deadline - System.system_time(:millisecond), 0) + 25)
+
+    assert await_process_message(coordinator, fn
+             {:run_deadline, ^run_id, ^deadline} -> true
+             _other -> false
+           end),
+           "the committed deadline did not queue behind the policy result"
+
+    :ok = :sys.resume(coordinator)
+    events = drain(attachment, 2_000)
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+
+    assert finished["outcome"] == "bound_reached"
+    assert finished["bound"] == "deadline"
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+
+    refute Enum.any?(events, fn event ->
+             event.kind == "tool.finished" and event["outcome"] == "denied"
+           end)
+  end
+
   test "an operator abort remains responsive while host policy is blocked" do
     Loopex.AgentLoopBlockingPolicy.observe(self())
     on_exit(&Loopex.AgentLoopBlockingPolicy.clear/0)
@@ -2331,7 +2405,7 @@ defmodule Loopex.AgentLoopTest do
 
     coordinator = coordinator_of(fixture.runtime)
     coordinator_state = :sys.get_state(coordinator)
-    workers = coordinator_state.workers
+    workers = coordinator_state.owner_workers
 
     [{_reference, {:model, run_id, ^model}}] = Map.to_list(coordinator_state.in_flight)
 
@@ -4209,7 +4283,7 @@ defmodule Loopex.AgentLoopTest do
     assert [{{:model, _run_id}, stream}] = Map.to_list(predecessor_state.streams)
     relay = stream.relay
     relay_reference = Process.monitor(relay)
-    workers = predecessor_state.workers
+    workers = predecessor_state.owner_workers
 
     assert [%{kind: :text_delta} = delta] = receive_progress()
     :sys.replace_state(predecessor, &%{&1 | superseded: true})
@@ -4301,15 +4375,22 @@ defmodule Loopex.AgentLoopTest do
     #
     # Technical depth: unlike the recognized-supersession case above, the
     # predecessor is killed while its producer is held. Its linked relay must
-    # disappear without a closure, the successor must durably advance the
-    # inherited attempt before dispatch, and releasing the orphaned producer
-    # after the successor finishes must project nothing. This keeps abrupt death
-    # and live supersession as distinct full-runtime evidence.
+    # disappear without a closure, its effect-free producer must be terminated,
+    # and only after that barrier may the successor dispatch a distinct attempt.
+    # This keeps abrupt death and live supersession as distinct full-runtime
+    # evidence.
     fixture =
       start(
         script: [
-          %{text: "", calls: [], error: :provider_unavailable, hold: self(), deltas: ["a"]},
-          %{text: "done", calls: [], deltas: ["b"]}
+          %{
+            text: "",
+            calls: [],
+            error: :provider_unavailable,
+            hold: self(),
+            hold_timeout_ms: 30_000,
+            deltas: ["a"]
+          },
+          %{text: "done", calls: [], deltas: ["b"], require_previous_worker_down: true}
         ],
         progress_to: self()
       )
@@ -4325,17 +4406,26 @@ defmodule Loopex.AgentLoopTest do
 
     coordinator = coordinator_of(fixture.runtime)
     coordinator_reference = Process.monitor(coordinator)
+    model_reference = Process.monitor(model)
     Process.exit(coordinator, :kill)
 
     assert_receive {:DOWN, ^coordinator_reference, :process, ^coordinator, :killed},
                    5_000
 
-    assert {:ok, ^session_id} =
-             Loopex.resume_session(
-               fixture.runtime,
-               session_id,
-               command_id: "resume-after-abrupt-model-owner-death"
-             )
+    resume =
+      Task.async(fn ->
+        Loopex.resume_session(
+          fixture.runtime,
+          session_id,
+          command_id: "resume-after-abrupt-model-owner-death"
+        )
+      end)
+
+    assert_receive {:DOWN, ^model_reference, :process, ^model, _reason},
+                   2_000,
+                   "the dead owner left its effect-free model task alive"
+
+    assert {:ok, ^session_id} = Task.await(resume, 5_000)
 
     {:ok, resumed} =
       Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
@@ -4346,12 +4436,6 @@ defmodule Loopex.AgentLoopTest do
     assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
 
     successor = receive_progress()
-    model_reference = Process.monitor(model)
-    send(model, :release)
-
-    assert_receive {:DOWN, ^model_reference, :process, ^model, _reason},
-                   5_000,
-                   "the orphaned provider task did not settle after release"
 
     assert receive_progress() == [],
            "the predecessor emitted after abrupt owner and relay death"

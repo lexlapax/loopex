@@ -28,6 +28,7 @@ defmodule Loopex.Runtime.Supervisor do
   @registry_id Loopex.ToolRegistry
   @control_id Loopex.Runtime.Control
   @workers_id Loopex.Runtime.Workers
+  @owner_groups_id Loopex.Runtime.OwnerGroups
   @sessions_id Loopex.Runtime.SessionSupervisor
   @dispatcher_id Loopex.Runtime.EventDispatcher
 
@@ -60,6 +61,10 @@ defmodule Loopex.Runtime.Supervisor do
       Supervisor.child_spec({Task.Supervisor, []}, id: @workers_id),
       Supervisor.child_spec(
         {DynamicSupervisor, strategy: :one_for_one},
+        id: @owner_groups_id
+      ),
+      Supervisor.child_spec(
+        {DynamicSupervisor, strategy: :one_for_one},
         id: @sessions_id
       ),
       %{
@@ -81,6 +86,7 @@ defmodule Loopex.Runtime.Supervisor do
       with registry when is_pid(registry) <- Map.get(resolved, @registry_id),
            control when is_pid(control) <- Map.get(resolved, @control_id),
            workers when is_pid(workers) <- Map.get(resolved, @workers_id),
+           owner_groups when is_pid(owner_groups) <- Map.get(resolved, @owner_groups_id),
            sessions when is_pid(sessions) <- Map.get(resolved, @sessions_id),
            dispatcher when is_pid(dispatcher) <- Map.get(resolved, @dispatcher_id) do
         {:ok,
@@ -88,6 +94,7 @@ defmodule Loopex.Runtime.Supervisor do
            registry: registry,
            control: control,
            workers: workers,
+           owner_groups: owner_groups,
            sessions: sessions,
            dispatcher: dispatcher
          }}

@@ -188,6 +188,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        incarnation: nil,
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
        workers: Keyword.fetch!(options, :workers),
+       owner_workers: Keyword.fetch!(options, :owner_workers),
        model: Keyword.fetch!(options, :model),
        executor: Keyword.fetch!(options, :executor),
        tool: Keyword.fetch!(options, :tool),
@@ -444,7 +445,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   def handle_info({:policy_timeout, reference, run_id}, state) do
     case Map.pop(state.in_flight, reference) do
       {{:policy, ^run_id, pid}, remaining} ->
-        _ = Task.Supervisor.terminate_child(state.workers, pid)
+        _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
         _ = take_worker_result(reference)
 
         state =
@@ -1205,7 +1206,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {stream, progress} = model_progress_fun(state, work)
 
         task =
-          Task.Supervisor.async_nolink(state.workers, fn ->
+          Task.Supervisor.async_nolink(state.owner_workers, fn ->
             module.complete(request, options, progress)
           end)
 
@@ -1613,7 +1614,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp terminate_superseded_effect_free_work(state) do
     Enum.reduce(state.in_flight, state, fn
       {reference, {:model, run_id, pid}}, next ->
-        _ = Task.Supervisor.terminate_child(next.workers, pid)
+        _ = Task.Supervisor.terminate_child(next.owner_workers, pid)
         _ = take_worker_result(reference)
 
         next
@@ -1621,7 +1622,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         |> disarm_deadline(run_id)
 
       {reference, {:policy, run_id, pid}}, next ->
-        _ = Task.Supervisor.terminate_child(next.workers, pid)
+        _ = Task.Supervisor.terminate_child(next.owner_workers, pid)
         _ = take_worker_result(reference)
 
         next
@@ -1957,7 +1958,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           {state, :cleaned}
 
         {reference, pid} ->
-          _ = Task.Supervisor.terminate_child(state.workers, pid)
+          _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
           answer = take_worker_result(reference)
 
           {state, retained} =
@@ -1992,7 +1993,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         state
 
       {reference, pid} ->
-        _ = Task.Supervisor.terminate_child(state.workers, pid)
+        _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
         _ = take_worker_result(reference)
 
         state
@@ -2191,7 +2192,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     request = policy_request(state, work, call, definition)
 
     task =
-      Task.Supervisor.async_nolink(state.workers, fn ->
+      Task.Supervisor.async_nolink(state.owner_workers, fn ->
         Policy.evaluate_callback(state.policy, request)
       end)
 

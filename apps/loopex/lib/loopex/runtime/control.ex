@@ -26,6 +26,7 @@ defmodule Loopex.Runtime.Control do
   use GenServer
 
   alias Loopex.Runtime.EventDispatcher
+  alias Loopex.Runtime.OwnerGroup
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.StreamRelay
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
@@ -394,8 +395,8 @@ defmodule Loopex.Runtime.Control do
   # the reason that is true instead of the one the monitor can infer.
   #
   # Technical depth: the coordinator casts this and then stops, so this message
-  # and the monitor's `:DOWN` both arrive. Signals from one process to another
-  # keep their order and the `:DOWN` is one of them, so this runs first: it
+  # and the coordinator monitor's `:DOWN` both arrive. Signals from one process
+  # to another keep their order and the `:DOWN` is one of them, so this runs first: it
   # answers the waiter with the coordinator's own reason and clears `waiting`,
   # which is what makes the answer exactly one rather than this reason followed
   # by `:owner_recovery_failed` from the `:DOWN` behind it. Clearing the waiter
@@ -421,18 +422,48 @@ defmodule Loopex.Runtime.Control do
       {nil, _monitors} ->
         {:noreply, state}
 
-      {session_id, monitors} ->
-        sessions =
-          case Map.fetch(state.sessions, session_id) do
-            {:ok, %{coordinator: ^pid} = entry} ->
-              reply_waiting(entry, {:error, :owner_recovery_failed})
-              Map.put(state.sessions, session_id, %{entry | status: :unavailable})
+      {{:coordinator, session_id, ^pid}, monitors} ->
+        state = %{state | monitor_to_session: monitors}
 
-            _other ->
-              state.sessions
-          end
+        case Map.fetch(state.sessions, session_id) do
+          {:ok, %{status: :acquiring, coordinator: ^pid} = entry} ->
+            reply_waiting(entry, {:error, :owner_recovery_failed})
+            unavailable = entry |> Map.put(:status, :unavailable) |> Map.put(:waiting, nil)
+            {:noreply, %{state | sessions: Map.put(state.sessions, session_id, unavailable)}}
 
-        {:noreply, %{state | sessions: sessions, monitor_to_session: monitors}}
+          _other ->
+            {:noreply, state}
+        end
+
+      {{:owner_group, session_id, ^pid}, monitors} ->
+        state = %{state | monitor_to_session: monitors}
+
+        case Map.fetch(state.sessions, session_id) do
+          {:ok,
+           %{
+             status: :awaiting_owner_barrier,
+             owner_group: ^pid,
+             succession_id: succession_id,
+             waiting: waiting
+           }} ->
+            cleared = %{state | sessions: Map.delete(state.sessions, session_id)}
+
+            case do_start_owner(cleared, session_id, succession_id, waiting) do
+              {:waiting, next} ->
+                {:noreply, next}
+
+              {:error, reason, next} ->
+                GenServer.reply(waiting, {:error, reason})
+                {:noreply, next}
+            end
+
+          {:ok, %{status: :active, owner_group: ^pid} = entry} ->
+            unavailable = Map.put(entry, :status, :unavailable)
+            {:noreply, %{state | sessions: Map.put(state.sessions, session_id, unavailable)}}
+
+          _other ->
+            {:noreply, state}
+        end
     end
   end
 
@@ -488,13 +519,30 @@ defmodule Loopex.Runtime.Control do
       %{status: :acquiring} ->
         {:error, :owner_acquiring, state}
 
+      %{status: :awaiting_owner_barrier} ->
+        {:error, :owner_acquiring, state}
+
+      %{coordinator: coordinator, owner_group: owner_group} = entry
+      when is_pid(coordinator) and is_pid(owner_group) ->
+        if not Process.alive?(coordinator) and Process.alive?(owner_group) do
+          waiting =
+            entry
+            |> Map.put(:status, :awaiting_owner_barrier)
+            |> Map.put(:succession_id, succession_id)
+            |> Map.put(:waiting, from)
+
+          {:waiting, %{state | sessions: Map.put(state.sessions, session_id, waiting)}}
+        else
+          do_start_owner(state, session_id, succession_id, from)
+        end
+
       _other ->
         do_start_owner(state, session_id, succession_id, from)
     end
   end
 
   defp do_start_owner(state, session_id, succession_id, from) do
-    with {:ok, %{sessions: session_supervisor, workers: workers}} <-
+    with {:ok, %{sessions: session_supervisor, owner_groups: owner_groups, workers: workers}} <-
            RuntimeSupervisor.children(state.root) do
       counter = state.generation_counter + 1
       generation = fresh_id("generation", state.runtime_id, counter)
@@ -508,48 +556,78 @@ defmodule Loopex.Runtime.Control do
             nil
         end
 
-      options = [
-        control: self(),
-        store: state.store,
-        session_id: session_id,
-        generation: generation,
-        succession_id: succession_id,
-        prior_tx_id: prior_tx_id,
-        workers: workers,
-        model: state.model,
-        executor: state.executor,
-        tool: state.tool,
-        active_tools: active_tool_definitions(state),
-        progress_to: state.progress_to,
-        diagnostics_to: state.diagnostics_to,
-        bounds: state.bounds,
-        policy: state.policy,
-        project_manifest: state.project_manifest,
-        project_decision: state.project_decision,
-        sampling: state.sampling,
-        grant_decision: state.grant_decision,
-        fault_to: state.fault_to,
-        cleanup_grace_ms: state.cleanup_grace_ms
-      ]
+      owner_group_options = [generation: generation]
 
-      case DynamicSupervisor.start_child(session_supervisor, {SessionCoordinator, options}) do
-        {:ok, coordinator} ->
-          await_owner(state, session_id, generation, coordinator, counter, from)
+      with {:ok, owner_group} <-
+             DynamicSupervisor.start_child(owner_groups, {OwnerGroup, owner_group_options}),
+           {:ok, owner_workers} <- OwnerGroup.workers(owner_group) do
+        options = [
+          control: self(),
+          store: state.store,
+          session_id: session_id,
+          generation: generation,
+          succession_id: succession_id,
+          prior_tx_id: prior_tx_id,
+          workers: workers,
+          owner_workers: owner_workers,
+          model: state.model,
+          executor: state.executor,
+          tool: state.tool,
+          active_tools: active_tool_definitions(state),
+          progress_to: state.progress_to,
+          diagnostics_to: state.diagnostics_to,
+          bounds: state.bounds,
+          policy: state.policy,
+          project_manifest: state.project_manifest,
+          project_decision: state.project_decision,
+          sampling: state.sampling,
+          grant_decision: state.grant_decision,
+          fault_to: state.fault_to,
+          cleanup_grace_ms: state.cleanup_grace_ms
+        ]
 
-        {:error, reason} ->
-          unavailable = %{status: :unavailable, durable: nil}
+        case DynamicSupervisor.start_child(session_supervisor, {SessionCoordinator, options}) do
+          {:ok, coordinator} ->
+            case OwnerGroup.attach(owner_group, coordinator) do
+              :ok ->
+                await_owner(
+                  state,
+                  session_id,
+                  generation,
+                  coordinator,
+                  owner_group,
+                  counter,
+                  from
+                )
 
-          next = %{
-            state
-            | sessions: Map.put(state.sessions, session_id, unavailable),
-              generation_counter: counter
-          }
+              {:error, reason} ->
+                _ = DynamicSupervisor.terminate_child(session_supervisor, coordinator)
+                _ = DynamicSupervisor.terminate_child(owner_groups, owner_group)
+                unavailable_owner(state, session_id, counter, reason)
+            end
 
-          {:error, normalize_start_error(reason), next}
+          {:error, reason} ->
+            _ = DynamicSupervisor.terminate_child(owner_groups, owner_group)
+            unavailable_owner(state, session_id, counter, reason)
+        end
+      else
+        {:error, reason} -> unavailable_owner(state, session_id, counter, reason)
       end
     else
       _other -> {:error, :runtime_unavailable, state}
     end
+  end
+
+  defp unavailable_owner(state, session_id, counter, reason) do
+    unavailable = %{status: :unavailable, durable: nil}
+
+    next = %{
+      state
+      | sessions: Map.put(state.sessions, session_id, unavailable),
+        generation_counter: counter
+    }
+
+    {:error, normalize_start_error(reason), next}
   end
 
   # Concept: control records the new owner and waits for it to announce itself,
@@ -565,23 +643,39 @@ defmodule Loopex.Runtime.Control do
   # sends completes it, and a coordinator that dies first is answered by the
   # monitor. Control therefore never makes a synchronous call into a coordinator,
   # which is what makes the cycle unconstructible rather than merely unlikely.
-  defp await_owner(state, session_id, generation, coordinator, counter, from) do
-    monitor = Process.monitor(coordinator)
+  defp await_owner(
+         state,
+         session_id,
+         generation,
+         coordinator,
+         owner_group,
+         counter,
+         from
+       ) do
+    coordinator_monitor = Process.monitor(coordinator)
+    owner_group_monitor = Process.monitor(owner_group)
 
     entry = %{
       status: :acquiring,
       coordinator: coordinator,
+      owner_group: owner_group,
       generation: generation,
       previous: Map.get(state.sessions, session_id),
-      monitor: monitor,
+      coordinator_monitor: coordinator_monitor,
+      owner_group_monitor: owner_group_monitor,
       durable: nil,
       waiting: from
     }
 
+    monitors =
+      state.monitor_to_session
+      |> Map.put(coordinator_monitor, {:coordinator, session_id, coordinator})
+      |> Map.put(owner_group_monitor, {:owner_group, session_id, owner_group})
+
     next = %{
       state
       | sessions: Map.put(state.sessions, session_id, entry),
-        monitor_to_session: Map.put(state.monitor_to_session, monitor, session_id),
+        monitor_to_session: monitors,
         generation_counter: counter
     }
 

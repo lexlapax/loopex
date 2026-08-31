@@ -561,6 +561,7 @@ defmodule Loopex.SessionLifecycleTest do
        fixture do
     session_id = create_session!(fixture, "unavailable-baseline")
     :ok = M1RuntimeTestStore.fail_reads(fixture.store_pid, true)
+    started = System.monotonic_time(:millisecond)
 
     caller =
       Task.async(fn ->
@@ -571,7 +572,36 @@ defmodule Loopex.SessionLifecycleTest do
         {result, Process.info(self(), :messages)}
       end)
 
-    started = System.monotonic_time(:millisecond)
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    assert eventually(fn -> current_entry(fixture.runtime, session_id).status == :acquiring end)
+    acquiring = current_entry(fixture.runtime, session_id)
+    coordinator_reference = Process.monitor(acquiring.coordinator)
+
+    # The cleanup-group DOWN and the coordinator's reason come from different
+    # senders, so the group signal may be observed first even though the
+    # coordinator sent its reason before it exited. Hold Control and queue that
+    # legal ordering explicitly. Only the direct coordinator monitor may answer
+    # acquisition failure; the group monitor is the cleanup barrier.
+    :ok = :sys.suspend(control)
+
+    on_exit(fn ->
+      if Process.alive?(control) do
+        try do
+          :sys.resume(control)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end)
+
+    send(
+      control,
+      {:DOWN, acquiring.owner_group_monitor, :process, acquiring.owner_group, :normal}
+    )
+
+    assert_receive {:DOWN, ^coordinator_reference, :process, _coordinator, :normal}, 30_000
+    :ok = :sys.resume(control)
+
     assert {{:error, :store_unavailable}, {:messages, []}} = Task.await(caller, 30_000)
     elapsed = System.monotonic_time(:millisecond) - started
 
