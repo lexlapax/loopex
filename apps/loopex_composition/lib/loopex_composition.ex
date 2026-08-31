@@ -35,6 +35,7 @@ defmodule LoopexComposition do
   alias Loopex.{Executor.Local, LLM.ReqLLM, Store}
   alias Loopex.Executor.Local.{CodingTools, WorkspaceLease}
   alias Loopex.Store.Local.Artifacts
+  alias LoopexProtocol.Canonical
 
   # Concept: what the host decides stays the host's to supply.
   #
@@ -51,6 +52,11 @@ defmodule LoopexComposition do
   @host_supplied ~w(project_manifest project_decision progress_to diagnostics_to
                     cleanup_grace_ms)a
 
+  @edge_observer :"$loopex_composition_edge_observer"
+  @effect_observer :"$loopex_composition_effect_observer"
+  @owned :"$loopex_composition_owned"
+  @stop_timeout 1_000
+
   @doc """
   ## Concept
 
@@ -63,27 +69,12 @@ defmodule LoopexComposition do
   data lives is the host's decision.
   """
   @spec start(keyword()) :: {:ok, Loopex.Runtime.t()} | {:error, term()}
-  def start(options) do
-    state_root = Keyword.fetch!(options, :state_root)
-
-    with {:ok, policy} <- fetch_policy(options),
-         :ok <- start_applications(),
-         {:ok, store} <- open_store(state_root),
-         {:ok, executor} <- open_executor(state_root, options) do
-      start_edge(
-        Loopex,
-        [
-          runtime_id: Keyword.fetch!(options, :runtime_id),
-          store: store,
-          policy: policy,
-          model: %{module: ReqLLM, model: ReqLLM.default_model(), options: []},
-          executor: executor,
-          tools: CodingTools.definitions(),
-          active_tools: Enum.map(CodingTools.definitions(), & &1["tool_id"])
-        ] ++ Keyword.take(options, @host_supplied)
-      )
-    end
+  def start(options) when is_list(options) do
+    with {:ok, configuration} <- validate(options),
+         do: start_owner(configuration)
   end
+
+  def start(_options), do: {:error, :invalid_composition_options}
 
   @doc """
   ## Concept
@@ -105,34 +96,121 @@ defmodule LoopexComposition do
   defp policy(module) when is_atom(module) and not is_nil(module), do: {:ok, module}
   defp policy(_absent), do: {:error, :host_policy_required}
 
+  defp validate(options) do
+    with {:ok, policy} <- fetch_policy(options),
+         {:ok, state_root} <- required_binary(options, :state_root),
+         {:ok, workspace} <- required_binary(options, :workspace),
+         {:ok, runtime_id} <- required_binary(options, :runtime_id) do
+      {:ok, {options, state_root, workspace, runtime_id, policy}}
+    end
+  end
+
+  defp required_binary(options, key) do
+    case Keyword.fetch(options, key) do
+      {:ok, value} when is_binary(value) and byte_size(value) > 0 -> {:ok, value}
+      _other -> {:error, {:invalid_composition_option, key}}
+    end
+  end
+
+  defp start_owner(configuration) do
+    caller = self()
+    tag = make_ref()
+    observer = Process.get(@edge_observer, &apply/3)
+    effect_observer = Process.get(@effect_observer, &apply/3)
+
+    {owner, monitor} =
+      spawn_monitor(fn -> own(caller, tag, configuration, observer, effect_observer) end)
+
+    receive do
+      {^tag, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^owner, reason} ->
+        {:error, {:composition_owner_failed, reason}}
+    end
+  end
+
+  defp own(caller, tag, configuration, observer, effect_observer) do
+    Process.flag(:trap_exit, true)
+    Process.put(@edge_observer, observer)
+    Process.put(@effect_observer, effect_observer)
+    Process.put(@owned, [])
+
+    result =
+      try do
+        compose(configuration)
+      rescue
+        exception -> {:error, {:composition_start_raised, exception}}
+      catch
+        kind, reason -> {:error, {:composition_start_caught, kind, reason}}
+      end
+
+    case result do
+      {:ok, _runtime} ->
+        send(caller, {tag, result})
+        receive do: ({:EXIT, _pid, _reason} -> cleanup())
+
+      {:error, _reason} ->
+        cleanup()
+        send(caller, {tag, result})
+    end
+  end
+
+  defp compose({options, state_root, workspace, runtime_id, policy}) do
+    with :ok <- start_applications(),
+         {:ok, store} <- open_store(state_root),
+         {:ok, executor} <- open_executor(state_root, workspace, options) do
+      start_edge(
+        Loopex,
+        [
+          runtime_id: runtime_id,
+          store: store,
+          policy: policy,
+          model: %{module: ReqLLM, model: ReqLLM.default_model(), options: []},
+          executor: executor,
+          tools: CodingTools.definitions(),
+          active_tools: Enum.map(CodingTools.definitions(), & &1["tool_id"])
+        ] ++ Keyword.take(options, @host_supplied)
+      )
+    end
+  end
+
   defp open_store(state_root) do
     with :ok <- File.mkdir_p(state_root),
-         {:ok, adapter} <- Store.Local.start_link(path: Path.join(state_root, "store.log")),
+         {:ok, adapter} <- start_edge(Store.Local, path: Path.join(state_root, "store.log")),
          do: Store.new(Store.Local, adapter)
   end
 
   defp start_applications do
     Enum.reduce_while([:loopex, :loopex_store_local, :loopex_executor_local], :ok, fn app, :ok ->
-      case Application.ensure_all_started(app) do
+      case effect(Application, :ensure_all_started, [app]) do
         {:ok, _started} -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, {:application_not_started, app, reason}}}
       end
     end)
   end
 
+  # Concept: tests observe effects without replacing the public composition.
+  #
+  # Technical depth: the caller-local function defaults to the real operation
+  # and follows the composition owner, so production behavior and global state
+  # remain unchanged while prevalidation and cleanup ordering stay observable.
+  defp effect(module, function, arguments),
+    do: Process.get(@effect_observer, &apply/3).(module, function, arguments)
+
   # The executor's declared periods and programs are forwarded rather than
   # defaulted here, so an embedder that supplies neither gets the executor's own
   # defaults and one that supplies either gets exactly what it asked for. ADR
   # 0009 requires the cleanup grace to be session configuration; forwarding it is
   # what makes a composed session able to declare one at all.
-  defp open_executor(state_root, options) do
+  defp open_executor(state_root, workspace, options) do
     lease_id = "workspace"
-    workspace = Keyword.fetch!(options, :workspace)
-
     placement = [identity: "executor-local", epoch: 1, fencing_token: 1]
+    workspace_ref = "workspace:" <> Canonical.digest_bytes(workspace)
 
     with {:ok, lease} <-
-           WorkspaceLease.start_link(id: lease_id, path: workspace, fencing_token: 1),
+           start_edge(WorkspaceLease, id: lease_id, path: workspace, fencing_token: 1),
          {:ok, spill} <- artifacts(state_root),
          {:ok, executor} <-
            start_edge(
@@ -148,7 +226,7 @@ defmodule LoopexComposition do
        Map.merge(Map.new(placement), %{
          module: Local,
          reference: executor,
-         workspace_ref: workspace,
+         workspace_ref: workspace_ref,
          workspace_lease: lease_id
        })}
     end
@@ -159,7 +237,39 @@ defmodule LoopexComposition do
   # Technical depth: the caller-local observer exists for conformance evidence;
   # the absent key delegates directly through `apply/3`, and no exported runtime
   # accessor or VM-global test state becomes part of the reference stack.
-  defp start_edge(module, options),
-    do:
-      Process.get(:"$loopex_composition_edge_observer", &apply/3).(module, :start_link, [options])
+  defp start_edge(module, options) do
+    case Process.get(@edge_observer, &apply/3).(module, :start_link, [options]) do
+      {:ok, resource} = result ->
+        remember(module, resource)
+        result
+
+      error ->
+        error
+    end
+  end
+
+  defp remember(Loopex, runtime),
+    do: Process.put(@owned, [{:runtime, runtime} | Process.get(@owned)])
+
+  defp remember(_module, pid) when is_pid(pid),
+    do: Process.put(@owned, [{:process, pid} | Process.get(@owned)])
+
+  defp cleanup, do: Enum.each(Process.get(@owned, []), &stop_owned/1)
+
+  defp stop_owned({:runtime, runtime}), do: effect(Loopex, :stop, [runtime])
+
+  defp stop_owned({:process, pid}) do
+    if Process.alive?(pid) do
+      monitor = Process.monitor(pid)
+      effect(Process, :exit, [pid, :shutdown])
+
+      receive do
+        {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+      after
+        @stop_timeout ->
+          effect(Process, :exit, [pid, :kill])
+          receive do: ({:DOWN, ^monitor, :process, ^pid, _reason} -> :ok)
+      end
+    end
+  end
 end

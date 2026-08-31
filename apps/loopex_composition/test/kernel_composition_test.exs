@@ -154,6 +154,13 @@ defmodule LoopexCompositionTest do
     assert Keyword.fetch!(executor_options, :cleanup_grace_ms) == 137
     assert Keyword.fetch!(executor_options, :process_probe) == process_probe
 
+    runtime_executor = Keyword.fetch!(runtime_options, :executor)
+    assert runtime_executor.workspace_ref =~ ~r/^workspace:[0-9a-f]{64}$/
+    refute runtime_executor.workspace_ref == workspace
+    assert Keyword.fetch!(executor_options, :workspace_leases)["workspace"]
+    refute contains_exact?(runtime_options, workspace)
+    refute contains_exact?(executor_options, workspace)
+
     # Concept: the cleanup period reaches the session as well as the hand.
     #
     # Forwarded rather than defaulted: keys the host did not supply stay absent,
@@ -171,6 +178,161 @@ defmodule LoopexCompositionTest do
     refute Keyword.has_key?(Map.fetch!(defaults, Loopex), :cleanup_grace_ms)
     refute Keyword.has_key?(Map.fetch!(defaults, Loopex.Executor.Local), :cleanup_grace_ms)
     refute Keyword.has_key?(Map.fetch!(defaults, Loopex.Executor.Local), :process_probe)
+  end
+
+  test "required host inputs are validated before the first effect" do
+    edge_observer = :"$loopex_composition_edge_observer"
+    effect_observer = :"$loopex_composition_effect_observer"
+
+    refuse_effect = fn module, function, _arguments ->
+      flunk("#{module}.#{function} caused an effect")
+    end
+
+    Process.put(edge_observer, refuse_effect)
+    Process.put(effect_observer, refuse_effect)
+
+    try do
+      assert {:error, :host_policy_required} =
+               LoopexComposition.start(
+                 runtime_id: "prevalidated",
+                 state_root: "/unused",
+                 workspace: "/unused"
+               )
+
+      assert {:error, {:invalid_composition_option, :state_root}} =
+               LoopexComposition.start(
+                 runtime_id: "prevalidated",
+                 workspace: "/unused",
+                 policy: Embedder
+               )
+
+      assert {:error, {:invalid_composition_option, :workspace}} =
+               LoopexComposition.start(
+                 runtime_id: "prevalidated",
+                 state_root: "/unused",
+                 policy: Embedder
+               )
+
+      assert {:error, {:invalid_composition_option, :runtime_id}} =
+               LoopexComposition.start(
+                 state_root: "/unused",
+                 workspace: "/unused",
+                 policy: Embedder
+               )
+    after
+      Process.delete(edge_observer)
+      Process.delete(effect_observer)
+    end
+  end
+
+  test "a later error raise or exit cleans every process acquired before it" do
+    cases = [
+      {Loopex.Executor.Local.WorkspaceLease, :error},
+      {Loopex.Executor.Local, :raise},
+      {Loopex, :exit}
+    ]
+
+    for {failed_module, failure} <- cases do
+      {state_root, workspace} = roots()
+
+      {captured, stopped} =
+        capture_start_failure(state_root, workspace, failed_module, failure)
+
+      expected =
+        Enum.take(
+          [Loopex.Store.Local, Loopex.Executor.Local.WorkspaceLease, Loopex.Executor.Local],
+          length(captured)
+        )
+
+      assert Enum.map(captured, &elem(&1, 0)) == expected
+      assert stopped == Enum.reverse(expected)
+      for {_module, pid} <- captured, do: refute(Process.alive?(pid))
+    end
+  end
+
+  test "stopping the runtime releases the composition owner and every private process" do
+    {state_root, workspace} = roots()
+    test = self()
+    marker = make_ref()
+    observer = :"$loopex_composition_edge_observer"
+
+    Process.put(observer, fn module, function, arguments ->
+      result = apply(module, function, arguments)
+      send(test, {marker, self(), module, result})
+      result
+    end)
+
+    try do
+      assert {:ok, runtime} =
+               LoopexComposition.start(
+                 runtime_id: "owned-stack",
+                 state_root: state_root,
+                 workspace: workspace,
+                 policy: Embedder
+               )
+
+      acquired =
+        for _ <- 1..4 do
+          assert_receive {^marker, owner, module, result}
+          {owner, module, result}
+        end
+
+      [owner] = acquired |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+      owner_monitor = Process.monitor(owner)
+
+      assert :ok = Loopex.stop(runtime)
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 2_000
+      refute Loopex.Runtime.alive?(runtime)
+
+      for {_owner, module, {:ok, pid}} <- acquired, module != Loopex do
+        refute Process.alive?(pid)
+      end
+    after
+      Process.delete(observer)
+    end
+  end
+
+  test "abnormal runtime death releases the composition owner and every private process" do
+    {state_root, workspace} = roots()
+    test = self()
+    marker = make_ref()
+    observer = :"$loopex_composition_edge_observer"
+
+    Process.put(observer, fn module, function, arguments ->
+      result = apply(module, function, arguments)
+      send(test, {marker, self(), module, result})
+      result
+    end)
+
+    try do
+      assert {:ok, runtime} =
+               LoopexComposition.start(
+                 runtime_id: "abnormal-owned-stack",
+                 state_root: state_root,
+                 workspace: workspace,
+                 policy: Embedder
+               )
+
+      acquired =
+        for _ <- 1..4 do
+          assert_receive {^marker, owner, module, result}
+          {owner, module, result}
+        end
+
+      [owner] = acquired |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+      owner_monitor = Process.monitor(owner)
+
+      Process.exit(runtime.supervisor, :kill)
+
+      assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}, 2_000
+      refute Loopex.Runtime.alive?(runtime)
+
+      for {_owner, module, {:ok, pid}} <- acquired, module != Loopex do
+        refute Process.alive?(pid)
+      end
+    after
+      Process.delete(observer)
+    end
   end
 
   test "the shipped composition requires a host supplied policy and ships no permissive default" do
@@ -269,11 +431,14 @@ defmodule LoopexCompositionTest do
 
   defp capture_edges(options) do
     marker = make_ref()
+    test = self()
 
     Process.put(:"$loopex_composition_edge_observer", fn module,
                                                          function,
                                                          [edge_options] = args ->
-      send(self(), {marker, module, edge_options})
+      if module in [Loopex, Loopex.Executor.Local],
+        do: send(test, {marker, module, edge_options})
+
       apply(module, function, args)
     end)
 
@@ -290,6 +455,77 @@ defmodule LoopexCompositionTest do
       end
     after
       Process.delete(:"$loopex_composition_edge_observer")
+    end
+  end
+
+  defp capture_start_failure(state_root, workspace, failed_module, failure) do
+    test = self()
+    marker = make_ref()
+    observer = :"$loopex_composition_edge_observer"
+    effect_observer = :"$loopex_composition_effect_observer"
+
+    Process.put(observer, fn module, function, arguments ->
+      if module == failed_module do
+        case failure do
+          :error -> {:error, :injected_failure}
+          :raise -> raise "injected failure"
+          :exit -> exit(:injected_failure)
+        end
+      else
+        {:ok, pid} = result = apply(module, function, arguments)
+        send(test, {marker, module, pid})
+        result
+      end
+    end)
+
+    Process.put(effect_observer, fn module, function, arguments ->
+      result = apply(module, function, arguments)
+
+      if module == Process and function == :exit do
+        [pid, :shutdown] = arguments
+        send(test, {marker, :stopped, pid})
+      end
+
+      result
+    end)
+
+    try do
+      assert {:error, _reason} =
+               LoopexComposition.start(
+                 runtime_id: "failure-#{failure}",
+                 state_root: state_root,
+                 workspace: workspace,
+                 policy: Embedder
+               )
+
+      count =
+        Enum.find_index(
+          [
+            Loopex.Store.Local,
+            Loopex.Executor.Local.WorkspaceLease,
+            Loopex.Executor.Local,
+            Loopex
+          ],
+          &(&1 == failed_module)
+        )
+
+      acquired =
+        for _ <- 1..count do
+          assert_receive {^marker, module, pid}
+          {module, pid}
+        end
+
+      stopped =
+        for _ <- 1..count do
+          assert_receive {^marker, :stopped, pid}
+          {module, ^pid} = Enum.find(acquired, &(elem(&1, 1) == pid))
+          module
+        end
+
+      {acquired, stopped}
+    after
+      Process.delete(observer)
+      Process.delete(effect_observer)
     end
   end
 
@@ -310,4 +546,22 @@ defmodule LoopexCompositionTest do
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == "" or String.starts_with?(&1, "#")))
   end
+
+  defp contains_exact?(term, target) when term == target, do: true
+
+  defp contains_exact?(term, target) when is_map(term),
+    do:
+      term
+      |> Map.to_list()
+      |> Enum.any?(fn {key, value} ->
+        contains_exact?(key, target) or contains_exact?(value, target)
+      end)
+
+  defp contains_exact?(term, target) when is_list(term),
+    do: Enum.any?(term, &contains_exact?(&1, target))
+
+  defp contains_exact?(term, target) when is_tuple(term),
+    do: term |> Tuple.to_list() |> contains_exact?(target)
+
+  defp contains_exact?(_term, _target), do: false
 end
