@@ -208,7 +208,10 @@ defmodule Loopex.AgentLoopProgressExecutor do
         finish: fn -> :ok end,
         credential: "sk-not-a-real-secret"
       }),
-      %{chunk(job, 1, String.duplicate("x", 70_000)) | stream: "stdout"}
+      %{chunk(job, 1, "warning") | stream: "stderr"},
+      %{chunk(job, 2, "half way") | stream: "progress"},
+      %{chunk(job, 3, "not a declared stream") | stream: "telemetry"},
+      %{chunk(job, 4, String.duplicate("x", 70_000)) | stream: "stdout"}
     ]
   end
 
@@ -1923,7 +1926,9 @@ defmodule Loopex.AgentLoopTest do
       |> Enum.filter(&(&1.payload[:kind] == "executor_progress_refused"))
 
     assert [%{payload: quiet_payload}] = quiet_refusals
-    assert quiet_payload["refused_count"] == 1, "the oversized chunk was not counted"
+
+    assert quiet_payload["refused_count"] == 2,
+           "the unknown stream and oversized chunk were not both counted"
   end
 
   test "a validated executor event carries only its bounded named payload across" do
@@ -1931,16 +1936,28 @@ defmodule Loopex.AgentLoopTest do
     # executor put beside the named payload crosses, because the projection is
     # built here rather than merged from what arrived. The second event is
     # refused outright for exceeding the declared chunk ceiling.
-    _fixture = start_with_progress(:hostile_payload)
+    fixture = start_with_progress(:hostile_payload)
 
-    assert [item] = tool_progress_items()
-    assert item.progress_sequence == 0
-    assert item.chunk == "ok"
+    items = tool_progress_items()
+    assert Enum.map(items, & &1.progress_sequence) == [0, 1, 2]
+    assert Enum.map(items, & &1.stream) == ["stdout", "stderr", "progress"]
 
-    refute Map.has_key?(item, :owner)
-    refute Map.has_key?(item, :finish)
-    refute Map.has_key?(item, :credential)
-    assert is_binary(LoopexProtocol.Canonical.encode(item))
+    [first | _rest] = items
+    assert first.chunk == "ok"
+
+    for item <- items do
+      refute Map.has_key?(item, :owner)
+      refute Map.has_key?(item, :finish)
+      refute Map.has_key?(item, :credential)
+      assert is_binary(LoopexProtocol.Canonical.encode(item))
+    end
+
+    assert [%{payload: refusal}] =
+             fixture
+             |> Fixture.records(fixture.session_id)
+             |> Enum.filter(&(&1.payload[:kind] == "executor_progress_refused"))
+
+    assert refusal["refused_count"] == 2
   end
 
   test "the first delta of a model attempt is sequence zero" do

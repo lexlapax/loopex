@@ -27,7 +27,7 @@ defmodule Loopex.Runtime.ExecutorStream do
   alias Loopex.StreamDomain
 
   @max_progress_chunk_bytes 65_536
-  @progress_streams ["stdout", "stderr"]
+  @progress_streams ["stdout", "stderr", "progress"]
 
   @typedoc """
   ## Concept
