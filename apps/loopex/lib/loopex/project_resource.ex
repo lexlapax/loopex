@@ -53,6 +53,8 @@ defmodule Loopex.ProjectResource do
   @permitted_labels ["AGENTS.md"]
   @per_resource_bytes 64 * 1024
   @class_total_bytes 64 * 1024
+  @max_host_label_bytes 1_024
+  @unsafe_host_label_codepoints ~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u
   @decision_keys [
     :decision_source,
     :expires_at,
@@ -144,11 +146,13 @@ defmodule Loopex.ProjectResource do
   and `contained: true`.
   """
   @spec digest(term()) :: {:ok, binary(), [map()]} | {:error, atom(), map()}
-  def digest(%{entries: entries, workspace: %{workspace_ref: workspace_ref} = workspace})
-      when is_list(entries) and is_binary(workspace_ref) do
-    with :ok <- validate_entries(entries),
+  def digest(%{entries: entries, workspace: workspace})
+      when is_list(entries) and is_map(workspace) and not is_struct(workspace) do
+    with :ok <- validate_workspace(workspace),
+         :ok <- validate_entries(entries),
          :ok <- validate_sizes(entries) do
       ordered = Enum.sort_by(entries, & &1.label)
+      workspace_ref = Map.fetch!(workspace, :workspace_ref)
 
       manifest = %{
         "entries" =>
@@ -216,29 +220,35 @@ defmodule Loopex.ProjectResource do
       {:ok, manifest_digest, ordered} ->
         workspace_ref = manifest.workspace.workspace_ref
 
-        case decision do
-          %{
-            manifest_digest: ^manifest_digest,
-            workspace_ref: ^workspace_ref,
-            trust_scope: "project_resource"
-          } = admitted ->
-            admit(admitted, manifest_digest, ordered)
-
-          %{manifest_digest: other} when is_binary(other) ->
-            {:declined, :binding_changed, %{"expected" => manifest_digest, "decision" => other}}
-
-          supplied when is_map(supplied) ->
-            {:declined, :binding_changed, %{"reason" => "decision binding is incomplete"}}
-
-          _absent ->
-            {:declined, :no_decision, %{"manifest_digest" => manifest_digest}}
-        end
+        resolve_decision(decision, manifest_digest, workspace_ref, ordered)
     end
   end
 
+  defp resolve_decision(nil, manifest_digest, _workspace_ref, _ordered),
+    do: {:declined, :no_decision, %{"manifest_digest" => manifest_digest}}
+
+  defp resolve_decision(decision, manifest_digest, workspace_ref, ordered)
+       when is_map(decision) and not is_struct(decision) do
+    with :ok <- validate_decision(decision) do
+      case decision do
+        %{
+          manifest_digest: ^manifest_digest,
+          workspace_ref: ^workspace_ref,
+          trust_scope: "project_resource"
+        } = admitted ->
+          admit(admitted, manifest_digest, ordered)
+
+        %{manifest_digest: other} ->
+          {:declined, :binding_changed, %{"expected" => manifest_digest, "decision" => other}}
+      end
+    end
+  end
+
+  defp resolve_decision(_invalid, _manifest_digest, _workspace_ref, _ordered),
+    do: {:declined, :binding_changed, %{"reason" => "decision record is invalid"}}
+
   defp admit(admitted, manifest_digest, ordered) do
-    with :ok <- validate_decision(admitted),
-         :ok <- check_revocation(Map.fetch!(admitted, :revocation_state)),
+    with :ok <- check_revocation(Map.fetch!(admitted, :revocation_state)),
          :ok <- check_expiry(Map.get(admitted, :expires_at)) do
       {:staged, Enum.map(ordered, &block/1),
        %{
@@ -254,7 +264,11 @@ defmodule Loopex.ProjectResource do
 
   defp validate_decision(decision) do
     with true <- Enum.sort(Map.keys(decision)) == @decision_keys,
+         true <- valid_digest?(Map.fetch!(decision, :manifest_digest)),
+         true <- valid_host_label?(Map.fetch!(decision, :workspace_ref)),
+         true <- Map.fetch!(decision, :trust_scope) == "project_resource",
          true <- Map.fetch!(decision, :decision_source) in @decision_sources,
+         true <- valid_instant_label?(Map.fetch!(decision, :issued_at)),
          {:ok, _instant, _offset} <- DateTime.from_iso8601(Map.fetch!(decision, :issued_at)) do
       :ok
     else
@@ -265,8 +279,47 @@ defmodule Loopex.ProjectResource do
     _invalid -> {:declined, :binding_changed, %{"reason" => "decision record is invalid"}}
   end
 
+  defp validate_workspace(workspace) do
+    valid =
+      Enum.sort(Map.keys(workspace)) == [:repository_origin, :revision, :workspace_ref] and
+        valid_host_label?(Map.get(workspace, :workspace_ref)) and
+        valid_optional_host_label?(Map.get(workspace, :repository_origin)) and
+        valid_optional_host_label?(Map.get(workspace, :revision))
+
+    if valid,
+      do: :ok,
+      else: {:error, :manifest_rejected, %{"reason" => "workspace is not bounded plain data"}}
+  end
+
+  defp valid_digest?(value) when is_binary(value),
+    do: String.match?(value, ~r/^[0-9a-f]{64}$/)
+
+  defp valid_digest?(_value), do: false
+
+  defp valid_instant_label?(value), do: valid_host_label?(value, 64)
+
+  defp valid_optional_host_label?(nil), do: true
+  defp valid_optional_host_label?(value), do: valid_host_label?(value)
+
+  defp valid_host_label?(value, ceiling \\ @max_host_label_bytes)
+
+  defp valid_host_label?(value, ceiling) when is_binary(value) do
+    byte_size(value) in 1..ceiling and String.valid?(value) and
+      not Regex.match?(@unsafe_host_label_codepoints, value)
+  end
+
+  defp valid_host_label?(_value, _ceiling), do: false
+
   defp check_revocation("active"), do: :ok
-  defp check_revocation(state), do: {:declined, :decision_revoked, %{"state" => inspect(state)}}
+
+  defp check_revocation(state) when is_binary(state) do
+    if valid_host_label?(state, 64),
+      do: {:declined, :decision_revoked, %{"state" => state}},
+      else: {:declined, :decision_revoked, %{"reason" => "invalid revocation state"}}
+  end
+
+  defp check_revocation(_state),
+    do: {:declined, :decision_revoked, %{"reason" => "invalid revocation state"}}
 
   # Technical depth: an unparseable or non-string expiry declines rather than
   # being ignored. A host that wrote something here meant to bound the decision,
@@ -275,21 +328,25 @@ defmodule Loopex.ProjectResource do
   defp check_expiry(nil), do: :ok
 
   defp check_expiry(expires_at) when is_binary(expires_at) do
-    case DateTime.from_iso8601(expires_at) do
-      {:ok, instant, _offset} ->
-        if DateTime.compare(instant, DateTime.utc_now()) == :gt do
-          :ok
-        else
-          {:declined, :decision_expired, %{"expires_at" => expires_at}}
-        end
+    if valid_instant_label?(expires_at) do
+      case DateTime.from_iso8601(expires_at) do
+        {:ok, instant, _offset} ->
+          if DateTime.compare(instant, DateTime.utc_now()) == :gt do
+            :ok
+          else
+            {:declined, :decision_expired, %{"expires_at" => expires_at}}
+          end
 
-      {:error, _reason} ->
-        {:declined, :decision_expired, %{"expires_at" => expires_at, "reason" => "unparseable"}}
+        {:error, _reason} ->
+          {:declined, :decision_expired, %{"expires_at" => expires_at, "reason" => "unparseable"}}
+      end
+    else
+      {:declined, :decision_expired, %{"reason" => "invalid expiry"}}
     end
   end
 
-  defp check_expiry(other),
-    do: {:declined, :decision_expired, %{"expires_at" => inspect(other)}}
+  defp check_expiry(_other),
+    do: {:declined, :decision_expired, %{"reason" => "invalid expiry"}}
 
   @doc """
   ## Concept

@@ -151,7 +151,7 @@ defmodule Loopex.ProjectResourceTrustTest do
     })
   end
 
-  test "discovery resolves a canonical ordered resource set under declared path size and total limits" do
+  test "discovery resolves one canonical resource under declared path and size limits and retains the future shape total" do
     # Exactly one label is considered, and it is not derived from content.
     assert ProjectResource.permitted_labels() == ["AGENTS.md"]
     assert %{per_resource_bytes: 65_536, class_total_bytes: 65_536} = ProjectResource.limits()
@@ -299,6 +299,61 @@ defmodule Loopex.ProjectResourceTrustTest do
                given,
                Map.put(decision, :decision_source, "terminal_prompt")
              )
+  end
+
+  test "project manifest and trust labels are closed bounded safe text before retention" do
+    assert {:error, :manifest_rejected, %{"reason" => "workspace is not bounded plain data"}} =
+             ProjectResource.digest(
+               manifest(%{workspace: Map.put(manifest().workspace, :resolved_path, "/workspace")})
+             )
+
+    Enum.each(
+      [
+        %{workspace_ref: String.duplicate("w", 1_025)},
+        %{workspace_ref: <<255>>},
+        %{repository_origin: "git@example.invalid/project\nforged"},
+        %{revision: String.duplicate("r", 1_025)}
+      ],
+      fn override ->
+        workspace = Map.merge(manifest().workspace, override)
+
+        assert {:error, :manifest_rejected, %{"reason" => "workspace is not bounded plain data"}} =
+                 ProjectResource.digest(manifest(%{workspace: workspace}))
+      end
+    )
+
+    given = manifest()
+    decision = decision_for(given)
+    hostile = String.duplicate("x", 70_000)
+
+    Enum.each(
+      [
+        Map.put(decision, :manifest_digest, hostile),
+        Map.put(decision, :workspace_ref, hostile),
+        Map.put(decision, :decision_source, hostile),
+        Map.put(decision, :issued_at, hostile),
+        Map.put(decision, :extra, "not admitted")
+      ],
+      fn invalid ->
+        assert {:declined, :binding_changed, %{"reason" => "decision record is invalid"}} =
+                 ProjectResource.resolve(given, invalid)
+      end
+    )
+
+    refute inspect(ProjectResource.resolve(given, Map.put(decision, :manifest_digest, hostile))) =~
+             hostile
+
+    assert {:declined, :decision_expired, %{"reason" => "invalid expiry"}} =
+             ProjectResource.resolve(given, Map.put(decision, :expires_at, hostile))
+
+    assert {:declined, :decision_revoked, %{"reason" => "invalid revocation state"}} =
+             ProjectResource.resolve(given, Map.put(decision, :revocation_state, hostile))
+
+    refute inspect(ProjectResource.resolve(given, Map.put(decision, :expires_at, hostile))) =~
+             hostile
+
+    refute inspect(ProjectResource.resolve(given, Map.put(decision, :revocation_state, hostile))) =~
+             hostile
   end
 
   test "the retained context receipt covers system project lineage steer and tools in final request order" do
