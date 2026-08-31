@@ -6382,6 +6382,40 @@ defmodule Loopex.AgentLoopTest do
     send(worker, :release)
   end
 
+  test "an atom valued executor receipt is normalized before bounded projection" do
+    # Concept: the shipped executor's native receipt is accepted by the runtime,
+    # not only the string-valued receipts convenient test doubles tend to build.
+    #
+    # Technical depth: Store plain-data validation rejects arbitrary atom values,
+    # while the local executor returns the declared outcome atom `:completed`.
+    # Validation used to run before that one contract value was normalized, so a
+    # real completed tool became outcome_unknown while a string fixture passed.
+    # Replacing the outcome normalization with the old validation order makes
+    # this case fail at both the tool and run terminals.
+    fixture =
+      start_with_executor(
+        AgentLoopAnsweringExecutor,
+        AgentLoopAnsweringExecutor.start(%{}),
+        one_call_script(),
+        receipt_extras: %{outcome: :completed}
+      )
+
+    events = drain(fixture.attachment)
+    tool = Enum.find(events, &(&1.kind == "tool.finished"))
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+
+    assert tool["outcome"] == "completed"
+    assert finished["outcome"] == "completed"
+
+    receipt =
+      fixture
+      |> Fixture.records(fixture.session_id)
+      |> Enum.find(&(&1.payload[:kind] == "executor_receipt_committed"))
+      |> get_in([:payload, "receipt"])
+
+    assert receipt["outcome"] == "completed"
+  end
+
   test "a complete model stream closes on its reply's own delta count" do
     # Concept: ADR 0011 assigns a complete closure the producer's own statement,
     # and the executor side of that table is proved by

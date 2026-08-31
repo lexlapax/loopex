@@ -77,6 +77,14 @@ defmodule Loopex.Runtime.SessionState do
     :effective_deadline_ms,
     :run_deadline_ms
   ]
+  @receipt_outcomes [
+    :completed,
+    :failed,
+    :denied,
+    :cancelled,
+    :outcome_unknown,
+    :cancelled_workspace_lease_lost
+  ]
   @receipt_job_identity_fields [
     :protocol_version,
     :job_id,
@@ -2330,21 +2338,24 @@ defmodule Loopex.Runtime.SessionState do
   # Concept: only the bounded declared receipt crosses the journal
   # boundary; an executor's private terms and credentials do not hitchhike.
   #
-  # Technical depth: validate the complete candidate against the Store's real
-  # private-record ceilings before traversing it, normalize atom/binary keys
-  # without collisions, then project only the declared receipt fields. The
-  # projected receipt is checked against the committed job before the record is
-  # built. A malformed or unsupported term therefore becomes an invalid receipt
-  # that the coordinator reports unproven instead of an exception that kills the
-  # owner. The rescue covers malformed list tails and other terms a host adapter
-  # can return despite the callback's map boundary.
+  # Technical depth: normalize the one atom value the executor contract admits,
+  # then normalize atom/binary keys without collisions and validate the complete
+  # candidate against the Store's real private-record ceilings before projecting
+  # only the declared receipt fields. Validation used to run first, even though
+  # the shipped executor returns `outcome` as an atom; every real local receipt
+  # was therefore rejected as non-plain while string-valued test doubles passed.
+  # The projected receipt is checked against the committed job before the record
+  # is built. A malformed or unsupported term therefore becomes an invalid
+  # receipt that the coordinator reports unproven instead of an exception that
+  # kills the owner. The rescue covers malformed list tails and other terms a
+  # host adapter can return despite the callback's map boundary.
   defp canonical_executor_receipt(receipt, job) do
-    with :ok <-
+    with {:ok, encoded} <- encode_executor_receipt(receipt),
+         :ok <-
            Store.validate_private_record(%{
-             "receipt" => receipt,
+             "receipt" => encoded,
              kind: "executor_receipt_candidate"
            }),
-         {:ok, encoded} <- encode_plain_unique(receipt),
          projected <-
            Map.take(
              encoded,
@@ -2361,6 +2372,29 @@ defmodule Loopex.Runtime.SessionState do
   catch
     _kind, _reason -> {:error, :invalid_executor_receipt}
   end
+
+  defp encode_executor_receipt(receipt) do
+    case {Map.fetch(receipt, :outcome), Map.fetch(receipt, "outcome")} do
+      {{:ok, outcome}, :error} ->
+        with {:ok, outcome} <- normalize_executor_outcome(outcome) do
+          receipt |> Map.put(:outcome, outcome) |> encode_plain_unique()
+        end
+
+      {:error, {:ok, outcome}} ->
+        with {:ok, outcome} <- normalize_executor_outcome(outcome) do
+          receipt |> Map.put("outcome", outcome) |> encode_plain_unique()
+        end
+
+      _missing_or_ambiguous ->
+        {:error, :invalid_plain_record}
+    end
+  end
+
+  defp normalize_executor_outcome(outcome) when outcome in @receipt_outcomes,
+    do: {:ok, Atom.to_string(outcome)}
+
+  defp normalize_executor_outcome(outcome) when is_binary(outcome), do: {:ok, outcome}
+  defp normalize_executor_outcome(_outcome), do: {:error, :invalid_plain_record}
 
   # Concept: a spilled artifact crosses this boundary as plain bounded data.
   #
