@@ -58,8 +58,8 @@ defmodule Loopex.Runtime.ExecutorStream do
 
   The relay owns emission order and carries each validated executor-supplied
   sequence unchanged. The atomic counters record refused events by their first
-  failed binding; the tool-call identifier is retained for the private refusal
-  record written when the stream closes.
+  failed binding until the stream closes; the tool-call identifier names the
+  bounded diagnostic emitted for that attempt. Neither becomes durable state.
   """
   @opaque t :: %{
             required(:domain) => StreamDomain.id(),
@@ -73,9 +73,17 @@ defmodule Loopex.Runtime.ExecutorStream do
   @type publish :: (StreamRelay.t(), term() -> :ok | {:error, term()})
 
   @doc false
-  @spec open(Supervisor.supervisor(), pid() | nil, Executor.job_request(), publish()) ::
+  @spec open(
+          Supervisor.supervisor(),
+          pid() | nil,
+          Executor.job_request(),
+          non_neg_integer(),
+          publish()
+        ) ::
           {:ok, t(), Executor.progress_fun()} | {:error, term()}
-  def open(supervisor, sink, job, publish) when is_map(job) and is_function(publish, 2) do
+  def open(supervisor, sink, job, base_event_sequence, publish)
+      when is_map(job) and is_integer(base_event_sequence) and base_event_sequence >= 0 and
+             is_function(publish, 2) do
     domain = StreamDomain.for_job(job)
     turn_id = job.turn_id
     tool_call_id = job.tool_call_id
@@ -98,7 +106,8 @@ defmodule Loopex.Runtime.ExecutorStream do
                       kind: :tool_progress,
                       turn_id: turn_id,
                       tool_call_id: tool_call_id,
-                      stream_domain_id: domain
+                      stream_domain_id: domain,
+                      base_event_sequence: base_event_sequence
                     }), next_validation}
 
                  {:refused, binding, next_validation} ->
@@ -107,7 +116,14 @@ defmodule Loopex.Runtime.ExecutorStream do
                end
              end,
              fn disposition, count ->
-               StreamDomain.tool_closed(turn_id, domain, tool_call_id, 0, disposition, count)
+               StreamDomain.tool_closed(
+                 turn_id,
+                 domain,
+                 tool_call_id,
+                 base_event_sequence,
+                 disposition,
+                 count
+               )
              end
            ) do
       stream = %{

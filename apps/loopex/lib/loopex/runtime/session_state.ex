@@ -17,25 +17,6 @@ defmodule Loopex.Runtime.SessionState do
   """
 
   @max_command_bytes 65_536
-  @progress_refusal_bindings ~w(
-    protocol_version
-    job_id
-    tool_call_id
-    operation_id
-    attempt
-    session_id
-    run_id
-    turn_id
-    canonical_request_digest
-    session_epoch_at_dispatch
-    executor_epoch
-    executor_identity
-    fencing_token
-    progress_sequence
-    stream
-    byte_offset
-    chunk
-  )
 
   @typedoc """
   ## Concept
@@ -650,64 +631,6 @@ defmodule Loopex.Runtime.SessionState do
   @doc """
   ## Concept
 
-  Records how many progress events an executor emitted that this session had no
-  standing to accept, grouped by the binding each event failed.
-
-  ## Technical depth
-
-  A refused event is dropped: nothing about it is projected, published, or
-  allowed to affect an outcome, a bound, or a receipt. But an executor emitting
-  events it cannot identify is a fact about that attempt, and a count with no
-  failed-binding name cannot say which contract the executor violated. Evidence
-  that lives only in the coordinator's memory also disappears with the
-  coordinator -- so a reviewer reading the journal afterwards cannot tell a
-  well-behaved attempt from one that was refused a thousand times.
-
-  The count and binding groups are this coordinator's own tally and never values
-  the executor reported. They ride their own record rather than the receipt,
-  because the receipt's bytes are covered by the canonical mutation digest its
-  transaction is fenced on: a count that could differ between two computations
-  of the same proposal would make a `commit_unknown` retry unresolvable. This
-  record is proposed once, at stream close, when no further event can arrive.
-
-  Zero is not recorded. An attempt that emitted nothing refusable is the
-  ordinary case and needs no row to say so.
-  """
-  @spec propose_progress_refusals(
-          t(),
-          binary(),
-          binary(),
-          pos_integer(),
-          %{required(binary()) => pos_integer()}
-        ) ::
-          {:ok, proposal()} | {:error, term()}
-  def propose_progress_refusals(
-        %__MODULE__{} = state,
-        run_id,
-        tool_call_id,
-        count,
-        bindings
-      )
-      when is_binary(run_id) and is_binary(tool_call_id) and is_integer(count) and count > 0 and
-             is_map(bindings) do
-    if valid_refusal_bindings?(bindings, count) do
-      record = %{
-        "run_id" => run_id,
-        "tool_call_id" => tool_call_id,
-        "refused_count" => count,
-        "refused_bindings" => bindings,
-        kind: "executor_progress_refused"
-      }
-
-      internal_proposal(state, stable_id("progress-refusals", run_id, tool_call_id), record)
-    else
-      {:error, :invalid_progress_refusals}
-    end
-  end
-
-  @doc """
-  ## Concept
-
   Commits a terminal fact for a tool call that never produced a receipt.
 
   ## Technical depth
@@ -782,6 +705,48 @@ defmodule Loopex.Runtime.SessionState do
 
       _absent ->
         {:error, :no_attempt_pending}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Retains the answer a model attempt produced after stopping that attempt had
+  already won the journal order.
+
+  ## Technical depth
+
+  The record is attempt evidence only. It changes no conversation, public event,
+  bound, or terminal outcome. A reply is validated against the exact staged
+  request still held by the dispatched attempt before its plain bytes are
+  retained; an unreadable or failed answer retains only one bounded failure
+  reason. The following `model_attempt_abandoned` transition remains the one
+  that charges the attempt and advances its identity.
+  """
+  @spec propose_model_attempt_evidence(t(), binary(), :abort | :deadline, term()) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_model_attempt_evidence(%__MODULE__{} = state, run_id, termination, result)
+      when is_binary(run_id) and termination in [:abort, :deadline] do
+    with %{stage: "model_dispatched"} = work <- Map.get(state.pending_work, run_id),
+         attempt = Map.get(work, :model_attempt, 1),
+         {:ok, evidence} <- encode_model_attempt_evidence(result, work.request) do
+      record = %{
+        "run_id" => run_id,
+        "attempt" => attempt,
+        "termination" => Atom.to_string(termination),
+        "evidence" => evidence,
+        kind: "model_attempt_evidence_retained"
+      }
+
+      internal_proposal(
+        state,
+        stable_id("model-attempt-evidence", run_id, attempt),
+        record
+      )
+    else
+      nil -> {:error, :no_attempt_pending}
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :invalid_model_attempt_evidence}
     end
   end
 
@@ -1083,10 +1048,10 @@ defmodule Loopex.Runtime.SessionState do
        when kind in [
               "model_request_committed",
               "model_result_committed",
+              "model_attempt_evidence_retained",
               "model_attempt_abandoned",
               "effect_intent_committed",
               "executor_receipt_committed",
-              "executor_progress_refused",
               "outcome_unknown_committed",
               "run_terminal_committed",
               "tool_result_committed"
@@ -1295,23 +1260,6 @@ defmodule Loopex.Runtime.SessionState do
       next = %{next | expected_events: state.expected_events ++ events}
       {:ok, proposal(tx_id, record, events, next, {:accepted, tx_id})}
     end
-  end
-
-  # Technical depth: a refusal count changes no stage, no bound, and no pending
-  # work. It is retained and nothing follows from it, which is the whole point:
-  # a refused event must not be able to affect the run it was refused from.
-  defp apply_internal_record(state, %{
-         "run_id" => run_id,
-         "tool_call_id" => tool_call_id,
-         "refused_count" => count,
-         "refused_bindings" => bindings,
-         kind: "executor_progress_refused"
-       })
-       when is_binary(run_id) and is_binary(tool_call_id) and is_integer(count) and count > 0 and
-              is_map(bindings) do
-    if valid_refusal_bindings?(bindings, count),
-      do: {:ok, state, []},
-      else: {:error, :invalid_progress_refusals}
   end
 
   defp apply_internal_record(state, %{
@@ -1575,6 +1523,24 @@ defmodule Loopex.Runtime.SessionState do
 
   defp apply_internal_record(state, %{
          "run_id" => run_id,
+         "attempt" => attempt,
+         "termination" => termination,
+         "evidence" => evidence,
+         kind: "model_attempt_evidence_retained"
+       }) do
+    with %{stage: "model_dispatched", request: request} = work <-
+           Map.get(state.pending_work, run_id),
+         true <- Map.get(work, :model_attempt, 1) == attempt,
+         true <- termination in ["abort", "deadline"],
+         :ok <- validate_model_attempt_evidence(evidence, request) do
+      {:ok, state, []}
+    else
+      _other -> {:error, :invalid_model_attempt_evidence}
+    end
+  end
+
+  defp apply_internal_record(state, %{
+         "run_id" => run_id,
          "outcome" => outcome,
          "bound" => bound,
          "observed" => observed,
@@ -1662,13 +1628,6 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp apply_internal_record(_state, _record), do: {:error, :invalid_internal_transition}
-
-  defp valid_refusal_bindings?(bindings, count) do
-    map_size(bindings) > 0 and
-      Enum.all?(bindings, fn {binding, binding_count} ->
-        binding in @progress_refusal_bindings and is_integer(binding_count) and binding_count > 0
-      end) and Enum.sum(Map.values(bindings)) == count
-  end
 
   # Concept: only the deadline and an unprovable effect may end a run that is
   # still mid-turn.
@@ -1983,6 +1942,63 @@ defmodule Loopex.Runtime.SessionState do
       {encoded_key, encode_plain(nested)}
     end)
   end
+
+  defp encode_model_attempt_evidence({:ok, reply}, request) when is_map(reply) do
+    try do
+      evidence = %{"kind" => "reply", "reply" => encode_plain(reply)}
+
+      case validate_model_attempt_evidence(evidence, request) do
+        :ok -> {:ok, evidence}
+        {:error, _reason} -> unreadable_model_attempt_evidence()
+      end
+    rescue
+      _error -> unreadable_model_attempt_evidence()
+    end
+  end
+
+  defp encode_model_attempt_evidence(result, _request) do
+    {:ok, %{"kind" => "error", "reason" => model_attempt_error_reason(result)}}
+  end
+
+  defp validate_model_attempt_evidence(
+         %{"kind" => "reply", "reply" => encoded},
+         request
+       )
+       when is_map(encoded) do
+    with {:ok, reply} <- decode_reply(encoded),
+         true <- reply.canonical_request_bytes == request.canonical_request_bytes,
+         true <- reply.staged_request_digest == request.staged_request_digest,
+         true <- is_binary(reply.text),
+         true <- is_map(reply.identity),
+         true <- is_map(reply.usage),
+         true <- is_list(reply.tool_calls) do
+      :ok
+    else
+      _other -> {:error, :invalid_model_attempt_evidence}
+    end
+  end
+
+  defp validate_model_attempt_evidence(
+         %{"kind" => "error", "reason" => reason} = evidence,
+         _request
+       )
+       when map_size(evidence) == 2 and is_binary(reason) and byte_size(reason) > 0 and
+              byte_size(reason) <= 256,
+       do: :ok
+
+  defp validate_model_attempt_evidence(_evidence, _request),
+    do: {:error, :invalid_model_attempt_evidence}
+
+  defp model_attempt_error_reason({:error, reason}) when is_atom(reason),
+    do: Atom.to_string(reason)
+
+  defp model_attempt_error_reason({:error, {reason, _detail}}) when is_atom(reason),
+    do: Atom.to_string(reason)
+
+  defp model_attempt_error_reason(_result), do: "unreadable_model_answer"
+
+  defp unreadable_model_attempt_evidence,
+    do: {:ok, %{"kind" => "error", "reason" => "unreadable_model_answer"}}
 
   defp decode_request(encoded) do
     fields = [

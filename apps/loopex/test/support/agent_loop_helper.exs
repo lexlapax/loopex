@@ -76,22 +76,28 @@ defmodule Loopex.AgentLoopTestModel do
         end
     end
 
-    case Map.get(turn, :error) do
-      nil ->
-        {:ok,
-         %{
-           text: Map.get(turn, :text, ""),
-           identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
-           usage: Map.get(turn, :usage, %{}),
-           tool_calls: Map.get(turn, :calls, []),
-           delta_count: Map.get(turn, :delta_count, length(Map.get(turn, :deltas, []))),
-           streamed: Map.get(turn, :deltas, []) != [],
-           canonical_request_bytes: request.canonical_request_bytes,
-           staged_request_digest: request.staged_request_digest
-         }}
+    case Map.fetch(turn, :raw_result) do
+      {:ok, result} ->
+        result
 
-      reason ->
-        {:error, reason}
+      :error ->
+        case Map.get(turn, :error) do
+          nil ->
+            {:ok,
+             %{
+               text: Map.get(turn, :text, ""),
+               identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
+               usage: Map.get(turn, :usage, %{}),
+               tool_calls: Map.get(turn, :calls, []),
+               delta_count: Map.get(turn, :delta_count, length(Map.get(turn, :deltas, []))),
+               streamed: Map.get(turn, :deltas, []) != [],
+               canonical_request_bytes: request.canonical_request_bytes,
+               staged_request_digest: request.staged_request_digest
+             }}
+
+          reason ->
+            {:error, reason}
+        end
     end
   end
 end

@@ -162,9 +162,10 @@ defmodule Loopex.Executor do
   ## Technical depth
 
   An ordinary in-VM function reference in the trailing argument position. That
-  one parameter is the whole executor-boundary change; an executor that emits
-  nothing stays conformant, returns the same receipt, and reports a
-  `progress_count` of zero rather than a sentinel or an absent field.
+  one parameter is the whole streaming change to `execute`; ADR 0012 separately
+  requires `cancel/2`. An executor that emits nothing stays conformant, returns
+  the same receipt, and reports a `progress_count` of zero rather than a sentinel
+  or an absent field.
   """
   @type progress_fun :: (progress_event() -> :ok)
 

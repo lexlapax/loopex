@@ -696,12 +696,14 @@ defmodule Loopex.AgentLoopTest do
   # Technical depth: composed through the public `Loopex.start_link` rather than
   # by changing the shared helper, so the executor-progress cases get the events
   # they need without altering what every other case runs against.
-  defp start_with_progress(mode) do
-    model_pid =
-      AgentLoopTestModel.start([
-        %{text: "run it", calls: [call("c1")]},
-        %{text: "done", calls: []}
-      ])
+  defp start_with_progress(
+         mode,
+         script \\ [
+           %{text: "run it", calls: [call("c1")]},
+           %{text: "done", calls: []}
+         ]
+       ) do
+    model_pid = AgentLoopTestModel.start(script)
 
     executor_pid = AgentLoopProgressExecutor.start(mode)
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop-progress")
@@ -755,8 +757,15 @@ defmodule Loopex.AgentLoopTest do
     {:accepted, "prompt-1"} =
       Loopex.command(attachment, %{type: :prompt, command_id: "prompt-1", content: "go"})
 
-    _events = drain(attachment)
-    %{runtime: runtime, executor: executor_pid, store: store_pid, session_id: session_id}
+    events = drain(attachment)
+
+    %{
+      runtime: runtime,
+      executor: executor_pid,
+      store: store_pid,
+      session_id: session_id,
+      events: events
+    }
   end
 
   defp await_dispatch_count(fixture, wanted, attempts \\ 300) do
@@ -807,6 +816,50 @@ defmodule Loopex.AgentLoopTest do
       nil ->
         false
     end
+  end
+
+  defp admit_abort_before_queued_model_result(fixture, attachment, model, command_id) do
+    coordinator = coordinator_of(fixture.runtime)
+
+    [{reference, {:model, run_id, _worker}}] =
+      coordinator
+      |> :sys.get_state()
+      |> Map.fetch!(:in_flight)
+      |> Map.to_list()
+
+    :ok = :sys.suspend(coordinator)
+
+    on_exit(fn ->
+      if Process.alive?(coordinator) do
+        try do
+          :sys.resume(coordinator)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end)
+
+    abort =
+      Task.async(fn ->
+        Loopex.command(attachment, %{type: :abort, command_id: command_id})
+      end)
+
+    assert await_process_message(coordinator, fn
+             {:"$gen_call", _from, {:command, _owner, %{type: :abort}}} -> true
+             _other -> false
+           end)
+
+    send(model, :release)
+
+    assert await_process_message(coordinator, fn
+             {^reference, _result} -> true
+             _other -> false
+           end)
+
+    :ok = :sys.resume(coordinator)
+    assert {:accepted, ^command_id} = Task.await(abort, 5_000)
+
+    {run_id, drain(attachment)}
   end
 
   defp diagnostics(acc \\ []) do
@@ -1764,7 +1817,15 @@ defmodule Loopex.AgentLoopTest do
 
     fixture =
       start(
-        script: [%{text: "late reply", calls: [call("c1")], hold: parent}],
+        script: [
+          %{
+            text: "late reply",
+            calls: [call("c1")],
+            deltas: ["late ", "reply"],
+            usage: %{"input_tokens" => 17, "output_tokens" => 4},
+            hold: parent
+          }
+        ],
         diagnostics_to: parent
       )
 
@@ -1828,20 +1889,70 @@ defmodule Loopex.AgentLoopTest do
     # Whether the attempt is stopped outright or its reply arrives too late to
     # belong anywhere, the invariant is the same and is what this asserts: the
     # aborted attempt never becomes canonical history. A late reply that does
-    # arrive is retained as attempt evidence on the diagnostics plane.
-    assistants =
-      fixture
-      |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_result_committed"))
+    # arrive is a durable attempt-evidence record and the diagnostic is only its
+    # live notification.
+    records = Fixture.records(fixture, session_id)
+    assistants = Enum.filter(records, &(&1.payload[:kind] == "model_result_committed"))
 
     assert assistants == []
 
-    terminals =
-      fixture
-      |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "run_terminal_committed"))
+    assert [%{payload: evidence}] =
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_evidence_retained"))
+
+    assert evidence["run_id"] == run_id
+    assert evidence["attempt"] == 1
+    assert evidence["termination"] == "abort"
+    assert evidence["evidence"]["kind"] == "reply"
+
+    retained_reply = evidence["evidence"]["reply"]
+
+    assert Map.keys(retained_reply) |> Enum.sort() ==
+             ~w(canonical_request_bytes delta_count identity staged_request_digest streamed text tool_calls usage)
+
+    assert retained_reply["text"] == "late reply"
+
+    assert retained_reply["identity"] == %{
+             "provider" => "scripted",
+             "model" => "scripted:v1",
+             "endpoint" => "in-process"
+           }
+
+    assert retained_reply["usage"] == %{"input_tokens" => 17, "output_tokens" => 4}
+
+    assert retained_reply["tool_calls"] == [
+             %{
+               "id" => "c1",
+               "name" => "write",
+               "arguments" => %{"path" => "c1"}
+             }
+           ]
+
+    assert retained_reply["delta_count"] == 2
+    assert retained_reply["streamed"]
+
+    staged = Enum.find(records, &(&1.payload[:kind] == "model_request_committed"))
+
+    assert retained_reply["canonical_request_bytes"] ==
+             staged.payload["request"]["canonical_request_bytes"]
+
+    assert retained_reply["staged_request_digest"] ==
+             staged.payload["request"]["staged_request_digest"]
+
+    terminals = Enum.filter(records, &(&1.payload[:kind] == "run_terminal_committed"))
 
     assert Enum.map(terminals, & &1.payload["outcome"]) == ["cancelled"]
+
+    assert {:ok, recovered} =
+             Loopex.Runtime.SessionState.recover(
+               session_id,
+               records,
+               Fixture.events(fixture, session_id)
+             )
+
+    refute Enum.any?(
+             Loopex.Runtime.SessionState.elements(recovered, run_id),
+             &(&1.kind == :assistant_message)
+           )
 
     # Reply first: let the held provider reply commit, then submit the abort. The
     # completed run wins by journal order and the later command is refused rather
@@ -1857,6 +1968,225 @@ defmodule Loopex.AgentLoopTest do
 
     assert {:error, :no_active_run} =
              Loopex.command(other_attachment, %{type: :abort, command_id: "abort-too-late"})
+  end
+
+  test "a Store refusal of late model attempt evidence makes clean cancellation unprovable" do
+    parent = self()
+
+    fixture =
+      start(
+        script: [%{text: "late but unretained", calls: [], hold: parent}],
+        diagnostics_to: parent
+      )
+
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 2_000
+
+    :ok =
+      M1RuntimeTestStore.refuse_next_record(
+        fixture.store,
+        "model_attempt_evidence_retained"
+      )
+
+    coordinator = coordinator_of(fixture.runtime)
+
+    [{reference, {:model, _run_id, _worker}}] =
+      coordinator
+      |> :sys.get_state()
+      |> Map.fetch!(:in_flight)
+      |> Map.to_list()
+
+    :ok = :sys.suspend(coordinator)
+
+    on_exit(fn ->
+      if Process.alive?(coordinator) do
+        try do
+          :sys.resume(coordinator)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end)
+
+    abort =
+      Task.async(fn ->
+        Loopex.command(attachment, %{type: :abort, command_id: "abort-unretained-evidence"})
+      end)
+
+    assert await_process_message(coordinator, fn
+             {:"$gen_call", _from, {:command, _owner, %{type: :abort}}} -> true
+             _other -> false
+           end)
+
+    send(model, :release)
+
+    assert await_process_message(coordinator, fn
+             {^reference, {:ok, %{text: "late but unretained"}}} -> true
+             _other -> false
+           end)
+
+    :ok = :sys.resume(coordinator)
+    assert {:accepted, "abort-unretained-evidence"} = Task.await(abort, 5_000)
+
+    events = drain(attachment)
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "outcome_unknown"
+
+    records = Fixture.records(fixture, session_id)
+
+    refute Enum.any?(records, &(&1.payload[:kind] == "model_attempt_evidence_retained"))
+
+    assert Enum.any?(records, &(&1.payload[:kind] == "model_attempt_abandoned"))
+
+    assert [%{payload: terminal}] =
+             Enum.filter(records, &(&1.payload[:kind] == "run_terminal_committed"))
+
+    assert terminal["outcome"] == "outcome_unknown"
+  end
+
+  test "a late model error is retained as bounded attempt evidence without becoming history" do
+    parent = self()
+
+    fixture =
+      start(
+        script: [%{error: :provider_unavailable, hold: parent}],
+        diagnostics_to: parent
+      )
+
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 2_000
+
+    {run_id, events} =
+      admit_abort_before_queued_model_result(
+        fixture,
+        attachment,
+        model,
+        "abort-late-error"
+      )
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+
+    records = Fixture.records(fixture, session_id)
+
+    assert [%{payload: evidence}] =
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_evidence_retained"))
+
+    assert evidence["run_id"] == run_id
+    assert evidence["termination"] == "abort"
+
+    assert evidence["evidence"] == %{
+             "kind" => "error",
+             "reason" => "provider_unavailable"
+           }
+
+    refute Enum.any?(records, &(&1.payload[:kind] == "model_result_committed"))
+  end
+
+  test "an unreadable late model reply is retained as a bounded error instead of crashing cleanup" do
+    parent = self()
+
+    fixture =
+      start(
+        script: [
+          %{
+            hold: parent,
+            raw_result:
+              {:ok,
+               %{
+                 text: "unreadable",
+                 identity: %{owner: self()},
+                 usage: %{},
+                 tool_calls: [],
+                 canonical_request_bytes: "wrong",
+                 staged_request_digest: "wrong"
+               }}
+          }
+        ],
+        diagnostics_to: parent
+      )
+
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 2_000
+
+    {_run_id, events} =
+      admit_abort_before_queued_model_result(
+        fixture,
+        attachment,
+        model,
+        "abort-unreadable-late-reply"
+      )
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+
+    assert [%{payload: evidence}] =
+             fixture
+             |> Fixture.records(session_id)
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_evidence_retained"))
+
+    assert evidence["evidence"] == %{
+             "kind" => "error",
+             "reason" => "unreadable_model_answer"
+           }
+  end
+
+  test "a model reply queued behind its deadline is retained with the deadline termination" do
+    parent = self()
+
+    fixture =
+      start(
+        script: [%{text: "late at deadline", calls: [], hold: parent}],
+        bounds_deadline_ms: 300,
+        diagnostics_to: parent
+      )
+
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 2_000
+
+    coordinator = coordinator_of(fixture.runtime)
+    coordinator_state = :sys.get_state(coordinator)
+    run_id = coordinator_state.durable.active_run_id
+    deadline = get_in(coordinator_state.durable.pending_work, [run_id, :request, :deadline])
+
+    [{reference, {:model, ^run_id, _worker}}] = Map.to_list(coordinator_state.in_flight)
+
+    :ok = :sys.suspend(coordinator)
+
+    on_exit(fn ->
+      if Process.alive?(coordinator) do
+        try do
+          :sys.resume(coordinator)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end)
+
+    assert await_process_message(coordinator, fn
+             {:run_deadline, ^run_id, ^deadline} -> true
+             _other -> false
+           end)
+
+    send(model, :release)
+
+    assert await_process_message(coordinator, fn
+             {^reference, {:ok, %{text: "late at deadline"}}} -> true
+             _other -> false
+           end)
+
+    :ok = :sys.resume(coordinator)
+    events = drain(attachment)
+
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "bound_reached"
+    assert finished["bound"] == "deadline"
+
+    assert [%{payload: evidence}] =
+             fixture
+             |> Fixture.records(session_id)
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_evidence_retained"))
+
+    assert evidence["termination"] == "deadline"
+    assert evidence["evidence"]["kind"] == "reply"
+    assert evidence["evidence"]["reply"]["text"] == "late at deadline"
   end
 
   test "executor progress proves its whole identity before anything is projected" do
@@ -1881,6 +2211,7 @@ defmodule Loopex.AgentLoopTest do
                :turn_id,
                :tool_call_id,
                :stream_domain_id,
+               :base_event_sequence,
                :progress_sequence,
                :stream,
                :byte_offset,
@@ -1907,9 +2238,50 @@ defmodule Loopex.AgentLoopTest do
     assert Enum.all?(items, &(&1.tool_call_id == job.tool_call_id)),
            "the projection did not retain the dispatched job's tool-call identity"
 
+    tool_started = Enum.find(fixture.events, &(&1.kind == "tool.started"))
+
+    assert Enum.all?(items, &(&1.base_event_sequence == tool_started.event_sequence)),
+           "executor progress was not anchored to the public event that preceded dispatch"
+
     # Plain data: encoding it must not raise, which it does for a pid, port,
     # reference, or function anywhere inside.
     assert is_binary(LoopexProtocol.Canonical.encode(first))
+  end
+
+  test "each executor stream anchors to the current public event at its own dispatch" do
+    fixture =
+      start_with_progress(:valid, [
+        %{text: "first", calls: [call("c1")]},
+        %{text: "second", calls: [call("c2")]},
+        %{text: "done", calls: []}
+      ])
+
+    progress =
+      receive_progress()
+      |> Enum.filter(&(&1.kind in [:tool_progress, :tool_stream_closed]))
+
+    assert jobs = AgentLoopProgressExecutor.jobs(fixture.executor)
+    assert length(jobs) == 2
+
+    started =
+      fixture.events
+      |> Enum.filter(&(&1.kind == "tool.started"))
+      |> Map.new(&{&1["tool_call_id"], &1.event_sequence})
+
+    for job <- jobs do
+      domain = Loopex.StreamDomain.for_job(job)
+      items = Enum.filter(progress, &(&1.stream_domain_id == domain))
+
+      assert length(items) == 3
+
+      assert Enum.all?(
+               items,
+               &(&1.base_event_sequence == Map.fetch!(started, job.tool_call_id))
+             )
+    end
+
+    [first, second] = Enum.map(jobs, &Map.fetch!(started, &1.tool_call_id))
+    assert second > first
   end
 
   test "an executor event that names the live call but any wrong binding never reaches the operator" do
@@ -1960,37 +2332,30 @@ defmodule Loopex.AgentLoopTest do
     end
   end
 
-  test "a refused executor event is counted on the attempt's own durable record" do
-    # Concept: a count that lives only in the coordinator's memory dies with the
-    # coordinator.
+  test "a refused executor event is counted privately and never journaled" do
+    # Concept: invalid progress is observable to the current operator without
+    # becoming durable truth about the run.
     #
-    # Technical depth: the diagnostic above reaches whoever is watching the run
-    # now, and nothing else did -- so a reviewer reading the journal afterwards
-    # could not tell an attempt that behaved from one that was refused a
-    # thousand times. The obligation is that a refused event is counted on the
-    # attempt's private record, and the private record is the journal.
+    # Technical depth: ADR 0011 makes the count relay-private and says neither
+    # the refused event nor its accounting is journaled. The coordinator emits
+    # one bounded diagnostic after close, while the run, receipt and durable
+    # projection remain unchanged.
     fixture = start_with_progress(:one_valid_two_refused_one_valid)
 
-    refusals =
-      fixture
-      |> Fixture.records(fixture.session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "executor_progress_refused"))
-
-    assert [%{payload: payload}] = refusals
-    assert payload["refused_count"] == 2
-    assert payload["tool_call_id"] == "c1"
-    assert payload["refused_bindings"] == %{"attempt" => 1, "fencing_token" => 1}
+    refute fixture
+           |> Fixture.records(fixture.session_id)
+           |> Enum.any?(&(&1.payload[:kind] == "executor_progress_refused"))
 
     diagnostic = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
     assert diagnostic["refused_count"] == 2
-    assert diagnostic["refused_bindings"] == payload["refused_bindings"]
+    assert diagnostic["tool_call_id"] == "c1"
+    assert diagnostic["refused_bindings"] == %{"attempt" => 1, "fencing_token" => 1}
 
     # The two valid items crossed and the two wrong-identity items did not. An
     # event that does not belong to the live attempt cannot consume that
     # attempt's sequence or byte offset, so the valid item after both refusals is
-    # still sequence one at stdout offset four. The refusal record changes
-    # neither the receipt nor how the run ends, which is what makes counting it
-    # safe at all.
+    # still sequence one at stdout offset four. The diagnostic changes neither
+    # the receipt nor how the run ends.
     assert [first, second] = tool_progress_items()
     assert Enum.map([first, second], & &1.progress_sequence) == [0, 1]
     assert Enum.map([first, second], & &1.byte_offset) == [0, 4]
@@ -2002,16 +2367,14 @@ defmodule Loopex.AgentLoopTest do
 
     assert terminal.payload["outcome"] == "completed"
 
-    # An attempt with nothing to refuse writes no row: zero is the ordinary case
-    # and does not need a record to say so.
+    # Payload refusals have the same transient-only boundary.
     quiet = start_with_progress(:hostile_payload)
 
-    quiet_refusals =
-      quiet
-      |> Fixture.records(quiet.session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "executor_progress_refused"))
+    refute quiet
+           |> Fixture.records(quiet.session_id)
+           |> Enum.any?(&(&1.payload[:kind] == "executor_progress_refused"))
 
-    assert [%{payload: quiet_payload}] = quiet_refusals
+    quiet_payload = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
 
     assert quiet_payload["refused_count"] == 4,
            "the unknown stream, two bad offsets, and oversized chunk were not all counted"
@@ -2038,47 +2401,16 @@ defmodule Loopex.AgentLoopTest do
     assert Enum.map([before_gap, after_gap], & &1.progress_sequence) == [0, 2]
     assert Enum.map([before_gap, after_gap], & &1.byte_offset) == [0, 2]
 
-    assert [%{payload: refusal}] =
-             fixture
-             |> Fixture.records(fixture.session_id)
-             |> Enum.filter(&(&1.payload[:kind] == "executor_progress_refused"))
-
+    refusal = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
     assert refusal["refused_count"] == 1
     assert refusal["refused_bindings"] == %{"stream" => 1}
 
+    refute fixture
+           |> Fixture.records(fixture.session_id)
+           |> Enum.any?(&(&1.payload[:kind] == "executor_progress_refused"))
+
     assert %{progress_count: 3} =
              Enum.find(progress_plane, &(&1.kind == :tool_stream_closed))
-  end
-
-  test "a refused progress record admits only declared contract binding names" do
-    state = %Loopex.Runtime.SessionState{session_id: "refusal-schema"}
-
-    assert {:error, :invalid_progress_refusals} =
-             Loopex.Runtime.SessionState.propose_progress_refusals(
-               state,
-               "run-1",
-               "call-1",
-               1,
-               %{"banana" => 1}
-             )
-
-    assert {:error, :invalid_progress_refusals} =
-             Loopex.Runtime.SessionState.propose_progress_refusals(
-               state,
-               "run-1",
-               "call-1",
-               1,
-               %{"attempt" => 2}
-             )
-
-    assert {:ok, _proposal} =
-             Loopex.Runtime.SessionState.propose_progress_refusals(
-               state,
-               "run-1",
-               "call-1",
-               2,
-               %{"attempt" => 1, "fencing_token" => 1}
-             )
   end
 
   test "a validated executor event carries only its bounded named payload across" do
@@ -2102,11 +2434,7 @@ defmodule Loopex.AgentLoopTest do
       assert is_binary(LoopexProtocol.Canonical.encode(item))
     end
 
-    assert [%{payload: refusal}] =
-             fixture
-             |> Fixture.records(fixture.session_id)
-             |> Enum.filter(&(&1.payload[:kind] == "executor_progress_refused"))
-
+    refusal = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
     assert refusal["refused_count"] == 4
 
     assert refusal["refused_bindings"] == %{
@@ -2114,29 +2442,59 @@ defmodule Loopex.AgentLoopTest do
              "chunk" => 1,
              "stream" => 1
            }
+
+    refute fixture
+           |> Fixture.records(fixture.session_id)
+           |> Enum.any?(&(&1.payload[:kind] == "executor_progress_refused"))
   end
 
   test "the first delta of a model attempt is sequence zero" do
     fixture =
       start(
-        script: [%{text: "abc", calls: [], deltas: ["a", "b", "c"]}],
+        script: [
+          %{text: "run", calls: [call("c1")], deltas: ["run"]},
+          %{text: "abc", calls: [], deltas: ["a", "b", "c"]}
+        ],
         progress_to: self()
       )
 
     {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
-    _events = drain(attachment)
+    events = drain(attachment)
 
     observed = receive_progress()
-    deltas = Enum.filter(observed, &(Map.get(&1, :kind) == :text_delta))
 
-    assert Enum.map(deltas, & &1.model_sequence) == [0, 1, 2]
+    model_items =
+      Enum.filter(observed, &(Map.get(&1, :kind) in [:text_delta, :model_stream_closed]))
 
-    # The closing count and the last sequence describe the same stream: a count
-    # of three and a last sequence of two. Starting at one made those two
-    # statements disagree for every consumer that compares them.
-    closure = Enum.find(observed, &(Map.get(&1, :kind) == :model_stream_closed))
-    assert closure.delta_count == 3
-    assert List.last(deltas).model_sequence == closure.delta_count - 1
+    domains = model_items |> Enum.map(& &1.stream_domain_id) |> Enum.uniq()
+    assert length(domains) == 2
+
+    grouped = Enum.group_by(model_items, & &1.stream_domain_id)
+
+    [{first_domain, [0], 1}, {second_domain, [0, 1, 2], 3}] =
+      Enum.map(domains, fn domain ->
+        items = Map.fetch!(grouped, domain)
+        deltas = Enum.filter(items, &(&1.kind == :text_delta))
+        closure = Enum.find(items, &(&1.kind == :model_stream_closed))
+
+        assert List.last(deltas).model_sequence == closure.delta_count - 1
+        {domain, Enum.map(deltas, & &1.model_sequence), closure.delta_count}
+      end)
+
+    refute first_domain == second_domain
+
+    run_started = Enum.find(events, &(&1.kind == "run.started"))
+    tool_finished = Enum.find(events, &(&1.kind == "tool.finished"))
+
+    for {domain, anchor} <- [
+          {first_domain, run_started.event_sequence},
+          {second_domain, tool_finished.event_sequence}
+        ] do
+      assert Enum.all?(
+               Map.fetch!(grouped, domain),
+               &(&1.base_event_sequence == anchor)
+             )
+    end
   end
 
   test "several tool calls in one turn are dispatched in the model's own call order" do
@@ -2518,13 +2876,11 @@ defmodule Loopex.AgentLoopTest do
     #
     # Technical depth: an earlier round of this amendment substituted the count
     # this runtime published, on the reasoning that refusals are not loss. That
-    # was a departure from an accepted decision, and it erased the only live
-    # evidence a refusal leaves: the refusal record is durable and private, so a
-    # consumer watching the transient plane has nothing but the stated total to
-    # compare against what arrived. The executor below emits three events and
-    # reports three; two carry a wrong binding and never reach the operator. The
-    # closure states three, one item arrived, and the two that did not are
-    # separately recorded as refusals rather than being silently subtracted.
+    # was a departure from an accepted decision, and it erased the loss signal a
+    # refusal leaves on the transient plane. The executor below emits three
+    # events and reports three; two carry a wrong binding and never reach the
+    # operator. The closure states three, one item arrived, and the current
+    # operator receives one private refusal diagnostic explaining the mismatch.
     _fixture = start_with_progress(:one_valid_two_refused)
 
     items = receive_progress()
@@ -2541,8 +2897,8 @@ defmodule Loopex.AgentLoopTest do
            "the closing item carried #{closure.progress_count} rather than the count its " <>
              "receipt reported, so a consumer cannot tell that two items never arrived"
 
-    # And the two that were refused are recorded as refusals, so the difference
-    # the closure exposes is explained rather than merely visible.
+    # The diagnostic explains the difference without turning the refusal into a
+    # durable run fact.
     refusal = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
     assert refusal["refused_count"] == 2
   end
@@ -4999,10 +5355,10 @@ defmodule Loopex.AgentLoopTest do
       )
 
     {:ok, first_stream, first_progress} =
-      ExecutorStream.open(supervisor, self(), first, &StreamRelay.emit/2)
+      ExecutorStream.open(supervisor, self(), first, 17, &StreamRelay.emit/2)
 
     {:ok, second_stream, second_progress} =
-      ExecutorStream.open(supervisor, self(), second, &StreamRelay.emit/2)
+      ExecutorStream.open(supervisor, self(), second, 23, &StreamRelay.emit/2)
 
     first_progress.(
       Map.merge(AgentLoopProgressExecutor.identity(first), %{
@@ -5049,7 +5405,7 @@ defmodule Loopex.AgentLoopTest do
     assert Map.has_key?(by_domain, first_domain)
     assert Map.has_key?(by_domain, second_domain)
 
-    assert_domain = fn job, domain, disposition, progress_count ->
+    assert_domain = fn job, domain, base_event_sequence, disposition, progress_count ->
       items = Map.fetch!(by_domain, domain)
       progress = Enum.reject(items, &(&1.kind == :tool_stream_closed))
       closure = List.last(items)
@@ -5059,13 +5415,14 @@ defmodule Loopex.AgentLoopTest do
       assert closure.turn_id == job.turn_id
       assert closure.tool_call_id == job.tool_call_id
       assert closure.stream_domain_id == domain
+      assert Enum.all?(items, &(&1.base_event_sequence == base_event_sequence))
       assert closure.disposition == disposition
       assert closure.progress_count == progress_count
       assert closure == Enum.find(items, &(&1.kind == :tool_stream_closed))
     end
 
-    assert_domain.(first, first_domain, :abandoned, 2)
-    assert_domain.(second, second_domain, :complete, 1)
+    assert_domain.(first, first_domain, 17, :abandoned, 2)
+    assert_domain.(second, second_domain, 23, :complete, 1)
   end
 
   test "an executor that declares no cancellation confirms nothing" do

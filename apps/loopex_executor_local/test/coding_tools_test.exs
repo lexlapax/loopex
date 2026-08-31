@@ -232,6 +232,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   defp run(root, tool_id, arguments, overrides \\ %{}) do
     {execute_options, overrides} = Map.pop(overrides, :execute_options, [])
 
+    {progress, overrides} =
+      Map.pop(overrides, :progress, Loopex.Executor.discard_progress())
+
     # A case that composed its own executor passes it in; everything else gets a
     # fresh one, as before.
     {overrides, {executor, lease_id}} =
@@ -290,7 +293,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       job,
       grant,
       execute_options,
-      Loopex.Executor.discard_progress()
+      progress
     )
   end
 
@@ -742,35 +745,114 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     end
   end
 
-  test "executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted" do
+  test "bash emits real progress before completion with exact identity sequence offsets and receipt count" do
     root = workspace()
-
-    assert {:ok, receipt} = run(root, "loopex.bash", %{"argv" => ["echo", "progress"]})
-
-    # The receipt proves the identity a progress event would have to match before
-    # anything narrower is projected from it.
-    assert receipt.executor_identity == "executor-local"
-    assert receipt.executor_epoch == 3
-    assert receipt.fencing_token == @fence
-    assert receipt.session_epoch_at_dispatch == 1
-    assert is_binary(receipt.canonical_request_digest)
-    # This executor accepts the progress callback but deliberately emits no
-    # progress items. A floor would admit a receipt that invents items the
-    # transient plane never carried and make the stream closure report loss.
-    assert receipt.progress_count == 0
-
-    # An event whose call identity does not match the dispatched one is dropped
-    # rather than relabelled, which is why the coordinator stamps the stream
-    # domain only after validation.
     parent = self()
+    release = ".loopex-release"
+    {executor, lease_id} = executor_for(root)
+    {:ok, observed} = Agent.start_link(fn -> [] end)
+
+    on_exit(fn ->
+      if Process.alive?(observed), do: Agent.stop(observed)
+    end)
 
     progress = fn event ->
-      if event.tool_call_id == "the-dispatched-call", do: send(parent, {:kept, event})
+      :ok = Agent.update(observed, &(&1 ++ [event]))
+      send(parent, {:local_executor_progress, event})
       :ok
     end
 
-    progress.(%{tool_call_id: "a-different-call", chunk: "x"})
-    refute_received {:kept, _event}
+    task =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{
+            "command" =>
+              "printf first; while [ ! -f #{release} ]; do sleep 0.01; done; printf second"
+          },
+          %{
+            progress: progress,
+            executor: executor,
+            lease_id: lease_id,
+            operation_id: "operation-progress",
+            session_id: "session-progress",
+            run_id: "run-progress",
+            turn_id: "turn-progress",
+            tool_call_id: "call-progress"
+          }
+        )
+      end)
+
+    assert_receive {:local_executor_progress, _first}, 2_000
+
+    await_first = fn await_first ->
+      bytes =
+        observed
+        |> Agent.get(& &1)
+        |> Enum.map_join(& &1.chunk)
+
+      if bytes == "first" do
+        bytes
+      else
+        receive do
+          {:local_executor_progress, _event} -> await_first.(await_first)
+        after
+          2_000 -> bytes
+        end
+      end
+    end
+
+    assert await_first.(await_first) == "first"
+    assert Task.yield(task, 0) == nil
+
+    File.write!(Path.join(root, release), "continue")
+    assert {:ok, receipt} = Task.await(task, 5_000)
+
+    events = Agent.get(observed, & &1)
+    assert length(events) >= 2
+    assert receipt.progress_count == length(events)
+    assert Enum.map_join(events, & &1.chunk) == "firstsecond"
+    assert receipt.output == "firstsecond"
+
+    expected_identity = %{
+      protocol_version: receipt.protocol_version,
+      job_id: receipt.job_id,
+      operation_id: receipt.operation_id,
+      attempt: receipt.attempt,
+      session_id: receipt.session_id,
+      run_id: receipt.run_id,
+      turn_id: receipt.turn_id,
+      tool_call_id: receipt.tool_call_id,
+      canonical_request_digest: receipt.canonical_request_digest,
+      session_epoch_at_dispatch: receipt.session_epoch_at_dispatch,
+      executor_epoch: receipt.executor_epoch,
+      executor_identity: receipt.executor_identity,
+      fencing_token: receipt.fencing_token
+    }
+
+    identity_keys = Map.keys(expected_identity)
+
+    {count, bytes} =
+      Enum.reduce(events, {0, 0}, fn event, {sequence, offset} ->
+        assert Map.keys(event) |> Enum.sort() ==
+                 (identity_keys ++ [:progress_sequence, :stream, :byte_offset, :chunk])
+                 |> Enum.sort()
+
+        assert Map.take(event, identity_keys) == expected_identity
+        assert event.progress_sequence == sequence
+        assert event.stream == "stdout"
+        assert event.byte_offset == offset
+        assert byte_size(event.chunk) <= 65_536
+        refute event.chunk =~ "loopex-pgid:"
+
+        {sequence + 1, offset + byte_size(event.chunk)}
+      end)
+
+    assert count == receipt.progress_count
+    assert bytes == byte_size(receipt.output)
+
+    refute Enum.map_join(events, & &1.chunk) =~ "loopex-pgid:"
   end
 
   test "a coding tool command receives a constructed provider credential free environment and its receipt records that declared environment" do
@@ -862,6 +944,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert {:ok, quiet} = run(root, "loopex.read", %{"path" => "notes.txt"})
     assert quiet.child_environment_names == []
     refute quiet.provider_credential_present
+    assert quiet.progress_count == 0
   end
 
   test "output beyond a tool's bound spills through the artifact store and the model sees a bounded notice naming it" do

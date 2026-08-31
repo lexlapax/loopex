@@ -1285,6 +1285,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       )
 
     turn_id = work.turn_id
+    base_event_sequence = state.durable.event_sequence
 
     # Concept: the first delta of a domain is sequence zero.
     #
@@ -1303,11 +1304,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
           Map.merge(delta, %{
             turn_id: turn_id,
             stream_domain_id: domain,
-            model_sequence: sequence
+            model_sequence: sequence,
+            base_event_sequence: base_event_sequence
           })
         end,
         fn disposition, count ->
-          StreamDomain.model_closed(turn_id, domain, 0, disposition, count)
+          StreamDomain.model_closed(
+            turn_id,
+            domain,
+            base_event_sequence,
+            disposition,
+            count
+          )
         end
       )
 
@@ -1417,7 +1425,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # that difference is a signal rather than a defect: a consumer comparing the
   # stated total against what reached it learns that something did not arrive.
   # Substituting this runtime's own count would erase the only live evidence a
-  # refusal leaves, since the refusal record itself is durable and private.
+  # refusal leaves; its accounting is relay-private and diagnostic-only.
   # Concept: only a validated receipt may state a completed stream's count.
   #
   # Technical depth: every call is after `put_executor_fact/3` accepted and
@@ -1468,10 +1476,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
         %{state | superseded: true}
 
       {:error, :runtime_unavailable} ->
-        # No successor has been established. The refusal fact remains a valid
-        # observation of this attempt and its Store transaction still owns the
-        # authority decision.
-        report_refused_progress(state, run_id, stream)
+        # A diagnostic is transient projection too. Without a successful owner
+        # check this coordinator cannot say it is still the process entitled to
+        # emit one, and unavailability is not evidence that ownership stayed or
+        # moved.
+        state
     end
   end
 
@@ -1591,13 +1600,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # executor emitting something it had no standing to emit, and an operator or
   # reviewer needs to know which contract it failed.
   #
-  # It goes two places for two different readers. The diagnostic reaches whoever
-  # is watching the run now. The private record reaches whoever reads the
-  # journal afterwards, which is what the count in memory could never do -- it
-  # died with the coordinator, so a reviewer could not tell a well-behaved
-  # attempt from one refused a thousand times. The record is committed here,
-  # at stream close, because no further event can arrive by then and the count
-  # is therefore stable across any recomputation of this proposal.
+  # It reaches only the diagnostic plane. ADR 0011 makes the count relay-private
+  # and explicitly forbids journaling a refused event or its accounting. Stream
+  # close is when the count is stable and when this one bounded diagnostic is
+  # emitted; owner loss discards the counter with the relay.
   defp report_refused_progress(state, run_id, stream) do
     case ExecutorStream.refused_count(stream) do
       0 ->
@@ -1614,24 +1620,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           "refused_bindings" => bindings
         })
 
-        case SessionState.propose_progress_refusals(
-               state.durable,
-               run_id,
-               stream.tool_call_id,
-               refused,
-               bindings
-             ) do
-          {:ok, proposal} ->
-            case commit_internal(state, proposal) do
-              {:ok, next} -> next
-              # Technical depth: a refusal count that cannot be retained is not
-              # worth failing a run over. The diagnostic above already went out.
-              {:error, _reason} -> state
-            end
-
-          {:error, _reason} ->
-            state
-        end
+        state
     end
   end
 
@@ -1779,7 +1768,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       state
     else
       state = disarm_deadline(state, run_id)
-      {state, model} = cancel_model_attempt(state, run_id)
+      {state, model} = cancel_model_attempt(state, run_id, purpose)
       job_id = dispatched_job_id(state, run_id)
 
       state = %{
@@ -1890,30 +1879,30 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # in memory, so a run cannot escape its own token budget by being aborted and a
   # successor owner cannot rebuild the abandoned attempt and spend the nominal
   # retry allowance a second time.
-  defp cancel_model_attempt(state, run_id) do
-    state =
+  defp cancel_model_attempt(state, run_id, purpose) do
+    {state, retained} =
       case in_flight_of(state, :model, run_id) do
         nil ->
-          state
+          {state, :cleaned}
 
         {reference, pid} ->
           _ = Task.Supervisor.terminate_child(state.workers, pid)
           answer = take_worker_result(reference)
 
-          state =
+          {state, retained} =
             state
             |> Map.put(:in_flight, Map.delete(state.in_flight, reference))
-            |> report_cancelled_model_answer(run_id, answer)
+            |> retain_cancelled_model_answer(run_id, purpose, answer)
 
-          close_current_model_stream(state, run_id, :abandoned)
+          {close_current_model_stream(state, run_id, :abandoned), retained}
       end
 
     # The charge follows the dispatched turn rather than the live task: a
     # successor that inherits a request its predecessor dispatched still owes the
     # allowance that turn spent, and it holds no task to find.
     case commit_abandoned_attempt(state, run_id) do
-      {:ok, next} -> {next, :cleaned}
-      {:error, :no_attempt_pending} -> {state, :cleaned}
+      {:ok, next} -> {next, retained}
+      {:error, :no_attempt_pending} -> {state, retained}
       {:error, _reason} -> {state, :unconfirmed}
     end
   end
@@ -1935,30 +1924,53 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Concept: take a worker's answer out of the mailbox instead of leaving it to
   # be dropped in silence.
   #
-  # Technical depth: called only after the task is dead, so a message that has
-  # not arrived by now never will and a zero timeout is exact rather than
-  # optimistic. The monitor is flushed in every branch, so a terminated worker's
-  # `DOWN` can never later be read as a live worker failing.
+  # Technical depth: `terminate_child/2` answers from the supervisor, while the
+  # result is sent by the task. Those senders have no ordering relationship, so
+  # the supervisor's answer cannot make a zero-timeout mailbox read exact. The
+  # task's own result signal and its monitor signal do have one order: if a
+  # result was sent it precedes `DOWN` from that task to this coordinator. Wait
+  # for either, and only read no answer when `DOWN` itself proves none can still
+  # arrive. A result branch demonitor-flushes the following signal.
   defp take_worker_result(reference) do
-    result =
-      receive do
-        {^reference, {:ok, value}} -> {:ok, value}
-        {^reference, other} -> {:answered, other}
-      after
-        0 -> :none
-      end
+    receive do
+      {^reference, {:ok, value}} ->
+        Process.demonitor(reference, [:flush])
+        {:ok, value}
 
-    Process.demonitor(reference, [:flush])
-    result
+      {^reference, other} ->
+        Process.demonitor(reference, [:flush])
+        {:answered, other}
+
+      {:DOWN, ^reference, :process, _pid, _reason} ->
+        :none
+    end
   end
 
-  defp report_cancelled_model_answer(state, _run_id, :none), do: state
+  defp retain_cancelled_model_answer(state, _run_id, _purpose, :none),
+    do: {state, :cleaned}
 
-  defp report_cancelled_model_answer(state, run_id, {:ok, reply}),
-    do: report_late_result(state, run_id, :model, {:ok, reply})
+  defp retain_cancelled_model_answer(state, run_id, purpose, {:ok, reply}),
+    do: retain_model_attempt_evidence(state, run_id, purpose, {:ok, reply})
 
-  defp report_cancelled_model_answer(state, run_id, {:answered, answer}),
-    do: report_late_result(state, run_id, :model, answer)
+  defp retain_cancelled_model_answer(state, run_id, purpose, {:answered, answer}),
+    do: retain_model_attempt_evidence(state, run_id, purpose, answer)
+
+  defp retain_model_attempt_evidence(state, run_id, purpose, result) do
+    termination = if match?({:deadline, _detail}, purpose), do: :deadline, else: :abort
+
+    with {:ok, proposal} <-
+           SessionState.propose_model_attempt_evidence(
+             state.durable,
+             run_id,
+             termination,
+             result
+           ),
+         {:ok, next} <- commit_internal(state, proposal) do
+      {report_late_result(next, run_id, :model, result), :cleaned}
+    else
+      {:error, _reason} -> {state, :unconfirmed}
+    end
+  end
 
   defp in_flight_of(state, kind, run_id) do
     Enum.find_value(state.in_flight, fn
@@ -2191,7 +2203,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
       end
 
       {:ok, stream, progress} =
-        ExecutorStream.open(state.workers, state.progress_to, work.job, publish)
+        ExecutorStream.open(
+          state.workers,
+          state.progress_to,
+          work.job,
+          state.durable.event_sequence,
+          publish
+        )
 
       task =
         Task.Supervisor.async_nolink(state.workers, fn ->

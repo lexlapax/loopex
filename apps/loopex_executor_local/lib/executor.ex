@@ -28,6 +28,7 @@ defmodule Loopex.Executor.Local do
   alias Loopex.Executor.Local.WorkspaceLease
 
   @max_output_bytes 1_048_576
+  @max_progress_chunk_bytes 65_536
 
   # Concept: the declared grace the cancellation sequence gets once the run's own
   # instant has passed, and the only number any of that work is measured against.
@@ -178,14 +179,15 @@ defmodule Loopex.Executor.Local do
 
   def execute(executor, job, grant, options, progress)
       when is_pid(executor) and is_map(job) and is_map(grant) and is_list(options) do
-    # Concept: an executor that emits nothing is conformant.
+    # Concept: the shipped shell tool reports output while it runs; a filesystem
+    # tool that starts no child remains a truthful zero-progress executor.
     #
-    # Technical depth: this executor does not stream yet, so it accepts the
-    # progress function, never calls it, and reports `progress_count: 0`. The
-    # coordinator then closes that operation's domain with a truthful count
-    # rather than with an absent item a consumer would have to interpret.
-    _progress = progress || Executor.discard_progress()
-    GenServer.call(executor, {:execute, job, grant, options}, :infinity)
+    # Technical depth: the callback crosses the in-VM GenServer boundary with
+    # the job and is called only for bytes the process collector has admitted
+    # after removing its private process-group preamble. A duplicate job returns
+    # the retained receipt without replaying transient output.
+    progress = progress || Executor.discard_progress()
+    GenServer.call(executor, {:execute, job, grant, options, progress}, :infinity)
   end
 
   @doc """
@@ -474,7 +476,7 @@ defmodule Loopex.Executor.Local do
   def handle_call(:process_probe, _from, state),
     do: {:reply, state.process_probe, state}
 
-  def handle_call({:execute, job, grant, options}, _from, state) do
+  def handle_call({:execute, job, grant, options, progress}, _from, state) do
     case read_receipt(state.ledger_root, Map.get(job, :job_id, "")) do
       {:ok, receipt} ->
         if Map.get(receipt, :canonical_request_digest) ==
@@ -485,7 +487,7 @@ defmodule Loopex.Executor.Local do
         end
 
       :absent ->
-        execute_new(state, job, grant, options)
+        execute_new(state, job, grant, options, progress)
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -590,7 +592,7 @@ defmodule Loopex.Executor.Local do
   # the monitored interval exactly the job lifetime ADR 0007 names, and every
   # blocking step inside it is a wait that carries the DOWN rather than a gap
   # between two samples of the mailbox.
-  defp execute_new(state, job, grant, options) do
+  defp execute_new(state, job, grant, options, progress) do
     close_cleanup_episode()
 
     case final_prestart_validation(state, job, grant) do
@@ -603,7 +605,8 @@ defmodule Loopex.Executor.Local do
         lease = {Process.monitor(lease_pid), lease_pid}
 
         try do
-          receipt = run_tool(next_state, job, tool, workspace, arguments, options, lease)
+          receipt =
+            run_tool(next_state, job, tool, workspace, arguments, options, lease, progress)
 
           case retain_receipt_under_lease(
                  next_state.ledger_root,
@@ -723,14 +726,35 @@ defmodule Loopex.Executor.Local do
   # The effect was bounded correctly and the durable record of that bound was
   # false, which is worse than not recording it -- an operator reconciling a
   # stopped job reads a deadline the run never had.
-  defp run_tool(state, job, %{coding: _definition} = tool, workspace, arguments, options, lease) do
+  defp run_tool(
+         state,
+         job,
+         %{coding: _definition} = tool,
+         workspace,
+         arguments,
+         options,
+         lease,
+         progress
+       ) do
     deadline = effective_deadline(job, tool)
     limits = effective_output_limits(job, tool)
 
+    {tool_result, progress_count} =
+      run_coding_tool(
+        job,
+        tool,
+        workspace,
+        arguments,
+        options,
+        lease,
+        deadline,
+        limits,
+        progress,
+        progress_identity(state, job)
+      )
+
     {outcome, output, artifacts} =
-      job
-      |> run_coding_tool(tool, workspace, arguments, options, lease, deadline, limits)
-      |> spill(state, job, lease, limits)
+      spill(tool_result, state, job, lease, limits)
 
     receipt(
       state,
@@ -740,11 +764,21 @@ defmodule Loopex.Executor.Local do
       output,
       coding_tool_environment(arguments),
       artifacts,
-      deadline
+      deadline,
+      progress_count
     )
   end
 
-  defp run_tool(state, job, tool, workspace, arguments, options, {monitor, lease_pid}) do
+  defp run_tool(
+         state,
+         job,
+         tool,
+         workspace,
+         arguments,
+         options,
+         {monitor, lease_pid},
+         _progress
+       ) do
     args = launcher_arguments(arguments)
     deadline = effective_deadline(job, tool)
 
@@ -753,7 +787,25 @@ defmodule Loopex.Executor.Local do
     notify(options, {:executor_process_started, job.job_id, tool.id, [@search_path_name]})
     {outcome, output} = await_port(port, monitor, lease_pid, <<>>, deadline)
 
-    receipt(state, job, tool, outcome, output, demonstration_environment(), [], deadline)
+    receipt(state, job, tool, outcome, output, demonstration_environment(), [], deadline, 0)
+  end
+
+  defp progress_identity(state, job) do
+    %{
+      protocol_version: job.protocol_version,
+      job_id: job.job_id,
+      operation_id: job.operation_id,
+      attempt: job.attempt,
+      session_id: job.session_id,
+      run_id: job.run_id,
+      turn_id: job.turn_id,
+      tool_call_id: job.tool_call_id,
+      canonical_request_digest: job.canonical_request_digest,
+      session_epoch_at_dispatch: job.origin_session_epoch,
+      executor_epoch: state.epoch,
+      executor_identity: state.identity,
+      fencing_token: state.fencing_token
+    }
   end
 
   # Concept: the lease is honoured until the receipt is durable, not until it is
@@ -1005,15 +1057,17 @@ defmodule Loopex.Executor.Local do
          _options,
          lease,
          deadline,
-         limits
+         limits,
+         _progress,
+         _identity
        )
        when kind in [:read, :write, :edit] do
     remaining = deadline - System.system_time(:millisecond)
 
     if remaining <= 0 do
-      {:failed, "the effective deadline passed before this tool began"}
+      {{:failed, "the effective deadline passed before this tool began"}, 0}
     else
-      run_bounded_tool(workspace, arguments, remaining, lease, limits)
+      {run_bounded_tool(workspace, arguments, remaining, lease, limits), 0}
     end
   end
 
@@ -1025,9 +1079,22 @@ defmodule Loopex.Executor.Local do
          options,
          lease,
          deadline,
-         limits
+         limits,
+         progress,
+         identity
        ) do
-    run_owned_process(job, tool, workspace, arguments, options, lease, deadline, limits)
+    run_owned_process(
+      job,
+      tool,
+      workspace,
+      arguments,
+      options,
+      lease,
+      deadline,
+      limits,
+      progress,
+      identity
+    )
   end
 
   # Concept: the effect runs where it can be abandoned, and the abandonment is
@@ -1466,7 +1533,18 @@ defmodule Loopex.Executor.Local do
   # because the BEAM gives a port's os_pid but not the group the child chose. A
   # captured identity is the only one termination can honestly claim to have
   # confirmed.
-  defp run_owned_process(job, _tool, workspace, arguments, options, lease, deadline, limits) do
+  defp run_owned_process(
+         job,
+         _tool,
+         workspace,
+         arguments,
+         options,
+         lease,
+         deadline,
+         limits,
+         progress,
+         identity
+       ) do
     environment = child_environment()
     {launcher, command_arguments} = process_launcher(arguments, environment)
 
@@ -1481,7 +1559,7 @@ defmodule Loopex.Executor.Local do
 
     register_inflight(job.job_id, os_pid)
 
-    collector = new_output_collector(os_pid)
+    collector = new_output_collector(os_pid, progress, identity)
 
     case collect_output(port, deadline, collector, options, job, lease, limits.artifact) do
       # Concept: the launcher's exit is the end of one process, not the end of
@@ -1498,34 +1576,37 @@ defmodule Loopex.Executor.Local do
       # quiescence and confirmed before `:completed` is reported. A command that
       # backgrounds work and exits has that work terminated, which is the
       # intended reading of owning the group rather than the leader.
-      {:exited, status, output, group} ->
+      {:exited, status, output, group, progress_count} ->
         quiescence = quiesce_group(group, job_episode())
         forget_inflight(job.job_id)
 
         case quiescence do
           :quiescent ->
-            bound_process_output(status, output, "", limits.output)
+            {bound_process_output(status, output, "", limits.output), progress_count}
 
           :terminated ->
-            bound_process_output(status, output, @group_terminated_note, limits.output)
+            {bound_process_output(status, output, @group_terminated_note, limits.output),
+             progress_count}
 
           :unconfirmed ->
-            unproven(bound_process_output(status, output, @group_unconfirmed_note, limits.output))
+            {unproven(
+               bound_process_output(status, output, @group_unconfirmed_note, limits.output)
+             ), progress_count}
         end
 
-      {:artifact_limit_exceeded, output, group, observed} ->
+      {:artifact_limit_exceeded, output, group, observed, progress_count} ->
         confirmed = confirm_group_terminated(group, job_episode())
 
-        {if(confirmed, do: :failed, else: :outcome_unknown),
-         artifact_ceiling_message(
-           output,
-           limits.output,
-           limits.artifact,
-           observed,
-           confirmed
-         ), :complete}
+        {{if(confirmed, do: :failed, else: :outcome_unknown),
+          artifact_ceiling_message(
+            output,
+            limits.output,
+            limits.artifact,
+            observed,
+            confirmed
+          ), :complete}, progress_count}
 
-      {:cancelled, output, group} ->
+      {:cancelled, output, group, progress_count} ->
         confirmed = confirm_group_terminated(group, job_episode())
 
         suffix =
@@ -1535,8 +1616,8 @@ defmodule Loopex.Executor.Local do
               else: " Cleanup could not be confirmed.]"
             )
 
-        {if(confirmed, do: :cancelled, else: :outcome_unknown),
-         bounded_terminal_output(output, suffix, limits.output)}
+        {{if(confirmed, do: :cancelled, else: :outcome_unknown),
+          bounded_terminal_output(output, suffix, limits.output)}, progress_count}
 
       # Concept: a command whose lease vanished is unproven, not cancelled.
       #
@@ -1550,7 +1631,7 @@ defmodule Loopex.Executor.Local do
       # state, and it is reported whether or not the group was confirmed cleaned
       # -- confirming cleanup proves the command stopped, not that its effect
       # never landed.
-      {:workspace_lease_lost, output, group} ->
+      {:workspace_lease_lost, output, group, progress_count} ->
         confirmed = confirm_group_terminated(group, job_episode())
 
         suffix =
@@ -1562,7 +1643,8 @@ defmodule Loopex.Executor.Local do
             " Whether its effect landed in the workspace this job was authorised" <>
             " against is unproven.]"
 
-        {:outcome_unknown, bounded_terminal_output(output, suffix, limits.output)}
+        {{:outcome_unknown, bounded_terminal_output(output, suffix, limits.output)},
+         progress_count}
     end
   end
 
@@ -2146,8 +2228,14 @@ defmodule Loopex.Executor.Local do
   # artifact ceiling. Crossing it terminates the owned group immediately. The
   # final flatten therefore has a hard upper bound, while ordinary output beneath
   # the ceiling is still byte-identical for artifact spill.
-  defp new_output_collector(os_pid) do
-    %{chunks: [], bytes: 0, group: os_pid, preamble: <<>>}
+  defp new_output_collector(os_pid, progress, identity) do
+    %{
+      chunks: [],
+      bytes: 0,
+      group: os_pid,
+      preamble: <<>>,
+      progress: %{publish: progress, identity: identity, sequence: 0, byte_offset: 0}
+    }
   end
 
   defp collect_output(port, deadline, collector, options, job, lease, artifact_limit) do
@@ -2155,10 +2243,10 @@ defmodule Loopex.Executor.Local do
     remaining = deadline - System.system_time(:millisecond)
 
     if remaining <= 0 do
-      {output, group} = collected_output(collector, artifact_limit)
+      {output, group, progress_count} = collected_output(collector, artifact_limit)
       terminate_group(group, job_episode())
       forget_inflight(job.job_id)
-      {:cancelled, output, group}
+      {:cancelled, output, group, progress_count}
     else
       receive do
         {^port, {:data, chunk}} ->
@@ -2172,25 +2260,30 @@ defmodule Loopex.Executor.Local do
             {:artifact_limit_exceeded, next, observed} ->
               terminate_group(next.group, job_episode())
               forget_inflight(job.job_id)
-              {:artifact_limit_exceeded, flatten_chunks(next), next.group, observed}
+
+              {:artifact_limit_exceeded, flatten_chunks(next), next.group, observed,
+               progress_count(next)}
           end
 
         {^port, {:exit_status, status}} ->
           case finish_collector(collector, artifact_limit) do
             {:ok, finished} ->
-              {:exited, status, flatten_chunks(finished), finished.group}
+              {:exited, status, flatten_chunks(finished), finished.group,
+               progress_count(finished)}
 
             {:artifact_limit_exceeded, finished, observed} ->
               terminate_group(finished.group, job_episode())
               forget_inflight(job.job_id)
-              {:artifact_limit_exceeded, flatten_chunks(finished), finished.group, observed}
+
+              {:artifact_limit_exceeded, flatten_chunks(finished), finished.group, observed,
+               progress_count(finished)}
           end
 
         {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-          {output, group} = collected_output(collector, artifact_limit)
+          {output, group, progress_count} = collected_output(collector, artifact_limit)
           terminate_group(group, job_episode())
           forget_inflight(job.job_id)
-          {:workspace_lease_lost, output, group}
+          {:workspace_lease_lost, output, group, progress_count}
       after
         min(remaining, 50) ->
           collect_output(port, deadline, collector, options, job, lease, artifact_limit)
@@ -2245,7 +2338,11 @@ defmodule Loopex.Executor.Local do
         collector
       else
         kept = binary_part(chunk, 0, kept_size)
-        %{collector | chunks: [kept | collector.chunks], bytes: bytes + kept_size}
+
+        collector
+        |> Map.put(:chunks, [kept | collector.chunks])
+        |> Map.put(:bytes, bytes + kept_size)
+        |> emit_progress(kept)
       end
 
     if observed > limit,
@@ -2256,9 +2353,18 @@ defmodule Loopex.Executor.Local do
   defp finish_collector(%{preamble: nil} = collector, _limit), do: {:ok, collector}
 
   defp finish_collector(%{preamble: preamble} = collector, limit) do
-    collector
-    |> Map.put(:preamble, nil)
-    |> append_collected(preamble, limit)
+    collector = Map.put(collector, :preamble, nil)
+
+    if private_preamble_prefix?(preamble) do
+      {:ok, collector}
+    else
+      append_collected(collector, preamble, limit)
+    end
+  end
+
+  defp private_preamble_prefix?(bytes) do
+    prefix = "loopex-pgid:"
+    String.starts_with?(prefix, bytes) or String.starts_with?(bytes, prefix)
   end
 
   defp collected_output(collector, limit) do
@@ -2268,11 +2374,51 @@ defmodule Loopex.Executor.Local do
         {:artifact_limit_exceeded, value, _observed} -> value
       end
 
-    {flatten_chunks(finished), finished.group}
+    {flatten_chunks(finished), finished.group, progress_count(finished)}
   end
 
   defp flatten_chunks(collector),
     do: collector.chunks |> Enum.reverse() |> IO.iodata_to_binary()
+
+  # Concept: the stream carries exactly the child bytes admitted by the bounded
+  # collector, before the terminal receipt exists.
+  #
+  # Technical depth: the private process-group preamble is removed before this
+  # function is reached. Large port packets are split at the executor contract's
+  # chunk ceiling, and one state owns both sequence and byte offset so the
+  # receipt's `progress_count` is the exact number of callbacks invoked.
+  defp emit_progress(collector, <<>>), do: collector
+
+  defp emit_progress(%{progress: progress} = collector, bytes) do
+    %{collector | progress: emit_progress_bytes(progress, bytes)}
+  end
+
+  defp emit_progress_bytes(progress, <<>>), do: progress
+
+  defp emit_progress_bytes(progress, bytes) do
+    size = min(byte_size(bytes), @max_progress_chunk_bytes)
+    chunk = binary_part(bytes, 0, size)
+    rest = binary_part(bytes, size, byte_size(bytes) - size)
+
+    event =
+      Map.merge(progress.identity, %{
+        progress_sequence: progress.sequence,
+        # The Port deliberately merges stderr into stdout so one offset owns the
+        # exact byte order the collector and terminal receipt observed.
+        stream: "stdout",
+        byte_offset: progress.byte_offset,
+        chunk: chunk
+      })
+
+    :ok = progress.publish.(event)
+
+    emit_progress_bytes(
+      %{progress | sequence: progress.sequence + 1, byte_offset: progress.byte_offset + size},
+      rest
+    )
+  end
+
+  defp progress_count(%{progress: %{sequence: sequence}}), do: sequence
 
   # Concept: end the group, not the leader.
   #
@@ -2754,7 +2900,17 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp receipt(state, job, tool, outcome, output, environment, artifacts, deadline) do
+  defp receipt(
+         state,
+         job,
+         tool,
+         outcome,
+         output,
+         environment,
+         artifacts,
+         deadline,
+         progress_count
+       ) do
     %{
       protocol_version: 1,
       job_id: job.job_id,
@@ -2773,7 +2929,7 @@ defmodule Loopex.Executor.Local do
       tool_version: tool.version,
       outcome: outcome,
       output: output,
-      progress_count: 0,
+      progress_count: progress_count,
       observed_at_ms: System.system_time(:millisecond),
       child_environment_names: environment_names(environment),
       provider_credential_present: credential_present?(environment),
