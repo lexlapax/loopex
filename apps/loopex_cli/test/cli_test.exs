@@ -669,6 +669,56 @@ defmodule LoopexCliTest do
     end
   end
 
+  test "a delayed placement release cannot remove its successor" do
+    {state_root, _workspace} = roots()
+
+    assert {:ok, first} = Placement.acquire(state_root)
+    assert :ok = Placement.release(first)
+
+    assert {:ok, successor} = Placement.acquire(state_root)
+
+    # A delayed cleanup may retain the handle returned by the earlier
+    # acquisition. It is not authority over the lock generation that followed.
+    assert :ok = Placement.release(first)
+    assert File.read!(successor) == System.pid()
+    assert {:ok, pid} = Placement.live_owner(state_root)
+    assert String.trim(pid) == System.pid()
+
+    assert :ok = Placement.release(successor)
+  end
+
+  test "concurrent placement reclaimers elect exactly one owner for a stale lock" do
+    {state_root, _workspace} = roots()
+    File.write!(Path.join(state_root, "placement.lock"), "999999999")
+    parent = self()
+
+    contenders =
+      for _index <- 1..64 do
+        Task.async(fn ->
+          send(parent, {:placement_ready, self()})
+
+          receive do
+            :reclaim -> Placement.acquire(state_root)
+          end
+        end)
+      end
+
+    contender_pids =
+      for _index <- contenders do
+        assert_receive {:placement_ready, pid}, 2_000
+        pid
+      end
+
+    Enum.each(contender_pids, &send(&1, :reclaim))
+    results = Enum.map(contenders, &Task.await(&1, 10_000))
+
+    assert [{:ok, owner}] = Enum.filter(results, &match?({:ok, _path}, &1))
+    assert Enum.count(results, &match?({:error, _message}, &1)) == 63
+    assert File.read!(owner) == System.pid()
+
+    assert :ok = Placement.release(owner)
+  end
+
   test "the policy option selects the governing host policy and a refusal is reported in the transcript" do
     # There is no default. A command that quietly picked one would answer the
     # authority question on the operator's behalf.
