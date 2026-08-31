@@ -1887,7 +1887,7 @@ defmodule Loopex.AgentLoopTest do
     # could not tell an attempt that behaved from one that was refused a
     # thousand times. The obligation is that a refused event is counted on the
     # attempt's private record, and the private record is the journal.
-    fixture = start_with_progress(:wrong_fence)
+    fixture = start_with_progress(:one_valid_two_refused)
 
     refusals =
       fixture
@@ -1895,13 +1895,16 @@ defmodule Loopex.AgentLoopTest do
       |> Enum.filter(&(&1.payload[:kind] == "executor_progress_refused"))
 
     assert [%{payload: payload}] = refusals
-    assert payload["refused_count"] == 1
+    assert payload["refused_count"] == 2
     assert payload["tool_call_id"] == "c1"
 
-    # It is a record and nothing follows from it. The refused event did not
-    # become progress, did not become a receipt, and did not change how the run
-    # ended -- which is the property that makes counting it safe at all.
-    assert tool_progress_items() == []
+    diagnostic = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
+    assert diagnostic["refused_count"] == 2
+
+    # The one valid item crossed and the two refused items did not. The refusal
+    # record changes neither the receipt nor how the run ends, which is what makes
+    # counting it safe at all.
+    assert [_valid] = tool_progress_items()
 
     terminal =
       fixture
