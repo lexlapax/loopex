@@ -626,6 +626,29 @@ defmodule Loopex.AgentLoopBrokenDeclarationExecutor do
   end
 end
 
+defmodule Loopex.AgentLoopBlockingPolicy do
+  @moduledoc false
+
+  @behaviour Loopex.Policy
+
+  @observer_key {__MODULE__, :observer}
+
+  def observe(observer) when is_pid(observer), do: :persistent_term.put(@observer_key, observer)
+  def clear, do: :persistent_term.erase(@observer_key)
+
+  @impl Loopex.Policy
+  def decide(request) do
+    observer = :persistent_term.get(@observer_key)
+    send(observer, {:policy_consulting, self(), request.run_id})
+
+    receive do
+      :release -> {:allow, nil}
+    after
+      20_000 -> {:allow, nil}
+    end
+  end
+end
+
 defmodule Loopex.AgentLoopTest do
   @moduledoc false
 
@@ -1024,6 +1047,13 @@ defmodule Loopex.AgentLoopTest do
     pid
   end
 
+  defp in_flight_kind?(state, kind, run_id) do
+    Enum.any?(state.in_flight, fn
+      {_reference, {^kind, ^run_id, _pid}} -> true
+      _other -> false
+    end)
+  end
+
   test "a prompt runs until the model stops requesting tools rather than after a fixed number of turns" do
     # Four turns of tool use, then the model stops on its own. M1's loop was
     # hardwired to exactly two turns; nothing here caps it at any number.
@@ -1331,6 +1361,77 @@ defmodule Loopex.AgentLoopTest do
     # And no further call followed the bound.
     Process.sleep(150)
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  test "a committed run deadline bounds a host policy consultation without inventing a policy verdict" do
+    Loopex.AgentLoopBlockingPolicy.observe(self())
+    on_exit(&Loopex.AgentLoopBlockingPolicy.clear/0)
+
+    fixture =
+      start(
+        script: [%{text: "ask permission", calls: [call("c1")]}],
+        policy: Loopex.AgentLoopBlockingPolicy,
+        bounds_deadline_ms: 500
+      )
+
+    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:policy_consulting, policy_pid, run_id}, 2_000
+
+    coordinator = coordinator_of(fixture.runtime)
+    coordinator_state = :sys.get_state(coordinator)
+
+    assert Enum.any?(coordinator_state.in_flight, fn
+             {_reference, {:policy, ^run_id, ^policy_pid}} -> true
+             _other -> false
+           end)
+
+    events = drain(attachment, 2_000)
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+
+    assert finished["outcome"] == "bound_reached"
+    assert finished["bound"] == "deadline"
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+
+    refute Enum.any?(events, fn event ->
+             event.kind == "tool.finished" and event["outcome"] == "denied"
+           end)
+
+    refute Process.alive?(policy_pid)
+
+    settled = :sys.get_state(coordinator)
+    assert settled.policy_timers == %{}
+    refute in_flight_kind?(settled, :policy, run_id)
+  end
+
+  test "an operator abort remains responsive while host policy is blocked" do
+    Loopex.AgentLoopBlockingPolicy.observe(self())
+    on_exit(&Loopex.AgentLoopBlockingPolicy.clear/0)
+
+    fixture =
+      start(
+        script: [%{text: "ask permission", calls: [call("c1")]}],
+        policy: Loopex.AgentLoopBlockingPolicy,
+        bounds_deadline_ms: 60_000
+      )
+
+    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:policy_consulting, policy_pid, run_id}, 2_000
+
+    abort =
+      Task.async(fn ->
+        Loopex.command(attachment, %{type: :abort, command_id: "abort-policy"})
+      end)
+
+    assert {:accepted, "abort-policy"} = Task.await(abort, 1_000)
+
+    events = drain(attachment, 2_000)
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+    refute Process.alive?(policy_pid)
+
+    settled = fixture.runtime |> coordinator_of() |> :sys.get_state()
+    assert settled.policy_timers == %{}
+    refute in_flight_kind?(settled, :policy, run_id)
   end
 
   test "the committed absolute deadline is propagated into the model call rather than an independent per call timeout" do

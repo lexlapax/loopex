@@ -135,6 +135,18 @@ defmodule Loopex.Policy do
   @spec reason_categories() :: [atom()]
   def reason_categories, do: @reason_categories
 
+  @doc false
+  @spec decision_timeout_ms() :: pos_integer()
+  def decision_timeout_ms, do: @decision_timeout_ms
+
+  @doc false
+  @spec evaluate_callback(module(), request()) ::
+          {:allow, context()} | {:deny, reason_category()}
+  def evaluate_callback(module, request) when is_atom(module) and is_map(request),
+    do: safely(module, request)
+
+  def evaluate_callback(_module, _request), do: {:deny, :policy_unavailable}
+
   @doc """
   ## Concept
 

@@ -210,6 +210,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        pending_cleanup: %{},
        streams: %{},
        deadline_timers: %{},
+       policy_timers: %{},
        pending_fault: nil,
        query: nil,
        owner: nil,
@@ -310,7 +311,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # and states the model domain abandoned; the boolean must not suppress
         # those idempotent local actions.
         state
-        |> terminate_superseded_model_work()
+        |> terminate_superseded_effect_free_work()
         |> abandon_open_streams()
       else
         state
@@ -402,6 +403,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {{:cleanup, run_id, _pid}, remaining} ->
         Process.demonitor(reference, [:flush])
         complete_cleanup(%{state | in_flight: remaining}, run_id, admitted_cleanup(result))
+
+      {{:policy, run_id, _pid}, remaining} ->
+        Process.demonitor(reference, [:flush])
+
+        state
+        |> Map.put(:in_flight, remaining)
+        |> cancel_policy_timeout(reference)
+        |> disarm_deadline(run_id)
+        |> complete_policy_consultation(run_id, result)
     end
   end
 
@@ -419,8 +429,38 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {{:cleanup, run_id, _pid}, remaining} ->
         complete_cleanup(%{state | in_flight: remaining}, run_id, :unconfirmed)
 
+      {{:policy, run_id, _pid}, remaining} ->
+        state
+        |> Map.put(:in_flight, remaining)
+        |> cancel_policy_timeout(reference)
+        |> disarm_deadline(run_id)
+        |> complete_policy_consultation(run_id, {:deny, :policy_unavailable})
+
       {_work, remaining} ->
         {:stop, {:worker_failed, reason}, %{state | in_flight: remaining}}
+    end
+  end
+
+  def handle_info({:policy_timeout, reference, run_id}, state) do
+    case Map.pop(state.in_flight, reference) do
+      {{:policy, ^run_id, pid}, remaining} ->
+        _ = Task.Supervisor.terminate_child(state.workers, pid)
+        _ = take_worker_result(reference)
+
+        state =
+          state
+          |> Map.put(:in_flight, remaining)
+          |> cancel_policy_timeout(reference)
+          |> disarm_deadline(run_id)
+
+        if deadline_reached?(state, run_id) do
+          finish_at_deadline(state, run_id)
+        else
+          complete_policy_consultation(state, run_id, {:deny, :policy_unavailable})
+        end
+
+      {_other, remaining} ->
+        {:noreply, cancel_policy_timeout(%{state | in_flight: remaining}, reference)}
     end
   end
 
@@ -1546,17 +1586,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end)
   end
 
-  # Concept: a superseded owner cannot keep spending the operator's model budget
-  # after its successor has taken the run.
+  # Concept: a superseded owner cannot keep spending an operator's model budget
+  # or waiting on a host policy after its successor has taken the run.
   #
   # Technical depth: deadline messages deliberately no-op after supersession,
   # because the old owner cannot commit their decision. A model call has no host
   # effect to reconcile, so every in-flight model worker is terminated here,
   # its monitor/result is drained, and its timer is disarmed before the domain is
-  # closed abandoned. Executor and cleanup workers are left alone: killing an
-  # effectful operation is evidence-destroying and its own deadline/lease path
-  # must settle it truthfully.
-  defp terminate_superseded_model_work(state) do
+  # closed abandoned. A policy callback has admitted no effect, so it is likewise
+  # terminated and drained rather than left consuming the predecessor's run
+  # deadline. Executor and cleanup workers are left alone: killing an effectful
+  # operation is evidence-destroying and its own deadline/lease path must settle
+  # it truthfully.
+  defp terminate_superseded_effect_free_work(state) do
     Enum.reduce(state.in_flight, state, fn
       {reference, {:model, run_id, pid}}, next ->
         _ = Task.Supervisor.terminate_child(next.workers, pid)
@@ -1564,6 +1606,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
         next
         |> Map.update!(:in_flight, &Map.delete(&1, reference))
+        |> disarm_deadline(run_id)
+
+      {reference, {:policy, run_id, pid}}, next ->
+        _ = Task.Supervisor.terminate_child(next.workers, pid)
+        _ = take_worker_result(reference)
+
+        next
+        |> Map.update!(:in_flight, &Map.delete(&1, reference))
+        |> cancel_policy_timeout(reference)
         |> disarm_deadline(run_id)
 
       {_reference, _work}, next ->
@@ -1640,24 +1691,36 @@ defmodule Loopex.Runtime.SessionCoordinator do
     # remaining time: a call with one millisecond left is dispatched, because
     # inventing a threshold would refuse work the operator's declared bound
     # actually permits.
-    if System.system_time(:millisecond) >= run_deadline(declared) do
-      commit_tool_terminal(
-        state,
-        work,
-        call,
-        :cancelled,
-        "the run deadline passed before dispatch"
-      )
-    else
-      dispatch_effect(state, work, call)
+    cond do
+      in_flight?(state, :policy, work.run_id) ->
+        {:noreply, state}
+
+      System.system_time(:millisecond) >= run_deadline(declared) ->
+        commit_tool_terminal(
+          state,
+          work,
+          call,
+          :cancelled,
+          "the run deadline passed before dispatch"
+        )
+
+      true ->
+        dispatch_effect(state, work, call)
     end
   end
 
   defp dispatch_effect(state, work, call) do
     with {:ok, definition} <- resolve_active_tool(state, call.name),
-         :ok <- validate_tool_arguments(definition, call.arguments),
-         {:allow, context} <- consult_policy(state, work, call, definition),
-         {:ok, job} <- build_job(state, work, call, definition),
+         :ok <- validate_tool_arguments(definition, call.arguments) do
+      start_policy_consultation(state, work, call, definition)
+    else
+      {:error, reason} ->
+        commit_tool_failure(state, work, call, reason)
+    end
+  end
+
+  defp dispatch_authorized_effect(state, work, call, definition, context) do
+    with {:ok, job} <- build_job(state, work, call, definition),
          {:ok, grant} <-
            Executor.issue_grant(
              grant_decision(state),
@@ -1670,15 +1733,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
          {:ok, next} <- commit_internal(state, proposal) do
       start_executor_work(next, Map.fetch!(next.durable.pending_work, work.run_id))
     else
-      # Concept: a host refusal is an answer, not an error.
-      #
-      # Technical depth: no grant is issued and no operating-system process
-      # starts. The denial commits as a terminal fact the operator can read, and
-      # the run carries on or ends truthfully. It is never retried, because the
-      # host already answered.
-      {:deny, category} ->
-        commit_tool_terminal(state, work, call, :denied, Atom.to_string(category))
-
       # Concept: a call that cannot be dispatched still gets an answer.
       #
       # Technical depth: the name is never guessed and the call is never
@@ -1772,6 +1826,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       state
     else
       state = disarm_deadline(state, run_id)
+      state = cancel_policy_consultation(state, run_id)
       {state, model} = cancel_model_attempt(state, run_id, purpose)
       job_id = dispatched_job_id(state, run_id)
 
@@ -1908,6 +1963,29 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:ok, next} -> {next, retained}
       {:error, :no_attempt_pending} -> {state, retained}
       {:error, _reason} -> {state, :unconfirmed}
+    end
+  end
+
+  # Concept: waiting for permission is effect-free work, so stopping it proves
+  # there is no host effect to reconcile.
+  #
+  # Technical depth: the callback itself runs in the supervised task. Ending
+  # that task therefore ends the whole consultation; unlike nesting
+  # `Policy.decide/2`, it cannot leave an unlinked callback alive past the run's
+  # deadline. Its pending timeout and result are drained with it, and no denial
+  # is fabricated for a deadline or abort that won the coordinator's order.
+  defp cancel_policy_consultation(state, run_id) do
+    case in_flight_of(state, :policy, run_id) do
+      nil ->
+        state
+
+      {reference, pid} ->
+        _ = Task.Supervisor.terminate_child(state.workers, pid)
+        _ = take_worker_result(reference)
+
+        state
+        |> Map.update!(:in_flight, &Map.delete(&1, reference))
+        |> cancel_policy_timeout(reference)
     end
   end
 
@@ -2085,18 +2163,70 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: every executor-backed call asks the host, including a read-only one.
+  # Concept: every executor-backed call asks the host, including a read-only one,
+  # without making the serial session owner wait inside host code.
   #
-  # Technical depth: there is no effect class and no argument shape that skips
-  # this. An exemption would be a dispatch branch nothing policed. Where no
-  # policy is configured the runtime refused to start, so reaching here without
-  # one means tools were composed after start, and that is refused rather than
-  # allowed.
-  defp consult_policy(%{policy: nil}, _work, _call, _definition),
-    do: {:deny, :policy_unavailable}
+  # Technical depth: the callback runs in this coordinator's supervised task,
+  # not inside the coordinator and not behind `Policy.decide/2`'s own unlinked
+  # child. That makes both bounds real: the policy's fixed timeout resolves fail
+  # closed, while the run timer can terminate the callback at the earlier
+  # committed deadline without leaving an orphan host operation behind. No
+  # effect intent or grant exists until the supervised answer is admitted.
+  defp start_policy_consultation(%{policy: nil} = state, work, call, _definition),
+    do: commit_tool_terminal(state, work, call, :denied, "policy_unavailable")
 
-  defp consult_policy(state, work, call, definition) do
-    Policy.decide(state.policy, %{
+  defp start_policy_consultation(state, work, call, definition) do
+    request = policy_request(state, work, call, definition)
+
+    task =
+      Task.Supervisor.async_nolink(state.workers, fn ->
+        Policy.evaluate_callback(state.policy, request)
+      end)
+
+    state = put_in_flight(state, task.ref, {:policy, work.run_id, task.pid})
+    state = arm_policy_timeout(state, task.ref, work.run_id)
+    {:noreply, arm_deadline(state, work.run_id)}
+  end
+
+  defp complete_policy_consultation(state, run_id, decision) do
+    cond do
+      state.phase != :ready or state.superseded ->
+        continue_after_owner_loss(state)
+
+      deadline_reached?(state, run_id) ->
+        finish_at_deadline(state, run_id)
+
+      true ->
+        case Map.get(state.durable.pending_work, run_id) do
+          %{stage: "effect_pending", pending_calls: [call | _rest]} = work ->
+            with {:ok, definition} <- resolve_active_tool(state, call.name),
+                 :ok <- validate_tool_arguments(definition, call.arguments) do
+              case decision do
+                {:allow, context} ->
+                  dispatch_authorized_effect(state, work, call, definition, context)
+
+                {:deny, category} when is_atom(category) ->
+                  if category in Policy.reason_categories() do
+                    commit_tool_terminal(state, work, call, :denied, Atom.to_string(category))
+                  else
+                    commit_tool_terminal(state, work, call, :denied, "policy_unavailable")
+                  end
+
+                _unavailable ->
+                  commit_tool_terminal(state, work, call, :denied, "policy_unavailable")
+              end
+            else
+              {:error, reason} -> commit_tool_failure(state, work, call, reason)
+            end
+
+          _no_pending_call ->
+            {:noreply, state}
+        end
+    end
+  end
+
+  defp policy_request(state, work, call, definition) do
+    %{
       session_id: state.session_id,
       run_id: work.run_id,
       tool_call_id: call.tool_call_id,
@@ -2105,7 +2235,29 @@ defmodule Loopex.Runtime.SessionCoordinator do
       effect_class: Map.fetch!(definition, "effect_class"),
       idempotency_class: Map.fetch!(definition, "idempotency_class"),
       workspace_lease: state.executor.workspace_lease
-    })
+    }
+  end
+
+  defp arm_policy_timeout(state, reference, run_id) do
+    timer =
+      Process.send_after(
+        self(),
+        {:policy_timeout, reference, run_id},
+        Policy.decision_timeout_ms()
+      )
+
+    %{state | policy_timers: Map.put(state.policy_timers, reference, timer)}
+  end
+
+  defp cancel_policy_timeout(state, reference) do
+    case Map.pop(state.policy_timers, reference) do
+      {nil, _remaining} ->
+        state
+
+      {timer, remaining} ->
+        _ = Process.cancel_timer(timer)
+        %{state | policy_timers: remaining}
+    end
   end
 
   defp validate_tool_arguments(definition, arguments) do
