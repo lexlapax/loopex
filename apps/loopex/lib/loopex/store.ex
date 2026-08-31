@@ -172,6 +172,36 @@ defmodule Loopex.Store do
   @typedoc """
   ## Concept
 
+  The durable identity of one candidate owner attempt beneath a logical resume
+  command.
+
+  ## Technical depth
+
+  Staging binds the complete command and candidate bytes before succession is
+  submitted. The expected generation is zero for explicit absence or the
+  observed open generation for replacement after candidate resolution.
+  """
+  @type stage_owner_attempt_transaction :: %{
+          required(:type) => :stage_owner_attempt,
+          required(:runtime_id) => id(),
+          required(:command_id) => id(),
+          required(:command_kind) => :resume,
+          required(:session_id) => id(),
+          required(:mutation_domain) => mutation_domain(),
+          required(:succession_id) => id(),
+          required(:canonical_command_bytes) => binary(),
+          required(:canonical_command_digest) => digest(),
+          required(:attempt_generation) => pos_integer(),
+          required(:expected_generation) => non_neg_integer(),
+          required(:tx_id) => id(),
+          required(:candidate) => advance_owner_transaction(),
+          required(:canonical_record_bytes) => binary(),
+          required(:canonical_mutation_digest) => digest()
+        }
+
+  @typedoc """
+  ## Concept
+
   One atomic private-record and public-outbox commit by the current owner.
 
   ## Technical depth
@@ -201,10 +231,14 @@ defmodule Loopex.Store do
   ## Technical depth
 
   The union is closed to session creation, owner succession, and ordinary
-  session commit; the transition catalogue derives from the same shapes.
+  owner-attempt staging, and session commit; the transition catalogue derives
+  from the same shapes.
   """
   @type transaction ::
-          create_session_transaction() | advance_owner_transaction() | session_transaction()
+          create_session_transaction()
+          | stage_owner_attempt_transaction()
+          | advance_owner_transaction()
+          | session_transaction()
 
   @typedoc """
   ## Concept
@@ -330,6 +364,25 @@ defmodule Loopex.Store do
               mutation_domain(),
               tx_id :: id()
             ) :: transaction_status()
+
+  @doc """
+  ## Concept
+
+  Observes the durable historical result or current owner candidate for one
+  runtime command identity.
+
+  ## Technical depth
+
+  The projection omits canonical command and candidate bytes, digests, and all
+  owner-incarnation capability. `:absent` is authoritative only for the exact
+  runtime and command key; adapter loss is `:unavailable`.
+  """
+  @callback runtime_command(reference :: term(), command :: map()) ::
+              :absent
+              | :unavailable
+              | {:error, :runtime_command_conflict}
+              | {:open, map()}
+              | {:completed, map()}
 
   @doc """
   ## Concept
@@ -477,6 +530,59 @@ defmodule Loopex.Store do
     build_transaction(fields)
   end
 
+  @doc false
+  def advance_owner(
+        session_id,
+        mutation_domain,
+        tx_id,
+        expected_owner_epoch,
+        expected_journal_version,
+        proposed_owner_incarnation_id,
+        owner_command
+      )
+      when is_map(owner_command) do
+    fields = [
+      type: :advance_owner,
+      session_id: session_id,
+      mutation_domain: mutation_domain,
+      tx_id: tx_id,
+      expected_owner_epoch: expected_owner_epoch,
+      expected_journal_version: expected_journal_version,
+      proposed_owner_incarnation_id: proposed_owner_incarnation_id,
+      runtime_id: Map.get(owner_command, :runtime_id),
+      command_id: Map.get(owner_command, :command_id),
+      command_kind: :resume,
+      succession_id: Map.get(owner_command, :succession_id),
+      canonical_command_bytes: Map.get(owner_command, :canonical_command_bytes),
+      canonical_command_digest: Map.get(owner_command, :canonical_command_digest),
+      attempt_generation: Map.get(owner_command, :attempt_generation)
+    ]
+
+    build_transaction(fields)
+  end
+
+  @doc false
+  def stage_owner_attempt(owner_command, expected_generation, stage_tx_id, candidate)
+      when is_map(owner_command) and is_map(candidate) do
+    fields = [
+      type: :stage_owner_attempt,
+      runtime_id: Map.get(owner_command, :runtime_id),
+      command_id: Map.get(owner_command, :command_id),
+      command_kind: :resume,
+      session_id: Map.get(owner_command, :session_id),
+      mutation_domain: Map.get(owner_command, :mutation_domain),
+      succession_id: Map.get(owner_command, :succession_id),
+      canonical_command_bytes: Map.get(owner_command, :canonical_command_bytes),
+      canonical_command_digest: Map.get(owner_command, :canonical_command_digest),
+      attempt_generation: Map.get(owner_command, :attempt_generation),
+      expected_generation: expected_generation,
+      tx_id: stage_tx_id,
+      candidate: candidate
+    ]
+
+    build_transaction(fields)
+  end
+
   @doc """
   ## Concept
 
@@ -583,6 +689,21 @@ defmodule Loopex.Store do
       _invalid -> :unavailable
     end
   end
+
+  @doc false
+  def runtime_command(%__MODULE__{adapter: adapter, reference: reference}, command)
+      when is_map(command) do
+    with :ok <- validate_runtime_command_binding(command) do
+      adapter_call(
+        fn -> adapter.runtime_command(reference, command) end,
+        :unavailable
+      )
+    else
+      _invalid -> {:error, :runtime_command_conflict}
+    end
+  end
+
+  def runtime_command(%__MODULE__{}, _command), do: {:error, :runtime_command_conflict}
 
   @doc """
   ## Concept
@@ -724,8 +845,26 @@ defmodule Loopex.Store do
     fetch_fields(transaction, [:type, :runtime_id, :command_id, :genesis])
   end
 
-  defp semantic_fields(%{type: :advance_owner} = transaction) do
+  defp semantic_fields(%{type: :stage_owner_attempt} = transaction) do
     fetch_fields(transaction, [
+      :type,
+      :runtime_id,
+      :command_id,
+      :command_kind,
+      :session_id,
+      :mutation_domain,
+      :succession_id,
+      :canonical_command_bytes,
+      :canonical_command_digest,
+      :attempt_generation,
+      :expected_generation,
+      :tx_id,
+      :candidate
+    ])
+  end
+
+  defp semantic_fields(%{type: :advance_owner} = transaction) do
+    fields = [
       :type,
       :session_id,
       :mutation_domain,
@@ -733,7 +872,25 @@ defmodule Loopex.Store do
       :expected_owner_epoch,
       :expected_journal_version,
       :proposed_owner_incarnation_id
-    ])
+    ]
+
+    fields =
+      if Map.has_key?(transaction, :runtime_id) do
+        fields ++
+          [
+            :runtime_id,
+            :command_id,
+            :command_kind,
+            :succession_id,
+            :canonical_command_bytes,
+            :canonical_command_digest,
+            :attempt_generation
+          ]
+      else
+        fields
+      end
+
+    fetch_fields(transaction, fields)
   end
 
   defp semantic_fields(%{type: :session_commit} = transaction) do
@@ -793,6 +950,17 @@ defmodule Loopex.Store do
     end
   end
 
+  defp validate_common(:runtime_control_stage_owner_attempt, transaction) do
+    with {:ok, _runtime_id} <- fetch_identifier(transaction, :runtime_id),
+         {:ok, _command_id} <- fetch_identifier(transaction, :command_id),
+         {:ok, _session_id} <- fetch_identifier(transaction, :session_id),
+         {:ok, _domain} <- fetch_identifier(transaction, :mutation_domain),
+         {:ok, _succession_id} <- fetch_identifier(transaction, :succession_id),
+         {:ok, _tx_id} <- fetch_identifier(transaction, :tx_id) do
+      :ok
+    end
+  end
+
   defp validate_common(_transition, transaction) do
     with {:ok, _session_id} <- fetch_identifier(transaction, :session_id),
          {:ok, _domain} <- fetch_identifier(transaction, :mutation_domain),
@@ -805,11 +973,28 @@ defmodule Loopex.Store do
     validate_record(Map.get(transaction, :genesis))
   end
 
+  defp validate_shape(:runtime_control_stage_owner_attempt, transaction) do
+    with true <- transaction.command_kind == :resume,
+         true <- is_binary(transaction.canonical_command_bytes),
+         true <- byte_size(transaction.canonical_command_digest) == 32,
+         true <-
+           transaction.canonical_command_digest == digest(transaction.canonical_command_bytes),
+         true <- is_integer(transaction.attempt_generation) and transaction.attempt_generation > 0,
+         :ok <- non_negative(transaction, :expected_generation),
+         true <- is_map(transaction.candidate),
+         :ok <- validate_transaction(transaction.candidate) do
+      :ok
+    else
+      _other -> {:error, :invalid_owner_attempt}
+    end
+  end
+
   defp validate_shape(:session_journal_advance_owner, transaction) do
     with :ok <- non_negative(transaction, :expected_owner_epoch),
          :ok <- non_negative(transaction, :expected_journal_version),
          {:ok, _incarnation} <-
-           fetch_identifier(transaction, :proposed_owner_incarnation_id) do
+           fetch_identifier(transaction, :proposed_owner_incarnation_id),
+         :ok <- validate_owner_command_fields(transaction) do
       :ok
     end
   end
@@ -827,6 +1012,53 @@ defmodule Loopex.Store do
              Map.get(transaction, :expected_owner_incarnation_id)
            ) do
       :ok
+    end
+  end
+
+  defp validate_owner_command_fields(%{runtime_id: runtime_id} = transaction) do
+    with {:ok, _runtime_id} <- validate_identifier(runtime_id),
+         {:ok, _command_id} <- fetch_identifier(transaction, :command_id),
+         true <- transaction.command_kind == :resume,
+         {:ok, _succession_id} <- fetch_identifier(transaction, :succession_id),
+         true <- is_binary(transaction.canonical_command_bytes),
+         true <- byte_size(transaction.canonical_command_digest) == 32,
+         true <-
+           transaction.canonical_command_digest == digest(transaction.canonical_command_bytes),
+         true <- is_integer(transaction.attempt_generation) and transaction.attempt_generation > 0 do
+      :ok
+    else
+      _other -> {:error, :invalid_owner_command}
+    end
+  end
+
+  defp validate_owner_command_fields(_transaction), do: :ok
+
+  defp validate_runtime_command_binding(command) do
+    expected =
+      MapSet.new([
+        :runtime_id,
+        :command_id,
+        :command_kind,
+        :session_id,
+        :mutation_domain,
+        :succession_id,
+        :canonical_command_bytes,
+        :canonical_command_digest
+      ])
+
+    with true <- Map.keys(command) |> MapSet.new() |> MapSet.equal?(expected),
+         {:ok, _runtime_id} <- fetch_identifier(command, :runtime_id),
+         {:ok, _command_id} <- fetch_identifier(command, :command_id),
+         true <- command.command_kind == :resume,
+         {:ok, _session_id} <- fetch_identifier(command, :session_id),
+         {:ok, _mutation_domain} <- fetch_identifier(command, :mutation_domain),
+         {:ok, _succession_id} <- fetch_identifier(command, :succession_id),
+         true <- is_binary(command.canonical_command_bytes),
+         true <- byte_size(command.canonical_command_digest) == 32,
+         true <- command.canonical_command_digest == digest(command.canonical_command_bytes) do
+      :ok
+    else
+      _other -> {:error, :invalid_runtime_command_binding}
     end
   end
 

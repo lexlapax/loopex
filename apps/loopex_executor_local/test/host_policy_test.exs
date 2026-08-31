@@ -155,6 +155,9 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     def ownership_head(_reference, _session, _domain), do: raise("unreachable")
 
     @impl Loopex.Store
+    def runtime_command(_reference, _command), do: raise("unreachable")
+
+    @impl Loopex.Store
     def load_records(_reference, _session, _after, _limit), do: raise("unreachable")
 
     @impl Loopex.Store

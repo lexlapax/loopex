@@ -79,6 +79,10 @@ defmodule Loopex.M1RuntimeTestStore do
     do: GenServer.call(pid, {:ownership_head, session_id})
 
   @impl Store
+  def runtime_command(pid, command),
+    do: GenServer.call(pid, {:runtime_command, command})
+
+  @impl Store
   def load_records(pid, session_id, after_version, limit),
     do: GenServer.call(pid, {:load_records, session_id, after_version, limit})
 
@@ -203,6 +207,28 @@ defmodule Loopex.M1RuntimeTestStore do
              owner_epoch: session.owner_epoch,
              journal_version: session.journal_version
            }}
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call({:runtime_command, command}, _from, state) do
+    result =
+      case Map.get(state.runtime_commands, {command.runtime_id, command.command_id}) do
+        nil ->
+          :absent
+
+        %{command: ^command, status: status, generation: generation, candidate: candidate} =
+            entry ->
+          details = %{attempt_generation: generation, candidate_tx_id: candidate.tx_id}
+
+          case status do
+            :open -> {:open, details}
+            :completed -> {:completed, Map.put(details, :result, entry.result)}
+          end
+
+        _changed_binding ->
+          {:error, :runtime_command_conflict}
       end
 
     {:reply, result, state}
@@ -475,6 +501,7 @@ defmodule Loopex.M1RuntimeTestStore do
     command_key = {transaction.runtime_id, transaction.command_id}
 
     session = %{
+      runtime_id: transaction.runtime_id,
       owner_epoch: 0,
       owner_incarnation_id: nil,
       journal_version: 1,
@@ -494,6 +521,65 @@ defmodule Loopex.M1RuntimeTestStore do
     {next, outcome}
   end
 
+  defp linearize(state, %{type: :stage_owner_attempt} = transaction, binding) do
+    command = owner_command_binding(transaction)
+
+    session = Map.get(state.sessions, transaction.session_id)
+
+    reason =
+      cond do
+        is_nil(session) ->
+          :session_not_found
+
+        session.runtime_id != transaction.runtime_id ->
+          :runtime_placement_mismatch
+
+        unresolved_other_owner_command?(state, transaction) ->
+          :owner_attempt_in_progress
+
+        true ->
+          case Map.get(state.runtime_commands, {transaction.runtime_id, transaction.command_id}) do
+            nil ->
+              if transaction.expected_generation == 0,
+                do: nil,
+                else: :stale_attempt_generation
+
+            %{command: ^command, status: :open, generation: generation}
+            when generation == transaction.expected_generation ->
+              nil
+
+            %{command: ^command, status: :completed} ->
+              :command_completed
+
+            _changed_binding ->
+              :runtime_command_conflict
+          end
+      end
+
+    if reason do
+      retain_noncommit(state, transaction, binding, reason)
+    else
+      outcome = {:committed, transaction.tx_id, %{type: :stage_owner_attempt}}
+
+      staged = %{
+        command: command,
+        status: :open,
+        generation: transaction.attempt_generation,
+        candidate: transaction.candidate,
+        result: nil
+      }
+
+      next =
+        state
+        |> put_resolution(transaction, binding, outcome)
+        |> Map.update!(:runtime_commands, fn commands ->
+          Map.put(commands, {transaction.runtime_id, transaction.command_id}, staged)
+        end)
+
+      {next, outcome}
+    end
+  end
+
   defp linearize(state, %{type: :advance_owner} = transaction, binding) do
     case Map.get(state.sessions, transaction.session_id) do
       nil ->
@@ -501,6 +587,14 @@ defmodule Loopex.M1RuntimeTestStore do
 
       session ->
         cond do
+          owner_command_refusal(state, transaction) != nil ->
+            retain_noncommit(
+              state,
+              transaction,
+              binding,
+              owner_command_refusal(state, transaction)
+            )
+
           transaction.expected_owner_epoch != session.owner_epoch ->
             retain_noncommit(state, transaction, binding, :stale_owner_epoch)
 
@@ -547,6 +641,8 @@ defmodule Loopex.M1RuntimeTestStore do
               state
               |> put_session(transaction.session_id, updated)
               |> put_resolution(transaction, binding, outcome)
+
+            next = complete_runtime_command(next, transaction)
 
             {next, outcome}
         end
@@ -651,6 +747,76 @@ defmodule Loopex.M1RuntimeTestStore do
   defp put_session(state, session_id, session),
     do: %{state | sessions: Map.put(state.sessions, session_id, session)}
 
+  defp complete_runtime_command(state, %{runtime_id: runtime_id} = transaction) do
+    key = {runtime_id, transaction.command_id}
+
+    completed =
+      state.runtime_commands
+      |> Map.fetch!(key)
+      |> Map.merge(%{status: :completed, result: transaction.session_id})
+
+    %{state | runtime_commands: Map.put(state.runtime_commands, key, completed)}
+  end
+
+  defp complete_runtime_command(state, _transaction), do: state
+
+  defp owner_command_refusal(state, %{runtime_id: runtime_id} = transaction) do
+    command = owner_command_binding(transaction)
+
+    case Map.get(state.runtime_commands, {runtime_id, transaction.command_id}) do
+      %{command: ^command, status: :open, generation: generation, candidate: candidate}
+      when generation == transaction.attempt_generation ->
+        case {Store.immutable_binding(candidate), Store.immutable_binding(transaction)} do
+          {{:ok, binding}, {:ok, binding}} -> nil
+          _mismatch -> :owner_candidate_conflict
+        end
+
+      %{command: ^command, status: :completed} ->
+        :command_completed
+
+      _other ->
+        :runtime_command_conflict
+    end
+  end
+
+  defp owner_command_refusal(_state, _transaction), do: nil
+
+  defp unresolved_other_owner_command?(state, transaction) do
+    Enum.any?(state.runtime_commands, fn
+      {{runtime_id, command_id},
+       %{
+         command: %{session_id: session_id, mutation_domain: mutation_domain},
+         status: :open,
+         candidate: candidate
+       }} ->
+        same_command =
+          runtime_id == transaction.runtime_id and command_id == transaction.command_id
+
+        key = {session_id, mutation_domain, candidate.tx_id}
+
+        same_session_domain =
+          session_id == transaction.session_id and mutation_domain == transaction.mutation_domain
+
+        same_session_domain and not same_command and not Map.has_key?(state.resolutions, key)
+
+      _other ->
+        false
+    end)
+  end
+
+  defp owner_command_binding(transaction) do
+    %{
+      runtime_id: transaction.runtime_id,
+      command_id: transaction.command_id,
+      command_kind: transaction.command_kind,
+      session_id: transaction.session_id,
+      mutation_domain: transaction.mutation_domain,
+      succession_id: transaction.succession_id,
+      canonical_command_bytes: transaction.canonical_command_bytes,
+      canonical_command_digest: transaction.canonical_command_digest
+    }
+  end
+
   defp session_commit_refusal(session, transaction) do
     cond do
       transaction.expected_owner_epoch != session.owner_epoch ->
@@ -685,6 +851,7 @@ defmodule Loopex.M1RuntimeTestStore do
 
   defp empty_session do
     %{
+      runtime_id: nil,
       owner_epoch: 0,
       owner_incarnation_id: nil,
       journal_version: 0,

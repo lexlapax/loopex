@@ -178,6 +178,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        session_id: Keyword.fetch!(options, :session_id),
        generation: Keyword.fetch!(options, :generation),
        succession_id: Keyword.fetch!(options, :succession_id),
+       owner_command: Keyword.get(options, :owner_command),
        prior_tx_id: Keyword.get(options, :prior_tx_id),
        attempt: 1,
        # Technical depth: one counter for the whole acquisition, never reset. A
@@ -496,6 +497,43 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp discover_and_advance(%{attempt: attempt} = state)
        when attempt <= @max_historical_attempts do
+    discover_and_advance_owner(state)
+  end
+
+  defp discover_and_advance(state), do: {:stop, :owner_attempt_limit, state}
+
+  defp discover_and_advance_owner(%{owner_command: owner_command} = state)
+       when is_map(owner_command) do
+    with {:ok, prior_tx_id} <- discover_prior_tx_id(state),
+         :ok <- prior_transaction_resolved(state, prior_tx_id),
+         {:ok, head} <- ownership_head(state),
+         {:ok, attempt_generation, expected_generation} <- owner_attempt_generation(state),
+         {:ok, transaction, incarnation} <-
+           build_command_owner_candidate(state, head, attempt_generation),
+         {:ok, stage} <-
+           Store.stage_owner_attempt(
+             Map.put(owner_command, :attempt_generation, attempt_generation),
+             expected_generation,
+             owner_identity("owner_stage_tx", state.succession_id, attempt_generation),
+             transaction
+           ) do
+      transact_owner_stage(
+        %{
+          state
+          | phase: :acquiring,
+            prior_tx_id: prior_tx_id,
+            transaction: transaction,
+            incarnation: incarnation
+        },
+        stage
+      )
+    else
+      :retry -> retry_owner(state, :store_unavailable)
+      {:error, reason} -> {:stop, reason, state}
+    end
+  end
+
+  defp discover_and_advance_owner(state) do
     with {:ok, prior_tx_id} <- discover_prior_tx_id(state),
          :ok <- prior_transaction_resolved(state, prior_tx_id),
          {:ok, head} <- ownership_head(state),
@@ -513,7 +551,88 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp discover_and_advance(state), do: {:stop, :owner_attempt_limit, state}
+  defp owner_attempt_generation(%{owner_command: %{open: nil}}), do: {:ok, 1, 0}
+
+  defp owner_attempt_generation(%{
+         store: store,
+         session_id: session_id,
+         owner_command: %{
+           open: %{attempt_generation: generation, candidate_tx_id: candidate_tx_id}
+         }
+       }) do
+    case Store.transaction_status(store, session_id, @mutation_domain, candidate_tx_id) do
+      :absent -> {:ok, generation + 1, generation}
+      {:terminal, {:not_committed, _reason}} -> {:ok, generation + 1, generation}
+      {:terminal, :committed} -> {:error, :runtime_command_inconsistent}
+      :unavailable -> :retry
+    end
+  end
+
+  defp build_command_owner_candidate(state, head, attempt_generation) do
+    tx_id = owner_identity("owner_tx", state.succession_id, attempt_generation)
+    incarnation = owner_identity("owner_incarnation", state.succession_id, attempt_generation)
+    owner_command = Map.put(state.owner_command, :attempt_generation, attempt_generation)
+
+    case Store.advance_owner(
+           state.session_id,
+           @mutation_domain,
+           tx_id,
+           head.owner_epoch,
+           head.journal_version,
+           incarnation,
+           owner_command
+         ) do
+      {:ok, transaction} -> {:ok, transaction, incarnation}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp transact_owner_stage(state, stage) do
+    {outcome, lane} = OwnerLane.transact(state.lane, stage)
+    state = %{state | lane: lane}
+
+    case outcome do
+      {:committed, tx_id, %{type: :stage_owner_attempt}} when tx_id == stage.tx_id ->
+        transact_owner(state)
+
+      {:not_committed, reason}
+      when reason in [:stale_attempt_generation, :command_completed] ->
+        retry_command_owner(state)
+
+      {:not_committed, reason} ->
+        {:stop, reason, state}
+
+      {:commit_unknown, _tx_id} ->
+        retry_owner(%{state | phase: :discovering}, :commit_unknown)
+
+      {:fenced, :commit_unknown} ->
+        retry_owner(%{state | phase: :discovering}, :commit_unknown)
+    end
+  end
+
+  defp retry_command_owner(state) do
+    case Store.runtime_command(state.store, Map.delete(state.owner_command, :open)) do
+      {:completed, %{result: session_id}} when session_id == state.session_id ->
+        GenServer.cast(state.control, {:owner_replayed, self(), state.session_id})
+        {:stop, :normal, state}
+
+      {:open, open} ->
+        advance_acquisition(%{
+          state
+          | phase: :discovering,
+            owner_command: Map.put(state.owner_command, :open, open),
+            transaction: nil,
+            incarnation: nil,
+            attempt: state.attempt + 1
+        })
+
+      :unavailable ->
+        retry_owner(%{state | phase: :discovering}, :store_unavailable)
+
+      _other ->
+        {:stop, :runtime_command_conflict, state}
+    end
+  end
 
   defp discover_prior_tx_id(%{prior_tx_id: prior_tx_id}) when is_binary(prior_tx_id),
     do: {:ok, prior_tx_id}
@@ -1744,7 +1863,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
          {:ok, proposal} <-
            SessionState.propose_effect_intent(state.durable, work.run_id, job, grant),
          {:ok, next} <- commit_internal(state, proposal) do
-      start_executor_work(next, Map.fetch!(next.durable.pending_work, work.run_id))
+      # Concept: committing intent does not buy permission to start after the
+      # operator's deadline.
+      #
+      # Technical depth: the Store call above is synchronous and may linearize
+      # the intent while the deadline is still open, then return after it has
+      # passed. The coordinator cannot process its queued deadline timer while
+      # it waits. Rechecking at the dispatch boundary prevents that scheduling
+      # delay from starting an executor after the bound. The intent is already
+      # durable, so the call receives its own truthful pre-effect terminal fact;
+      # no cancellation query is sent for a job that never crossed the port.
+      if deadline_reached?(next, work.run_id) do
+        commit_tool_terminal(
+          next,
+          work,
+          call,
+          :cancelled,
+          "the run deadline passed before dispatch"
+        )
+      else
+        start_executor_work(next, Map.fetch!(next.durable.pending_work, work.run_id))
+      end
     else
       # Concept: a call that cannot be dispatched still gets an answer.
       #

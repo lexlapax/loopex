@@ -74,6 +74,32 @@ defmodule Loopex.Store.Local.State do
     end
   end
 
+  @spec runtime_command(map(), map()) ::
+          :absent | {:error, :runtime_command_conflict} | {:open, map()} | {:completed, map()}
+  def runtime_command(state, command) do
+    case fetch_nested(state.runtime_commands, command.runtime_id, command.command_id) do
+      :absent ->
+        :absent
+
+      {:ok, %{command: ^command, status: :open, generation: generation, candidate: candidate}} ->
+        {:open, %{attempt_generation: generation, candidate_tx_id: candidate.tx_id}}
+
+      {:ok,
+       %{
+         command: ^command,
+         status: :completed,
+         generation: generation,
+         candidate: candidate,
+         result: result
+       }} ->
+        {:completed,
+         %{attempt_generation: generation, candidate_tx_id: candidate.tx_id, result: result}}
+
+      {:ok, _changed_binding} ->
+        {:error, :runtime_command_conflict}
+    end
+  end
+
   @spec load_records(map(), binary(), non_neg_integer(), pos_integer()) ::
           {:ok, [Store.private_record()]}
   def load_records(state, session_id, after_version, limit) do
@@ -141,6 +167,7 @@ defmodule Loopex.Store.Local.State do
     retained = retained(transaction, resolution)
 
     session = %{
+      runtime_id: transaction.runtime_id,
       owner_epoch: 0,
       owner_incarnation_id: nil,
       journal_version: 1,
@@ -170,13 +197,54 @@ defmodule Loopex.Store.Local.State do
     {:new, next, frame, {:committed, transaction.command_id, receipt}}
   end
 
+  defp linearize(state, :runtime_control_stage_owner_attempt, transaction) do
+    case Map.fetch(state.sessions, transaction.session_id) do
+      :error ->
+        retain_absent_session(state, transaction)
+
+      {:ok, session} ->
+        command = owner_command_binding(transaction)
+
+        reason = stage_refusal(state, session, transaction, command)
+
+        if reason do
+          retain_non_commit(state, session, transaction, reason)
+        else
+          resolution = committed_resolution(%{type: :stage_owner_attempt})
+
+          staged = %{
+            command: command,
+            status: :open,
+            generation: transaction.attempt_generation,
+            candidate: transaction.candidate,
+            result: nil
+          }
+
+          updated = %{
+            session
+            | resolutions: put_resolution(session.resolutions, transaction, resolution)
+          }
+
+          next =
+            state
+            |> put_session(transaction.session_id, updated)
+            |> put_runtime_command(transaction.runtime_id, transaction.command_id, staged)
+
+          frame =
+            frame(:runtime_control_stage_owner_attempt, transaction, resolution, [], [])
+
+          {:new, next, frame, {:committed, transaction.tx_id, %{type: :stage_owner_attempt}}}
+        end
+    end
+  end
+
   defp linearize(state, :session_journal_advance_owner, transaction) do
     case Map.fetch(state.sessions, transaction.session_id) do
       :error ->
         retain_absent_session(state, transaction)
 
       {:ok, session} ->
-        reason = succession_refusal(session, transaction)
+        reason = succession_refusal(state, session, transaction)
 
         case reason do
           nil -> commit_succession(state, session, transaction)
@@ -238,6 +306,17 @@ defmodule Loopex.Store.Local.State do
     }
 
     next = put_session(state, transaction.session_id, updated)
+
+    next =
+      if Map.has_key?(transaction, :runtime_id) do
+        {:ok, staged} =
+          fetch_nested(next.runtime_commands, transaction.runtime_id, transaction.command_id)
+
+        completed = %{staged | status: :completed, result: transaction.session_id}
+        put_runtime_command(next, transaction.runtime_id, transaction.command_id, completed)
+      else
+        next
+      end
 
     frame =
       frame(:session_journal_advance_owner, transaction, resolution, [stamped], [])
@@ -354,7 +433,7 @@ defmodule Loopex.Store.Local.State do
   end
 
   defp retained_resolution(state, transaction)
-       when transaction.type in [:advance_owner, :session_commit] do
+       when transaction.type in [:stage_owner_attempt, :advance_owner, :session_commit] do
     with session_id when is_binary(session_id) <- Map.get(transaction, :session_id),
          mutation_domain when is_binary(mutation_domain) <-
            Map.get(transaction, :mutation_domain),
@@ -368,12 +447,102 @@ defmodule Loopex.Store.Local.State do
 
   defp retained_resolution(_state, _transaction), do: :invalid_scope
 
-  defp succession_refusal(session, transaction) do
+  defp succession_refusal(state, session, transaction) do
     cond do
-      transaction.expected_owner_epoch != session.owner_epoch -> :stale_owner_epoch
-      transaction.expected_journal_version != session.journal_version -> :stale_journal_version
-      true -> nil
+      owner_command_refusal(state, transaction) != nil ->
+        owner_command_refusal(state, transaction)
+
+      transaction.expected_owner_epoch != session.owner_epoch ->
+        :stale_owner_epoch
+
+      transaction.expected_journal_version != session.journal_version ->
+        :stale_journal_version
+
+      true ->
+        nil
     end
+  end
+
+  defp owner_command_refusal(state, %{runtime_id: runtime_id} = transaction) do
+    command = owner_command_binding(transaction)
+
+    case fetch_nested(state.runtime_commands, runtime_id, transaction.command_id) do
+      {:ok,
+       %{
+         command: ^command,
+         status: :open,
+         generation: generation,
+         candidate: %{tx_id: tx_id} = candidate
+       }}
+      when generation == transaction.attempt_generation and tx_id == transaction.tx_id ->
+        case {Store.immutable_binding(candidate), Store.immutable_binding(transaction)} do
+          {{:ok, binding}, {:ok, binding}} -> nil
+          _mismatch -> :owner_candidate_conflict
+        end
+
+      {:ok, %{command: ^command, status: :completed}} ->
+        :command_completed
+
+      _other ->
+        :runtime_command_conflict
+    end
+  end
+
+  defp owner_command_refusal(_state, _transaction), do: nil
+
+  defp stage_refusal(state, session, transaction, command) do
+    cond do
+      session.runtime_id != transaction.runtime_id ->
+        :runtime_placement_mismatch
+
+      unresolved_other_owner_command?(state, session, transaction) ->
+        :owner_attempt_in_progress
+
+      true ->
+        case fetch_nested(
+               state.runtime_commands,
+               transaction.runtime_id,
+               transaction.command_id
+             ) do
+          :absent ->
+            if transaction.expected_generation == 0, do: nil, else: :stale_attempt_generation
+
+          {:ok, %{command: ^command, status: :open, generation: generation}}
+          when generation == transaction.expected_generation ->
+            nil
+
+          {:ok, %{command: ^command, status: :completed}} ->
+            :command_completed
+
+          {:ok, _changed_binding} ->
+            :runtime_command_conflict
+        end
+    end
+  end
+
+  defp unresolved_other_owner_command?(state, session, transaction) do
+    state.runtime_commands
+    |> Enum.flat_map(fn {_runtime_id, commands} -> Map.values(commands) end)
+    |> Enum.any?(fn
+      %{
+        command: %{session_id: session_id, mutation_domain: mutation_domain} = command,
+        status: :open,
+        candidate: candidate
+      } ->
+        same_command =
+          command.runtime_id == transaction.runtime_id and
+            command.command_id == transaction.command_id
+
+        same_session_domain =
+          session_id == transaction.session_id and
+            mutation_domain == transaction.mutation_domain
+
+        same_session_domain and not same_command and
+          fetch_resolution(session.resolutions, mutation_domain, candidate.tx_id) == :absent
+
+      _other ->
+        false
+    end)
   end
 
   defp ordinary_refusal(session, transaction) do
@@ -476,6 +645,26 @@ defmodule Loopex.Store.Local.State do
 
   defp put_session(state, session_id, session) do
     %{state | sessions: Map.put(state.sessions, session_id, session)}
+  end
+
+  defp put_runtime_command(state, runtime_id, command_id, command) do
+    %{
+      state
+      | runtime_commands: put_nested(state.runtime_commands, runtime_id, command_id, command)
+    }
+  end
+
+  defp owner_command_binding(transaction) do
+    %{
+      runtime_id: transaction.runtime_id,
+      command_id: transaction.command_id,
+      command_kind: transaction.command_kind,
+      session_id: transaction.session_id,
+      mutation_domain: transaction.mutation_domain,
+      succession_id: transaction.succession_id,
+      canonical_command_bytes: transaction.canonical_command_bytes,
+      canonical_command_digest: transaction.canonical_command_digest
+    }
   end
 
   defp put_nested(outer, first, second, value) do

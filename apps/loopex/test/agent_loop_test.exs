@@ -1477,6 +1477,39 @@ defmodule Loopex.AgentLoopTest do
            end)
   end
 
+  test "an effect intent whose store commit crosses the deadline never reaches the executor" do
+    fixture =
+      start(
+        script: [%{text: "ask permission", calls: [call("c1")]}],
+        bounds_deadline_ms: 500
+      )
+
+    :ok =
+      M1RuntimeTestStore.delay_after_record(
+        fixture.store,
+        "effect_intent_committed",
+        self()
+      )
+
+    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+
+    assert_receive {:record_linearized, waiter, _store, "effect_intent_committed",
+                    :session_journal_commit, {:committed, _tx_id, _receipt}},
+                   2_000
+
+    Process.sleep(550)
+    M1RuntimeTestStore.release(waiter)
+
+    events = drain(attachment, 2_000)
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+
+    assert finished["outcome"] == "bound_reached"
+    assert finished["bound"] == "deadline"
+
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == [],
+           "the executor received an effect after the deadline crossed inside the intent commit"
+  end
+
   test "an operator abort remains responsive while host policy is blocked" do
     Loopex.AgentLoopBlockingPolicy.observe(self())
     on_exit(&Loopex.AgentLoopBlockingPolicy.clear/0)

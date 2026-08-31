@@ -253,6 +253,89 @@ defmodule Loopex.SessionDirectoryTest do
     assert session_owner_epoch(store_pid, session_id) == epoch_after_first + 1
   end
 
+  test "Store replay of a resume command survives a missing directory cache", %{root: root} do
+    {store_pid, store} = M1RuntimeTestStore.start_store(label: "resume-store-replay")
+    on_exit(fn -> stop_store(store_pid) end)
+
+    {:ok, runtime_id} = SessionDirectory.runtime_id(root)
+    {:ok, runtime} = Loopex.start_link(runtime_id: runtime_id, store: store)
+    on_exit(fn -> stop_runtime(runtime) end)
+
+    {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-replay")
+    :ok = SessionDirectory.record_session(root, session_id, runtime_id)
+
+    assert {:ok, ^session_id} =
+             Loopex.Runtime.resume_session(runtime, session_id, "resume-store-owned")
+
+    epoch = session_owner_epoch(store_pid, session_id)
+
+    assert {:ok, ^session_id} =
+             SessionDirectory.resume(root, runtime, session_id, "resume-store-owned")
+
+    assert session_owner_epoch(store_pid, session_id) == epoch
+  end
+
+  test "simultaneous resume misses converge on one durable owner advance", %{root: root} do
+    {store_pid, store} = M1RuntimeTestStore.start_store(label: "resume-convergence")
+    on_exit(fn -> stop_store(store_pid) end)
+
+    {:ok, runtime_id} = SessionDirectory.runtime_id(root)
+    {:ok, runtime} = Loopex.start_link(runtime_id: runtime_id, store: store)
+    on_exit(fn -> stop_runtime(runtime) end)
+
+    {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-convergence")
+    before_epoch = session_owner_epoch(store_pid, session_id)
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        store_pid,
+        :runtime_control_stage_owner_attempt,
+        self()
+      )
+
+    first = Task.async(fn -> Runtime.resume_session(runtime, session_id, "resume-concurrent") end)
+
+    assert_receive {:transaction_linearized, waiter, ^store_pid,
+                    :runtime_control_stage_owner_attempt, {:committed, _tx_id, _receipt}}
+
+    second =
+      Task.async(fn -> Runtime.resume_session(runtime, session_id, "resume-concurrent") end)
+
+    M1RuntimeTestStore.release(waiter)
+
+    assert Task.await(first) == {:ok, session_id}
+    assert Task.await(second) == {:ok, session_id}
+    assert session_owner_epoch(store_pid, session_id) == before_epoch + 1
+  end
+
+  test "one runtime command identity conflicts across session and command kind", %{root: root} do
+    {store_pid, store} = M1RuntimeTestStore.start_store(label: "resume-binding-conflict")
+    on_exit(fn -> stop_store(store_pid) end)
+
+    {:ok, runtime_id} = SessionDirectory.runtime_id(root)
+    {:ok, runtime} = Loopex.start_link(runtime_id: runtime_id, store: store)
+    on_exit(fn -> stop_runtime(runtime) end)
+
+    {:ok, session_a} = Loopex.create_session(runtime, %{}, command_id: "create-a-conflict")
+    {:ok, session_b} = Loopex.create_session(runtime, %{}, command_id: "create-b-conflict")
+
+    assert {:ok, ^session_a} = Runtime.resume_session(runtime, session_a, "shared-resume")
+    before_b = session_owner_epoch(store_pid, session_b)
+
+    assert {:error, :runtime_command_conflict} =
+             Runtime.resume_session(runtime, session_b, "shared-resume")
+
+    assert {:error, :runtime_command_conflict} =
+             Runtime.resume_session(runtime, session_a, "create-a-conflict")
+
+    changed_canonical = resume_command_binding(runtime_id, session_a, "shared-resume", "v2")
+
+    assert {:error, :runtime_command_conflict} =
+             Loopex.Store.runtime_command(store, changed_canonical)
+
+    assert session_owner_epoch(store_pid, session_b) == before_b
+  end
+
   test "a session identifier that is not one contained name is refused before any file is touched",
        %{root: root} do
     # Concept: the identifier an operator types names an entry in this
@@ -592,6 +675,40 @@ defmodule Loopex.SessionDirectoryTest do
     M1RuntimeTestStore.inspect_state(store_pid).sessions
     |> Map.fetch!(session_id)
     |> Map.fetch!(:owner_epoch)
+  end
+
+  defp resume_command_binding(runtime_id, session_id, command_id, version) do
+    canonical =
+      :erlang.term_to_binary(
+        [
+          "loopex_runtime_command_#{version}",
+          runtime_id,
+          command_id,
+          :resume,
+          session_id,
+          "session"
+        ],
+        [:deterministic]
+      )
+
+    succession_bytes =
+      :erlang.term_to_binary(
+        ["loopex_owner_operation_v1", runtime_id, "resume", session_id, command_id],
+        [:deterministic]
+      )
+
+    encoded = :crypto.hash(:sha256, succession_bytes) |> Base.encode16(case: :lower)
+
+    %{
+      runtime_id: runtime_id,
+      command_id: command_id,
+      command_kind: :resume,
+      session_id: session_id,
+      mutation_domain: "session",
+      succession_id: "succession_" <> binary_part(encoded, 0, 40),
+      canonical_command_bytes: canonical,
+      canonical_command_digest: :crypto.hash(:sha256, canonical)
+    }
   end
 
   defp stop_runtime(runtime) do

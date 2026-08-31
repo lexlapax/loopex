@@ -224,9 +224,26 @@ defmodule Loopex.Runtime.Control do
 
   def handle_call({:resume_session, token, session_id, command_id}, from, state) do
     if token == state.token and valid_identifier?(session_id) and valid_identifier?(command_id) do
-      case start_owner(state, session_id, succession_id("resume", session_id, command_id), from) do
-        {:waiting, next} -> {:noreply, next}
-        {:error, reason, next} -> {:reply, {:error, reason}, next}
+      command = resume_command(state.runtime_id, session_id, command_id)
+
+      case Store.runtime_command(state.store, command) do
+        {:completed, %{result: ^session_id}} ->
+          {:reply, {:ok, session_id}, state}
+
+        {:completed, _changed_result} ->
+          {:reply, {:error, :runtime_command_conflict}, state}
+
+        {:open, open} ->
+          start_resume_owner(state, session_id, from, Map.put(command, :open, open))
+
+        :absent ->
+          start_resume_owner(state, session_id, from, Map.put(command, :open, nil))
+
+        :unavailable ->
+          {:reply, {:error, :store_unavailable}, state}
+
+        {:error, :runtime_command_conflict} ->
+          {:reply, {:error, :runtime_command_conflict}, state}
       end
     else
       {:reply, {:error, :invalid_session_id}, state}
@@ -355,6 +372,13 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
+  defp start_resume_owner(state, session_id, from, command) do
+    case start_owner(state, session_id, command.succession_id, from, command) do
+      {:waiting, next} -> {:noreply, next}
+      {:error, reason, next} -> {:reply, {:error, reason}, next}
+    end
+  end
+
   @impl GenServer
   def handle_cast({:owner_ready, coordinator, owner, durable}, state) do
     case Map.get(state.sessions, durable.session_id) do
@@ -416,6 +440,17 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
+  def handle_cast({:owner_replayed, coordinator, session_id}, state) do
+    case Map.fetch(state.sessions, session_id) do
+      {:ok, %{status: :acquiring, coordinator: ^coordinator} = entry} ->
+        reply_waiting(entry, {:ok, session_id})
+        {:noreply, %{state | sessions: Map.delete(state.sessions, session_id)}}
+
+      _other ->
+        {:noreply, state}
+    end
+  end
+
   @impl GenServer
   def handle_info({:DOWN, reference, :process, pid, _reason}, state) do
     case Map.pop(state.monitor_to_session, reference) do
@@ -444,16 +479,17 @@ defmodule Loopex.Runtime.Control do
              status: :awaiting_owner_barrier,
              owner_group: ^pid,
              succession_id: succession_id,
-             waiting: waiting
+             waiting: waiting,
+             owner_command: owner_command
            }} ->
             cleared = %{state | sessions: Map.delete(state.sessions, session_id)}
 
-            case do_start_owner(cleared, session_id, succession_id, waiting) do
+            case do_start_owner(cleared, session_id, succession_id, waiting, owner_command) do
               {:waiting, next} ->
                 {:noreply, next}
 
               {:error, reason, next} ->
-                GenServer.reply(waiting, {:error, reason})
+                Enum.each(waiting, &GenServer.reply(&1, {:error, reason}))
                 {:noreply, next}
             end
 
@@ -492,7 +528,7 @@ defmodule Loopex.Runtime.Control do
               case start_owner(
                      state,
                      session_id,
-                     succession_id("create", session_id, command_id),
+                     succession_id(state.runtime_id, "create", session_id, command_id),
                      from
                    ) do
                 {:waiting, next} -> {:noreply, next}
@@ -514,8 +550,16 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
-  defp start_owner(state, session_id, succession_id, from) do
+  defp start_owner(state, session_id, succession_id, from, owner_command \\ nil) do
     case Map.get(state.sessions, session_id) do
+      %{
+        status: :acquiring,
+        owner_command: %{succession_id: ^succession_id}
+      } = entry
+      when not is_nil(owner_command) ->
+        waiting = Map.update!(entry, :waiting, &[from | &1])
+        {:waiting, %{state | sessions: Map.put(state.sessions, session_id, waiting)}}
+
       %{status: :acquiring} ->
         {:error, :owner_acquiring, state}
 
@@ -529,19 +573,20 @@ defmodule Loopex.Runtime.Control do
             entry
             |> Map.put(:status, :awaiting_owner_barrier)
             |> Map.put(:succession_id, succession_id)
-            |> Map.put(:waiting, from)
+            |> Map.put(:owner_command, owner_command)
+            |> Map.put(:waiting, [from])
 
           {:waiting, %{state | sessions: Map.put(state.sessions, session_id, waiting)}}
         else
-          do_start_owner(state, session_id, succession_id, from)
+          do_start_owner(state, session_id, succession_id, [from], owner_command)
         end
 
       _other ->
-        do_start_owner(state, session_id, succession_id, from)
+        do_start_owner(state, session_id, succession_id, [from], owner_command)
     end
   end
 
-  defp do_start_owner(state, session_id, succession_id, from) do
+  defp do_start_owner(state, session_id, succession_id, waiting, owner_command) do
     with {:ok, %{sessions: session_supervisor, owner_groups: owner_groups, workers: workers}} <-
            RuntimeSupervisor.children(state.root) do
       counter = state.generation_counter + 1
@@ -567,6 +612,7 @@ defmodule Loopex.Runtime.Control do
           session_id: session_id,
           generation: generation,
           succession_id: succession_id,
+          owner_command: owner_command,
           prior_tx_id: prior_tx_id,
           workers: workers,
           owner_workers: owner_workers,
@@ -597,7 +643,8 @@ defmodule Loopex.Runtime.Control do
                   coordinator,
                   owner_group,
                   counter,
-                  from
+                  waiting,
+                  owner_command
                 )
 
               {:error, reason} ->
@@ -650,7 +697,8 @@ defmodule Loopex.Runtime.Control do
          coordinator,
          owner_group,
          counter,
-         from
+         waiting,
+         owner_command
        ) do
     coordinator_monitor = Process.monitor(coordinator)
     owner_group_monitor = Process.monitor(owner_group)
@@ -659,12 +707,13 @@ defmodule Loopex.Runtime.Control do
       status: :acquiring,
       coordinator: coordinator,
       owner_group: owner_group,
+      owner_command: owner_command,
       generation: generation,
       previous: Map.get(state.sessions, session_id),
       coordinator_monitor: coordinator_monitor,
       owner_group_monitor: owner_group_monitor,
       durable: nil,
-      waiting: from
+      waiting: waiting
     }
 
     monitors =
@@ -684,10 +733,12 @@ defmodule Loopex.Runtime.Control do
 
   # Concept: whoever is waiting on this session's owner gets exactly one answer.
   #
-  # Technical depth: only the caller that started the acquisition waits. A
-  # concurrent caller is still refused with `:owner_acquiring`, which is the
-  # behaviour the lifecycle suite locks, so deferring the reply changed who waits
-  # and never what a second caller is told.
+  # Technical depth: callers that re-present the same Store-owned resume
+  # command wait for the same acquisition result. A distinct command remains
+  # refused with `:owner_acquiring`, preserving per-session serialization.
+  defp reply_waiting(%{waiting: waiters}, reply) when is_list(waiters),
+    do: Enum.each(waiters, &GenServer.reply(&1, reply))
+
   defp reply_waiting(%{waiting: from}, reply) when not is_nil(from),
     do: GenServer.reply(from, reply)
 
@@ -880,11 +931,31 @@ defmodule Loopex.Runtime.Control do
     String.replace(namespace, "-", "_") <> "_" <> binary_part(encoded, 0, 30)
   end
 
-  defp succession_id(kind, session_id, command_id) do
+  defp resume_command(runtime_id, session_id, command_id) do
+    canonical =
+      :erlang.term_to_binary(
+        ["loopex_runtime_command_v1", runtime_id, command_id, :resume, session_id, "session"],
+        [:deterministic]
+      )
+
+    %{
+      runtime_id: runtime_id,
+      command_id: command_id,
+      command_kind: :resume,
+      session_id: session_id,
+      mutation_domain: "session",
+      succession_id: succession_id(runtime_id, "resume", session_id, command_id),
+      canonical_command_bytes: canonical,
+      canonical_command_digest: :crypto.hash(:sha256, canonical)
+    }
+  end
+
+  defp succession_id(runtime_id, kind, session_id, command_id) do
     bytes =
-      :erlang.term_to_binary(["loopex_owner_operation_v1", kind, session_id, command_id], [
-        :deterministic
-      ])
+      :erlang.term_to_binary(
+        ["loopex_owner_operation_v1", runtime_id, kind, session_id, command_id],
+        [:deterministic]
+      )
 
     encoded = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
     "succession_" <> binary_part(encoded, 0, 40)

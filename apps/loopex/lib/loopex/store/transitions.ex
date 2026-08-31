@@ -9,12 +9,12 @@ defmodule Loopex.Store.Transitions do
 
   ## Technical depth
 
-  Every Store transaction is one of three accepted shapes: runtime-controlled
-  session creation, session-owner succession, or an ordinary session commit.
-  Each shape exposes the same three phase identities around its one
-  linearization point. Adapters validate both identities before invoking a
-  fault probe; an unknown transition or phase is refused rather than becoming
-  an unobserved mutation path.
+  Every Store transaction is one of four accepted shapes: runtime-controlled
+  session creation, owner-attempt staging, session-owner succession, or an
+  ordinary session commit. Each shape exposes the same three phase identities
+  around its one linearization point. Adapters validate both identities before
+  invoking a fault probe; an unknown transition or phase is refused rather
+  than becoming an unobserved mutation path.
   """
 
   @typedoc """
@@ -29,6 +29,7 @@ defmodule Loopex.Store.Transitions do
   """
   @type transition_id ::
           :runtime_control_create_session
+          | :runtime_control_stage_owner_attempt
           | :session_journal_advance_owner
           | :session_journal_commit
 
@@ -55,6 +56,7 @@ defmodule Loopex.Store.Transitions do
 
   @catalogue %{
     runtime_control_create_session: @phases,
+    runtime_control_stage_owner_attempt: @phases,
     session_journal_advance_owner: @phases,
     session_journal_commit: @phases
   }
@@ -72,6 +74,7 @@ defmodule Loopex.Store.Transitions do
   """
   @spec id(map()) :: {:ok, transition_id()} | {:error, :unknown_transaction_type}
   def id(%{type: :create_session}), do: {:ok, :runtime_control_create_session}
+  def id(%{type: :stage_owner_attempt}), do: {:ok, :runtime_control_stage_owner_attempt}
   def id(%{type: :advance_owner}), do: {:ok, :session_journal_advance_owner}
   def id(%{type: :session_commit}), do: {:ok, :session_journal_commit}
   def id(_transaction), do: {:error, :unknown_transaction_type}

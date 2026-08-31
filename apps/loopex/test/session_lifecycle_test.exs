@@ -679,6 +679,24 @@ defmodule Loopex.SessionLifecycleTest do
     )
   end
 
+  defp drive_fault_pair(fixture, {:runtime_control_stage_owner_attempt, _phase} = pair) do
+    session_id = create_session!(fixture, "stage-baseline")
+    prior_epoch = current_entry(fixture.runtime, session_id).owner.owner_epoch
+    :ok = M1RuntimeTestStore.inject(fixture.store_pid, pair)
+
+    assert Loopex.resume_session(fixture.runtime, session_id, command_id: "faulted-stage") in [
+             {:ok, session_id},
+             {:error, :owner_acquiring}
+           ]
+
+    eventually(fn ->
+      case Loopex.session_status(fixture.runtime, session_id) do
+        {:ok, %{owner_epoch: epoch}} -> epoch == prior_epoch + 1
+        _other -> false
+      end
+    end)
+  end
+
   defp drive_fault_pair(fixture, {:session_journal_advance_owner, _phase} = pair) do
     session_id = create_session!(fixture, "advance-baseline")
     prior_epoch = current_entry(fixture.runtime, session_id).owner.owner_epoch

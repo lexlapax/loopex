@@ -95,6 +95,11 @@ defmodule Loopex.Store.Local do
   end
 
   @impl Store
+  def runtime_command(reference, command) do
+    GenServer.call(reference, {:runtime_command, command}, @call_timeout)
+  end
+
+  @impl Store
   def ownership_head(reference, session_id, mutation_domain) do
     GenServer.call(reference, {:ownership_head, session_id, mutation_domain}, @call_timeout)
   end
@@ -151,6 +156,10 @@ defmodule Loopex.Store.Local do
         state
       ) do
     {:reply, State.transaction_status(state.store, session_id, mutation_domain, tx_id), state}
+  end
+
+  def handle_call({:runtime_command, command}, _from, state) do
+    {:reply, State.runtime_command(state.store, command), state}
   end
 
   def handle_call({:ownership_head, session_id, _mutation_domain}, _from, state) do
