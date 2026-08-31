@@ -42,6 +42,13 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     def decide(_request), do: raise("host policy is broken")
   end
 
+  defmodule KillsItself do
+    @moduledoc false
+    @behaviour Policy
+    @impl Policy
+    def decide(_request), do: Process.exit(self(), :kill)
+  end
+
   defmodule Hangs do
     @moduledoc false
     @behaviour Policy
@@ -186,6 +193,7 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     # Every one of these has not allowed anything, and the safe reading of "I do
     # not know" is no.
     assert {:deny, :policy_unavailable} = Policy.decide(Raises, request())
+    assert {:deny, :policy_unavailable} = Policy.decide(KillsItself, request())
     assert {:deny, :policy_unavailable} = Policy.decide(Malformed, request())
     assert {:deny, :policy_unavailable} = Policy.decide(Unbounded, request())
     assert {:deny, :policy_unavailable} = Policy.decide(LeaksAPid, request())

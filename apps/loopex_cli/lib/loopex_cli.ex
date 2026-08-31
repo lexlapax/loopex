@@ -69,12 +69,16 @@ defmodule LoopexCli do
   behaviour the outcome names.
   """
   @spec dispatch([binary()]) :: :ok | {:error, binary()}
-  def dispatch(["run" | rest]), do: admitted(rest, &run/1)
-  def dispatch(["sessions" | rest]), do: admitted(rest, &sessions/1)
-  def dispatch(["resume" | rest]), do: admitted(rest, &resume/1)
-  def dispatch(["cancel" | rest]), do: admitted(rest, &cancel/1)
-  def dispatch(["artifact" | rest]), do: admitted(rest, &artifact/1)
-  def dispatch(_unrecognised), do: usage()
+  def dispatch(argv), do: dispatch(argv, [])
+
+  @doc false
+  @spec dispatch([binary()], keyword()) :: :ok | {:error, binary()}
+  def dispatch(["run" | rest], options), do: admitted(rest, &run(&1, options))
+  def dispatch(["sessions" | rest], _options), do: admitted(rest, &sessions/1)
+  def dispatch(["resume" | rest], options), do: admitted(rest, &resume(&1, options))
+  def dispatch(["cancel" | rest], options), do: admitted(rest, &cancel(&1, options))
+  def dispatch(["artifact" | rest], _options), do: admitted(rest, &artifact/1)
+  def dispatch(_unrecognised, _options), do: usage()
 
   # Concept: input naming nothing this command offers is refused, whichever
   # subcommand it was typed after.
@@ -159,11 +163,11 @@ defmodule LoopexCli do
   # same-process by construction rather than by convention. Which signals reach
   # it, and by what route a terminal Ctrl-C becomes one of them, is
   # `LoopexCli.Interrupt`.
-  defp run({flags, words}) do
+  defp run({flags, words}, options) do
     with :ok <- one_input(flags),
          {:ok, policy} <- policy(Map.get(flags, "policy")),
          {:ok, prompt} <- prompt_of(words),
-         {:ok, runtime} <- start_runtime(flags, policy),
+         {:ok, runtime} <- start_runtime(flags, policy, options),
          {:ok, session_id} <- create(runtime),
          {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
       Interrupt.install(attachment)
@@ -315,10 +319,10 @@ defmodule LoopexCli do
     end
   end
 
-  defp resume({flags, words}) do
+  defp resume({flags, words}, options) do
     with {:ok, session_id} <- positional(words, "a session identifier"),
          {:ok, policy} <- policy(Map.get(flags, "policy")),
-         {:ok, runtime} <- start_runtime(flags, policy),
+         {:ok, runtime} <- start_runtime(flags, policy, options),
          {:ok, root} <- state_root(flags),
          {:ok, _resumed} <-
            Loopex.resume_known_session(root, runtime, session_id, unique_id()),
@@ -335,11 +339,11 @@ defmodule LoopexCli do
   # is refused against a live owner rather than racing one — two Controls on one
   # placement key is precisely what ADR 0008 makes the host responsible for
   # preventing.
-  defp cancel({flags, words}) do
+  defp cancel({flags, words}, options) do
     with {:ok, session_id} <- positional(words, "a session identifier"),
          {:ok, root} <- state_root(flags),
          :none <- Placement.live_owner(root),
-         {:ok, runtime} <- start_runtime(flags, reconciling_policy(flags)),
+         {:ok, runtime} <- start_runtime(flags, reconciling_policy(flags), options),
          {:ok, _resumed} <-
            Loopex.resume_known_session(root, runtime, session_id, unique_id()),
          {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
@@ -473,7 +477,7 @@ defmodule LoopexCli do
     end
   end
 
-  defp start_runtime(flags, policy) do
+  defp start_runtime(flags, policy, options) do
     with {:ok, workspace} <- workspace(flags),
          {:ok, root} <- state_root(flags),
          {:ok, cleanup} <- cleanup_grace(flags),
@@ -491,7 +495,9 @@ defmodule LoopexCli do
       manifest = ProjectResources.discover(workspace)
       decision = ProjectResources.decide(manifest, workspace)
 
-      LoopexComposition.start(
+      runtime_starter = Keyword.get(options, :runtime_starter, &LoopexComposition.start/1)
+
+      runtime_starter.(
         [
           runtime_id: placement,
           state_root: root,

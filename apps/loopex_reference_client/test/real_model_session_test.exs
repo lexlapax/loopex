@@ -78,12 +78,13 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
     requests = Enum.filter(records, &(&1.payload.kind == "model_request_committed"))
     results = Enum.filter(records, &(&1.payload.kind == "model_result_committed"))
 
-    # M2's loop runs as many turns as the task needs, so a fixed count would
-    # assert an M1 loop shape this milestone deliberately replaced. What the case
-    # claims is that every committed request reached dispatch with its own bytes
-    # and digest, and that the session completed.
-    assert length(requests) >= 1
-    assert length(results) == length(requests)
+    # This is an inherited M1 protection. M2's loop may run for more turns in
+    # general, but this task deliberately needs exactly the request that chooses
+    # the tool and the request that confirms its durable result. Relaxing that
+    # count would let a session stop after the effect without proving the
+    # post-tool confirmation call the inherited role closed with.
+    assert length(requests) == 2
+    assert length(results) == 2
 
     Enum.zip(requests, results)
     |> Enum.each(fn {request_record, result_record} ->
@@ -96,6 +97,9 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
 
     assert File.read!(Path.join(fixture.workspace, "real-session.txt")) ==
              "loopex-real-session"
+
+    events = Fixture.events(fixture, fixture.client.session_id)
+    assert List.last(events)["outcome"] == "completed"
 
     identity = List.last(results).payload["reply"]["identity"]
 

@@ -143,20 +143,20 @@ defmodule Loopex.Policy do
 
   ## Technical depth
 
-  Runs the callback in a supervised task so a policy that blocks cannot block the
-  session owner, and so a policy that raises or exits produces a decision instead
-  of a crash. The timeout is fixed rather than configurable: a host that wants
-  longer to decide is a host that wants an interactive `defer`, which is a
-  different decision this milestone declares and refuses.
+  Runs the callback in an unlinked monitored task so a policy that blocks cannot
+  block the session owner, and so a policy that raises or exits — including an
+  untrappable `:kill` — produces a decision instead of a crash. The timeout is
+  fixed rather than configurable: a host that wants longer to decide is a host
+  that wants an interactive `defer`, which is a different decision this
+  milestone declares and refuses.
   """
   @spec decide(module(), request()) :: {:allow, context()} | {:deny, reason_category()}
   def decide(module, request) when is_atom(module) and is_map(request) do
-    task = Task.async(fn -> safely(module, request) end)
+    caller = self()
+    reply_ref = make_ref()
 
-    case Task.yield(task, @decision_timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, decision} -> decision
-      _timeout_or_crash -> {:deny, :policy_unavailable}
-    end
+    {:ok, pid} = Task.start(fn -> send(caller, {reply_ref, safely(module, request)}) end)
+    await_policy(pid, Process.monitor(pid), reply_ref)
   end
 
   def decide(_module, _request), do: {:deny, :policy_unavailable}
@@ -188,6 +188,44 @@ defmodule Loopex.Policy do
   end
 
   def valid_context?(_context), do: false
+
+  # Concept: a broken host policy never becomes a broken session owner.
+  #
+  # Technical depth: `Task.async/1` links the callback to its caller. Rescue and
+  # catch cannot intercept `Process.exit(self(), :kill)`, so that shape used to
+  # take the coordinator down before `Task.yield/2` could fail closed. This task
+  # is deliberately unlinked and monitored. The reply is sent before the task
+  # exits, and signals from one sender preserve order, so a valid decision wins
+  # before the matching `:DOWN`; any exit without a reply is unavailable.
+  defp await_policy(pid, monitor, reply_ref) do
+    receive do
+      {^reply_ref, decision} ->
+        Process.demonitor(monitor, [:flush])
+        decision
+
+      {:DOWN, ^monitor, :process, ^pid, _reason} ->
+        {:deny, :policy_unavailable}
+    after
+      @decision_timeout_ms ->
+        Process.exit(pid, :kill)
+        await_policy_shutdown(pid, monitor, reply_ref)
+        {:deny, :policy_unavailable}
+    end
+  end
+
+  defp await_policy_shutdown(pid, monitor, reply_ref) do
+    receive do
+      {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+    after
+      @decision_timeout_ms -> Process.demonitor(monitor, [:flush])
+    end
+
+    receive do
+      {^reply_ref, _late_decision} -> :ok
+    after
+      0 -> :ok
+    end
+  end
 
   defp bounded_attributes?(attributes) when is_map(attributes) and not is_struct(attributes) do
     map_size(attributes) <= @max_attributes and

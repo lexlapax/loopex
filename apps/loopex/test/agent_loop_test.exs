@@ -1681,6 +1681,36 @@ defmodule Loopex.AgentLoopTest do
     assert {:error, :canonical_job_request_mismatch} = Loopex.Executor.validate_job(swapped)
   end
 
+  test "the runtime commits the assistant reply and never assembles canonical history from streamed deltas" do
+    fixture =
+      start(
+        script: [%{text: "AUTHORITATIVE", calls: [], deltas: ["PARTIAL"]}],
+        progress_to: self()
+      )
+
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    events = drain(attachment)
+
+    # The transient plane really carried the contradictory bytes, so this is a
+    # runtime-boundary proof rather than the equality of two values produced by
+    # the same fixture branch.
+    assert Enum.any?(receive_progress(), fn
+             %{kind: :text_delta, text: "PARTIAL"} -> true
+             _other -> false
+           end)
+
+    assistant = Enum.find(events, &(&1.kind == "assistant.message_appended"))
+    assert assistant["content"] == "AUTHORITATIVE"
+    refute assistant["content"] =~ "PARTIAL"
+
+    committed =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.find(&(&1.payload[:kind] == "model_result_committed"))
+
+    assert committed.payload["reply"]["text"] == "AUTHORITATIVE"
+  end
+
   test "a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" do
     # Abort first: the reply arrives after the run is gone and never becomes a
     # canonical assistant message.

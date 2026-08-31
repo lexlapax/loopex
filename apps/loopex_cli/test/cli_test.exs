@@ -36,6 +36,7 @@ defmodule LoopexCliTest do
 
   setup do
     :persistent_term.erase({AllowAll, :announced})
+    on_exit(&LoopexCli.release_placement/0)
     :ok
   end
 
@@ -58,6 +59,27 @@ defmodule LoopexCliTest do
     fixture = AgentLoopFixture.start(options)
     on_exit(fn -> AgentLoopFixture.stop(fixture) end)
     fixture
+  end
+
+  defp await_record(fixture, predicate, attempts \\ 200)
+
+  defp await_record(_fixture, _predicate, 0),
+    do: flunk("the command never committed the record its flag names")
+
+  defp await_record(fixture, predicate, attempts) do
+    record =
+      fixture
+      |> AgentLoopFixture.run_ids()
+      |> Tuple.to_list()
+      |> Enum.flat_map(&AgentLoopFixture.records(fixture, &1))
+      |> Enum.find(predicate)
+
+    if record do
+      record
+    else
+      Process.sleep(10)
+      await_record(fixture, predicate, attempts - 1)
+    end
   end
 
   # Concept: a case reads the source it is about, from wherever it was invoked.
@@ -180,42 +202,99 @@ defmodule LoopexCliTest do
   end
 
   test "the operator steers a running task and queues a follow-up from the same terminal" do
-    fixture = fixture(script: [%{text: "", hold: self()}, %{text: "done differently"}])
-    {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "do the thing")
+    parent = self()
+    {steer_root, steer_workspace} = roots()
 
-    assert_receive {:holding, model}, 2_000
+    steered =
+      fixture(
+        script: [
+          %{text: "", calls: [call()], hold: parent},
+          %{text: "done differently"}
+        ]
+      )
 
-    started =
-      Enum.find(events(observe_until(attachment, "run.started")), &(&1.kind == "run.started"))
+    steer_task =
+      Task.async(fn ->
+        LoopexCli.dispatch(
+          [
+            "run",
+            "--policy",
+            "allow-all",
+            "--state-root",
+            steer_root,
+            "--workspace",
+            steer_workspace,
+            "--steer",
+            "actually, do it this way",
+            "do the thing"
+          ],
+          runtime_starter: fn _options -> {:ok, steered.runtime} end
+        )
+      end)
 
-    run_id = started["run_id"]
+    assert_receive {:holding, steer_model}, 2_000
 
-    # Steering joins the run that is already going.
-    assert {:accepted, _steer} =
-             Loopex.command(attachment, %{
-               type: :steer,
-               command_id: "steer-1",
-               run_id: run_id,
-               content: "actually, do it this way"
-             })
+    assert await_record(steered, fn record ->
+             record.payload[:kind] == "command_admitted" and
+               record.payload["command_type"] == "steer" and
+               record.payload["admission"] == "accepted"
+           end)
 
-    # A follow-up is a different thing said from the same terminal: it queues
-    # rather than joining, and is never confused with the steer above.
-    assert {:accepted, _follow} =
-             Loopex.command(attachment, %{
-               type: :follow_up,
-               command_id: "follow-1",
-               content: "then do this next"
-             })
+    send(steer_model, :release)
+    assert :ok = Task.await(steer_task, 10_000)
+    assert :ok = LoopexCli.release_placement()
 
-    send(model, :release)
+    [steer_session] = steered |> AgentLoopFixture.run_ids() |> Tuple.to_list()
+    steer_events = AgentLoopFixture.events(steered, steer_session)
 
-    # Both affordances exist on the command, separately named.
-    {flags, []} = LoopexCli.parse(["--steer", "actually, do it this way"])
-    assert flags["steer"] == "actually, do it this way"
+    assert Enum.any?(steer_events, fn event ->
+             event.kind == "steer.resolved" and event["disposition"] == "applied"
+           end)
 
-    {queued, []} = LoopexCli.parse(["--follow-up", "then do this next"])
-    assert queued["follow-up"] == "then do this next"
+    {follow_root, follow_workspace} = roots()
+
+    followed =
+      fixture(script: [%{text: "first done", hold: parent}, %{text: "follow-up done"}])
+
+    follow_task =
+      Task.async(fn ->
+        LoopexCli.dispatch(
+          [
+            "run",
+            "--policy",
+            "allow-all",
+            "--state-root",
+            follow_root,
+            "--workspace",
+            follow_workspace,
+            "--follow-up",
+            "then do this next",
+            "do the thing"
+          ],
+          runtime_starter: fn _options -> {:ok, followed.runtime} end
+        )
+      end)
+
+    assert_receive {:holding, follow_model}, 2_000
+
+    assert await_record(followed, fn record ->
+             record.payload[:kind] == "command_admitted" and
+               record.payload["command_type"] == "follow_up" and
+               record.payload["admission"] == "accepted"
+           end)
+
+    send(follow_model, :release)
+    assert :ok = Task.await(follow_task, 10_000)
+
+    [follow_session] = followed |> AgentLoopFixture.run_ids() |> Tuple.to_list()
+    follow_events = AgentLoopFixture.events(followed, follow_session)
+
+    assert Enum.count(follow_events, &(&1.kind == "run.started")) == 2
+
+    assert Enum.any?(follow_events, fn event ->
+             event.kind == "user.message_appended" and
+               event["content"] == "then do this next"
+           end)
   end
 
   test "prompt steer follow up and abort have distinct explicit affordances and input naming neither is refused" do
@@ -328,25 +407,35 @@ defmodule LoopexCliTest do
     usage = capture_io(fn -> LoopexCli.dispatch(["nonsense"]) end)
     assert usage =~ "--cleanup-grace-ms"
 
-    # Concept: a value that is read and then dropped is worse than a flag that
-    # was never offered.
-    #
-    # Technical depth: this half is a structural assertion and is written as one.
-    # Reaching the period behaviourally from here means starting the shipped
-    # composition, which means a provider call this file deliberately never
-    # makes; and adding an accessor so a case could read the parsed options back
-    # would widen the command's surface for a test. So the one place the parsed
-    # value is handed on is asserted here, and the two links after it are proved
-    # behaviourally elsewhere: `kernel_composition_test.exs` proves the
-    # composition forwards it to the session, and `agent_loop_test.exs` proves
-    # the session's terminal reports it.
-    source = File.read!(app_path("lib/loopex_cli.ex"))
+    # A value that is read and then dropped is worse than a flag that was never
+    # offered. Drive the actual dispatch-to-composition seam with a starter that
+    # records exactly what the command supplied and stops before any provider
+    # work; source text can remain present while the value is overwritten later.
+    {state_root, workspace} = roots()
+    parent = self()
 
-    assert source =~ "cleanup_grace_ms: milliseconds",
-           "the command parses the period and never turns it into the option the runtime reads"
+    assert {:error, "captured composition options"} =
+             LoopexCli.dispatch(
+               [
+                 "run",
+                 "--policy",
+                 "allow-all",
+                 "--state-root",
+                 state_root,
+                 "--workspace",
+                 workspace,
+                 "--cleanup-grace-ms",
+                 "8000",
+                 "do the thing"
+               ],
+               runtime_starter: fn options ->
+                 send(parent, {:composition_options, options})
+                 {:error, "captured composition options"}
+               end
+             )
 
-    assert Regex.match?(~r/LoopexComposition\.start\(\s*\[.*\]\s*\+\+\s*cleanup\s*\)/s, source),
-           "the command does not hand the parsed period to the composition it starts"
+    assert_receive {:composition_options, options}
+    assert Keyword.fetch!(options, :cleanup_grace_ms) == 8_000
   end
 
   test "tool progress from a running executor job reaches the operator's terminal before the tool finishes" do
