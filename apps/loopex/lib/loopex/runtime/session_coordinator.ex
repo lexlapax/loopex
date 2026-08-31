@@ -2762,14 +2762,21 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp validate_reconciliation_evidence(%{evidence: "receipt", retained_receipt: receipt}, job)
        when is_map(receipt) do
     receipt_fields = [
+      protocol_version: job.protocol_version,
       job_id: job.job_id,
       operation_id: job.operation_id,
       attempt: job.attempt,
+      session_id: job.session_id,
+      run_id: job.run_id,
+      turn_id: job.turn_id,
+      tool_call_id: job.tool_call_id,
       canonical_request_digest: job.canonical_request_digest,
       session_epoch_at_dispatch: job.origin_session_epoch,
       executor_epoch: job.origin_executor_epoch,
       executor_identity: job.executor_identity,
-      fencing_token: job.fencing_token
+      fencing_token: job.fencing_token,
+      tool_id: job.tool_id,
+      tool_version: job.tool_version
     ]
 
     Enum.reduce_while(receipt_fields, :ok, fn {field, expected}, :ok ->

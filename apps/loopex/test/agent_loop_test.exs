@@ -4954,6 +4954,94 @@ defmodule Loopex.AgentLoopTest do
     assert length(AgentLoopProgressExecutor.jobs(executor)) == 1
   end
 
+  test "reconciling an unknown effect resolves its steer and promotes its follow up atomically" do
+    # Concept: an operator may keep directing a recovered run while its effect is
+    # waiting for reconciliation; settling that run must settle the operator's
+    # queued input at the same time.
+    #
+    # Technical depth: this is a real Control succession over an effect-dispatched
+    # run. The successor solicits reconciliation, then admits both queue members
+    # before committing outcome_unknown. The first read ends at that terminal; the
+    # second can finish only if the same proposal resolved the steer and promoted
+    # the follow-up. Removing either reducer helper therefore fails this one case:
+    # one loses the resolution, and the other leaves the second drain waiting for
+    # a run that never starts.
+    executor = AgentLoopProgressExecutor.start({:held_after_effect, self()})
+
+    fixture =
+      start_with_executor(
+        AgentLoopProgressExecutor,
+        executor,
+        one_call_script(),
+        progress_to: self()
+      )
+
+    assert_receive {:executor_effect_held, worker}, 5_000
+    [job] = AgentLoopProgressExecutor.jobs(executor)
+    predecessor = coordinator_of(fixture.runtime)
+
+    assert {:ok, fixture.session_id} ==
+             Loopex.resume_session(
+               fixture.runtime,
+               fixture.session_id,
+               command_id: "resume-reconcile-queues"
+             )
+
+    assert await_superseded(predecessor)
+
+    {:ok, resumed} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    assert {:ok, query} = Loopex.reconciliation_query(resumed)
+
+    assert {:accepted, "recovered-steer"} =
+             Loopex.command(resumed, %{
+               type: :steer,
+               command_id: "recovered-steer",
+               run_id: job.run_id,
+               content: "apply if another turn starts"
+             })
+
+    assert {:accepted, "recovered-follow-up"} =
+             Loopex.command(resumed, %{
+               type: :follow_up,
+               command_id: "recovered-follow-up",
+               content: "continue after reconciliation"
+             })
+
+    assert :ok = Loopex.reconcile(resumed, Map.put(query, :evidence, "outcome_unknown"))
+
+    first_run = drain(resumed)
+    first_finished = Enum.find(first_run, &(&1.kind == "run.finished"))
+    assert first_finished["run_id"] == job.run_id
+    assert first_finished["outcome"] == "outcome_unknown"
+
+    promoted_run = drain(resumed)
+
+    assert Enum.any?(promoted_run, fn event ->
+             event.kind == "steer.resolved" and
+               event["command_id"] == "recovered-steer" and
+               event["disposition"] == "unapplied" and
+               event["reason"] == "run_terminal"
+           end)
+
+    promoted_prompt =
+      Enum.find(
+        promoted_run,
+        &(&1.kind == "user.message_appended" and
+            &1["command_id"] == "recovered-follow-up")
+      )
+
+    assert is_binary(promoted_prompt["run_id"])
+    refute promoted_prompt["run_id"] == job.run_id
+
+    promoted_finished = Enum.find(promoted_run, &(&1.kind == "run.finished"))
+    assert promoted_finished["run_id"] == promoted_prompt["run_id"]
+    assert promoted_finished["outcome"] == "completed"
+
+    send(worker, :release)
+  end
+
   test "an executor progress ownership refusal ends the stale plane without terminating its worker" do
     # Concept: Control refusing one executor item is the ownership verdict for
     # the whole transient plane. The old relay ends immediately, while the
@@ -6124,6 +6212,174 @@ defmodule Loopex.AgentLoopTest do
            |> then(&Fixture.records(cleanup, &1))
            |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed")),
            "cleanup committed a receipt whose progress count was malformed"
+  end
+
+  test "executor receipts are bounded projected and bind every repeated job identity" do
+    # Concept: an executor receipt contributes only its declared terminal fact;
+    # private adapter fields and credentials never become durable session data.
+    #
+    # Technical depth: the first fixture proves projection rather than rejection
+    # for a bounded extension. The second supplies a pid, which is outside the
+    # Store's plain-data algebra and must become an unproven effect without killing
+    # the owner. The literal identity oracle then changes each repeated job field
+    # alone on both the live and solicited-reconciliation paths. Restoring raw
+    # `encode_plain(receipt)` leaks the first secret and crashes on the pid; deleting
+    # any comparison admits the one vector carrying that field's name.
+    projected =
+      start_with_executor(
+        AgentLoopAnsweringExecutor,
+        AgentLoopAnsweringExecutor.start(%{}),
+        one_call_script(),
+        receipt_extras: %{
+          provider_api_key: "credential-that-must-not-be-retained",
+          adapter_private_note: "private-extension"
+        }
+      )
+
+    projected_finished = Enum.find(drain(projected.attachment), &(&1.kind == "run.finished"))
+    assert projected_finished["outcome"] == "completed"
+
+    projected_record =
+      projected
+      |> Fixture.records(projected.session_id)
+      |> Enum.find(&(&1.payload[:kind] == "executor_receipt_committed"))
+
+    projected_receipt = projected_record.payload["receipt"]
+    refute Map.has_key?(projected_receipt, "provider_api_key")
+    refute Map.has_key?(projected_receipt, "adapter_private_note")
+    refute inspect(projected_record) =~ "credential-that-must-not-be-retained"
+
+    unsupported =
+      start_with_executor(
+        AgentLoopAnsweringExecutor,
+        AgentLoopAnsweringExecutor.start(%{}),
+        one_call_script(),
+        receipt_extras: %{adapter_private: self()}
+      )
+
+    unsupported_events = drain(unsupported.attachment)
+    unsupported_tool = Enum.find(unsupported_events, &(&1.kind == "tool.finished"))
+    unsupported_finished = Enum.find(unsupported_events, &(&1.kind == "run.finished"))
+    assert unsupported_tool["outcome"] == "outcome_unknown"
+    assert unsupported_finished["outcome"] == "outcome_unknown"
+    assert Process.alive?(coordinator_of(unsupported.runtime))
+
+    refute unsupported
+           |> Fixture.records(unsupported.session_id)
+           |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed"))
+
+    wrong_identities = [
+      protocol_version: 2,
+      job_id: "wrong-job",
+      operation_id: "wrong-operation",
+      attempt: 2,
+      session_id: "wrong-session",
+      run_id: "wrong-run",
+      turn_id: "wrong-turn",
+      tool_call_id: "wrong-call",
+      canonical_request_digest: String.duplicate("0", 64),
+      session_epoch_at_dispatch: 99,
+      executor_epoch: 99,
+      executor_identity: "wrong-executor",
+      fencing_token: 99,
+      tool_id: "wrong.tool",
+      tool_version: "99.0.0"
+    ]
+
+    for {field, wrong} <- wrong_identities do
+      fixture =
+        start_with_executor(
+          AgentLoopAnsweringExecutor,
+          AgentLoopAnsweringExecutor.start(%{}),
+          one_call_script(),
+          receipt_extras: %{field => wrong}
+        )
+
+      events = drain(fixture.attachment)
+      tool = Enum.find(events, &(&1.kind == "tool.finished"))
+      finished = Enum.find(events, &(&1.kind == "run.finished"))
+
+      assert tool["outcome"] == "outcome_unknown",
+             "a live receipt with wrong #{field} was admitted"
+
+      assert finished["outcome"] == "outcome_unknown"
+      assert Process.alive?(coordinator_of(fixture.runtime))
+
+      refute fixture
+             |> Fixture.records(fixture.session_id)
+             |> Enum.any?(&(&1.payload[:kind] == "executor_receipt_committed")),
+             "a live receipt with wrong #{field} reached the journal"
+    end
+
+    executor = AgentLoopProgressExecutor.start({:held_after_effect, self()})
+
+    recovered =
+      start_with_executor(
+        AgentLoopProgressExecutor,
+        executor,
+        one_call_script(),
+        progress_to: self()
+      )
+
+    assert_receive {:executor_effect_held, worker}, 5_000
+    [job] = AgentLoopProgressExecutor.jobs(executor)
+    predecessor = coordinator_of(recovered.runtime)
+
+    assert {:ok, recovered.session_id} ==
+             Loopex.resume_session(
+               recovered.runtime,
+               recovered.session_id,
+               command_id: "resume-receipt-identity"
+             )
+
+    assert await_superseded(predecessor)
+
+    {:ok, resumed} =
+      Loopex.attach(recovered.runtime, recovered.session_id, after_event_sequence: 0)
+
+    assert {:ok, query} = Loopex.reconciliation_query(resumed)
+    valid_receipt = AgentLoopProgressExecutor.receipt(job, 2)
+
+    for {field, wrong} <- wrong_identities do
+      response =
+        query
+        |> Map.put(:evidence, "receipt")
+        |> Map.put(:retained_receipt, Map.put(valid_receipt, field, wrong))
+
+      assert {:error, {:mismatch, ^field}} = Loopex.reconcile(resumed, response)
+    end
+
+    unsupported_response =
+      query
+      |> Map.put(:evidence, "receipt")
+      |> Map.put(:retained_receipt, Map.put(valid_receipt, :adapter_private, self()))
+
+    assert {:error, :invalid_executor_receipt} =
+             Loopex.reconcile(resumed, unsupported_response)
+
+    assert Process.alive?(coordinator_of(recovered.runtime)),
+           "an unsupported reconciliation receipt killed the current owner"
+
+    response =
+      query
+      |> Map.put(:evidence, "receipt")
+      |> Map.put(
+        :retained_receipt,
+        Map.put(valid_receipt, :provider_api_key, "reconciliation-secret")
+      )
+
+    assert :ok = Loopex.reconcile(resumed, response)
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    reconciled_record =
+      recovered
+      |> Fixture.records(recovered.session_id)
+      |> Enum.find(&(&1.payload[:kind] == "executor_receipt_committed"))
+
+    refute Map.has_key?(reconciled_record.payload["receipt"], "provider_api_key")
+    refute inspect(reconciled_record) =~ "reconciliation-secret"
+
+    send(worker, :release)
   end
 
   test "a complete model stream closes on its reply's own delta count" do

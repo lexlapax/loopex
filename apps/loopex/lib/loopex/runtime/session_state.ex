@@ -46,6 +46,51 @@ defmodule Loopex.Runtime.SessionState do
   @model_identity_fields [:provider, :model, :endpoint]
   @model_usage_fields ~w(input_tokens output_tokens)
   @max_provider_response_id_bytes 256
+  @receipt_required_fields [
+    :protocol_version,
+    :job_id,
+    :operation_id,
+    :attempt,
+    :session_id,
+    :run_id,
+    :turn_id,
+    :tool_call_id,
+    :session_epoch_at_dispatch,
+    :executor_epoch,
+    :executor_identity,
+    :canonical_request_digest,
+    :fencing_token,
+    :tool_id,
+    :tool_version,
+    :outcome,
+    :output,
+    :progress_count,
+    :observed_at_ms,
+    :child_environment_names,
+    :provider_credential_present,
+    :artifacts
+  ]
+  @receipt_optional_fields [
+    :cleanup_grace_ms,
+    :process_probe,
+    :receipt_retention_bound_ms,
+    :effective_deadline_ms,
+    :run_deadline_ms
+  ]
+  @receipt_job_identity_fields [
+    :protocol_version,
+    :job_id,
+    :operation_id,
+    :attempt,
+    :session_id,
+    :run_id,
+    :turn_id,
+    :tool_call_id,
+    :canonical_request_digest,
+    :fencing_token,
+    :tool_id,
+    :tool_version
+  ]
 
   @type t :: %__MODULE__{
           session_id: binary(),
@@ -602,13 +647,18 @@ defmodule Loopex.Runtime.SessionState do
   @spec propose_executor_fact(t(), binary(), map()) :: {:ok, proposal()} | {:error, term()}
   def propose_executor_fact(%__MODULE__{} = state, run_id, receipt)
       when is_binary(run_id) and is_map(receipt) do
-    record = %{
-      "run_id" => run_id,
-      "receipt" => encode_plain(receipt),
-      kind: "executor_receipt_committed"
-    }
+    with %{stage: "effect_dispatched", job: job} <- Map.get(state.pending_work, run_id),
+         {:ok, receipt} <- canonical_executor_receipt(receipt, job) do
+      record = %{
+        "run_id" => run_id,
+        "receipt" => encode_plain(receipt),
+        kind: "executor_receipt_committed"
+      }
 
-    internal_proposal(state, stable_id("executor-fact", run_id, receipt.job_id), record)
+      internal_proposal(state, stable_id("executor-fact", run_id, receipt.job_id), record)
+    else
+      _other -> {:error, :invalid_executor_receipt}
+    end
   end
 
   @doc false
@@ -616,26 +666,31 @@ defmodule Loopex.Runtime.SessionState do
           {:ok, proposal()} | {:error, term()}
   def propose_reconciled_executor_fact(%__MODULE__{} = state, run_id, receipt, query_id)
       when is_binary(run_id) and is_map(receipt) and is_binary(query_id) do
-    record = %{
-      "run_id" => run_id,
-      "receipt" => encode_plain(receipt),
-      "reconciliation_query_id" => query_id,
-      kind: "executor_receipt_committed"
-    }
+    with %{stage: "effect_dispatched", job: job} <- Map.get(state.pending_work, run_id),
+         {:ok, receipt} <- canonical_executor_receipt(receipt, job) do
+      record = %{
+        "run_id" => run_id,
+        "receipt" => encode_plain(receipt),
+        "reconciliation_query_id" => query_id,
+        kind: "executor_receipt_committed"
+      }
 
-    # Concept: a solicited current-owner receipt is a new reconciliation
-    # decision, not a retry of the stale predecessor's live-result transaction.
-    #
-    # Technical depth: ADR 0006 makes every proved non-commit terminal for its
-    # transaction ID. A predecessor may already have consumed the live
-    # `executor-fact` ID with `stale_owner_epoch`; reusing it with current-owner
-    # bindings must then conflict. The query ID names the separately validated
-    # current-epoch decision and is already bound by the reconciliation response.
-    internal_proposal(
-      state,
-      stable_id("executor-reconciliation-fact", run_id, query_id),
-      record
-    )
+      # Concept: a solicited current-owner receipt is a new reconciliation
+      # decision, not a retry of the stale predecessor's live-result transaction.
+      #
+      # Technical depth: ADR 0006 makes every proved non-commit terminal for its
+      # transaction ID. A predecessor may already have consumed the live
+      # `executor-fact` ID with `stale_owner_epoch`; reusing it with current-owner
+      # bindings must then conflict. The query ID names the separately validated
+      # current-epoch decision and is already bound by the reconciliation response.
+      internal_proposal(
+        state,
+        stable_id("executor-reconciliation-fact", run_id, query_id),
+        record
+      )
+    else
+      _other -> {:error, :invalid_executor_receipt}
+    end
   end
 
   @doc """
@@ -1630,8 +1685,18 @@ defmodule Loopex.Runtime.SessionState do
         )
       ]
 
-      {:ok, %{state | active_run_id: nil, pending_work: Map.delete(state.pending_work, run_id)},
-       events}
+      # Concept: reconciliation settles the same operator queues as every other
+      # run ending.
+      #
+      # Technical depth: this record used to clear the active run directly. That
+      # stranded a steer and follow-up admitted while the recovered effect awaited
+      # its operator decision, and the stale follow-up could later start behind an
+      # unrelated run. Resolve and promote inside this proposal so the public
+      # terminal and everything it unblocks remain one durable transaction.
+      {state, steer_events} = resolve_steer(state, run_id, "run_terminal")
+      {state, promotion_events} = promote_follow_up(state, run_id)
+
+      {:ok, state, events ++ steer_events ++ promotion_events}
     else
       _other -> {:error, :invalid_outcome_unknown_transition}
     end
@@ -1917,20 +1982,8 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp receipt_matches_job(receipt, job) do
-    fields = [
-      :job_id,
-      :operation_id,
-      :attempt,
-      :session_id,
-      :run_id,
-      :turn_id,
-      :tool_call_id,
-      :canonical_request_digest,
-      :fencing_token
-    ]
-
     valid =
-      Enum.all?(fields, &(Map.get(receipt, &1) == Map.get(job, &1))) and
+      Enum.all?(@receipt_job_identity_fields, &(Map.get(receipt, &1) == Map.get(job, &1))) and
         receipt.session_epoch_at_dispatch == job.origin_session_epoch and
         receipt.executor_epoch == job.origin_executor_epoch and
         receipt.executor_identity == job.executor_identity
@@ -2249,31 +2302,6 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp decode_receipt(encoded) do
-    fields = [
-      :protocol_version,
-      :job_id,
-      :operation_id,
-      :attempt,
-      :session_id,
-      :run_id,
-      :turn_id,
-      :tool_call_id,
-      :session_epoch_at_dispatch,
-      :executor_epoch,
-      :executor_identity,
-      :canonical_request_digest,
-      :fencing_token,
-      :tool_id,
-      :tool_version,
-      :outcome,
-      :output,
-      :progress_count,
-      :observed_at_ms,
-      :child_environment_names,
-      :provider_credential_present,
-      :artifacts
-    ]
-
     # Concept: the executor's declared periods and programs survive
     # reconstruction where an executor reported them, and their absence is not a
     # malformed receipt.
@@ -2286,25 +2314,52 @@ defmodule Loopex.Runtime.SessionState do
     # required because the port promises `{:ok, map()}` and says nothing about
     # them: an executor with no operating-system work to bound has no period to
     # declare, and demanding one would refuse a conforming receipt.
-    optional = [
-      :cleanup_grace_ms,
-      :process_probe,
-      :receipt_retention_bound_ms,
-      :effective_deadline_ms,
-      :run_deadline_ms
-    ]
-
-    with {:ok, receipt} <- decode_top(encoded, fields),
+    with {:ok, receipt} <- decode_top(encoded, @receipt_required_fields),
          {:ok, outcome} <- decode_receipt_outcome(receipt.outcome),
          :ok <- validate_stream_count(receipt.progress_count),
          {:ok, artifacts} <- decode_artifacts(receipt.artifacts) do
       {:ok,
        encoded
-       |> decode_optional(optional)
+       |> decode_optional(@receipt_optional_fields)
        |> Map.merge(%{receipt | outcome: outcome, artifacts: artifacts})}
     else
       _other -> {:error, :invalid_plain_receipt}
     end
+  end
+
+  # Concept: only the bounded declared receipt crosses the journal
+  # boundary; an executor's private terms and credentials do not hitchhike.
+  #
+  # Technical depth: validate the complete candidate against the Store's real
+  # private-record ceilings before traversing it, normalize atom/binary keys
+  # without collisions, then project only the declared receipt fields. The
+  # projected receipt is checked against the committed job before the record is
+  # built. A malformed or unsupported term therefore becomes an invalid receipt
+  # that the coordinator reports unproven instead of an exception that kills the
+  # owner. The rescue covers malformed list tails and other terms a host adapter
+  # can return despite the callback's map boundary.
+  defp canonical_executor_receipt(receipt, job) do
+    with :ok <-
+           Store.validate_private_record(%{
+             "receipt" => receipt,
+             kind: "executor_receipt_candidate"
+           }),
+         {:ok, encoded} <- encode_plain_unique(receipt),
+         projected <-
+           Map.take(
+             encoded,
+             Enum.map(@receipt_required_fields ++ @receipt_optional_fields, &Atom.to_string/1)
+           ),
+         {:ok, decoded} <- decode_receipt(projected),
+         :ok <- receipt_matches_job(decoded, job) do
+      {:ok, decoded}
+    else
+      _other -> {:error, :invalid_executor_receipt}
+    end
+  rescue
+    _exception -> {:error, :invalid_executor_receipt}
+  catch
+    _kind, _reason -> {:error, :invalid_executor_receipt}
   end
 
   # Concept: a spilled artifact crosses this boundary as plain bounded data.
