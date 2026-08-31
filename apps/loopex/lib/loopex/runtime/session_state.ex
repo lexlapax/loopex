@@ -521,40 +521,13 @@ defmodule Loopex.Runtime.SessionState do
   def propose_run_terminal(%__MODULE__{} = state, run_id, proposed, detail)
       when is_binary(run_id) and
              proposed in ["completed", "bound_reached", "outcome_unknown", "cancelled"] do
-    outcome = run_outcome(state, run_id, proposed)
+    record = run_terminal_record(state, run_id, proposed, detail)
 
-    record = %{
-      "run_id" => run_id,
-      "outcome" => outcome,
-      "bound" => Map.get(detail, :bound),
-      "observed" => Map.get(detail, :observed),
-      "declared_limit" => Map.get(detail, :declared_limit),
-      "accounting_source" => Map.get(detail, :accounting_source),
-      "reconciliation_ref" => terminal_reference(state, run_id, outcome, detail),
-      # Concept: an ending that stopped work says what bounded the stopping.
-      #
-      # Technical depth: ADR 0009 requires the declared cleanup grace to be
-      # reported in the terminal outcome's evidence, so an operator can tell a
-      # clean cooperative stop from a forced kill that was confirmed and from a
-      # termination that could not be confirmed at all. It is the session's own
-      # declared value, which is what ADR 0009 makes it, and the same value the
-      # composed executor is handed -- so the terminal names the period the
-      # cleanup actually ran under. Reading it back off a receipt instead left
-      # every ending that produced no receipt reporting `nil`: an abort admitted
-      # before any executor answered, a run stopped between turns, and every
-      # recovery, which are precisely the endings an operator needs the period
-      # for.
-      "cleanup_grace_ms" => state.cleanup_grace_ms,
-      # Concept: an ending names the command that asked for it, where one did.
-      #
-      # Technical depth: the abort's admission and its outcome are two records
-      # now, and without this nothing joins them. It used to be carried by the
-      # abort's own `run.finished`, which no longer exists.
-      "command_id" => aborting_command(state, run_id),
-      kind: "run_terminal_committed"
-    }
-
-    internal_proposal(state, stable_id("run-terminal", run_id, outcome), record)
+    internal_proposal(
+      state,
+      stable_id("run-terminal", run_id, record["outcome"]),
+      record
+    )
   end
 
   @doc false
@@ -622,6 +595,13 @@ defmodule Loopex.Runtime.SessionState do
       kind: "model_result_committed"
     }
 
+    records =
+      if reply.tool_calls == [] do
+        [record, run_terminal_record(state, run_id, "completed", %{})]
+      else
+        [record]
+      end
+
     internal_proposal(
       state,
       # ADR 0010 keeps the staged request bytes and their digest unchanged
@@ -632,7 +612,7 @@ defmodule Loopex.Runtime.SessionState do
       # recorded retry cannot collide with its predecessor's terminal
       # non-commit merely because it dispatched the same bytes.
       stable_id("model-result", run_id, {reply.staged_request_digest, attempt}),
-      record
+      records
     )
   end
 
@@ -1344,12 +1324,30 @@ defmodule Loopex.Runtime.SessionState do
   # re-presentation while making every re-derivation from a new authoritative
   # head a new transaction. All internal transition constructors pass through
   # this boundary; command IDs retain their separate public idempotency contract.
-  defp internal_proposal(state, logical_tx_id, record) do
-    with {:ok, next, events} <- apply_internal_record(state, record) do
+  defp internal_proposal(state, logical_tx_id, record) when is_map(record),
+    do: internal_proposal(state, logical_tx_id, [record])
+
+  defp internal_proposal(state, logical_tx_id, records) when is_list(records) do
+    with [_first | _rest] <- records,
+         {:ok, next, events} <- apply_internal_records(state, records) do
       tx_id = internal_transaction_id(state, logical_tx_id)
       next = %{next | expected_events: state.expected_events ++ events}
-      {:ok, proposal(tx_id, record, events, next, {:accepted, tx_id})}
+
+      {:ok,
+       %{tx_id: tx_id, records: records, events: events, next: next, reply: {:accepted, tx_id}}}
+    else
+      [] -> {:error, :empty_internal_proposal}
+      {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp apply_internal_records(state, records) do
+    Enum.reduce_while(records, {:ok, state, []}, fn record, {:ok, current, events} ->
+      case apply_internal_record(current, record) do
+        {:ok, next, emitted} -> {:cont, {:ok, next, events ++ emitted}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   defp internal_transaction_id(state, logical_tx_id) do
@@ -2764,6 +2762,41 @@ defmodule Loopex.Runtime.SessionState do
 
   defp run_finished_event(session_id, run_id, outcome, reconciliation_ref, grace),
     do: run_finished_event(session_id, run_id, outcome, reconciliation_ref, grace, nil)
+
+  defp run_terminal_record(state, run_id, proposed, detail) do
+    outcome = run_outcome(state, run_id, proposed)
+
+    %{
+      "run_id" => run_id,
+      "outcome" => outcome,
+      "bound" => Map.get(detail, :bound),
+      "observed" => Map.get(detail, :observed),
+      "declared_limit" => Map.get(detail, :declared_limit),
+      "accounting_source" => Map.get(detail, :accounting_source),
+      "reconciliation_ref" => terminal_reference(state, run_id, outcome, detail),
+      # Concept: an ending that stopped work says what bounded the stopping.
+      #
+      # Technical depth: ADR 0009 requires the declared cleanup grace to be
+      # reported in the terminal outcome's evidence, so an operator can tell a
+      # clean cooperative stop from a forced kill that was confirmed and from a
+      # termination that could not be confirmed at all. It is the session's own
+      # declared value, which is what ADR 0009 makes it, and the same value the
+      # composed executor is handed -- so the terminal names the period the
+      # cleanup actually ran under. Reading it back off a receipt instead left
+      # every ending that produced no receipt reporting `nil`: an abort admitted
+      # before any executor answered, a run stopped between turns, and every
+      # recovery, which are precisely the endings an operator needs the period
+      # for.
+      "cleanup_grace_ms" => state.cleanup_grace_ms,
+      # Concept: an ending names the command that asked for it, where one did.
+      #
+      # Technical depth: the abort's admission and its outcome are two records
+      # now, and without this nothing joins them. It used to be carried by the
+      # abort's own `run.finished`, which no longer exists.
+      "command_id" => aborting_command(state, run_id),
+      kind: "run_terminal_committed"
+    }
+  end
 
   defp run_finished_event(session_id, run_id, outcome, reconciliation_ref, grace, command_id) do
     %{

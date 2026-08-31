@@ -2245,20 +2245,67 @@ defmodule Loopex.AgentLoopTest do
              &(&1.kind == :assistant_message)
            )
 
-    # Reply first: let the held provider reply commit, then submit the abort. The
-    # completed run wins by journal order and the later command is refused rather
-    # than rewriting its terminal.
+    # Reply first: hold the single result-and-terminal transaction before the
+    # Store linearizes it, then queue the abort behind the coordinator that is
+    # waiting for that transaction. Releasing the Store must make completion
+    # atomic: the abort can observe only the completed run, never the old active
+    # run between its assistant reply and terminal.
     other = start(script: [%{text: "in time", calls: [], hold: parent}])
-    {_other_session, other_attachment, _reply} = Fixture.run(other, "go")
+    {other_session, other_attachment, _reply} = Fixture.run(other, "go")
     assert_receive {:holding, in_time_model}, 2_000
+
+    :ok =
+      M1RuntimeTestStore.hold_next_record_before_linearization(
+        other.store,
+        "model_result_committed",
+        self()
+      )
+
     send(in_time_model, :release)
+
+    assert_receive {:record_held_before_linearization, result_waiter, _store,
+                    "model_result_committed", transaction},
+                   5_000
+
+    assert Enum.map(transaction.records, &(Map.get(&1, :kind) || Map.get(&1, "kind"))) == [
+             "model_result_committed",
+             "run_terminal_committed"
+           ]
+
+    coordinator = coordinator_of(other.runtime)
+
+    abort =
+      Task.async(fn ->
+        Loopex.command(other_attachment, %{
+          type: :abort,
+          command_id: "abort-too-late"
+        })
+      end)
+
+    assert await_process_message(coordinator, fn
+             {:"$gen_call", _from, {:command, _owner, %{type: :abort}}} -> true
+             _other -> false
+           end),
+           "the abort was not queued behind the held model-result transaction"
+
+    M1RuntimeTestStore.release(result_waiter)
+
+    assert {:error, :no_active_run} =
+             Task.await(abort, 5_000)
 
     events = drain(other_attachment)
     assert Enum.find(events, &(&1.kind == "assistant.message_appended"))["content"] == "in time"
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
 
-    assert {:error, :no_active_run} =
-             Loopex.command(other_attachment, %{type: :abort, command_id: "abort-too-late"})
+    records = Fixture.records(other, other_session)
+
+    [result_record, terminal_record] =
+      records
+      |> Enum.filter(&(&1.payload[:kind] in ["model_result_committed", "run_terminal_committed"]))
+
+    assert terminal_record.journal_version == result_record.journal_version + 1
+    assert result_record.payload["reply"]["text"] == "in time"
+    assert terminal_record.payload["outcome"] == "completed"
   end
 
   test "cleanup waits for a model result sent after the supervisor answers" do
