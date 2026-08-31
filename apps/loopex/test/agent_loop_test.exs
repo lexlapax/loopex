@@ -1684,7 +1684,10 @@ defmodule Loopex.AgentLoopTest do
   test "the runtime commits the assistant reply and never assembles canonical history from streamed deltas" do
     fixture =
       start(
-        script: [%{text: "AUTHORITATIVE", calls: [], deltas: ["PARTIAL"]}],
+        script: [
+          %{text: "AUTHORITATIVE", calls: [call("c1")], deltas: ["PARTIAL"]},
+          %{text: "done", calls: []}
+        ],
         progress_to: self()
       )
 
@@ -1706,9 +1709,21 @@ defmodule Loopex.AgentLoopTest do
     committed =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.find(&(&1.payload[:kind] == "model_result_committed"))
+      |> Enum.find(
+        &(&1.payload[:kind] == "model_result_committed" and
+            get_in(&1.payload, ["reply", "text"]) == "AUTHORITATIVE")
+      )
 
     assert committed.payload["reply"]["text"] == "AUTHORITATIVE"
+
+    # The next provider request is the production consumer of canonical
+    # conversation history. An event and the raw model-result record can both be
+    # correct while the durable assistant element is wrong, so this assertion is
+    # the one that proves the bytes replayed to the model came from the reply.
+    [_first, second] = AgentLoopTestModel.dispatched(fixture.model)
+    replayed = Enum.find(second.messages, &(&1["role"] == "assistant"))
+    assert replayed["content"] == "AUTHORITATIVE"
+    refute replayed["content"] =~ "PARTIAL"
   end
 
   test "a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" do
@@ -1772,7 +1787,7 @@ defmodule Loopex.AgentLoopTest do
   end
 
   test "executor progress proves its whole identity before anything is projected" do
-    _fixture = start_with_progress(:valid)
+    fixture = start_with_progress(:valid)
 
     items = tool_progress_items()
     assert length(items) == 2
@@ -1801,6 +1816,17 @@ defmodule Loopex.AgentLoopTest do
 
     assert first.chunk == "first"
     assert first.kind == :tool_progress
+
+    # The event and receipt are deliberately built from the job, so comparing
+    # them only with each other would admit a self-consistent job carrying the
+    # wrong configured executor identity. Bind the dispatched job back to the
+    # independent runtime configuration this fixture supplied.
+    assert [job] = AgentLoopProgressExecutor.jobs(fixture.executor)
+    assert job.origin_executor_epoch == 1
+    assert job.executor_identity == "progress-executor"
+    assert job.fencing_token == 7
+    assert job.workspace_ref == "workspace-ref"
+    assert job.workspace_lease == "workspace-lease"
 
     # Plain data: encoding it must not raise, which it does for a pid, port,
     # reference, or function anywhere inside.

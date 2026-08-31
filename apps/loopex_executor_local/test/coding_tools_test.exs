@@ -1089,7 +1089,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     large = Path.join(root, "larger-than-the-artifact-bound.txt")
 
     {:ok, file} = :file.open(large, [:write, :raw, :binary])
-    {:ok, _position} = :file.position(file, artifact_limit)
+    observed_size = artifact_limit + 4_096
+    {:ok, _position} = :file.position(file, observed_size - 1)
     :ok = :file.write(file, "x")
     :ok = :file.close(file)
 
@@ -1101,6 +1102,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     assert receipt.output =~ "artifact ceiling"
     assert receipt.output =~ Integer.to_string(artifact_limit)
+    assert receipt.output =~ Integer.to_string(observed_size)
     assert receipt.artifacts == []
     assert Loopex.Executor.Local.CodingToolsTest.RecordingStore.stored(store) == %{}
 

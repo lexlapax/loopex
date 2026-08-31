@@ -542,6 +542,31 @@ defmodule LoopexCliTest do
 
     assert after_epoch > before_epoch
 
+    # The continuation above isolates the command decisions from provider work,
+    # but an injected starter cannot prove that the public command still invokes
+    # the shipped composition by default. Drive `dispatch/1` against a fresh
+    # state root as well. There is deliberately no session there: reaching the
+    # truthful unknown-session refusal proves the real composition started and
+    # the command got as far as the durable resume boundary without making a
+    # provider call.
+    assert :ok = LoopexCli.release_placement()
+    {empty_root, empty_workspace} = roots()
+
+    assert {:error, :session_unknown} =
+             LoopexCli.dispatch([
+               "resume",
+               "s_missing",
+               "--policy",
+               "allow-all",
+               "--state-root",
+               empty_root,
+               "--workspace",
+               empty_workspace
+             ])
+
+    assert File.regular?(Path.join(empty_root, "store.log")),
+           "the shipped composition did not open its durable store"
+
     # And the command needs to be told which one: it never picks for the operator.
     assert {:error, message} = LoopexCli.dispatch(["resume", "--state-root", state_root])
     assert message =~ "session identifier"
