@@ -1743,17 +1743,64 @@ defmodule Loopex.AgentLoopTest do
     {session_id, attachment, _reply} = Fixture.run(fixture, "go")
     assert_receive {:holding, model}, 2_000
 
-    assert {:accepted, "abort-1"} =
-             Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
+    coordinator = coordinator_of(fixture.runtime)
+
+    [{reference, {:model, run_id, _worker}}] =
+      coordinator
+      |> :sys.get_state()
+      |> Map.fetch!(:in_flight)
+      |> Map.to_list()
+
+    :ok = :sys.suspend(coordinator)
+
+    on_exit(fn ->
+      if Process.alive?(coordinator) do
+        try do
+          :sys.resume(coordinator)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end)
+
+    abort =
+      Task.async(fn ->
+        Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
+      end)
+
+    assert await_process_message(coordinator, fn
+             {:"$gen_call", _from, {:command, _owner, %{type: :abort}}} -> true
+             _other -> false
+           end),
+           "the abort was not queued before the model reply"
 
     send(model, :release)
-    Process.sleep(300)
+
+    assert await_process_message(coordinator, fn
+             {^reference, {:ok, %{text: "late reply"}}} -> true
+             _other -> false
+           end),
+           "the model reply was not queued behind the admitted abort"
+
+    :ok = :sys.resume(coordinator)
+    assert {:accepted, "abort-1"} = Task.await(abort, 5_000)
+
+    assert_receive {:loopex_diagnostic,
+                    %{
+                      "kind" => "late_result_discarded",
+                      "run_id" => ^run_id,
+                      "operation" => "model",
+                      "outcome" => "reply"
+                    }},
+                   5_000
+
+    events = drain(attachment)
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
 
     # Whether the attempt is stopped outright or its reply arrives too late to
     # belong anywhere, the invariant is the same and is what this asserts: the
     # aborted attempt never becomes canonical history. A late reply that does
-    # arrive is retained as attempt evidence on the diagnostics plane, which is
-    # the path exercised when an executor answers after its run is gone.
+    # arrive is retained as attempt evidence on the diagnostics plane.
     assistants =
       fixture
       |> Fixture.records(session_id)
@@ -1761,32 +1808,27 @@ defmodule Loopex.AgentLoopTest do
 
     assert assistants == []
 
-    # And the run did not end as though the attempt had succeeded, so a consumer
-    # reading events sees no turn the journal cannot justify.
-    #
-    # This asserted that no `run_terminal_committed` record existed at all, which
-    # was true only because an abort used to carry its ending inside its own
-    # admission record and produce no terminal. It therefore passed without
-    # testing anything the comment above it claimed. An abort commits an ending
-    # now, like every other way a run stops, so the assertion is what the comment
-    # always meant: whatever the run ended as, it was not `completed`.
     terminals =
       fixture
       |> Fixture.records(session_id)
       |> Enum.filter(&(&1.payload[:kind] == "run_terminal_committed"))
 
-    refute Enum.any?(terminals, &(&1.payload["outcome"] == "completed")),
-           "an aborted attempt's reply completed the run: " <>
-             inspect(Enum.map(terminals, & &1.payload["outcome"]))
+    assert Enum.map(terminals, & &1.payload["outcome"]) == ["cancelled"]
 
-    # A reply that committed before any abort does complete its turn: the loop
-    # in every other case here commits its assistant message and carries on,
-    # which is the same path observed throughout this file.
-    other = start(script: [%{text: "in time", calls: []}])
+    # Reply first: let the held provider reply commit, then submit the abort. The
+    # completed run wins by journal order and the later command is refused rather
+    # than rewriting its terminal.
+    other = start(script: [%{text: "in time", calls: [], hold: parent}])
     {_other_session, other_attachment, _reply} = Fixture.run(other, "go")
+    assert_receive {:holding, in_time_model}, 2_000
+    send(in_time_model, :release)
+
     events = drain(other_attachment)
-    assert Enum.find(events, &(&1.kind == "assistant.message_appended"))
+    assert Enum.find(events, &(&1.kind == "assistant.message_appended"))["content"] == "in time"
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    assert {:error, :no_active_run} =
+             Loopex.command(other_attachment, %{type: :abort, command_id: "abort-too-late"})
   end
 
   test "executor progress proves its whole identity before anything is projected" do

@@ -1894,8 +1894,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
         {reference, pid} ->
           _ = Task.Supervisor.terminate_child(state.workers, pid)
-          _ = take_worker_result(reference)
-          state = %{state | in_flight: Map.delete(state.in_flight, reference)}
+          answer = take_worker_result(reference)
+
+          state =
+            state
+            |> Map.put(:in_flight, Map.delete(state.in_flight, reference))
+            |> report_cancelled_model_answer(run_id, answer)
+
           close_current_model_stream(state, run_id, :abandoned)
       end
 
@@ -1942,6 +1947,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
     Process.demonitor(reference, [:flush])
     result
   end
+
+  defp report_cancelled_model_answer(state, _run_id, :none), do: state
+
+  defp report_cancelled_model_answer(state, run_id, {:ok, reply}),
+    do: report_late_result(state, run_id, :model, {:ok, reply})
+
+  defp report_cancelled_model_answer(state, run_id, {:answered, answer}),
+    do: report_late_result(state, run_id, :model, answer)
 
   defp in_flight_of(state, kind, run_id) do
     Enum.find_value(state.in_flight, fn
@@ -2475,6 +2488,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # would have continued is already terminal. Treating it as a fault instead
   # would kill an owner over a message that arrived a moment too late.
   defp accept_late_result(state, run_id, kind, result) do
+    {:noreply, report_late_result(state, run_id, kind, result)}
+  end
+
+  defp report_late_result(state, run_id, kind, result) do
     emit_diagnostic(state, %{
       "kind" => "late_result_discarded",
       "run_id" => run_id,
@@ -2482,7 +2499,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       "outcome" => if(match?({:ok, _}, result), do: "reply", else: "error")
     })
 
-    {:noreply, state}
+    state
   end
 
   defp emit_diagnostic(%{diagnostics_to: sink}, item) when is_pid(sink) do
