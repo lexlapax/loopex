@@ -1128,10 +1128,10 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "the refused oversized file changed the retained exact-bound artifact"
 
     # Loading is not safely measurable from outside File without making a huge
-    # allocation the test's failure mode, so this half is explicitly structural.
-    # It binds both protections: the known size is refused before read_verified,
-    # and the open handle still reads at most one byte beyond the ceiling so a
-    # file that grows after the stat cannot turn the preflight into an OOM gap.
+    # allocation the test's failure mode, so the preflight half is explicitly
+    # structural. The open-handle half is behavioural: a small fixed file drives
+    # the exact branch a file that grew after the preflight would reach, without
+    # making this locked case depend on winning a filesystem race.
     source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
 
     [read_clause] =
@@ -1144,9 +1144,15 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert read_clause =~ ":ok <- within_artifact_ceiling(identity, limits.artifact)"
     assert read_clause =~ "read_verified(resolved, path, identity, limits.artifact)"
 
-    assert source =~ "defp read_open_file(file, limit) when is_integer(limit) and limit > 0"
-    assert source =~ "read_open_file(file, limit + 1, limit)"
-    assert source =~ "case IO.binread(file, amount) do"
+    opened_overflow = Path.join(root, "opened-overflow.txt")
+    File.write!(opened_overflow, "limit+")
+    {:ok, opened_file} = File.open(opened_overflow, [:read, :binary])
+
+    try do
+      assert {:artifact_ceiling_exceeded, 6} = Local.bounded_read_probe(opened_file, 5)
+    after
+      File.close(opened_file)
+    end
   end
 
   test "a tool child process group is owned and terminated with its job and no group member survives" do

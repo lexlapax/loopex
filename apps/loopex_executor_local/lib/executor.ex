@@ -1303,6 +1303,21 @@ defmodule Loopex.Executor.Local do
     end
   end
 
+  # Concept: the bounded read of an already-open regular file refuses the first
+  # byte beyond its artifact ceiling instead of returning a successful prefix.
+  #
+  # Technical depth: the production path reaches this boundary only if a file
+  # grows after its size was checked but before its opened handle is read.
+  # Arranging that interval through the filesystem is inherently racy, so the
+  # locked case supplies an already-open handle and a small ceiling here. This
+  # `@doc false` probe calls the same private collector and creates no runtime or
+  # compatibility contract.
+  @doc false
+  @spec bounded_read_probe(:file.io_device(), pos_integer()) ::
+          {:ok, binary()} | {:artifact_ceiling_exceeded, pos_integer()} | {:error, term()}
+  def bounded_read_probe(file, limit) when is_integer(limit) and limit > 0,
+    do: read_open_file(file, limit)
+
   defp read_open_file(file, :unbounded_input), do: read_open_file(file, :eof, nil)
 
   defp read_open_file(file, limit) when is_integer(limit) and limit > 0,
