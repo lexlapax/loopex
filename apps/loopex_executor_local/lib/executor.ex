@@ -59,8 +59,6 @@ defmodule Loopex.Executor.Local do
   # hands it here; a session and a hand that each kept their own default would
   # agree only until one was edited, and the run's terminal would then report a
   # period the cleanup did not run under.
-  @default_cleanup_grace_ms Executor.default_cleanup_grace_ms()
-
   # Concept: the program this executor asks whether a process group still has
   # members, and the share of the declared period reserved for writing down what
   # happened.
@@ -273,7 +271,11 @@ defmodule Loopex.Executor.Local do
     with {:dictionary, dictionary} <- Process.info(executor, :dictionary),
          table when not is_nil(table) <- Keyword.get(dictionary, :loopex_inflight_table),
          grace when is_integer(grace) <-
-           Keyword.get(dictionary, :loopex_cleanup_grace_ms, @default_cleanup_grace_ms),
+           Keyword.get(
+             dictionary,
+             :loopex_cleanup_grace_ms,
+             Executor.default_cleanup_grace_ms()
+           ),
          probe when is_binary(probe) <-
            Keyword.get(dictionary, :loopex_process_probe, @default_process_probe),
          [{^job_id, group}] <- :ets.lookup(table, job_id) do
@@ -321,7 +323,7 @@ defmodule Loopex.Executor.Local do
   defp close_cleanup_episode, do: Process.delete(:loopex_cleanup_episode)
 
   defp cleanup_grace_ms,
-    do: Process.get(:loopex_cleanup_grace_ms, @default_cleanup_grace_ms)
+    do: Process.get(:loopex_cleanup_grace_ms, Executor.default_cleanup_grace_ms())
 
   defp process_probe,
     do: Process.get(:loopex_process_probe, @default_process_probe)
@@ -420,7 +422,10 @@ defmodule Loopex.Executor.Local do
     leases = Keyword.fetch!(options, :workspace_leases)
     ledger_root = Keyword.fetch!(options, :ledger_root) |> Path.expand()
     artifacts = Keyword.get(options, :artifacts)
-    cleanup_grace_ms = Keyword.get(options, :cleanup_grace_ms, @default_cleanup_grace_ms)
+
+    cleanup_grace_ms =
+      Keyword.get(options, :cleanup_grace_ms, Executor.default_cleanup_grace_ms())
+
     process_probe = Keyword.get(options, :process_probe, @default_process_probe)
 
     valid =

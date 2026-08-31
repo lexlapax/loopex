@@ -2772,18 +2772,44 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     {executor, lease_id} = executor_with_grace(root, 750)
     assert Local.cleanup_grace_ms(executor) == 750
 
-    assert {:ok, receipt} =
-             run(root, "loopex.write", %{"path" => "budgeted.txt", "content" => "x"}, %{
-               executor: executor,
-               lease_id: lease_id
-             })
+    File.write!(Path.join(root, "read.txt"), "read me")
+    File.write!(Path.join(root, "edit.txt"), "before")
 
-    assert receipt.cleanup_grace_ms == 750
+    receipts =
+      for {tool_id, arguments} <- [
+            {"loopex.read", %{"path" => "read.txt"}},
+            {"loopex.write", %{"path" => "budgeted.txt", "content" => "x"}},
+            {"loopex.edit", %{"path" => "edit.txt", "old" => "before", "new" => "after"}},
+            {"loopex.bash", %{"argv" => ["printf", "ok"]}}
+          ] do
+        assert {:ok, receipt} =
+                 run(root, tool_id, arguments, %{
+                   executor: executor,
+                   lease_id: lease_id
+                 })
 
-    # The durable record carries it too, so a coordinator recovering this job
-    # reads the period it was bounded by rather than the one running now.
-    assert {:ok, retained} = Local.receipt(executor, receipt.job_id)
-    assert retained.cleanup_grace_ms == 750
+        assert receipt.cleanup_grace_ms == 750,
+               "#{tool_id} reported #{inspect(receipt.cleanup_grace_ms)} rather than the " <>
+                 "configured 750ms cleanup period"
+
+        # The durable record carries it too, so a coordinator recovering this
+        # job reads the period it was bounded by rather than the one running now.
+        assert {:ok, retained} = Local.receipt(executor, receipt.job_id)
+
+        assert retained.cleanup_grace_ms == 750,
+               "#{tool_id}'s retained receipt reported " <>
+                 "#{inspect(retained.cleanup_grace_ms)} rather than 750ms"
+
+        receipt
+      end
+
+    assert Enum.map(receipts, & &1.tool_id) == [
+             "loopex.read",
+             "loopex.write",
+             "loopex.edit",
+             "loopex.bash"
+           ],
+           "the every-receipt claim no longer exercises every shipped tool"
 
     # A second executor in the same VM keeps its own period; the value is
     # per-instance configuration and not a global.
