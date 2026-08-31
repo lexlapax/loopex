@@ -6416,6 +6416,134 @@ defmodule Loopex.AgentLoopTest do
     assert receipt["outcome"] == "completed"
   end
 
+  test "every declared executor receipt field is validated live and during reconciliation" do
+    # Concept: an executor receipt is durable evidence, not an opaque adapter
+    # payload. A declared field whose shape cannot be read must leave the effect
+    # unproven without killing the owner or retaining the hostile value.
+    #
+    # Technical depth: each vector changes one declared field. In particular the
+    # first value makes `Conversation.result_content/2` receive a map, while the
+    # environment assignment carries a secret-shaped value that Store's generic
+    # plain-data check would otherwise admit. The same literal corpus is driven
+    # through the ordinary worker-result path and through a solicited recovery
+    # receipt. Deleting any corresponding validator admits that vector on both
+    # paths; deleting only one proposal path admits it on one of them.
+    secret = "credential-shaped-value-that-must-not-be-journaled"
+
+    malformed = [
+      {"binary output", %{output: %{"credential" => secret}}},
+      {"environment list", %{child_environment_names: "PATH"}},
+      {"environment assignment", %{child_environment_names: ["PATH=#{secret}"]}},
+      {"environment non-name", %{child_environment_names: ["PATH WITH SPACE"]}},
+      {"environment control", %{child_environment_names: ["PATH\nINJECTED"]}},
+      {"environment utf8", %{child_environment_names: [<<255>>]}},
+      {"environment credential key", %{child_environment_names: ["LOOPEX_PROVIDER_API_KEY"]}},
+      {"credential presence", %{provider_credential_present: true}},
+      {"credential flag type", %{provider_credential_present: "false"}},
+      {"observation instant", %{observed_at_ms: "now"}},
+      {"cleanup bound", %{cleanup_grace_ms: -1}},
+      {"receipt retention bound", %{receipt_retention_bound_ms: -1}},
+      {"effective deadline shape", %{effective_deadline_ms: "later"}},
+      {"run deadline shape", %{run_deadline_ms: 0}},
+      {"effective deadline range", %{effective_deadline_ms: 9_223_372_036_854_775_807}},
+      {"run deadline identity", %{run_deadline_ms: 1}},
+      {"process probe shape", %{process_probe: %{"path" => "/bin/ps"}}},
+      {"process probe control", %{process_probe: "/bin/ps\nother"}},
+      {"artifact references", %{artifacts: [%{"locator" => "missing-fields"}]}},
+      {"progress count", %{progress_count: -1}},
+      {"outcome", %{outcome: "invented"}}
+    ]
+
+    for {field, extras} <- malformed do
+      fixture =
+        start_with_executor(
+          AgentLoopAnsweringExecutor,
+          AgentLoopAnsweringExecutor.start(%{}),
+          one_call_script(),
+          receipt_extras: extras
+        )
+
+      events = drain(fixture.attachment)
+      tool = Enum.find(events, &(&1.kind == "tool.finished"))
+      finished = Enum.find(events, &(&1.kind == "run.finished"))
+
+      assert tool["outcome"] == "outcome_unknown",
+             "a live receipt with malformed #{field} became a terminal fact"
+
+      assert finished["outcome"] == "outcome_unknown"
+
+      assert Process.alive?(coordinator_of(fixture.runtime)),
+             "a live receipt with malformed #{field} killed the session owner"
+
+      records = Fixture.records(fixture, fixture.session_id)
+
+      refute Enum.any?(records, &(&1.payload[:kind] == "executor_receipt_committed")),
+             "a live receipt with malformed #{field} reached the journal"
+
+      refute inspect(records) =~ secret,
+             "a rejected live receipt retained credential material from #{field}"
+    end
+
+    executor = AgentLoopProgressExecutor.start({:held_after_effect, self()})
+
+    recovered =
+      start_with_executor(
+        AgentLoopProgressExecutor,
+        executor,
+        one_call_script(),
+        progress_to: self()
+      )
+
+    assert_receive {:executor_effect_held, worker}, 5_000
+    [job] = AgentLoopProgressExecutor.jobs(executor)
+    predecessor = coordinator_of(recovered.runtime)
+
+    assert {:ok, recovered.session_id} ==
+             Loopex.resume_session(
+               recovered.runtime,
+               recovered.session_id,
+               command_id: "resume-malformed-receipt-fields"
+             )
+
+    assert await_superseded(predecessor)
+
+    {:ok, resumed} =
+      Loopex.attach(recovered.runtime, recovered.session_id, after_event_sequence: 0)
+
+    assert {:ok, query} = Loopex.reconciliation_query(resumed)
+    valid_receipt = AgentLoopProgressExecutor.receipt(job, 2)
+
+    for {field, extras} <- malformed do
+      response =
+        query
+        |> Map.put(:evidence, "receipt")
+        |> Map.put(:retained_receipt, Map.merge(valid_receipt, extras))
+
+      assert {:error, :invalid_executor_receipt} = Loopex.reconcile(resumed, response),
+             "recovery admitted a receipt with malformed #{field}"
+
+      assert Process.alive?(coordinator_of(recovered.runtime)),
+             "a recovery receipt with malformed #{field} killed the current owner"
+    end
+
+    records = Fixture.records(recovered, recovered.session_id)
+
+    refute Enum.any?(records, &(&1.payload[:kind] == "executor_receipt_committed")),
+           "a malformed recovery receipt reached the journal"
+
+    refute inspect(records) =~ secret,
+           "a rejected recovery receipt retained credential material"
+
+    response =
+      query
+      |> Map.put(:evidence, "receipt")
+      |> Map.put(:retained_receipt, valid_receipt)
+
+    assert :ok = Loopex.reconcile(resumed, response)
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+    send(worker, :release)
+  end
+
   test "a complete model stream closes on its reply's own delta count" do
     # Concept: ADR 0011 assigns a complete closure the producer's own statement,
     # and the executor side of that table is proved by

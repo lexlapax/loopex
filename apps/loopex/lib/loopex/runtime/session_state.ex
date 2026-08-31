@@ -85,6 +85,10 @@ defmodule Loopex.Runtime.SessionState do
     :outcome_unknown,
     :cancelled_workspace_lease_lost
   ]
+  @provider_credential_name "LOOPEX_PROVIDER_API_KEY"
+  @max_receipt_text_bytes 1_024
+  @unsafe_receipt_text ~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u
+  @environment_name ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
   @receipt_job_identity_fields [
     :protocol_version,
     :job_id,
@@ -1994,7 +1998,9 @@ defmodule Loopex.Runtime.SessionState do
       Enum.all?(@receipt_job_identity_fields, &(Map.get(receipt, &1) == Map.get(job, &1))) and
         receipt.session_epoch_at_dispatch == job.origin_session_epoch and
         receipt.executor_epoch == job.origin_executor_epoch and
-        receipt.executor_identity == job.executor_identity
+        receipt.executor_identity == job.executor_identity and
+        optional_receipt_field_matches?(receipt, :run_deadline_ms, job.run_deadline) and
+        effective_deadline_within_run?(receipt, job.run_deadline)
 
     if valid, do: :ok, else: {:error, :receipt_identity_mismatch}
   end
@@ -2324,14 +2330,99 @@ defmodule Loopex.Runtime.SessionState do
     # declare, and demanding one would refuse a conforming receipt.
     with {:ok, receipt} <- decode_top(encoded, @receipt_required_fields),
          {:ok, outcome} <- decode_receipt_outcome(receipt.outcome),
+         :ok <- validate_receipt_output(receipt.output),
          :ok <- validate_stream_count(receipt.progress_count),
-         {:ok, artifacts} <- decode_artifacts(receipt.artifacts) do
-      {:ok,
-       encoded
-       |> decode_optional(@receipt_optional_fields)
-       |> Map.merge(%{receipt | outcome: outcome, artifacts: artifacts})}
+         :ok <- validate_non_negative_integer(receipt.observed_at_ms),
+         :ok <- validate_child_environment_names(receipt.child_environment_names),
+         false <- receipt.provider_credential_present,
+         {:ok, artifacts} <- decode_artifacts(receipt.artifacts),
+         optional <- decode_optional(encoded, @receipt_optional_fields),
+         :ok <- validate_optional_receipt_fields(optional) do
+      {:ok, Map.merge(optional, %{receipt | outcome: outcome, artifacts: artifacts})}
     else
       _other -> {:error, :invalid_plain_receipt}
+    end
+  end
+
+  defp validate_receipt_output(output) when is_binary(output), do: :ok
+  defp validate_receipt_output(_output), do: {:error, :invalid_plain_receipt}
+
+  # Concept: environment evidence contains names, never assignments or values.
+  # A receipt that says the provider credential reached a child is not an
+  # ordinary terminal fact this runtime can safely continue past.
+  #
+  # Technical depth: Store plain-data validation accepts any binary, including
+  # `NAME=secret`, terminal-control text, and the provider key itself. Those
+  # values used to be projected into the durable receipt before anything judged
+  # their meaning. The closed grammar keeps this field an inventory of names and
+  # the separate boolean is admitted only at its credential-free value. Invalid
+  # UTF-8 is tested before the Unicode predicate so a hostile binary cannot make
+  # receipt validation raise.
+  defp validate_child_environment_names(names) when is_list(names) do
+    if Enum.all?(names, &valid_child_environment_name?/1),
+      do: :ok,
+      else: {:error, :invalid_plain_receipt}
+  end
+
+  defp validate_child_environment_names(_names), do: {:error, :invalid_plain_receipt}
+
+  defp valid_child_environment_name?(name) when is_binary(name) do
+    name != "" and byte_size(name) <= @max_receipt_text_bytes and String.valid?(name) and
+      Regex.match?(@environment_name, name) and name != @provider_credential_name and
+      not Regex.match?(@unsafe_receipt_text, name)
+  end
+
+  defp valid_child_environment_name?(_name), do: false
+
+  defp validate_optional_receipt_fields(optional) do
+    validators = [
+      cleanup_grace_ms: &validate_non_negative_integer/1,
+      receipt_retention_bound_ms: &validate_non_negative_integer/1,
+      effective_deadline_ms: &validate_positive_integer/1,
+      run_deadline_ms: &validate_positive_integer/1,
+      process_probe: &validate_receipt_text/1
+    ]
+
+    Enum.reduce_while(validators, :ok, fn {field, validator}, :ok ->
+      case Map.fetch(optional, field) do
+        {:ok, value} ->
+          case validator.(value) do
+            :ok -> {:cont, :ok}
+            {:error, _reason} = error -> {:halt, error}
+          end
+
+        :error ->
+          {:cont, :ok}
+      end
+    end)
+  end
+
+  defp validate_non_negative_integer(value) when is_integer(value) and value >= 0, do: :ok
+  defp validate_non_negative_integer(_value), do: {:error, :invalid_plain_receipt}
+
+  defp validate_positive_integer(value) when is_integer(value) and value > 0, do: :ok
+  defp validate_positive_integer(_value), do: {:error, :invalid_plain_receipt}
+
+  defp validate_receipt_text(value) when is_binary(value) do
+    if value != "" and byte_size(value) <= @max_receipt_text_bytes and String.valid?(value) and
+         not Regex.match?(@unsafe_receipt_text, value),
+       do: :ok,
+       else: {:error, :invalid_plain_receipt}
+  end
+
+  defp validate_receipt_text(_value), do: {:error, :invalid_plain_receipt}
+
+  defp optional_receipt_field_matches?(receipt, field, expected) do
+    case Map.fetch(receipt, field) do
+      {:ok, value} -> value == expected
+      :error -> true
+    end
+  end
+
+  defp effective_deadline_within_run?(receipt, run_deadline) do
+    case Map.fetch(receipt, :effective_deadline_ms) do
+      {:ok, deadline} -> deadline <= run_deadline
+      :error -> true
     end
   end
 
