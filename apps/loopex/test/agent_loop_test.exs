@@ -2628,7 +2628,11 @@ defmodule Loopex.AgentLoopTest do
   test "an oversized valid late reply is retained as bounded error" do
     {_run_id, events, records, evidence} =
       retain_late_model_evidence(
-        %{text: &full_record_boundary_text/1, calls: []},
+        %{
+          text: &full_record_boundary_text/1,
+          calls: [],
+          reply_overrides: %{provider_response_id: "req-boundary"}
+        },
         "abort-oversized-late-reply"
       )
 
