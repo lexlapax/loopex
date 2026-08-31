@@ -1639,11 +1639,9 @@ defmodule Loopex.AgentLoopTest do
              Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
 
     # The successor abandons the attempt it inherited rather than re-running it
-    # under the same identity, and dispatches the next one. Re-running it would
-    # give two owners one stream domain, because ADR 0011 makes a domain one
-    # attempt's progress stream; abandoning it also charges the call the
-    # predecessor actually made, which a silent reuse did not.
-    assert await_dispatch_count(fixture, 3)
+    # under the same identity. That consumes the final allowed attempt: a third
+    # provider call would both exceed the allowance and open a stream domain for
+    # an attempt the run was never entitled to make.
     Process.sleep(300)
 
     attempts =
@@ -1653,17 +1651,38 @@ defmodule Loopex.AgentLoopTest do
       |> Enum.map(& &1.payload["attempt"])
 
     # Numbered by the run rather than by whichever owner observed them, and never
-    # restarted at one: attempt two is the inherited one the successor gave up,
-    # and attempt three is the successor's own.
+    # restarted at one: attempt two is the inherited final attempt the successor
+    # gave up. Attempt three is only the next durable identity; it was never
+    # dispatched and must never be charged as abandoned on a later resume.
     assert Enum.take(attempts, 2) == [1, 2]
 
     refute length(attempts) > length(Enum.uniq(attempts)),
            "an attempt number was abandoned twice: #{inspect(attempts)}"
 
-    dispatched = length(AgentLoopTestModel.dispatched(fixture.model))
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
 
-    assert dispatched == 3,
-           "the successor made #{dispatched - 2} further provider calls rather than one"
+    # Repeated recovery used to abandon the never-dispatched next identity and
+    # call the provider on attempts 4, 6, 8, ... . No number of owner changes may
+    # turn an exhausted allowance back into dispatch authority.
+    for index <- 2..4 do
+      _ =
+        Loopex.resume_session(
+          fixture.runtime,
+          session_id,
+          command_id: "resume-#{index}"
+        )
+
+      Process.sleep(100)
+      assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
+    end
+
+    final_attempts =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+      |> Enum.map(& &1.payload["attempt"])
+
+    assert final_attempts == [1, 2]
   end
 
   test "a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" do

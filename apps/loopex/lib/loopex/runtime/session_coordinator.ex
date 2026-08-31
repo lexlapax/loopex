@@ -1245,17 +1245,29 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp adopt_inherited_attempt(state, work) do
     state = adopt_run(state, work.run_id)
 
-    case commit_abandoned_attempt(state, work.run_id) do
-      {:ok, next} ->
-        send(self(), :advance_work)
-        {:noreply, next}
+    if retry_available?(state, work.run_id) do
+      case commit_abandoned_attempt(state, work.run_id) do
+        {:ok, next} ->
+          if retry_available?(next, work.run_id) do
+            send(self(), :advance_work)
+            {:noreply, next}
+          else
+            {:stop, {:model_failed, :retry_exhausted}, next}
+          end
 
-      {:error, :no_attempt_pending} ->
-        send(self(), :advance_work)
-        {:noreply, state}
+        {:error, :no_attempt_pending} ->
+          send(self(), :advance_work)
+          {:noreply, state}
 
-      {:error, reason} ->
-        {:stop, {:model_attempt_failed, reason}, state}
+        {:error, reason} ->
+          {:stop, {:model_attempt_failed, reason}, state}
+      end
+    else
+      # The durable attempt is already the first one the declared allowance does
+      # not permit. It was never dispatched, so abandoning it would both charge
+      # work that did not happen and advance to another identity a later owner
+      # could mistake for permission to call again.
+      {:stop, {:model_failed, :retry_exhausted}, state}
     end
   end
 
