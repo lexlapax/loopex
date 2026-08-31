@@ -40,6 +40,10 @@ defmodule Loopex.SessionDirectory do
   alias Loopex.Runtime
 
   @max_identifier_bytes 256
+  @max_runtime_id_file_bytes 1_024
+  @max_session_entry_bytes 1_048_576
+  @max_cached_commands 4_096
+  @temporary_name_bytes 16
 
   # Technical depth: bounded so a pathologically contended entry fails with a
   # reason rather than spinning.
@@ -117,20 +121,38 @@ defmodule Loopex.SessionDirectory do
   """
   @spec runtime_id(Path.t()) :: {:ok, binary()} | {:error, term()}
   def runtime_id(root) when is_binary(root) and byte_size(root) > 0 do
-    path = runtime_id_path(root)
+    runtime_id(root, [])
+  end
 
-    with :ok <- File.mkdir_p(root) do
-      case File.read(path) do
-        {:ok, contents} -> decode_runtime_id(contents)
-        {:error, :enoent} -> generate_and_persist_runtime_id(path)
-        {:error, reason} -> {:error, {:runtime_id_unreadable, reason}}
+  def runtime_id(_root), do: {:error, :invalid_state_root}
+
+  @doc false
+  @spec runtime_id(Path.t(), keyword()) :: {:ok, binary()} | {:error, term()}
+  def runtime_id(root, options)
+      when is_binary(root) and byte_size(root) > 0 and is_list(options) do
+    path = runtime_id_path(root)
+    before_publish = Keyword.get(options, :before_publish, fn -> :ok end)
+
+    with :ok <- ensure_directory_durable(root) do
+      case read_durable_runtime_id(path) do
+        {:ok, runtime_id} ->
+          {:ok, runtime_id}
+
+        {:error, :enoent} ->
+          generate_and_persist_runtime_id(path, before_publish)
+
+        {:error, :corrupt_runtime_id} = error ->
+          error
+
+        {:error, reason} ->
+          {:error, {:runtime_id_unreadable, reason}}
       end
     else
       {:error, reason} -> {:error, {:state_root_unavailable, reason}}
     end
   end
 
-  def runtime_id(_root), do: {:error, :invalid_state_root}
+  def runtime_id(_root, _options), do: {:error, :invalid_state_root}
 
   @doc """
   ## Concept
@@ -209,23 +231,32 @@ defmodule Loopex.SessionDirectory do
   def list_sessions(root) when is_binary(root) do
     dir = Path.join(root, @sessions_dirname)
 
-    case File.ls(dir) do
-      {:ok, filenames} ->
-        entries =
-          filenames
-          |> Enum.reject(&String.contains?(&1, ".tmp-"))
-          |> Enum.flat_map(fn session_id ->
-            case read_entry(root, session_id) do
-              {:ok, entry} -> [%{session_id: entry.session_id, runtime_id: entry.runtime_id}]
-              {:error, _reason} -> []
-            end
-          end)
-          |> Enum.sort_by(& &1.session_id)
+    case directory_identity(dir) do
+      {:ok, expected_directory} ->
+        with {:ok, filenames} <- File.ls(dir),
+             {:ok, ^expected_directory} <- directory_identity(dir) do
+          entries =
+            filenames
+            |> Enum.reject(&String.contains?(&1, ".tmp-"))
+            |> Enum.flat_map(fn session_id ->
+              case read_entry(root, session_id) do
+                {:ok, entry} -> [%{session_id: session_id, runtime_id: entry.runtime_id}]
+                {:error, _reason} -> []
+              end
+            end)
+            |> Enum.sort_by(& &1.session_id)
 
-        {:ok, entries}
+          {:ok, entries}
+        else
+          {:ok, _different} -> {:error, :sessions_directory_replaced}
+          {:error, reason} -> {:error, {:sessions_directory_unreadable, reason}}
+        end
 
       {:error, :enoent} ->
         {:ok, []}
+
+      {:error, :not_directory} ->
+        {:error, :sessions_directory_unreadable}
 
       {:error, reason} ->
         {:error, {:sessions_directory_unreadable, reason}}
@@ -338,14 +369,18 @@ defmodule Loopex.SessionDirectory do
   # Concept: only the first writer against an absent identity file may choose
   # the value every later process re-presents.
   #
-  # Technical depth: `:exclusive` maps to POSIX `O_CREAT|O_EXCL`, so two
-  # processes racing to bootstrap the same empty state root cannot both
-  # "win" -- the loser's open fails with `:eexist` and it reads back the
-  # winner's committed bytes instead of persisting its own candidate.
-  defp generate_and_persist_runtime_id(path) do
+  # Technical depth: the candidate is written and synced under a private name,
+  # then hard-linked into the public name. Link creation is the one no-replace
+  # publication step: a reader can see either no `runtime_id` or the complete,
+  # synced inode, never the empty/partial interval between `O_EXCL` and write.
+  # Two publishers may prepare candidates, but exactly one link succeeds and
+  # every loser durably reads the winner. The hook is a test-only seam at that
+  # exact election boundary.
+  defp generate_and_persist_runtime_id(path, before_publish) do
     candidate = fresh_runtime_id()
+    tmp = temporary_path(path)
 
-    case File.open(path, [:write, :exclusive]) do
+    case File.open(tmp, [:write, :exclusive]) do
       {:ok, io} ->
         write_result =
           with :ok <- IO.binwrite(io, candidate),
@@ -355,30 +390,81 @@ defmodule Loopex.SessionDirectory do
 
         close_result = File.close(io)
 
-        result =
+        prepared =
           case {write_result, close_result} do
-            {:ok, :ok} -> sync_runtime_id_directory(path)
+            {:ok, :ok} -> :ok
             {{:error, reason}, _close} -> {:error, {:runtime_id_write_failed, reason}}
             {:ok, {:error, reason}} -> {:error, {:runtime_id_close_failed, reason}}
+          end
+
+        result =
+          with :ok <- prepared,
+               :ok <- before_publish.() do
+            publish_runtime_id(tmp, path)
           end
 
         case result do
           :ok ->
             {:ok, candidate}
 
+          {:winner, runtime_id} ->
+            {:ok, runtime_id}
+
           {:error, _reason} = error ->
-            _ = File.rm(path)
             error
+        end
+        |> tap(fn _result -> File.rm(tmp) end)
+
+      {:error, reason} ->
+        {:error, {:runtime_id_persist_failed, reason}}
+    end
+  end
+
+  defp publish_runtime_id(tmp, path) do
+    case File.ln(tmp, path) do
+      :ok ->
+        case sync_runtime_id_directory(path) do
+          :ok -> :ok
+          {:error, _reason} = error -> error
         end
 
       {:error, :eexist} ->
-        case File.read(path) do
-          {:ok, contents} -> decode_runtime_id(contents)
-          {:error, reason} -> {:error, {:runtime_id_unreadable, reason}}
+        case read_durable_runtime_id(path) do
+          {:ok, runtime_id} -> {:winner, runtime_id}
+          {:error, _reason} = error -> error
         end
 
       {:error, reason} ->
         {:error, {:runtime_id_persist_failed, reason}}
+    end
+  end
+
+  defp read_durable_runtime_id(path) do
+    with {:ok, contents} <- read_regular_file(path, @max_runtime_id_file_bytes, true),
+         {:ok, runtime_id} <- decode_runtime_id(contents),
+         :ok <- sync_runtime_id_directory(path) do
+      {:ok, runtime_id}
+    else
+      {:error, :enoent} = error ->
+        error
+
+      {:error, :corrupt_runtime_id} = error ->
+        error
+
+      {:error, reason} when reason in [:not_regular, :replaced, :too_large] ->
+        {:error, :corrupt_runtime_id}
+
+      {:error, {:runtime_id_directory_sync_failed, _reason}} = error ->
+        error
+
+      {:error, {:runtime_id_directory_close_failed, _reason}} = error ->
+        error
+
+      {:error, {:runtime_id_directory_unavailable, _reason}} = error ->
+        error
+
+      {:error, reason} ->
+        {:error, {:runtime_id_unreadable, reason}}
     end
   end
 
@@ -443,12 +529,22 @@ defmodule Loopex.SessionDirectory do
   end
 
   defp read_entry(root, session_id) do
-    with {:ok, path} <- session_path(root, session_id),
-         :ok <- own_entry(path) do
-      case File.read(path) do
-        {:ok, contents} -> decode_entry(contents)
-        {:error, :enoent} -> {:error, :session_unknown}
-        {:error, reason} -> {:error, {:session_entry_unreadable, reason}}
+    with {:ok, path} <- session_path(root, session_id) do
+      case read_regular_file(path, @max_session_entry_bytes) do
+        {:ok, contents} ->
+          decode_entry(contents, session_id)
+
+        {:error, :enoent} ->
+          {:error, :session_unknown}
+
+        {:error, reason} when reason in [:not_regular, :not_directory, :replaced] ->
+          {:error, :invalid_session_id}
+
+        {:error, :too_large} ->
+          {:error, :corrupt_session_entry}
+
+        {:error, reason} ->
+          {:error, {:session_entry_unreadable, reason}}
       end
     end
   end
@@ -468,15 +564,6 @@ defmodule Loopex.SessionDirectory do
   # the only way to tell the two apart. A symlink is refused as an identifier
   # rather than repaired, because replacing it would destroy whatever an operator
   # deliberately linked and admitting it would be the defect.
-  defp own_entry(path) do
-    case File.lstat(path) do
-      {:ok, %File.Stat{type: :regular}} -> :ok
-      {:ok, _non_regular} -> {:error, :invalid_session_id}
-      {:error, :enoent} -> {:error, :session_unknown}
-      {:error, reason} -> {:error, {:session_entry_unreadable, reason}}
-    end
-  end
-
   # Concept: a directory a cold VM can decode without risking atom-table growth.
   #
   # Technical depth: `:safe` refuses to create atoms absent from the current
@@ -484,19 +571,36 @@ defmodule Loopex.SessionDirectory do
   # `:runtime_id`, `:commands`) is a literal in this source file and therefore
   # already loaded, so decoding never needs a new one; a hand-edited or foreign
   # file that does would fail closed here instead of growing the table.
-  defp decode_entry(contents) do
-    entry = :erlang.binary_to_term(contents, [:safe])
-
-    case entry do
-      %{session_id: session_id, runtime_id: runtime_id, commands: commands}
-      when is_binary(session_id) and is_binary(runtime_id) and is_map(commands) ->
-        {:ok, entry}
-
-      _other ->
-        {:error, :corrupt_session_entry}
+  defp decode_entry(contents, expected_session_id) do
+    with false <- compressed_external_term?(contents),
+         entry <- :erlang.binary_to_term(contents, [:safe]),
+         %{session_id: ^expected_session_id, runtime_id: runtime_id, commands: commands} <- entry,
+         true <- Enum.sort(Map.keys(entry)) == [:commands, :runtime_id, :session_id],
+         true <- valid_persisted_identifier?(runtime_id),
+         true <- valid_commands?(commands, expected_session_id) do
+      {:ok, entry}
+    else
+      _other -> {:error, :corrupt_session_entry}
     end
   rescue
     ArgumentError -> {:error, :corrupt_session_entry}
+  end
+
+  defp compressed_external_term?(<<131, 80, _rest::binary>>), do: true
+  defp compressed_external_term?(_contents), do: false
+
+  defp valid_commands?(commands, session_id) when is_map(commands) do
+    map_size(commands) <= @max_cached_commands and
+      Enum.all?(commands, fn {command_id, result} ->
+        valid_persisted_identifier?(command_id) and result == session_id
+      end)
+  end
+
+  defp valid_commands?(_commands, _session_id), do: false
+
+  defp valid_persisted_identifier?(value) do
+    is_binary(value) and byte_size(value) > 0 and byte_size(value) <= @max_identifier_bytes and
+      String.valid?(value) and not String.contains?(value, <<0>>)
   end
 
   # Concept: recording a session for the first time and updating one already
@@ -512,17 +616,29 @@ defmodule Loopex.SessionDirectory do
   # learns it lost and settles against whatever is actually on disk.
   defp write_entry(root, entry, mode) do
     with {:ok, path} <- session_path(root, entry.session_id) do
-      tmp = path <> ".tmp-" <> Integer.to_string(System.unique_integer([:positive]))
+      encoded = :erlang.term_to_binary(entry)
 
-      with :ok <- File.mkdir_p(Path.dirname(path)),
-           :ok <- File.write(tmp, :erlang.term_to_binary(entry)),
-           :ok <- publish(tmp, path, mode) do
-        :ok
+      if byte_size(encoded) <= @max_session_entry_bytes do
+        write_entry_bytes(root, path, encoded, mode)
       else
-        {:error, reason} ->
-          _ = File.rm(tmp)
-          {:error, {:session_entry_persist_failed, reason}}
+        {:error, {:session_entry_persist_failed, :entry_too_large}}
       end
+    end
+  end
+
+  defp write_entry_bytes(root, path, encoded, mode) do
+    directory = Path.dirname(path)
+    tmp = temporary_path(path)
+
+    with :ok <- ensure_sessions_directory(root, directory),
+         :ok <- write_synced_exclusive(tmp, encoded),
+         :ok <- publish(tmp, path, mode),
+         :ok <- sync_directory(directory) do
+      :ok
+    else
+      {:error, reason} ->
+        _ = File.rm(tmp)
+        {:error, {:session_entry_persist_failed, reason}}
     end
   end
 
@@ -533,4 +649,229 @@ defmodule Loopex.SessionDirectory do
   end
 
   defp publish(tmp, path, :update), do: File.rename(tmp, path)
+
+  defp ensure_sessions_directory(root, directory) do
+    with :ok <- ensure_directory(root) do
+      case File.mkdir(directory) do
+        :ok ->
+          sync_directory(root)
+
+        {:error, :eexist} ->
+          with :ok <- ensure_directory(directory),
+               :ok <- sync_directory(root) do
+            :ok
+          end
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp ensure_directory_durable(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :directory}} ->
+        parent = Path.dirname(path)
+        if parent == path, do: :ok, else: sync_directory(parent)
+
+      {:ok, _other} ->
+        {:error, :not_directory}
+
+      {:error, :enoent} ->
+        parent = Path.dirname(path)
+
+        if parent == path do
+          {:error, :enoent}
+        else
+          with :ok <- ensure_directory_durable(parent),
+               :ok <- create_and_sync_directory(path, parent) do
+            :ok
+          end
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp create_and_sync_directory(path, parent) do
+    case File.mkdir(path) do
+      :ok ->
+        sync_directory(parent)
+
+      {:error, :eexist} ->
+        with :ok <- ensure_directory(path),
+             :ok <- sync_directory(parent) do
+          :ok
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp ensure_directory(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :directory}} -> :ok
+      {:ok, _other} -> {:error, :not_directory}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp write_synced_exclusive(path, contents) do
+    case :file.open(String.to_charlist(path), [:raw, :binary, :write, :exclusive]) do
+      {:ok, io} ->
+        write_result =
+          with :ok <- :file.write(io, contents),
+               :ok <- :file.sync(io) do
+            :ok
+          end
+
+        close_result = :file.close(io)
+
+        case {write_result, close_result} do
+          {:ok, :ok} -> :ok
+          {{:error, reason}, _close} -> {:error, reason}
+          {:ok, {:error, reason}} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp sync_directory(path) do
+    case :file.open(String.to_charlist(path), [:raw, :read, :directory]) do
+      {:ok, io} ->
+        sync_result = :file.sync(io)
+        close_result = :file.close(io)
+
+        case {sync_result, close_result} do
+          {:ok, :ok} -> :ok
+          {{:error, reason}, _close} -> {:error, reason}
+          {:ok, {:error, reason}} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp temporary_path(path) do
+    suffix = :crypto.strong_rand_bytes(@temporary_name_bytes) |> Base.url_encode64(padding: false)
+    path <> ".tmp-" <> suffix
+  end
+
+  # Concept: a durable directory entry is read from the ordinary file that the
+  # directory still names, never through a link or from an unbounded object.
+  #
+  # Technical depth: lstat refuses a static symlink, FIFO, device, or directory
+  # before open. The opened descriptor is checked against that exact inode
+  # before any byte is read and the path is checked again afterwards, so a
+  # replacement cannot substitute outside bytes. Reading stops at one byte past
+  # the caller's limit and therefore decides oversize without loading the rest
+  # of a hostile file.
+  defp read_regular_file(path, limit), do: read_regular_file(path, limit, false)
+
+  defp read_regular_file(path, limit, sync?) do
+    directory = Path.dirname(path)
+
+    with {:ok, expected_directory} <- directory_identity(directory),
+         {:ok, expected} <- regular_file_identity(path, limit),
+         {:ok, io} <- :file.open(String.to_charlist(path), [:raw, :binary, :read]) do
+      try do
+        with {:ok, ^expected} <- opened_file_identity(io, limit),
+             {:ok, ^expected_directory} <- directory_identity(directory),
+             {:ok, contents} <- read_bounded(io, limit + 1),
+             true <- byte_size(contents) <= limit,
+             :ok <- maybe_sync_file(io, sync?),
+             {:ok, ^expected_directory} <- directory_identity(directory),
+             {:ok, ^expected} <- regular_file_identity(path, limit) do
+          {:ok, contents}
+        else
+          false -> {:error, :too_large}
+          {:ok, _different} -> {:error, :replaced}
+          {:error, _reason} = error -> error
+        end
+      after
+        :file.close(io)
+      end
+    else
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp maybe_sync_file(_io, false), do: :ok
+  defp maybe_sync_file(io, true), do: :file.sync(io)
+
+  defp regular_file_identity(path, limit) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular, size: size} = stat} when size <= limit ->
+        {:ok, file_identity(stat)}
+
+      {:ok, %File.Stat{type: :regular}} ->
+        {:error, :too_large}
+
+      {:ok, _non_regular} ->
+        {:error, :not_regular}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp directory_identity(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :directory} = stat} ->
+        {:ok, {stat.major_device, stat.inode}}
+
+      {:ok, _not_directory} ->
+        {:error, :not_directory}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp opened_file_identity(io, limit) do
+    case :file.read_file_info(io) do
+      {:ok, record} ->
+        case File.Stat.from_record(record) do
+          %File.Stat{type: :regular, size: size} = stat when size <= limit ->
+            {:ok, file_identity(stat)}
+
+          %File.Stat{type: :regular} ->
+            {:error, :too_large}
+
+          %File.Stat{} ->
+            {:error, :not_regular}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp file_identity(stat), do: {stat.major_device, stat.inode, stat.size}
+
+  defp read_bounded(io, remaining, chunks \\ [])
+
+  defp read_bounded(_io, 0, chunks),
+    do: {:ok, chunks |> Enum.reverse() |> IO.iodata_to_binary()}
+
+  defp read_bounded(io, remaining, chunks) do
+    case :file.read(io, remaining) do
+      {:ok, bytes} when is_binary(bytes) and byte_size(bytes) > 0 ->
+        read_bounded(io, remaining - byte_size(bytes), [bytes | chunks])
+
+      {:ok, ""} ->
+        {:ok, chunks |> Enum.reverse() |> IO.iodata_to_binary()}
+
+      :eof ->
+        {:ok, chunks |> Enum.reverse() |> IO.iodata_to_binary()}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 end

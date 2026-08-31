@@ -143,6 +143,52 @@ defmodule Loopex.SessionDirectoryTest do
     assert File.read!(Path.join(root, "runtime_id")) == runtime_id
   end
 
+  test "concurrent runtime identity bootstrap publishes only a complete winning identity", %{
+    root: root
+  } do
+    parent = self()
+    contenders = 16
+
+    tasks =
+      for _index <- 1..contenders do
+        Task.async(fn ->
+          SessionDirectory.runtime_id(root,
+            before_publish: fn ->
+              send(parent, {:runtime_id_ready, self()})
+
+              receive do
+                {:publish_runtime_id, ^parent} -> :ok
+              end
+            end
+          )
+        end)
+      end
+
+    publishers =
+      for _index <- 1..contenders do
+        assert_receive {:runtime_id_ready, publisher}, 2_000
+        publisher
+      end
+
+    # Every contender has finished and synced its private candidate. The public
+    # name still does not exist: a caller can see absent or complete, never the
+    # empty interval an exclusive open of the final path exposed.
+    refute File.exists?(Path.join(root, "runtime_id"))
+
+    Enum.each(publishers, &send(&1, {:publish_runtime_id, parent}))
+
+    results = Task.await_many(tasks, 5_000)
+    assert Enum.all?(results, &match?({:ok, _runtime_id}, &1))
+
+    identities = results |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+    assert [runtime_id] = identities
+    assert File.read!(Path.join(root, "runtime_id")) == runtime_id
+
+    assert File.ls!(root)
+           |> Enum.reject(&String.starts_with?(&1, "runtime_id.tmp-"))
+           |> Enum.sort() == ["runtime_id"]
+  end
+
   test "resuming a session through a different runtime identity is refused with an explicit reason",
        %{root: root} do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "mismatch-store")
@@ -382,6 +428,156 @@ defmodule Loopex.SessionDirectoryTest do
                "not-a-session",
                "resume-1"
              )
+  end
+
+  test "runtime identity refuses a link or fifo before reading placement bytes", %{root: root} do
+    identity_path = Path.join(root, "runtime_id")
+    outside = Path.join(root, "outside-runtime-id")
+    File.write!(outside, "runtime_attacker")
+    File.ln_s!(outside, identity_path)
+
+    assert {:error, :corrupt_runtime_id} = SessionDirectory.runtime_id(root)
+    File.rm!(identity_path)
+
+    mkfifo = System.find_executable("mkfifo") || flunk("the POSIX mkfifo tool is unavailable")
+    {_output, 0} = System.cmd(mkfifo, [identity_path], stderr_to_stdout: true)
+
+    task = Task.async(fn -> SessionDirectory.runtime_id(root) end)
+    assert {:error, :corrupt_runtime_id} = Task.await(task, 1_000)
+  end
+
+  test "a linked sessions directory cannot redirect listing recording or resume", %{root: root} do
+    outside = Path.join(root, "outside-sessions")
+    File.mkdir_p!(outside)
+
+    outside_entry =
+      :erlang.term_to_binary(%{
+        session_id: "s_outside",
+        runtime_id: "runtime_attacker",
+        commands: %{}
+      })
+
+    File.write!(Path.join(outside, "s_outside"), outside_entry)
+
+    File.ln_s!(outside, Path.join(root, "sessions"))
+
+    assert {:error, :sessions_directory_unreadable} = SessionDirectory.list_sessions(root)
+
+    assert {:error, :invalid_session_id} =
+             SessionDirectory.record_session(root, "s_outside", "runtime_real")
+
+    assert {:error, :invalid_session_id} =
+             SessionDirectory.resume(root, :unused, "s_outside", "resume-1")
+
+    assert File.read!(Path.join(outside, "s_outside")) == outside_entry
+  end
+
+  test "a session entry is bounded and its durable identity cannot disagree with its name", %{
+    root: root
+  } do
+    sessions = Path.join(root, "sessions")
+    File.mkdir_p!(sessions)
+
+    planted = fn name, entry ->
+      File.write!(Path.join(sessions, name), :erlang.term_to_binary(entry))
+    end
+
+    planted.("s_mismatch", %{
+      session_id: "s_other",
+      runtime_id: "runtime_attacker",
+      commands: %{}
+    })
+
+    planted.("s_host_term", %{
+      session_id: "s_host_term",
+      runtime_id: "runtime_attacker",
+      commands: %{"resume-1" => self()}
+    })
+
+    compressed =
+      :erlang.term_to_binary(
+        %{
+          session_id: "s_compressed",
+          runtime_id: "runtime_attacker",
+          commands: %{},
+          padding: String.duplicate("x", 2_000_000)
+        },
+        compressed: 9
+      )
+
+    assert byte_size(compressed) < 1_048_576
+    File.write!(Path.join(sessions, "s_compressed"), compressed)
+    File.write!(Path.join(sessions, "s_oversized"), String.duplicate("x", 1_048_577))
+
+    for session_id <- ["s_mismatch", "s_host_term", "s_compressed", "s_oversized"] do
+      assert {:error, :corrupt_session_entry} =
+               SessionDirectory.resume(root, :unused, session_id, "resume-1"),
+             "#{session_id} crossed the public resume boundary"
+    end
+
+    assert {:ok, []} = SessionDirectory.list_sessions(root)
+  end
+
+  test "cold runtime and session directory publication syncs every new namespace boundary", %{
+    root: root
+  } do
+    cold_root = Path.join([root, "cold-parent", "state"])
+
+    {runtime_result, runtime_syncs} =
+      trace_syncs(fn -> SessionDirectory.runtime_id(cold_root) end)
+
+    assert {:ok, runtime_id} = runtime_result
+    assert runtime_syncs == 5
+
+    {record_result, record_syncs} =
+      trace_syncs(fn -> SessionDirectory.record_session(cold_root, "s_durable", runtime_id) end)
+
+    assert :ok = record_result
+    assert record_syncs == 3
+
+    assert {:ok, [%{session_id: "s_durable", runtime_id: ^runtime_id}]} =
+             SessionDirectory.list_sessions(cold_root)
+  end
+
+  defp trace_syncs(fun) do
+    test = self()
+    tracer = spawn_link(fn -> trace_sync_forwarder(test, 0) end)
+    1 = :erlang.trace_pattern({:file, :sync, 1}, true, [])
+    1 = :erlang.trace(self(), true, [:call, {:tracer, tracer}])
+
+    result =
+      try do
+        fun.()
+      after
+        1 = :erlang.trace(self(), false, [:call])
+        1 = :erlang.trace_pattern({:file, :sync, 1}, false, [])
+      end
+
+    delivery = :erlang.trace_delivered(self())
+
+    receive do
+      {:trace_delivered, _tracee, ^delivery} -> :ok
+    after
+      1_000 -> flunk("session-directory sync trace was not delivered")
+    end
+
+    send(tracer, {:finish, self()})
+
+    receive do
+      {:session_directory_syncs, count} -> {result, count}
+    after
+      1_000 -> flunk("session-directory sync trace did not finish")
+    end
+  end
+
+  defp trace_sync_forwarder(test, count) do
+    receive do
+      {:trace, ^test, :call, {:file, :sync, [_io_device]}} ->
+        trace_sync_forwarder(test, count + 1)
+
+      {:finish, ^test} ->
+        send(test, {:session_directory_syncs, count})
+    end
   end
 
   defp wait_for_barrier(barrier, target) do
