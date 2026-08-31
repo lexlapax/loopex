@@ -436,6 +436,45 @@ defmodule LoopexCliTest do
 
     assert_receive {:composition_options, options}
     assert Keyword.fetch!(options, :cleanup_grace_ms) == 8_000
+
+    # An injected starter proves the command-side seam, but it cannot prove the
+    # shipped composition received the value. Observe the default composition's
+    # real kernel edge and stop there, before a provider call.
+    assert :ok = LoopexCli.release_placement()
+    {default_state_root, default_workspace} = roots()
+    default_parent = self()
+
+    default_observer = fn
+      Loopex, :start_link, [runtime_options] ->
+        send(default_parent, {:default_cleanup_options, runtime_options})
+        {:error, :observed_default_composition}
+
+      module, function, arguments ->
+        apply(module, function, arguments)
+    end
+
+    Process.put(:"$loopex_composition_edge_observer", default_observer)
+
+    try do
+      assert {:error, :observed_default_composition} =
+               LoopexCli.dispatch([
+                 "run",
+                 "--policy",
+                 "allow-all",
+                 "--state-root",
+                 default_state_root,
+                 "--workspace",
+                 default_workspace,
+                 "--cleanup-grace-ms",
+                 "8000",
+                 "do the thing"
+               ])
+    after
+      Process.delete(:"$loopex_composition_edge_observer")
+    end
+
+    assert_receive {:default_cleanup_options, default_options}
+    assert Keyword.fetch!(default_options, :cleanup_grace_ms) == 8_000
   end
 
   test "tool progress from a running executor job reaches the operator's terminal before the tool finishes" do
@@ -1130,26 +1169,53 @@ defmodule LoopexCliTest do
     # command does after the decision is not this case's claim.
     {command_root, command_workspace} = roots()
     File.write!(Path.join(command_workspace, "AGENTS.md"), "always run the tests")
+    command_manifest = LoopexCli.ProjectResources.discover(command_workspace)
+    assert {:ok, command_digest, _resolved} = Loopex.ProjectResource.digest(command_manifest)
+
+    command_parent = self()
+
+    command_observer = fn
+      Loopex, :start_link, [runtime_options] ->
+        send(command_parent, {:command_project_options, runtime_options})
+        {:error, :observed_default_composition}
+
+      module, function, arguments ->
+        apply(module, function, arguments)
+    end
+
+    Process.put(:"$loopex_composition_edge_observer", command_observer)
 
     commanded =
-      capture_io(:stderr, fn ->
-        assert {:error, unreconciled} =
-                 LoopexCli.dispatch([
-                   "cancel",
-                   "no-such-session",
-                   "--policy",
-                   "allow-all",
-                   "--state-root",
-                   command_root,
-                   "--workspace",
-                   command_workspace
-                 ])
+      try do
+        with_terminal_input("y\n", fn ->
+          capture_io(:stderr, fn ->
+            assert {:error, observed} =
+                     LoopexCli.dispatch([
+                       "cancel",
+                       "no-such-session",
+                       "--policy",
+                       "allow-all",
+                       "--state-root",
+                       command_root,
+                       "--workspace",
+                       command_workspace
+                     ])
 
-        send(self(), {:unreconciled, unreconciled})
-      end)
+            assert observed =~ "observed_default_composition"
+          end)
+        end)
+      after
+        Process.delete(:"$loopex_composition_edge_observer")
+      end
 
-    assert_received {:unreconciled, unreconciled}
-    assert unreconciled =~ "session_unknown"
+    assert_receive {:command_project_options, command_options}
+    assert Keyword.fetch!(command_options, :project_manifest) == command_manifest
+
+    assert %{
+             manifest_digest: ^command_digest,
+             decision_source: "terminal_prompt",
+             revocation_state: "active"
+           } = Keyword.fetch!(command_options, :project_decision)
 
     assert commanded =~ "project resources found in this workspace",
            "the command did not run discovery: #{String.slice(commanded, 0, 400)}"
@@ -1157,8 +1223,8 @@ defmodule LoopexCliTest do
     assert commanded =~ "AGENTS.md"
     assert commanded =~ "trust class project_resource"
 
-    assert commanded =~ "not interactive",
-           "the command did not reach the trust decision from dispatch"
+    assert commanded =~ "admit these project resources for this run?"
+    assert commanded =~ "project resources admitted for this run"
 
     # And a workspace carrying none says so, rather than saying nothing.
     {_other_root, empty} = roots()
@@ -1473,6 +1539,56 @@ defmodule LoopexCliTest do
 
     receive do: ({:decided, decision} ->
                    receive do: ({:shown, shown} -> {output <> shown, decision}))
+  end
+
+  # Concept: exercise the command's real terminal-presence check with a
+  # controllable standard-input device.
+  #
+  # Technical depth: `ProjectResources.operator_present?/0` asks the current
+  # group leader through the ordinary Erlang IO protocol. This proxy delegates
+  # every request to `StringIO` except `:getopts`, where it truthfully describes
+  # the test device as an input terminal. No project-decision seam is injected:
+  # the command still calls `decide/2`, asks through `IO.gets/1`, and consumes
+  # the typed answer through `:standard_io`.
+  defp with_terminal_input(typed, work) do
+    {:ok, input} = StringIO.open(typed)
+    terminal = spawn(fn -> terminal_io(input) end)
+    prior = Process.group_leader()
+    true = Process.group_leader(self(), terminal)
+
+    try do
+      work.()
+    after
+      true = Process.group_leader(self(), prior)
+      send(terminal, :stop)
+      StringIO.close(input)
+    end
+  end
+
+  defp terminal_io(input) do
+    receive do
+      {:io_request, from, reply_as, :getopts} ->
+        send(
+          from,
+          {:io_reply, reply_as, [binary: true, encoding: :unicode, terminal: true, stdin: true]}
+        )
+
+        terminal_io(input)
+
+      {:io_request, from, reply_as, request} ->
+        reference = make_ref()
+        send(input, {:io_request, self(), reference, request})
+
+        receive do
+          {:io_reply, ^reference, reply} ->
+            send(from, {:io_reply, reply_as, reply})
+        end
+
+        terminal_io(input)
+
+      :stop ->
+        :ok
+    end
   end
 
   test "the command surface drives only the public facade and owns no loop store cursor or authority" do
