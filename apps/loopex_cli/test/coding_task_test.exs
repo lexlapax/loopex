@@ -519,7 +519,17 @@ defmodule LoopexCli.CodingTaskTest do
       |> Enum.map(fn reply -> reply |> Map.get("tool_calls", []) |> length() end)
       |> Enum.sum()
 
-    tool_results = Enum.filter(records, &(&1.payload.kind == "tool_result_committed"))
+    # Concept: every call owes one durable terminal fact.
+    #
+    # Technical depth: a dispatched call terminates in its executor receipt;
+    # only a call refused before dispatch uses the separate tool-result record.
+    # Counting only the latter made a healthy multi-tool run look incomplete as
+    # soon as canonical replies truthfully retained every provider tool call.
+    nondispatched_results =
+      Enum.filter(records, &(&1.payload.kind == "tool_result_committed"))
+
+    executor_receipts =
+      Enum.filter(records, &(&1.payload.kind == "executor_receipt_committed"))
 
     GenServer.stop(adapter, :normal, 1_000)
 
@@ -527,10 +537,10 @@ defmodule LoopexCli.CodingTaskTest do
       replies: replies,
       turns: length(replies),
       tool_calls: tool_calls,
-      tool_results: length(tool_results),
-      denied: Enum.count(tool_results, &(&1.payload["outcome"] == "denied")),
+      tool_results: length(nondispatched_results) + length(executor_receipts),
+      denied: Enum.count(nondispatched_results, &(&1.payload["outcome"] == "denied")),
       effects: Enum.count(records, &(&1.payload.kind == "effect_intent_committed")),
-      executor_receipts: Enum.count(records, &(&1.payload.kind == "executor_receipt_committed"))
+      executor_receipts: length(executor_receipts)
     }
   end
 
