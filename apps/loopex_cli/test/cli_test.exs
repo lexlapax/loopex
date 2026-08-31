@@ -1102,6 +1102,67 @@ defmodule LoopexCliTest do
     assert Path.basename(inner) == "agents-source.md"
   end
 
+  test "project resource discovery retains only the bounded refusal prefix of an oversized or growing file" do
+    {_state_root, workspace} = roots()
+    path = Path.join(workspace, "AGENTS.md")
+    File.write!(path, String.duplicate("a", 2 * 1024 * 1024))
+
+    assert %{entries: [%{label: "AGENTS.md", content: retained}]} =
+             manifest = LoopexCli.ProjectResources.discover(workspace)
+
+    # One byte beyond the accepted ceiling is enough to retain the fact that the
+    # resource exists and make core refuse it. Discovery never needs the other
+    # ~2 MiB in memory.
+    assert byte_size(retained) == 65_537
+
+    assert {:error, :over_limit, %{"observed_bytes" => 65_537, "limit_bytes" => 65_536}} =
+             Loopex.ProjectResource.digest(manifest)
+
+    # The same reader is bounded when the file grows after its identity is
+    # checked but before its bytes are consumed. The opener is the exact seam
+    # between those operations; injecting it makes the race deterministic.
+    File.write!(path, "first")
+
+    opener = fn opened_path ->
+      with {:ok, file} <- File.open(opened_path, [:read, :binary, :raw]) do
+        File.write!(opened_path, String.duplicate("b", 2 * 1024 * 1024), [:append])
+        {:ok, file}
+      end
+    end
+
+    assert {:ok, grown_prefix} =
+             LoopexCli.ProjectResources.ResourceReader.read(path, 65_536, opener)
+
+    assert byte_size(grown_prefix) == 65_537
+    assert String.starts_with?(grown_prefix, "first")
+  end
+
+  test "a project resource replaced through a component after containment is refused before reading" do
+    {_state_root, workspace} = roots()
+    component = Path.join(workspace, "instructions")
+    File.mkdir!(component)
+    checked = Path.join(component, "AGENTS.md")
+    File.write!(checked, "the operator-approved bytes")
+
+    elsewhere =
+      Path.join(System.tmp_dir!(), "loopex-cli-swapped-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(elsewhere)
+    on_exit(fn -> File.rm_rf(elsewhere) end)
+    File.write!(Path.join(elsewhere, "AGENTS.md"), "outside bytes that must not be read")
+
+    moved = Path.join(workspace, "instructions-checked")
+
+    opener = fn opened_path ->
+      File.rename!(component, moved)
+      File.ln_s!(elsewhere, component)
+      File.open(opened_path, [:read, :binary, :raw])
+    end
+
+    assert {:refused, :replaced} =
+             LoopexCli.ProjectResources.ResourceReader.read(checked, 65_536, opener)
+  end
+
   test "a session the state root could not record is reported and fails the command instead of passing as recorded" do
     # Concept: a session that was never written down is a session the operator
     # cannot find again, and they have to be told while they can still act.

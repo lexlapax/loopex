@@ -34,6 +34,7 @@ defmodule LoopexCli.ProjectResources do
   """
 
   alias Loopex.ProjectResource
+  alias __MODULE__.ResourceReader
 
   # Concept: a symlink chain has to end somewhere, and a cycle is a filesystem an
   # operator can create by accident.
@@ -55,9 +56,10 @@ defmodule LoopexCli.ProjectResources do
   kernel's to enforce and reporting it as absent would hide a refusal behind a
   discovery result.
 
-  A candidate is resolved before it is stated: `File.regular?/1` and `File.read/1`
-  both follow symlinks, so a workspace `AGENTS.md` pointing at a file outside the
-  root was read from outside and then reported `contained: true` from a literal.
+  A candidate is resolved before it is stated. The earlier `File.regular?/1`
+  and `File.read/1` path followed symlinks twice, so a workspace `AGENTS.md`
+  pointing at a file outside the root was read from outside and then reported
+  `contained: true` from a literal.
   The manifest asserted a containment nothing had checked, the kernel is
   documented as unable to check it, and the outside content reached the model's
   staged project block labelled as coming from the workspace root. Resolution
@@ -71,7 +73,7 @@ defmodule LoopexCli.ProjectResources do
   @spec discover(Path.t()) :: map() | nil
   def discover(workspace) do
     with {:ok, root} <- real_path(workspace) do
-      case Enum.flat_map(ProjectResource.permitted_labels(), &admit(root, &1)) do
+      case discover_entries(root) do
         [] ->
           nil
 
@@ -96,12 +98,46 @@ defmodule LoopexCli.ProjectResources do
     end
   end
 
+  # Concept: discovery retains enough bytes to prove an over-limit resource was
+  # present, without making the command hold the whole resource in memory.
+  #
+  # Technical depth: the extra byte makes the kernel's existing `over_limit`
+  # verdict observable rather than trimming an oversized resource into an
+  # apparently admissible one. The remaining class budget is carried across the
+  # ordered labels, so a future expansion of the permitted set cannot turn the
+  # per-file bound into an unbounded class total.
+  defp discover_entries(root) do
+    %{per_resource_bytes: per_resource, class_total_bytes: class_total} =
+      ProjectResource.limits()
+
+    {entries, _remaining, _over_limit} =
+      Enum.reduce(ProjectResource.permitted_labels(), {[], class_total, false}, fn
+        _label, state = {_entries, _remaining, true} ->
+          state
+
+        label, {entries, remaining, false} ->
+          read_limit = min(per_resource, remaining)
+
+          case admit(root, label, read_limit) do
+            [] ->
+              {entries, remaining, false}
+
+            [entry] ->
+              size = byte_size(entry.content)
+              over_limit = size > per_resource or size > remaining
+              {[entry | entries], max(remaining - size, 0), over_limit}
+          end
+      end)
+
+    Enum.reverse(entries)
+  end
+
   # Concept: one candidate, resolved, judged, and read — in that order.
   #
   # Technical depth: the resolved path is carried on the entry rather than
   # recomputed for display, so what the operator is shown is the exact path the
   # bytes were read from and not a second answer to the same question.
-  defp admit(root, label) do
+  defp admit(root, label, read_limit) do
     case real_path(Path.join(root, label)) do
       {:ok, resolved} ->
         cond do
@@ -109,11 +145,8 @@ defmodule LoopexCli.ProjectResources do
             excluded(label, "it resolves to #{resolved}, which is outside #{root}")
             []
 
-          not regular?(resolved) ->
-            []
-
           true ->
-            read_entry(label, resolved)
+            read_entry(label, resolved, read_limit)
         end
 
       {:error, reason} ->
@@ -122,10 +155,17 @@ defmodule LoopexCli.ProjectResources do
     end
   end
 
-  defp read_entry(label, resolved) do
-    case File.read(resolved) do
+  defp read_entry(label, resolved, read_limit) do
+    case ResourceReader.read(resolved, read_limit) do
       {:ok, content} ->
         [%{label: label, content: content, contained: true, resolved_path: resolved}]
+
+      {:refused, reason} when reason in [:absent, :not_regular] ->
+        []
+
+      {:refused, :replaced} ->
+        excluded(label, "it was replaced while it was being opened; nothing was read")
+        []
 
       {:error, reason} ->
         excluded(label, "it could not be read (#{inspect(reason)})")
@@ -135,13 +175,6 @@ defmodule LoopexCli.ProjectResources do
 
   defp excluded(label, why) do
     IO.puts(:stderr, "loopex: #{label} was excluded from the project resources because #{why}")
-  end
-
-  # Technical depth: the resolved path has no symlink left in it, so `lstat`
-  # and `stat` agree here; `lstat` is used because it is the one that cannot be
-  # made to answer about a different file than the one named.
-  defp regular?(path) do
-    match?({:ok, %File.Stat{type: :regular}}, File.lstat(path))
   end
 
   # Concept: containment is a comparison of resolved paths, not of text.
@@ -397,6 +430,91 @@ defmodule LoopexCli.ProjectResources do
     case System.cmd("git", ["-C", workspace, "rev-parse", "HEAD"], stderr_to_stdout: true) do
       {output, 0} -> String.trim(output)
       _absent -> nil
+    end
+  end
+
+  defmodule ResourceReader do
+    @moduledoc false
+
+    @type opener :: (Path.t() -> {:ok, File.io_device()} | {:error, File.posix()})
+
+    # Concept: reads the regular file that discovery checked, and no replacement.
+    #
+    # Technical depth: containment resolves a name and this function must then
+    # open that name. Device and inode bind the checked object to the opened
+    # handle. A component or final name swapped in between therefore produces a
+    # different handle identity and is refused before any content is read.
+    #
+    # `opener` is injectable so the race boundary can be exercised
+    # deterministically. Production uses the default opener below.
+    @doc false
+    @spec read(Path.t(), non_neg_integer(), opener()) ::
+            {:ok, binary()} | {:refused, :absent | :not_regular | :replaced} | {:error, term()}
+    def read(path, limit, opener \\ &open/1)
+
+    def read(path, limit, opener)
+        when is_binary(path) and is_integer(limit) and limit >= 0 and is_function(opener, 1) do
+      with {:ok, expected} <- regular_identity(path),
+           {:ok, file} <- opener.(path) do
+        try do
+          with {:ok, ^expected} <- opened_regular_identity(file) do
+            read_bounded(file, limit + 1)
+          else
+            {:ok, _different} -> {:refused, :replaced}
+            {:refused, :not_regular} = refused -> refused
+            {:error, reason} -> {:error, reason}
+          end
+        after
+          File.close(file)
+        end
+      end
+    end
+
+    defp open(path), do: File.open(path, [:read, :binary, :raw])
+
+    defp regular_identity(path) do
+      case File.lstat(path) do
+        {:ok, %File.Stat{type: :regular} = stat} -> {:ok, identity(stat)}
+        {:ok, %File.Stat{}} -> {:refused, :not_regular}
+        {:error, :enoent} -> {:refused, :absent}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+
+    defp opened_regular_identity(file) do
+      case :file.read_file_info(file) do
+        {:ok, record} ->
+          case File.Stat.from_record(record) do
+            %File.Stat{type: :regular} = stat -> {:ok, identity(stat)}
+            %File.Stat{} -> {:refused, :not_regular}
+          end
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+
+    defp identity(stat), do: {stat.major_device, stat.inode}
+
+    defp read_bounded(file, remaining, chunks \\ [])
+
+    defp read_bounded(_file, 0, chunks),
+      do: {:ok, chunks |> Enum.reverse() |> IO.iodata_to_binary()}
+
+    defp read_bounded(file, remaining, chunks) do
+      case :file.read(file, remaining) do
+        {:ok, bytes} when is_binary(bytes) and byte_size(bytes) > 0 ->
+          read_bounded(file, remaining - byte_size(bytes), [bytes | chunks])
+
+        {:ok, ""} ->
+          {:ok, chunks |> Enum.reverse() |> IO.iodata_to_binary()}
+
+        :eof ->
+          {:ok, chunks |> Enum.reverse() |> IO.iodata_to_binary()}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 end
