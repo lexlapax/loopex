@@ -957,6 +957,7 @@ defmodule Loopex.AgentLoopTest do
       tool_calls: [],
       delta_count: 0,
       streamed: false,
+      provider_response_id: "req-boundary",
       canonical_request_bytes: request.canonical_request_bytes,
       staged_request_digest: request.staged_request_digest
     }
@@ -2252,15 +2253,31 @@ defmodule Loopex.AgentLoopTest do
 
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
 
+    records = Fixture.records(fixture, session_id)
+
     assert [%{payload: evidence}] =
-             fixture
-             |> Fixture.records(session_id)
-             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_evidence_retained"))
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_evidence_retained"))
 
     assert evidence["run_id"] == run_id
     assert evidence["attempt"] == 2
     assert evidence["termination"] == "abort"
     assert evidence["evidence"]["reply"]["text"] == "late retry"
+
+    stale_records =
+      Enum.map(records, fn
+        %{payload: %{kind: "model_attempt_evidence_retained"} = payload} = record ->
+          %{record | payload: Map.put(payload, "attempt", 1)}
+
+        record ->
+          record
+      end)
+
+    assert {:error, :invalid_model_attempt_evidence} =
+             Loopex.Runtime.SessionState.recover(
+               session_id,
+               stale_records,
+               Fixture.events(fixture, session_id)
+             )
   end
 
   test "a Store refusal of late model attempt evidence makes clean cancellation unprovable" do
@@ -2462,8 +2479,34 @@ defmodule Loopex.AgentLoopTest do
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
 
-    assert Enum.any?(records, &(&1.payload[:kind] == "model_attempt_abandoned"))
+    assert records
+           |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+           |> Enum.map(& &1.payload["attempt"]) == [1]
+
     refute :erlang.term_to_binary(records) =~ secret
+
+    exhausted =
+      start(
+        script: [
+          %{error: :provider_unavailable},
+          %{text: "still unreadable", calls: [], reply_overrides: %{credential: secret}}
+        ]
+      )
+
+    {exhausted_session, _attachment, _reply} = Fixture.run(exhausted, "go")
+    exhausted_coordinator = coordinator_of(exhausted.runtime)
+    exhausted_reference = Process.monitor(exhausted_coordinator)
+
+    assert_receive {:DOWN, ^exhausted_reference, :process, ^exhausted_coordinator, _reason},
+                   5_000
+
+    exhausted_records = Fixture.records(exhausted, exhausted_session)
+
+    assert exhausted_records
+           |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+           |> Enum.map(& &1.payload["attempt"]) == [1, 2]
+
+    refute :erlang.term_to_binary(exhausted_records) =~ secret
   end
 
   test "nested provider fields are projected out of valid late evidence" do
@@ -2486,6 +2529,7 @@ defmodule Loopex.AgentLoopTest do
               provider: "scripted",
               model: "scripted:v1",
               endpoint: "in-process",
+              credential: secret,
               provider_private: secret
             },
             usage: %{input_tokens: 7, output_tokens: 3, provider_private: secret}
@@ -2542,22 +2586,24 @@ defmodule Loopex.AgentLoopTest do
   end
 
   test "a malformed streamed flag in a late reply becomes bounded error" do
-    {_run_id, events, _records, evidence} =
-      retain_late_model_evidence(
-        %{
-          text: "otherwise valid",
-          calls: [],
-          reply_overrides: %{streamed: "not-a-boolean"}
-        },
-        "abort-late-streamed-shape"
-      )
+    for {malformed, index} <- Enum.with_index(["not-a-boolean", 1], 1) do
+      {_run_id, events, _records, evidence} =
+        retain_late_model_evidence(
+          %{
+            text: "otherwise valid",
+            calls: [],
+            reply_overrides: %{delta_count: 1, streamed: malformed}
+          },
+          "abort-late-streamed-shape-#{index}"
+        )
 
-    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+      assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
 
-    assert evidence["evidence"] == %{
-             "kind" => "error",
-             "reason" => "unreadable_model_answer"
-           }
+      assert evidence["evidence"] == %{
+               "kind" => "error",
+               "reason" => "unreadable_model_answer"
+             }
+    end
   end
 
   test "a late reply whose streamed flag contradicts its count becomes bounded error" do
@@ -2602,18 +2648,20 @@ defmodule Loopex.AgentLoopTest do
     # error-reason byte ceiling.
     oversized_reason = String.to_atom(String.duplicate("é", 200))
 
-    {_run_id, events, _records, evidence} =
-      retain_late_model_evidence(
-        %{error: oversized_reason},
-        "abort-oversized-late-error"
-      )
+    for {reason, index} <- Enum.with_index([oversized_reason, {oversized_reason, :detail}], 1) do
+      {_run_id, events, _records, evidence} =
+        retain_late_model_evidence(
+          %{error: reason},
+          "abort-oversized-late-error-#{index}"
+        )
 
-    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+      assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
 
-    assert evidence["evidence"] == %{
-             "kind" => "error",
-             "reason" => "model_call_failed"
-           }
+      assert evidence["evidence"] == %{
+               "kind" => "error",
+               "reason" => "model_call_failed"
+             }
+    end
   end
 
   test "a model reply queued behind its deadline is retained with the deadline termination" do

@@ -751,6 +751,21 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     refute :canonical_request_digest in declared
   end
 
+  test "the model reply contract declares the optional provider response identifier" do
+    {:ok, types} = Code.Typespec.fetch_types(Loopex.Model)
+
+    {:type, {:reply, {:type, _line, :map, fields}, []}} =
+      Enum.find(types, &match?({:type, {:reply, _definition, []}}, &1))
+
+    assert Enum.any?(fields, fn
+             {:type, _line, :map_field_assoc, [{:atom, _key_line, :provider_response_id}, _value]} ->
+               true
+
+             _other ->
+               false
+           end)
+  end
+
   defp declared_reply_fields do
     {:ok, types} = Code.Typespec.fetch_types(Loopex.LLM.ReqLLM)
 
