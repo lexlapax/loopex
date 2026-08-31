@@ -51,9 +51,11 @@ defmodule Loopex.ArtifactStore do
   """
 
   @roles ["tool_output"]
+  @max_media_type_bytes 255
   @max_locator_bytes 1_024
+  @max_size 18_446_744_073_709_551_615
   @lookup_digest String.duplicate("0", 64)
-  @unsafe_locator_codepoints ~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u
+  @unsafe_reference_codepoints ~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u
 
   @typedoc """
   ## Concept
@@ -62,12 +64,15 @@ defmodule Loopex.ArtifactStore do
 
   ## Technical depth
 
-  Bounded plain data. `locator` is opaque to core, which never parses, joins, or
-  reconstructs it: how an adapter addresses its own storage is the adapter's
-  business, and a core that took it apart would be coupled to one adapter's
-  layout. Opaque does not mean unbounded or safe to print without validation:
-  locators are valid UTF-8 of at most 1,024 bytes and carry no control, format,
-  line-separator, or paragraph-separator codepoint.
+  Bounded plain data. Digests are exactly one lowercase hexadecimal SHA-256,
+  media types are non-empty safe UTF-8 of at most 255 bytes, sizes fit in one
+  unsigned 64-bit value, and the role is a closed enumeration. `locator` is
+  opaque to core, which never parses, joins, or reconstructs it: how an adapter
+  addresses its own storage is the adapter's business, and a core that took it
+  apart would be coupled to one adapter's layout. Opaque does not mean unbounded
+  or safe to print without validation: locators are valid UTF-8 of at most 1,024
+  bytes and carry no control, format, line-separator, or paragraph-separator
+  codepoint.
   """
   @type artifact_reference :: %{
           required(:digest) => binary(),
@@ -116,9 +121,11 @@ defmodule Loopex.ArtifactStore do
   def valid_reference?(reference) when is_map(reference) and not is_struct(reference) do
     Enum.sort(Map.keys(reference)) == [:digest, :locator, :media_type, :role, :size] and
       is_binary(reference.digest) and
+      byte_size(reference.digest) == 64 and
+      String.valid?(reference.digest) and
       String.match?(reference.digest, ~r/^[0-9a-f]{64}$/) and
-      is_binary(reference.media_type) and reference.media_type != "" and
-      is_integer(reference.size) and reference.size >= 0 and
+      valid_media_type?(reference.media_type) and
+      is_integer(reference.size) and reference.size in 0..@max_size and
       reference.role in @roles and
       valid_locator?(reference.locator)
   end
@@ -174,9 +181,16 @@ defmodule Loopex.ArtifactStore do
 
   def retrieve(_store, _locator), do: {:error, :invalid_artifact_reference}
 
+  defp valid_media_type?(media_type) when is_binary(media_type) do
+    byte_size(media_type) in 1..@max_media_type_bytes and String.valid?(media_type) and
+      not Regex.match?(@unsafe_reference_codepoints, media_type)
+  end
+
+  defp valid_media_type?(_media_type), do: false
+
   defp valid_locator?(locator) when is_binary(locator) do
     byte_size(locator) in 1..@max_locator_bytes and String.valid?(locator) and
-      not Regex.match?(@unsafe_locator_codepoints, locator)
+      not Regex.match?(@unsafe_reference_codepoints, locator)
   end
 
   defp valid_locator?(_locator), do: false

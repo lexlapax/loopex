@@ -5,6 +5,7 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
 
   alias Loopex.ArtifactStore
   alias Loopex.Store.Local.Artifacts
+  alias LoopexProtocol.Canonical
 
   # Concept: one suite every artifact store satisfies.
   #
@@ -42,9 +43,12 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
           locator: locator
         }
 
-        :ok = Agent.update(pid, &Map.put(&1, locator, {reference, bytes}))
-
-        {:ok, reference}
+        if ArtifactStore.valid_reference?(reference) do
+          :ok = Agent.update(pid, &Map.put(&1, locator, {reference, bytes}))
+          {:ok, reference}
+        else
+          {:error, :invalid_artifact_metadata}
+        end
       else
         {:error, {:unknown_artifact_role, role}}
       end
@@ -167,6 +171,41 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     refute ArtifactStore.valid_reference?(%{reference | role: "invented"})
   end
 
+  test "artifact reference fields are bounded and invalid metadata is refused before success" do
+    valid = %{
+      digest: String.duplicate("a", 64),
+      media_type: "text/plain",
+      size: 0,
+      role: "tool_output",
+      locator: "opaque"
+    }
+
+    assert ArtifactStore.valid_reference?(valid)
+
+    assert ArtifactStore.valid_reference?(%{
+             valid
+             | media_type: String.duplicate("m", 255),
+               size: 18_446_744_073_709_551_615,
+               locator: String.duplicate("l", 1_024)
+           })
+
+    refute ArtifactStore.valid_reference?(%{valid | digest: String.duplicate("a", 65)})
+    refute ArtifactStore.valid_reference?(%{valid | digest: :binary.copy(<<255>>, 64)})
+    refute ArtifactStore.valid_reference?(%{valid | media_type: String.duplicate("m", 256)})
+    refute ArtifactStore.valid_reference?(%{valid | media_type: "text/plain\nunsafe"})
+    refute ArtifactStore.valid_reference?(%{valid | media_type: <<255>>})
+    refute ArtifactStore.valid_reference?(%{valid | size: -1})
+    refute ArtifactStore.valid_reference?(%{valid | size: 18_446_744_073_709_551_616})
+    refute ArtifactStore.valid_reference?(%{valid | locator: String.duplicate("l", 1_025)})
+
+    invalid_media_types = ["", String.duplicate("m", 256), "text/plain\nunsafe", :text]
+
+    for {module, handle} <- implementations(), media_type <- invalid_media_types do
+      assert {:error, :invalid_artifact_metadata} =
+               module.put(handle, "metadata boundary", %{"media_type" => media_type})
+    end
+  end
+
   test "the model facing result stays under its bound and names what was truncated" do
     for {module, handle} <- implementations() do
       full = String.duplicate("y", 50_000)
@@ -217,6 +256,58 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
         assert {:error, :artifact_integrity_failed} = module.fetch(handle, reference)
       end
     end
+  end
+
+  test "fetch refuses a reference whose claimed exact size differs from the stored bytes" do
+    for {module, handle} <- implementations() do
+      {:ok, reference} = module.put(handle, "payload", %{})
+
+      assert {:error, :artifact_integrity_failed} =
+               module.fetch(handle, %{reference | size: reference.size + 1})
+    end
+  end
+
+  test "opening an absent artifact root durably publishes every new directory component" do
+    state_root =
+      Path.join(
+        System.fetch_env!("LOOPEX_HOME"),
+        "absent-state-root-#{System.unique_integer([:positive])}"
+      )
+
+    artifact_root = Path.join(state_root, "artifacts")
+    refute File.exists?(state_root)
+
+    events = trace_publication(fn -> Artifacts.open(artifact_root) end)
+
+    # One sync reconfirms the nearest existing boundary and one follows each of
+    # the two new directory entries. That first sync makes a retry safe after a
+    # prior creator made the directory visible but failed its parent sync.
+    assert events == [:sync, :sync, :sync]
+    assert File.dir?(state_root)
+    assert File.dir?(artifact_root)
+  end
+
+  test "a temporary name collision is retried without deleting another writer's file" do
+    root =
+      Path.join(
+        System.fetch_env!("LOOPEX_HOME"),
+        "artifact-temp-collision-#{System.unique_integer([:positive])}"
+      )
+
+    {:ok, handle} = Artifacts.open(root)
+    bytes = "collision-safe payload"
+    digest = Canonical.digest_bytes(bytes)
+    object_directory = Path.join(root, binary_part(digest, 0, 2))
+    object_path = Path.join(object_directory, digest)
+    competing_temporary = object_path <> ".tmp-" <> List.to_string(:os.getpid())
+
+    File.mkdir_p!(object_directory)
+    File.write!(competing_temporary, "another writer's temporary bytes")
+
+    assert {:ok, reference} = Artifacts.put(handle, bytes, %{})
+    assert reference.digest == digest
+    assert {:ok, ^bytes} = Artifacts.fetch(handle, reference)
+    assert File.read!(competing_temporary) == "another writer's temporary bytes"
   end
 
   test "artifact publication syncs file bytes before its durable directory entry" do

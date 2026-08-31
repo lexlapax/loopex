@@ -37,6 +37,7 @@ defmodule Loopex.Store.Local.Artifacts do
 
   @max_bytes 64 * 1024 * 1024
   @default_media_type "application/octet-stream"
+  @temporary_attempts 8
 
   @typedoc """
   ## Concept
@@ -64,7 +65,7 @@ defmodule Loopex.Store.Local.Artifacts do
   """
   @spec open(binary()) :: {:ok, handle()} | {:error, term()}
   def open(root) when is_binary(root) do
-    case File.mkdir_p(root) do
+    case ensure_directory_durable(root) do
       :ok -> {:ok, %{root: root}}
       {:error, reason} -> {:error, {:artifact_root_unavailable, reason}}
     end
@@ -88,6 +89,15 @@ defmodule Loopex.Store.Local.Artifacts do
           {:ok, ArtifactStore.artifact_reference()} | {:error, term()}
   def put(%{root: root}, bytes, metadata) when is_binary(bytes) and is_map(metadata) do
     role = Map.get(metadata, "role", "tool_output")
+    media_type = Map.get(metadata, "media_type", @default_media_type)
+
+    metadata_probe = %{
+      digest: String.duplicate("0", 64),
+      media_type: media_type,
+      size: 0,
+      role: role,
+      locator: "metadata-probe"
+    }
 
     cond do
       byte_size(bytes) > @max_bytes ->
@@ -98,20 +108,28 @@ defmodule Loopex.Store.Local.Artifacts do
       role not in ArtifactStore.roles() ->
         {:error, {:unknown_artifact_role, role}}
 
+      not ArtifactStore.valid_reference?(metadata_probe) ->
+        {:error, :invalid_artifact_metadata}
+
       true ->
         digest = Canonical.digest_bytes(bytes)
         path = object_path(root, digest)
 
-        with :ok <- ensure_object_directory(root, Path.dirname(path)),
+        reference = %{
+          digest: digest,
+          media_type: media_type,
+          size: byte_size(bytes),
+          role: role,
+          locator: digest
+        }
+
+        with true <- ArtifactStore.valid_reference?(reference),
+             :ok <- ensure_object_directory(root, Path.dirname(path)),
              :ok <- write_once(path, bytes, digest) do
-          {:ok,
-           %{
-             digest: digest,
-             media_type: Map.get(metadata, "media_type", @default_media_type),
-             size: byte_size(bytes),
-             role: role,
-             locator: digest
-           }}
+          {:ok, reference}
+        else
+          false -> {:error, :invalid_artifact_metadata}
+          {:error, reason} -> {:error, reason}
         end
     end
   end
@@ -125,7 +143,7 @@ defmodule Loopex.Store.Local.Artifacts do
       path = object_path(root, reference.locator)
 
       case File.read(path) do
-        {:ok, bytes} -> verify(bytes, reference.digest)
+        {:ok, bytes} -> verify(bytes, reference.digest, reference.size)
         {:error, :enoent} -> {:error, :unknown_artifact}
         {:error, reason} -> {:error, {:artifact_unreadable, reason}}
       end
@@ -206,14 +224,56 @@ defmodule Loopex.Store.Local.Artifacts do
     end
   end
 
-  defp rename_into_place(path, bytes) do
-    temporary = path <> ".tmp-" <> Integer.to_string(System.unique_integer([:positive]))
+  defp rename_into_place(path, bytes), do: rename_into_place(path, bytes, 0)
 
-    with :ok <- write_synced(temporary, bytes),
-         :ok <- File.rename(temporary, path),
-         :ok <- sync_directory(Path.dirname(path)) do
-      :ok
-    else
+  defp rename_into_place(_path, _bytes, @temporary_attempts) do
+    {:error, {:artifact_unwritable, :temporary_name_collision}}
+  end
+
+  defp rename_into_place(path, bytes, attempt) do
+    temporary = temporary_path(path, attempt)
+
+    case write_synced(temporary, bytes) do
+      :ok ->
+        publish_temporary(temporary, path, bytes)
+
+      {:error, :eexist} ->
+        # The path belongs to another writer or to a prior crashed process. It
+        # must not be removed by this writer; use another exclusive name.
+        rename_into_place(path, bytes, attempt + 1)
+
+      {:error, reason} ->
+        {:error, {:artifact_unwritable, reason}}
+    end
+  end
+
+  defp temporary_path(path, 0), do: path <> ".tmp-" <> List.to_string(:os.getpid())
+
+  defp temporary_path(path, attempt) do
+    instant = System.system_time(:nanosecond)
+    unique = System.unique_integer([:monotonic, :positive])
+
+    path <>
+      ".tmp-" <> List.to_string(:os.getpid()) <> "-#{instant}-#{unique}-#{attempt}"
+  end
+
+  defp publish_temporary(temporary, path, bytes) do
+    case File.rename(temporary, path) do
+      :ok ->
+        sync_directory(Path.dirname(path))
+
+      {:error, :eexist} ->
+        # Windows does not replace an existing destination. A concurrent writer
+        # of the same content may have won after this writer checked; verify the
+        # winner and retain the ordinary idempotent result.
+        _ = File.rm(temporary)
+
+        case File.read(path) do
+          {:ok, ^bytes} -> sync_existing(path)
+          {:ok, _different} -> {:error, {:artifact_unwritable, :integrity_conflict}}
+          {:error, reason} -> {:error, {:artifact_unwritable, reason}}
+        end
+
       {:error, reason} ->
         _ = File.rm(temporary)
         {:error, {:artifact_unwritable, reason}}
@@ -288,10 +348,72 @@ defmodule Loopex.Store.Local.Artifacts do
     end
   end
 
+  # Concept: creating the artifact root is itself a durable publication.
+  #
+  # Technical depth: `mkdir_p/1` alone can leave a newly visible directory name
+  # outside the filesystem's durable namespace after a crash. Create each absent
+  # component and sync its parent before moving to the next one. A racing creator
+  # is accepted only after the resulting path is confirmed to be a directory.
+  defp ensure_directory_durable(path) do
+    case File.stat(path) do
+      {:ok, %File.Stat{type: :directory}} ->
+        parent = Path.dirname(path)
+
+        # A previous caller may have created this component and then received a
+        # parent-sync failure. Reconfirm the nearest existing boundary so a
+        # retry cannot turn that earlier unproved publication into success.
+        if parent == path, do: :ok, else: sync_directory(parent)
+
+      {:ok, _other} ->
+        {:error, :enotdir}
+
+      {:error, :enoent} ->
+        parent = Path.dirname(path)
+
+        if parent == path do
+          {:error, :enoent}
+        else
+          with :ok <- ensure_directory_durable(parent),
+               :ok <- create_and_sync_directory(path, parent) do
+            :ok
+          end
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp create_and_sync_directory(path, parent) do
+    case File.mkdir(path) do
+      :ok ->
+        sync_directory(parent)
+
+      {:error, :eexist} ->
+        case File.stat(path) do
+          {:ok, %File.Stat{type: :directory}} -> sync_directory(parent)
+          {:ok, _other} -> {:error, :enotdir}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp verify(bytes, digest) do
     if Canonical.digest_bytes(bytes) == digest,
       do: {:ok, bytes},
       else: {:error, :artifact_integrity_failed}
+  end
+
+  defp verify(bytes, digest, size) do
+    with {:ok, ^bytes} <- verify(bytes, digest),
+         true <- byte_size(bytes) == size do
+      {:ok, bytes}
+    else
+      _mismatch -> {:error, :artifact_integrity_failed}
+    end
   end
 
   # Concept: a locator is opaque to the port and meaningful only to the store
