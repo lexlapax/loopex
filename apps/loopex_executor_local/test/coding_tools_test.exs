@@ -1146,6 +1146,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     assert source =~ "defp read_open_file(file, limit) when is_integer(limit) and limit > 0"
     assert source =~ "read_open_file(file, limit + 1, limit)"
+    assert source =~ "case IO.binread(file, amount) do"
   end
 
   test "a tool child process group is owned and terminated with its job and no group member survives" do
