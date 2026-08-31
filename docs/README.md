@@ -55,6 +55,9 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0012 — executor cancellation capability | [Decision](adr/0012-executor-cancellation-capability.md#concept) | [Technical depth](adr/0012-executor-cancellation-capability-technical.md#technical-depth) |
 | 0013 — run-deadline commitment at first request staging | [Decision](adr/0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](adr/0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
 | 0014 — stream closure at owner loss | [Decision](adr/0014-stream-closure-at-owner-loss.md#concept) | [Technical depth](adr/0014-stream-closure-at-owner-loss-technical.md#technical-depth) |
+| 0015 — artifact object and use identity | [Decision](adr/0015-artifact-object-and-use-identity.md#concept) | [Technical depth](adr/0015-artifact-object-and-use-identity-technical.md#technical-depth) |
+| 0016 — configured cancellation observation | [Decision](adr/0016-configured-cancellation-observation.md#concept) | [Technical depth](adr/0016-configured-cancellation-observation-technical.md#technical-depth) |
+| 0017 — durable context and record admission budgets | [Decision](adr/0017-durable-context-admission-budget.md#concept) | [Technical depth](adr/0017-durable-context-admission-budget-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
