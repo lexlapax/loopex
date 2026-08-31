@@ -297,7 +297,7 @@ identifier:
 
 | Provider and model | Identity endpoint | Tool call | Response identifier form |
 | --- | --- | --- | --- |
-| `anthropic:claude-haiku-4-5` | `https://api.anthropic.com` | correct | `msg_…` |
+| `anthropic:claude-haiku-4-5` | `https://api.anthropic.com` | correct | `req_…` |
 | `openai:gpt-4o-mini` | `https://api.openai.com/v1` | correct | `resp_…` |
 | `openrouter:qwen/qwen3-32b` | `https://openrouter.ai/api/v1` | correct | `gen-…` |
 | `ollama:qwen3.5:27b` | `http://localhost:11434/v1` | correct | `chatcmpl-…` |
@@ -306,6 +306,10 @@ identifier:
 `ollama:qwen2.5:7b` answered the same prompt without calling the tool. It
 declares tool capability and the call reached it correctly, so this is a
 statement about that model rather than about the boundary.
+
+The Anthropic value is the per-call HTTP request identifier surfaced by the
+streaming adapter and visible in the provider account, not the assembled
+message identifier a non-streaming response may carry.
 
 **A local provider can never be this milestone's real-call evidence.** An Ollama
 response identifier is a per-process counter, not an identifier that exists in a

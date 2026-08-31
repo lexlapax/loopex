@@ -67,7 +67,7 @@ Core defines five boundary behaviours. M1's three — `Loopex.Store`,
 `Loopex.Model`, and `Loopex.Executor` — are joined by `Loopex.Policy`, the host
 authority port, and `Loopex.ArtifactStore`, the spill port. `Loopex.Executor`
 also gains one required `cancel/2` callback, recorded in
-[M2 recorded limitations](../evidence/M2-recorded-limitations.md). Its exact
+[ADR 0012](../adr/0012-executor-cancellation-capability.md#concept). Its exact
 answers are `{:ok, :cleaned}`, `{:ok, :unconfirmed}`, and `{:error, term()}`;
 the runtime treats every answer except confirmed cleanup as unconfirmed.
 Runtime, composition, and client code introduce no sixth behaviour, broker,
