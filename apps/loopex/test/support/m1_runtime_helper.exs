@@ -35,6 +35,17 @@ defmodule Loopex.M1RuntimeTestStore do
   def delay_after_record(pid, kind, observer) when is_binary(kind) and is_pid(observer),
     do: GenServer.call(pid, {:delay_after_record, kind, observer})
 
+  # Concept: hold one named transaction before the Store decides it, while the
+  # Store remains available to a successor.
+  #
+  # Technical depth: a stale-owner refusal is meaningful only when ownership
+  # moves before the old transaction linearizes. Keeping the original caller
+  # pending outside the GenServer lets an `advance_owner` transaction establish
+  # that order without fabricating a refusal or blocking the serialized Store.
+  def hold_next_record_before_linearization(pid, kind, observer)
+      when is_binary(kind) and is_pid(observer),
+      do: GenServer.call(pid, {:hold_next_record_before_linearization, kind, observer})
+
   def block_next_event_read(pid, observer) when is_pid(observer),
     do: GenServer.call(pid, {:block_next_event_read, observer})
 
@@ -92,6 +103,8 @@ defmodule Loopex.M1RuntimeTestStore do
        recovery_setup: MapSet.new(),
        delayed: %{},
        delayed_records: %{},
+       held_before_records: %{},
+       pending_transactions: %{},
        event_read_block: nil,
        fail_reads: false,
        refuse_records: MapSet.new()
@@ -122,6 +135,11 @@ defmodule Loopex.M1RuntimeTestStore do
     {:reply, :ok, %{state | delayed_records: Map.put(state.delayed_records, kind, observer)}}
   end
 
+  def handle_call({:hold_next_record_before_linearization, kind, observer}, _from, state) do
+    {:reply, :ok,
+     %{state | held_before_records: Map.put(state.held_before_records, kind, observer)}}
+  end
+
   def handle_call({:block_next_event_read, observer}, _from, state) do
     {:reply, :ok, %{state | event_read_block: observer}}
   end
@@ -138,18 +156,23 @@ defmodule Loopex.M1RuntimeTestStore do
   def handle_call(:injected, _from, state), do: {:reply, state.injected, state}
 
   def handle_call(:inspect_state, _from, state) do
-    visible = Map.drop(state, [:faults, :delayed, :delayed_records, :event_read_block])
+    visible =
+      Map.drop(state, [
+        :faults,
+        :delayed,
+        :delayed_records,
+        :held_before_records,
+        :pending_transactions,
+        :event_read_block
+      ])
+
     {:reply, visible, state}
   end
 
   def handle_call({:transact, transaction}, from, state) do
-    case refused_kind(state, transaction) do
-      nil ->
-        admit(state, from, transaction)
-
-      kind ->
-        {:reply, {:not_committed, :refused_by_test_store},
-         %{state | refuse_records: MapSet.delete(state.refuse_records, kind)}}
+    case held_before_record(state, transaction) do
+      {kind, observer} -> hold_before_linearization(state, from, transaction, kind, observer)
+      nil -> transact(state, from, transaction)
     end
   end
 
@@ -238,6 +261,71 @@ defmodule Loopex.M1RuntimeTestStore do
       nil ->
         {:reply, result, state}
     end
+  end
+
+  @impl GenServer
+  def handle_info({:release_before_linearization, token}, state) do
+    case Map.pop(state.pending_transactions, token) do
+      {nil, _pending} ->
+        {:noreply, state}
+
+      {{from, transaction}, pending} ->
+        state = %{state | pending_transactions: pending}
+
+        case transact(state, from, transaction) do
+          {:reply, reply, next} ->
+            GenServer.reply(from, reply)
+            {:noreply, next}
+
+          {:noreply, next} ->
+            {:noreply, next}
+        end
+    end
+  end
+
+  defp transact(state, from, transaction) do
+    case refused_kind(state, transaction) do
+      nil ->
+        admit(state, from, transaction)
+
+      kind ->
+        {:reply, {:not_committed, :refused_by_test_store},
+         %{state | refuse_records: MapSet.delete(state.refuse_records, kind)}}
+    end
+  end
+
+  defp held_before_record(%{held_before_records: held}, transaction) do
+    transaction
+    |> Map.get(:records, [])
+    |> Enum.find_value(fn record ->
+      kind = record_kind(record)
+
+      case Map.fetch(held, kind) do
+        {:ok, observer} -> {kind, observer}
+        :error -> nil
+      end
+    end)
+  end
+
+  defp hold_before_linearization(state, from, transaction, kind, observer) do
+    token = make_ref()
+    server = self()
+
+    waiter =
+      spawn(fn ->
+        receive do
+          :release -> send(server, {:release_before_linearization, token})
+        end
+      end)
+
+    send(observer, {:record_held_before_linearization, waiter, self(), kind, transaction})
+
+    {:noreply,
+     %{
+       state
+       | held_before_records: Map.delete(state.held_before_records, kind),
+         pending_transactions: Map.put(state.pending_transactions, token, {from, transaction})
+     }}
   end
 
   defp refused_kind(%{refuse_records: refused} = _state, transaction) do

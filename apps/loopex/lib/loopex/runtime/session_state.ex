@@ -1332,11 +1332,37 @@ defmodule Loopex.Runtime.SessionState do
   defp command_effect(_state, _record, _command_type, _admission, _command_id),
     do: {:error, :invalid_command_transition}
 
-  defp internal_proposal(state, tx_id, record) do
+  # Concept: an internal transition keeps one identity while its exact Store
+  # presentation is unresolved, and receives a fresh one after ownership or the
+  # durable head moves.
+  #
+  # Technical depth: ADR 0006 retains non-commits as terminal transaction
+  # resolutions. A logical ID derived only from the run or operation can
+  # therefore be consumed by a stale owner and poison the successor's different
+  # immutable binding with `tx_id_conflict`. Binding the Store-facing ID to the
+  # expected owner pair and journal version preserves exact `commit_unknown`
+  # re-presentation while making every re-derivation from a new authoritative
+  # head a new transaction. All internal transition constructors pass through
+  # this boundary; command IDs retain their separate public idempotency contract.
+  defp internal_proposal(state, logical_tx_id, record) do
     with {:ok, next, events} <- apply_internal_record(state, record) do
+      tx_id = internal_transaction_id(state, logical_tx_id)
       next = %{next | expected_events: state.expected_events ++ events}
       {:ok, proposal(tx_id, record, events, next, {:accepted, tx_id})}
     end
+  end
+
+  defp internal_transaction_id(state, logical_tx_id) do
+    stable_id(
+      "internal",
+      state.session_id,
+      {
+        logical_tx_id,
+        state.owner_epoch,
+        state.owner_incarnation_id,
+        state.journal_version
+      }
+    )
   end
 
   defp apply_internal_record(state, %{

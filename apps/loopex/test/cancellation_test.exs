@@ -204,6 +204,7 @@ defmodule Loopex.CancellationTest do
   alias Loopex.AgentLoopTestModel
   alias Loopex.CancellationTestExecutor
   alias Loopex.M1RuntimeTestStore
+  alias Loopex.Runtime.SessionState
 
   defp call(id), do: %{id: id, name: "write", arguments: %{"path" => id}}
 
@@ -1422,6 +1423,192 @@ defmodule Loopex.CancellationTest do
              "cannot prove ran, half ran, or never started"
 
     assert is_binary(run_finished["reconciliation_ref"])
+  end
+
+  test "internal transaction identity is stable for exact re-presentation and fresh for a new owner or durable head" do
+    {:ok, request} =
+      Loopex.Model.request(
+        "scripted:v1",
+        [%{"role" => "user", "content" => "identity"}],
+        sampling: %{"max_tokens" => 32},
+        deadline: System.system_time(:millisecond) + 60_000
+      )
+
+    run_id = "run-internal-identity"
+
+    state = %SessionState{
+      session_id: "s-internal-identity",
+      owner_epoch: 4,
+      owner_incarnation_id: "owner-four",
+      journal_version: 19,
+      event_sequence: 7,
+      active_run_id: run_id,
+      pending_work: %{
+        run_id => %{
+          stage: "turn_settled",
+          run_id: run_id,
+          turn_number: 1,
+          request: request,
+          pending_calls: []
+        }
+      },
+      conversation: %{run_id => []}
+    }
+
+    terminal = fn candidate ->
+      SessionState.propose_run_terminal(candidate, run_id, "completed", %{})
+    end
+
+    assert_internal_transaction_identity(state, terminal)
+
+    abandoned_state =
+      put_in(state.pending_work[run_id].stage, "model_dispatched")
+
+    abandoned = fn candidate ->
+      SessionState.propose_model_attempt_abandoned(candidate, run_id)
+    end
+
+    assert_internal_transaction_identity(abandoned_state, abandoned)
+  end
+
+  test "a retained stale-owner run terminal cannot poison its successor's transaction identity" do
+    fixture = start(script: [%{text: "done", calls: []}])
+
+    {:ok, session_id} =
+      Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "create-stale-terminal")
+
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    :ok =
+      M1RuntimeTestStore.hold_next_record_before_linearization(
+        fixture.store,
+        "run_terminal_committed",
+        self()
+      )
+
+    assert {:accepted, "prompt-stale-terminal"} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: "prompt-stale-terminal",
+               content: "finish"
+             })
+
+    assert_receive {:record_held_before_linearization, terminal_waiter, _store,
+                    "run_terminal_committed", terminal_transaction},
+                   5_000
+
+    assert terminal_transaction.type == :session_commit
+    predecessor = coordinator_of(fixture.runtime)
+    predecessor_reference = Process.monitor(predecessor)
+
+    :ok =
+      M1RuntimeTestStore.delay_after_commit(
+        fixture.store,
+        :session_journal_advance_owner,
+        self()
+      )
+
+    resume =
+      Task.async(fn ->
+        Loopex.resume_session(
+          fixture.runtime,
+          session_id,
+          command_id: "resume-after-stale-terminal"
+        )
+      end)
+
+    assert_receive {:transaction_linearized, owner_waiter, _store, :session_journal_advance_owner,
+                    {:committed, _owner_tx, _receipt}},
+                   5_000
+
+    # Ownership is durable while the successor is still held outside recovery.
+    # The old run terminal therefore reaches the Store as a genuinely stale
+    # presentation and leaves ADR 0006's retained terminal non-commit behind.
+    M1RuntimeTestStore.release(terminal_waiter)
+
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor,
+                    {:run_terminal_failed, :stale_owner_epoch}},
+                   5_000
+
+    old_tx_id = terminal_transaction.tx_id
+
+    assert %{outcome: {:not_committed, :stale_owner_epoch}} =
+             M1RuntimeTestStore.inspect_state(fixture.store).resolutions[
+               {session_id, "session", old_tx_id}
+             ]
+
+    M1RuntimeTestStore.release(owner_waiter)
+    assert {:ok, ^session_id} = Task.await(resume, 5_000)
+
+    assert settled?(fixture, session_id),
+           "the successor could not commit the run terminal after the retained stale-owner refusal"
+
+    terminals =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.filter(&(&1.payload[:kind] == "run_terminal_committed"))
+
+    assert length(terminals) == 1
+
+    terminal_resolutions =
+      M1RuntimeTestStore.inspect_state(fixture.store).resolutions
+      |> Enum.filter(fn
+        {{^session_id, "session", _tx_id}, %{binding: %{records: records}}} ->
+          Enum.any?(
+            records,
+            &((Map.get(&1, :kind) || Map.get(&1, "kind")) == "run_terminal_committed")
+          )
+
+        _other ->
+          false
+      end)
+
+    assert length(terminal_resolutions) == 2
+
+    assert Enum.count(terminal_resolutions, fn
+             {_key, %{outcome: {:not_committed, :stale_owner_epoch}}} -> true
+             _other -> false
+           end) == 1
+
+    assert Enum.count(terminal_resolutions, fn
+             {{^session_id, "session", tx_id}, %{outcome: {:committed, outcome_tx, _receipt}}} ->
+               tx_id == outcome_tx
+
+             _other ->
+               false
+           end) == 1
+
+    assert Enum.any?(terminal_resolutions, fn
+             {{^session_id, "session", tx_id}, %{outcome: {:committed, outcome_tx, _receipt}}} ->
+               tx_id == outcome_tx and tx_id != old_tx_id
+
+             _other ->
+               false
+           end),
+           "the successor reused the transaction ID whose stale-owner non-commit is terminal"
+  end
+
+  defp assert_internal_transaction_identity(state, derive) do
+    assert {:ok, first} = derive.(state)
+    assert {:ok, exact_replay} = derive.(state)
+
+    assert exact_replay.tx_id == first.tx_id,
+           "exact commit-unknown re-presentation changed transaction identity"
+
+    for changed <- [
+          %{state | owner_epoch: state.owner_epoch + 1},
+          %{state | owner_incarnation_id: state.owner_incarnation_id <> "-successor"},
+          %{state | journal_version: state.journal_version + 1},
+          %{
+            state
+            | owner_epoch: state.owner_epoch + 1,
+              owner_incarnation_id: state.owner_incarnation_id <> "-successor",
+              journal_version: state.journal_version + 1
+          }
+        ] do
+      assert {:ok, fresh} = derive.(changed)
+      refute fresh.tx_id == first.tx_id
+    end
   end
 
   defp coordinator_of(runtime) do
