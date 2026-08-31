@@ -315,6 +315,7 @@ defmodule LoopexCli.CodingTaskTest do
       end)
 
     assert_received {:out, answer}
+    facts = real_run_facts(state_root)
 
     # Concept: an attended demonstration says what it observed.
     #
@@ -324,7 +325,8 @@ defmodule LoopexCli.CodingTaskTest do
     # beside the attestation identifiers, where the runner passes it through.
     IO.puts(
       :stderr,
-      "loopex demonstration observed: tools=" <>
+      "loopex demonstration observed: turns=#{facts.turns} " <>
+        "tool_calls=#{facts.tool_calls} effects=#{facts.effects} tools=" <>
         (~r/loopex\.[a-z]+/
          |> Regex.scan(transcript)
          |> List.flatten()
@@ -370,7 +372,27 @@ defmodule LoopexCli.CodingTaskTest do
     assert done_position > denial_position,
            "the run ended before the refusal rather than continuing past it"
 
-    replies = real_replies(state_root)
+    replies = facts.replies
+
+    # Count the attended run from its copied durable Store, outside the runtime
+    # that produced it. Every model result is one provider turn, every tool call
+    # is read from that committed reply, and every dispatched effect is one
+    # committed effect intent. The host-policy refusal owes a terminal tool fact
+    # but no effect intent or executor receipt.
+    assert facts.turns >= 3,
+           "the task completed #{facts.turns} turns; at least 3 are required"
+
+    assert facts.tool_results == facts.tool_calls,
+           "#{facts.tool_calls} calls produced #{facts.tool_results} terminal tool facts"
+
+    assert facts.denied == 1,
+           "the attended run committed #{facts.denied} denied tool results rather than one"
+
+    assert facts.effects == facts.tool_calls - facts.denied,
+           "#{facts.tool_calls} calls with #{facts.denied} denial produced #{facts.effects} effects"
+
+    assert facts.executor_receipts == facts.effects,
+           "#{facts.effects} dispatched effects produced #{facts.executor_receipts} receipts"
 
     # Concept: the answer reached the operator as the provider produced it.
     #
@@ -386,8 +408,7 @@ defmodule LoopexCli.CodingTaskTest do
     assert Enum.all?(replies, &(&1["delta_count"] > 0)),
            "a committed reply streamed with no deltas"
 
-    assert length(replies) >= 3,
-           "the task completed #{length(replies)} turns; at least 3 are required"
+    assert length(replies) == facts.turns
 
     assert {:ok, record} = Evidence.attest("demonstration_db", @selector, replies)
     announce(record)
@@ -482,18 +503,35 @@ defmodule LoopexCli.CodingTaskTest do
   # its attachment, so the replies come back through the Store port from the
   # state root the command wrote. A reply reconstructed here would be this
   # process's account of a call rather than the run's.
-  defp real_replies(state_root) do
+  defp real_run_facts(state_root) do
     {:ok, [%{session_id: session_id} | _rest]} = sessions(state_root)
     {store, adapter} = Demonstration.open_store(state_root)
 
+    records = Demonstration.records(store, session_id)
+
     replies =
-      store
-      |> Demonstration.records(session_id)
+      records
       |> Enum.filter(&(&1.payload.kind == "model_result_committed"))
       |> Enum.map(& &1.payload["reply"])
 
+    tool_calls =
+      replies
+      |> Enum.map(fn reply -> reply |> Map.get("tool_calls", []) |> length() end)
+      |> Enum.sum()
+
+    tool_results = Enum.filter(records, &(&1.payload.kind == "tool_result_committed"))
+
     GenServer.stop(adapter, :normal, 1_000)
-    replies
+
+    %{
+      replies: replies,
+      turns: length(replies),
+      tool_calls: tool_calls,
+      tool_results: length(tool_results),
+      denied: Enum.count(tool_results, &(&1.payload["outcome"] == "denied")),
+      effects: Enum.count(records, &(&1.payload.kind == "effect_intent_committed")),
+      executor_receipts: Enum.count(records, &(&1.payload.kind == "executor_receipt_committed"))
+    }
   end
 
   defp sessions(state_root) do
