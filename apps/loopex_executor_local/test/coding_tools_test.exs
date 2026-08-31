@@ -1086,7 +1086,26 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     definition = Enum.find(CodingTools.definitions(), &(&1["tool_id"] == "loopex.read"))
     artifact_limit = get_in(definition, ["budgets", "artifact_bytes"])
+    exact = Path.join(root, "exactly-the-artifact-bound.txt")
     large = Path.join(root, "larger-than-the-artifact-bound.txt")
+
+    {:ok, file} = :file.open(exact, [:write, :raw, :binary])
+    {:ok, _position} = :file.position(file, artifact_limit - 1)
+    :ok = :file.write(file, "x")
+    :ok = :file.close(file)
+
+    assert {:ok, %{outcome: :completed, artifacts: [reference]}} =
+             run(root, "loopex.read", %{"path" => Path.basename(exact)}, %{
+               executor: executor,
+               lease_id: lease_id
+             })
+
+    assert reference.size == artifact_limit
+
+    stored_at_limit = Loopex.Executor.Local.CodingToolsTest.RecordingStore.stored(store)
+    assert map_size(stored_at_limit) == 1
+    assert [retained] = Map.values(stored_at_limit)
+    assert byte_size(retained) == artifact_limit
 
     {:ok, file} = :file.open(large, [:write, :raw, :binary])
     observed_size = artifact_limit + 4_096
@@ -1104,7 +1123,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert receipt.output =~ Integer.to_string(artifact_limit)
     assert receipt.output =~ Integer.to_string(observed_size)
     assert receipt.artifacts == []
-    assert Loopex.Executor.Local.CodingToolsTest.RecordingStore.stored(store) == %{}
+
+    assert Loopex.Executor.Local.CodingToolsTest.RecordingStore.stored(store) == stored_at_limit,
+           "the refused oversized file changed the retained exact-bound artifact"
 
     # Loading is not safely measurable from outside File without making a huge
     # allocation the test's failure mode, so this half is explicitly structural.
