@@ -818,6 +818,30 @@ defmodule Loopex.AgentLoopTest do
     end
   end
 
+  defp await_worker_result_drain(coordinator, abort, attempts \\ 100_000) do
+    info = Process.info(coordinator, [:status, :current_function])
+
+    cond do
+      is_list(info) and Keyword.get(info, :status) == :waiting and
+          Keyword.get(info, :current_function) ==
+            {Loopex.Runtime.SessionCoordinator, :take_worker_result, 1} ->
+        :waiting
+
+      attempts == 0 ->
+        {:timeout, info}
+
+      true ->
+        case Task.yield(abort, 0) do
+          nil ->
+            :erlang.yield()
+            await_worker_result_drain(coordinator, abort, attempts - 1)
+
+          result ->
+            {:returned, result}
+        end
+    end
+  end
+
   defp admit_abort_before_queued_model_result(fixture, attachment, model, command_id) do
     coordinator = coordinator_of(fixture.runtime)
 
@@ -1968,6 +1992,130 @@ defmodule Loopex.AgentLoopTest do
 
     assert {:error, :no_active_run} =
              Loopex.command(other_attachment, %{type: :abort, command_id: "abort-too-late"})
+  end
+
+  test "cleanup waits for a model result sent after the supervisor answers" do
+    # Concept: a supervisor confirming that it stopped a worker does not prove
+    # the worker's result has already reached this owner.
+    #
+    # Technical depth: the real worker supervisor is suspended with its
+    # terminate call stably queued, then that call receives its reply while the
+    # held provider task still has not answered. The coordinator must remain in
+    # its result drain until the task's own result or ordered DOWN arrives.
+    # Restoring the old zero-timeout poll makes the public abort return before
+    # the provider is released and fails this case without scheduler timing.
+    parent = self()
+
+    fixture =
+      start(
+        script: [%{text: "late after supervisor", calls: [], hold: parent}],
+        diagnostics_to: parent
+      )
+
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 2_000
+
+    coordinator = coordinator_of(fixture.runtime)
+    coordinator_state = :sys.get_state(coordinator)
+    workers = coordinator_state.workers
+
+    [{_reference, {:model, run_id, ^model}}] = Map.to_list(coordinator_state.in_flight)
+
+    :ok = :sys.suspend(workers)
+
+    on_exit(fn ->
+      send(model, :release)
+
+      if Process.alive?(workers) do
+        try do
+          :sys.resume(workers)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end)
+
+    abort =
+      Task.async(fn ->
+        Loopex.command(attachment, %{
+          type: :abort,
+          command_id: "abort-after-supervisor-reply"
+        })
+      end)
+
+    assert await_process_message(workers, fn
+             {:"$gen_call", _from, {:terminate_child, ^model}} -> true
+             _other -> false
+           end),
+           "the coordinator never asked its real supervisor to stop the model worker"
+
+    {:messages, messages} = Process.info(workers, :messages)
+
+    {:"$gen_call", from, {:terminate_child, ^model}} =
+      Enum.find(messages, fn
+        {:"$gen_call", _from, {:terminate_child, ^model}} -> true
+        _other -> false
+      end)
+
+    GenServer.reply(from, :ok)
+
+    assert :waiting == await_worker_result_drain(coordinator, abort),
+           "the abort returned instead of waiting for the worker's ordered result or DOWN"
+
+    send(model, :release)
+    assert {:accepted, "abort-after-supervisor-reply"} = Task.await(abort, 5_000)
+
+    :ok = :sys.resume(workers)
+
+    events = drain(attachment)
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+
+    records = Fixture.records(fixture, session_id)
+
+    assert [%{payload: evidence}] =
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_evidence_retained"))
+
+    assert evidence["run_id"] == run_id
+    assert evidence["attempt"] == 1
+    assert evidence["termination"] == "abort"
+    assert evidence["evidence"]["reply"]["text"] == "late after supervisor"
+  end
+
+  test "late model evidence binds the provider retry attempt that produced it" do
+    parent = self()
+
+    fixture =
+      start(
+        script: [
+          %{text: "", calls: [], error: :provider_unavailable},
+          %{text: "late retry", calls: [], hold: parent}
+        ],
+        diagnostics_to: parent
+      )
+
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 2_000
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
+
+    {run_id, events} =
+      admit_abort_before_queued_model_result(
+        fixture,
+        attachment,
+        model,
+        "abort-late-retry"
+      )
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+
+    assert [%{payload: evidence}] =
+             fixture
+             |> Fixture.records(session_id)
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_evidence_retained"))
+
+    assert evidence["run_id"] == run_id
+    assert evidence["attempt"] == 2
+    assert evidence["termination"] == "abort"
+    assert evidence["evidence"]["reply"]["text"] == "late retry"
   end
 
   test "a Store refusal of late model attempt evidence makes clean cancellation unprovable" do

@@ -769,7 +769,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
           "loopex.bash",
           %{
             "command" =>
-              "printf first; while [ ! -f #{release} ]; do sleep 0.01; done; printf second"
+              "printf éfirst; while [ ! -f #{release} ]; do sleep 0.01; done; printf second"
           },
           %{
             progress: progress,
@@ -792,7 +792,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         |> Agent.get(& &1)
         |> Enum.map_join(& &1.chunk)
 
-      if bytes == "first" do
+      if bytes == "éfirst" do
         bytes
       else
         receive do
@@ -803,7 +803,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       end
     end
 
-    assert await_first.(await_first) == "first"
+    assert await_first.(await_first) == "éfirst"
     assert Task.yield(task, 0) == nil
 
     File.write!(Path.join(root, release), "continue")
@@ -812,8 +812,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     events = Agent.get(observed, & &1)
     assert length(events) >= 2
     assert receipt.progress_count == length(events)
-    assert Enum.map_join(events, & &1.chunk) == "firstsecond"
-    assert receipt.output == "firstsecond"
+    assert Enum.map_join(events, & &1.chunk) == "éfirstsecond"
+    assert receipt.output == "éfirstsecond"
 
     expected_identity = %{
       protocol_version: receipt.protocol_version,
