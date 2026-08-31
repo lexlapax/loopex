@@ -134,6 +134,39 @@ defmodule LoopexProtocol.ToolDefinitionTest do
     })
   end
 
+  test "arguments are checked against every declared schema constraint" do
+    assert :ok =
+             ToolDefinition.validate_arguments(definition(), %{
+               "path" => "README.md",
+               "lines" => [1, 3],
+               "mode" => "text",
+               "provider_extension" => %{"threshold" => 0.5}
+             })
+
+    for invalid <- [
+          %{},
+          %{"path" => 1},
+          %{"path" => "README.md", "lines" => [1, 0.5]},
+          %{"path" => "README.md", "mode" => "raw"},
+          %{"path" => "README.md", "provider_extension" => self()}
+        ] do
+      assert {:error, :invalid_arguments} =
+               ToolDefinition.validate_arguments(definition(), invalid)
+    end
+
+    number_definition =
+      definition(%{
+        "parameter_schema" => %{
+          "type" => "object",
+          "properties" => %{"threshold" => %{"type" => "number"}},
+          "required" => ["threshold"]
+        }
+      })
+
+    assert :ok = ToolDefinition.validate_arguments(number_definition, %{"threshold" => 0.5})
+    assert :ok = ToolDefinition.validate_arguments(number_definition, %{"threshold" => 1})
+  end
+
   test "the generation triple changes with any field and is stable across key order" do
     base = definition()
     {tool_id, tool_version, digest} = ToolDefinition.generation(base)

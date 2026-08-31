@@ -886,6 +886,82 @@ defmodule Loopex.AgentLoopTest do
     {run_id, drain(attachment)}
   end
 
+  defp retain_late_model_evidence(turn, command_id) do
+    parent = self()
+
+    fixture =
+      start(
+        script: [Map.put(turn, :hold, parent)],
+        diagnostics_to: parent
+      )
+
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    assert_receive {:holding, model}, 2_000
+
+    {run_id, events} =
+      admit_abort_before_queued_model_result(fixture, attachment, model, command_id)
+
+    records = Fixture.records(fixture, session_id)
+
+    assert [%{payload: evidence}] =
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_evidence_retained"))
+
+    {run_id, events, records, evidence}
+  end
+
+  defp full_record_boundary_text(request) do
+    size = greatest_candidate_text_size(request, 0, 65_536)
+    text = String.duplicate("x", size)
+    reply = model_reply_for_boundary(request, text)
+
+    :ok =
+      Loopex.Store.validate_private_record(%{
+        "reply" => reply,
+        kind: "model_reply_candidate"
+      })
+
+    {:error, _reason} =
+      Loopex.Store.validate_private_record(%{
+        "run_id" => "run_00000000000000000000000000000000",
+        "attempt" => 1,
+        "termination" => "abort",
+        "evidence" => %{"kind" => "reply", "reply" => reply},
+        kind: "model_attempt_evidence_retained"
+      })
+
+    text
+  end
+
+  defp greatest_candidate_text_size(_request, low, high) when low == high, do: low
+
+  defp greatest_candidate_text_size(request, low, high) do
+    candidate = div(low + high + 1, 2)
+    text = String.duplicate("x", candidate)
+
+    if :ok ==
+         Loopex.Store.validate_private_record(%{
+           "reply" => model_reply_for_boundary(request, text),
+           kind: "model_reply_candidate"
+         }) do
+      greatest_candidate_text_size(request, candidate, high)
+    else
+      greatest_candidate_text_size(request, low, candidate - 1)
+    end
+  end
+
+  defp model_reply_for_boundary(request, text) do
+    %{
+      text: text,
+      identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
+      usage: %{},
+      tool_calls: [],
+      delta_count: 0,
+      streamed: false,
+      canonical_request_bytes: request.canonical_request_bytes,
+      staged_request_digest: request.staged_request_digest
+    }
+  end
+
   defp diagnostics(acc \\ []) do
     receive do
       {:loopex_diagnostic, item} -> diagnostics([item | acc])
@@ -1016,6 +1092,73 @@ defmodule Loopex.AgentLoopTest do
     assert result["tool_call_id"] == "c1"
     assert result["content"] == "tool output for c1"
     assert result["outcome"] == "completed"
+  end
+
+  test "a model tool call preserves a JSON number argument through durable dispatch" do
+    definition =
+      Fixture.tool_definition(%{
+        "parameter_schema" => %{
+          "type" => "object",
+          "properties" => %{"threshold" => %{"type" => "number"}},
+          "required" => ["threshold"]
+        }
+      })
+
+    call = %{id: "c1", name: "write", arguments: %{"threshold" => 0.5}}
+
+    fixture =
+      start(
+        script: [%{text: "use the threshold", calls: [call]}, %{text: "done", calls: []}],
+        tools: [definition]
+      )
+
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    events = drain(attachment)
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    assert [job] = Loopex.AgentLoopTestExecutor.jobs(fixture.executor)
+    assert job.validated_arguments == %{"threshold" => 0.5}
+
+    assert Enum.any?(Fixture.records(fixture, session_id), fn record ->
+             record.payload[:kind] == "model_result_committed" and
+               get_in(record.payload, ["reply", "tool_calls", Access.at(0), "arguments"]) == %{
+                 "threshold" => 0.5
+               }
+           end)
+  end
+
+  test "a schema-invalid tool call fails before policy or executor sees it" do
+    definition =
+      Fixture.tool_definition(%{
+        "parameter_schema" => %{
+          "type" => "object",
+          "properties" => %{"threshold" => %{"type" => "integer"}},
+          "required" => ["threshold"]
+        }
+      })
+
+    call = %{id: "c1", name: "write", arguments: %{"threshold" => 0.5}}
+
+    fixture =
+      start(
+        script: [%{text: "use the threshold", calls: [call]}, %{text: "done", calls: []}],
+        tools: [definition],
+        policy: Loopex.AgentLoopUnexpectedPolicy
+      )
+
+    {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    events = drain(attachment)
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
+
+    assert Enum.find(events, &(&1.kind == "tool.finished"))["outcome"] == "failed"
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+
+    [_first, second] = AgentLoopTestModel.dispatched(fixture.model)
+    result = Enum.find(second.messages, &(&1["role"] == "tool"))
+    assert result["outcome"] == "failed"
+    assert result["content"] =~ "invalid_tool_arguments"
   end
 
   test "each turn dispatches exactly the canonical request bytes and digest committed before it" do
@@ -1847,6 +1990,7 @@ defmodule Loopex.AgentLoopTest do
             calls: [call("c1")],
             deltas: ["late ", "reply"],
             usage: %{"input_tokens" => 17, "output_tokens" => 4},
+            reply_overrides: %{provider_response_id: "req_late_reply_1"},
             hold: parent
           }
         ],
@@ -1931,9 +2075,10 @@ defmodule Loopex.AgentLoopTest do
     retained_reply = evidence["evidence"]["reply"]
 
     assert Map.keys(retained_reply) |> Enum.sort() ==
-             ~w(canonical_request_bytes delta_count identity staged_request_digest streamed text tool_calls usage)
+             ~w(canonical_request_bytes delta_count identity provider_response_id staged_request_digest streamed text tool_calls usage)
 
     assert retained_reply["text"] == "late reply"
+    assert retained_reply["provider_response_id"] == "req_late_reply_1"
 
     assert retained_reply["identity"] == %{
              "provider" => "scripted",
@@ -2223,7 +2368,7 @@ defmodule Loopex.AgentLoopTest do
 
     assert evidence["evidence"] == %{
              "kind" => "error",
-             "reason" => "provider_unavailable"
+             "reason" => "model_call_failed"
            }
 
     refute Enum.any?(records, &(&1.payload[:kind] == "model_result_committed"))
@@ -2273,6 +2418,201 @@ defmodule Loopex.AgentLoopTest do
     assert evidence["evidence"] == %{
              "kind" => "error",
              "reason" => "unreadable_model_answer"
+           }
+  end
+
+  test "an undeclared late provider field becomes bounded error and never reaches the journal" do
+    secret = "sk-live-provider-secret-1234567890"
+
+    {_run_id, events, records, evidence} =
+      retain_late_model_evidence(
+        %{
+          text: "otherwise valid",
+          calls: [],
+          reply_overrides: %{credential: secret}
+        },
+        "abort-late-provider-field"
+      )
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+
+    assert evidence["evidence"] == %{
+             "kind" => "error",
+             "reason" => "unreadable_model_answer"
+           }
+
+    refute :erlang.term_to_binary(records) =~ secret
+  end
+
+  test "an unreadable live model reply abandons and retries its attempt" do
+    secret = "sk-live-provider-secret-before-retry"
+
+    fixture =
+      start(
+        script: [
+          %{text: "unreadable", calls: [], reply_overrides: %{credential: secret}},
+          %{text: "recovered", calls: []}
+        ]
+      )
+
+    {session_id, attachment, _reply} = Fixture.run(fixture, "go")
+    events = drain(attachment)
+    records = Fixture.records(fixture, session_id)
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
+
+    assert Enum.any?(records, &(&1.payload[:kind] == "model_attempt_abandoned"))
+    refute :erlang.term_to_binary(records) =~ secret
+  end
+
+  test "nested provider fields are projected out of valid late evidence" do
+    secret = "sk-live-nested-provider-secret"
+
+    {_run_id, events, records, evidence} =
+      retain_late_model_evidence(
+        %{
+          text: "provider-neutral reply",
+          calls: [
+            %{
+              id: "c1",
+              name: "write",
+              arguments: %{"path" => "safe.txt"},
+              provider_private: secret
+            }
+          ],
+          reply_overrides: %{
+            identity: %{
+              provider: "scripted",
+              model: "scripted:v1",
+              endpoint: "in-process",
+              provider_private: secret
+            },
+            usage: %{input_tokens: 7, output_tokens: 3, provider_private: secret}
+          }
+        },
+        "abort-nested-late-provider-fields"
+      )
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+
+    assert %{"kind" => "reply", "reply" => reply} = evidence["evidence"]
+
+    assert reply["identity"] == %{
+             "provider" => "scripted",
+             "model" => "scripted:v1",
+             "endpoint" => "in-process"
+           }
+
+    assert reply["usage"] == %{"input_tokens" => 7, "output_tokens" => 3}
+
+    assert reply["tool_calls"] == [
+             %{
+               "id" => "c1",
+               "name" => "write",
+               "arguments" => %{"path" => "safe.txt"}
+             }
+           ]
+
+    refute :erlang.term_to_binary(records) =~ secret
+  end
+
+  test "a deeply nested late provider term becomes bounded error at the Store boundary" do
+    nested =
+      Enum.reduce(1..20, "leaf", fn level, value ->
+        %{"level_#{level}" => value}
+      end)
+
+    {_run_id, events, _records, evidence} =
+      retain_late_model_evidence(
+        %{
+          text: "otherwise valid",
+          calls: [],
+          reply_overrides: %{usage: %{"provider_private" => nested}}
+        },
+        "abort-deep-late-provider-term"
+      )
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+
+    assert evidence["evidence"] == %{
+             "kind" => "error",
+             "reason" => "unreadable_model_answer"
+           }
+  end
+
+  test "a malformed streamed flag in a late reply becomes bounded error" do
+    {_run_id, events, _records, evidence} =
+      retain_late_model_evidence(
+        %{
+          text: "otherwise valid",
+          calls: [],
+          reply_overrides: %{streamed: "not-a-boolean"}
+        },
+        "abort-late-streamed-shape"
+      )
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+
+    assert evidence["evidence"] == %{
+             "kind" => "error",
+             "reason" => "unreadable_model_answer"
+           }
+  end
+
+  test "a late reply whose streamed flag contradicts its count becomes bounded error" do
+    {_run_id, events, _records, evidence} =
+      retain_late_model_evidence(
+        %{
+          text: "otherwise valid",
+          calls: [],
+          reply_overrides: %{delta_count: 0, streamed: true}
+        },
+        "abort-late-stream-count-contradiction"
+      )
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+
+    assert evidence["evidence"] == %{
+             "kind" => "error",
+             "reason" => "unreadable_model_answer"
+           }
+  end
+
+  test "an oversized valid late reply is retained as bounded error" do
+    {_run_id, events, records, evidence} =
+      retain_late_model_evidence(
+        %{text: &full_record_boundary_text/1, calls: []},
+        "abort-oversized-late-reply"
+      )
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+
+    assert evidence["evidence"] == %{
+             "kind" => "error",
+             "reason" => "unreadable_model_answer"
+           }
+
+    assert :erlang.external_size(records) < 65_536
+  end
+
+  test "a late model error retains only its generic bounded category" do
+    # Erlang bounds atoms by characters rather than their UTF-8 byte encoding.
+    # This stays inside the VM's atom-length limit while exceeding the retained
+    # error-reason byte ceiling.
+    oversized_reason = String.to_atom(String.duplicate("é", 200))
+
+    {_run_id, events, _records, evidence} =
+      retain_late_model_evidence(
+        %{error: oversized_reason},
+        "abort-oversized-late-error"
+      )
+
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+
+    assert evidence["evidence"] == %{
+             "kind" => "error",
+             "reason" => "model_call_failed"
            }
   end
 

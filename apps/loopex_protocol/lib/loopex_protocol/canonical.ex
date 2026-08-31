@@ -42,7 +42,7 @@ defmodule LoopexProtocol.Canonical do
   @typedoc """
   ## Concept
 
-  Bounded plain data: a term built only from binaries, integers, booleans,
+  Bounded plain data: a term built only from binaries, integers, floats, booleans,
   atoms, `nil`, lists, tuples, and maps of the same.
 
   ## Technical depth
@@ -136,8 +136,8 @@ defmodule LoopexProtocol.Canonical do
   end
 
   defp order(term)
-       when is_binary(term) or is_integer(term) or is_boolean(term) or is_nil(term) or
-              is_atom(term),
+       when is_binary(term) or is_integer(term) or is_float(term) or is_boolean(term) or
+              is_nil(term) or is_atom(term),
        do: term
 
   defp order(term) do

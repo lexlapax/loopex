@@ -679,6 +679,14 @@ defmodule Loopex.Store do
   end
 
   @doc false
+  @spec validate_private_record(term()) :: :ok | {:error, term()}
+  def validate_private_record(record) do
+    with {:ok, normalized} <- normalize_record(record) do
+      validate_record(normalized)
+    end
+  end
+
+  @doc false
   @spec immutable_binding(map()) :: {:ok, map()} | {:error, term()}
   def immutable_binding(transaction) when is_map(transaction) do
     with {:ok, fields} <- semantic_fields(transaction),
@@ -902,8 +910,9 @@ defmodule Loopex.Store do
 
   defp normalize_event_map(_map, _depth), do: {:error, :not_plain_event_data}
 
-  defp normalize_event_value(value, _depth) when is_binary(value) or is_integer(value),
-    do: {:ok, value}
+  defp normalize_event_value(value, _depth)
+       when is_binary(value) or is_integer(value) or is_float(value),
+       do: {:ok, value}
 
   defp normalize_event_value(value, _depth) when value in [nil, true, false], do: {:ok, value}
 
@@ -979,8 +988,9 @@ defmodule Loopex.Store do
 
   defp normalize_user_key(_key), do: {:error, :not_plain_data}
 
-  defp normalize_user_value(value, _depth) when is_binary(value) or is_integer(value),
-    do: {:ok, value}
+  defp normalize_user_value(value, _depth)
+       when is_binary(value) or is_integer(value) or is_float(value),
+       do: {:ok, value}
 
   defp normalize_user_value(value, _depth) when value in [nil, true, false], do: {:ok, value}
 
@@ -1245,7 +1255,10 @@ defmodule Loopex.Store do
   end
 
   defp plain?(_value, depth) when depth > @max_depth, do: false
-  defp plain?(value, _depth) when is_binary(value) or is_integer(value), do: true
+
+  defp plain?(value, _depth) when is_binary(value) or is_integer(value) or is_float(value),
+    do: true
+
   defp plain?(value, _depth) when value in [nil, true, false], do: true
 
   defp plain?(value, depth) when is_list(value) do

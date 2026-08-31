@@ -39,6 +39,13 @@ defmodule Loopex.Runtime.SessionState do
   alias Loopex.ArtifactStore
   alias Loopex.Bounds
   alias Loopex.Conversation
+  alias Loopex.Store
+
+  @model_reply_required_fields ~w(text identity usage tool_calls canonical_request_bytes staged_request_digest)
+  @model_reply_optional_fields ~w(delta_count streamed provider_response_id)
+  @model_identity_fields [:provider, :model, :endpoint]
+  @model_usage_fields ~w(input_tokens output_tokens)
+  @max_provider_response_id_bytes 256
 
   @type t :: %__MODULE__{
           session_id: binary(),
@@ -524,8 +531,11 @@ defmodule Loopex.Runtime.SessionState do
   @spec propose_model_result(t(), binary(), map(), map()) :: {:ok, proposal()} | {:error, term()}
   def propose_model_result(%__MODULE__{} = state, run_id, reply, generations \\ %{})
       when is_binary(run_id) and is_map(reply) and is_map(generations) do
-    with :ok <- validate_stream_count(Map.get(reply, :delta_count, 0)) do
-      propose_validated_model_result(state, run_id, reply, generations)
+    with %{request: request} <- Map.get(state.pending_work, run_id),
+         {:ok, canonical_reply} <- canonical_model_reply(reply, request) do
+      propose_validated_model_result(state, run_id, canonical_reply, generations)
+    else
+      _other -> {:error, :invalid_model_reply}
     end
   end
 
@@ -729,15 +739,15 @@ defmodule Loopex.Runtime.SessionState do
       when is_binary(run_id) and termination in [:abort, :deadline] do
     with %{stage: "model_dispatched"} = work <- Map.get(state.pending_work, run_id),
          attempt = Map.get(work, :model_attempt, 1),
-         {:ok, evidence} <- encode_model_attempt_evidence(result, work.request) do
-      record = %{
-        "run_id" => run_id,
-        "attempt" => attempt,
-        "termination" => Atom.to_string(termination),
-        "evidence" => evidence,
-        kind: "model_attempt_evidence_retained"
-      }
-
+         {:ok, evidence} <- encode_model_attempt_evidence(result, work.request),
+         {:ok, record} <-
+           bounded_model_attempt_record(%{
+             "run_id" => run_id,
+             "attempt" => attempt,
+             "termination" => Atom.to_string(termination),
+             "evidence" => evidence,
+             kind: "model_attempt_evidence_retained"
+           }) do
       internal_proposal(
         state,
         stable_id("model-attempt-evidence", run_id, attempt),
@@ -1933,7 +1943,10 @@ defmodule Loopex.Runtime.SessionState do
 
   defp encode_plain(value) when value in [nil, true, false], do: value
   defp encode_plain(value) when is_atom(value), do: Atom.to_string(value)
-  defp encode_plain(value) when is_binary(value) or is_integer(value), do: value
+
+  defp encode_plain(value) when is_binary(value) or is_integer(value) or is_float(value),
+    do: value
+
   defp encode_plain(value) when is_list(value), do: Enum.map(value, &encode_plain/1)
 
   defp encode_plain(value) when is_map(value) do
@@ -1944,15 +1957,12 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp encode_model_attempt_evidence({:ok, reply}, request) when is_map(reply) do
-    try do
-      evidence = %{"kind" => "reply", "reply" => encode_plain(reply)}
+    case canonical_model_reply(reply, request) do
+      {:ok, canonical_reply} ->
+        {:ok, %{"kind" => "reply", "reply" => encode_plain(canonical_reply)}}
 
-      case validate_model_attempt_evidence(evidence, request) do
-        :ok -> {:ok, evidence}
-        {:error, _reason} -> unreadable_model_attempt_evidence()
-      end
-    rescue
-      _error -> unreadable_model_attempt_evidence()
+      {:error, _reason} ->
+        unreadable_model_attempt_evidence()
     end
   end
 
@@ -1965,13 +1975,10 @@ defmodule Loopex.Runtime.SessionState do
          request
        )
        when is_map(encoded) do
-    with {:ok, reply} <- decode_reply(encoded),
+    with {:ok, reply} <- canonical_model_reply(encoded, request),
          true <- reply.canonical_request_bytes == request.canonical_request_bytes,
          true <- reply.staged_request_digest == request.staged_request_digest,
-         true <- is_binary(reply.text),
-         true <- is_map(reply.identity),
-         true <- is_map(reply.usage),
-         true <- is_list(reply.tool_calls) do
+         true <- is_binary(reply.text) do
       :ok
     else
       _other -> {:error, :invalid_model_attempt_evidence}
@@ -1989,16 +1996,117 @@ defmodule Loopex.Runtime.SessionState do
   defp validate_model_attempt_evidence(_evidence, _request),
     do: {:error, :invalid_model_attempt_evidence}
 
-  defp model_attempt_error_reason({:error, reason}) when is_atom(reason),
-    do: Atom.to_string(reason)
-
-  defp model_attempt_error_reason({:error, {reason, _detail}}) when is_atom(reason),
-    do: Atom.to_string(reason)
+  # Provider error details are not durable evidence. Even an atom can be minted
+  # from a credential or tenant value by a broken adapter, so retaining its name
+  # is not structurally secret-safe. The durable fact is only that the model call
+  # failed; live diagnostics may carry the adapter's separately scrubbed detail.
+  defp model_attempt_error_reason({:error, _reason}), do: "model_call_failed"
 
   defp model_attempt_error_reason(_result), do: "unreadable_model_answer"
 
   defp unreadable_model_attempt_evidence,
     do: {:ok, %{"kind" => "error", "reason" => "unreadable_model_answer"}}
+
+  # Concept: late evidence takes the Store's actual durable-record boundary,
+  # rather than guessing a second size ceiling beside it.
+  #
+  # Technical depth: a provider-neutral reply may still be too large to retain
+  # once wrapped with its run and attempt identity. Validate the complete record
+  # through the same normalizer and ceiling the real Store transaction uses. A
+  # refusal becomes the one small error form, which is then checked through that
+  # boundary too; cleanup therefore distinguishes an unreadable answer from an
+  # unavailable Store instead of letting record size impersonate Store loss.
+  defp bounded_model_attempt_record(record) do
+    case Store.validate_private_record(record) do
+      :ok ->
+        {:ok, record}
+
+      {:error, _reason} ->
+        bounded =
+          Map.put(record, "evidence", %{"kind" => "error", "reason" => "unreadable_model_answer"})
+
+        case Store.validate_private_record(bounded) do
+          :ok -> {:ok, bounded}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  # Concept: only the provider-neutral reply contract crosses into durable
+  # state; an adapter's private fields never hitchhike beside it.
+  #
+  # Technical depth: normalize atom and binary keys without collisions, require
+  # the exact top-level provider-neutral field set, and project nested identity,
+  # usage, and tool-call maps onto their declared fields rather than retaining an
+  # adapter's input map. This keeps a credential, provider struct, malformed
+  # stream statistic, or unmeasured vendor payload out even when all required
+  # fields beside it are valid.
+  defp canonical_model_reply(reply, request) when is_map(reply) do
+    with :ok <- Store.validate_private_record(%{"reply" => reply, kind: "model_reply_candidate"}),
+         {:ok, encoded} <- encode_plain_unique(reply),
+         {:ok, decoded} <- decode_reply(encoded),
+         true <- decoded.canonical_request_bytes == request.canonical_request_bytes,
+         true <- decoded.staged_request_digest == request.staged_request_digest do
+      {:ok, decoded}
+    else
+      _other -> {:error, :invalid_model_reply}
+    end
+  end
+
+  defp validate_model_reply_keys(encoded) do
+    exact_required_and_optional_keys(
+      encoded,
+      @model_reply_required_fields,
+      @model_reply_optional_fields
+    )
+  end
+
+  defp exact_required_and_optional_keys(map, required, optional) when is_map(map) do
+    keys = Map.keys(map) |> MapSet.new()
+    required = MapSet.new(required)
+    allowed = MapSet.union(required, MapSet.new(optional))
+
+    if MapSet.subset?(required, keys) and MapSet.subset?(keys, allowed),
+      do: :ok,
+      else: {:error, :invalid_model_reply}
+  end
+
+  defp exact_required_and_optional_keys(_map, _required, _optional),
+    do: {:error, :invalid_model_reply}
+
+  defp encode_plain_unique(value)
+       when is_binary(value) or is_integer(value) or is_float(value) or
+              value in [nil, true, false],
+       do: {:ok, value}
+
+  defp encode_plain_unique(value) when is_list(value) do
+    Enum.reduce_while(value, {:ok, []}, fn nested, {:ok, encoded} ->
+      case encode_plain_unique(nested) do
+        {:ok, item} -> {:cont, {:ok, [item | encoded]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp encode_plain_unique(value) when is_map(value) and not is_struct(value) do
+    Enum.reduce_while(value, {:ok, %{}}, fn {key, nested}, {:ok, encoded} ->
+      encoded_key = if is_atom(key), do: Atom.to_string(key), else: key
+
+      with true <- is_binary(encoded_key),
+           false <- Map.has_key?(encoded, encoded_key),
+           {:ok, item} <- encode_plain_unique(nested) do
+        {:cont, {:ok, Map.put(encoded, encoded_key, item)}}
+      else
+        _other -> {:halt, {:error, :invalid_plain_record}}
+      end
+    end)
+  end
+
+  defp encode_plain_unique(_value), do: {:error, :invalid_plain_record}
 
   defp decode_request(encoded) do
     fields = [
@@ -2034,17 +2142,78 @@ defmodule Loopex.Runtime.SessionState do
     # behaviour change for exactly the adapters ADR 0011 says stay conformant.
     # They default to "emitted nothing", which is what their absence means.
     delta_count = Map.get(encoded, "delta_count", 0)
+    streamed = Map.get(encoded, "streamed", false)
+    provider_response_id = Map.get(encoded, "provider_response_id", :absent)
 
-    with {:ok, reply} <- decode_top(encoded, fields),
+    with :ok <- validate_model_reply_keys(encoded),
+         {:ok, reply} <- decode_top(encoded, fields),
+         {:ok, identity} <- decode_model_identity(reply.identity),
+         {:ok, usage} <- decode_model_usage(reply.usage),
          {:ok, calls} <- decode_tool_calls(reply.tool_calls),
-         :ok <- validate_stream_count(delta_count) do
-      {:ok,
-       reply
-       |> Map.put(:tool_calls, calls)
-       |> Map.put(:delta_count, delta_count)
-       |> Map.put(:streamed, Map.get(encoded, "streamed", false))}
+         :ok <- validate_stream_count(delta_count),
+         true <- is_boolean(streamed),
+         true <- Map.has_key?(encoded, "delta_count") == Map.has_key?(encoded, "streamed"),
+         true <- streamed == delta_count > 0,
+         true <- is_binary(reply.text),
+         true <- Enum.all?(calls, &valid_model_tool_call?/1),
+         true <- is_binary(reply.canonical_request_bytes),
+         true <- is_binary(reply.staged_request_digest),
+         true <- valid_provider_response_id?(provider_response_id) do
+      decoded =
+        reply
+        |> Map.put(:identity, identity)
+        |> Map.put(:usage, usage)
+        |> Map.put(:tool_calls, calls)
+        |> Map.put(:delta_count, delta_count)
+        |> Map.put(:streamed, streamed)
+
+      if provider_response_id == :absent,
+        do: {:ok, decoded},
+        else: {:ok, Map.put(decoded, :provider_response_id, provider_response_id)}
+    else
+      _other -> {:error, :invalid_model_reply}
     end
   end
+
+  defp decode_model_identity(identity) when is_map(identity) do
+    with {:ok, decoded} <- decode_top(identity, @model_identity_fields),
+         true <- Enum.all?(Map.values(decoded), &(is_binary(&1) and &1 != "")) do
+      {:ok, decoded}
+    else
+      _other -> {:error, :invalid_model_reply}
+    end
+  end
+
+  defp decode_model_identity(_identity), do: {:error, :invalid_model_reply}
+
+  defp decode_model_usage(usage) when is_map(usage) do
+    projected = Map.take(usage, @model_usage_fields)
+
+    if Enum.all?(Map.values(projected), fn
+         value when is_integer(value) and value >= 0 -> true
+         nil -> true
+         _other -> false
+       end) do
+      {:ok, projected}
+    else
+      {:error, :invalid_model_reply}
+    end
+  end
+
+  defp decode_model_usage(_usage), do: {:error, :invalid_model_reply}
+
+  defp valid_model_tool_call?(%{id: id, name: name, arguments: arguments}),
+    do: is_binary(id) and id != "" and is_binary(name) and name != "" and is_map(arguments)
+
+  defp valid_model_tool_call?(_call), do: false
+
+  defp valid_provider_response_id?(:absent), do: true
+  defp valid_provider_response_id?(nil), do: true
+
+  defp valid_provider_response_id?(value) when is_binary(value),
+    do: byte_size(value) > 0 and byte_size(value) <= @max_provider_response_id_bytes
+
+  defp valid_provider_response_id?(_value), do: false
 
   defp decode_tool_calls(calls) when is_list(calls) do
     Enum.reduce_while(calls, {:ok, []}, fn call, {:ok, decoded} ->

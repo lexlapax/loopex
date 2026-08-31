@@ -315,6 +315,36 @@ defmodule LoopexProtocol.ToolDefinition do
   @doc """
   ## Concept
 
+  Checks one model-supplied argument object against this generation's declared
+  parameter schema before policy sees it or an effect intent is committed.
+
+  ## Technical depth
+
+  Evaluates exactly the registered subset: required members, declared scalar
+  types, scalar array items, and string enumerations. Undeclared members remain
+  ordinary JSON-Schema additions because this subset has no
+  `additionalProperties` keyword; they must still be bounded JSON-like plain
+  data. A registered definition is expected, but an invalid definition fails
+  closed rather than turning a malformed registry entry into an unchecked call.
+  """
+  @spec validate_arguments(t(), term()) :: :ok | {:error, :invalid_arguments}
+  def validate_arguments(definition, arguments)
+      when is_map(definition) and not is_struct(definition) and is_map(arguments) and
+             not is_struct(arguments) do
+    schema = Map.get(definition, "parameter_schema")
+
+    valid =
+      valid?(definition) and json_plain?(arguments) and
+        arguments_match_schema?(arguments, schema)
+
+    if valid, do: :ok, else: {:error, :invalid_arguments}
+  end
+
+  def validate_arguments(_definition, _arguments), do: {:error, :invalid_arguments}
+
+  @doc """
+  ## Concept
+
   The exact bytes this definition's digest covers.
 
   ## Technical depth
@@ -598,4 +628,53 @@ defmodule LoopexProtocol.ToolDefinition do
 
   defp items_reasons(name, _type, _items),
     do: ["parameter_schema: #{name} declares items but is not an array"]
+
+  defp arguments_match_schema?(arguments, %{
+         "type" => "object",
+         "properties" => properties,
+         "required" => required
+       })
+       when is_map(properties) and is_list(required) do
+    Enum.all?(required, &Map.has_key?(arguments, &1)) and
+      Enum.all?(properties, fn {name, property} ->
+        not Map.has_key?(arguments, name) or
+          property_matches?(Map.fetch!(arguments, name), property)
+      end)
+  end
+
+  defp arguments_match_schema?(_arguments, _schema), do: false
+
+  defp property_matches?(value, %{"type" => type} = property) do
+    type_matches?(value, type, Map.get(property, "items")) and
+      enum_matches?(value, Map.get(property, "enum"))
+  end
+
+  defp property_matches?(_value, _property), do: false
+
+  defp type_matches?(value, "string", _items), do: is_binary(value)
+  defp type_matches?(value, "integer", _items), do: is_integer(value)
+  defp type_matches?(value, "number", _items), do: is_integer(value) or is_float(value)
+  defp type_matches?(value, "boolean", _items), do: is_boolean(value)
+
+  defp type_matches?(value, "array", %{"type" => item_type}) when is_list(value),
+    do: Enum.all?(value, &type_matches?(&1, item_type, nil))
+
+  defp type_matches?(_value, _type, _items), do: false
+
+  defp enum_matches?(_value, nil), do: true
+  defp enum_matches?(value, enum) when is_list(enum), do: value in enum
+  defp enum_matches?(_value, _enum), do: false
+
+  defp json_plain?(value)
+       when is_binary(value) or is_integer(value) or is_float(value) or is_boolean(value) or
+              is_nil(value),
+       do: true
+
+  defp json_plain?(value) when is_list(value), do: Enum.all?(value, &json_plain?/1)
+
+  defp json_plain?(value) when is_map(value) and not is_struct(value) do
+    Enum.all?(value, fn {key, nested} -> is_binary(key) and json_plain?(nested) end)
+  end
+
+  defp json_plain?(_value), do: false
 end

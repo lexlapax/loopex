@@ -83,17 +83,24 @@ defmodule Loopex.AgentLoopTestModel do
       :error ->
         case Map.get(turn, :error) do
           nil ->
-            {:ok,
-             %{
-               text: Map.get(turn, :text, ""),
-               identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
-               usage: Map.get(turn, :usage, %{}),
-               tool_calls: Map.get(turn, :calls, []),
-               delta_count: Map.get(turn, :delta_count, length(Map.get(turn, :deltas, []))),
-               streamed: Map.get(turn, :deltas, []) != [],
-               canonical_request_bytes: request.canonical_request_bytes,
-               staged_request_digest: request.staged_request_digest
-             }}
+            text =
+              case Map.get(turn, :text, "") do
+                builder when is_function(builder, 1) -> builder.(request)
+                text -> text
+              end
+
+            reply = %{
+              text: text,
+              identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
+              usage: Map.get(turn, :usage, %{}),
+              tool_calls: Map.get(turn, :calls, []),
+              delta_count: Map.get(turn, :delta_count, length(Map.get(turn, :deltas, []))),
+              streamed: Map.get(turn, :deltas, []) != [],
+              canonical_request_bytes: request.canonical_request_bytes,
+              staged_request_digest: request.staged_request_digest
+            }
+
+            {:ok, Map.merge(reply, Map.get(turn, :reply_overrides, %{}))}
 
           reason ->
             {:error, reason}
@@ -245,6 +252,15 @@ defmodule Loopex.AgentLoopTestPolicy do
 
   @impl Loopex.Policy
   def decide(_request), do: {:allow, nil}
+end
+
+defmodule Loopex.AgentLoopUnexpectedPolicy do
+  @moduledoc false
+
+  @behaviour Loopex.Policy
+
+  @impl Loopex.Policy
+  def decide(_request), do: raise("schema-invalid arguments reached host policy")
 end
 
 defmodule Loopex.AgentLoopFixture do

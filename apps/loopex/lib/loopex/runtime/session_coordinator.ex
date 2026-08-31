@@ -1260,7 +1260,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
         end
 
       {:error, reason} ->
-        {:stop, {:model_result_failed, reason}, state}
+        case reason do
+          :invalid_model_reply -> accept_model_result(state, run_id, {:error, reason})
+          _other -> {:stop, {:model_result_failed, reason}, state}
+        end
     end
   end
 
@@ -1652,8 +1655,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp dispatch_effect(state, work, call) do
     with {:ok, definition} <- resolve_active_tool(state, call.name),
-         {:ok, job} <- build_job(state, work, call, definition),
+         :ok <- validate_tool_arguments(definition, call.arguments),
          {:allow, context} <- consult_policy(state, work, call, definition),
+         {:ok, job} <- build_job(state, work, call, definition),
          {:ok, grant} <-
            Executor.issue_grant(
              grant_decision(state),
@@ -2102,6 +2106,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
       idempotency_class: Map.fetch!(definition, "idempotency_class"),
       workspace_lease: state.executor.workspace_lease
     })
+  end
+
+  defp validate_tool_arguments(definition, arguments) do
+    case ToolDefinition.validate_arguments(definition, arguments) do
+      :ok -> :ok
+      {:error, _reason} -> {:error, :invalid_tool_arguments}
+    end
   end
 
   # Concept: the grant is minted because the host allowed, not because a literal

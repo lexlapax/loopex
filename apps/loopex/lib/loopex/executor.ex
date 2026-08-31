@@ -608,7 +608,8 @@ defmodule Loopex.Executor do
   defp bounded_binary?(value), do: is_binary(value) and byte_size(value) in 1..1_024
 
   defp plain?(value)
-       when is_binary(value) or is_integer(value) or is_boolean(value) or is_nil(value),
+       when is_binary(value) or is_integer(value) or is_float(value) or is_boolean(value) or
+              is_nil(value),
        do: true
 
   defp plain?(value) when is_list(value), do: Enum.all?(value, &plain?/1)

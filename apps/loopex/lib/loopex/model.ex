@@ -129,6 +129,7 @@ defmodule Loopex.Model do
           required(:tool_calls) => [map()],
           required(:delta_count) => non_neg_integer(),
           required(:streamed) => boolean(),
+          optional(:provider_response_id) => binary() | nil,
           required(:canonical_request_bytes) => binary(),
           required(:staged_request_digest) => binary()
         }
@@ -401,8 +402,10 @@ defmodule Loopex.Model do
 
   defp term_bytes(value), do: byte_size(:erlang.term_to_binary(value))
 
-  defp plain?(term) when is_binary(term) or is_integer(term) or is_boolean(term) or is_nil(term),
-    do: true
+  defp plain?(term)
+       when is_binary(term) or is_integer(term) or is_float(term) or is_boolean(term) or
+              is_nil(term),
+       do: true
 
   defp plain?(term) when is_list(term), do: Enum.all?(term, &plain?/1)
 

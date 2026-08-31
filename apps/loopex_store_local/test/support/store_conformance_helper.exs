@@ -466,6 +466,21 @@ defmodule LoopexStoreLocalTest.Conformance do
 
     assert normalized.genesis == %{dynamic_name => "plain", kind: dynamic_name}
 
+    assert {:ok, number_transaction} =
+             Store.session_commit(
+               "session",
+               @domain,
+               "plain-json-number",
+               0,
+               "owner",
+               0,
+               [%{kind: :fact, threshold: 0.5}],
+               [%{event_id: "number-event", kind: :fact_committed, threshold: 0.5}]
+             )
+
+    assert [%{"threshold" => 0.5}] = number_transaction.records
+    assert [%{"threshold" => 0.5}] = number_transaction.outbox
+
     for reserved <- [
           :event_sequence,
           :owner_epoch,
