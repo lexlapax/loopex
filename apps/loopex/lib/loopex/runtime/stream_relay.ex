@@ -17,11 +17,14 @@ defmodule Loopex.Runtime.StreamRelay do
   are different processes and neither orders the other.
 
   So neither of them emits. A relay does, and it is the only emitter of its
-  domain: producers hand it items, the closer asks it to close, and it assigns
-  every sequence, emits every item, and emits the closure itself, in the order
-  its own mailbox delivers them. There is no reservation separate from an
-  emission to be stranded, no seal to be read after the fact, and no wait to be
-  bounded.
+  domain: producers hand it items, the closer asks it to close, and it orders
+  every item and the closure in the order its own mailbox delivers them. Model
+  domains use that projected emission position as their sequence. Executor
+  domains validate their own supplied position in state carried by this relay,
+  independently of the projected-item count, and carry it unchanged so a
+  refused payload leaves a visible gap. There is no reservation separate from
+  an emission to be stranded, no seal to be read after the fact, and no wait to
+  be bounded.
 
   Closing ends the relay. A producer that hands an item to a closed domain is
   sending to a process that no longer exists, which is exactly ADR 0011's rule
@@ -95,6 +98,11 @@ defmodule Loopex.Runtime.StreamRelay do
   """
   @type build :: (term(), non_neg_integer() -> map())
 
+  @typedoc false
+  @type stateful_build ::
+          (term(), non_neg_integer(), term() ->
+             {:emit, map(), term()} | {:drop, term()})
+
   @typedoc """
   ## Concept
 
@@ -123,6 +131,25 @@ defmodule Loopex.Runtime.StreamRelay do
           {:ok, t()} | {:error, term()}
   def open(supervisor, sink, build, close)
       when is_function(build, 2) and is_function(close, 2) do
+    open_stateful(
+      supervisor,
+      sink,
+      nil,
+      fn item, sequence, state -> {:emit, build.(item, sequence), state} end,
+      close
+    )
+  end
+
+  @doc false
+  @spec open_stateful(
+          Supervisor.supervisor(),
+          pid() | nil,
+          term(),
+          stateful_build(),
+          closing()
+        ) :: {:ok, t()} | {:error, term()}
+  def open_stateful(supervisor, sink, initial_state, build, close)
+      when is_function(build, 3) and is_function(close, 2) do
     owner = self()
     ready = make_ref()
 
@@ -130,7 +157,14 @@ defmodule Loopex.Runtime.StreamRelay do
            try do
              Process.link(owner)
              send(owner, {ready, self()})
-             relay(%{sink: sink, build: build, close: close, count: 0})
+
+             relay(%{
+               sink: sink,
+               build: build,
+               build_state: initial_state,
+               close: close,
+               count: 0
+             })
            catch
              _kind, _reason -> :ok
            end
@@ -236,8 +270,14 @@ defmodule Loopex.Runtime.StreamRelay do
   defp relay(state) do
     receive do
       {:emit, item} ->
-        deliver(state.sink, state.build.(item, state.count))
-        relay(%{state | count: state.count + 1})
+        case state.build.(item, state.count, state.build_state) do
+          {:emit, projected, next_build_state} ->
+            deliver(state.sink, projected)
+            relay(%{state | count: state.count + 1, build_state: next_build_state})
+
+          {:drop, next_build_state} ->
+            relay(%{state | build_state: next_build_state})
+        end
 
       {:close, from, reference, disposition} ->
         count = stated_count(disposition, state.count)

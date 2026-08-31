@@ -116,11 +116,12 @@ defmodule Loopex.Executor do
 
   ## Technical depth
 
-  Plain data carrying the job's complete origin tuple — the call and operation it
-  belongs to, that operation's attempt, the session, run, and turn, the
-  attempt-bound `canonical_request_digest`, both origin epochs, the executor's
-  identity, and its fencing token — followed by the stream it came from, a byte
-  offset, and a bounded chunk.
+  Plain data carrying the protocol and job identifiers and the job's complete
+  origin tuple — the call and operation it belongs to, that operation's attempt,
+  the session, run, and turn, the attempt-bound `canonical_request_digest`, both
+  origin epochs, the executor's identity, and its fencing token — followed by
+  the executor-supplied progress sequence, the stream it came from, a contiguous
+  per-stream byte offset, and a bounded chunk.
 
   Every one of those bindings is required, because the coordinator validates all
   of them fail-closed against the job it journaled before it projects anything.
@@ -134,6 +135,8 @@ defmodule Loopex.Executor do
   belongs to the attempt it dispatched.
   """
   @type progress_event :: %{
+          required(:protocol_version) => pos_integer(),
+          required(:job_id) => binary(),
           required(:tool_call_id) => binary(),
           required(:operation_id) => binary(),
           required(:attempt) => pos_integer(),
@@ -145,6 +148,7 @@ defmodule Loopex.Executor do
           required(:executor_epoch) => non_neg_integer(),
           required(:executor_identity) => binary(),
           required(:fencing_token) => non_neg_integer(),
+          required(:progress_sequence) => non_neg_integer(),
           required(:stream) => binary(),
           required(:byte_offset) => non_neg_integer(),
           required(:chunk) => binary()

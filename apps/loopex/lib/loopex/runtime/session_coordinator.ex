@@ -1584,12 +1584,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Concept: an executor whose progress was refused should not be refused in
   # silence.
   #
-  # Technical depth: the count only. Nothing about a refused event is projected
-  # or published, and the count never reaches the operator's progress plane, so
-  # it can neither be mistaken for progress nor affect an outcome, a bound, or a
-  # receipt. A refused event is still an executor emitting something it had no
-  # standing to emit, and an operator or a reviewer needs some way to see that
-  # it happened.
+  # Technical depth: the count and first failed binding only. Nothing else about
+  # a refused event is projected or published, and this evidence never reaches
+  # the operator's progress plane, so it can neither be mistaken for progress
+  # nor affect an outcome, a bound, or a receipt. A refused event is still an
+  # executor emitting something it had no standing to emit, and an operator or
+  # reviewer needs to know which contract it failed.
   #
   # It goes two places for two different readers. The diagnostic reaches whoever
   # is watching the run now. The private record reaches whoever reads the
@@ -1604,18 +1604,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
         state
 
       refused ->
+        bindings = ExecutorStream.refused_bindings(stream)
+
         emit_diagnostic(state, %{
           "kind" => "executor_progress_refused",
           "run_id" => run_id,
           "tool_call_id" => stream.tool_call_id,
-          "refused_count" => refused
+          "refused_count" => refused,
+          "refused_bindings" => bindings
         })
 
         case SessionState.propose_progress_refusals(
                state.durable,
                run_id,
                stream.tool_call_id,
-               refused
+               refused,
+               bindings
              ) do
           {:ok, proposal} ->
             case commit_internal(state, proposal) do

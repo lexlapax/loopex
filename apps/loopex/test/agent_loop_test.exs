@@ -69,7 +69,7 @@ defmodule Loopex.AgentLoopProgressExecutor do
           5_000 -> :ok
         end
 
-        progress.(chunk(job, 1, "after succession"))
+        progress.(chunk(job, 1, 17, "after succession"))
 
         if held_mode == :held_after_effect_and_progress do
           send(observer, {:executor_progress_held, self()})
@@ -115,6 +115,8 @@ defmodule Loopex.AgentLoopProgressExecutor do
 
   def identity(job) do
     %{
+      protocol_version: job.protocol_version,
+      job_id: job.job_id,
       tool_call_id: job.tool_call_id,
       operation_id: job.operation_id,
       attempt: job.attempt,
@@ -129,22 +131,30 @@ defmodule Loopex.AgentLoopProgressExecutor do
     }
   end
 
-  defp chunk(job, index, text),
-    do: Map.merge(identity(job), %{stream: "stdout", byte_offset: index * 8, chunk: text})
+  defp chunk(job, sequence, offset, text),
+    do:
+      Map.merge(identity(job), %{
+        progress_sequence: sequence,
+        stream: "stdout",
+        byte_offset: offset,
+        chunk: text
+      })
 
-  defp events(:valid, job), do: [chunk(job, 0, "first"), chunk(job, 1, "second")]
-  defp events({:held_after_effect, _observer}, job), do: [chunk(job, 0, "before succession")]
+  defp events(:valid, job), do: [chunk(job, 0, 0, "first"), chunk(job, 1, 5, "second")]
+
+  defp events({:held_after_effect, _observer}, job),
+    do: [chunk(job, 0, 0, "before succession")]
 
   defp events({:held_after_effect_then_lost, _observer}, job),
-    do: [chunk(job, 0, "before succession")]
+    do: [chunk(job, 0, 0, "before succession")]
 
   defp events({:held_after_effect_and_progress, _observer}, job),
-    do: [chunk(job, 0, "before succession")]
+    do: [chunk(job, 0, 0, "before succession")]
 
   defp events({:held_after_effect_with_refusal, _observer}, job) do
     [
-      chunk(job, 0, "before succession"),
-      %{chunk(job, 1, "refused before succession") | attempt: job.attempt + 1}
+      chunk(job, 0, 0, "before succession"),
+      %{chunk(job, 1, 17, "refused before succession") | attempt: job.attempt + 1}
     ]
   end
 
@@ -162,18 +172,23 @@ defmodule Loopex.AgentLoopProgressExecutor do
   # where an integer belongs, which is a different refusal from the one this is
   # about.
   defp events({:wrong, binding}, job) do
-    event = chunk(job, 0, "tampered")
+    event = chunk(job, 0, 0, "tampered")
     [Map.put(event, binding, tamper(Map.fetch!(event, binding)))]
   end
 
+  defp events({:missing, binding}, job) do
+    event = chunk(job, 0, 0, "missing")
+    [Map.delete(event, binding)]
+  end
+
   defp events(:wrong_attempt, job),
-    do: [%{chunk(job, 0, "stale") | attempt: job.attempt + 1}]
+    do: [%{chunk(job, 0, 0, "stale") | attempt: job.attempt + 1}]
 
   defp events(:wrong_fence, job),
-    do: [%{chunk(job, 0, "fenced") | fencing_token: job.fencing_token + 1}]
+    do: [%{chunk(job, 0, 0, "fenced") | fencing_token: job.fencing_token + 1}]
 
   defp events(:wrong_digest, job),
-    do: [%{chunk(job, 0, "other") | canonical_request_digest: "not-the-digest"}]
+    do: [%{chunk(job, 0, 0, "other") | canonical_request_digest: "not-the-digest"}]
 
   # Concept: one event this coordinator accepts and two it refuses, from an
   # executor that counts all three.
@@ -185,9 +200,20 @@ defmodule Loopex.AgentLoopProgressExecutor do
   # of both kinds in one job, which no single-mode double could produce.
   defp events(:one_valid_two_refused, job) do
     [
-      chunk(job, 0, "kept"),
-      %{chunk(job, 1, "stale") | attempt: job.attempt + 1},
-      %{chunk(job, 2, "fenced") | fencing_token: job.fencing_token + 1}
+      chunk(job, 0, 0, "kept"),
+      %{chunk(job, 1, 4, "stale") | attempt: job.attempt + 1},
+      %{chunk(job, 1, 4, "fenced") | fencing_token: job.fencing_token + 1}
+    ]
+  end
+
+  defp events(:one_valid_two_refused_one_valid, job),
+    do: events(:one_valid_two_refused, job) ++ [chunk(job, 1, 4, "kept after refusals")]
+
+  defp events(:payload_refusal_preserves_executor_gap, job) do
+    [
+      chunk(job, 0, 0, "ok"),
+      %{chunk(job, 1, 2, "refused") | stream: "telemetry"},
+      chunk(job, 2, 2, "after gap")
     ]
   end
 
@@ -203,15 +229,17 @@ defmodule Loopex.AgentLoopProgressExecutor do
   # A fully identified event whose payload carries what must never cross.
   defp events(:hostile_payload, job) do
     [
-      Map.merge(chunk(job, 0, "ok"), %{
+      Map.merge(chunk(job, 0, 0, "ok"), %{
         owner: self(),
         finish: fn -> :ok end,
         credential: "sk-not-a-real-secret"
       }),
-      %{chunk(job, 1, "warning") | stream: "stderr"},
-      %{chunk(job, 2, "half way") | stream: "progress"},
-      %{chunk(job, 3, "not a declared stream") | stream: "telemetry"},
-      %{chunk(job, 4, String.duplicate("x", 70_000)) | stream: "stdout"}
+      %{chunk(job, 1, 0, "warning") | stream: "stderr"},
+      %{chunk(job, 2, 0, "half way") | stream: "progress"},
+      %{chunk(job, 3, 0, "not a declared stream") | stream: "telemetry"},
+      chunk(job, 4, -1, "negative offset"),
+      chunk(job, 5, 3, "gap"),
+      chunk(job, 6, 2, String.duplicate("x", 70_000))
     ]
   end
 
@@ -1884,13 +1912,14 @@ defmodule Loopex.AgentLoopTest do
     # stale or faulty executor speak on the live attempt's behalf.
     #
     # Every binding is asked for by name, and the list is the full identity a
-    # dispatched job carries rather than a selection. Three named vectors plus
-    # one with no bindings at all was not "any wrong binding": it left seven of
-    # the eleven unexercised, and they could be dropped from the coordinator's
-    # comparison together without a single case noticing. `tool_call_id` is
-    # covered by `:call_id_only` and by every other case in this file, since an
-    # event that does not name the live call is refused before any of this.
+    # dispatched job carries rather than a selection. Missing and wrong are
+    # independent fail-closed shapes, so every binding is driven once each
+    # rather than letting one mostly-empty event stand in for all missing
+    # members.
     bindings = [
+      :protocol_version,
+      :job_id,
+      :tool_call_id,
       :operation_id,
       :attempt,
       :session_id,
@@ -1900,10 +1929,11 @@ defmodule Loopex.AgentLoopTest do
       :session_epoch_at_dispatch,
       :executor_epoch,
       :executor_identity,
-      :fencing_token
+      :fencing_token,
+      :progress_sequence
     ]
 
-    modes = Enum.map(bindings, &{:wrong, &1}) ++ [:call_id_only]
+    modes = Enum.flat_map(bindings, &[{:wrong, &1}, {:missing, &1}])
 
     for mode <- modes do
       _fixture = start_with_progress(mode)
@@ -1920,6 +1950,7 @@ defmodule Loopex.AgentLoopTest do
              "an event with #{inspect(mode)} was dropped without a trace"
 
       assert refusal["tool_call_id"] == "c1"
+      assert refusal["refused_bindings"] == %{Atom.to_string(elem(mode, 1)) => 1}
     end
   end
 
@@ -1932,7 +1963,7 @@ defmodule Loopex.AgentLoopTest do
     # could not tell an attempt that behaved from one that was refused a
     # thousand times. The obligation is that a refused event is counted on the
     # attempt's private record, and the private record is the journal.
-    fixture = start_with_progress(:one_valid_two_refused)
+    fixture = start_with_progress(:one_valid_two_refused_one_valid)
 
     refusals =
       fixture
@@ -1942,14 +1973,21 @@ defmodule Loopex.AgentLoopTest do
     assert [%{payload: payload}] = refusals
     assert payload["refused_count"] == 2
     assert payload["tool_call_id"] == "c1"
+    assert payload["refused_bindings"] == %{"attempt" => 1, "fencing_token" => 1}
 
     diagnostic = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
     assert diagnostic["refused_count"] == 2
+    assert diagnostic["refused_bindings"] == payload["refused_bindings"]
 
-    # The one valid item crossed and the two refused items did not. The refusal
-    # record changes neither the receipt nor how the run ends, which is what makes
-    # counting it safe at all.
-    assert [_valid] = tool_progress_items()
+    # The two valid items crossed and the two wrong-identity items did not. An
+    # event that does not belong to the live attempt cannot consume that
+    # attempt's sequence or byte offset, so the valid item after both refusals is
+    # still sequence one at stdout offset four. The refusal record changes
+    # neither the receipt nor how the run ends, which is what makes counting it
+    # safe at all.
+    assert [first, second] = tool_progress_items()
+    assert Enum.map([first, second], & &1.progress_sequence) == [0, 1]
+    assert Enum.map([first, second], & &1.byte_offset) == [0, 4]
 
     terminal =
       fixture
@@ -1969,8 +2007,72 @@ defmodule Loopex.AgentLoopTest do
 
     assert [%{payload: quiet_payload}] = quiet_refusals
 
-    assert quiet_payload["refused_count"] == 2,
-           "the unknown stream and oversized chunk were not both counted"
+    assert quiet_payload["refused_count"] == 4,
+           "the unknown stream, two bad offsets, and oversized chunk were not all counted"
+
+    assert quiet_payload["refused_bindings"] == %{
+             "byte_offset" => 2,
+             "chunk" => 1,
+             "stream" => 1
+           }
+  end
+
+  test "a refused current-attempt payload preserves its executor sequence gap" do
+    fixture = start_with_progress(:payload_refusal_preserves_executor_gap)
+    progress_plane = receive_progress()
+
+    # The middle event proves the live attempt's full identity and next
+    # sequence, then fails its stream binding. It therefore consumes executor
+    # sequence one but no stdout bytes. Carrying the later event's supplied
+    # sequence unchanged lets the consumer see the same gap the coordinator
+    # saw, while its offset remains the next contiguous stdout byte.
+    assert [before_gap, after_gap] =
+             Enum.filter(progress_plane, &(&1.kind == :tool_progress))
+
+    assert Enum.map([before_gap, after_gap], & &1.progress_sequence) == [0, 2]
+    assert Enum.map([before_gap, after_gap], & &1.byte_offset) == [0, 2]
+
+    assert [%{payload: refusal}] =
+             fixture
+             |> Fixture.records(fixture.session_id)
+             |> Enum.filter(&(&1.payload[:kind] == "executor_progress_refused"))
+
+    assert refusal["refused_count"] == 1
+    assert refusal["refused_bindings"] == %{"stream" => 1}
+
+    assert %{progress_count: 3} =
+             Enum.find(progress_plane, &(&1.kind == :tool_stream_closed))
+  end
+
+  test "a refused progress record admits only declared contract binding names" do
+    state = %Loopex.Runtime.SessionState{session_id: "refusal-schema"}
+
+    assert {:error, :invalid_progress_refusals} =
+             Loopex.Runtime.SessionState.propose_progress_refusals(
+               state,
+               "run-1",
+               "call-1",
+               1,
+               %{"banana" => 1}
+             )
+
+    assert {:error, :invalid_progress_refusals} =
+             Loopex.Runtime.SessionState.propose_progress_refusals(
+               state,
+               "run-1",
+               "call-1",
+               1,
+               %{"attempt" => 2}
+             )
+
+    assert {:ok, _proposal} =
+             Loopex.Runtime.SessionState.propose_progress_refusals(
+               state,
+               "run-1",
+               "call-1",
+               2,
+               %{"attempt" => 1, "fencing_token" => 1}
+             )
   end
 
   test "a validated executor event carries only its bounded named payload across" do
@@ -1999,7 +2101,13 @@ defmodule Loopex.AgentLoopTest do
              |> Fixture.records(fixture.session_id)
              |> Enum.filter(&(&1.payload[:kind] == "executor_progress_refused"))
 
-    assert refusal["refused_count"] == 2
+    assert refusal["refused_count"] == 4
+
+    assert refusal["refused_bindings"] == %{
+             "byte_offset" => 2,
+             "chunk" => 1,
+             "stream" => 1
+           }
   end
 
   test "the first delta of a model attempt is sequence zero" do
@@ -4892,6 +5000,7 @@ defmodule Loopex.AgentLoopTest do
 
     first_progress.(
       Map.merge(AgentLoopProgressExecutor.identity(first), %{
+        progress_sequence: 0,
         stream: "stdout",
         byte_offset: 0,
         chunk: "first-a"
@@ -4900,6 +5009,7 @@ defmodule Loopex.AgentLoopTest do
 
     first_progress.(
       Map.merge(AgentLoopProgressExecutor.identity(first), %{
+        progress_sequence: 1,
         stream: "stdout",
         byte_offset: 7,
         chunk: "first-b"
@@ -4908,6 +5018,7 @@ defmodule Loopex.AgentLoopTest do
 
     second_progress.(
       Map.merge(AgentLoopProgressExecutor.identity(second), %{
+        progress_sequence: 0,
         stream: "stderr",
         byte_offset: 0,
         chunk: "second"
@@ -5258,7 +5369,12 @@ defmodule Loopex.AgentLoopTest do
 
     late =
       AgentLoopProgressExecutor.identity(job)
-      |> Map.merge(%{stream: "stdout", byte_offset: 999, chunk: "after the closure"})
+      |> Map.merge(%{
+        progress_sequence: 999,
+        stream: "stdout",
+        byte_offset: 999,
+        chunk: "after the closure"
+      })
 
     assert progress.(late) == :ok
 

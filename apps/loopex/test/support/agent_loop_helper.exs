@@ -157,6 +157,8 @@ defmodule Loopex.AgentLoopTestExecutor do
     end
 
     progress.(%{
+      protocol_version: job.protocol_version,
+      job_id: job.job_id,
       tool_call_id: job.tool_call_id,
       operation_id: job.operation_id,
       attempt: job.attempt,
@@ -168,6 +170,7 @@ defmodule Loopex.AgentLoopTestExecutor do
       executor_epoch: job.origin_executor_epoch,
       executor_identity: job.executor_identity,
       fencing_token: job.fencing_token,
+      progress_sequence: 0,
       stream: "stdout",
       byte_offset: 0,
       chunk: "working"

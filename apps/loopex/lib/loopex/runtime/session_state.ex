@@ -17,6 +17,25 @@ defmodule Loopex.Runtime.SessionState do
   """
 
   @max_command_bytes 65_536
+  @progress_refusal_bindings ~w(
+    protocol_version
+    job_id
+    tool_call_id
+    operation_id
+    attempt
+    session_id
+    run_id
+    turn_id
+    canonical_request_digest
+    session_epoch_at_dispatch
+    executor_epoch
+    executor_identity
+    fencing_token
+    progress_sequence
+    stream
+    byte_offset
+    chunk
+  )
 
   @typedoc """
   ## Concept
@@ -632,39 +651,58 @@ defmodule Loopex.Runtime.SessionState do
   ## Concept
 
   Records how many progress events an executor emitted that this session had no
-  standing to accept.
+  standing to accept, grouped by the binding each event failed.
 
   ## Technical depth
 
   A refused event is dropped: nothing about it is projected, published, or
   allowed to affect an outcome, a bound, or a receipt. But an executor emitting
-  events it cannot identify is a fact about that attempt, and a count that lives
-  only in the coordinator's memory disappears with the coordinator -- so a
-  reviewer reading the journal afterwards cannot tell a well-behaved attempt
-  from one that was refused a thousand times.
+  events it cannot identify is a fact about that attempt, and a count with no
+  failed-binding name cannot say which contract the executor violated. Evidence
+  that lives only in the coordinator's memory also disappears with the
+  coordinator -- so a reviewer reading the journal afterwards cannot tell a
+  well-behaved attempt from one that was refused a thousand times.
 
-  The count is this coordinator's own tally and never a number the executor
-  reported. It rides its own record rather than the receipt, because the
-  receipt's bytes are covered by the canonical mutation digest its transaction
-  is fenced on: a count that could differ between two computations of the same
-  proposal would make a `commit_unknown` retry unresolvable. This record is
-  proposed once, at stream close, when no further event can arrive.
+  The count and binding groups are this coordinator's own tally and never values
+  the executor reported. They ride their own record rather than the receipt,
+  because the receipt's bytes are covered by the canonical mutation digest its
+  transaction is fenced on: a count that could differ between two computations
+  of the same proposal would make a `commit_unknown` retry unresolvable. This
+  record is proposed once, at stream close, when no further event can arrive.
 
   Zero is not recorded. An attempt that emitted nothing refusable is the
   ordinary case and needs no row to say so.
   """
-  @spec propose_progress_refusals(t(), binary(), binary(), pos_integer()) ::
+  @spec propose_progress_refusals(
+          t(),
+          binary(),
+          binary(),
+          pos_integer(),
+          %{required(binary()) => pos_integer()}
+        ) ::
           {:ok, proposal()} | {:error, term()}
-  def propose_progress_refusals(%__MODULE__{} = state, run_id, tool_call_id, count)
-      when is_binary(run_id) and is_binary(tool_call_id) and is_integer(count) and count > 0 do
-    record = %{
-      "run_id" => run_id,
-      "tool_call_id" => tool_call_id,
-      "refused_count" => count,
-      kind: "executor_progress_refused"
-    }
+  def propose_progress_refusals(
+        %__MODULE__{} = state,
+        run_id,
+        tool_call_id,
+        count,
+        bindings
+      )
+      when is_binary(run_id) and is_binary(tool_call_id) and is_integer(count) and count > 0 and
+             is_map(bindings) do
+    if valid_refusal_bindings?(bindings, count) do
+      record = %{
+        "run_id" => run_id,
+        "tool_call_id" => tool_call_id,
+        "refused_count" => count,
+        "refused_bindings" => bindings,
+        kind: "executor_progress_refused"
+      }
 
-    internal_proposal(state, stable_id("progress-refusals", run_id, tool_call_id), record)
+      internal_proposal(state, stable_id("progress-refusals", run_id, tool_call_id), record)
+    else
+      {:error, :invalid_progress_refusals}
+    end
   end
 
   @doc """
@@ -1266,10 +1304,14 @@ defmodule Loopex.Runtime.SessionState do
          "run_id" => run_id,
          "tool_call_id" => tool_call_id,
          "refused_count" => count,
+         "refused_bindings" => bindings,
          kind: "executor_progress_refused"
        })
-       when is_binary(run_id) and is_binary(tool_call_id) and is_integer(count) and count > 0 do
-    {:ok, state, []}
+       when is_binary(run_id) and is_binary(tool_call_id) and is_integer(count) and count > 0 and
+              is_map(bindings) do
+    if valid_refusal_bindings?(bindings, count),
+      do: {:ok, state, []},
+      else: {:error, :invalid_progress_refusals}
   end
 
   defp apply_internal_record(state, %{
@@ -1620,6 +1662,13 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp apply_internal_record(_state, _record), do: {:error, :invalid_internal_transition}
+
+  defp valid_refusal_bindings?(bindings, count) do
+    map_size(bindings) > 0 and
+      Enum.all?(bindings, fn {binding, binding_count} ->
+        binding in @progress_refusal_bindings and is_integer(binding_count) and binding_count > 0
+      end) and Enum.sum(Map.values(bindings)) == count
+  end
 
   # Concept: only the deadline and an unprovable effect may end a run that is
   # still mid-turn.
