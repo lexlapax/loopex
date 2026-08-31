@@ -1,3 +1,15 @@
+unless System.get_env("LOOPEX_HOME") do
+  isolated_home =
+    Path.join(System.tmp_dir!(), "loopex-host-policy-#{System.unique_integer([:positive])}")
+
+  File.mkdir_p!(isolated_home)
+  System.put_env("LOOPEX_HOME", isolated_home)
+  System.at_exit(fn _status -> File.rm_rf(isolated_home) end)
+end
+
+Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+
 defmodule Loopex.Executor.LocalHostPolicyTest do
   @moduledoc false
 
@@ -33,6 +45,29 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     @behaviour Policy
     @impl Policy
     def decide(_request), do: {:deny, :policy_denied}
+  end
+
+  defmodule CountingDenies do
+    @moduledoc false
+    @behaviour Policy
+
+    @observer_key {__MODULE__, :observer}
+
+    def observe_from(pid), do: :persistent_term.put(@observer_key, pid)
+    def stop_observing, do: :persistent_term.erase(@observer_key)
+
+    @impl Policy
+    def decide(request) do
+      case :persistent_term.get(@observer_key, nil) do
+        observer when is_pid(observer) ->
+          send(observer, {:host_policy_decided, request.tool_call_id})
+
+        _none ->
+          :ok
+      end
+
+      {:deny, :policy_denied}
+    end
   end
 
   defmodule Raises do
@@ -142,6 +177,25 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     )
   end
 
+  defp await_run_finished(attachment, acc \\ [], attempts \\ 500)
+
+  defp await_run_finished(_attachment, _acc, 0),
+    do: flunk("the denied run never committed a terminal event")
+
+  defp await_run_finished(attachment, acc, attempts) do
+    case Loopex.next_event(attachment) do
+      {:ok, %{kind: "run.finished"} = event} ->
+        Enum.reverse([event | acc])
+
+      {:ok, event} ->
+        await_run_finished(attachment, [event | acc], attempts)
+
+      _absent ->
+        Process.sleep(10)
+        await_run_finished(attachment, acc, attempts - 1)
+    end
+  end
+
   test "every host policy implementation satisfies one policy port conformance suite" do
     # The same contract holds for each: exactly one of two resolved shapes comes
     # back, and nothing else ever does.
@@ -179,14 +233,52 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
   end
 
   test "the run continues or terminates truthfully after a denial and never retries the refused call" do
-    # A denial is a terminal outcome of the conversation, not a transient error,
-    # so it takes its place beside completed and failed rather than inviting
-    # another attempt.
-    assert :denied in Loopex.Conversation.outcomes()
+    # Concept: one tool call is refused once, reaches no executor, and becomes a
+    # durable result the model and operator can read before the run continues.
+    #
+    # Technical depth: calling the policy twice and comparing its answers proved
+    # only that this fixture was deterministic. It did not exercise the runtime,
+    # count runtime decisions, or detect a retry. The observer lives in
+    # `persistent_term` because the policy boundary deliberately executes in an
+    # isolated process; the message therefore counts the production decision
+    # point rather than a test-side rehearsal.
+    CountingDenies.observe_from(self())
+    on_exit(&CountingDenies.stop_observing/0)
 
-    # Asking again returns the same answer; nothing in the port carries retry
-    # state that could turn a second ask into a different result.
-    assert Policy.decide(Denies, request()) == Policy.decide(Denies, request())
+    fixture =
+      Loopex.AgentLoopFixture.start(
+        script: [
+          %{
+            text: "try the tool",
+            calls: [%{id: "c1", name: "write", arguments: %{"path" => "notes.txt"}}]
+          },
+          %{text: "the tool was refused", calls: []}
+        ],
+        policy: CountingDenies
+      )
+
+    on_exit(fn -> Loopex.AgentLoopFixture.stop(fixture) end)
+
+    {_session_id, attachment, reply} = Loopex.AgentLoopFixture.run(fixture, "write notes")
+    assert {:accepted, "prompt-1"} = reply
+
+    events = await_run_finished(attachment)
+
+    assert_receive {:host_policy_decided, "c1"}, 1_000
+    refute_receive {:host_policy_decided, "c1"}, 200
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+
+    tool = Enum.find(events, &(&1.kind == "tool.finished"))
+    assert tool["tool_call_id"] == "c1"
+    assert tool["outcome"] == "denied"
+
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "completed"
+
+    assert [_first, second] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
+    result = Enum.find(second.messages, &(&1["role"] == "tool"))
+    assert result["outcome"] == "denied"
+    assert result["content"] =~ "Do not retry"
   end
 
   test "a policy that raises times out or returns a malformed value fails closed into denial" do

@@ -481,7 +481,7 @@ defmodule LoopexCliTest do
   end
 
   test "loopex sessions lists the operator's sessions and loopex resume continues one" do
-    {state_root, _workspace} = roots()
+    {state_root, workspace} = roots()
 
     empty = capture_io(fn -> LoopexCli.dispatch(["sessions", "--state-root", state_root]) end)
     assert empty =~ "no sessions"
@@ -489,18 +489,58 @@ defmodule LoopexCliTest do
     {:ok, placement} = Loopex.runtime_placement_id(state_root)
     fixture = fixture(script: [%{text: "done"}], runtime_id: placement)
 
-    {:ok, session_id} =
-      Loopex.create_session(fixture.runtime, %{"surface" => "cli"}, command_id: "create-1")
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      AgentLoopFixture.run(fixture, "resume this session")
+
+    _finished = observe(attachment)
 
     :ok = Loopex.track_session(state_root, session_id, placement)
 
     listed = capture_io(fn -> LoopexCli.dispatch(["sessions", "--state-root", state_root]) end)
     assert listed =~ session_id
 
-    # Resuming continues that session under the placement identity that created
-    # it, which is the identity the directory recorded.
-    assert {:ok, _resumed} =
-             Loopex.resume_known_session(state_root, fixture.runtime, session_id, "resume-1")
+    # Resuming continues that session through the command the operator actually
+    # invokes, under the placement identity the directory recorded. The injected
+    # starter replaces only the concrete composition so this case stays offline;
+    # argument parsing, placement ownership, session lookup, facade resume,
+    # attachment, and terminal replay are the shipped command path.
+    before_epoch =
+      fixture.store
+      |> Loopex.M1RuntimeTestStore.inspect_state()
+      |> get_in([:sessions, session_id, :owner_epoch])
+
+    on_exit(fn -> restore_signal_handlers() end)
+
+    output =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch(
+                   [
+                     "resume",
+                     session_id,
+                     "--policy",
+                     "allow-all",
+                     "--state-root",
+                     state_root,
+                     "--workspace",
+                     workspace
+                   ],
+                   runtime_starter: fn options ->
+                     assert Keyword.fetch!(options, :runtime_id) == placement
+                     {:ok, fixture.runtime}
+                   end
+                 )
+      end)
+
+    assert output =~ "resume this session"
+    assert output =~ "done"
+
+    after_epoch =
+      fixture.store
+      |> Loopex.M1RuntimeTestStore.inspect_state()
+      |> get_in([:sessions, session_id, :owner_epoch])
+
+    assert after_epoch > before_epoch
 
     # And the command needs to be told which one: it never picks for the operator.
     assert {:error, message} = LoopexCli.dispatch(["resume", "--state-root", state_root])
@@ -580,7 +620,7 @@ defmodule LoopexCliTest do
   end
 
   test "loopex cancel reconciles a session left behind by a dead process and is refused against a live owner" do
-    {state_root, _workspace} = roots()
+    {state_root, workspace} = roots()
 
     # A live owner holds the placement key, so cancel refuses rather than racing
     # it: two Runtime Controls on one key is what the lock exists to prevent.
@@ -588,7 +628,12 @@ defmodule LoopexCliTest do
     assert {:ok, _pid} = Placement.live_owner(state_root)
 
     assert {:error, message} =
-             LoopexCli.dispatch(["cancel", "s_known_1", "--state-root", state_root])
+             LoopexCli.dispatch(
+               ["cancel", "s_known_1", "--state-root", state_root],
+               runtime_starter: fn _options ->
+                 flunk("a live placement owner must refuse before composition starts")
+               end
+             )
 
     assert message =~ "live loopex process"
 
@@ -629,44 +674,61 @@ defmodule LoopexCliTest do
     assert {:ok, reclaimed} = Placement.acquire(state_root)
     assert File.read!(reclaimed) == System.pid()
 
-    # Reconciling still reaches the run through the public facade: cancel is a
-    # different route to the same abort, not a private one.
+    # Reconciling still reaches a live run through the public command and facade:
+    # cancel is a different route to the same abort, not a private one. The
+    # composition seam supplies the already-isolated runtime so this case does no
+    # provider work; every command decision on either side of it remains real.
     Placement.release(reclaimed)
     {:ok, placement} = Loopex.runtime_placement_id(state_root)
-    fixture = fixture(script: [%{text: "", hold: self()}], runtime_id: placement)
+    # The predecessor consumes the first held provider attempt. Its successor
+    # must redispatch the staged request during recovery, so a second held turn
+    # keeps the run active until the command's abort reaches it.
+    fixture =
+      fixture(
+        script: [%{text: "", hold: self()}, %{text: "", hold: self()}],
+        runtime_id: placement
+      )
 
-    {:ok, session_id} =
-      Loopex.create_session(fixture.runtime, %{"surface" => "cli"}, command_id: "create-1")
+    {session_id, _attachment, {:accepted, "prompt-1"}} =
+      AgentLoopFixture.run(fixture, "do the thing")
 
     :ok = Loopex.track_session(state_root, session_id, placement)
-    {:ok, _resumed} = Loopex.resume_known_session(state_root, fixture.runtime, session_id, "r-1")
-    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+    assert_receive {:holding, _model}, 2_000
 
-    assert {:accepted, _prompt} =
-             Loopex.command(attachment, %{
-               type: :prompt,
-               command_id: "prompt-1",
-               content: "do the thing"
-             })
+    output =
+      capture_io(:stderr, fn ->
+        send(
+          self(),
+          {:cancelled,
+           LoopexCli.dispatch(
+             [
+               "cancel",
+               session_id,
+               "--state-root",
+               state_root,
+               "--workspace",
+               workspace
+             ],
+             runtime_starter: fn options ->
+               assert Keyword.fetch!(options, :runtime_id) == placement
+               assert Keyword.fetch!(options, :policy) == LoopexCli.Policy.RefuseAll
+               {:ok, fixture.runtime}
+             end
+           )}
+        )
+      end)
 
-    assert_receive {:holding, model}, 2_000
-    assert {:accepted, _id} = Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
-    send(model, :release)
+    assert_received {:cancelled, :ok}
+    assert output =~ "loopex: cancelled"
+    refute output =~ "outcome is unknown"
+    refute output =~ "--policy is required"
 
-    # And the command itself gets past the authority check with no `--policy`,
-    # which is the half the live-owner refusal above can never reach. It fails
-    # later, on a runtime this test already owns, and the failure it gives is
-    # about that rather than about a flag it should not need.
-    AgentLoopFixture.stop(fixture)
-    LoopexCli.release_placement()
+    finished =
+      fixture
+      |> AgentLoopFixture.events(session_id)
+      |> Enum.find(&(&1.kind == "run.finished"))
 
-    reconciled = LoopexCli.dispatch(["cancel", session_id, "--state-root", state_root])
-    assert match?(:ok, reconciled) or match?({:error, _reason}, reconciled)
-
-    case reconciled do
-      {:error, reason} -> refute reason =~ "--policy is required"
-      :ok -> :ok
-    end
+    assert finished["outcome"] == "cancelled"
   end
 
   test "a delayed placement release cannot remove its successor" do
