@@ -357,6 +357,33 @@ defmodule Loopex.SessionDirectoryTest do
     assert Enum.map(entries, & &1.session_id) == ["s_real"]
   end
 
+  test "a non regular session entry is refused before it can block or redirect a read", %{
+    root: root
+  } do
+    {:ok, state_root} = SessionDirectory.state_root()
+    {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
+
+    sessions = Path.join(root, "sessions")
+    File.mkdir_p!(Path.join(sessions, "not-a-session"))
+
+    assert {:ok, []} = SessionDirectory.list_sessions(state_root)
+
+    assert {:error, :invalid_session_id} =
+             SessionDirectory.record_session(
+               state_root,
+               "not-a-session",
+               runtime_id
+             )
+
+    assert {:error, :invalid_session_id} =
+             SessionDirectory.resume(
+               state_root,
+               :unused,
+               "not-a-session",
+               "resume-1"
+             )
+  end
+
   defp wait_for_barrier(barrier, target) do
     if :counters.get(barrier, 1) >= target do
       :ok

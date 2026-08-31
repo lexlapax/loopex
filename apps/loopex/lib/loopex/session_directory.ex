@@ -457,13 +457,12 @@ defmodule Loopex.SessionDirectory do
   # pointer to one somewhere else.
   #
   # Technical depth: `contained?/1` constrains the identifier and says nothing
-  # about what the name already refers to, and `File.read/1` follows a symlink to
-  # its target. Anyone able to write into the sessions directory could therefore
-  # plant `sessions/<id>` pointing at a file of their own: `list_sessions/1`
-  # reported it as a session of this state root with a `runtime_id` they chose,
-  # and because the name was taken, `record_session/3` refused the real session
-  # `:session_already_bound` against a binding this host never made. Neither the
-  # listing nor the refusal was true.
+  # about what the name already refers to, and `File.read/1` follows a symlink or
+  # can block on a FIFO. Anyone able to write into the sessions directory could
+  # therefore plant `sessions/<id>` pointing at a file of their own, or wedge a
+  # listing on a non-regular device. A session entry is the ordinary file this
+  # directory published; every other filesystem type is refused before it is
+  # opened.
   #
   # `lstat` answers about the name rather than about what it points at, which is
   # the only way to tell the two apart. A symlink is refused as an identifier
@@ -471,8 +470,8 @@ defmodule Loopex.SessionDirectory do
   # deliberately linked and admitting it would be the defect.
   defp own_entry(path) do
     case File.lstat(path) do
-      {:ok, %File.Stat{type: :symlink}} -> {:error, :invalid_session_id}
-      {:ok, _stat} -> :ok
+      {:ok, %File.Stat{type: :regular}} -> :ok
+      {:ok, _non_regular} -> {:error, :invalid_session_id}
       {:error, :enoent} -> {:error, :session_unknown}
       {:error, reason} -> {:error, {:session_entry_unreadable, reason}}
     end
