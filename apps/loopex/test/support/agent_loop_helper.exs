@@ -120,7 +120,13 @@ defmodule Loopex.AgentLoopTestExecutor do
 
   @behaviour Loopex.Executor
 
-  def start(outcomes \\ %{}, delay_ms \\ 0, cleanup \\ :cleaned, progress_gate \\ nil) do
+  def start(
+        outcomes \\ %{},
+        delay_ms \\ 0,
+        cleanup \\ :cleaned,
+        progress_gate \\ nil,
+        artifacts \\ %{}
+      ) do
     {:ok, pid} =
       Agent.start_link(fn ->
         %{
@@ -128,7 +134,8 @@ defmodule Loopex.AgentLoopTestExecutor do
           jobs: [],
           delay_ms: delay_ms,
           cleanup: cleanup,
-          progress_gate: progress_gate
+          progress_gate: progress_gate,
+          artifacts: artifacts
         }
       end)
 
@@ -155,7 +162,14 @@ defmodule Loopex.AgentLoopTestExecutor do
   def execute(pid, job, _grant, _options, progress \\ nil) do
     progress = progress || Loopex.Executor.discard_progress()
     :ok = Agent.update(pid, fn state -> %{state | jobs: [job | state.jobs]} end)
-    outcome = Agent.get(pid, &Map.get(&1.outcomes, job.tool_call_id, "completed"))
+
+    {outcome, artifacts} =
+      Agent.get(pid, fn state ->
+        {
+          Map.get(state.outcomes, job.tool_call_id, "completed"),
+          Map.get(state.artifacts, job.tool_call_id, [])
+        }
+      end)
 
     # Concept: a tool that takes real time, so a deadline can be reached while it
     # runs rather than before it starts.
@@ -233,7 +247,7 @@ defmodule Loopex.AgentLoopTestExecutor do
        observed_at_ms: System.system_time(:millisecond),
        child_environment_names: [],
        provider_credential_present: false,
-       artifacts: []
+       artifacts: artifacts
      }}
   end
 end
@@ -312,7 +326,8 @@ defmodule Loopex.AgentLoopFixture do
         outcomes,
         Keyword.get(options, :tool_delay_ms, 0),
         Keyword.get(options, :cleanup, :cleaned),
-        Keyword.get(options, :tool_progress_gate)
+        Keyword.get(options, :tool_progress_gate),
+        Keyword.get(options, :artifacts, %{})
       )
 
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "agent-loop")
