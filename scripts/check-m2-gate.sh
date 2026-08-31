@@ -653,7 +653,8 @@ require_feature \
   "a retried executor operation attempt opens its own stream domain closed by its own closure item and count" \
   "the committed assistant message is built from the reply and never assembled from deltas" \
   "a cancelled stream commits no assistant message and a late reply never becomes canonical" \
-  "an adapter that emits no deltas is conformant and declares that it does not stream"
+  "an adapter that emits no deltas is conformant and declares that it does not stream" \
+  "the model reply contract declares the optional provider response identifier"
 
 require_feature \
   "the operator cannot redirect a running task or queue the next one; there is no prompt steer follow-up algebra" \
@@ -679,6 +680,13 @@ require_feature \
   "a session binds one active model visible name to one generation and refuses a name conflict at start" \
   "a model request records the exact tool definition generation it used"
 
+# Schema evaluation is the internal authority that stops malformed model
+# arguments before policy, grant, or dispatch.
+require_feature \
+  "model tool arguments are not validated against their staged definition before policy or dispatch" \
+  apps/loopex_protocol/test/tool_definition_test.exs \
+  "arguments are checked against every declared schema constraint"
+
 # The Control service is the authority that distinguishes a real owner handoff
 # from runtime unavailability. These supporting cases stop progress, closure,
 # or post-commit admission from converting an unavailable answer into an
@@ -698,7 +706,7 @@ require_feature \
   "edit applies an exact match change and names what differed on a mismatch" \
   "bash runs an argv command and an explicit raw shell command with distinct semantics" \
   "every filesystem tool refuses a path that escapes the workspace root through traversal or a symlink" \
-  "executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted" \
+  "bash emits real progress before completion with exact identity sequence offsets and receipt count" \
   "a tool child process group is owned and terminated with its job and no group member survives" \
   "a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound"
 
@@ -1311,7 +1319,7 @@ run_selector() {
   fi
 }
 
-run_selector 1 apps/loopex/test/agent_loop_test.exs default 67 zero \
+run_selector 1 apps/loopex/test/agent_loop_test.exs default 89 zero \
   "passed=a prompt runs until the model stops requesting tools rather than after a fixed number of turns" \
   "passed=every model request carries the committed conversation history including the original prompt" \
   "passed=an assistant tool call and its real tool result are committed and replayed to the model" \
@@ -1378,9 +1386,31 @@ run_selector 1 apps/loopex/test/agent_loop_test.exs default 67 zero \
   "passed=a run that no executor answered still reports the period it would have stopped under" \
   "passed=a model delta emitted after its stream is closed is neither projected nor counted" \
   "passed=an event emitted after its stream is closed is neither projected nor counted" \
-  "passed=an abandoned tool stream closes on the count this runtime published rather than a claim"
+  "passed=an abandoned tool stream closes on the count this runtime published rather than a claim" \
+  "passed=executor progress proves its whole identity before anything is projected" \
+  "passed=a refused executor event is counted privately and never journaled" \
+  "passed=a refused current-attempt payload preserves its executor sequence gap" \
+  "passed=a validated executor event carries only its bounded named payload across" \
+  "passed=the first delta of a model attempt is sequence zero" \
+  "passed=each executor stream anchors to the current public event at its own dispatch" \
+  "passed=a Store refusal of late model attempt evidence makes clean cancellation unprovable" \
+  "passed=a late model error is retained as bounded attempt evidence without becoming history" \
+  "passed=an unreadable late model reply is retained as a bounded error instead of crashing cleanup" \
+  "passed=a model reply queued behind its deadline is retained with the deadline termination" \
+  "passed=cleanup waits for a model result sent after the supervisor answers" \
+  "passed=late model evidence binds the provider retry attempt that produced it" \
+  "passed=a model tool call preserves a JSON number argument through durable dispatch" \
+  "passed=a schema-invalid tool call fails before policy or executor sees it" \
+  "passed=an undeclared late provider field becomes bounded error and never reaches the journal" \
+  "passed=an unreadable live model reply abandons and retries its attempt" \
+  "passed=nested provider fields are projected out of valid late evidence" \
+  "passed=a deeply nested late provider term becomes bounded error at the Store boundary" \
+  "passed=a malformed streamed flag in a late reply becomes bounded error" \
+  "passed=a late reply whose streamed flag contradicts its count becomes bounded error" \
+  "passed=an oversized valid late reply is retained as bounded error" \
+  "passed=a late model error retains only its generic bounded category"
 
-run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs default 15 zero \
+run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs default 16 zero \
   "passed=every model adapter satisfies one streaming conformance suite" \
   "passed=each canonical delta kind is bounded plain data carrying no provider or host term" \
   "passed=a text delta is observable while its operation is still incomplete rather than after the reply returns" \
@@ -1395,7 +1425,8 @@ run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs defaul
   "passed=an adapter that emits no deltas is conformant and declares that it does not stream" \
   "passed=a delta missing a field its kind declares is refused rather than projected" \
   "passed=a delta field whose size the ceiling cannot see is refused rather than projected" \
-  "passed=an abandoned domain is closed and stated rather than guessed from a stream that stopped"
+  "passed=an abandoned domain is closed and stated rather than guessed from a stream that stopped" \
+  "passed=the model reply contract declares the optional provider response identifier"
 
 run_selector 3 apps/loopex/test/input_algebra_test.exs default 9 zero \
   "passed=a prompt starts a run only while the session is settled and is otherwise refused" \
@@ -1415,7 +1446,7 @@ run_selector 4 apps/loopex_executor_local/test/coding_tools_test.exs default 39 
   "passed=bash runs an argv command and an explicit raw shell command with distinct semantics" \
   "passed=bash reports a nonzero exit as failed and names the status the command exited with" \
   "passed=every filesystem tool refuses a path that escapes the workspace root through traversal or a symlink" \
-  "passed=executor progress carries the full identity epoch digest and fence tuple and a refused event is dropped and counted" \
+  "passed=bash emits real progress before completion with exact identity sequence offsets and receipt count" \
   "passed=a coding tool command receives a constructed provider credential free environment and its receipt records that declared environment" \
   "passed=a tool child process group is owned and terminated with its job and no group member survives" \
   "passed=a long running job carries the run deadline is terminated at expiry and its cleanup is confirmed before the run commits its bound" \
@@ -1547,6 +1578,11 @@ run_selector registry apps/loopex/test/tool_registry_test.exs default 5 zero \
   "passed=a conflicting tool id and version registration is refused with an explicit reason" \
   "passed=a session binds one active model visible name to one generation and refuses a name conflict at start" \
   "passed=a model request records the exact tool definition generation it used"
+
+# Tool-schema evaluation is the internal mechanism that keeps invalid model
+# arguments out of policy, grant, and executor boundaries.
+run_selector tool-schema apps/loopex_protocol/test/tool_definition_test.exs default 10 zero \
+  "passed=arguments are checked against every declared schema constraint"
 
 # Owner-loss admission is cross-cutting stream machinery rather than an
 # operator outcome. These cases protect the distinction between an unavailable
