@@ -1901,6 +1901,12 @@ defmodule Loopex.AgentLoopTest do
     assert job.workspace_ref == "workspace-ref"
     assert job.workspace_lease == "workspace-lease"
 
+    assert Enum.all?(items, &(&1.turn_id == job.turn_id)),
+           "the projection did not retain the dispatched job's turn identity"
+
+    assert Enum.all?(items, &(&1.tool_call_id == job.tool_call_id)),
+           "the projection did not retain the dispatched job's tool-call identity"
+
     # Plain data: encoding it must not raise, which it does for a pid, port,
     # reference, or function anywhere inside.
     assert is_binary(LoopexProtocol.Canonical.encode(first))
