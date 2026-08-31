@@ -857,8 +857,25 @@ defmodule Loopex.LLM.ReqLLM do
   end
 
   # `inspect/2` bounds collection members and printable members, not the complete
-  # rendered diagnostic. Keep the public failure plane bounded after redaction.
-  defp inspect_bound(inspected), do: String.slice(inspected, 0, 4_096)
+  # rendered diagnostic. Keep the public failure plane bounded in bytes after
+  # redaction; a character count would admit up to four times the declared
+  # boundary for multibyte UTF-8. The inspected term is valid UTF-8, so at most
+  # three trailing bytes need to be removed after a byte cut.
+  defp inspect_bound(inspected) when byte_size(inspected) <= 4_096, do: inspected
+
+  defp inspect_bound(inspected) do
+    inspected
+    |> binary_part(0, 4_096)
+    |> valid_utf8_prefix()
+  end
+
+  defp valid_utf8_prefix(prefix) do
+    if String.valid?(prefix) do
+      prefix
+    else
+      valid_utf8_prefix(binary_part(prefix, 0, byte_size(prefix) - 1))
+    end
+  end
 
   defp endpoint(%{base_url: url}) when is_binary(url) and url != "", do: url
   defp endpoint(%{provider: provider}), do: provider_default_endpoint(provider)

@@ -633,6 +633,10 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
 
     assert escaped_diagnostic =~ "[redacted credential]"
     refute escaped_diagnostic =~ "escaped"
+
+    multibyte = Loopex.LLM.ReqLLM.scrub_error(String.duplicate("🙂", 5_000), nil)
+    assert byte_size(multibyte) <= 4_096
+    assert String.valid?(multibyte)
   end
 
   test "a completion the provider finished with nothing to say is a success and not an interruption" do
