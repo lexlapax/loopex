@@ -1079,3 +1079,35 @@ review. The administrative transition changes only the `M2` Acceptance row and
 this new disposition record; the accepted amendment section, normative
 envelopes, locked gate, portable enforcement, register, and product bytes are
 unchanged.
+
+<a id="disposition-m2-gate-amendment-3-2026-08-31"></a>
+### M2 gate Amendment 3 acceptance — 2026-08-31
+
+The maintainer explicitly accepted
+[Amendment 3](../plans/M2-gate.md#amendment-3) to the accepted `M2` plan pair
+and locked gate as proposed at exact candidate
+`530baa3567fb422bef5cffcb6ac63bdb871623a6`, after independent review of that
+exact candidate. Acceptance binds the amended normative envelopes and gate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept envelope | `sha256:83ace70588d90135a4da12475a2e29f4cdbbbb6564b10d9e8a52a9ae5c468ce0` |
+| Technical depth envelope | `sha256:b824a0b2abbdcd46303e6bfeede3413a497311216fa7007cb61d608a1af78aef` |
+| Gate | `sha256:be0baf5332664e4da7b2d62855062f3ec6adc9104210b01324c31ba9972ebac5` |
+
+Amendment 3 binds canonical model-reply evidence, schema validation before
+policy or dispatch, truthful provider and tool progress, and the attended
+provider audit to protected identities and raised minima. The Concept envelope
+is unchanged; the Technical depth envelope and locked gate carry the accepted
+changes.
+
+**Scope of this record.** It accepts Amendment 3 alone and rebinds the `M2`
+Acceptance row to its exact proposal. It does not close `M2`, accept a closure
+candidate, authorize product integration, authorize a release, or dispose of
+any recorded limitation. The milestone remains `In review`.
+
+This record is the maintainer's disposition evidence, not the independent
+review. The administrative transition changes only the `M2` Acceptance row and
+this new disposition record; the accepted amendment sections, normative
+envelopes, locked gate, portable enforcement, register, and product bytes are
+unchanged.
