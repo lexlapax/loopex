@@ -1275,16 +1275,21 @@ defmodule LoopexCliTest do
 
     found = LoopexCli.ProjectResources.discover(workspace)
     assert %{entries: [%{label: "AGENTS.md"}]} = found
-    assert {:ok, digest, _resolved} = Loopex.ProjectResource.digest(found)
+    runtime_manifest = LoopexCli.ProjectResources.runtime_manifest(found)
+    assert {:ok, digest, [resolved_entry]} = Loopex.ProjectResource.digest(runtime_manifest)
+    assert found.workspace.workspace_ref =~ ~r/^workspace:[0-9a-f]{64}$/
+    refute found.workspace.workspace_ref == workspace
+    refute Map.has_key?(hd(runtime_manifest.entries), :resolved_path)
 
-    # Presented: every resolved path, its provenance class, its trust class, and
-    # the digest, before anything is asked.
+    # Presented: every resolved path, its content digest, provenance class,
+    # trust class, and the manifest digest before anything is asked.
     {shown, admitted} =
       with_input("y\n", fn -> LoopexCli.ProjectResources.decide(found, workspace, true) end)
 
     assert shown =~ "AGENTS.md"
     assert shown =~ "provenance workspace_root"
     assert shown =~ "trust class project_resource"
+    assert shown =~ resolved_entry.content_digest
     assert shown =~ digest
     assert shown =~ "admit these project resources for this run?"
 
@@ -1293,17 +1298,23 @@ defmodule LoopexCliTest do
     assert %{
              manifest_digest: ^digest,
              trust_scope: "project_resource",
-             decision_source: "terminal_prompt",
+             decision_source: "interactive_operator",
+             issued_at: issued_at,
              revocation_state: "active",
              expires_at: nil
            } = admitted
 
+    assert {:ok, _instant, 0} = DateTime.from_iso8601(issued_at)
     assert admitted.workspace_ref == found.workspace.workspace_ref
 
     # And it is a decision the kernel actually admits: the content reaches the
     # staged request rather than being withheld anyway.
     admitting =
-      fixture(script: [%{text: "done"}], project_manifest: found, project_decision: admitted)
+      fixture(
+        script: [%{text: "done"}],
+        project_manifest: runtime_manifest,
+        project_decision: admitted
+      )
 
     {_admitted_session, admitting_attachment, {:accepted, _admitting_id}} =
       AgentLoopFixture.run(admitting, "do the thing")
@@ -1341,9 +1352,10 @@ defmodule LoopexCliTest do
 
     # A headless run with a manifest and no decision still does the coding task,
     # and the staged bytes carry none of the withheld content.
-    assert {:declined, :no_decision, _detail} = Loopex.ProjectResource.resolve(found, nil)
+    assert {:declined, :no_decision, _detail} =
+             Loopex.ProjectResource.resolve(runtime_manifest, nil)
 
-    fixture = fixture(script: [%{text: "done"}], project_manifest: found)
+    fixture = fixture(script: [%{text: "done"}], project_manifest: runtime_manifest)
     {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "do the thing")
 
     finished = Enum.find(events(observe(attachment)), &(&1.kind == "run.finished"))
@@ -1371,7 +1383,10 @@ defmodule LoopexCliTest do
     {command_root, command_workspace} = roots()
     File.write!(Path.join(command_workspace, "AGENTS.md"), "always run the tests")
     command_manifest = LoopexCli.ProjectResources.discover(command_workspace)
-    assert {:ok, command_digest, _resolved} = Loopex.ProjectResource.digest(command_manifest)
+    command_runtime_manifest = LoopexCli.ProjectResources.runtime_manifest(command_manifest)
+
+    assert {:ok, command_digest, _resolved} =
+             Loopex.ProjectResource.digest(command_runtime_manifest)
 
     command_parent = self()
 
@@ -1410,13 +1425,21 @@ defmodule LoopexCliTest do
       end
 
     assert_receive {:command_project_options, command_options}
-    assert Keyword.fetch!(command_options, :project_manifest) == command_manifest
+    assert Keyword.fetch!(command_options, :project_manifest) == command_runtime_manifest
+
+    refute Enum.any?(
+             Keyword.fetch!(command_options, :project_manifest).entries,
+             &Map.has_key?(&1, :resolved_path)
+           )
 
     assert %{
              manifest_digest: ^command_digest,
-             decision_source: "terminal_prompt",
+             decision_source: "interactive_operator",
+             issued_at: command_issued_at,
              revocation_state: "active"
            } = Keyword.fetch!(command_options, :project_decision)
+
+    assert {:ok, _instant, 0} = DateTime.from_iso8601(command_issued_at)
 
     assert commanded =~ "project resources found in this workspace",
            "the command did not run discovery: #{String.slice(commanded, 0, 400)}"
@@ -1526,7 +1549,7 @@ defmodule LoopexCliTest do
     assert byte_size(retained) == 65_537
 
     assert {:error, :over_limit, %{"observed_bytes" => 65_537, "limit_bytes" => 65_536}} =
-             Loopex.ProjectResource.digest(manifest)
+             Loopex.ProjectResource.digest(LoopexCli.ProjectResources.runtime_manifest(manifest))
 
     # The same reader is bounded when the file grows after its identity is
     # checked but before its bytes are consumed. The opener is the exact seam

@@ -562,8 +562,9 @@ defmodule LoopexCli do
       # the terminal -- asks. Both the manifest and whatever decision was taken
       # are carried in: with no decision the kernel journals a receipt naming
       # the manifest it withheld, rather than one saying nothing was found.
-      manifest = ProjectResources.discover(workspace)
-      decision = ProjectResources.decide(manifest, workspace)
+      discovered = ProjectResources.discover(workspace)
+      decision = ProjectResources.decide(discovered, workspace)
+      manifest = ProjectResources.runtime_manifest(discovered)
 
       runtime_starter = Keyword.get(options, :runtime_starter, &LoopexComposition.start/1)
 

@@ -36,6 +36,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Policy
   alias Loopex.ProjectResource
   alias Loopex.StreamDomain
+  alias LoopexProtocol.Canonical
   alias LoopexProtocol.ToolDefinition
   alias Loopex.Store
   alias Loopex.Store.OwnerLane
@@ -1039,9 +1040,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
     steer = SessionState.pending_steer(state.durable, run_id)
 
     with {:ok, max_tokens} <- declared_max_tokens(state),
-         {blocks, receipt} = project_blocks(state),
+         {blocks, project_receipt} = project_blocks(state),
+         system = system_block(state),
+         session_entries = Conversation.session_entries(elements),
          messages =
-           Conversation.project(elements, system: system_block(state), project_blocks: blocks),
+           Conversation.project(elements, system: system, project_blocks: blocks),
          messages = messages ++ steer_message(steer),
          deadline = run_deadline(declared),
          {:ok, request} <-
@@ -1049,6 +1052,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
              tools: state.active_tools,
              sampling: %{"max_tokens" => max_tokens},
              deadline: deadline
+           ),
+         {:ok, receipt} <-
+           context_receipt(
+             request,
+             context_sources(project_receipt, session_entries, steer, run_id),
+             project_receipt
            ),
          {:ok, proposal} <-
            SessionState.propose_model_request(state.durable, run_id, request,
@@ -1144,6 +1153,128 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:staged, blocks, detail} -> {blocks, ProjectResource.receipt(:staged, detail)}
       {:declined, reason, detail} -> {[], ProjectResource.receipt(reason, detail)}
     end
+  end
+
+  # Concept: every byte class staged for a model call says where it came from,
+  # what trust it carries, and what it cost before the provider sees it.
+  #
+  # Technical depth: this is one final ordered receipt over the three provenance
+  # classes ADR 0010 fixes for M2. The provider identity is the fixed local
+  # context stage, not the model provider; a future pluggable pipeline can change
+  # that identity without migrating the descriptor algebra. Project-resource
+  # admission remains nested so a declined class keeps its exact reason even
+  # though it contributes no block.
+  defp context_receipt(request, message_sources, project_receipt) do
+    # Technical depth: `Enum.zip/2` truncates silently. A projection/source
+    # disagreement is therefore refused before commit instead of producing a
+    # receipt that simply omits the tail of the request it claims to describe.
+    if length(request.messages) == length(message_sources) do
+      message_blocks =
+        request.messages
+        |> Enum.zip(message_sources)
+        |> Enum.map(fn {message, source} ->
+          context_descriptor(source, Canonical.encode(message))
+        end)
+
+      tool_blocks = Enum.map(request.tools, &tool_descriptor/1)
+      blocks = message_blocks ++ tool_blocks
+
+      {:ok,
+       %{
+         "provider_identity" => "loopex.context.reference",
+         "provider_revision" => 1,
+         "token_estimator" => Bounds.estimator(),
+         "blocks" => blocks,
+         "totals" => context_totals(blocks),
+         "project_resource" => project_receipt
+       }}
+    else
+      {:error, :context_receipt_source_mismatch}
+    end
+  end
+
+  defp context_sources(project_receipt, session_entries, steer, run_id) do
+    [source("loopex.system.v1", "system")] ++
+      project_sources(project_receipt) ++
+      Enum.map(session_entries, fn {source_reference, _message} ->
+        source(source_reference, "session")
+      end) ++ steer_sources(steer, run_id)
+  end
+
+  defp tool_descriptor(tool) do
+    definition_digest = ToolDefinition.definition_digest(tool)
+
+    source_reference =
+      "tool_definition:#{Map.fetch!(tool, "tool_id")}:#{Map.fetch!(tool, "tool_version")}:" <>
+        definition_digest
+
+    context_descriptor(source(source_reference, "system"), ToolDefinition.canonical_bytes(tool))
+  end
+
+  defp project_sources(%{
+         "disposition" => "staged",
+         "detail" => %{
+           "workspace_ref" => workspace_ref,
+           "manifest_digest" => manifest_digest,
+           "entries" => entries
+         }
+       }) do
+    Enum.map(entries, fn entry ->
+      source_reference =
+        "project:#{workspace_ref}:#{manifest_digest}:#{entry["relative_label"]}"
+
+      source(source_reference, "project_resource")
+      |> Map.put("source_content_digest", entry["content_digest"])
+      |> Map.put("source_byte_size", entry["byte_size"])
+    end)
+  end
+
+  defp project_sources(_declined), do: []
+
+  defp steer_sources(nil, _run_id), do: []
+
+  defp steer_sources(%{command_id: command_id}, run_id),
+    do: [source("session:#{run_id}:steer:#{command_id}", "session")]
+
+  defp source(source_reference, provenance_class) do
+    trust_class =
+      case provenance_class do
+        "system" -> "host_owned_trusted_brain_content"
+        "session" -> "session_owned_durable_truth"
+        "project_resource" -> "untrusted_behavior_shaping_data"
+      end
+
+    %{
+      "source_reference" => source_reference,
+      "provenance_class" => provenance_class,
+      "trust_class" => trust_class
+    }
+  end
+
+  defp context_descriptor(source, bytes) do
+    Map.merge(source, %{
+      "content_digest" => Canonical.digest_bytes(bytes),
+      "byte_cost" => byte_size(bytes),
+      "token_cost" => Bounds.estimate(bytes)
+    })
+  end
+
+  defp context_totals(blocks) do
+    by_provenance =
+      blocks
+      |> Enum.group_by(& &1["provenance_class"])
+      |> Map.new(fn {provenance, descriptors} -> {provenance, sum_costs(descriptors)} end)
+
+    Map.put(sum_costs(blocks), "by_provenance", by_provenance)
+  end
+
+  defp sum_costs(blocks) do
+    Enum.reduce(blocks, %{"byte_cost" => 0, "token_cost" => 0}, fn block, totals ->
+      %{
+        "byte_cost" => totals["byte_cost"] + block["byte_cost"],
+        "token_cost" => totals["token_cost"] + block["token_cost"]
+      }
+    end)
   end
 
   defp steer_message(nil), do: []

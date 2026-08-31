@@ -34,6 +34,7 @@ defmodule LoopexCli.ProjectResources do
   """
 
   alias Loopex.ProjectResource
+  alias LoopexProtocol.Canonical
   alias __MODULE__.ResourceReader
 
   # Concept: a symlink chain has to end somewhere, and a cycle is a filesystem an
@@ -74,6 +75,14 @@ defmodule LoopexCli.ProjectResources do
   def discover(workspace), do: discover(workspace, [])
 
   @doc false
+  @spec runtime_manifest(map() | nil) :: map() | nil
+  def runtime_manifest(nil), do: nil
+
+  def runtime_manifest(%{entries: entries} = manifest) when is_list(entries) do
+    %{manifest | entries: Enum.map(entries, &Map.drop(&1, [:resolved_path]))}
+  end
+
+  @doc false
   @spec discover(Path.t(), keyword()) :: map() | nil
   def discover(workspace, options) when is_list(options) do
     after_containment = Keyword.get(options, :after_containment, fn _resolved -> :ok end)
@@ -88,7 +97,7 @@ defmodule LoopexCli.ProjectResources do
           %{
             entries: found,
             workspace: %{
-              workspace_ref: root,
+              workspace_ref: workspace_reference(root, root_identity),
               repository_origin: nil,
               revision: revision(workspace)
             }
@@ -169,7 +178,16 @@ defmodule LoopexCli.ProjectResources do
   defp read_entry(label, resolved, root, root_identity, read_limit) do
     case ResourceReader.read_contained(resolved, root, root_identity, read_limit) do
       {:ok, content} ->
-        [%{label: label, content: content, contained: true, resolved_path: resolved}]
+        [
+          %{
+            label: label,
+            content: content,
+            byte_size: byte_size(content),
+            content_digest: Canonical.digest_bytes(content),
+            contained: true,
+            resolved_path: resolved
+          }
+        ]
 
       {:refused, reason} when reason in [:absent, :not_regular] ->
         []
@@ -194,6 +212,23 @@ defmodule LoopexCli.ProjectResources do
   # contain `/workspace-elsewhere`, which a bare prefix test would admit.
   defp contained?(path, "/"), do: String.starts_with?(path, "/")
   defp contained?(path, root), do: path == root or String.starts_with?(path, root <> "/")
+
+  # Concept: core receives an opaque workspace identity, never the host path it
+  # would need filesystem authority to interpret.
+  #
+  # Technical depth: the canonical root and its directory identity are host-side
+  # inputs to a deterministic digest. A replacement checkout or different root
+  # therefore invalidates the decision, while the value crossing into core
+  # reveals no joinable or openable path.
+  defp workspace_reference(root, {major_device, inode}) do
+    identity = %{
+      "canonical_root" => root,
+      "major_device" => major_device,
+      "inode" => inode
+    }
+
+    "workspace:" <> Canonical.digest(identity)
+  end
 
   @doc false
   @spec resolve_path(Path.t()) :: {:ok, Path.t()} | {:error, term()}
@@ -295,13 +330,13 @@ defmodule LoopexCli.ProjectResources do
   end
 
   def decide(manifest, workspace, operator_present) do
-    case ProjectResource.digest(manifest) do
+    case ProjectResource.digest(runtime_manifest(manifest)) do
       {:error, _reason, _detail} ->
         announce(manifest, workspace)
         nil
 
-      {:ok, digest, resolved} ->
-        present(digest, resolved)
+      {:ok, digest, _resolved} ->
+        present(digest, manifest.entries)
 
         if operator_present do
           ask(manifest, digest)
@@ -355,7 +390,8 @@ defmodule LoopexCli.ProjectResources do
         manifest_digest: digest,
         workspace_ref: manifest.workspace.workspace_ref,
         trust_scope: "project_resource",
-        decision_source: "terminal_prompt",
+        decision_source: "interactive_operator",
+        issued_at: DateTime.utc_now() |> DateTime.to_iso8601(),
         revocation_state: "active",
         expires_at: nil
       }
@@ -380,7 +416,7 @@ defmodule LoopexCli.ProjectResources do
       IO.puts(
         :stderr,
         "  \u00b7 #{entry.label} at #{shown_path(entry)} " <>
-          "(#{byte_size(entry.content)} bytes, " <>
+          "(#{byte_size(entry.content)} bytes, digest #{entry.content_digest}, " <>
           "provenance workspace_root, trust class project_resource)"
       )
     end
@@ -401,10 +437,11 @@ defmodule LoopexCli.ProjectResources do
 
   ## Technical depth
 
-  Prints each resolved label, its provenance, its size, and the manifest digest
-  a decision would bind — then says plainly that this run withholds it, because
-  a non-interactive terminal took no decision. Written to standard error, beside
-  the rest of the run's commentary, so a redirected answer is unaffected.
+  Prints each resolved label, its provenance, size, and content digest, plus the
+  manifest digest a decision would bind — then says plainly that this run
+  withholds it, because a non-interactive terminal took no decision. Written to
+  standard error, beside the rest of the run's commentary, so a redirected
+  answer is unaffected.
 
   A manifest the kernel refuses is reported with the reason it gave. Failing
   closed withholds content and never the runtime, so the run continues either
@@ -420,15 +457,16 @@ defmodule LoopexCli.ProjectResources do
   end
 
   def announce(manifest, _workspace) do
-    case ProjectResource.digest(manifest) do
-      {:ok, digest, resolved} ->
+    case ProjectResource.digest(runtime_manifest(manifest)) do
+      {:ok, digest, _resolved} ->
         IO.puts(:stderr, "loopex: project resources found, and withheld from this run:")
 
-        for entry <- resolved do
+        for entry <- manifest.entries do
           IO.puts(
             :stderr,
             "  · #{entry.label} at #{shown_path(entry)} " <>
-              "(#{byte_size(entry.content)} bytes, from the workspace root)"
+              "(#{byte_size(entry.content)} bytes, digest #{entry.content_digest}, " <>
+              "from the workspace root)"
           )
         end
 

@@ -53,6 +53,16 @@ defmodule Loopex.ProjectResource do
   @permitted_labels ["AGENTS.md"]
   @per_resource_bytes 64 * 1024
   @class_total_bytes 64 * 1024
+  @decision_keys [
+    :decision_source,
+    :expires_at,
+    :issued_at,
+    :manifest_digest,
+    :revocation_state,
+    :trust_scope,
+    :workspace_ref
+  ]
+  @decision_sources ["interactive_operator", "host_supplied"]
 
   @typedoc """
   ## Concept
@@ -86,7 +96,9 @@ defmodule Loopex.ProjectResource do
           required(:workspace_ref) => binary(),
           required(:trust_scope) => binary(),
           required(:decision_source) => binary(),
-          optional(atom()) => term()
+          required(:issued_at) => binary(),
+          required(:expires_at) => binary() | nil,
+          required(:revocation_state) => binary()
         }
 
   @doc """
@@ -143,8 +155,8 @@ defmodule Loopex.ProjectResource do
           Enum.map(ordered, fn entry ->
             %{
               "relative_label" => entry.label,
-              "byte_size" => byte_size(entry.content),
-              "content_digest" => Canonical.digest_bytes(entry.content),
+              "byte_size" => entry.byte_size,
+              "content_digest" => entry.content_digest,
               "contained" => true
             }
           end),
@@ -186,11 +198,11 @@ defmodule Loopex.ProjectResource do
   workspace identity is inside the digested manifest.
 
   The last two rows are checked because the fields exist. `revocation_state`
-  and `expires_at` are part of the shape a decision is recorded in, so a host
-  that sets either one is entitled to have it mean something; matching on the
-  digest and the scope alone admitted a decision its own record said was no
-  longer good, which is worse than not carrying the fields at all. A decision
-  omitting them is active and does not expire, which is what M2 mints.
+  and `expires_at` are required members of the exact decision shape, so a host
+  is entitled to have each value mean something; matching on the digest and the
+  scope alone admitted a decision its own record said was no longer good, which
+  is worse than not carrying the fields at all. M2 mints `active` and `nil`
+  explicitly rather than treating an omitted field as permission.
   """
   @spec resolve(term(), term()) ::
           {:staged, [binary()], map()} | {:declined, atom(), map()}
@@ -202,12 +214,21 @@ defmodule Loopex.ProjectResource do
         {:declined, reason, detail}
 
       {:ok, manifest_digest, ordered} ->
+        workspace_ref = manifest.workspace.workspace_ref
+
         case decision do
-          %{manifest_digest: ^manifest_digest, trust_scope: "project_resource"} = admitted ->
+          %{
+            manifest_digest: ^manifest_digest,
+            workspace_ref: ^workspace_ref,
+            trust_scope: "project_resource"
+          } = admitted ->
             admit(admitted, manifest_digest, ordered)
 
           %{manifest_digest: other} when is_binary(other) ->
             {:declined, :binding_changed, %{"expected" => manifest_digest, "decision" => other}}
+
+          supplied when is_map(supplied) ->
+            {:declined, :binding_changed, %{"reason" => "decision binding is incomplete"}}
 
           _absent ->
             {:declined, :no_decision, %{"manifest_digest" => manifest_digest}}
@@ -216,20 +237,34 @@ defmodule Loopex.ProjectResource do
   end
 
   defp admit(admitted, manifest_digest, ordered) do
-    with :ok <- check_revocation(Map.get(admitted, :revocation_state)),
+    with :ok <- validate_decision(admitted),
+         :ok <- check_revocation(Map.fetch!(admitted, :revocation_state)),
          :ok <- check_expiry(Map.get(admitted, :expires_at)) do
       {:staged, Enum.map(ordered, &block/1),
        %{
          "manifest_digest" => manifest_digest,
-         "decision_source" => Map.get(admitted, :decision_source, "host_supplied"),
-         "labels" => Enum.map(ordered, & &1.label)
+         "decision_source" => Map.fetch!(admitted, :decision_source),
+         "workspace_ref" => Map.fetch!(admitted, :workspace_ref),
+         "entries" => Enum.map(ordered, &source_entry/1)
        }}
     else
       {:declined, reason, detail} -> {:declined, reason, detail}
     end
   end
 
-  defp check_revocation(nil), do: :ok
+  defp validate_decision(decision) do
+    with true <- Enum.sort(Map.keys(decision)) == @decision_keys,
+         true <- Map.fetch!(decision, :decision_source) in @decision_sources,
+         {:ok, _instant, _offset} <- DateTime.from_iso8601(Map.fetch!(decision, :issued_at)) do
+      :ok
+    else
+      _invalid ->
+        {:declined, :binding_changed, %{"reason" => "decision record is invalid"}}
+    end
+  rescue
+    _invalid -> {:declined, :binding_changed, %{"reason" => "decision record is invalid"}}
+  end
+
   defp check_revocation("active"), do: :ok
   defp check_revocation(state), do: {:declined, :decision_revoked, %{"state" => inspect(state)}}
 
@@ -286,29 +321,63 @@ defmodule Loopex.ProjectResource do
     "<project_resource label=\"#{entry.label}\">\n#{entry.content}\n</project_resource>"
   end
 
+  defp source_entry(entry) do
+    %{
+      "relative_label" => entry.label,
+      "content_digest" => entry.content_digest,
+      "byte_size" => entry.byte_size
+    }
+  end
+
   defp validate_entries([]), do: :ok
 
   defp validate_entries(entries) do
-    Enum.reduce_while(entries, :ok, fn entry, :ok ->
-      cond do
-        not (is_map(entry) and is_binary(Map.get(entry, :label)) and
-                 is_binary(Map.get(entry, :content))) ->
-          {:halt, {:error, :manifest_rejected, %{"reason" => "entry is not bounded plain data"}}}
+    labels = Enum.map(entries, &Map.get(&1, :label))
 
-        entry.label not in @permitted_labels ->
-          {:halt,
-           {:error, :manifest_rejected,
-            %{"reason" => "unpermitted label", "label" => entry.label}}}
+    if length(labels) != MapSet.size(MapSet.new(labels)) do
+      {:error, :manifest_rejected, %{"reason" => "duplicate resource label"}}
+    else
+      Enum.reduce_while(entries, :ok, fn entry, :ok ->
+        expected_keys = [:byte_size, :contained, :content, :content_digest, :label]
 
-        Map.get(entry, :contained) != true ->
-          {:halt,
-           {:error, :manifest_rejected,
-            %{"reason" => "entry was not reported contained", "label" => entry.label}}}
+        cond do
+          not (is_map(entry) and not is_struct(entry) and
+                 Enum.sort(Map.keys(entry)) == expected_keys and
+                 is_binary(Map.get(entry, :label)) and
+                 is_binary(Map.get(entry, :content)) and
+                 is_integer(Map.get(entry, :byte_size)) and
+                   is_binary(Map.get(entry, :content_digest))) ->
+            {:halt,
+             {:error, :manifest_rejected, %{"reason" => "entry is not bounded plain data"}}}
 
-        true ->
-          {:cont, :ok}
-      end
-    end)
+          entry.label not in @permitted_labels ->
+            {:halt,
+             {:error, :manifest_rejected,
+              %{"reason" => "unpermitted label", "label" => entry.label}}}
+
+          entry.contained != true ->
+            {:halt,
+             {:error, :manifest_rejected,
+              %{"reason" => "entry was not reported contained", "label" => entry.label}}}
+
+          entry.byte_size != byte_size(entry.content) ->
+            {:halt,
+             {:error, :manifest_rejected,
+              %{"reason" => "declared byte size does not match content", "label" => entry.label}}}
+
+          entry.content_digest != Canonical.digest_bytes(entry.content) ->
+            {:halt,
+             {:error, :manifest_rejected,
+              %{
+                "reason" => "declared content digest does not match content",
+                "label" => entry.label
+              }}}
+
+          true ->
+            {:cont, :ok}
+        end
+      end)
+    end
   end
 
   defp validate_sizes(entries) do

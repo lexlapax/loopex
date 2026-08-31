@@ -110,6 +110,10 @@ defmodule Loopex.Conversation do
       project_elements(elements)
   end
 
+  @doc false
+  @spec session_entries([element()]) :: [{binary(), message()}]
+  def session_entries(elements) when is_list(elements), do: project_entries(elements)
+
   @doc """
   ## Concept
 
@@ -228,12 +232,21 @@ defmodule Loopex.Conversation do
         ". Do not assume it succeeded and do not retry it."
 
   defp project_elements(elements) do
-    Enum.flat_map(elements, fn
-      %{kind: :user_message, content: content} ->
-        [%{"role" => "user", "content" => content}]
+    Enum.map(project_entries(elements), &elem(&1, 1))
+  end
 
-      %{kind: :assistant_message} = assistant ->
-        [assistant_message(assistant) | turn_results(elements, assistant)]
+  defp project_entries(elements) do
+    Enum.flat_map(elements, fn
+      %{kind: :user_message, run_id: run_id, command_id: command_id, content: content} ->
+        [
+          {"session:#{run_id}:command:#{command_id}", %{"role" => "user", "content" => content}}
+        ]
+
+      %{kind: :assistant_message, run_id: run_id, turn_number: turn_number} = assistant ->
+        [
+          {"session:#{run_id}:turn:#{turn_number}:assistant", assistant_message(assistant)}
+          | turn_result_entries(elements, assistant)
+        ]
 
       %{kind: :tool_result} ->
         # Concept: results are emitted with their assistant message, not here.
@@ -282,7 +295,7 @@ defmodule Loopex.Conversation do
     }
   end
 
-  defp turn_results(elements, assistant) do
+  defp turn_result_entries(elements, assistant) do
     by_call =
       elements
       |> Enum.filter(&(&1.kind == :tool_result and &1.turn_number == assistant.turn_number))
@@ -294,11 +307,14 @@ defmodule Loopex.Conversation do
       case Map.fetch(by_call, tool_call_id) do
         {:ok, result} ->
           [
-            %{
-              "role" => "tool",
-              "tool_call_id" => tool_call_id,
-              "outcome" => Atom.to_string(result.outcome),
-              "content" => result.content
+            {
+              "session:#{result.run_id}:turn:#{result.turn_number}:tool:#{tool_call_id}",
+              %{
+                "role" => "tool",
+                "tool_call_id" => tool_call_id,
+                "outcome" => Atom.to_string(result.outcome),
+                "content" => result.content
+              }
             }
           ]
 
