@@ -38,13 +38,14 @@ usable coding loop — that loop ran a fixed two turns, carried no conversation
 history, and exposed two demonstration tools, so the only way to drive it was a
 test selector.
 
-`M2` is in review on its own branch. It makes that loop a command:
+M2 makes that loop a command:
 `loopex` submits a prompt into a durable session, the answer streams as it is
 produced, the loop runs as many turns as the task needs while the model sees the
 whole conversation and the real output of every tool it ran, four coding tools
 act on a real workspace under a host policy that can refuse, and yesterday's
-session can be found and continued. Its product implementation stays on the
-milestone branch until closure; `main`'s product baseline remains M1.
+session can be found and continued. The marked status capsule above and the
+canonical plan register state whether those bytes are still a milestone
+candidate or part of the closed product baseline.
 
 Loopex remains source-tree milestone work, not
 an installable package, release, or frozen public API. Start with the

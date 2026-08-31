@@ -1,11 +1,10 @@
 # Development
 
-Loopex has closed its M0 feasibility and M1 working-loop milestones. `M2`, the
-coding-session milestone, is in review on its designated milestone branch: it
-remains unclosed until its retained multi-toolchain evidence, exact gate,
-independent review, and maintainer closure disposition are complete. This document describes
-how to validate and work on the repository, and it owns the commands, not the
-milestone state. There is no installable package and no public product surface.
+Loopex development is milestone-governed. This document describes how to
+validate and work on the repository, and it owns the commands, not the milestone
+state. A milestone remains unclosed until its retained evidence, exact gate,
+independent review, and maintainer closure disposition are complete. There is no
+installable package and no public product surface.
 
 The canonical status for the checked-out revision, including currently
 authorized work and the next maintainer decision, is in
@@ -193,13 +192,13 @@ documentation should clarify rather than paraphrase syntax.
 Read [AGENTS.md](AGENTS.md), then the
 [plans status register](docs/plans/README.md), and use the
 [agent context map](docs/developer/agent-context-map.md) only to load relevant
-Concept sections and their exact Technical depth. `M0` and `M1` are closed.
-`M2` is the current delivery milestone; consult the marked register capsule for
-its exact lifecycle state and currently authorized work. An accepted governance
-checkpoint may be present on `main`, but M2 product work stays on its designated
-milestone branch until closure. If the register also names one Open successor,
-that branch is planning/gate-only: it cannot be accepted or implemented until M2
-closes and the candidate is refreshed and reviewed on the integrated closed base.
+Concept sections and their exact Technical depth. Consult the marked register
+capsule for the exact lifecycle state and currently authorized work. An accepted
+governance checkpoint may be present on `main`, but product work stays on its
+designated milestone branch until closure. If the register also names one Open
+successor, that branch is planning/gate-only: it cannot be accepted or
+implemented until its predecessor closes and the candidate is refreshed and
+reviewed on the integrated closed base.
 
 Tests use a temporary `LOOPEX_HOME` and temporary workspaces, and the helpers fail
 before touching real user state. Never point development or test commands at a
