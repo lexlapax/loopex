@@ -5049,20 +5049,23 @@ defmodule Loopex.AgentLoopTest do
     assert Map.has_key?(by_domain, first_domain)
     assert Map.has_key?(by_domain, second_domain)
 
-    assert_domain = fn domain, disposition, progress_count ->
+    assert_domain = fn job, domain, disposition, progress_count ->
       items = Map.fetch!(by_domain, domain)
       progress = Enum.reject(items, &(&1.kind == :tool_stream_closed))
       closure = List.last(items)
 
       assert Enum.map(progress, & &1.progress_sequence) == Enum.to_list(0..(progress_count - 1))
       assert closure.kind == :tool_stream_closed
+      assert closure.turn_id == job.turn_id
+      assert closure.tool_call_id == job.tool_call_id
+      assert closure.stream_domain_id == domain
       assert closure.disposition == disposition
       assert closure.progress_count == progress_count
       assert closure == Enum.find(items, &(&1.kind == :tool_stream_closed))
     end
 
-    assert_domain.(first_domain, :abandoned, 2)
-    assert_domain.(second_domain, :complete, 1)
+    assert_domain.(first, first_domain, :abandoned, 2)
+    assert_domain.(second, second_domain, :complete, 1)
   end
 
   test "an executor that declares no cancellation confirms nothing" do
