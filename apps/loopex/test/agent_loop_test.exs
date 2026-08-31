@@ -239,7 +239,8 @@ defmodule Loopex.AgentLoopProgressExecutor do
       %{chunk(job, 3, 0, "not a declared stream") | stream: "telemetry"},
       chunk(job, 4, -1, "negative offset"),
       chunk(job, 5, 3, "gap"),
-      chunk(job, 6, 2, String.duplicate("x", 70_000))
+      chunk(job, 6, 2, String.duplicate("x", 70_000)),
+      chunk(job, 7, 2, "\e]52;c;owned\a")
     ]
   end
 
@@ -2916,12 +2917,12 @@ defmodule Loopex.AgentLoopTest do
 
     quiet_payload = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
 
-    assert quiet_payload["refused_count"] == 4,
-           "the unknown stream, two bad offsets, and oversized chunk were not all counted"
+    assert quiet_payload["refused_count"] == 5,
+           "the unknown stream, two bad offsets, oversized chunk, and terminal control were not all counted"
 
     assert quiet_payload["refused_bindings"] == %{
              "byte_offset" => 2,
-             "chunk" => 1,
+             "chunk" => 2,
              "stream" => 1
            }
   end
@@ -2975,11 +2976,11 @@ defmodule Loopex.AgentLoopTest do
     end
 
     refusal = Enum.find(diagnostics(), &(&1["kind"] == "executor_progress_refused"))
-    assert refusal["refused_count"] == 4
+    assert refusal["refused_count"] == 5
 
     assert refusal["refused_bindings"] == %{
              "byte_offset" => 2,
-             "chunk" => 1,
+             "chunk" => 2,
              "stream" => 1
            }
 

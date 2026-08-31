@@ -47,6 +47,7 @@ defmodule Loopex.Model do
 
   alias LoopexProtocol.Canonical
   alias LoopexProtocol.ToolDefinition
+  alias Loopex.ProgressPayload
 
   @canonicalization_version "loopex.model_request.v1"
 
@@ -287,10 +288,31 @@ defmodule Loopex.Model do
 
     Enum.sort(Map.keys(delta)) == Enum.sort(admitted) and
       plain?(Map.delete(delta, :kind)) and
+      semantic_delta?(delta) and
       delta_bytes(delta) <= @max_delta_bytes
   end
 
   def valid_delta?(_delta), do: false
+
+  defp semantic_delta?(%{kind: kind, content_index: index, text: text})
+       when kind in [:text_delta, :reasoning_delta],
+       do: is_integer(index) and index >= 0 and ProgressPayload.terminal_safe?(text)
+
+  defp semantic_delta?(%{
+         kind: :tool_call_delta,
+         call_index: index,
+         tool_call_id: call_id,
+         name: name,
+         arguments_fragment: fragment
+       }) do
+    is_integer(index) and index >= 0 and optional_safe_text?(call_id) and
+      optional_safe_text?(name) and optional_safe_text?(fragment)
+  end
+
+  defp semantic_delta?(_delta), do: false
+
+  defp optional_safe_text?(nil), do: true
+  defp optional_safe_text?(value), do: ProgressPayload.terminal_safe?(value)
 
   @doc """
   ## Concept

@@ -172,7 +172,8 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
         |> Keyword.get(:thinking, [])
         |> Enum.map(&ReqLLM.StreamChunk.thinking/1)
 
-      chunks = Stream.concat([content, thinking, tool_chunks(Keyword.get(options, :tool_call))])
+      tool_input = Keyword.get(options, :tool_calls, Keyword.get(options, :tool_call))
+      chunks = Stream.concat([content, thinking, tool_chunks(tool_input)])
 
       case Keyword.get(options, :cut_after_chunks, false) do
         false -> chunks
@@ -195,6 +196,25 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
         Enum.map(fragments, fn fragment ->
           ReqLLM.StreamChunk.meta(%{tool_call_args: %{index: 1, fragment: fragment}})
         end)
+    end
+
+    defp tool_chunks(calls) when is_list(calls) do
+      openings =
+        Enum.map(calls, fn {index, id, name, _fragments} ->
+          ReqLLM.StreamChunk.tool_call(name, %{}, %{id: id, index: index, start: true})
+        end)
+
+      fragments =
+        calls
+        |> Enum.flat_map(fn {index, _id, _name, parts} ->
+          Enum.with_index(parts, &{&2, index, &1})
+        end)
+        |> Enum.sort_by(fn {round, index, _fragment} -> {round, index} end)
+        |> Enum.map(fn {_round, index, fragment} ->
+          ReqLLM.StreamChunk.meta(%{tool_call_args: %{index: index, fragment: fragment}})
+        end)
+
+      openings ++ fragments
     end
 
     # Concept: exactly what the library raises out of its own lazy stream when a
@@ -334,6 +354,45 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
              content_index: 0,
              text: String.duplicate("x", 70_000)
            })
+
+    # A provider may control every value here. Shape validation therefore
+    # includes semantic types and terminal safety rather than merely key names
+    # and encoded byte size.
+    refute Model.valid_delta?(%{kind: :text_delta, content_index: "0", text: "x"})
+    refute Model.valid_delta?(%{kind: :reasoning_delta, content_index: -1, text: "x"})
+    refute Model.valid_delta?(%{kind: :text_delta, content_index: 0, text: "\e]0;owned\a"})
+
+    refute Model.valid_delta?(%{
+             kind: :tool_call_delta,
+             call_index: 0,
+             tool_call_id: "toolu_1\e[2J",
+             name: "write",
+             arguments_fragment: nil
+           })
+  end
+
+  test "the shipped adapter splits oversized provider text before it reaches progress" do
+    text = String.duplicate("界", 30_000)
+    {reply, deltas} = collect(Shipped, chunks: [text])
+
+    assert reply.text == text
+    assert reply.delta_count == length(deltas)
+    assert length(deltas) > 1
+    assert Enum.all?(deltas, &Model.valid_delta?/1)
+    assert Enum.all?(deltas, &(byte_size(&1.text) <= 60_000))
+    assert Enum.map_join(deltas, & &1.text) == text
+  end
+
+  test "the shipped adapter refuses terminal-control provider progress before emission" do
+    parent = self()
+    reference = make_ref()
+
+    progress = fn delta -> send(parent, {reference, delta}) end
+
+    assert {:error, {:invalid_progress_delta, _reason}} =
+             Shipped.complete(request(), [chunks: ["\e]0;owned\a"]], progress)
+
+    refute_receive {^reference, _delta}
   end
 
   test "a delta missing a field its kind declares is refused rather than projected" do
@@ -545,6 +604,25 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     assert replay_call(other_deltas, 1) == {"toolu_2", "edit", ~s({"path":"b.txt"})}
   end
 
+  test "two interleaved provider tool calls retain distinct replay domains" do
+    {reply, deltas} =
+      collect(Shipped,
+        chunks: ["Working"],
+        tool_calls: [
+          {1, "toolu_1", "write", [~s({"path":"a), ~s(.txt"})]},
+          {2, "toolu_2", "edit", [~s({"path":"b), ~s(.txt"})]}
+        ]
+      )
+
+    assert Enum.map(reply.tool_calls, &{&1.id, &1.name, &1.arguments}) == [
+             {"toolu_1", "write", %{"path" => "a.txt"}},
+             {"toolu_2", "edit", %{"path" => "b.txt"}}
+           ]
+
+    assert replay_call(deltas, 1) == {"toolu_1", "write", ~s({"path":"a.txt"})}
+    assert replay_call(deltas, 2) == {"toolu_2", "edit", ~s({"path":"b.txt"})}
+  end
+
   # Concept: everything a consumer holding only the deltas can rebuild about one
   # call.
   #
@@ -720,7 +798,7 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
         deadline: deadline
       )
 
-    bound = Loopex.LLM.ReqLLM.transport_bound(request)
+    assert {:ok, bound} = Loopex.LLM.ReqLLM.transport_bound(request)
 
     # It is the run's remaining time, not a constant. Anything near the
     # library's 30 seconds would mean the default is still governing.
@@ -728,18 +806,18 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
            "the transport bound is #{bound}ms, which does not track the run's deadline"
 
     # And it is what a real call is actually made with.
-    options = Loopex.LLM.ReqLLM.call_options(request, "credential", [])
-    assert Keyword.fetch!(options, :receive_timeout) == Loopex.LLM.ReqLLM.transport_bound(request)
+    assert {:ok, options} = Loopex.LLM.ReqLLM.call_options(request, "credential", [])
+    assert {:ok, expected_bound} = Loopex.LLM.ReqLLM.transport_bound(request)
+    assert Keyword.fetch!(options, :receive_timeout) == expected_bound
 
     # Every other option a call carries is a declared value too, so a bound this
     # adapter never chose cannot re-enter through one of them.
     assert Keyword.fetch!(options, :max_tokens) == 32
     assert Keyword.fetch!(options, :api_key) == "credential"
 
-    # A run whose deadline has already passed still gets a bounded attempt
-    # rather than a zero or negative timeout, which the transport would read as
-    # its own default or as an immediate failure. Whether such a run should be
-    # dispatched at all is the coordinator's decision and not this adapter's.
+    # An adapter is also an enforcement point. It refuses an already-expired
+    # request rather than extending the run by inventing a minimum transport
+    # wait after the committed instant.
     {:ok, expired} =
       Loopex.Model.request(
         Loopex.LLM.ReqLLM.default_model(),
@@ -748,7 +826,10 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
         deadline: System.system_time(:millisecond) - 60_000
       )
 
-    assert Loopex.LLM.ReqLLM.transport_bound(expired) == 1_000
+    assert Loopex.LLM.ReqLLM.transport_bound(expired) == {:error, :deadline_elapsed}
+
+    assert Loopex.LLM.ReqLLM.call_options(expired, "credential", []) ==
+             {:error, :deadline_elapsed}
   end
 
   test "the exported reply type names exactly the fields a reply carries" do

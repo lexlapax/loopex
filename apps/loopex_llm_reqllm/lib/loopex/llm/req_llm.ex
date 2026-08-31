@@ -77,6 +77,7 @@ defmodule Loopex.LLM.ReqLLM do
   # Concept: one short answer is all the outcome needs; a ceiling keeps the
   # evidence run cheap and bounded.
   @max_tokens 64
+  @progress_fragment_bytes 60_000
 
   @unknown_endpoint "unknown"
   @redacted "[redacted credential]"
@@ -276,8 +277,6 @@ defmodule Loopex.LLM.ReqLLM do
   # negative or zero timeout, because a call dispatched at all is owed a bounded
   # attempt to fail in; the coordinator, not this adapter, decides that a run
   # past its deadline stops.
-  @minimum_transport_bound_ms 1_000
-
   @doc """
   ## Concept
 
@@ -295,14 +294,18 @@ defmodule Loopex.LLM.ReqLLM do
   The credential is a parameter rather than a field of the request, because it
   never enters a committed request in the first place.
   """
-  @spec call_options(Model.request(), binary(), term()) :: keyword()
+  @spec call_options(Model.request(), binary(), term()) ::
+          {:ok, keyword()} | {:error, :deadline_elapsed}
   def call_options(request, credential, tools) do
-    [
-      api_key: credential,
-      max_tokens: Model.max_tokens(request),
-      tools: tools,
-      receive_timeout: transport_bound(request)
-    ]
+    with {:ok, bound} <- transport_bound(request) do
+      {:ok,
+       [
+         api_key: credential,
+         max_tokens: Model.max_tokens(request),
+         tools: tools,
+         receive_timeout: bound
+       ]}
+    end
   end
 
   @doc """
@@ -316,9 +319,12 @@ defmodule Loopex.LLM.ReqLLM do
   regression here is silent: the call still works, it simply stops being bounded
   by anything the run declared.
   """
-  @spec transport_bound(Model.request()) :: pos_integer()
+  @spec transport_bound(Model.request()) :: {:ok, pos_integer()} | {:error, :deadline_elapsed}
   def transport_bound(request) do
-    max(request.deadline - System.system_time(:millisecond), @minimum_transport_bound_ms)
+    case request.deadline - System.system_time(:millisecond) do
+      remaining when remaining > 0 -> {:ok, remaining}
+      _elapsed -> {:error, :deadline_elapsed}
+    end
   end
 
   # Concept: the credential is read here and nowhere else, and an absent or
@@ -346,14 +352,14 @@ defmodule Loopex.LLM.ReqLLM do
   # the provider sends after the content, which is why they are read once the
   # stream is drained rather than beside it.
   defp dispatch(request, context, credential, identity, tools, progress) do
-    options = call_options(request, credential, tools)
+    with {:ok, options} <- call_options(request, credential, tools) do
+      case ReqLLM.stream_text(request.model, context, options) do
+        {:ok, response} ->
+          drain(response, request, identity, progress, credential)
 
-    case ReqLLM.stream_text(request.model, context, options) do
-      {:ok, response} ->
-        drain(response, request, identity, progress, credential)
-
-      {:error, error} ->
-        {:error, {:provider_call_failed, scrub_error(error, credential)}}
+        {:error, error} ->
+          {:error, {:provider_call_failed, scrub_error(error, credential)}}
+      end
     end
   end
 
@@ -400,15 +406,36 @@ defmodule Loopex.LLM.ReqLLM do
   # dangerous shape -- text already streamed, `{:ok, reply}` one line away -- and
   # is why the metadata is judged before a reply is built at all.
   defp drain(response, request, identity, progress, credential) do
-    {chunks, text, deltas} =
-      Enum.reduce(response.stream, {[], [], 0}, fn chunk, {chunks, text, deltas} ->
-        case emit(chunk, progress) do
-          {:text, fragment} -> {[chunk | chunks], [fragment | text], deltas + 1}
-          :counted -> {[chunk | chunks], text, deltas + 1}
-          :ignored -> {[chunk | chunks], text, deltas}
-        end
+    emitted =
+      Enum.reduce_while(response.stream, {:ok, {[], [], 0}}, fn
+        chunk, {:ok, {chunks, text, deltas}} ->
+          case emit(chunk, progress) do
+            {:text, fragment, count} ->
+              {:cont, {:ok, {[chunk | chunks], [fragment | text], deltas + count}}}
+
+            {:counted, count} ->
+              {:cont, {:ok, {[chunk | chunks], text, deltas + count}}}
+
+            :ignored ->
+              {:cont, {:ok, {[chunk | chunks], text, deltas}}}
+
+            {:error, reason} ->
+              {:halt, {:error, reason}}
+          end
       end)
 
+    case emitted do
+      {:ok, {chunks, text, deltas}} ->
+        finish_drain(response, request, identity, chunks, text, deltas, credential)
+
+      {:error, reason} ->
+        {:error, {:invalid_progress_delta, scrub_error(reason, credential)}}
+    end
+  rescue
+    interrupted -> {:error, {:stream_interrupted, scrub_error(interrupted, credential)}}
+  end
+
+  defp finish_drain(response, request, identity, chunks, text, deltas, credential) do
     chunks = Enum.reverse(chunks)
     metadata = ReqLLM.StreamResponse.MetadataHandle.await(response.metadata_handle)
 
@@ -420,8 +447,6 @@ defmodule Loopex.LLM.ReqLLM do
     else
       {:error, {tag, reason}} -> {:error, {tag, scrub_error(reason, credential)}}
     end
-  rescue
-    interrupted -> {:error, {:stream_interrupted, scrub_error(interrupted, credential)}}
   end
 
   defp reply(request, identity, metadata, text, calls, deltas) do
@@ -540,8 +565,9 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
-  # Concept: one provider chunk becomes at most one delta, and the deltas of one
-  # attempt are everything needed to rebuild the reply that attempt returns.
+  # Concept: one provider chunk becomes as many bounded deltas as it needs, and
+  # the deltas of one attempt are everything needed to rebuild the reply that
+  # attempt returns.
   #
   # Technical depth: the reply's text is the concatenation of exactly these text
   # deltas rather than a second assembly of the same chunks, so replaying them is
@@ -564,43 +590,66 @@ defmodule Loopex.LLM.ReqLLM do
   # either could misattribute an item to another attempt.
   defp emit(%{type: :content, text: fragment}, progress)
        when is_binary(fragment) and fragment != "" do
-    progress.(%{kind: :text_delta, content_index: 0, text: fragment})
-    {:text, fragment}
+    deltas =
+      Enum.map(split_progress_fragment(fragment), fn text ->
+        %{kind: :text_delta, content_index: 0, text: text}
+      end)
+
+    case emit_checked(deltas, progress) do
+      {:ok, count} -> {:text, fragment, count}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp emit(%{type: :thinking, text: fragment}, progress)
        when is_binary(fragment) and fragment != "" do
-    progress.(%{kind: :reasoning_delta, content_index: 0, text: fragment})
-    :counted
+    deltas =
+      Enum.map(split_progress_fragment(fragment), fn text ->
+        %{kind: :reasoning_delta, content_index: 0, text: text}
+      end)
+
+    case emit_checked(deltas, progress) do
+      {:ok, count} -> {:counted, count}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp emit(%{type: :tool_call, name: name} = chunk, progress)
        when is_binary(name) and name != "" do
     metadata = Map.get(chunk, :metadata) || %{}
 
-    progress.(%{
+    delta = %{
       kind: :tool_call_delta,
       call_index: call_index(metadata),
       tool_call_id: field(metadata, :id),
       name: name,
       arguments_fragment: nil
-    })
+    }
 
-    :counted
+    case emit_checked([delta], progress) do
+      {:ok, count} -> {:counted, count}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp emit(%{type: :meta, metadata: metadata}, progress) when is_map(metadata) do
     case argument_fragment(metadata) do
       {index, fragment} ->
-        progress.(%{
-          kind: :tool_call_delta,
-          call_index: index,
-          tool_call_id: nil,
-          name: nil,
-          arguments_fragment: fragment
-        })
+        deltas =
+          Enum.map(split_progress_fragment(fragment), fn part ->
+            %{
+              kind: :tool_call_delta,
+              call_index: index,
+              tool_call_id: nil,
+              name: nil,
+              arguments_fragment: part
+            }
+          end)
 
-        :counted
+        case emit_checked(deltas, progress) do
+          {:ok, count} -> {:counted, count}
+          {:error, reason} -> {:error, reason}
+        end
 
       :none ->
         :ignored
@@ -608,6 +657,41 @@ defmodule Loopex.LLM.ReqLLM do
   end
 
   defp emit(_chunk, _progress), do: :ignored
+
+  defp emit_checked(deltas, progress) do
+    if Enum.all?(deltas, &Model.valid_delta?/1) do
+      Enum.each(deltas, progress)
+      {:ok, length(deltas)}
+    else
+      {:error, :provider_progress_not_bounded_plain_terminal_safe_data}
+    end
+  end
+
+  defp split_progress_fragment(fragment) do
+    if Loopex.ProgressPayload.terminal_safe?(fragment) do
+      do_split_progress_fragment(fragment)
+    else
+      [fragment]
+    end
+  end
+
+  defp do_split_progress_fragment(fragment)
+       when byte_size(fragment) <= @progress_fragment_bytes,
+       do: [fragment]
+
+  defp do_split_progress_fragment(fragment) do
+    size = utf8_prefix_size(fragment, @progress_fragment_bytes)
+    <<prefix::binary-size(^size), rest::binary>> = fragment
+    [prefix | do_split_progress_fragment(rest)]
+  end
+
+  defp utf8_prefix_size(fragment, size) do
+    if String.valid?(binary_part(fragment, 0, size)) do
+      size
+    else
+      utf8_prefix_size(fragment, size - 1)
+    end
+  end
 
   # Concept: read the provider's own argument fragment the way the library's own
   # assembler reads it, so the deltas and the reply cannot disagree about which

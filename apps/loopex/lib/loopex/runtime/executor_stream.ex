@@ -26,6 +26,7 @@ defmodule Loopex.Runtime.ExecutorStream do
   """
 
   alias Loopex.Executor
+  alias Loopex.ProgressPayload
   alias Loopex.Runtime.StreamRelay
   alias Loopex.StreamDomain
 
@@ -258,7 +259,8 @@ defmodule Loopex.Runtime.ExecutorStream do
       not is_integer(offset) or offset < 0 or Map.fetch!(offsets, stream) != offset ->
         {:refused, :byte_offset, validation}
 
-      not is_binary(chunk) or byte_size(chunk) > @max_progress_chunk_bytes ->
+      not ProgressPayload.terminal_safe?(chunk) or
+          byte_size(chunk) > @max_progress_chunk_bytes ->
         {:refused, :chunk, validation}
 
       true ->
