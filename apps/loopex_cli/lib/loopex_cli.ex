@@ -73,12 +73,25 @@ defmodule LoopexCli do
 
   @doc false
   @spec dispatch([binary()], keyword()) :: :ok | {:error, binary()}
-  def dispatch(["run" | rest], options), do: admitted(rest, &run(&1, options))
-  def dispatch(["sessions" | rest], _options), do: admitted(rest, &sessions/1)
-  def dispatch(["resume" | rest], options), do: admitted(rest, &resume(&1, options))
-  def dispatch(["cancel" | rest], options), do: admitted(rest, &cancel(&1, options))
-  def dispatch(["artifact" | rest], _options), do: admitted(rest, &artifact/1)
-  def dispatch(_unrecognised, _options), do: usage()
+  def dispatch(["run" | rest], options), do: admitted("run", rest, &run(&1, options))
+  def dispatch(["sessions" | rest], _options), do: admitted("sessions", rest, &sessions/1)
+  def dispatch(["resume" | rest], options), do: admitted("resume", rest, &resume(&1, options))
+  def dispatch(["cancel" | rest], options), do: admitted("cancel", rest, &cancel(&1, options))
+  def dispatch(["artifact" | rest], _options), do: admitted("artifact", rest, &artifact/1)
+
+  def dispatch([], _options),
+    do: {:error, "choose one command: run, sessions, resume, cancel, or artifact\n\n" <> usage()}
+
+  def dispatch([unknown | _rest], _options),
+    do: {:error, "unknown command #{unknown}\n\n" <> usage()}
+
+  @command_flags %{
+    "run" => ~w(policy state-root workspace steer follow-up cleanup-grace-ms),
+    "sessions" => ~w(state-root),
+    "resume" => ~w(policy state-root workspace cleanup-grace-ms),
+    "cancel" => ~w(policy state-root workspace cleanup-grace-ms),
+    "artifact" => ~w(state-root)
+  }
 
   # Concept: input naming nothing this command offers is refused, whichever
   # subcommand it was typed after.
@@ -88,13 +101,68 @@ defmodule LoopexCli do
   # exists to prevent, surviving in four of the five subcommands. Refusing at
   # dispatch means a subcommand added later inherits it rather than having to
   # remember it.
-  defp admitted(arguments, command) do
-    {flags, words} = parse(arguments)
-
-    with :ok <- known_flags(flags) do
+  defp admitted(name, arguments, command) do
+    with {:ok, flags, words} <- parse_command(name, arguments) do
       command.({flags, words})
     end
   end
+
+  defp parse_command(name, arguments),
+    do: parse_command(name, Map.fetch!(@command_flags, name), arguments, %{}, [])
+
+  defp parse_command(_name, _allowed, [], flags, words),
+    do: {:ok, flags, Enum.reverse(words)}
+
+  # Concept: an opaque positional value remains data even when it starts with
+  # the command-line flag prefix.
+  #
+  # Technical depth: artifact locators belong to the composed store and the
+  # port deliberately does not constrain their grammar. `--` therefore ends
+  # option parsing and preserves every remaining byte as a positional word.
+  # Without this arm a conforming locator such as `--remote-token` was
+  # impossible to retrieve through the shipped command.
+  defp parse_command(_name, _allowed, ["--" | rest], flags, words),
+    do: {:ok, flags, Enum.reverse(words) ++ rest}
+
+  defp parse_command(name, allowed, ["--" <> flag | rest], flags, words) do
+    case String.split(flag, "=", parts: 2) do
+      [key, value] ->
+        with :ok <- admit_flag(name, allowed, flags, key),
+             :ok <- require_flag_value(key, value) do
+          parse_command(name, allowed, rest, Map.put(flags, key, value), words)
+        end
+
+      [key] ->
+        with :ok <- admit_flag(name, allowed, flags, key),
+             {:ok, value, tail} <- take_flag_value(key, rest) do
+          parse_command(name, allowed, tail, Map.put(flags, key, value), words)
+        end
+    end
+  end
+
+  defp parse_command(name, allowed, [word | rest], flags, words),
+    do: parse_command(name, allowed, rest, flags, [word | words])
+
+  defp admit_flag(name, allowed, flags, key) do
+    cond do
+      key not in allowed -> {:error, "--#{key} is not valid for loopex #{name}"}
+      Map.has_key?(flags, key) -> {:error, "--#{key} was supplied more than once"}
+      true -> :ok
+    end
+  end
+
+  defp require_flag_value(key, ""), do: {:error, "--#{key} requires a value"}
+  defp require_flag_value(_key, _value), do: :ok
+
+  defp take_flag_value(key, [value | rest]) do
+    cond do
+      flag?(value) -> {:error, "--#{key} requires a value"}
+      value == "" -> {:error, "--#{key} requires a value"}
+      true -> {:ok, value, rest}
+    end
+  end
+
+  defp take_flag_value(key, []), do: {:error, "--#{key} requires a value"}
 
   @doc """
   ## Concept
@@ -307,20 +375,21 @@ defmodule LoopexCli do
             "`loopex sessions` will not list #{session_id} and " <>
             "`loopex resume #{session_id}` cannot reach it"
 
-        IO.puts(:stderr, "loopex: #{message}")
+        IO.puts(:stderr, "loopex: #{terminal_message(message)}")
         {:error, message}
     end
   end
 
-  defp sessions({flags, _words}) do
-    with {:ok, root} <- state_root(flags),
+  defp sessions({flags, words}) do
+    with :ok <- no_positionals(words, "sessions"),
+         {:ok, root} <- state_root(flags),
          {:ok, entries} <- Loopex.list_sessions(root) do
       Render.sessions(entries)
     end
   end
 
   defp resume({flags, words}, options) do
-    with {:ok, session_id} <- positional(words, "a session identifier"),
+    with {:ok, session_id} <- positional(words, "session identifier"),
          {:ok, policy} <- policy(Map.get(flags, "policy")),
          {:ok, runtime} <- start_runtime(flags, policy, options),
          {:ok, root} <- state_root(flags),
@@ -340,10 +409,11 @@ defmodule LoopexCli do
   # placement key is precisely what ADR 0008 makes the host responsible for
   # preventing.
   defp cancel({flags, words}, options) do
-    with {:ok, session_id} <- positional(words, "a session identifier"),
+    with {:ok, session_id} <- positional(words, "session identifier"),
+         {:ok, policy} <- reconciling_policy(flags),
          {:ok, root} <- state_root(flags),
          :none <- Placement.live_owner(root),
-         {:ok, runtime} <- start_runtime(flags, reconciling_policy(flags), options),
+         {:ok, runtime} <- start_runtime(flags, policy, options),
          {:ok, _resumed} <-
            Loopex.resume_known_session(root, runtime, session_id, unique_id()),
          {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
@@ -366,7 +436,7 @@ defmodule LoopexCli do
   end
 
   defp artifact({flags, words}) do
-    with {:ok, reference} <- positional(words, "an artifact reference"),
+    with {:ok, reference} <- positional(words, "artifact reference"),
          {:ok, root} <- state_root(flags),
          {:ok, store} <- LoopexComposition.artifacts(root),
          {:ok, bytes} <- fetch_artifact(store, reference) do
@@ -420,9 +490,9 @@ defmodule LoopexCli do
   # reached a tool should be refused, so refusing is both the safe default and
   # the true one. An operator who names a policy still gets theirs.
   defp reconciling_policy(flags) do
-    case policy(Map.get(flags, "policy")) do
-      {:ok, module} -> module
-      {:error, _absent} -> LoopexCli.Policy.RefuseAll
+    case Map.fetch(flags, "policy") do
+      :error -> {:ok, LoopexCli.Policy.RefuseAll}
+      {:ok, selected} -> policy(selected)
     end
   end
 
@@ -558,21 +628,6 @@ defmodule LoopexCli do
     end
   end
 
-  # Concept: input naming neither a prompt, a steer, nor a follow-up is refused.
-  #
-  # Technical depth: the runtime never infers which kind of input it was handed,
-  # and a surface that accepted an unrecognised flag would be inferring on its
-  # behalf — silently, by dropping it. An operator who typed `--nudge` meant
-  # something, and being told nothing happened is the only answer that is true.
-  @known_flags ~w(policy state-root workspace steer follow-up cleanup-grace-ms)
-
-  defp known_flags(flags) do
-    case Map.keys(flags) -- @known_flags do
-      [] -> :ok
-      [unknown | _rest] -> {:error, "--#{unknown} names neither a steer nor a follow-up"}
-    end
-  end
-
   # Concept: a caller who asked for both has not said which they meant.
   #
   # Technical depth: refused before a runtime, a store, or an executor is
@@ -590,13 +645,21 @@ defmodule LoopexCli do
   defp prompt_of([]), do: {:error, "describe the change you want, in ordinary words"}
   defp prompt_of(words), do: {:ok, Enum.join(words, " ")}
 
-  defp positional([], expected), do: {:error, "this command needs #{expected}"}
-  defp positional([word | _rest], _expected), do: {:ok, word}
+  defp no_positionals([], _command), do: :ok
+
+  defp no_positionals(_words, command),
+    do: {:error, "loopex #{command} takes no positional arguments"}
+
+  defp positional([], expected), do: {:error, "this command needs a #{expected}"}
+  defp positional([word], _expected), do: {:ok, word}
+
+  defp positional(_words, expected),
+    do: {:error, "this command takes exactly one #{expected}"}
 
   defp unique_id, do: "cli-" <> Integer.to_string(System.unique_integer([:positive]))
 
   defp usage do
-    IO.puts("""
+    """
     loopex — run a coding task from your terminal
 
       loopex run --policy allow-all "describe the change"
@@ -613,15 +676,21 @@ defmodule LoopexCli do
     Ctrl-C stops the run and reports what happened, when this command is started
     through `bin/loopex`; the escript run directly cannot see that signal. Either
     way the session survives — `loopex cancel <session>` reconciles the run.
-    """)
-
-    :ok
+    """
   end
 
   defp halt(:ok), do: System.halt(0)
 
   defp halt({:error, message}) do
-    IO.puts(:stderr, "loopex: #{message}")
+    IO.puts(:stderr, "loopex: #{terminal_message(message)}")
     System.halt(1)
   end
+
+  defp terminal_message(value) when is_binary(value) do
+    if Loopex.ProgressPayload.terminal_safe?(value),
+      do: value,
+      else: inspect(value, binaries: :as_strings, printable_limit: :infinity, limit: :infinity)
+  end
+
+  defp terminal_message(value), do: inspect(value, printable_limit: :infinity, limit: :infinity)
 end

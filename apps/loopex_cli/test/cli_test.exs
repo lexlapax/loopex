@@ -22,6 +22,7 @@ defmodule LoopexCliTest do
   alias LoopexCli.Placement
   alias LoopexCli.Policy.AllowAll
   alias LoopexCli.Policy.ShellAllowlist
+  alias LoopexCli.ProgressConsumer
   alias LoopexCli.Render
 
   # Concept: exercise the real command surface in this process, against a real
@@ -36,6 +37,7 @@ defmodule LoopexCliTest do
 
   setup do
     :persistent_term.erase({AllowAll, :announced})
+    :persistent_term.erase({ShellAllowlist, :notice})
     on_exit(&LoopexCli.release_placement/0)
     :ok
   end
@@ -61,6 +63,33 @@ defmodule LoopexCliTest do
     fixture
   end
 
+  defp concurrent_decisions(count, decide) do
+    parent = self()
+
+    tasks =
+      for _index <- 1..count do
+        Task.async(fn ->
+          send(parent, {:policy_decision_ready, self()})
+
+          receive do
+            {:decide, ^parent} -> decide.()
+          end
+        end)
+      end
+
+    workers =
+      for _task <- tasks do
+        receive do
+          {:policy_decision_ready, worker} -> worker
+        after
+          2_000 -> flunk("a concurrent policy decision did not reach the barrier")
+        end
+      end
+
+    Enum.each(workers, &send(&1, {:decide, parent}))
+    Task.await_many(tasks, 10_000)
+  end
+
   defp await_record(fixture, predicate, attempts \\ 200)
 
   defp await_record(_fixture, _predicate, 0),
@@ -79,6 +108,22 @@ defmodule LoopexCliTest do
     else
       Process.sleep(10)
       await_record(fixture, predicate, attempts - 1)
+    end
+  end
+
+  defp await_event(fixture, session_id, kind, attempts \\ 200)
+
+  defp await_event(_fixture, _session_id, kind, 0),
+    do: flunk("the fixture never committed #{kind}")
+
+  defp await_event(fixture, session_id, kind, attempts) do
+    case Enum.find(AgentLoopFixture.events(fixture, session_id), &(&1.kind == kind)) do
+      nil ->
+        Process.sleep(10)
+        await_event(fixture, session_id, kind, attempts - 1)
+
+      event ->
+        event
     end
   end
 
@@ -173,7 +218,8 @@ defmodule LoopexCliTest do
         script: [
           %{text: "", calls: [call()], deltas: ["work", "ing"]},
           %{text: "the file is written"}
-        ]
+        ],
+        progress_to: self()
       )
 
     {_session_id, attachment, reply} = AgentLoopFixture.run(fixture, "write the notes file")
@@ -190,6 +236,7 @@ defmodule LoopexCliTest do
     # terminal, in the plane each belongs to: what the operator reads is on
     # standard output and the running commentary is not.
     assert answer =~ "> write the notes file"
+    assert answer =~ "working"
     assert answer =~ "the file is written"
     assert output =~ "example.write"
     assert output =~ "completed"
@@ -298,11 +345,14 @@ defmodule LoopexCliTest do
   end
 
   test "prompt steer follow up and abort have distinct explicit affordances and input naming neither is refused" do
-    usage = capture_io(fn -> LoopexCli.dispatch(["nonsense"]) end)
+    assert {:error, usage} = LoopexCli.dispatch(["nonsense"])
     assert usage =~ "loopex run"
     assert usage =~ "--steer"
     assert usage =~ "--follow-up"
     assert usage =~ "loopex cancel"
+
+    assert {:error, no_command} = LoopexCli.dispatch([])
+    assert no_command =~ "choose one command"
 
     # Naming both leaves the caller unable to say which they meant, and it is
     # refused before a runtime, a store, or an executor is started.
@@ -334,7 +384,35 @@ defmodule LoopexCliTest do
              "#{hd(arguments)} admitted an unrecognised flag"
 
       assert neither =~ "--nudge"
-      assert neither =~ "neither a steer nor a follow-up"
+      assert neither =~ "not valid for"
+    end
+  end
+
+  test "each command refuses malformed ambiguous or irrelevant arguments before doing work" do
+    cases = [
+      {[], "choose one command"},
+      {["invented"], "unknown command"},
+      {["sessions", "extra"], "takes no positional"},
+      {["resume", "one", "two", "--policy", "allow-all"], "exactly one session identifier"},
+      {["cancel", "one", "two"], "exactly one session identifier"},
+      {["artifact", "one", "two"], "exactly one artifact reference"},
+      {["sessions", "--workspace", "/tmp"], "not valid for loopex sessions"},
+      {["resume", "s1", "--steer", "later"], "not valid for loopex resume"},
+      {["artifact", "abc", "--policy", "allow-all"], "not valid for loopex artifact"},
+      {["run", "--policy"], "--policy requires a value"},
+      {["run", "--policy="], "--policy requires a value"},
+      {["run", "--steer", "--policy", "allow-all", "do it"], "--steer requires a value"},
+      {["sessions", "--state-root", "/tmp/one", "--state-root", "/tmp/two"],
+       "--state-root was supplied more than once"},
+      {["cancel", "s1", "--policy", "invented"], "unknown policy invented"}
+    ]
+
+    for {arguments, expected} <- cases do
+      assert {:error, message} = LoopexCli.dispatch(arguments),
+             "#{inspect(arguments)} was accepted"
+
+      assert message =~ expected,
+             "#{inspect(arguments)} was refused with #{inspect(message)}"
     end
   end
 
@@ -351,7 +429,7 @@ defmodule LoopexCliTest do
     # refused before a runtime, a store, or an executor is started, because a
     # cleanup period is the kind of mistake that only shows up once something has
     # already gone wrong.
-    for bad <- ["abc", "0", "-5", "5000ms", "1.5", ""] do
+    for bad <- ["abc", "0", "-5", "5000ms", "1.5"] do
       assert {:error, message} =
                LoopexCli.dispatch([
                  "run",
@@ -379,7 +457,19 @@ defmodule LoopexCliTest do
                "do the thing"
              ])
 
-    assert bare =~ "--cleanup-grace-ms takes a positive whole number of milliseconds"
+    assert bare =~ "--cleanup-grace-ms requires a value"
+
+    assert {:error, empty} =
+             LoopexCli.dispatch([
+               "run",
+               "--policy",
+               "allow-all",
+               "--cleanup-grace-ms",
+               "",
+               "do the thing"
+             ])
+
+    assert empty =~ "--cleanup-grace-ms requires a value"
 
     # And a well-formed value is not refused as an unrecognised flag. Pairing it
     # with an ambiguity refused later in the same command reaches the answer
@@ -404,7 +494,7 @@ defmodule LoopexCliTest do
 
     # The usage text names it, so an operator can find it without reading the
     # source.
-    usage = capture_io(fn -> LoopexCli.dispatch(["nonsense"]) end)
+    assert {:error, usage} = LoopexCli.dispatch(["nonsense"])
     assert usage =~ "--cleanup-grace-ms"
 
     # A value that is read and then dropped is worse than a flag that was never
@@ -512,7 +602,22 @@ defmodule LoopexCliTest do
     # short window rather than waiting out the shipped patience.
     output =
       capture_io(:stderr, fn ->
-        send(self(), {:loopex_progress, %{kind: :tool_progress, chunk: "working"}})
+        send(
+          self(),
+          {:loopex_progress,
+           %{
+             kind: :tool_progress,
+             turn_id: "terminal-test-turn",
+             tool_call_id: "terminal-test-call",
+             stream_domain_id: "terminal-test-domain",
+             base_event_sequence: 0,
+             progress_sequence: 0,
+             stream: "stdout",
+             byte_offset: 0,
+             chunk: "working"
+           }}
+        )
+
         Render.stream(attachment, idle_limit_ms: 200)
       end)
 
@@ -792,7 +897,8 @@ defmodule LoopexCliTest do
     File.write!(Path.join(state_root, "placement.lock"), "999999")
     assert :none = Placement.live_owner(state_root)
     assert {:ok, reclaimed} = Placement.acquire(state_root)
-    assert File.read!(reclaimed) == System.pid()
+    assert {:ok, reclaimed_pid} = Placement.live_owner(state_root)
+    assert reclaimed_pid == System.pid()
 
     # Reconciling still reaches a live run through the public command and facade:
     # cancel is a different route to the same abort, not a private one. The
@@ -862,11 +968,57 @@ defmodule LoopexCliTest do
     # A delayed cleanup may retain the handle returned by the earlier
     # acquisition. It is not authority over the lock generation that followed.
     assert :ok = Placement.release(first)
-    assert File.read!(successor) == System.pid()
     assert {:ok, pid} = Placement.live_owner(state_root)
     assert String.trim(pid) == System.pid()
 
     assert :ok = Placement.release(successor)
+  end
+
+  test "a reused live pid cannot inherit a stale placement lock" do
+    {state_root, _workspace} = roots()
+    lock_path = Path.join(state_root, "placement.lock")
+
+    assert {:ok, owner_handle} = Placement.acquire(state_root)
+    [version, pid, incarnation, ""] = String.split(File.read!(owner_handle), "\n")
+    assert pid == System.pid()
+    refute incarnation == ""
+    assert :ok = Placement.release(owner_handle)
+
+    forged_incarnation = Base.url_encode64("a different process incarnation", padding: false)
+    File.write!(lock_path, Enum.join([version, pid, forged_incarnation, ""], "\n"))
+
+    # The pid is deliberately live. Treating pid alone as ownership would
+    # strand this root or assign it to the unrelated process that reused it.
+    assert :none = Placement.live_owner(state_root)
+    assert {:ok, reclaimed} = Placement.acquire(state_root)
+    assert {:ok, ^pid} = Placement.live_owner(state_root)
+    assert :ok = Placement.release(reclaimed)
+  end
+
+  test "placement refuses rather than reclaiming when process identity cannot be inspected" do
+    {state_root, _workspace} = roots()
+    lock_path = Path.join(state_root, "placement.lock")
+
+    assert {:ok, owner_handle} = Placement.acquire(state_root)
+    [version, own_pid, encoded_incarnation, ""] = String.split(File.read!(owner_handle), "\n")
+    {:ok, own_incarnation} = Base.url_decode64(encoded_incarnation, padding: false)
+    assert :ok = Placement.release(owner_handle)
+
+    foreign_pid = "999999"
+    foreign_incarnation = Base.url_encode64("foreign incarnation", padding: false)
+    foreign_record = Enum.join([version, foreign_pid, foreign_incarnation, ""], "\n")
+    File.write!(lock_path, foreign_record)
+
+    probe = fn
+      ^own_pid -> {:ok, own_incarnation}
+      ^foreign_pid -> {:error, :process_probe_failed}
+    end
+
+    assert {:error, unavailable} = Placement.live_owner(state_root, probe)
+    assert unavailable =~ "could not be verified"
+    assert {:error, refused} = Placement.acquire(state_root, probe)
+    assert refused =~ "could not be verified"
+    assert File.read!(lock_path) == foreign_record
   end
 
   test "concurrent placement reclaimers elect exactly one owner for a stale lock" do
@@ -896,7 +1048,8 @@ defmodule LoopexCliTest do
 
     assert [{:ok, owner}] = Enum.filter(results, &match?({:ok, _path}, &1))
     assert Enum.count(results, &match?({:error, _message}, &1)) == 63
-    assert File.read!(owner) == System.pid()
+    assert {:ok, owner_pid} = Placement.live_owner(state_root)
+    assert owner_pid == System.pid()
 
     assert :ok = Placement.release(owner)
   end
@@ -1025,6 +1178,40 @@ defmodule LoopexCliTest do
     refute :loopex_reference_client in declared
   end
 
+  test "host policy notices remain once-per-VM when decisions start concurrently" do
+    request = %{
+      session_id: "s1",
+      run_id: "r1",
+      tool_call_id: "c1",
+      generation: {"loopex.write", "1.0.0", String.duplicate("a", 64)},
+      arguments: %{},
+      effect_class: "workspace_write",
+      idempotency_class: "safe_retry",
+      workspace_lease: "lease"
+    }
+
+    cases = [
+      {AllowAll, {AllowAll, :announced}, AllowAll.notice()},
+      {ShellAllowlist, {ShellAllowlist, :notice},
+       "loopex: the shell-allowlist host policy is active"}
+    ]
+
+    for {policy, notice_key, notice} <- cases do
+      :persistent_term.erase(notice_key)
+
+      output =
+        capture_io(:stderr, fn ->
+          assert Enum.all?(
+                   concurrent_decisions(128, fn -> policy.decide(request) end),
+                   &(&1 == {:allow, nil})
+                 )
+        end)
+
+      occurrences = output |> String.split(notice) |> length() |> Kernel.-(1)
+      assert occurrences == 1
+    end
+  end
+
   test "loopex artifact retrieves a spilled artifact by its opaque reference" do
     {state_root, _workspace} = roots()
     {:ok, store} = LoopexComposition.artifacts(state_root)
@@ -1054,6 +1241,20 @@ defmodule LoopexCliTest do
              ])
 
     assert message =~ "no artifact is retained"
+
+    # A store owns its locator grammar. `--` keeps a leading-hyphen opaque
+    # locator positional instead of silently turning the store's data into a
+    # command flag.
+    assert {:error, opaque_message} =
+             LoopexCli.dispatch([
+               "artifact",
+               "--state-root",
+               state_root,
+               "--",
+               "--remote-token"
+             ])
+
+    assert opaque_message =~ "no artifact is retained for --remote-token"
   end
 
   test "project resource trust is decided at the terminal and a non interactive run without a decision proceeds with the block withheld" do
@@ -1346,6 +1547,27 @@ defmodule LoopexCliTest do
     assert String.starts_with?(grown_prefix, "first")
   end
 
+  test "a nonregular project resource is refused without opening it" do
+    {_state_root, workspace} = roots()
+    path = Path.join(workspace, "AGENTS.md")
+    {_, 0} = System.cmd("mkfifo", [path], stderr_to_stdout: true)
+
+    reader = Task.async(fn -> LoopexCli.ProjectResources.discover(workspace) end)
+
+    case Task.yield(reader, 500) do
+      {:ok, result} ->
+        assert result == nil
+
+      nil ->
+        # Pair a mutant's blocked FIFO open so the test process can cleanly
+        # collect it before reporting the failure rather than leaving dirty-I/O
+        # work behind for the rest of the suite.
+        File.write!(path, "release")
+        _ = Task.await(reader, 2_000)
+        flunk("project-resource discovery opened a FIFO and blocked")
+    end
+  end
+
   test "a project resource replaced through a component after containment is refused before reading" do
     {_state_root, workspace} = roots()
     component = Path.join(workspace, "instructions")
@@ -1370,6 +1592,44 @@ defmodule LoopexCliTest do
 
     assert {:refused, :replaced} =
              LoopexCli.ProjectResources.ResourceReader.read(checked, 65_536, opener)
+  end
+
+  test "a project root replaced after containment cannot make an outside file look contained" do
+    {_state_root, workspace} = roots()
+    checked = Path.join(workspace, "AGENTS.md")
+    File.write!(checked, "the workspace bytes")
+
+    elsewhere =
+      Path.join(System.tmp_dir!(), "loopex-cli-root-swap-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(elsewhere)
+    on_exit(fn -> File.rm_rf(elsewhere) end)
+    File.write!(Path.join(elsewhere, "AGENTS.md"), "outside bytes that must not be read")
+
+    moved = workspace <> "-checked"
+    on_exit(fn -> File.rm_rf(moved) end)
+
+    after_containment = fn _resolved ->
+      File.rename!(workspace, moved)
+      File.rename!(elsewhere, workspace)
+      :ok
+    end
+
+    excluded =
+      capture_io(:stderr, fn ->
+        send(
+          self(),
+          {:root_swap_manifest,
+           LoopexCli.ProjectResources.discover(
+             workspace,
+             after_containment: after_containment
+           )}
+        )
+      end)
+
+    assert_received {:root_swap_manifest, nil}
+    assert excluded =~ "was replaced while it was being opened"
+    refute excluded =~ "outside bytes that must not be read"
   end
 
   test "a session the state root could not record is reported and fails the command instead of passing as recorded" do
@@ -1681,6 +1941,355 @@ defmodule LoopexCliTest do
     assert quiet_output =~ "resume"
     refute quiet_output =~ "cancelled"
     refute quiet_output =~ "loopex: done"
+  end
+
+  test "the terminal validates model streams per domain and falls back unless one closes exactly" do
+    model_item = fn domain, sequence, text ->
+      %{
+        kind: :text_delta,
+        text: text,
+        content_index: 0,
+        turn_id: "t1",
+        stream_domain_id: domain,
+        model_sequence: sequence,
+        base_event_sequence: 4
+      }
+    end
+
+    model_close = fn domain, count ->
+      %{
+        kind: :model_stream_closed,
+        turn_id: "t1",
+        stream_domain_id: domain,
+        base_event_sequence: 4,
+        disposition: :complete,
+        delta_count: count
+      }
+    end
+
+    {complete, [{:stdout, "hel"}]} =
+      ProgressConsumer.consume(ProgressConsumer.new(), model_item.("complete", 0, "hel"))
+
+    {complete, [{:stdout, "lo"}]} =
+      ProgressConsumer.consume(complete, model_item.("complete", 1, "lo"))
+
+    {complete, []} = ProgressConsumer.consume(complete, model_close.("complete", 2))
+    assert ProgressConsumer.status(complete, "complete") == :complete
+    {_complete, :suppress} = ProgressConsumer.durable_assistant(complete, 5, "hello")
+
+    {missing, [{:stdout, "hello"}]} =
+      ProgressConsumer.consume(ProgressConsumer.new(), model_item.("missing", 0, "hello"))
+
+    {_missing, :render} = ProgressConsumer.durable_assistant(missing, 5, "hello")
+
+    {gapped, [{:stdout, "hel"}]} =
+      ProgressConsumer.consume(ProgressConsumer.new(), model_item.("gapped", 0, "hel"))
+
+    {gapped, []} = ProgressConsumer.consume(gapped, model_item.("gapped", 2, "lo"))
+    {gapped, []} = ProgressConsumer.consume(gapped, model_close.("gapped", 3))
+    assert ProgressConsumer.status(gapped, "gapped") == :invalid
+    {_gapped, :render} = ProgressConsumer.durable_assistant(gapped, 5, "hello")
+
+    {mismatched, [{:stdout, "hello"}]} =
+      ProgressConsumer.consume(ProgressConsumer.new(), model_item.("mismatched", 0, "hello"))
+
+    {mismatched, []} = ProgressConsumer.consume(mismatched, model_close.("mismatched", 2))
+    assert ProgressConsumer.status(mismatched, "mismatched") == :invalid
+    {_mismatched, :render} = ProgressConsumer.durable_assistant(mismatched, 5, "hello")
+  end
+
+  test "reasoning and tool call deltas reach the terminal while their domain is open" do
+    base = %{
+      turn_id: "turn-visible",
+      stream_domain_id: "domain-visible",
+      base_event_sequence: 4
+    }
+
+    reasoning =
+      Map.merge(base, %{
+        kind: :reasoning_delta,
+        model_sequence: 0,
+        content_index: 0,
+        text: "checking the workspace"
+      })
+
+    tool_call =
+      Map.merge(base, %{
+        kind: :tool_call_delta,
+        model_sequence: 1,
+        call_index: 0,
+        tool_call_id: "call-visible",
+        name: "write",
+        arguments_fragment: "{\"path\":\"notes.txt\"}"
+      })
+
+    {state, [{:stderr, "checking the workspace"}]} =
+      ProgressConsumer.consume(ProgressConsumer.new(), reasoning)
+
+    {state, [{:stderr, shown_call}]} = ProgressConsumer.consume(state, tool_call)
+    assert shown_call =~ "write (call-visible)"
+    assert shown_call =~ "notes.txt"
+    assert ProgressConsumer.status(state, "domain-visible") == :open
+  end
+
+  test "transient and durable terminal output cannot carry terminal control instructions" do
+    unsafe = "answer\e]52;c;YXR0YWNr\a"
+
+    item = %{
+      kind: :text_delta,
+      text: unsafe,
+      content_index: 0,
+      turn_id: "turn-unsafe",
+      stream_domain_id: "domain-unsafe",
+      model_sequence: 0,
+      base_event_sequence: 0
+    }
+
+    {consumer, []} = ProgressConsumer.consume(ProgressConsumer.new(), item)
+    assert ProgressConsumer.status(consumer, "domain-unsafe") == :unknown
+
+    {:ok, source} =
+      Agent.start_link(fn ->
+        [
+          %{"content" => unsafe, kind: "user.message_appended", event_sequence: 1},
+          %{
+            "tool_id" => "loopex.write",
+            "tool_call_id" => "call-unsafe",
+            "outcome" => "completed",
+            "artifacts" => [
+              %{
+                "size" => 7,
+                "locator" => "--remote token';$(printf unsafe)"
+              }
+            ],
+            kind: "tool.finished",
+            event_sequence: 2
+          },
+          %{"outcome" => "completed", kind: "run.finished", event_sequence: 3}
+        ]
+      end)
+
+    next_event = fn _attachment ->
+      Agent.get_and_update(source, fn
+        [event | rest] -> {{:ok, event}, rest}
+        [] -> {:absent, []}
+      end)
+    end
+
+    parent = self()
+
+    stdout =
+      capture_io(fn ->
+        stderr =
+          capture_io(:stderr, fn -> Render.stream(:terminal_safe, next_event: next_event) end)
+
+        send(parent, {:terminal_safe_stderr, stderr})
+      end)
+
+    assert_receive {:terminal_safe_stderr, stderr}
+    refute stdout =~ "\e"
+    refute stderr =~ "\e"
+    assert stdout =~ "\\e"
+
+    assert stderr =~
+             "`loopex artifact -- '--remote token'\"'\"';$(printf unsafe)'`"
+  end
+
+  test "a closure delivered after its durable assistant prevents duplicate terminal output" do
+    send(
+      self(),
+      {:loopex_progress,
+       %{
+         kind: :text_delta,
+         text: "hello",
+         content_index: 0,
+         turn_id: "turn-ordered",
+         stream_domain_id: "domain-ordered",
+         model_sequence: 0,
+         base_event_sequence: 4
+       }}
+    )
+
+    {:ok, source} = Agent.start_link(fn -> 0 end)
+    consumer = self()
+
+    next_event = fn _attachment ->
+      Agent.get_and_update(source, fn
+        0 ->
+          event = %{"content" => "hello", kind: "assistant.message_appended", event_sequence: 5}
+          {{:ok, event}, 1}
+
+        1 ->
+          send(
+            consumer,
+            {:loopex_progress,
+             %{
+               kind: :model_stream_closed,
+               turn_id: "turn-ordered",
+               stream_domain_id: "domain-ordered",
+               base_event_sequence: 4,
+               disposition: :complete,
+               delta_count: 1
+             }}
+          )
+
+          event = %{"outcome" => "completed", kind: "run.finished", event_sequence: 6}
+          {{:ok, event}, 2}
+      end)
+    end
+
+    answer =
+      capture_io(fn ->
+        capture_io(:stderr, fn -> Render.stream(:test_attachment, next_event: next_event) end)
+      end)
+
+    assert answer == "hello"
+  end
+
+  test "a complete streamed assistant answer is not printed again from the durable record" do
+    fixture = fixture(script: [%{text: "hello"}])
+    {session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "answer once")
+
+    assistant_sequence =
+      fixture
+      |> await_event(session_id, "assistant.message_appended")
+      |> Map.fetch!(:event_sequence)
+
+    base_event_sequence = assistant_sequence - 1
+
+    for item <- [
+          %{
+            kind: :text_delta,
+            text: "hel",
+            content_index: 0,
+            turn_id: "turn-once",
+            stream_domain_id: "domain-once",
+            model_sequence: 0,
+            base_event_sequence: base_event_sequence
+          },
+          %{
+            kind: :text_delta,
+            text: "lo",
+            content_index: 0,
+            turn_id: "turn-once",
+            stream_domain_id: "domain-once",
+            model_sequence: 1,
+            base_event_sequence: base_event_sequence
+          },
+          %{
+            kind: :model_stream_closed,
+            turn_id: "turn-once",
+            stream_domain_id: "domain-once",
+            base_event_sequence: base_event_sequence,
+            disposition: :complete,
+            delta_count: 2
+          }
+        ] do
+      send(self(), {:loopex_progress, item})
+    end
+
+    answer = capture_io(fn -> Render.stream(attachment) end)
+    occurrences = answer |> String.split("hello") |> length() |> Kernel.-(1)
+
+    assert occurrences == 1,
+           "the complete transient answer was followed by the same durable answer: #{inspect(answer)}"
+  end
+
+  test "retry and tool progress domains validate independently" do
+    model = fn domain, sequence, text ->
+      %{
+        kind: :text_delta,
+        text: text,
+        content_index: 0,
+        turn_id: "t1",
+        stream_domain_id: domain,
+        model_sequence: sequence,
+        base_event_sequence: 8
+      }
+    end
+
+    close_model = fn domain, disposition, count ->
+      %{
+        kind: :model_stream_closed,
+        turn_id: "t1",
+        stream_domain_id: domain,
+        base_event_sequence: 8,
+        disposition: disposition,
+        delta_count: count
+      }
+    end
+
+    state = ProgressConsumer.new()
+    {state, [_]} = ProgressConsumer.consume(state, model.("attempt-1", 0, "wrong"))
+    {state, []} = ProgressConsumer.consume(state, model.("attempt-1", 2, " domain"))
+    {state, []} = ProgressConsumer.consume(state, close_model.("attempt-1", :abandoned, 1))
+
+    # A complete tool-producing attempt can close before the later attempt that
+    # commits the durable assistant message. Only the domain anchored directly
+    # before that event may suppress it.
+    {state, [{:stdout, "intermediate"}]} =
+      ProgressConsumer.consume(
+        state,
+        model.("tool-producing", 0, "intermediate")
+        |> Map.put(:base_event_sequence, 4)
+      )
+
+    {state, []} =
+      ProgressConsumer.consume(
+        state,
+        close_model.("tool-producing", :complete, 1)
+        |> Map.put(:base_event_sequence, 4)
+      )
+
+    {state, [{:stdout, "right"}]} =
+      ProgressConsumer.consume(state, model.("attempt-2", 0, "right"))
+
+    {state, []} = ProgressConsumer.consume(state, close_model.("attempt-2", :complete, 1))
+    assert ProgressConsumer.status(state, "attempt-1") == :invalid
+    assert ProgressConsumer.status(state, "attempt-2") == :complete
+    {_state, :suppress} = ProgressConsumer.durable_assistant(state, 9, "right")
+
+    tool = fn domain, sequence, chunk ->
+      %{
+        kind: :tool_progress,
+        turn_id: "t1",
+        tool_call_id: "call-1",
+        stream_domain_id: domain,
+        base_event_sequence: 9,
+        progress_sequence: sequence,
+        stream: "stdout",
+        byte_offset: sequence,
+        chunk: chunk
+      }
+    end
+
+    close_tool = fn domain, count ->
+      %{
+        kind: :tool_stream_closed,
+        turn_id: "t1",
+        tool_call_id: "call-1",
+        stream_domain_id: domain,
+        base_event_sequence: 9,
+        disposition: :complete,
+        progress_count: count
+      }
+    end
+
+    {tools, [{:stderr, "a"}]} =
+      ProgressConsumer.consume(ProgressConsumer.new(), tool.("tool-ok", 0, "a"))
+
+    {tools, [{:stderr, "b"}]} = ProgressConsumer.consume(tools, tool.("tool-ok", 1, "b"))
+    {tools, []} = ProgressConsumer.consume(tools, close_tool.("tool-ok", 2))
+    assert ProgressConsumer.status(tools, "tool-ok") == :complete
+
+    {tools, []} = ProgressConsumer.consume(tools, tool.("tool-ok", 2, "late"))
+    assert ProgressConsumer.status(tools, "tool-ok") == :invalid
+
+    {bad_tools, [{:stderr, "a"}]} =
+      ProgressConsumer.consume(ProgressConsumer.new(), tool.("tool-bad", 0, "a"))
+
+    {bad_tools, []} = ProgressConsumer.consume(bad_tools, close_tool.("tool-bad", 2))
+    assert ProgressConsumer.status(bad_tools, "tool-bad") == :invalid
   end
 
   test "the base system prompt and active tool definitions measure under one thousand tokens" do

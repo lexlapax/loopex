@@ -24,6 +24,8 @@ defmodule LoopexCli.Policy.AllowAll do
 
   @behaviour Loopex.Policy
 
+  alias LoopexCli.Policy.Notice
+
   @notice "loopex: the allow-all host policy is active. " <>
             "This is permissive local authority, not a permission model: " <>
             "every tool call this session makes will be allowed."
@@ -51,16 +53,9 @@ defmodule LoopexCli.Policy.AllowAll do
   # Concept: once per VM, not once per call.
   #
   # Technical depth: a line per tool call would train an operator to skip it,
-  # which is the opposite of what a notice is for.
+  # which is the opposite of what a notice is for. The shared notice helper
+  # serializes the otherwise-racy persistent-term check and write.
   defp announce do
-    case :persistent_term.get({__MODULE__, :announced}, false) do
-      true ->
-        :ok
-
-      false ->
-        :persistent_term.put({__MODULE__, :announced}, true)
-        IO.puts(:stderr, @notice)
-        :ok
-    end
+    Notice.once({__MODULE__, :announced}, fn -> IO.puts(:stderr, @notice) end)
   end
 end

@@ -9,7 +9,7 @@ defmodule Loopex.ReferenceClient.Policy.AllowAll do
   the kernel refuses to run tools for a host that has named no authority at all,
   and a reference client running on a developer's own machine has a real answer
   to that question: yes, on my machine, to my own files. It says so out loud once
-  per runtime rather than quietly behaving as though a decision had been made.
+  per VM rather than quietly behaving as though a decision had been made.
 
   It ships here, in a client, and deliberately not in core and not in an edge. A
   permissive default inside the kernel would be inherited by every host that
@@ -24,7 +24,7 @@ defmodule Loopex.ReferenceClient.Policy.AllowAll do
   about a call beyond permitting it, and inventing a `decision_ref` would imply a
   decision record that does not exist.
 
-  The notice is emitted once per runtime rather than once per call, because a
+  The notice is emitted once per VM rather than once per call, because a
   line per tool call would train an operator to ignore it, which is the opposite
   of what a notice is for. It is emitted at first decision rather than at load,
   so a module that is compiled but never selected stays silent.
@@ -59,10 +59,13 @@ defmodule Loopex.ReferenceClient.Policy.AllowAll do
 
   # Concept: say it once, to whoever is listening.
   #
-  # Technical depth: `:persistent_term` keyed by this module gives one notice per
-  # VM rather than per call. That is deliberately coarser than per runtime: two
-  # runtimes in one VM both using this policy are both permissive for the same
-  # reason, and repeating the line adds nothing an operator did not already read.
+  # Technical depth: a named ETS set gives one atomic first insertion per VM
+  # rather than a racy read-then-write per call. That is deliberately coarser
+  # than per runtime: the decision request carries no runtime identity, and two
+  # runtimes in one VM using this policy are permissive for the same reason.
+  # Repeating the line adds nothing an operator did not already read. The init
+  # process inherits the table so a short-lived first caller cannot erase the
+  # announcement state when it exits.
   defp announce do
     if :ets.insert_new(notice_table(), {:announced, true}), do: IO.puts(:stderr, @notice)
     :ok

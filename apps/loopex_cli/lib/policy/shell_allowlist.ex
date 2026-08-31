@@ -37,6 +37,8 @@ defmodule LoopexCli.Policy.ShellAllowlist do
 
   @behaviour Loopex.Policy
 
+  alias LoopexCli.Policy.Notice
+
   @permitted ["cat", "ls", "pwd", "echo", "git", "grep", "head", "tail", "wc"]
   @notice_key {__MODULE__, :notice}
 
@@ -93,11 +95,10 @@ defmodule LoopexCli.Policy.ShellAllowlist do
   defp leading_word(_request), do: :error
 
   # Technical depth: once per operating-system process, so a run under this
-  # stance says so without a line per tool call.
+  # stance says so without a line per tool call. The shared notice helper makes
+  # that promise atomic across concurrent decisions.
   defp notice do
-    if :persistent_term.get(@notice_key, nil) == nil do
-      :persistent_term.put(@notice_key, :announced)
-
+    Notice.once(@notice_key, fn ->
       IO.puts(
         :stderr,
         "loopex: the shell-allowlist host policy is active. Files may be read and " <>
@@ -106,8 +107,6 @@ defmodule LoopexCli.Policy.ShellAllowlist do
           ". This is scope, not containment: it matches the leading word of a " <>
           "command and a compound command defeats it."
       )
-    end
-
-    :ok
+    end)
   end
 end

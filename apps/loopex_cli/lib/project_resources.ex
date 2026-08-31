@@ -71,9 +71,16 @@ defmodule LoopexCli.ProjectResources do
   resource they cannot ask about.
   """
   @spec discover(Path.t()) :: map() | nil
-  def discover(workspace) do
-    with {:ok, root} <- real_path(workspace) do
-      case discover_entries(root) do
+  def discover(workspace), do: discover(workspace, [])
+
+  @doc false
+  @spec discover(Path.t(), keyword()) :: map() | nil
+  def discover(workspace, options) when is_list(options) do
+    after_containment = Keyword.get(options, :after_containment, fn _resolved -> :ok end)
+
+    with {:ok, root} <- real_path(workspace),
+         {:ok, root_identity} <- directory_identity(root) do
+      case discover_entries(root, root_identity, after_containment) do
         [] ->
           nil
 
@@ -106,7 +113,7 @@ defmodule LoopexCli.ProjectResources do
   # apparently admissible one. The remaining class budget is carried across the
   # ordered labels, so a future expansion of the permitted set cannot turn the
   # per-file bound into an unbounded class total.
-  defp discover_entries(root) do
+  defp discover_entries(root, root_identity, after_containment) do
     %{per_resource_bytes: per_resource, class_total_bytes: class_total} =
       ProjectResource.limits()
 
@@ -118,7 +125,7 @@ defmodule LoopexCli.ProjectResources do
         label, {entries, remaining, false} ->
           read_limit = min(per_resource, remaining)
 
-          case admit(root, label, read_limit) do
+          case admit(root, root_identity, label, read_limit, after_containment) do
             [] ->
               {entries, remaining, false}
 
@@ -137,7 +144,7 @@ defmodule LoopexCli.ProjectResources do
   # Technical depth: the resolved path is carried on the entry rather than
   # recomputed for display, so what the operator is shown is the exact path the
   # bytes were read from and not a second answer to the same question.
-  defp admit(root, label, read_limit) do
+  defp admit(root, root_identity, label, read_limit, after_containment) do
     case real_path(Path.join(root, label)) do
       {:ok, resolved} ->
         cond do
@@ -146,7 +153,11 @@ defmodule LoopexCli.ProjectResources do
             []
 
           true ->
-            read_entry(label, resolved, read_limit)
+            # This seam is test-only. It places a deterministic replacement in
+            # the exact interval the production reader has to defend: after
+            # containment was established and before the candidate is opened.
+            _ = after_containment.(resolved)
+            read_entry(label, resolved, root, root_identity, read_limit)
         end
 
       {:error, reason} ->
@@ -155,8 +166,8 @@ defmodule LoopexCli.ProjectResources do
     end
   end
 
-  defp read_entry(label, resolved, read_limit) do
-    case ResourceReader.read(resolved, read_limit) do
+  defp read_entry(label, resolved, root, root_identity, read_limit) do
+    case ResourceReader.read_contained(resolved, root, root_identity, read_limit) do
       {:ok, content} ->
         [%{label: label, content: content, contained: true, resolved_path: resolved}]
 
@@ -181,7 +192,27 @@ defmodule LoopexCli.ProjectResources do
   #
   # Technical depth: the trailing separator stops `/work` from appearing to
   # contain `/workspace-elsewhere`, which a bare prefix test would admit.
+  defp contained?(path, "/"), do: String.starts_with?(path, "/")
   defp contained?(path, root), do: path == root or String.starts_with?(path, root <> "/")
+
+  @doc false
+  @spec resolve_path(Path.t()) :: {:ok, Path.t()} | {:error, term()}
+  def resolve_path(path), do: real_path(path)
+
+  @doc false
+  @spec directory_identity(Path.t()) :: {:ok, {integer(), integer()}} | {:error, term()}
+  def directory_identity(path) do
+    case File.stat(path) do
+      {:ok, %File.Stat{type: :directory} = stat} ->
+        {:ok, {stat.major_device, stat.inode}}
+
+      {:ok, %File.Stat{}} ->
+        {:error, :workspace_root_not_directory}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   # Concept: the path the kernel would open, without moving the emulator.
   #
@@ -470,6 +501,74 @@ defmodule LoopexCli.ProjectResources do
       end
     end
 
+    # Concept: reads only an opened object that still belongs to the canonical
+    # workspace root the host accepted.
+    #
+    # Technical depth: containment used to be checked before this reader's
+    # `lstat` and open. Replacing the workspace root in that gap made both of
+    # those operations see the same outside inode, so their identity comparison
+    # passed. This path first refuses a statically non-regular name, then opens
+    # the candidate, re-resolves the root and candidate while holding that
+    # descriptor, and finally binds the current contained name back to both the
+    # pre-open and opened identities before reading. A replacement before open
+    # changes one of those identities or the root resolution; one after open
+    # changes either the name identity or the root. A replacement after
+    # validation cannot change the already-open file. The already-recorded path
+    # race still covers a regular file exchanged for a FIFO in the narrow gap
+    # between the first identity check and open.
+    @doc false
+    @spec read_contained(Path.t(), Path.t(), non_neg_integer(), opener()) ::
+            {:ok, binary()} | {:refused, :absent | :not_regular | :replaced} | {:error, term()}
+    def read_contained(path, root, limit, opener \\ &open/1)
+
+    def read_contained(path, root, limit, opener)
+        when is_binary(path) and is_binary(root) and is_integer(limit) and limit >= 0 and
+               is_function(opener, 1) do
+      with {:ok, root_identity} <- LoopexCli.ProjectResources.directory_identity(root) do
+        read_contained(path, root, root_identity, limit, opener)
+      else
+        _changed -> {:refused, :replaced}
+      end
+    end
+
+    @doc false
+    @spec read_contained(Path.t(), Path.t(), {integer(), integer()}, non_neg_integer(), opener()) ::
+            {:ok, binary()} | {:refused, :absent | :not_regular | :replaced} | {:error, term()}
+    def read_contained(path, root, root_identity, limit)
+        when is_binary(path) and is_binary(root) and is_tuple(root_identity) and
+               is_integer(limit) and limit >= 0 do
+      read_contained(path, root, root_identity, limit, &open/1)
+    end
+
+    def read_contained(path, root, root_identity, limit, opener)
+        when is_binary(path) and is_binary(root) and is_tuple(root_identity) and
+               is_integer(limit) and limit >= 0 and is_function(opener, 1) do
+      with {:ok, expected_identity} <- regular_identity(path) do
+        case opener.(path) do
+          {:ok, file} ->
+            try do
+              with {:ok, ^expected_identity} <- opened_regular_identity(file),
+                   :ok <-
+                     validate_contained_open(path, root, root_identity, expected_identity) do
+                read_bounded(file, limit + 1)
+              else
+                {:ok, _different} -> {:refused, :replaced}
+                {:refused, _reason} = refused -> refused
+                {:error, reason} -> {:error, reason}
+              end
+            after
+              File.close(file)
+            end
+
+          {:error, :enoent} ->
+            {:refused, :absent}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+      end
+    end
+
     defp open(path), do: File.open(path, [:read, :binary, :raw])
 
     defp regular_identity(path) do
@@ -493,6 +592,22 @@ defmodule LoopexCli.ProjectResources do
           {:error, reason}
       end
     end
+
+    defp validate_contained_open(path, root, root_identity, opened_identity) do
+      with {:ok, ^root} <- LoopexCli.ProjectResources.resolve_path(root),
+           {:ok, ^root_identity} <- LoopexCli.ProjectResources.directory_identity(root),
+           {:ok, current} <- LoopexCli.ProjectResources.resolve_path(path),
+           true <- contained?(current, root),
+           {:ok, ^opened_identity} <- regular_identity(current) do
+        :ok
+      else
+        {:refused, :not_regular} = refused -> refused
+        _changed -> {:refused, :replaced}
+      end
+    end
+
+    defp contained?(path, "/"), do: String.starts_with?(path, "/")
+    defp contained?(path, root), do: path == root or String.starts_with?(path, root <> "/")
 
     defp identity(stat), do: {stat.major_device, stat.inode}
 
