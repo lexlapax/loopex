@@ -6722,6 +6722,7 @@ defmodule Loopex.AgentLoopTest do
       {"environment non-name", %{child_environment_names: ["PATH WITH SPACE"]}},
       {"environment control", %{child_environment_names: ["PATH\nINJECTED"]}},
       {"environment utf8", %{child_environment_names: [<<255>>]}},
+      {"environment oversized", %{child_environment_names: [String.duplicate("A", 1_025)]}},
       {"environment credential key", %{child_environment_names: ["LOOPEX_PROVIDER_API_KEY"]}},
       {"credential presence", %{provider_credential_present: true}},
       {"credential flag type", %{provider_credential_present: "false"}},

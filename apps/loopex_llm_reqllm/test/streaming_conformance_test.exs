@@ -369,6 +369,14 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
              name: "write",
              arguments_fragment: nil
            })
+
+    refute Model.valid_delta?(%{
+             kind: :tool_call_delta,
+             call_index: -1,
+             tool_call_id: "toolu_1",
+             name: "write",
+             arguments_fragment: nil
+           })
   end
 
   test "the shipped adapter splits oversized provider text before it reaches progress" do
