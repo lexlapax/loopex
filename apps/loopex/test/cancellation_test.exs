@@ -1526,9 +1526,12 @@ defmodule Loopex.CancellationTest do
     # presentation and leaves ADR 0006's retained terminal non-commit behind.
     M1RuntimeTestStore.release(terminal_waiter)
 
-    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor,
-                    {:run_terminal_failed, :stale_owner_epoch}},
-                   5_000
+    # The durable stale-owner refusal is the fact this case needs. Once the
+    # handoff notification reaches the predecessor, ADR 0014 reaps that settled
+    # superseded coordinator normally rather than turning expected owner loss
+    # into a process fault. The retained transaction below, not an exit reason,
+    # is what prevents a successor from reusing the poisoned identity.
+    assert_receive {:DOWN, ^predecessor_reference, :process, ^predecessor, :normal}, 5_000
 
     old_tx_id = terminal_transaction.tx_id
 
