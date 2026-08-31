@@ -117,6 +117,34 @@ defmodule Loopex.SessionDirectoryTest do
     assert session_owner_epoch(store_pid, session_id) == before_epoch + 1
   end
 
+  test "a fresh operating system process re-presents the runtime placement identity persisted by its predecessor",
+       %{root: root} do
+    assert {:ok, runtime_id} = SessionDirectory.runtime_id(root)
+    assert File.read!(Path.join(root, "runtime_id")) == runtime_id
+
+    elixir = System.find_executable("elixir") || flunk("the accepted Elixir toolchain is absent")
+    ebin = Path.expand("../../../_build/test/lib/loopex/ebin", __DIR__)
+
+    expression = """
+    case Loopex.SessionDirectory.state_root() do
+      {:ok, root} ->
+        case Loopex.SessionDirectory.runtime_id(root) do
+          {:ok, runtime_id} -> IO.binwrite(runtime_id)
+          other -> IO.binwrite(:stderr, inspect(other)); System.halt(2)
+        end
+
+      other ->
+        IO.binwrite(:stderr, inspect(other)); System.halt(3)
+    end
+    """
+
+    assert {^runtime_id, 0} =
+             System.cmd(elixir, ["-pa", ebin, "-e", expression],
+               env: [{"LOOPEX_HOME", root}],
+               stderr_to_stdout: true
+             )
+  end
+
   test "the runtime identity is synced as a file and directory entry before it is returned", %{
     root: root
   } do

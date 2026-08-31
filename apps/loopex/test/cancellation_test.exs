@@ -195,6 +195,15 @@ defmodule Loopex.CancellationTestExecutor do
   end
 end
 
+defmodule Loopex.NoCancellationTestExecutor do
+  @moduledoc false
+
+  def execute(_reference, _job, _grant, _options, progress \\ nil) do
+    _progress = progress || Loopex.Executor.discard_progress()
+    {:error, {:refused_before_effect, :not_implemented}}
+  end
+end
+
 defmodule Loopex.CancellationTest do
   @moduledoc false
 
@@ -1004,6 +1013,13 @@ defmodule Loopex.CancellationTest do
 
     assert finished["outcome"] == "outcome_unknown"
     assert is_binary(finished["reconciliation_ref"])
+  end
+
+  test "a cancellation executor without cancel/2 is unconfirmed" do
+    refute function_exported?(Loopex.NoCancellationTestExecutor, :cancel, 2)
+
+    assert Loopex.Executor.cancel(Loopex.NoCancellationTestExecutor, :ignored, "job-1") ==
+             {:ok, :unconfirmed}
   end
 
   test "a run being cleaned up is still active and admits nothing new until its ending commits" do

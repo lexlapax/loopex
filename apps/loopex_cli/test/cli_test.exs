@@ -134,7 +134,6 @@ defmodule LoopexCliTest do
   # path is a different file in each, so every source this file inspects is
   # resolved against the selector's own location instead.
   defp app_path(relative), do: Path.expand(Path.join([__DIR__, "..", relative]))
-  defp repository_path(relative), do: Path.expand(Path.join([__DIR__, "..", "..", relative]))
 
   defp declared_dependencies do
     # The application's own declaration, read as source. `Mix.Project.config/0`
@@ -1920,6 +1919,45 @@ defmodule LoopexCliTest do
     assert command =~ "LoopexComposition."
   end
 
+  test "the command retrieves artifacts through the ArtifactStore facade and never calls a composed adapter directly" do
+    source = File.read!(app_path("lib/loopex_cli.ex"))
+    {:ok, ast} = Code.string_to_quoted(source)
+    body = function_body(ast, :fetch_artifact, 2)
+
+    {_body, remote_calls} =
+      Macro.prewalk(body, [], fn
+        {{:., _dot_metadata, [receiver, function]}, _call_metadata, arguments} = node, acc ->
+          call = {Macro.to_string(receiver), function, length(arguments)}
+          {node, [call | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    assert Enum.reverse(remote_calls) == [
+             {"Loopex.ArtifactStore", :retrieve, 2},
+             {"Kernel", :to_string, 1},
+             {"Kernel", :to_string, 1}
+           ]
+  end
+
+  test "the command exposes exactly run sessions resume cancel and artifact and no wire or line framing surface" do
+    source = File.read!(app_path("lib/loopex_cli.ex"))
+    {:ok, ast} = Code.string_to_quoted(source)
+
+    commands =
+      ast
+      |> function_heads(:dispatch, 2)
+      |> Enum.flat_map(fn
+        [command | _rest] when is_binary(command) -> [command]
+        [{:|, _metadata, [command, _tail]}] when is_binary(command) -> [command]
+        _other -> []
+      end)
+      |> Enum.sort()
+
+    assert commands == ~w(artifact cancel resume run sessions)
+  end
+
   test "a dropped stream closure leaves the terminal falling back to the durable record without inferring abandonment or starting a timer" do
     # No progress plane at all, so no closure item can arrive. The terminal must
     # still report the run in full, from the durable record.
@@ -2315,26 +2353,48 @@ defmodule LoopexCliTest do
     assert ProgressConsumer.status(bad_tools, "tool-bad") == :invalid
   end
 
-  test "the base system prompt and active tool definitions measure under one thousand tokens" do
+  test "the base context budget measures the exact system and tool bytes the runtime stages" do
     definitions = Loopex.Executor.Local.CodingTools.definitions()
     assert length(definitions) == 4
 
-    # The same block the coordinator stages, quoted rather than recomputed: a
-    # budget measured against a copy would pass while the real prompt grew.
-    system =
-      "loopex.system.v1: You are a coding agent working in a real workspace. " <>
-        "Use the tools you are given to inspect and change files, and run commands " <>
-        "when you need to. Continue until the task is done, then stop."
+    fixture = fixture(script: [%{text: "done"}], tools: definitions)
+    {session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "measure it")
+    _events = observe(attachment)
+    [request] = Loopex.AgentLoopTestModel.dispatched(fixture.model)
 
-    assert File.read!(repository_path("loopex/lib/loopex/runtime/session_coordinator.ex")) =~
-             "loopex.system.v1: You are a coding agent working in a real workspace. "
+    receipt =
+      fixture
+      |> AgentLoopFixture.records(session_id)
+      |> Enum.find(&(&1.payload[:kind] == "model_request_committed"))
+      |> get_in([Access.key(:payload), "context_receipt"])
 
-    staged =
-      definitions
-      |> Enum.map(&LoopexProtocol.ToolDefinition.model_facing/1)
-      |> :erlang.term_to_binary()
+    [system_descriptor | _rest] = receipt["blocks"]
+    tool_descriptors = Enum.take(receipt["blocks"], -length(request.tools))
+    system_message_bytes = LoopexProtocol.Canonical.encode(hd(request.messages))
 
-    measured = Loopex.Bounds.estimate(system <> staged)
+    assert system_descriptor["source_reference"] == "loopex.system.v1"
+    assert system_descriptor["byte_cost"] == byte_size(system_message_bytes)
+    assert system_descriptor["token_cost"] == Loopex.Bounds.estimate(system_message_bytes)
+
+    Enum.zip(request.tools, tool_descriptors)
+    |> Enum.each(fn {tool, descriptor} ->
+      bytes = LoopexProtocol.ToolDefinition.canonical_bytes(tool)
+      assert descriptor["byte_cost"] == byte_size(bytes)
+      assert descriptor["token_cost"] == Loopex.Bounds.estimate(bytes)
+    end)
+
+    assert [%{"role" => "system", "content" => system_bytes} | _history] = request.messages
+
+    provider_tool_bytes =
+      Enum.map(request.tools, fn tool ->
+        tool
+        |> LoopexProtocol.ToolDefinition.model_facing()
+        |> LoopexProtocol.Canonical.encode()
+      end)
+
+    measured =
+      Loopex.Bounds.estimate(system_bytes) +
+        Enum.sum(Enum.map(provider_tool_bytes, &Loopex.Bounds.estimate/1))
 
     assert measured < 1_000,
            "the base prompt and tool definitions measure #{measured} tokens against a ceiling of 1000"
@@ -2358,6 +2418,37 @@ defmodule LoopexCliTest do
     assert {%{"c" => "2"}, []} = LoopexCli.parse(["--c", "2"])
     assert {%{"a" => true, "b" => "1"}, []} = LoopexCli.parse(["--a", "--b=1"])
     assert {%{}, ["one", "two"]} = LoopexCli.parse(["one", "two"])
+  end
+
+  defp function_body(ast, name, arity) do
+    {_ast, bodies} =
+      Macro.prewalk(ast, [], fn
+        {kind, _metadata, [{^name, _call_metadata, arguments}, [do: body]]} = node, acc
+        when kind in [:def, :defp] and length(arguments) == arity ->
+          {node, [body | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    case bodies do
+      [body] -> body
+      _other -> flunk("expected one #{name}/#{arity} definition")
+    end
+  end
+
+  defp function_heads(ast, name, arity) do
+    {_ast, heads} =
+      Macro.prewalk(ast, [], fn
+        {:def, _metadata, [{^name, _call_metadata, arguments}, _body]} = node, acc
+        when length(arguments) == arity ->
+          {node, [hd(arguments) | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    heads
   end
 
   # Concept: put the runtime's own signal handler back.

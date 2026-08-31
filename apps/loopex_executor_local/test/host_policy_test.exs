@@ -15,6 +15,7 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
 
   use ExUnit.Case, async: false
 
+  alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.Policy
 
   # Concept: the fixtures live here, in the selector's own file.
@@ -282,6 +283,94 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     result = Enum.find(second.messages, &(&1["role"] == "tool"))
     assert result["outcome"] == "denied"
     assert result["content"] =~ "Do not retry"
+  end
+
+  test "a denied read only call reaches neither the executor nor a durable effect path" do
+    definition =
+      Fixture.tool_definition(%{
+        "tool_id" => "example.read",
+        "name" => "read",
+        "description" => "Read a file beneath the workspace root.",
+        "effect_class" => "read_only",
+        "idempotency_class" => "safe_retry"
+      })
+
+    fixture =
+      Fixture.start(
+        script: [
+          %{text: "read it", calls: [%{id: "read-1", name: "read", arguments: %{"path" => "x"}}]},
+          %{text: "done", calls: []}
+        ],
+        tools: [definition],
+        policy: Denies
+      )
+
+    on_exit(fn -> Fixture.stop(fixture) end)
+
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "read x")
+    events = await_run_finished(attachment)
+
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+
+    refute Enum.any?(Fixture.records(fixture, session_id), fn record ->
+             record.payload[:kind] in ["effect_intent_committed", "executor_receipt_committed"]
+           end)
+
+    assert Enum.any?(events, &(&1.kind == "tool.finished" and &1["outcome"] == "denied"))
+  end
+
+  test "model tool context and client input cannot mint or widen a host grant" do
+    fields = %{
+      protocol_version: 1,
+      job_id: "grant-job",
+      operation_id: "grant-operation",
+      attempt: 1,
+      session_id: "grant-session",
+      run_id: "grant-run",
+      turn_id: "grant-turn",
+      tool_call_id: "grant-call",
+      origin_session_epoch: 1,
+      origin_executor_epoch: 1,
+      executor_identity: "grant-executor",
+      required_capabilities: ["workspace_write"],
+      tool_id: "example.write",
+      tool_version: "1.0.0",
+      effect_class: "workspace_write",
+      validated_arguments: %{"path" => "x", "content" => "bytes"},
+      workspace_ref: "workspace-grant",
+      workspace_lease: "lease-grant",
+      run_deadline: System.system_time(:millisecond) + 60_000,
+      resource_budgets: %{"max_output_bytes" => 65_536},
+      idempotency_class: "effectful",
+      fencing_token: 1,
+      artifact_policy: %{"retain" => true},
+      output_policy: %{"capture" => true}
+    }
+
+    {:ok, job} = Loopex.Executor.job(fields)
+    expiry = System.system_time(:millisecond) + 60_000
+
+    for source <- [:model, :tool, :context, :client] do
+      assert {:error, :host_policy_allow_required} =
+               Loopex.Executor.issue_grant({source, :allow}, job, expiry)
+    end
+
+    {:ok, grant} =
+      Loopex.Executor.issue_grant(
+        {:host_policy, :allow},
+        job,
+        expiry,
+        %{"tool_id" => "attacker.tool", "effect_class" => "external_effect"}
+      )
+
+    assert grant.tool_id == job.tool_id
+    assert grant.effect_class == job.effect_class
+    assert grant.workspace_lease == job.workspace_lease
+
+    assert grant.policy_context == %{
+             "tool_id" => "attacker.tool",
+             "effect_class" => "external_effect"
+           }
   end
 
   test "a policy that raises times out or returns a malformed value fails closed into denial" do

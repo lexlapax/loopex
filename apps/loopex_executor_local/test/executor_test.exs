@@ -117,6 +117,32 @@ defmodule Loopex.Executor.LocalTest do
     refute File.exists?(Path.join(fixture.workspace, "lease-loss.txt"))
   end
 
+  test "a starting job whose cancellation does not answer becomes unconfirmed" do
+    table = :ets.new(:starting_cancel_test, [:set, :public])
+    parent = self()
+
+    worker =
+      spawn(fn ->
+        Process.put(:loopex_inflight_table, table)
+        Process.put(:loopex_cleanup_grace_ms, 5)
+        send(parent, {:starting_worker, self()})
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    assert_receive {:starting_worker, ^worker}, 1_000
+    true = :ets.insert(table, {"starting-job", {:starting, worker}})
+
+    assert Local.cancel(worker, "starting-job") == {:ok, :unconfirmed}
+
+    monitor = Process.monitor(worker)
+    send(worker, :stop)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+    :ets.delete(table)
+  end
+
   test "the executor starts one credential-free OS tool that writes the expected workspace bytes and retains its receipt" do
     fixture = fixture("real-tool")
     on_exit(fn -> stop_fixture(fixture) end)
