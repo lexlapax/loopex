@@ -32,11 +32,8 @@ defmodule LoopexComposition do
   application permitted to declare them.
   """
 
-  alias Loopex.Executor.Local
-  alias Loopex.Executor.Local.CodingTools
-  alias Loopex.Executor.Local.WorkspaceLease
-  alias Loopex.LLM.ReqLLM
-  alias Loopex.Store
+  alias Loopex.{Executor.Local, LLM.ReqLLM, Store}
+  alias Loopex.Executor.Local.{CodingTools, WorkspaceLease}
   alias Loopex.Store.Local.Artifacts
 
   # Concept: what the host decides stays the host's to supply.
@@ -73,7 +70,8 @@ defmodule LoopexComposition do
          :ok <- start_applications(),
          {:ok, store} <- open_store(state_root),
          {:ok, executor} <- open_executor(state_root, options) do
-      Loopex.start_link(
+      start_edge(
+        Loopex,
         [
           runtime_id: Keyword.fetch!(options, :runtime_id),
           store: store,
@@ -103,12 +101,9 @@ defmodule LoopexComposition do
          do: {:ok, %{module: Artifacts, handle: handle}}
   end
 
-  defp fetch_policy(options) do
-    case Keyword.get(options, :policy) do
-      module when is_atom(module) and not is_nil(module) -> {:ok, module}
-      _absent -> {:error, :host_policy_required}
-    end
-  end
+  defp fetch_policy(options), do: policy(Keyword.get(options, :policy))
+  defp policy(module) when is_atom(module) and not is_nil(module), do: {:ok, module}
+  defp policy(_absent), do: {:error, :host_policy_required}
 
   defp open_store(state_root) do
     with :ok <- File.mkdir_p(state_root),
@@ -140,7 +135,8 @@ defmodule LoopexComposition do
            WorkspaceLease.start_link(id: lease_id, path: workspace, fencing_token: 1),
          {:ok, spill} <- artifacts(state_root),
          {:ok, executor} <-
-           Local.start_link(
+           start_edge(
+             Local,
              placement ++
                [
                  workspace_leases: %{lease_id => lease},
@@ -157,4 +153,13 @@ defmodule LoopexComposition do
        })}
     end
   end
+
+  # Concept: construction stays private while its forwarding remains observable.
+  #
+  # Technical depth: the caller-local observer exists for conformance evidence;
+  # the absent key delegates directly through `apply/3`, and no exported runtime
+  # accessor or VM-global test state becomes part of the reference stack.
+  defp start_edge(module, options),
+    do:
+      Process.get(:"$loopex_composition_edge_observer", &apply/3).(module, :start_link, [options])
 end

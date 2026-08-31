@@ -128,49 +128,49 @@ defmodule LoopexCompositionTest do
     # it, so a reference embedder and the command-line operator both got the
     # default and could not choose another.
     #
-    # Technical depth: this is a structural assertion and is written as one. The
-    # composed runtime exposes no accessor for the executor it built -- and
-    # adding a public one so a case could read it back would be widening the
-    # surface for a test rather than for an embedder. Driving it end to end needs
-    # a provider call, which this file deliberately never makes. So the
-    # forwarding is asserted here, at the one place it is decided, and the two
-    # halves it enables are proved behaviourally elsewhere: the executor honours
-    # both options in `coding_tools_test.exs`, and a run's terminal reports the
-    # declared period in `agent_loop_test.exs`.
-    source = File.read!(app_path("lib/loopex_composition.ex"))
+    # Technical depth: the caller-local observer runs the exact public `start/1`
+    # path and delegates both edge calls to their real constructors. It observes
+    # the options at the decision boundary without adding a runtime accessor or
+    # making a provider call.
+    {state_root, workspace} = roots()
+    process_probe = Path.join(workspace, "process-probe")
+    File.write!(process_probe, "#!/bin/sh\nexit 0\n")
+    File.chmod!(process_probe, 0o700)
 
-    [forwarded] =
-      Regex.run(~r/Keyword\.take\(options, \[([^\]]*)\]\)/, source, capture: :all_but_first)
+    captured =
+      capture_edges(
+        runtime_id: "forwarded",
+        state_root: state_root,
+        workspace: workspace,
+        policy: Embedder,
+        cleanup_grace_ms: 137,
+        process_probe: process_probe
+      )
 
-    assert forwarded =~ ":cleanup_grace_ms",
-           "the composition does not forward the declared cleanup period, so an embedder and " <>
-             "the command both get the default and cannot choose another: [#{forwarded}]"
+    runtime_options = Map.fetch!(captured, Loopex)
+    executor_options = Map.fetch!(captured, Loopex.Executor.Local)
 
-    assert forwarded =~ ":process_probe",
-           "the composition does not forward the declared process probe: [#{forwarded}]"
-
-    # Forwarded rather than defaulted: a key the host did not supply must stay
-    # absent so the one default the port declares applies, rather than this
-    # module inventing one.
-    refute source =~ ~r/cleanup_grace_ms:\s*\d/,
-           "the composition names a cleanup period of its own instead of forwarding the host's"
+    assert Keyword.fetch!(runtime_options, :cleanup_grace_ms) == 137
+    assert Keyword.fetch!(executor_options, :cleanup_grace_ms) == 137
+    assert Keyword.fetch!(executor_options, :process_probe) == process_probe
 
     # Concept: the cleanup period reaches the session as well as the hand.
     #
-    # Technical depth: ADR 0009 makes it a *session* configuration value. The
-    # period a run's terminal reports is the session's declaration, so a
-    # composition that handed it only to the executor would let the two differ:
-    # the ending would name a number the cleanup did not run under. Both halves
-    # are read out of the one list this module forwards to `Loopex.start_link/1`,
-    # asserted here for the same reason as the half above — this is where it is
-    # decided, and there is no accessor to read it back from without widening the
-    # surface for a case.
-    [host_supplied] =
-      Regex.run(~r/@host_supplied ~w\(([^)]*)\)a/, source, capture: :all_but_first)
+    # Forwarded rather than defaulted: keys the host did not supply stay absent,
+    # so the one default each owning port declares applies.
+    {default_root, default_workspace} = roots()
 
-    assert host_supplied =~ "cleanup_grace_ms",
-           "the composition does not forward the declared cleanup period to the session, so a " <>
-             "run's ending can report a period its cleanup never ran under: [#{host_supplied}]"
+    defaults =
+      capture_edges(
+        runtime_id: "defaults",
+        state_root: default_root,
+        workspace: default_workspace,
+        policy: Embedder
+      )
+
+    refute Keyword.has_key?(Map.fetch!(defaults, Loopex), :cleanup_grace_ms)
+    refute Keyword.has_key?(Map.fetch!(defaults, Loopex.Executor.Local), :cleanup_grace_ms)
+    refute Keyword.has_key?(Map.fetch!(defaults, Loopex.Executor.Local), :process_probe)
   end
 
   test "the shipped composition requires a host supplied policy and ships no permissive default" do
@@ -266,6 +266,32 @@ defmodule LoopexCompositionTest do
   # path names a different file in each. Resolving against the selector's own
   # location answers the same in both.
   defp app_path(relative), do: Path.expand(Path.join([__DIR__, "..", relative]))
+
+  defp capture_edges(options) do
+    marker = make_ref()
+
+    Process.put(:"$loopex_composition_edge_observer", fn module,
+                                                         function,
+                                                         [edge_options] = args ->
+      send(self(), {marker, module, edge_options})
+      apply(module, function, args)
+    end)
+
+    try do
+      assert {:ok, runtime} = LoopexComposition.start(options)
+
+      try do
+        for _ <- 1..2, into: %{} do
+          assert_receive {^marker, module, edge_options}
+          {module, edge_options}
+        end
+      after
+        Loopex.stop(runtime)
+      end
+    after
+      Process.delete(:"$loopex_composition_edge_observer")
+    end
+  end
 
   # The application's own declaration, read as source. `Mix.Project.config/0`
   # answers for whichever project is loaded, and under the gate none is.
