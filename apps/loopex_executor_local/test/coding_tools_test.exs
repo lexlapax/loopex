@@ -920,6 +920,211 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert quiet.output == "short"
   end
 
+  test "a shell job obeys the smaller declared output ceiling and spills the complete bytes" do
+    # Concept: the ceiling committed on the job can narrow the definition, and
+    # crossing it preserves the bytes without letting the artifact notice widen
+    # what reaches the model.
+    #
+    # Technical depth: the process path bounded with CodingTools' module constant
+    # after it had collected the whole answer. A job declaring a smaller ceiling
+    # therefore returned all its bytes, while the receipt's durable budget said
+    # it had shown less. Deleting the minimum calculation must make this case lose
+    # both its artifact and its bounded model-facing result.
+    root = workspace()
+    {:ok, store} = Loopex.Executor.Local.CodingToolsTest.RecordingStore.start()
+
+    {executor, lease_id} =
+      executor_for(root, %{
+        module: Loopex.Executor.Local.CodingToolsTest.RecordingStore,
+        handle: store
+      })
+
+    output_limit = 1_024
+    full = String.duplicate("bounded-output-", 256)
+
+    assert {:ok, %{outcome: :completed} = receipt} =
+             run(
+               root,
+               "loopex.bash",
+               %{"argv" => ["/usr/bin/printf", full]},
+               %{
+                 executor: executor,
+                 lease_id: lease_id,
+                 resource_budgets: %{
+                   "max_output_bytes" => output_limit,
+                   "max_wall_time_ms" => 30_000
+                 }
+               }
+             )
+
+    assert byte_size(receipt.output) <= output_limit
+    assert receipt.output =~ "truncated"
+    assert [reference] = receipt.artifacts
+    assert reference.size == byte_size(full)
+    assert receipt.output =~ reference.digest
+
+    assert [_, shown, total] =
+             Regex.run(~r/output truncated\. (\d+) of (\d+) bytes shown/, receipt.output)
+
+    assert String.to_integer(shown) > 0
+    assert String.to_integer(total) == byte_size(full)
+
+    assert store |> Loopex.Executor.Local.CodingToolsTest.RecordingStore.stored() |> Map.values() ==
+             [
+               full
+             ]
+  end
+
+  test "a shell job exceeding the tool artifact ceiling is stopped without retaining a partial artifact" do
+    # Concept: the artifact ceiling is a production bound, not metadata. A
+    # command cannot make this executor retain output forever by never stopping.
+    #
+    # Technical depth: collect_output/7 appended every port chunk to one binary
+    # and consulted no artifact_bytes value. This command crosses the shipped
+    # definition's ceiling, then leaves ten seconds before a final marker so the
+    # receiver has a deterministic opportunity to act. The implementation must stop
+    # the owned group at that crossing, retain no artifact that pretends to be
+    # complete, and keep the truthful receipt itself under the output ceiling.
+    # Replacing the bounded collector with acc <> chunk makes the marker appear
+    # and lets RecordingStore observe an over-ceiling artifact.
+    root = workspace()
+    marker = Path.join(root, "ran-past-artifact-ceiling")
+    {:ok, store} = Loopex.Executor.Local.CodingToolsTest.RecordingStore.start()
+
+    {executor, lease_id} =
+      executor_for(root, %{
+        module: Loopex.Executor.Local.CodingToolsTest.RecordingStore,
+        handle: store
+      })
+
+    definition = Enum.find(CodingTools.definitions(), &(&1["tool_id"] == "loopex.bash"))
+    artifact_limit = get_in(definition, ["budgets", "artifact_bytes"])
+    output_limit = get_in(definition, ["budgets", "output_bytes"])
+
+    assert {:ok, receipt} =
+             run(
+               root,
+               "loopex.bash",
+               %{
+                 "argv" => [
+                   "/bin/sh",
+                   "-c",
+                   "yes output | head -c \"$1\"; sleep 10; printf reached > \"$2\"",
+                   "loopex-artifact-ceiling",
+                   Integer.to_string(artifact_limit + 1_048_576),
+                   marker
+                 ]
+               },
+               %{executor: executor, lease_id: lease_id}
+             )
+
+    assert receipt.outcome in [:failed, :outcome_unknown]
+    assert receipt.output =~ "artifact ceiling"
+    assert receipt.output =~ Integer.to_string(artifact_limit)
+    assert byte_size(receipt.output) <= output_limit
+    assert receipt.artifacts == []
+    assert Loopex.Executor.Local.CodingToolsTest.RecordingStore.stored(store) == %{}
+    refute File.exists?(marker), "the command continued after crossing its artifact ceiling"
+  end
+
+  test "a deadline result keeps its diagnostic inside the smaller declared output ceiling" do
+    # Concept: reaching a deadline does not release the output bound. The model
+    # receives the reason the job stopped and a truthful indication that the
+    # partial output was truncated, all within the job's committed ceiling.
+    #
+    # Technical depth: the deadline branch bypassed bound_process_output/4 and
+    # appended its diagnostic directly to every byte collected before the
+    # deadline. A command could therefore emit megabytes below the artifact
+    # ceiling, wait for its deadline, and put all of them in the receipt despite
+    # declaring a much smaller max_output_bytes value.
+    root = workspace()
+    output_limit = 1_024
+
+    assert {:ok, receipt} =
+             run(
+               root,
+               "loopex.bash",
+               %{
+                 "argv" => [
+                   "/bin/sh",
+                   "-c",
+                   "yes partial-output | head -c 16384; sleep 10"
+                 ]
+               },
+               %{
+                 run_deadline: System.system_time(:millisecond) + 400,
+                 resource_budgets: %{
+                   "max_output_bytes" => output_limit,
+                   "max_wall_time_ms" => 30_000
+                 }
+               }
+             )
+
+    assert receipt.outcome in [:cancelled, :outcome_unknown]
+    assert byte_size(receipt.output) <= output_limit
+    assert receipt.output =~ "deadline passed"
+    assert receipt.output =~ "output truncated"
+    assert receipt.artifacts == []
+  end
+
+  test "read refuses a file larger than its artifact ceiling without loading or retaining it" do
+    # Concept: a regular file has a size before it is opened, so read refuses a
+    # result it cannot retain rather than first loading unbounded bytes.
+    #
+    # Technical depth: enforcing the ceiling only in spill/5 is too late for a
+    # filesystem result: File.read has already allocated the whole file by then.
+    # The identity check carries the measured size into the open, and the read is
+    # independently capped in case the file grows after that measurement.
+    root = workspace()
+    {:ok, store} = Loopex.Executor.Local.CodingToolsTest.RecordingStore.start()
+
+    {executor, lease_id} =
+      executor_for(root, %{
+        module: Loopex.Executor.Local.CodingToolsTest.RecordingStore,
+        handle: store
+      })
+
+    definition = Enum.find(CodingTools.definitions(), &(&1["tool_id"] == "loopex.read"))
+    artifact_limit = get_in(definition, ["budgets", "artifact_bytes"])
+    large = Path.join(root, "larger-than-the-artifact-bound.txt")
+
+    {:ok, file} = :file.open(large, [:write, :raw, :binary])
+    {:ok, _position} = :file.position(file, artifact_limit)
+    :ok = :file.write(file, "x")
+    :ok = :file.close(file)
+
+    assert {:ok, %{outcome: :failed} = receipt} =
+             run(root, "loopex.read", %{"path" => Path.basename(large)}, %{
+               executor: executor,
+               lease_id: lease_id
+             })
+
+    assert receipt.output =~ "artifact ceiling"
+    assert receipt.output =~ Integer.to_string(artifact_limit)
+    assert receipt.artifacts == []
+    assert Loopex.Executor.Local.CodingToolsTest.RecordingStore.stored(store) == %{}
+
+    # Loading is not safely measurable from outside File without making a huge
+    # allocation the test's failure mode, so this half is explicitly structural.
+    # It binds both protections: the known size is refused before read_verified,
+    # and the open handle still reads at most one byte beyond the ceiling so a
+    # file that grows after the stat cannot turn the preflight into an OOM gap.
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    [read_clause] =
+      Regex.run(
+        ~r/defp filesystem_effect\(workspace, %\{kind: :read, path: path\}, limits\) do\n(.*?)\n  end\n/s,
+        source,
+        capture: :all_but_first
+      )
+
+    assert read_clause =~ ":ok <- within_artifact_ceiling(identity, limits.artifact)"
+    assert read_clause =~ "read_verified(resolved, path, identity, limits.artifact)"
+
+    assert source =~ "defp read_open_file(file, limit) when is_integer(limit) and limit > 0"
+    assert source =~ "read_open_file(file, limit + 1, limit)"
+  end
+
   test "a tool child process group is owned and terminated with its job and no group member survives" do
     root = workspace()
 
@@ -3150,7 +3355,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # being built. The comparison is a pin on the entire identity, and it is
     # asserted here as one.
     [comparison] =
-      Regex.run(~r/defp read_verified\(resolved, path, identity\) do\n(.*?)\n  end\n/s, source,
+      Regex.run(
+        ~r/defp read_verified\(resolved, path, identity, artifact_limit\) do\n(.*?)\n  end\n/s,
+        source,
         capture: :all_but_first
       )
 

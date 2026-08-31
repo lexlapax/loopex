@@ -725,11 +725,12 @@ defmodule Loopex.Executor.Local do
   # stopped job reads a deadline the run never had.
   defp run_tool(state, job, %{coding: _definition} = tool, workspace, arguments, options, lease) do
     deadline = effective_deadline(job, tool)
+    limits = effective_output_limits(job, tool)
 
     {outcome, output, artifacts} =
       job
-      |> run_coding_tool(tool, workspace, arguments, options, lease, deadline)
-      |> spill(state, job, lease)
+      |> run_coding_tool(tool, workspace, arguments, options, lease, deadline, limits)
+      |> spill(state, job, lease, limits)
 
     receipt(
       state,
@@ -1003,7 +1004,8 @@ defmodule Loopex.Executor.Local do
          %{kind: kind} = arguments,
          _options,
          lease,
-         deadline
+         deadline,
+         limits
        )
        when kind in [:read, :write, :edit] do
     remaining = deadline - System.system_time(:millisecond)
@@ -1011,12 +1013,21 @@ defmodule Loopex.Executor.Local do
     if remaining <= 0 do
       {:failed, "the effective deadline passed before this tool began"}
     else
-      run_bounded_tool(workspace, arguments, remaining, lease)
+      run_bounded_tool(workspace, arguments, remaining, lease, limits)
     end
   end
 
-  defp run_coding_tool(job, tool, workspace, %{kind: :bash} = arguments, options, lease, deadline) do
-    run_owned_process(job, tool, workspace, arguments, options, lease, deadline)
+  defp run_coding_tool(
+         job,
+         tool,
+         workspace,
+         %{kind: :bash} = arguments,
+         options,
+         lease,
+         deadline,
+         limits
+       ) do
+    run_owned_process(job, tool, workspace, arguments, options, lease, deadline, limits)
   end
 
   # Concept: the effect runs where it can be abandoned, and the abandonment is
@@ -1029,8 +1040,12 @@ defmodule Loopex.Executor.Local do
   #
   # The mechanics of the wait live in `bounded_work/3`, which the two retentions
   # that follow the effect use as well.
-  defp run_bounded_tool(workspace, arguments, remaining, lease) do
-    case bounded_work(fn -> filesystem_effect(workspace, arguments) end, remaining, lease) do
+  defp run_bounded_tool(workspace, arguments, remaining, lease, limits) do
+    case bounded_work(
+           fn -> filesystem_effect(workspace, arguments, limits) end,
+           remaining,
+           lease
+         ) do
       {:done, result} ->
         result
 
@@ -1088,15 +1103,21 @@ defmodule Loopex.Executor.Local do
   defp effect_text(_cause, %{kind: kind}, _stopped),
     do: "Whether #{kind} changed the workspace is unproven."
 
-  defp filesystem_effect(workspace, %{kind: :read, path: path}) do
+  defp filesystem_effect(workspace, %{kind: :read, path: path}, limits) do
     with {:ok, resolved} <- CodingTools.resolve(workspace, path),
          {:ok, identity} <- ordinary_file(resolved, path, :required),
-         {:ok, content} <- read_verified(resolved, path, identity) do
-      case CodingTools.bound_output(content, CodingTools.limits().read_bytes) do
+         :ok <- within_artifact_ceiling(identity, limits.artifact),
+         {:ok, content} <- read_verified(resolved, path, identity, limits.artifact) do
+      case CodingTools.bound_output(content, limits.output) do
         {:complete, bounded} -> {:completed, bounded, :complete}
         {:truncated, kept, full} -> {:completed, kept, {:truncated, full}}
       end
     else
+      {:artifact_ceiling_exceeded, observed} ->
+        {:failed,
+         "read failed: the file is #{observed} bytes, exceeding the tool's declared " <>
+           "artifact ceiling of #{limits.artifact} bytes"}
+
       {:refused, message} ->
         {:failed, message}
 
@@ -1108,7 +1129,7 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp filesystem_effect(workspace, %{kind: :write, path: path, content: content}) do
+  defp filesystem_effect(workspace, %{kind: :write, path: path, content: content}, _limits) do
     with {:ok, root} <- CodingTools.resolve(workspace, "."),
          {:ok, resolved} <- CodingTools.resolve(workspace, path),
          {:ok, _identity} <- ordinary_file(resolved, path, :optional),
@@ -1151,7 +1172,7 @@ defmodule Loopex.Executor.Local do
   # atomically. It narrows the window to the same one `write` documents rather
   # than closing it, for the reason stated there: nothing available here can pin
   # a directory between the confirmation and the next syscall.
-  defp filesystem_effect(workspace, %{kind: :edit} = arguments) do
+  defp filesystem_effect(workspace, %{kind: :edit} = arguments, _limits) do
     %{path: path, old: old, new: new} = arguments
 
     with {:ok, root} <- CodingTools.resolve(workspace, "."),
@@ -1220,7 +1241,7 @@ defmodule Loopex.Executor.Local do
   defp ordinary_file(resolved, path, presence) do
     case File.lstat(resolved) do
       {:ok, %File.Stat{type: :regular} = stat} ->
-        {:ok, {stat.major_device, stat.inode}}
+        {:ok, {stat.major_device, stat.inode, stat.size}}
 
       {:ok, %File.Stat{type: type}} ->
         {:refused, "refused: #{path} is a #{type}, not a regular file"}
@@ -1232,6 +1253,11 @@ defmodule Loopex.Executor.Local do
         {:error, reason}
     end
   end
+
+  defp within_artifact_ceiling({_device, _inode, size}, limit) when size <= limit, do: :ok
+
+  defp within_artifact_ceiling({_device, _inode, size}, _limit),
+    do: {:artifact_ceiling_exceeded, size}
 
   # Concept: the file that was opened is checked against the file that was
   # contained, and a mismatch is refused rather than read.
@@ -1250,12 +1276,16 @@ defmodule Loopex.Executor.Local do
   # window and a truthful refusal when the swap is visible, not containment
   # under a racing filesystem.
   defp read_verified(resolved, path, identity) do
+    read_verified(resolved, path, identity, :unbounded_input)
+  end
+
+  defp read_verified(resolved, path, identity, artifact_limit) do
     case File.open(resolved, [:read, :binary]) do
       {:ok, file} ->
         try do
           case ordinary_file(resolved, path, :required) do
             {:ok, ^identity} ->
-              read_open_file(file)
+              read_open_file(file, artifact_limit)
 
             {:ok, _different} ->
               {:refused,
@@ -1273,11 +1303,25 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp read_open_file(file) do
-    case IO.binread(file, :eof) do
-      :eof -> {:ok, ""}
-      data when is_binary(data) -> {:ok, data}
-      {:error, reason} -> {:error, reason}
+  defp read_open_file(file, :unbounded_input), do: read_open_file(file, :eof, nil)
+
+  defp read_open_file(file, limit) when is_integer(limit) and limit > 0,
+    do: read_open_file(file, limit + 1, limit)
+
+  defp read_open_file(file, amount, artifact_limit) do
+    case IO.binread(file, amount) do
+      :eof ->
+        {:ok, ""}
+
+      data
+      when is_binary(data) and is_integer(artifact_limit) and byte_size(data) > artifact_limit ->
+        {:artifact_ceiling_exceeded, byte_size(data)}
+
+      data when is_binary(data) ->
+        {:ok, data}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -1407,7 +1451,7 @@ defmodule Loopex.Executor.Local do
   # because the BEAM gives a port's os_pid but not the group the child chose. A
   # captured identity is the only one termination can honestly claim to have
   # confirmed.
-  defp run_owned_process(job, _tool, workspace, arguments, options, lease, deadline) do
+  defp run_owned_process(job, _tool, workspace, arguments, options, lease, deadline, limits) do
     environment = child_environment()
     {launcher, command_arguments} = process_launcher(arguments, environment)
 
@@ -1422,7 +1466,9 @@ defmodule Loopex.Executor.Local do
 
     register_inflight(job.job_id, os_pid)
 
-    case collect_output(port, os_pid, deadline, <<>>, options, job, lease) do
+    collector = new_output_collector(os_pid)
+
+    case collect_output(port, deadline, collector, options, job, lease, limits.artifact) do
       # Concept: the launcher's exit is the end of one process, not the end of
       # the work this job owns.
       #
@@ -1443,25 +1489,39 @@ defmodule Loopex.Executor.Local do
 
         case quiescence do
           :quiescent ->
-            bound_process_output(status, output, "")
+            bound_process_output(status, output, "", limits.output)
 
           :terminated ->
-            bound_process_output(status, output, @group_terminated_note)
+            bound_process_output(status, output, @group_terminated_note, limits.output)
 
           :unconfirmed ->
-            unproven(bound_process_output(status, output, @group_unconfirmed_note))
+            unproven(bound_process_output(status, output, @group_unconfirmed_note, limits.output))
         end
+
+      {:artifact_limit_exceeded, output, group, observed} ->
+        confirmed = confirm_group_terminated(group, job_episode())
+
+        {if(confirmed, do: :failed, else: :outcome_unknown),
+         artifact_ceiling_message(
+           output,
+           limits.output,
+           limits.artifact,
+           observed,
+           confirmed
+         ), :complete}
 
       {:cancelled, output, group} ->
         confirmed = confirm_group_terminated(group, job_episode())
 
+        suffix =
+          "\n[loopex: the deadline passed and the command was terminated." <>
+            if(confirmed,
+              do: " Its process group is confirmed cleaned.]",
+              else: " Cleanup could not be confirmed.]"
+            )
+
         {if(confirmed, do: :cancelled, else: :outcome_unknown),
-         output <>
-           "\n[loopex: the deadline passed and the command was terminated." <>
-           if(confirmed,
-             do: " Its process group is confirmed cleaned.]",
-             else: " Cleanup could not be confirmed.]"
-           )}
+         bounded_terminal_output(output, suffix, limits.output)}
 
       # Concept: a command whose lease vanished is unproven, not cancelled.
       #
@@ -1478,15 +1538,16 @@ defmodule Loopex.Executor.Local do
       {:workspace_lease_lost, output, group} ->
         confirmed = confirm_group_terminated(group, job_episode())
 
-        {:outcome_unknown,
-         output <>
-           "\n[loopex: the workspace lease was lost and the command was terminated." <>
-           if(confirmed,
-             do: " Its process group is confirmed cleaned.",
-             else: " Cleanup could not be confirmed."
-           ) <>
-           " Whether its effect landed in the workspace this job was authorised" <>
-           " against is unproven.]"}
+        suffix =
+          "\n[loopex: the workspace lease was lost and the command was terminated." <>
+            if(confirmed,
+              do: " Its process group is confirmed cleaned.",
+              else: " Cleanup could not be confirmed."
+            ) <>
+            " Whether its effect landed in the workspace this job was authorised" <>
+            " against is unproven.]"
+
+        {:outcome_unknown, bounded_terminal_output(output, suffix, limits.output)}
     end
   end
 
@@ -1537,13 +1598,15 @@ defmodule Loopex.Executor.Local do
   # whose diagnosis is the first thing truncated away is the defect again in
   # another form. It is appended to the spilled copy too, so the truncation
   # notice's "N of M bytes shown" counts the same bytes on both sides.
-  defp bound_process_output(status, output, group_note) do
+  defp bound_process_output(status, output, group_note, output_limit) do
     outcome = if status == 0, do: :completed, else: :failed
     note = exit_note(status) <> group_note
+    full = output <> note
 
-    case CodingTools.bound_output(output, CodingTools.limits().output_bytes) do
-      {:complete, bounded} -> {outcome, bounded <> note, :complete}
-      {:truncated, kept, full} -> {outcome, kept <> note, {:truncated, full <> note}}
+    if byte_size(full) <= output_limit do
+      {outcome, full, :complete}
+    else
+      {outcome, bounded_with_suffix(output, note, output_limit), {:truncated, full, note}}
     end
   end
 
@@ -1631,6 +1694,39 @@ defmodule Loopex.Executor.Local do
 
   defp tool_wall_time(_tool), do: nil
 
+  # Concept: output is bounded by every declaration that applies, and artifact
+  # retention is bounded by the tool definition that the grant named.
+  #
+  # Technical depth: the process path used CodingTools' compiled output constant
+  # and never read artifact_bytes. That happened to match loopex.bash's shipped
+  # output declaration, but a job carrying a smaller committed output ceiling was
+  # widened at the hand, and no amount of output could reach an artifact ceiling
+  # because none was consulted. The minimum keeps a caller from widening the
+  # definition; the definition's artifact ceiling is the maximum complete result
+  # this executor may retain in memory or hand to a store.
+  defp effective_output_limits(job, %{coding: %{"budgets" => budgets}}) do
+    tool_output = positive_budget!(budgets, "output_bytes")
+    artifact = positive_budget!(budgets, "artifact_bytes")
+
+    output =
+      case job do
+        %{resource_budgets: %{"max_output_bytes" => value}}
+        when is_integer(value) and value > 0 ->
+          min(value, tool_output)
+
+        _other ->
+          tool_output
+      end
+
+    %{output: output, artifact: artifact}
+  end
+
+  defp positive_budget!(budgets, name) do
+    case Map.fetch!(budgets, name) do
+      value when is_integer(value) and value > 0 -> value
+    end
+  end
+
   # Concept: output beyond a tool's bound is retained, not discarded.
   #
   # Technical depth: a bounded tool returned the kept prefix and dropped the
@@ -1643,15 +1739,27 @@ defmodule Loopex.Executor.Local do
   # or the store refuses, the tool keeps the marker it had: an operator loses the
   # retrieval, never the result, and the receipt says truthfully that nothing was
   # retained.
-  defp spill({outcome, output}, state, job, lease),
-    do: spill({outcome, output, :complete}, state, job, lease)
+  defp spill({outcome, output}, state, job, lease, limits),
+    do: spill({outcome, output, :complete}, state, job, lease, limits)
 
-  defp spill({outcome, output, :complete}, _state, _job, _lease), do: {outcome, output, []}
+  defp spill({outcome, output, :complete}, _state, _job, _lease, _limits),
+    do: {outcome, output, []}
 
-  defp spill({outcome, kept, {:truncated, full}}, %{artifacts: nil}, _job, _lease),
-    do: {outcome, truncation_marker(kept, byte_size(full)), []}
+  defp spill({outcome, _kept, {:truncated, full}}, state, job, lease, limits),
+    do: spill_truncated(outcome, full, "", state, job, lease, limits)
 
-  defp spill({outcome, kept, {:truncated, full}}, state, job, lease) do
+  defp spill({outcome, _kept, {:truncated, full, diagnostic}}, state, job, lease, limits),
+    do: spill_truncated(outcome, full, diagnostic, state, job, lease, limits)
+
+  defp spill_truncated(outcome, full, diagnostic, state, job, lease, limits) do
+    retain_truncated(outcome, full, diagnostic, state, job, lease, limits.output)
+  end
+
+  defp retain_truncated(outcome, full, diagnostic, %{artifacts: nil}, _job, _lease, limit) do
+    {outcome, bounded_truncation_marker(full, diagnostic, limit), []}
+  end
+
+  defp retain_truncated(outcome, full, diagnostic, state, job, lease, limit) do
     metadata = %{
       "role" => "tool_output",
       "media_type" => "text/plain",
@@ -1663,11 +1771,10 @@ defmodule Loopex.Executor.Local do
 
     case retain_under_lease(module, handle, full, metadata, lease, retention_bound(job)) do
       {:ok, reference} ->
-        {outcome, Loopex.ArtifactStore.truncation_notice(kept, byte_size(full), reference),
-         [reference]}
+        {outcome, bounded_artifact_notice(full, diagnostic, limit, reference), [reference]}
 
       {:error, _reason} ->
-        {outcome, truncation_marker(kept, byte_size(full)), []}
+        {outcome, bounded_truncation_marker(full, diagnostic, limit), []}
 
       # Concept: the run's own instant ended the retention, and the result it was
       # retaining is untouched by that.
@@ -1680,17 +1787,25 @@ defmodule Loopex.Executor.Local do
       # above, said with the reason that actually applies.
       :run_deadline_passed ->
         {outcome,
-         truncation_marker(kept, byte_size(full)) <>
+         bounded_truncation_with_extra(
+           full,
+           diagnostic,
+           limit,
            "\n[loopex: the run deadline passed while this job's output was being" <>
-           " retained, and the retention was abandoned. The result above is what the" <>
-           " tool produced; nothing beyond it was retained.]", []}
+             " retained, and the retention was abandoned. The result above is what the" <>
+             " tool produced; nothing beyond it was retained.]"
+         ), []}
 
       :workspace_lease_lost ->
         {:outcome_unknown,
-         truncation_marker(kept, byte_size(full)) <>
+         bounded_truncation_with_extra(
+           full,
+           diagnostic,
+           limit,
            "\n[loopex: the workspace lease was lost while this job's output was being" <>
-           " retained, and the retention was abandoned. Whether the effect landed in" <>
-           " the workspace this job was authorised against is unproven.]", []}
+             " retained, and the retention was abandoned. Whether the effect landed in" <>
+             " the workspace this job was authorised against is unproven.]"
+         ), []}
     end
   end
 
@@ -2006,46 +2121,143 @@ defmodule Loopex.Executor.Local do
   # this executor assumed.
   defp group_preamble, do: "printf 'loopex-pgid:%s\\n' \"$(ps -o pgid= -p $$ | tr -d ' ')\" >&2; "
 
-  defp collect_output(port, os_pid, deadline, acc, options, job, lease) do
+  # Concept: command output is accumulated only up to the artifact ceiling that
+  # its resolved definition declared.
+  #
+  # Technical depth: appending `acc <> chunk` made memory grow with whatever the
+  # command chose to print, and did quadratic copying on the way. The collector
+  # keeps port chunks as reversed iodata, counts only tool output (the private
+  # process-group preamble is parsed separately), and accepts no bytes after the
+  # artifact ceiling. Crossing it terminates the owned group immediately. The
+  # final flatten therefore has a hard upper bound, while ordinary output beneath
+  # the ceiling is still byte-identical for artifact spill.
+  defp new_output_collector(os_pid) do
+    %{chunks: [], bytes: 0, group: os_pid, preamble: <<>>}
+  end
+
+  defp collect_output(port, deadline, collector, options, job, lease, artifact_limit) do
     {monitor, lease_pid} = lease
     remaining = deadline - System.system_time(:millisecond)
 
     if remaining <= 0 do
-      group = group_of(acc, os_pid)
+      {output, group} = collected_output(collector, artifact_limit)
       terminate_group(group, job_episode())
       forget_inflight(job.job_id)
-      {:cancelled, strip_group_line(acc), group}
+      {:cancelled, output, group}
     else
       receive do
         {^port, {:data, chunk}} ->
           notify(options, {:executor_progress, job.job_id, byte_size(chunk)})
-          combined = acc <> chunk
-          register_inflight(job.job_id, group_of(combined, os_pid))
-          collect_output(port, os_pid, deadline, combined, options, job, lease)
+
+          case collect_chunk(collector, chunk, artifact_limit) do
+            {:ok, next} ->
+              register_inflight(job.job_id, next.group)
+              collect_output(port, deadline, next, options, job, lease, artifact_limit)
+
+            {:artifact_limit_exceeded, next, observed} ->
+              terminate_group(next.group, job_episode())
+              forget_inflight(job.job_id)
+              {:artifact_limit_exceeded, flatten_chunks(next), next.group, observed}
+          end
 
         {^port, {:exit_status, status}} ->
-          {:exited, status, strip_group_line(acc), group_of(acc, os_pid)}
+          case finish_collector(collector, artifact_limit) do
+            {:ok, finished} ->
+              {:exited, status, flatten_chunks(finished), finished.group}
+
+            {:artifact_limit_exceeded, finished, observed} ->
+              terminate_group(finished.group, job_episode())
+              forget_inflight(job.job_id)
+              {:artifact_limit_exceeded, flatten_chunks(finished), finished.group, observed}
+          end
 
         {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-          group = group_of(acc, os_pid)
+          {output, group} = collected_output(collector, artifact_limit)
           terminate_group(group, job_episode())
           forget_inflight(job.job_id)
-          {:workspace_lease_lost, strip_group_line(acc), group}
+          {:workspace_lease_lost, output, group}
       after
         min(remaining, 50) ->
-          collect_output(port, os_pid, deadline, acc, options, job, lease)
+          collect_output(port, deadline, collector, options, job, lease, artifact_limit)
       end
     end
   end
 
-  defp group_of(output, os_pid) do
-    case Regex.run(~r/loopex-pgid:(\d+)/, output) do
-      [_all, group] -> String.to_integer(group)
-      nil -> os_pid
+  defp collect_chunk(%{preamble: preamble} = collector, chunk, limit)
+       when is_binary(preamble) do
+    combined = preamble <> chunk
+
+    case :binary.match(combined, "\n") do
+      {newline, 1} ->
+        line_size = newline + 1
+        line = binary_part(combined, 0, line_size)
+        rest = binary_part(combined, line_size, byte_size(combined) - line_size)
+
+        case Regex.run(~r/^loopex-pgid:(\d+)\n$/, line) do
+          [_all, group] ->
+            collector
+            |> Map.put(:preamble, nil)
+            |> Map.put(:group, String.to_integer(group))
+            |> append_collected(rest, limit)
+
+          nil ->
+            collector
+            |> Map.put(:preamble, nil)
+            |> append_collected(combined, limit)
+        end
+
+      :nomatch when byte_size(combined) <= 64 ->
+        {:ok, %{collector | preamble: combined}}
+
+      :nomatch ->
+        collector
+        |> Map.put(:preamble, nil)
+        |> append_collected(combined, limit)
     end
   end
 
-  defp strip_group_line(output), do: String.replace(output, ~r/loopex-pgid:\d+\n/, "")
+  defp collect_chunk(collector, chunk, limit), do: append_collected(collector, chunk, limit)
+
+  defp append_collected(collector, <<>>, _limit), do: {:ok, collector}
+
+  defp append_collected(%{bytes: bytes} = collector, chunk, limit) do
+    observed = bytes + byte_size(chunk)
+    available = max(limit - bytes, 0)
+    kept_size = min(byte_size(chunk), available)
+
+    next =
+      if kept_size == 0 do
+        collector
+      else
+        kept = binary_part(chunk, 0, kept_size)
+        %{collector | chunks: [kept | collector.chunks], bytes: bytes + kept_size}
+      end
+
+    if observed > limit,
+      do: {:artifact_limit_exceeded, next, observed},
+      else: {:ok, next}
+  end
+
+  defp finish_collector(%{preamble: nil} = collector, _limit), do: {:ok, collector}
+
+  defp finish_collector(%{preamble: preamble} = collector, limit) do
+    collector
+    |> Map.put(:preamble, nil)
+    |> append_collected(preamble, limit)
+  end
+
+  defp collected_output(collector, limit) do
+    finished =
+      case finish_collector(collector, limit) do
+        {:ok, value} -> value
+        {:artifact_limit_exceeded, value, _observed} -> value
+      end
+
+    {flatten_chunks(finished), finished.group}
+  end
+
+  defp flatten_chunks(collector),
+    do: collector.chunks |> Enum.reverse() |> IO.iodata_to_binary()
 
   # Concept: end the group, not the leader.
   #
@@ -2348,6 +2560,101 @@ defmodule Loopex.Executor.Local do
   defp truncation_marker(kept, total) do
     kept <>
       "\n\n[loopex: output truncated. #{byte_size(kept)} of #{total} bytes shown.]"
+  end
+
+  defp bounded_artifact_notice(full, diagnostic, limit, reference) do
+    bounded_notice(
+      output_without_suffix(full, diagnostic),
+      diagnostic,
+      limit,
+      &Loopex.ArtifactStore.truncation_notice(&1, byte_size(full), reference)
+    )
+  end
+
+  defp bounded_truncation_marker(full, diagnostic, limit) do
+    bounded_notice(
+      output_without_suffix(full, diagnostic),
+      diagnostic,
+      limit,
+      &truncation_marker(&1, byte_size(full))
+    )
+  end
+
+  defp bounded_truncation_with_extra(full, diagnostic, limit, extra) do
+    bounded_notice(
+      output_without_suffix(full, diagnostic),
+      diagnostic,
+      limit,
+      &(truncation_marker(&1, byte_size(full)) <> extra)
+    )
+  end
+
+  defp bounded_notice(output, diagnostic, limit, builder) do
+    if byte_size(diagnostic) >= limit do
+      binary_part(diagnostic, 0, limit)
+    else
+      converge_bounded_notice(output, diagnostic, limit, builder, 0, 0)
+    end
+  end
+
+  defp converge_bounded_notice(output, diagnostic, limit, builder, shown, attempts) do
+    kept = binary_part(output, 0, min(byte_size(output), shown))
+    displayed = kept <> diagnostic
+    candidate = builder.(displayed)
+    notice_bytes = byte_size(candidate) - byte_size(displayed)
+    next = min(byte_size(output), max(limit - byte_size(diagnostic) - notice_bytes, 0))
+
+    if next == shown or attempts == 4 do
+      next_kept = binary_part(output, 0, next)
+      bounded = builder.(next_kept <> diagnostic)
+      binary_part(bounded, 0, min(byte_size(bounded), limit))
+    else
+      converge_bounded_notice(output, diagnostic, limit, builder, next, attempts + 1)
+    end
+  end
+
+  defp artifact_ceiling_message(output, output_limit, artifact_limit, observed, confirmed) do
+    cleanup =
+      if confirmed,
+        do: "Its process group is confirmed clean.",
+        else: "Cleanup could not be confirmed, so the effect remains unproven."
+
+    suffix =
+      "\n\n[loopex: command output exceeded the tool's declared artifact ceiling of " <>
+        "#{artifact_limit} bytes after at least #{observed} bytes were observed. " <>
+        "Collection stopped at the ceiling and no partial artifact was retained. #{cleanup}]"
+
+    bounded_with_suffix(output, suffix, output_limit)
+  end
+
+  defp bounded_terminal_output(output, suffix, limit) do
+    if byte_size(output) + byte_size(suffix) <= limit do
+      output <> suffix
+    else
+      diagnostic =
+        suffix <>
+          "\n[loopex: output truncated after at least #{byte_size(output)} bytes were observed.]"
+
+      bounded_with_suffix(output, diagnostic, limit)
+    end
+  end
+
+  # Keep required diagnostics at the end while making the complete model-facing
+  # result obey the output ceiling. All shipped ceilings are larger than these
+  # suffixes; the final clause remains fail-closed for a narrower conforming
+  # definition by returning only as much of the diagnostic as can fit.
+  defp bounded_with_suffix(output, suffix, limit) do
+    kept_suffix = binary_part(suffix, 0, min(byte_size(suffix), limit))
+    available = limit - byte_size(kept_suffix)
+    kept_output = binary_part(output, 0, min(byte_size(output), available))
+    kept_output <> kept_suffix
+  end
+
+  defp output_without_suffix(full, ""), do: full
+
+  defp output_without_suffix(full, suffix) do
+    size = byte_size(full) - byte_size(suffix)
+    binary_part(full, 0, max(size, 0))
   end
 
   # Concept: a tool that did something says what it did.
