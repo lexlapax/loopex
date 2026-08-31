@@ -202,8 +202,10 @@ defmodule Loopex.Executor.Local do
   meant to end.
 
   Signals the job's owned process group and then confirms by looking for
-  survivors. A job this executor has no record of is trivially clean: it either
-  never started or already finished, and in both cases there is nothing running.
+  survivors. A job a live executor has no record of is trivially clean: it
+  either never started or already finished. An unavailable executor proves
+  nothing, because its process-local ledger may have disappeared with work still
+  in flight.
   """
   @impl Loopex.Executor
   @spec cancel(t(), binary()) :: {:ok, :cleaned} | {:ok, :unconfirmed}
@@ -216,15 +218,40 @@ defmodule Loopex.Executor.Local do
         # period less the receipt's share, because a cancellation writes no
         # receipt: it answers its caller and the job's own path retains the
         # record.
-        episode = {cleanup_now_ms() + grace, grace, probe}
+        episode = cancellation_episode(grace, probe)
         terminate_group(group, episode)
 
         if confirm_group_terminated(group, episode),
           do: {:ok, :cleaned},
           else: {:ok, :unconfirmed}
 
-      :error ->
+      {:starting, worker, grace, probe} ->
+        cancel_starting_job(worker, grace, probe)
+
+      :absent ->
         {:ok, :cleaned}
+
+      :executor_unavailable ->
+        {:ok, :unconfirmed}
+    end
+  end
+
+  defp cancel_starting_job(worker, grace, probe) do
+    token = make_ref()
+    monitor = Process.monitor(worker)
+    send(worker, {:loopex_cancel_pending, token, self(), grace, probe})
+
+    receive do
+      {:loopex_cancel_result, ^token, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^worker, _reason} ->
+        {:ok, :unconfirmed}
+    after
+      grace ->
+        Process.demonitor(monitor, [:flush])
+        {:ok, :unconfirmed}
     end
   end
 
@@ -268,21 +295,35 @@ defmodule Loopex.Executor.Local do
     do: GenServer.call(executor, :process_probe)
 
   defp lookup_inflight(executor, job_id) do
-    with {:dictionary, dictionary} <- Process.info(executor, :dictionary),
-         table when not is_nil(table) <- Keyword.get(dictionary, :loopex_inflight_table),
-         grace when is_integer(grace) <-
-           Keyword.get(
-             dictionary,
-             :loopex_cleanup_grace_ms,
-             Executor.default_cleanup_grace_ms()
-           ),
-         probe when is_binary(probe) <-
-           Keyword.get(dictionary, :loopex_process_probe, @default_process_probe),
-         [{^job_id, group}] <- :ets.lookup(table, job_id) do
-      {:ok, group, grace, probe}
-    else
-      _absent -> :error
+    case Process.info(executor, :dictionary) do
+      nil ->
+        :executor_unavailable
+
+      {:dictionary, dictionary} ->
+        table = Keyword.get(dictionary, :loopex_inflight_table)
+
+        grace =
+          Keyword.get(
+            dictionary,
+            :loopex_cleanup_grace_ms,
+            Executor.default_cleanup_grace_ms()
+          )
+
+        probe = Keyword.get(dictionary, :loopex_process_probe, @default_process_probe)
+
+        case table && :ets.lookup(table, job_id) do
+          [{^job_id, {:starting, worker}}] when is_pid(worker) ->
+            {:starting, worker, grace, probe}
+
+          [{^job_id, group}] when is_integer(group) and group > 1 ->
+            {:ok, group, grace, probe}
+
+          _absent ->
+            :absent
+        end
     end
+  rescue
+    ArgumentError -> :executor_unavailable
   end
 
   # Concept: a job's process cleanup is one episode with one instant, opened the
@@ -327,6 +368,9 @@ defmodule Loopex.Executor.Local do
 
   defp process_probe,
     do: Process.get(:loopex_process_probe, @default_process_probe)
+
+  defp cancellation_episode(grace, probe),
+    do: {cleanup_now_ms() + grace, grace, probe}
 
   # Concept: everything one cleanup episode needs, carried rather than looked up.
   #
@@ -1540,7 +1584,7 @@ defmodule Loopex.Executor.Local do
   # confirmed.
   defp run_owned_process(
          job,
-         _tool,
+         tool,
          workspace,
          arguments,
          options,
@@ -1549,6 +1593,124 @@ defmodule Loopex.Executor.Local do
          limits,
          progress,
          identity
+       ) do
+    # Concept: the process that owns the operating-system child outlives an
+    # abrupt death of the serialized executor long enough to end that child.
+    #
+    # Technical depth: the GenServer used to own the Port itself. Killing it
+    # destroyed the only in-flight table and closed the launcher while a
+    # descendant in the captured process group kept running; a later cancel then
+    # read the missing table as proof of cleanup. A monitored worker owns the
+    # Port instead, watches the executor, and performs the same bounded group
+    # termination if that owner disappears. The executor still serializes
+    # admission and receipt retention. Its public pid remains the reference.
+    owner = self()
+    tag = make_ref()
+    table = inflight_table()
+    grace = cleanup_grace_ms()
+    probe = process_probe()
+
+    {worker, monitor} =
+      spawn_monitor(fn ->
+        Process.put(:loopex_inflight_table, table)
+        Process.put(:loopex_cleanup_grace_ms, grace)
+        Process.put(:loopex_process_probe, probe)
+        owner_monitor = Process.monitor(owner)
+        send(owner, {tag, :worker_ready, self()})
+
+        receive do
+          {^tag, :run} ->
+            result =
+              run_owned_process_worker(
+                job,
+                tool,
+                workspace,
+                arguments,
+                options,
+                lease,
+                deadline,
+                limits,
+                progress,
+                identity,
+                {owner_monitor, owner}
+              )
+
+            send(owner, {tag, :worker_result, result, not is_nil(cleanup_episode())})
+
+          {:loopex_cancel_pending, token, caller, _cancel_grace, _cancel_probe} ->
+            forget_inflight(job.job_id)
+            send(caller, {:loopex_cancel_result, token, {:ok, :cleaned}})
+
+            send(
+              owner,
+              {tag, :worker_result,
+               {{:cancelled, "[loopex: the job was cancelled before its process began.]",
+                 :complete}, 0}, false}
+            )
+
+          {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+            :ok
+        end
+      end)
+
+    receive do
+      {^tag, :worker_ready, ^worker} ->
+        register_inflight(job.job_id, {:starting, worker})
+        send(worker, {tag, :run})
+        await_owned_process_worker(worker, monitor, tag, job)
+
+      {:DOWN, ^monitor, :process, ^worker, reason} ->
+        forget_inflight(job.job_id)
+
+        {{:outcome_unknown,
+          "[loopex: the process owner stopped before it could report cleanup: " <>
+            inspect(reason) <> "]", :complete}, 0}
+    end
+  end
+
+  defp await_owned_process_worker(worker, monitor, tag, job) do
+    receive do
+      {^tag, :worker_result, result, cleanup_used} ->
+        Process.demonitor(monitor, [:flush])
+        if cleanup_used, do: Process.put(:loopex_cleanup_episode, cleanup_now_ms())
+        result
+
+      {:DOWN, ^monitor, :process, ^worker, reason} ->
+        cleanup_worker_failure(job.job_id)
+
+        {{:outcome_unknown,
+          "[loopex: the process owner stopped before it could report cleanup: " <>
+            inspect(reason) <> "]", :complete}, 0}
+    end
+  end
+
+  defp cleanup_worker_failure(job_id) do
+    case :ets.lookup(inflight_table(), job_id) do
+      [{^job_id, group}] when is_integer(group) and group > 1 ->
+        terminate_group(group, job_episode())
+        _confirmed = confirm_group_terminated(group, job_episode())
+
+      _other ->
+        :ok
+    end
+
+    forget_inflight(job_id)
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp run_owned_process_worker(
+         job,
+         _tool,
+         workspace,
+         arguments,
+         options,
+         lease,
+         deadline,
+         limits,
+         progress,
+         identity,
+         owner
        ) do
     environment = child_environment()
     {launcher, command_arguments} = process_launcher(arguments, environment)
@@ -1565,92 +1727,130 @@ defmodule Loopex.Executor.Local do
     register_inflight(job.job_id, os_pid)
 
     collector = new_output_collector(os_pid, progress, identity)
+    {_parent_lease_monitor, lease_pid} = lease
+    local_lease = {Process.monitor(lease_pid), lease_pid}
 
-    case collect_output(port, deadline, collector, options, job, lease, limits.artifact) do
-      # Concept: the launcher's exit is the end of one process, not the end of
-      # the work this job owns.
-      #
-      # Technical depth: this branch treated the launcher's status as the whole
-      # job's completion, forgot the captured group and dropped the monitor at
-      # once. `( sleep 1; printf survived > after-receipt.txt ) & exit 0` reported
-      # `:completed` in 22 ms and the descendant then wrote inside the workspace
-      # after the receipt existed and after the lease had gone -- an effect
-      # attributed to nothing, outside every bound the receipt claimed. Process
-      # groups are what this executor owns and cancels; success has to mean the
-      # same thing cancellation already means, so the group is brought to
-      # quiescence and confirmed before `:completed` is reported. A command that
-      # backgrounds work and exits has that work terminated, which is the
-      # intended reading of owning the group rather than the leader.
-      {:exited, status, output, group, progress_count} ->
-        quiescence = quiesce_group(group, job_episode())
-        forget_inflight(job.job_id)
+    result =
+      case collect_output(
+             port,
+             deadline,
+             collector,
+             options,
+             job,
+             local_lease,
+             limits.artifact,
+             owner
+           ) do
+        # Concept: the launcher's exit is the end of one process, not the end of
+        # the work this job owns.
+        #
+        # Technical depth: this branch treated the launcher's status as the whole
+        # job's completion, forgot the captured group and dropped the monitor at
+        # once. `( sleep 1; printf survived > after-receipt.txt ) & exit 0` reported
+        # `:completed` in 22 ms and the descendant then wrote inside the workspace
+        # after the receipt existed and after the lease had gone -- an effect
+        # attributed to nothing, outside every bound the receipt claimed. Process
+        # groups are what this executor owns and cancels; success has to mean the
+        # same thing cancellation already means, so the group is brought to
+        # quiescence and confirmed before `:completed` is reported. A command that
+        # backgrounds work and exits has that work terminated, which is the
+        # intended reading of owning the group rather than the leader.
+        {:exited, status, output, group, progress_count} ->
+          quiescence = quiesce_group(group, job_episode())
+          forget_inflight(job.job_id)
 
-        case quiescence do
-          :quiescent ->
-            {bound_process_output(status, output, "", limits.output), progress_count}
+          case quiescence do
+            :quiescent ->
+              {bound_process_output(status, output, "", limits.output), progress_count}
 
-          :terminated ->
-            {bound_process_output(status, output, @group_terminated_note, limits.output),
-             progress_count}
+            :terminated ->
+              {bound_process_output(status, output, @group_terminated_note, limits.output),
+               progress_count}
 
-          :unconfirmed ->
-            {unproven(
-               bound_process_output(status, output, @group_unconfirmed_note, limits.output)
-             ), progress_count}
-        end
+            :unconfirmed ->
+              {unproven(
+                 bound_process_output(status, output, @group_unconfirmed_note, limits.output)
+               ), progress_count}
+          end
 
-      {:artifact_limit_exceeded, output, group, observed, progress_count} ->
-        confirmed = confirm_group_terminated(group, job_episode())
+        {:artifact_limit_exceeded, output, group, observed, progress_count} ->
+          confirmed = confirm_group_terminated(group, job_episode())
 
-        {{if(confirmed, do: :failed, else: :outcome_unknown),
-          artifact_ceiling_message(
-            output,
-            limits.output,
-            limits.artifact,
-            observed,
-            confirmed
-          ), :complete}, progress_count}
+          {{if(confirmed, do: :failed, else: :outcome_unknown),
+            artifact_ceiling_message(
+              output,
+              limits.output,
+              limits.artifact,
+              observed,
+              confirmed
+            ), :complete}, progress_count}
 
-      {:cancelled, output, group, progress_count} ->
-        confirmed = confirm_group_terminated(group, job_episode())
+        {:cancelled, output, group, progress_count} ->
+          confirmed = confirm_group_terminated(group, job_episode())
 
-        suffix =
-          "\n[loopex: the deadline passed and the command was terminated." <>
-            if(confirmed,
-              do: " Its process group is confirmed cleaned.]",
-              else: " Cleanup could not be confirmed.]"
-            )
+          suffix =
+            "\n[loopex: the deadline passed and the command was terminated." <>
+              if(confirmed,
+                do: " Its process group is confirmed cleaned.]",
+                else: " Cleanup could not be confirmed.]"
+              )
 
-        {{if(confirmed, do: :cancelled, else: :outcome_unknown),
-          bounded_terminal_output(output, suffix, limits.output)}, progress_count}
+          {{if(confirmed, do: :cancelled, else: :outcome_unknown),
+            bounded_terminal_output(output, suffix, limits.output)}, progress_count}
 
-      # Concept: a command whose lease vanished is unproven, not cancelled.
-      #
-      # Technical depth: a deadline cancellation happens while this executor
-      # still holds the workspace, so it can say the command was stopped inside a
-      # workspace that is still its own. A lost lease says the opposite: the
-      # claim that authorised these effects is gone, another holder may already
-      # have taken the workspace, and whatever the command wrote before the
-      # signal reached it is no longer attributable. `:outcome_unknown` is what
-      # stops the coordinator from blindly retrying an effectful job in that
-      # state, and it is reported whether or not the group was confirmed cleaned
-      # -- confirming cleanup proves the command stopped, not that its effect
-      # never landed.
-      {:workspace_lease_lost, output, group, progress_count} ->
-        confirmed = confirm_group_terminated(group, job_episode())
+        {:external_cancelled, output, _group, progress_count, confirmed} ->
+          suffix =
+            "\n[loopex: cancellation reached the process owner." <>
+              if(confirmed,
+                do: " Its process group is confirmed cleaned.]",
+                else: " Cleanup could not be confirmed.]"
+              )
 
-        suffix =
-          "\n[loopex: the workspace lease was lost and the command was terminated." <>
-            if(confirmed,
-              do: " Its process group is confirmed cleaned.",
-              else: " Cleanup could not be confirmed."
-            ) <>
-            " Whether its effect landed in the workspace this job was authorised" <>
-            " against is unproven.]"
+          {{if(confirmed, do: :cancelled, else: :outcome_unknown),
+            bounded_terminal_output(output, suffix, limits.output)}, progress_count}
 
-        {{:outcome_unknown, bounded_terminal_output(output, suffix, limits.output)},
-         progress_count}
-    end
+        {:executor_owner_lost, output, _group, progress_count, confirmed} ->
+          suffix =
+            "\n[loopex: the local executor owner stopped while this command was running." <>
+              if(confirmed,
+                do:
+                  " Its process group was terminated and confirmed cleaned, but no receipt owner remained.]",
+                else: " Cleanup could not be confirmed and the effect remains unproven.]"
+              )
+
+          {{:outcome_unknown, bounded_terminal_output(output, suffix, limits.output)},
+           progress_count}
+
+        # Concept: a command whose lease vanished is unproven, not cancelled.
+        #
+        # Technical depth: a deadline cancellation happens while this executor
+        # still holds the workspace, so it can say the command was stopped inside a
+        # workspace that is still its own. A lost lease says the opposite: the
+        # claim that authorised these effects is gone, another holder may already
+        # have taken the workspace, and whatever the command wrote before the
+        # signal reached it is no longer attributable. `:outcome_unknown` is what
+        # stops the coordinator from blindly retrying an effectful job in that
+        # state, and it is reported whether or not the group was confirmed cleaned
+        # -- confirming cleanup proves the command stopped, not that its effect
+        # never landed.
+        {:workspace_lease_lost, output, group, progress_count} ->
+          confirmed = confirm_group_terminated(group, job_episode())
+
+          suffix =
+            "\n[loopex: the workspace lease was lost and the command was terminated." <>
+              if(confirmed,
+                do: " Its process group is confirmed cleaned.",
+                else: " Cleanup could not be confirmed."
+              ) <>
+              " Whether its effect landed in the workspace this job was authorised" <>
+              " against is unproven.]"
+
+          {{:outcome_unknown, bounded_terminal_output(output, suffix, limits.output)},
+           progress_count}
+      end
+
+    Process.demonitor(elem(local_lease, 0), [:flush])
+    result
   end
 
   # Concept: an in-flight job publishes the group it owns, so a cancel can reach
@@ -1679,11 +1879,15 @@ defmodule Loopex.Executor.Local do
   defp register_inflight(job_id, group) do
     :ets.insert(inflight_table(), {job_id, group})
     :ok
+  rescue
+    ArgumentError -> :error
   end
 
   defp forget_inflight(job_id) do
     :ets.delete(inflight_table(), job_id)
     :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   # Concept: a command that exited nonzero failed, and the result says with what.
@@ -2243,8 +2447,9 @@ defmodule Loopex.Executor.Local do
     }
   end
 
-  defp collect_output(port, deadline, collector, options, job, lease, artifact_limit) do
+  defp collect_output(port, deadline, collector, options, job, lease, artifact_limit, owner) do
     {monitor, lease_pid} = lease
+    {owner_monitor, owner_pid} = owner
     remaining = deadline - System.system_time(:millisecond)
 
     if remaining <= 0 do
@@ -2260,7 +2465,17 @@ defmodule Loopex.Executor.Local do
           case collect_chunk(collector, chunk, artifact_limit) do
             {:ok, next} ->
               register_inflight(job.job_id, next.group)
-              collect_output(port, deadline, next, options, job, lease, artifact_limit)
+
+              collect_output(
+                port,
+                deadline,
+                next,
+                options,
+                job,
+                lease,
+                artifact_limit,
+                owner
+              )
 
             {:artifact_limit_exceeded, next, observed} ->
               terminate_group(next.group, job_episode())
@@ -2289,9 +2504,36 @@ defmodule Loopex.Executor.Local do
           terminate_group(group, job_episode())
           forget_inflight(job.job_id)
           {:workspace_lease_lost, output, group, progress_count}
+
+        {:loopex_cancel_pending, token, caller, grace, probe} ->
+          {output, group, progress_count} = collected_output(collector, artifact_limit)
+          episode = cancellation_episode(grace, probe)
+          terminate_group(group, episode)
+          confirmed = confirm_group_terminated(group, episode)
+          forget_inflight(job.job_id)
+
+          answer = if confirmed, do: {:ok, :cleaned}, else: {:ok, :unconfirmed}
+          send(caller, {:loopex_cancel_result, token, answer})
+          {:external_cancelled, output, group, progress_count, confirmed}
+
+        {:DOWN, ^owner_monitor, :process, ^owner_pid, _reason} ->
+          {output, group, progress_count} = collected_output(collector, artifact_limit)
+          terminate_group(group, job_episode())
+          confirmed = confirm_group_terminated(group, job_episode())
+          forget_inflight(job.job_id)
+          {:executor_owner_lost, output, group, progress_count, confirmed}
       after
         min(remaining, 50) ->
-          collect_output(port, deadline, collector, options, job, lease, artifact_limit)
+          collect_output(
+            port,
+            deadline,
+            collector,
+            options,
+            job,
+            lease,
+            artifact_limit,
+            owner
+          )
       end
     end
   end
@@ -2959,16 +3201,55 @@ defmodule Loopex.Executor.Local do
     bytes = :erlang.term_to_binary(receipt, [:deterministic])
 
     result =
-      with {:ok, file} <- File.open(temporary, [:write, :binary, :exclusive]),
-           :ok <- IO.binwrite(file, bytes),
-           :ok <- :file.sync(file),
-           :ok <- File.close(file),
-           :ok <- File.rename(temporary, path) do
+      with :ok <- write_synced_receipt(temporary, bytes),
+           :ok <- File.rename(temporary, path),
+           :ok <- sync_parent_directory(path) do
         :ok
       end
 
     if result != :ok, do: File.rm(temporary)
     result
+  end
+
+  defp write_synced_receipt(path, bytes) do
+    case File.open(path, [:write, :binary, :exclusive]) do
+      {:ok, file} ->
+        result =
+          with :ok <- IO.binwrite(file, bytes),
+               :ok <- :file.sync(file) do
+            :ok
+          end
+
+        close_result = File.close(file)
+
+        case {result, close_result} do
+          {:ok, :ok} -> :ok
+          {{:error, reason}, _close} -> {:error, {:receipt_write_failed, reason}}
+          {:ok, {:error, reason}} -> {:error, {:receipt_close_failed, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp sync_parent_directory(path) do
+    directory = path |> Path.dirname() |> String.to_charlist()
+
+    case :file.open(directory, [:raw, :read, :directory]) do
+      {:ok, file} ->
+        result = :file.sync(file)
+        close_result = :file.close(file)
+
+        case {result, close_result} do
+          {:ok, :ok} -> :ok
+          {{:error, reason}, _close} -> {:error, {:receipt_directory_sync_failed, reason}}
+          {:ok, {:error, reason}} -> {:error, {:receipt_directory_close_failed, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, {:receipt_directory_unavailable, reason}}
+    end
   end
 
   defp read_receipt(_root, ""), do: :absent

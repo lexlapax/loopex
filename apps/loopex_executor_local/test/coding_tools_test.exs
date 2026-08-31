@@ -2587,6 +2587,36 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert {:ok, []} = File.ls(ledger)
   end
 
+  test "receipt publication syncs its file and parent directory before reporting durability" do
+    # Concept: a receipt reported retained must survive the same crash boundary
+    # as the terminal fact it represents.
+    #
+    # Technical depth: a healthy filesystem cannot reveal whether the parent
+    # directory was synced, so this is one of the narrow structural assertions
+    # the suite uses for an otherwise unobservable syscall boundary. The actual
+    # write is still driven through the production executor and read back below.
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    assert source =~
+             ~r/with :ok <- write_synced_receipt\(temporary, bytes\),\n\s+:ok <- File\.rename\(temporary, path\),\n\s+:ok <- sync_parent_directory\(path\)/,
+           "receipt publication no longer orders file sync, rename, and directory sync"
+
+    assert source =~
+             ~r/defp write_synced_receipt\(path, bytes\).*?:file\.sync\(file\)/s,
+           "the receipt bytes are not synced before publication"
+
+    assert source =~
+             ~r/defp sync_parent_directory\(path\).*?:file\.open\(directory, \[:raw, :read, :directory\]\).*?:file\.sync\(file\)/s,
+           "the directory entry is not synced after publication"
+
+    root = workspace()
+
+    assert {:ok, receipt} =
+             run(root, "loopex.write", %{"path" => "durable.txt", "content" => "durable"})
+
+    assert receipt.outcome == :completed
+  end
+
   test "work this executor cannot bound is abandoned at its bound and a program that never answers confirms nothing" do
     # Concept: the two waits nothing in this suite can reach through the
     # operating system.
@@ -3199,6 +3229,68 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         _settled -> :ok
       end
     end
+  end
+
+  test "an abrupt local executor death cannot report clean while its owned child may still act" do
+    # Concept: losing the hand that serialized a job cannot turn missing
+    # process-local bookkeeping into proof that the operating-system work is
+    # gone.
+    #
+    # Technical depth: the command proves it began, waits, and then attempts a
+    # second effect. Killing the real executor destroys its ETS table. The Port
+    # worker must nevertheless observe that owner death, terminate the captured
+    # group, and prevent the delayed effect; `cancel/2` against the unavailable
+    # executor must stay unconfirmed because its caller cannot observe the
+    # worker's proof. Restoring direct Port ownership lets the delayed write land;
+    # reading a dead executor as an ordinary lookup miss makes the cancellation
+    # assertion fail.
+    root = workspace()
+    ready = Path.join(root, "owner-death-ready")
+    survived = Path.join(root, "owner-death-survived")
+    job_id = "owner-death-#{System.unique_integer([:positive])}"
+    {executor, lease_id} = executor_for(root)
+    Process.unlink(executor)
+    owner = self()
+
+    {_caller, caller_monitor} =
+      spawn_monitor(fn ->
+        answer =
+          try do
+            run(
+              root,
+              "loopex.bash",
+              %{
+                "argv" => [
+                  "/bin/sh",
+                  "-c",
+                  "printf ready > \"$1\"; sleep 1; printf survived > \"$2\"",
+                  "loopex-owner-death",
+                  ready,
+                  survived
+                ]
+              },
+              %{executor: executor, lease_id: lease_id, job_id: job_id}
+            )
+          catch
+            :exit, reason -> {:executor_exit, reason}
+          end
+
+        send(owner, {:owner_death_execute_answer, answer})
+      end)
+
+    assert {:ok, ^ready} =
+             await_path(fn -> if File.exists?(ready), do: {:ok, ready}, else: :error end, 5_000)
+
+    Process.exit(executor, :kill)
+
+    assert Local.cancel(executor, job_id) == {:ok, :unconfirmed}
+    assert_receive {:owner_death_execute_answer, {:executor_exit, _reason}}, 5_000
+    assert_receive {:DOWN, ^caller_monitor, :process, _caller, :normal}, 5_000
+
+    Process.sleep(1_200)
+
+    refute File.exists?(survived),
+           "a command owned by the dead executor continued and wrote after its owner vanished"
   end
 
   test "each of the three quiescence answers reaches a distinct outcome and only one is proved" do
