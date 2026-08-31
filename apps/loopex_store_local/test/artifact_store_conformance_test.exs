@@ -32,16 +32,19 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
 
       if role in ArtifactStore.roles() do
         digest = Canonical.digest_bytes(bytes)
-        :ok = Agent.update(pid, &Map.put(&1, digest, bytes))
+        locator = "memory:" <> Canonical.digest_bytes("locator:" <> digest)
 
-        {:ok,
-         %{
-           digest: digest,
-           media_type: Map.get(metadata, "media_type", "application/octet-stream"),
-           size: byte_size(bytes),
-           role: role,
-           locator: digest
-         }}
+        reference = %{
+          digest: digest,
+          media_type: Map.get(metadata, "media_type", "application/octet-stream"),
+          size: byte_size(bytes),
+          role: role,
+          locator: locator
+        }
+
+        :ok = Agent.update(pid, &Map.put(&1, locator, {reference, bytes}))
+
+        {:ok, reference}
       else
         {:error, {:unknown_artifact_role, role}}
       end
@@ -50,10 +53,11 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
     @impl Loopex.ArtifactStore
     def fetch(pid, reference) do
       case Agent.get(pid, &Map.fetch(&1, reference.locator)) do
-        {:ok, bytes} ->
-          if Canonical.digest_bytes(bytes) == reference.digest,
-            do: {:ok, bytes},
-            else: {:error, :artifact_integrity_failed}
+        {:ok, {_stored_reference, bytes}} ->
+          if Canonical.digest_bytes(bytes) == reference.digest and
+               byte_size(bytes) == reference.size,
+             do: {:ok, bytes},
+             else: {:error, :artifact_integrity_failed}
 
         :error ->
           {:error, :unknown_artifact}
@@ -62,11 +66,30 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
 
     @impl Loopex.ArtifactStore
     def stat(pid, reference) do
-      case fetch(pid, reference) do
-        {:ok, _bytes} -> {:ok, reference}
-        {:error, reason} -> {:error, reason}
+      result =
+        Agent.get_and_update(pid, fn state ->
+          {Map.fetch(state, reference.locator), Map.put(state, :last_stat_probe, reference)}
+        end)
+
+      case result do
+        {:ok, {stored_reference, bytes}} ->
+          if Canonical.digest_bytes(bytes) == stored_reference.digest and
+               byte_size(bytes) == stored_reference.size,
+             do: {:ok, stored_reference},
+             else: {:error, :artifact_integrity_failed}
+
+        :error ->
+          {:error, :unknown_artifact}
       end
     end
+
+    def corrupt(pid, locator, bytes) do
+      Agent.update(pid, fn state ->
+        Map.update!(state, locator, fn {reference, _stored} -> {reference, bytes} end)
+      end)
+    end
+
+    def last_stat_probe(pid), do: Agent.get(pid, &Map.fetch!(&1, :last_stat_probe))
   end
 
   defp implementations do
@@ -117,7 +140,7 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
 
     assert notice =~ "truncated"
     assert notice =~ "200 of 10000 bytes"
-    assert notice =~ reference.digest
+    assert notice =~ reference.locator
     assert String.starts_with?(notice, kept)
   end
 
@@ -145,40 +168,118 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
   end
 
   test "the model facing result stays under its bound and names what was truncated" do
-    [{module, handle} | _rest] = implementations()
+    for {module, handle} <- implementations() do
+      full = String.duplicate("y", 50_000)
+      {:ok, reference} = module.put(handle, full, %{})
+      kept = binary_part(full, 0, 1_024)
+      notice = ArtifactStore.truncation_notice(kept, byte_size(full), reference)
 
-    full = String.duplicate("y", 50_000)
-    {:ok, reference} = module.put(handle, full, %{})
-    kept = binary_part(full, 0, 1_024)
-    notice = ArtifactStore.truncation_notice(kept, byte_size(full), reference)
+      # The bounded result is the kept portion plus a short notice, so it stays
+      # close to the bound rather than reintroducing the size it was avoiding.
+      assert byte_size(notice) < 1_024 + 400
 
-    # The bounded result is the kept portion plus a short notice, so it stays
-    # close to the bound rather than reintroducing the size it was avoiding.
-    assert byte_size(notice) < 1_024 + 400
-
-    # It names the total and the retrieval reference, so an operator can get the
-    # rest and a model knows it is not seeing everything.
-    assert notice =~ "50000 bytes"
-    assert notice =~ reference.digest
+      # It names the total and the retrieval locator, so an operator can get the
+      # rest and a model knows it is not seeing everything. The second adapter's
+      # locator contains no digest, proving this is the opaque retrieval value.
+      assert notice =~ "50000 bytes"
+      assert notice =~ reference.locator
+      if module == InMemory, do: refute(notice =~ reference.digest)
+    end
   end
 
   test "the operator retrieves a spilled artifact by its opaque reference through the public facade" do
-    [{module, handle} | _rest] = implementations()
+    for {module, handle} <- implementations() do
+      {:ok, reference} = module.put(handle, "the whole output", %{})
 
-    {:ok, reference} = module.put(handle, "the whole output", %{})
+      # The locator is the only thing the public facade receives. The in-memory
+      # fixture deliberately issues a locator that differs from its digest, so
+      # this fails if core reconstructs adapter identity by equating the two.
+      if module == InMemory, do: refute(reference.locator == reference.digest)
 
-    # The locator is the only thing a caller needs, and core never takes it
-    # apart: a reference rebuilt from its retained members fetches the same
-    # bytes.
-    rebuilt = %{
-      digest: reference.digest,
-      media_type: reference.media_type,
-      size: reference.size,
-      role: reference.role,
-      locator: reference.locator
-    }
+      assert {:ok, "the whole output"} =
+               ArtifactStore.retrieve(%{module: module, handle: handle}, reference.locator)
 
-    assert {:ok, "the whole output"} = module.fetch(handle, rebuilt)
+      if module == InMemory do
+        probe = InMemory.last_stat_probe(handle)
+        assert probe.locator == reference.locator
+        refute probe.digest == probe.locator
+      end
+    end
+  end
+
+  test "stat and fetch refuse same size and different size artifact corruption" do
+    for replacement <- ["damage!", "short"] do
+      for {module, handle} <- implementations() do
+        {:ok, reference} = module.put(handle, "payload", %{})
+        corrupt(module, handle, reference, replacement)
+
+        assert {:error, :artifact_integrity_failed} = module.stat(handle, reference)
+        assert {:error, :artifact_integrity_failed} = module.fetch(handle, reference)
+      end
+    end
+  end
+
+  test "artifact publication syncs file bytes before its durable directory entry" do
+    [{Artifacts, handle} | _rest] = implementations()
+
+    events = trace_publication(fn -> Artifacts.put(handle, "durable payload", %{}) end)
+
+    first_sync = Enum.find_index(events, &(&1 == :sync))
+    rename = Enum.find_index(events, &(&1 == :rename))
+
+    last_sync =
+      events
+      |> Enum.with_index()
+      |> Enum.reverse()
+      |> Enum.find_value(fn
+        {:sync, index} -> index
+        {_event, _index} -> nil
+      end)
+
+    assert is_integer(first_sync)
+    assert is_integer(rename)
+    assert is_integer(last_sync)
+    assert Enum.count(events, &(&1 == :sync)) == 3
+    assert first_sync < rename
+    assert rename < last_sync
+
+    assert events
+           |> Enum.chunk_every(4, 1, :discard)
+           |> Enum.member?([:write, :sync, :rename, :sync])
+
+    repeated = trace_publication(fn -> Artifacts.put(handle, "durable payload", %{}) end)
+
+    assert Enum.count(repeated, &(&1 == :sync)) == 3
+    refute :write in repeated
+    refute :rename in repeated
+  end
+
+  test "unsafe opaque locators are refused before an adapter can resolve them" do
+    [{_local_module, _local_handle}, {InMemory, memory}] = implementations()
+
+    unsafe = [
+      "",
+      "line\nbreak",
+      "terminal\e[31m",
+      "right-to-left\u202Etxt",
+      <<255>>,
+      String.duplicate("x", 1_025)
+    ]
+
+    for locator <- unsafe do
+      reference = %{
+        digest: String.duplicate("a", 64),
+        media_type: "text/plain",
+        size: 3,
+        role: "tool_output",
+        locator: locator
+      }
+
+      refute ArtifactStore.valid_reference?(reference)
+
+      assert {:error, :invalid_artifact_reference} =
+               ArtifactStore.retrieve(%{module: InMemory, handle: memory}, locator)
+    end
   end
 
   test "a locator the store never issued reports unavailable rather than raising" do
@@ -233,6 +334,73 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
       {:ok, empty_reference} = module.put(handle, "", %{})
       assert {:ok, ""} = module.fetch(handle, empty_reference)
       assert empty_reference.size == 0
+    end
+  end
+
+  defp corrupt(Artifacts, %{root: root}, reference, bytes) do
+    path = Path.join([root, binary_part(reference.locator, 0, 2), reference.locator])
+    File.write!(path, bytes)
+  end
+
+  defp corrupt(InMemory, pid, reference, bytes) do
+    InMemory.corrupt(pid, reference.locator, bytes)
+  end
+
+  defp trace_publication(fun) do
+    test = self()
+
+    tracer =
+      spawn_link(fn ->
+        trace_forwarder(test)
+      end)
+
+    patterns = [{:file, :write, 2}, {:file, :sync, 1}, {:file, :rename, 2}]
+
+    Enum.each(patterns, fn pattern ->
+      1 = :erlang.trace_pattern(pattern, true, [])
+    end)
+
+    1 = :erlang.trace(self(), true, [:call, {:tracer, tracer}])
+
+    try do
+      assert {:ok, _reference} = fun.()
+    after
+      1 = :erlang.trace(self(), false, [:call])
+      Enum.each(patterns, &:erlang.trace_pattern(&1, false, []))
+    end
+
+    delivery = :erlang.trace_delivered(self())
+
+    receive do
+      {:trace_delivered, _tracee, ^delivery} -> :ok
+    after
+      1_000 -> flunk("file publication trace was not delivered")
+    end
+
+    send(tracer, {:finish, self()})
+
+    receive do
+      {:publication_trace, events} -> events
+    after
+      1_000 -> flunk("file publication trace did not finish")
+    end
+  end
+
+  defp trace_forwarder(test), do: trace_forwarder(test, [])
+
+  defp trace_forwarder(test, events) do
+    receive do
+      {:trace, ^test, :call, {:file, :sync, [_io_device]}} ->
+        trace_forwarder(test, [:sync | events])
+
+      {:trace, ^test, :call, {:file, :write, [_io_device, _bytes]}} ->
+        trace_forwarder(test, [:write | events])
+
+      {:trace, ^test, :call, {:file, :rename, [_source, _destination]}} ->
+        trace_forwarder(test, [:rename | events])
+
+      {:finish, ^test} ->
+        send(test, {:publication_trace, Enum.reverse(events)})
     end
   end
 end

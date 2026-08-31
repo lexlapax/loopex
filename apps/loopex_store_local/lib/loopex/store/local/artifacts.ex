@@ -15,11 +15,12 @@ defmodule Loopex.Store.Local.Artifacts do
   file; two writers storing different bytes cannot collide, because different
   bytes have different digests.
 
-  Writes go to a temporary name in the same directory and are renamed into place,
-  which is the same discipline the local store already uses for its journal. A
-  reader therefore never observes a partially written object: the rename is
-  atomic within a filesystem, and a crash mid-write leaves a temporary file that
-  belongs to nothing rather than a truncated artifact that looks complete.
+  Writes go to a temporary name in the same directory, sync the complete file,
+  rename it into place, and sync the containing directory where the platform
+  supports directory sync. A reader therefore never observes a partially
+  written object: the rename is atomic within a filesystem, and a crash
+  mid-write leaves a temporary file that belongs to nothing rather than a
+  truncated artifact that looks complete.
 
   An existing object is verified before it is treated as a hit. Trusting the
   filename's digest alone would mean a corrupted or truncated file kept its
@@ -101,7 +102,7 @@ defmodule Loopex.Store.Local.Artifacts do
         digest = Canonical.digest_bytes(bytes)
         path = object_path(root, digest)
 
-        with :ok <- File.mkdir_p(Path.dirname(path)),
+        with :ok <- ensure_object_directory(root, Path.dirname(path)),
              :ok <- write_once(path, bytes, digest) do
           {:ok,
            %{
@@ -136,18 +137,24 @@ defmodule Loopex.Store.Local.Artifacts do
   @impl Loopex.ArtifactStore
   @spec stat(handle(), ArtifactStore.artifact_reference()) ::
           {:ok, ArtifactStore.artifact_reference()} | {:error, term()}
-  def stat(%{root: root} = handle, reference) do
+  def stat(%{root: root}, reference) do
     if ArtifactStore.valid_reference?(reference) and mine?(reference.locator) do
       path = object_path(root, reference.locator)
 
-      case File.stat(path) do
-        {:ok, %File.Stat{size: size}} ->
-          # The size is read from the object rather than echoed from the
-          # reference, so a reference claiming a size the object does not have is
-          # caught here rather than believed.
-          if size == reference.size,
-            do: {:ok, reference},
-            else: verify_by_reading(handle, reference)
+      case File.read(path) do
+        {:ok, bytes} ->
+          # `stat/2` is the port's locator resolver. This adapter issued a
+          # digest-addressed locator, so it derives the canonical digest from its
+          # own locator rather than treating a caller's lookup-probe digest as a
+          # statement that locator and digest are universally the same thing.
+          with {:ok, _bytes} <- verify(bytes, reference.locator) do
+            {:ok,
+             %{
+               reference
+               | digest: reference.locator,
+                 size: byte_size(bytes)
+             }}
+          end
 
         {:error, :enoent} ->
           {:error, :unknown_artifact}
@@ -160,13 +167,6 @@ defmodule Loopex.Store.Local.Artifacts do
     end
   end
 
-  defp verify_by_reading(handle, reference) do
-    case fetch(handle, reference) do
-      {:ok, _bytes} -> {:ok, reference}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
   # Concept: an object already present must be the object it claims to be.
   #
   # Technical depth: the filename carries the digest, so a corrupted or truncated
@@ -176,7 +176,7 @@ defmodule Loopex.Store.Local.Artifacts do
   defp write_once(path, bytes, digest) do
     case File.read(path) do
       {:ok, ^bytes} ->
-        :ok
+        sync_existing(path)
 
       {:ok, _different} ->
         rename_into_place(path, bytes)
@@ -189,16 +189,102 @@ defmodule Loopex.Store.Local.Artifacts do
     end
   end
 
+  defp sync_existing(path) do
+    case :file.open(String.to_charlist(path), [:read, :binary, :raw]) do
+      {:ok, io_device} ->
+        result = :file.sync(io_device)
+        close_result = :file.close(io_device)
+
+        with :ok <- result,
+             :ok <- close_result,
+             :ok <- sync_directory(Path.dirname(path)) do
+          :ok
+        end
+
+      {:error, reason} ->
+        {:error, {:artifact_unwritable, reason}}
+    end
+  end
+
   defp rename_into_place(path, bytes) do
     temporary = path <> ".tmp-" <> Integer.to_string(System.unique_integer([:positive]))
 
-    with :ok <- File.write(temporary, bytes),
-         :ok <- File.rename(temporary, path) do
+    with :ok <- write_synced(temporary, bytes),
+         :ok <- File.rename(temporary, path),
+         :ok <- sync_directory(Path.dirname(path)) do
       :ok
     else
       {:error, reason} ->
         _ = File.rm(temporary)
         {:error, {:artifact_unwritable, reason}}
+    end
+  end
+
+  defp write_synced(path, bytes) do
+    case :file.open(String.to_charlist(path), [:write, :binary, :raw, :exclusive]) do
+      {:ok, io_device} ->
+        result =
+          with :ok <- :file.write(io_device, bytes),
+               :ok <- :file.sync(io_device) do
+            :ok
+          end
+
+        close_result = :file.close(io_device)
+
+        case {result, close_result} do
+          {:ok, :ok} -> :ok
+          {{:error, reason}, _close} -> {:error, reason}
+          {:ok, {:error, reason}} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Concept: success means the publication survives more than this VM.
+  #
+  # Technical depth: syncing the file before rename preserves its bytes; syncing
+  # the directory afterwards preserves the name that makes those bytes
+  # reachable. Some Unix filesystems reject directory sync explicitly, and
+  # Windows does not expose this directory-open discipline through `:file`; those
+  # platforms retain atomic visibility but cannot supply this extra durability
+  # confirmation through the portable adapter.
+  defp sync_directory(path) do
+    case :os.type() do
+      {:win32, _name} ->
+        :ok
+
+      {:unix, _name} ->
+        do_sync_directory(path)
+    end
+  end
+
+  defp do_sync_directory(path) do
+    case :file.open(String.to_charlist(path), [:read, :raw, :directory]) do
+      {:ok, io_device} ->
+        result = :file.sync(io_device)
+        close_result = :file.close(io_device)
+
+        case {result, close_result} do
+          {:ok, :ok} -> :ok
+          {{:error, reason}, _close} when reason in [:einval, :enotsup] -> :ok
+          {{:error, reason}, _close} -> {:error, reason}
+          {:ok, {:error, reason}} -> {:error, reason}
+        end
+
+      {:error, reason} when reason in [:eisdir, :einval, :enotsup] ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp ensure_object_directory(root, directory) do
+    with :ok <- File.mkdir_p(directory),
+         :ok <- sync_directory(root) do
+      :ok
     end
   end
 
@@ -211,13 +297,13 @@ defmodule Loopex.Store.Local.Artifacts do
   # Concept: a locator is opaque to the port and meaningful only to the store
   # that issued it.
   #
-  # Technical depth: the port requires a locator to be a non-empty string and
-  # nothing more, because its shape is the issuing store's business. This one
-  # issues content digests and derives a path by slicing the first two
-  # characters, so a reference carrying any other shape -- one this store never
-  # wrote, or a shorter string a caller constructed -- used to raise out of
-  # `binary_part/3` during retrieval or recovery instead of failing with a value.
-  # A locator this store did not issue is simply an artifact it does not hold.
+  # Technical depth: the port bounds locators but does not constrain an adapter's
+  # safe shape. This one issues content digests and derives a path by slicing the
+  # first two characters, so a reference carrying any other shape -- one this
+  # store never wrote, or a shorter string a caller constructed -- used to raise
+  # out of `binary_part/3` during retrieval or recovery instead of failing with a
+  # value. A locator this store did not issue is simply an artifact it does not
+  # hold.
   defp mine?(locator), do: String.match?(locator, ~r/^[0-9a-f]{64}$/)
 
   # Concept: two levels of fan-out, so a directory does not grow without bound.

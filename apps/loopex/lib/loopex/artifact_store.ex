@@ -33,6 +33,13 @@ defmodule Loopex.ArtifactStore do
   empty artifact and a missing one are different facts and a caller must be able
   to tell them apart.
 
+  `stat/2` is also the locator resolver. Core supplies a well-formed lookup
+  probe whose locator is authoritative and whose other members are placeholders;
+  the adapter resolves that locator to a validated reference that `fetch/2` can
+  use. This keeps the locator opaque: no core caller needs to know whether an
+  adapter uses a digest, database key, remote object token, or another safe
+  bounded value.
+
   Size ceilings belong to the adapter and are declared. A `put/3` over the
   ceiling fails closed with a truthful error rather than storing a truncated
   artifact, for the same reason the spill exists at all.
@@ -44,6 +51,9 @@ defmodule Loopex.ArtifactStore do
   """
 
   @roles ["tool_output"]
+  @max_locator_bytes 1_024
+  @lookup_digest String.duplicate("0", 64)
+  @unsafe_locator_codepoints ~r/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u
 
   @typedoc """
   ## Concept
@@ -55,7 +65,9 @@ defmodule Loopex.ArtifactStore do
   Bounded plain data. `locator` is opaque to core, which never parses, joins, or
   reconstructs it: how an adapter addresses its own storage is the adapter's
   business, and a core that took it apart would be coupled to one adapter's
-  layout.
+  layout. Opaque does not mean unbounded or safe to print without validation:
+  locators are valid UTF-8 of at most 1,024 bytes and carry no control, format,
+  line-separator, or paragraph-separator codepoint.
   """
   @type artifact_reference :: %{
           required(:digest) => binary(),
@@ -108,7 +120,7 @@ defmodule Loopex.ArtifactStore do
       is_binary(reference.media_type) and reference.media_type != "" and
       is_integer(reference.size) and reference.size >= 0 and
       reference.role in @roles and
-      is_binary(reference.locator) and reference.locator != ""
+      valid_locator?(reference.locator)
   end
 
   def valid_reference?(_reference), do: false
@@ -121,11 +133,15 @@ defmodule Loopex.ArtifactStore do
   ## Technical depth
 
   A caller holds a locator and a composed store, and wants the bytes. Doing that
-  by hand means constructing a reference around the locator to ask `stat/2` for
-  the real one, then `fetch/2` — three steps in which a caller can name a
-  concrete adapter without noticing. The command did exactly that, which coupled
-  a peer surface to the reference implementation while the port sat unused beside
-  it.
+  by hand means constructing a lookup probe around the locator to ask `stat/2`
+  for a validated fetchable reference, then `fetch/2` — three steps in which a
+  caller can name a concrete adapter without noticing. The command did exactly
+  that, which coupled a peer surface to the reference implementation while the
+  port sat unused beside it.
+
+  The lookup probe deliberately carries a fixed syntactically valid digest. It
+  is not a claim about the locator: a locator is not required to be a digest,
+  and `stat/2` resolves it before `fetch/2` validates the returned reference.
 
   The store arrives as `%{module:, handle:}`, the shape every other composed port
   uses here, so a host that supplies a different implementation is followed
@@ -134,21 +150,36 @@ defmodule Loopex.ArtifactStore do
   @spec retrieve(%{module: module(), handle: term()}, binary()) ::
           {:ok, binary()} | {:error, term()}
   def retrieve(%{module: module, handle: handle}, locator)
-      when is_atom(module) and is_binary(locator) and locator != "" do
-    probe = %{
-      digest: locator,
-      media_type: "application/octet-stream",
-      size: 0,
-      role: "tool_output",
-      locator: locator
-    }
+      when is_atom(module) and is_binary(locator) do
+    if valid_locator?(locator) do
+      probe = %{
+        digest: @lookup_digest,
+        media_type: "application/octet-stream",
+        size: 0,
+        role: "tool_output",
+        locator: locator
+      }
 
-    with {:ok, resolved} <- module.stat(handle, probe) do
-      module.fetch(handle, resolved)
+      with {:ok, resolved} <- module.stat(handle, probe),
+           true <- valid_reference?(resolved) do
+        module.fetch(handle, resolved)
+      else
+        false -> {:error, :invalid_artifact_reference}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, :invalid_artifact_reference}
     end
   end
 
   def retrieve(_store, _locator), do: {:error, :invalid_artifact_reference}
+
+  defp valid_locator?(locator) when is_binary(locator) do
+    byte_size(locator) in 1..@max_locator_bytes and String.valid?(locator) and
+      not Regex.match?(@unsafe_locator_codepoints, locator)
+  end
+
+  defp valid_locator?(_locator), do: false
 
   @doc """
   ## Concept
@@ -167,6 +198,6 @@ defmodule Loopex.ArtifactStore do
     kept <>
       "\n\n[loopex: output truncated. " <>
       "#{byte_size(kept)} of #{total_bytes} bytes shown. " <>
-      "The complete output is retained as artifact #{reference.digest}.]"
+      "The complete output is retained as artifact #{reference.locator}.]"
   end
 end
