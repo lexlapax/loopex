@@ -335,14 +335,19 @@ reuse, and administrator rewriting are outside the integrity boundary and may
 erase or counterfeit local authority. They are unsupported, not silently
 repaired.
 
-Recovery from a retired or ambiguous root leaves that root quarantined. A fresh
-empty root with a new generation may be activated only after positive
-termination of every Local instance, guard, captured worker group, and other
-effect authority from the old generation. If any termination is unconfirmed,
-the host must reboot first; selecting another path in the same boot is not a
-rollback and may not admit effects. A future migration must first close every
-old open authority and then create a new generation; it may not copy the old
-generation as authority.
+Recovery from a retired or ambiguous root leaves that root quarantined. The
+mandatory operator procedure activates a fresh empty root with a new generation
+only after positive termination of every Local instance, guard, captured worker
+group, and other effect authority from the old generation. If any termination
+is unconfirmed, the operator must reboot the host first. Selecting another path
+in the same boot is unsafe and is not the accepted rollback procedure.
+
+This is an out-of-band operator precondition, not an automatic cross-root
+refusal claim. A Local opened only on the fresh path has no authority or index
+with which to discover another path's quarantined root; M2 adds no boot-scoped
+registry, proof token, or activation API. A future migration must first close
+every old open authority and then create a new generation; it may not copy the
+old generation as authority.
 
 ### Recovery and command ordering
 
@@ -392,9 +397,11 @@ select them for a configured session. Executor implementations retain
 `cancel/2` but must emit the new receipt facts and honor the committed job
 value. No decoder upgrades legacy genesis or ledger bytes.
 
-Rollback uses the prior source with a fresh empty state root and new sessions
-only after every old effect authority has positively terminated, or after a
-mandatory host reboot when that proof is unavailable. It does not rewrite
+Rollback's operator procedure uses the prior source with a fresh empty state
+root and new sessions only after every old effect authority has positively
+terminated, or after a mandatory host reboot when that proof is unavailable.
+Local does not automatically enforce this across unrelated root paths. The
+procedure does not rewrite
 `session_genesis_v2`, strip receipt fields, downgrade a generation, reopen a
 quarantined root, or admit the fresh root merely because it has another path.
 The old root and all evidence bytes remain available for audit. The
@@ -431,9 +438,11 @@ Required evidence classes are:
   outlive their exact Local authority, that numeric identifiers are never used
   as cleanup authority, and that confirmed cleanup requires positive captured-
   group quiescence; escaped descendants are explicitly outside this proof;
-- rollback evidence that an ambiguous open authority refuses fresh-root
-  activation in the same boot, that positive termination admits it, and that a
-  mutant treating a new path or stopped application as termination fails;
+- retained rollback-procedure evidence that an ambiguous open authority requires
+  positive termination or selects mandatory host reboot before fresh-root
+  activation, including a fault-injection demonstration that stopping only the
+  application can leave the child alive; no automatic cross-root refusal is
+  claimed;
 - recovery and CLI evidence for matching, omitted, and conflicting configuration,
   prepared holder transfer, signal/activation ordering, single-flight abort,
   admission and accepted backstops, and no dispatch while recovery is paused;

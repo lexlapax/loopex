@@ -238,12 +238,14 @@ Technical depth: [Alternative failure modes](0016-configured-cancellation-observ
   duplicate effect without external reconciliation authority.
 - Large admitted durations remain exact but can produce correspondingly long
   observation windows. Timer implementation limits do not silently cap them.
-- Rollback is source rollback plus use of a fresh empty state root only after
-  every Local instance, guard, captured worker group, and other effect authority
-  from the old generation has positively terminated. If that termination cannot
-  be proved, the host must reboot before the fresh root is activated. The old
-  root remains quarantined; a root containing the new generation or genesis is
-  not downgraded or rewritten.
+- Rollback is an operator procedure: use the prior source and a fresh empty state
+  root only after every Local instance, guard, captured worker group, and other
+  effect authority from the old generation has positively terminated. If that
+  termination cannot be proved, the operator must reboot the host before
+  activating the fresh root. The old root remains quarantined; a root containing
+  the new generation or genesis is not downgraded or rewritten. M2 has no
+  cross-root registry and does not claim that a Local opened only on a different
+  path can discover or automatically refuse the unsafe procedure.
 - Closure requires formula, clock-domain, compatibility, durable-record,
   concurrency, fault-injection, security-plane, recovery, and real-path
   evidence described in Technical depth.
