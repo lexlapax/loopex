@@ -194,11 +194,21 @@ every other dispatched cell uses the exact remaining allowance.
 
 `streamed` is true exactly when `delta_count > 0`. A non-streaming adapter is
 normalized to the explicit pair `delta_count: 0, streamed: false`; omission is
-not retained in v2. Each `tool_call` has exactly `id`, `name`, and `arguments`;
-`id` and `name` are nonempty valid UTF-8 binaries, and `arguments` is a plain map
-accepted by ADR 0017's depth/cardinality/key normalizer. The list, every binary,
-and the complete reply remain within that normalizer's collection and 65,536-
-byte item bounds. No extra key is accepted at any level named here.
+not retained in v2. Each `tool_call` is exactly
+`%{"id" => id, "name" => name, "arguments" => arguments}`; `id` and `name`
+are nonempty valid UTF-8 binaries, and `arguments` is a plain map accepted by
+ADR 0017's depth/cardinality/key normalizer. No extra key is accepted at any
+level named here.
+
+The echoed `canonical_request_bytes` is validated for byte-for-byte equality
+with the already admitted committed request and then excluded from reply-size
+measurement. It does not make the callback map a second durable Store item and
+does not create a combined request-plus-response ceiling. Core applies the
+normalizer's structural limits to the newly supplied reply members, projects
+the eight-key durable reply below, and applies the 65,536-byte item ceiling to
+that projection inside the complete settlement record. The staged request and
+the intended durable reply must each fit their own owning record; their sum need
+not fit one item.
 
 The exact durable `bounded_canonical_reply_v2` is the eight-key map obtained by
 omitting only `canonical_request_bytes` from the validated adapter reply. It
@@ -400,6 +410,9 @@ Required evidence includes named cases and clause-derived mutants for:
 - atomic settlement/accounting/conversation/next/terminal application and every
   commit-unknown boundary;
 - compact unreadable-reply preflight one below, at, and above each Store limit;
+- a staged request and durable reply that each fit independently while the
+  nine-key callback map containing both would exceed 65,536 bytes; a mutant that
+  measures the callback aggregate rather than the durable projection must fail;
 - result-first, abort-first, and deadline-first ordering, including late
   evidence-only replies;
 - retry opening exactly one new stream domain and no successor redispatch of an
