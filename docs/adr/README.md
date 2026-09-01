@@ -24,6 +24,10 @@ a decision adds a new record rather than rewriting the old one.
 | 0012 | Executor cancellation capability | Accepted | [Decision](0012-executor-cancellation-capability.md#concept) | [Technical depth](0012-executor-cancellation-capability-technical.md#technical-depth) |
 | 0013 | Run-deadline commitment at first request staging | Accepted | [Decision](0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
 | 0014 | Stream closure at owner loss | Accepted | [Decision](0014-stream-closure-at-owner-loss.md#concept) | [Technical depth](0014-stream-closure-at-owner-loss-technical.md#technical-depth) |
+| 0015 | Artifact object and use identity | Proposed | [Decision](0015-artifact-object-and-use-identity.md#concept) | [Technical depth](0015-artifact-object-and-use-identity-technical.md#technical-depth) |
+| 0016 | Configured cancellation observation | Proposed | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
+| 0017 | Durable context and record admission budgets | Proposed | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
+| 0018 | Provider attempt authority and recovery | Proposed | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -61,6 +65,17 @@ and its rule that every closure precedes the attempt outcome's publication,
 solely where a terminal fact commits before handoff and its reply reaches the
 originating coordinator afterwards. ADR 0011's domain, sequencing,
 loss-detection, and durable-fallback rules stay in force.
+
+0015 proposes separating immutable artifact-object identity from the bounded
+metadata of each use, so content deduplication cannot erase durable provenance.
+0016 proposes deriving core cancellation observation and the later command
+backstop from the one configured cleanup period. 0017 proposes distinct durable
+provider-token and Store-record admission ceilings. 0018 proposes one-use
+current-owner provider dispatch, an exact two-attempt version-1 allowance, and
+conservative non-redispatching recovery. All four are decisions proposed for
+`M2` Amendment 4. While Proposed they change no canonical M2 blocker or closure
+state; if accepted, Amendment 4 must declare and lock them before dependent
+implementation or closure. None is accepted merely by being indexed here.
 
 0004 and 0005 are both parked. They designed correction paths for a defect
 found in an accepted plan, then the defect that prompted them turned out to be
