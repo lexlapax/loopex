@@ -719,6 +719,61 @@ inherited-gate enforcement decision recorded in
 [Amendment 8](../plans/M1-gate.md#amendment-8-inherited-gate-enforcement), which
 remains owed before `M2` closes.
 
+<a id="disposition-provider-recovery-proof-before-retry-2026-09-01"></a>
+### Provider recovery requires proof before retry — 2026-09-01
+
+The maintainer explicitly selected the conservative provider-recovery posture
+on 2026-09-01: exact staged request bytes identify an operation but do not
+authorize repeating an unsettled provider attempt. This is a recorded vision
+decision, not an inference from implementation work.
+
+**The principle.** A recovered open or otherwise unsettled provider attempt is
+`dispatched_or_unknown` for accounting and is not sent again. Only durable exact
+proof that transport was never invoked, or a future provider-specific
+reconciliation result proving retry safe, may authorize a new attempt. Provider
+ambiguity does not become executor `outcome_unknown`; it receives conservative
+provider accounting and the run ends under its committed provider failure,
+abort, or deadline truth.
+
+**The evidence.** The existing recovery language made stable staged bytes serve
+two different purposes: exact operation identity and permission to redispatch.
+Those bytes cannot distinguish a crash before transport from a crash after the
+provider accepted a possibly billed call, and M2 has no portable provider
+reconciliation contract. A coordinator-side send after an ownership check also
+leaves a handoff gap in which both owners can believe dispatch is theirs.
+
+**The selected M2 mechanics.** Each provider attempt commits before dispatch.
+Control validates current ownership and sends an exact one-use permit directly
+to a permit-blocked model worker inside the same serialized operation. The
+permit send is the provider-dispatch linearization point; later worker
+consumption executes that already-linearized authorization and cannot create a
+second authorization. This preserves ADR 0006's current-owner fence even if
+ownership changes after the send and before the worker is scheduled. The
+provider-attempt and recovery contract moves from the context-admission decision
+into its own ADR. Its first record version allows exactly two total attempts for
+one staged model operation: attempt one plus one retry, and attempt two is legal
+only after durable exact `not_dispatched` settlement. Succession never resets
+that allowance; changing it requires a new record version.
+
+**Compatibility and migration.** No released protocol or package is widened.
+`Loopex.LLM.complete/3` already admits term-shaped error detail. An adapter that
+cannot provide exact pre-transport proof remains conforming, but its ambiguous
+errors are non-retryable and conservatively accounted. The Control permit and
+attempt records are private unreleased machinery. Existing development journals
+do not migrate across the new record contract and fail closed if mixed.
+
+**Accepted-decision impact.** The provider-attempt ADR must name the exact
+clauses it partially supersedes in ADR 0010, ADR 0011, and ADR 0014. In
+particular, ADR 0014's successor retry after model-owner loss becomes
+non-redispatching conservative settlement unless exact `not_dispatched` proof
+already exists. ADR 0006 is not superseded: its current-owner dispatch rule is
+satisfied at Control's direct permit-send linearization point.
+
+**Scope.** This record authorizes the paired vision change and the corresponding
+ADR proposal only. It does not accept ADR 0015, ADR 0016, ADR 0017, or ADR 0018;
+does not accept or rebind M2 Amendment 4; does not close M2; and does not
+authorize integration, release, or publication.
+
 <a id="disposition-bound-reached-vision-change-2026-08-23"></a>
 ### Vision terminal algebra gains `bound_reached` — 2026-08-23
 

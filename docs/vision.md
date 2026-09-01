@@ -177,6 +177,14 @@ identity, epoch, digest, and fence evidence matches. Prior receipts enter only
 through a solicited current reconciliation. If an effect cannot be proven,
 Loopex records an immutable unknown outcome and does not blindly retry it.
 
+Stable provider-request bytes identify what one model operation intended; they
+do not prove whether a transport accepted that request. Without a portable
+provider reconciliation result, a recovered open or otherwise unsettled model
+attempt is treated as dispatched-or-unknown for accounting and is not sent
+again. Only durable exact proof that transport was never invoked, or a future
+provider-specific reconciliation contract proving retry safe, may authorize a
+new attempt.
+
 Cancellation stops owned work and reports what was observed; it does not claim
 to undo an external effect.
 
@@ -245,6 +253,9 @@ The context pipeline is the sole seam for memory, retrieval, prompts, and
 other injected context. Every staged block carries provenance, trust, lineage,
 and budget information. The exact staged context and model request digest
 commit before dispatch, so recovery cannot silently rebuild a different input.
+Those bytes are recovery identity, not redispatch authority: an ambiguous
+provider handoff is never made safe merely by having the same payload
+available.
 
 <a id="concept-vision-tools"></a>
 ### 14. Tools and the coding surface
@@ -490,8 +501,9 @@ Open decisions have evidence triggers rather than implied dates. They cover
 name clearance, terminal richness, the default tool profile, durable store,
 public schema subset, continuation retention, isolation and remote transports,
 published hand images, ACP scope, compatibility consumers, package splits,
-release hot upgrades, secured-host proof, context examples and storage, request
-artifact boundaries, pinned memory, and the lasting runtime floor.
+release hot upgrades, secured-host proof, context examples and storage,
+provider reconciliation, request artifact boundaries, pinned memory, and the
+lasting runtime floor.
 
 Technical depth: [Question-by-trigger register](vision-technical.md#technical-vision-open-questions)
 
