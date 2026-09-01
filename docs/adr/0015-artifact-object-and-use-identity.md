@@ -5,7 +5,7 @@
 
 Technical depth: [Reference algebra, compatibility, and evidence](0015-artifact-object-and-use-identity-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-31
 - **Decision owner:** Maintainer
 - **Prerequisite for:** proposed `M2` Amendment 4
@@ -24,7 +24,7 @@ collection, placement, and no-implicit-read decisions remain unchanged.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adrs-0015-through-0018-acceptance-2026-09-01) | candidate `acfdbeea5b3a7507c5510e03a10bb8b238481c88`; concept `sha256:71a7ae0546fee1c2eb282ca427262e7fe196329d5e122ef19b0063fd4a16d24d`; technical `sha256:9e4c10b05b3ef5dafb977de7036ebfa627d8124690307d1e4a678d70950ba818` |
 
 <a id="concept-adr-0015-context"></a>
 ## Context

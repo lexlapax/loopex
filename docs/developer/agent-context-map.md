@@ -1166,3 +1166,37 @@ review. The administrative transition changes only the `M2` Acceptance row and
 this new disposition record; the accepted amendment sections, normative
 envelopes, locked gate, portable enforcement, register, and product bytes are
 unchanged.
+
+<a id="disposition-adrs-0015-through-0018-acceptance-2026-09-01"></a>
+### ADR 0015 through ADR 0018 acceptance — 2026-09-01
+
+The maintainer explicitly accepted the four Proposed decision pairs at exact
+candidate `acfdbeea5b3a7507c5510e03a10bb8b238481c88`, after independent review
+of that exact candidate:
+
+| Decision | Concept | Technical depth |
+| --- | --- | --- |
+| [ADR 0015](../adr/0015-artifact-object-and-use-identity.md#concept) | `sha256:71a7ae0546fee1c2eb282ca427262e7fe196329d5e122ef19b0063fd4a16d24d` | `sha256:9e4c10b05b3ef5dafb977de7036ebfa627d8124690307d1e4a678d70950ba818` |
+| [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept) | `sha256:0b5c536791ad2d553fb8001e896c0004d34f5b161809b0072f9ff93e7fd31caa` | `sha256:76c20b8abf4344ccda8f45cbc2df173e174f08c6b30be21d8d09c2350edf7e5b` |
+| [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | `sha256:c24af4fe32cbbb47749c3359eceb29030b67191b3ab20b33976dd271b7e4fe4b` | `sha256:d092aaa6f94c508ee05aa83e261e4117265d0270582b0936a4e0eb35edbc08ae` |
+| [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept) | `sha256:c4d094e79427ab7c8403ddb3f57d992308f57b9ec44a56604a9b678ba198a67b` | `sha256:d9553fff8d05a1040c25a2b9a9c4f730cb8dec8599a508e81155d2991a49f992` |
+
+ADR 0015 separates immutable artifact-object identity from bounded per-use
+metadata. ADR 0016 derives cancellation observation, cleanup confirmation, and
+the later command backstop from the committed cleanup period. ADR 0017 adds
+separate durable context-token and Store-record admission ceilings. ADR 0018
+makes Control's one-use permit the provider-dispatch linearization, permits
+exactly one retry only after durable pretransport `not_dispatched` proof, and
+forbids redispatch of recovered unresolved attempts. Their supersession scopes
+are limited to the clauses each accepted pair names; ADR 0006 remains intact.
+
+**Scope of this record.** It accepts ADR 0015, ADR 0016, ADR 0017, and ADR 0018
+alone. It does not accept or rebind `M2` Amendment 4, change the milestone
+lifecycle, authorize dependent implementation, close `M2`, authorize product
+integration, or authorize a release.
+
+This record is the maintainer's disposition evidence, not the independent
+review. The administrative transition changes only the four ADR Concept status
+lines and governance rows, this disposition, and the ADR index that reports
+their accepted status and exact supersession scope. Every Technical depth file
+and all decision text remain byte-identical to the reviewed Proposed candidate.

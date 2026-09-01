@@ -5,7 +5,7 @@
 
 Technical depth: [Budget algebra, durability, and evidence](0017-durable-context-admission-budget-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-31
 - **Decision owner:** Maintainer
 - **Prerequisite for:** proposed `M2` Amendment 4
@@ -64,7 +64,7 @@ admission transaction succeeds and owns that boundary exclusively.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adrs-0015-through-0018-acceptance-2026-09-01) | candidate `acfdbeea5b3a7507c5510e03a10bb8b238481c88`; concept `sha256:c24af4fe32cbbb47749c3359eceb29030b67191b3ab20b33976dd271b7e4fe4b`; technical `sha256:d092aaa6f94c508ee05aa83e261e4117265d0270582b0936a4e0eb35edbc08ae` |
 
 <a id="concept-adr-0017-context"></a>
 ## Context

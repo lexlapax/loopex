@@ -5,7 +5,7 @@
 
 Technical depth: [Exact bounds, records, and evidence](0016-configured-cancellation-observation-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-31
 - **Decision owner:** Maintainer
 - **Prerequisite for:** proposed `M2` Amendment 4
@@ -40,7 +40,7 @@ bindings, attempt identity, and progress do not change.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adrs-0015-through-0018-acceptance-2026-09-01) | candidate `acfdbeea5b3a7507c5510e03a10bb8b238481c88`; concept `sha256:0b5c536791ad2d553fb8001e896c0004d34f5b161809b0072f9ff93e7fd31caa`; technical `sha256:76c20b8abf4344ccda8f45cbc2df173e174f08c6b30be21d8d09c2350edf7e5b` |
 
 <a id="concept-adr-0016-context"></a>
 ## Context

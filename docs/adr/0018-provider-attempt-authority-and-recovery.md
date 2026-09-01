@@ -5,7 +5,7 @@
 
 Technical depth: [Attempt records, dispatch linearization, settlement, and evidence](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-01
 - **Decision owner:** Maintainer
 - **Prerequisite for:** proposed `M2` Amendment 4
@@ -45,7 +45,7 @@ create another. All durable attempt and settlement transactions retain ADR
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adrs-0015-through-0018-acceptance-2026-09-01) | candidate `acfdbeea5b3a7507c5510e03a10bb8b238481c88`; concept `sha256:c4d094e79427ab7c8403ddb3f57d992308f57b9ec44a56604a9b678ba198a67b`; technical `sha256:d9553fff8d05a1040c25a2b9a9c4f730cb8dec8599a508e81155d2991a49f992` |
 
 <a id="concept-adr-0018-context"></a>
 ## Context
