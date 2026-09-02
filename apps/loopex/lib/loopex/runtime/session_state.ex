@@ -2701,7 +2701,15 @@ defmodule Loopex.Runtime.SessionState do
               run_id: run_id,
               turn_number: work.turn_number,
               content: reply["text"],
-              tool_calls: calls,
+              # Concept: the retained element names each call the way the reply
+              # named it.
+              #
+              # Technical depth: the dispatch queue keys calls by
+              # `tool_call_id`, which is the identity the executor boundary
+              # binds. The conversation element keeps that member and adds the
+              # adapter's own `id` beside it, so a projection reads back the
+              # bytes the provider produced rather than a renamed copy of them.
+              tool_calls: Enum.map(calls, &Map.put(&1, :id, &1.tool_call_id)),
               stop_reason: if(calls == [], do: "end_turn", else: "tool_use"),
               usage: reply["usage"]
             }
