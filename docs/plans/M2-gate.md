@@ -156,7 +156,7 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `c94f61e7164aefa07190e61acc60e6ddb3257d88a7006708dcd6befa5199129b` | `scripts/check-m2-gate.sh` |
+| `2cc3ff0147a7e818efb8493a666a6865d17f05ed9fea529c351cc43fa4f1e691` | `scripts/check-m2-gate.sh` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -1777,3 +1777,36 @@ change. The rebind that follows records that override as its disposition.
 | 5 | `scripts/check-m2-gate.sh` | `c94f61e7164aefa07190e61acc60e6ddb3257d88a7006708dcd6befa5199129b` |
 | 5 | `apps/loopex_composition/test/kernel_composition_test.exs` | `809ca8b835182751f493ef1c931d309f36a73ae48cf78208f84b81fcb05e74a4` |
 
+<a id="amendment-6"></a>
+## Amendment 6 — Let the Probe Report Raw Usage as the Pair
+
+**Acceptance: OUTSTANDING.** This section advances the generation and rebinds the amended artifact named below. The prior Acceptance row and `In review` lifecycle state remain at this proposal. Its immediate one-parent child must rebind Acceptance to this exact revision and add one new amendment-6-specific disposition anchor without changing any other byte.
+
+Amendment 4 accepted ADR 0018, whose bounded adapter reply admits no extra key
+at any level and whose usage is built from exactly the raw `input_tokens` and
+`output_tokens` pair; the `status` member exists only on the reducer's
+normalized usage. The opening probe's in-process harness model returned the
+normalized shape at the callback boundary. While the reducer silently dropped
+unknown usage members that passed; once the key set was closed as the ADR
+requires, the reducer refused the reply as an unreadable answer, the run
+settled terminal after one turn, and the probe reported the declared red
+against a loop that runs several turns with a committed conversation and a
+streamed delta on every real path.
+
+This amendment changes the probe's harness usage to the raw pair and its
+adjacent comment, and nothing else: the probe's observations, the declared red,
+every selector, minimum, and case identity, and every other bound artifact are
+unchanged. Run outside the gate at the same tree, the probe observes one turn
+with the normalized shape and three turns, a committed conversation, and five
+progress messages with the pair.
+
+**Maintainer disposition.** The maintainer, on 2026-09-02, authorized this
+amendment to bypass the exact-SHA independent review the ordinary transaction
+requires, as a recorded override: the change is one harness value inside the
+gate's own probe, its correctness is proved by the probe's own observation, and
+the review cost exceeded the change. The rebind that follows records that
+override as its disposition.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 6 | `scripts/check-m2-gate.sh` | `2cc3ff0147a7e818efb8493a666a6865d17f05ed9fea529c351cc43fa4f1e691` |

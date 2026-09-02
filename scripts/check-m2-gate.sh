@@ -228,10 +228,13 @@ defmodule Loopex.M2Probe.Model do
       end
 
     if function_exported?(Loopex.Store, :max_item_bytes, 0) do
-      # ADR 0018's exact callback boundary reports complete usage so the probe
-      # can observe several turns without conservative accounting consuming the
-      # remaining run allowance after its first call. The branch is discovered
-      # from ADR 0017's public Store ceiling rather than a private reducer name.
+      # ADR 0018's exact callback boundary reports complete usage as the raw
+      # token pair, so the probe can observe several turns without conservative
+      # accounting consuming the remaining run allowance after its first call.
+      # The `status` member belongs to the reducer's normalized usage, never to
+      # the adapter reply, whose every level admits no extra key. The branch is
+      # discovered from ADR 0017's public Store ceiling rather than a private
+      # reducer name.
       {:ok,
        %{
          "text" => "probe turn #{turn}",
@@ -240,7 +243,7 @@ defmodule Loopex.M2Probe.Model do
            "model" => request.model,
            "endpoint" => "in-process"
          },
-         "usage" => %{"status" => "reported", "input_tokens" => 1, "output_tokens" => 1},
+         "usage" => %{"input_tokens" => 1, "output_tokens" => 1},
          "tool_calls" =>
            Enum.map(tool_calls, fn call ->
              %{"id" => call.id, "name" => call.name, "arguments" => call.arguments}
