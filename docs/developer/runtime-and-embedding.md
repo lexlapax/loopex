@@ -178,6 +178,13 @@ retained values.
 `Loopex.progress/2` and `Loopex.diagnostic/2` are transient. None of those
 observations grants authority or substitutes for Store history.
 
+`Loopex.next_event/1` delivers only rows the runtime has acknowledged as
+resolved. A row that is durably linearized while its owner still holds an
+unresolved transaction is withheld until re-presentation settles it, so a
+caller never reads a fact the owner is not yet able to stand behind. Cursors and
+gap semantics are unchanged; the fence delays a read rather than reordering or
+dropping one, and it is released when this runtime stops owning the session.
+
 Recovery that may race an operator interrupt is deliberately two phase.
 `prepare_resume_session/3` and `prepare_resume_known_session/4` return either a
 replayed result or an opaque one-use activation capability while ordinary work
@@ -257,6 +264,33 @@ from its executor authority, constructs either
 `Loopex.ReferenceClient.Recovery.receipt/2` or `outcome_unknown/1`, and submits it
 with `Loopex.reconcile/2`. The current coordinator validates every query and
 origin binding before committing one receipt fact or terminal unknown outcome.
+
+The query is the contract, not a hint. It carries eleven members — the
+reconciliation query identity, the current session epoch, the expected executor
+identity, the current recovery contract, and the journaled operation, attempt,
+canonical request digest, original session and executor epochs, origin executor
+identity, and fencing token — and every one must be echoed back unchanged; a
+difference names the field that differed. Receipt evidence is then matched
+field for field against the job the coordinator journaled. A query is opened
+only where exactly one item sits at `effect_dispatched`; anything else is
+`:no_effect_recovery_pending`, and an effect still in flight is
+`:effect_in_flight`. Unsolicited evidence is refused rather than admitted.
+
+A model attempt is not reconciled this way. A successor that finds one open
+settles it `owner_loss` — charged the run's whole remaining allowance and ended
+`failed` — because a provider call is not a Loopex-controlled effect that
+reconciliation can complete safely, and its staged bytes are recovery identity
+rather than dispatch authority.
+
+Recovery also depends on the Store still holding the log it started with. The
+local Store records the log file's device and inode at start-up and re-checks
+the path while its append handle is held; a log removed or replaced underneath
+it answers `{:log_unavailable, :enoent}` or `{:log_unavailable, :replaced}`,
+which is commit-ambiguous like any other append failure, terminates the Store,
+and leaves the caller to re-present the exact transaction. Recovery accepts only
+a complete checksummed prefix: a strictly torn final frame is truncated away
+under a digest taken at read time, while a complete-but-invalid frame refuses to
+start at all rather than repairing itself.
 
 ### Verification Entry Points
 
