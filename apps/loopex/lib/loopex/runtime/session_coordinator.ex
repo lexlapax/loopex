@@ -148,6 +148,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # reintroduce the defect those two commits removed.
   @session_status_timeout_ms 5_000
 
+  # The floor of the cleanup period ADR 0016 admits. It is a domain boundary, not
+  # a wait: every duration derived from it comes from `cancellation_bounds/1`.
+  @shortest_cleanup_grace_ms 1
+
   # Concept: the version of the encoding a retained descriptor was measured and
   # digested under, carried so a later encoder cannot be assumed.
   #
@@ -3174,8 +3178,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # An unreadable committed period is not permission to wait forever, and it
       # is not a verdict either: the shortest admitted reserve is spent and the
       # operation is reported unproved.
+      #
+      # Technical depth: ADR 0016 owns the arithmetic that turns a cleanup period
+      # into a reserve, and it admits `1..2^64-1`, so the shortest reserve any
+      # admitted period derives is the one its floor derives. Restating that
+      # number here as a literal was a second copy of the formula: a change to
+      # `cancellation_bounds/1` would move every production wait except this one,
+      # and nothing would say so. The floor goes through the same function every
+      # other bound does.
       {:error, _reason} ->
-        2_001
+        {:ok, %{execute_result_reserve_ms: reserve}} =
+          Executor.cancellation_bounds(@shortest_cleanup_grace_ms)
+
+        reserve
     end
   end
 
