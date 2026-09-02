@@ -65,6 +65,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   @record_limit 65_536
   @record_depth_limit 12
   @record_cardinality_limit 1_024
+  @delivery_ledger :provider_attempt_delivery_ledger
 
   test "the request and first attempt open atomically before one direct one-use Control permit can invoke the provider" do
     fixture = start(script: [%{text: "done", calls: [], hold: self()}], progress_to: self())
@@ -1838,21 +1839,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   # at its head. Scanning only the head made the caller drain a message it did
   # not need to drain.
   defp queued_provider_request(runtime, control, binding) do
-    messages =
-      case Process.info(control, :messages) do
-        {:messages, queued} -> queued
-        _dead -> []
-      end
-
-    Enum.reduce_while(messages, :error, fn
+    Enum.reduce_while(queued_control_calls(control), :error, fn
       {:"$gen_call", _from, request} = message, _acc ->
         case provider_worker_in_request(runtime, request, binding) do
           {:ok, worker} -> {:halt, {:ok, {message, request, worker}}}
           :error -> {:cont, :error}
         end
-
-      _other, acc ->
-        {:cont, acc}
     end)
   end
 
@@ -1897,23 +1889,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   defp await_queued_control_call(_control, 0), do: flunk("Control received no queued call")
 
   defp await_queued_control_call(control, attempts) do
-    queued =
-      case Process.info(control, :messages) do
-        {:messages, messages} ->
-          Enum.find(messages, fn
-            {:"$gen_call", _from, _request} -> true
-            _other -> false
-          end)
+    case queued_control_calls(control) do
+      [call | _rest] ->
+        call
 
-        _dead ->
-          nil
-      end
-
-    if queued do
-      queued
-    else
-      Process.sleep(5)
-      await_queued_control_call(control, attempts - 1)
+      [] ->
+        Process.sleep(5)
+        await_queued_control_call(control, attempts - 1)
     end
   end
 
@@ -1923,13 +1905,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     do: flunk("Control did not consume its queued call")
 
   defp await_control_call_consumed(control, message, attempts) do
-    still_queued? =
-      case Process.info(control, :messages) do
-        {:messages, messages} -> Enum.any?(messages, &(&1 === message))
-        _dead -> false
-      end
-
-    if still_queued? do
+    if Enum.any?(queued_control_calls(control), &(&1 === message)) do
       Process.sleep(5)
       await_control_call_consumed(control, message, attempts - 1)
     else
@@ -2327,7 +2303,87 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     end
   end
 
+  # Concept: what Control is still holding, read from delivery and answer rather
+  # than from a mailbox that may be unable to answer for itself.
+  #
+  # Technical depth: `Process.info(pid, :messages)` and `:message_queue_len` report a
+  # process's internal message queue. A message sent to a process frozen by
+  # `:erlang.suspend_process/1` can still be sitting in that process's outer signal
+  # queue, which is merged into the internal queue only when the process is scheduled
+  # again, so a frozen Control can read as holding nothing while a call has in fact
+  # been delivered and is waiting. That was proved here: at the failure the
+  # coordinator sat blocked in `Loopex.Runtime.Control.post_commit/5` while Control
+  # reported `{:messages, []}` and `{:message_queue_len, 0}`, and thawing Control
+  # answered that same call inside 200ms. The same absence is therefore never
+  # evidence that a call is gone, which is why nothing here removes a call because a
+  # mailbox read did not show it.
+  #
+  # A call is queued once its `:receive` trace has arrived and stays queued until
+  # Control's own reply to that exact call is traced -- `{Tag, Reply}` carrying the
+  # `$gen_call`'s unique tag, which no permit send can imitate, so the `:send` traces
+  # the cells match on are left alone. Both trace points fire while the target stays
+  # frozen. A live mailbox read is still unioned in, because a call it does show is
+  # certainly there; it can only add.
+  #
+  # Every cell that uses these helpers already traces its own Control with
+  # `[:send, :receive]` from this same process, so nothing here enables, clears, or
+  # reassigns a trace flag.
   defp queued_control_calls(control) do
+    if Process.alive?(control) do
+      outstanding = sync_delivery_ledger(control)
+
+      outstanding ++
+        Enum.reject(
+          mailbox_control_calls(control),
+          fn seen -> Enum.any?(outstanding, &(&1 === seen)) end
+        )
+    else
+      put_delivery_ledger(control, [])
+      []
+    end
+  end
+
+  defp sync_delivery_ledger(control) do
+    outstanding =
+      control
+      |> drain_delivery_traces(delivery_ledger(control))
+      |> Enum.reject(&answered?(control, &1))
+
+    put_delivery_ledger(control, outstanding)
+    outstanding
+  end
+
+  defp drain_delivery_traces(control, acc) do
+    receive do
+      {:trace, ^control, :receive, {:"$gen_call", _from, _request} = message} ->
+        drain_delivery_traces(control, acc ++ [message])
+
+      {:trace, ^control, :receive, _other} ->
+        drain_delivery_traces(control, acc)
+    after
+      0 -> acc
+    end
+  end
+
+  defp answered?(control, {:"$gen_call", {_caller, tag}, _request}) do
+    receive do
+      {:trace, ^control, :send, {^tag, _reply}, _target} -> true
+    after
+      0 -> false
+    end
+  end
+
+  defp answered?(_control, _message), do: false
+
+  defp delivery_ledger(control),
+    do: Process.get(@delivery_ledger, %{}) |> Map.get(control, [])
+
+  defp put_delivery_ledger(control, messages) do
+    Process.put(@delivery_ledger, Map.put(Process.get(@delivery_ledger, %{}), control, messages))
+    :ok
+  end
+
+  defp mailbox_control_calls(control) do
     case Process.info(control, :messages) do
       {:messages, messages} ->
         Enum.filter(messages, fn

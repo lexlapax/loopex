@@ -91,17 +91,24 @@ in its outer signal queue until the process is scheduled, so mailbox
 introspection under-reports it; whether a given send has merged depends on
 whether the target ran between the send and the suspend, which is why the
 failure is load-dependent and whole-file-only. Every mailbox-scanning helper
-in that suite is unsound while its target is frozen. The repair, observing
-delivery by receive trace instead of by mailbox, is dispositioned separately.
+in that suite is unsound while its target is frozen. The repair, approved by
+the maintainer, observes delivery by receive trace instead of by mailbox: a
+call is queued once its receive trace arrives at Control and stays queued
+until Control's reply to that exact call is traced, and a mailbox read may
+only ever add to that ledger, never subtract, because absence is the
+unreliable signal. Thirty-two consecutive whole-file runs across seeds 0 to
+31 reproduced nothing, including a seed that reproduced the flake on an
+intermediate cut that still removed entries on mailbox absence.
 
 ## Per-file counts
 
 Serial runs at seed 0. "Before" is the integrated tree at `7f89ba9`; "after"
-is the tree with the production repairs and the first corpus commit.
+is the tree with the production repairs and both corpus commits; the
+agent-loop file gained one boundary case.
 
 | File | Before | After |
 | --- | --- | --- |
-| `apps/loopex/test/agent_loop_test.exs` | 80/100 | 95/100 (six addendum items pending) |
+| `apps/loopex/test/agent_loop_test.exs` | 80/100 | 101/101 |
 | `apps/loopex/test/provider_attempt_protocol_test.exs` | 19/24 | 24/24 |
 | `apps/loopex/test/cancellation_test.exs` | 26/28 | 28/28 |
 | `apps/loopex/test/input_algebra_test.exs` | 10/11 | 11/11 |
