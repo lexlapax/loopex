@@ -1016,7 +1016,7 @@ defmodule Loopex.Runtime.SessionState do
         result = %{"kind" => "reply", "reply" => reply}
         conversation = if termination, do: "evidence_only", else: "canonical"
 
-        if reply_settlement_fits?(work, result, reply["usage"]) do
+        if reply_settlement_fits?(work, result, reply["usage"], termination, conversation) do
           {result, conversation, reply["usage"]}
         else
           {unreadable_result(), "none", reply["usage"]}
@@ -1038,7 +1038,18 @@ defmodule Loopex.Runtime.SessionState do
   # Technical depth: measured on the intended settlement rather than the reply,
   # since the Store retains the record. The paired terminal is a separate item
   # and is measured on its own.
-  defp reply_settlement_fits?(work, result, usage) do
+  #
+  # The candidate carries the termination and conversation this settlement will
+  # actually commit, not a fixed pair. A settlement terminated by an admitted
+  # abort or deadline is longer than an unterminated canonical one -- `nil`
+  # against `"deadline"`, `"canonical"` against `"evidence_only"` -- so
+  # preflighting the shorter pair admits, at the exact byte ceiling, a record
+  # the Store then refuses. ADR 0018 requires that refusal never be discovered
+  # there, because the run would be left with no verdict at all. `next` stays
+  # `"terminal"` because it is the longest of the three values the member can
+  # take, and the member is not settled until the result it depends on is
+  # chosen.
+  defp reply_settlement_fits?(work, result, usage, termination, conversation) do
     candidate = %{
       "run_id" => work.run_id,
       "turn_id" => work.turn_id,
@@ -1046,8 +1057,8 @@ defmodule Loopex.Runtime.SessionState do
       "attempt" => work.model_attempt,
       "staged_request_digest" => work.request.staged_request_digest,
       "transport" => "dispatched_or_unknown",
-      "termination" => nil,
-      "conversation" => "canonical",
+      "termination" => termination,
+      "conversation" => conversation,
       "next" => "terminal",
       "result" => result,
       "accounting" => attempt_accounting("dispatched_or_unknown", usage),

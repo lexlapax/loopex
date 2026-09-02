@@ -2117,12 +2117,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # a domain at all. Malformed items are dropped rather than projected, because
   # a bad item must not be able to break the sequence a consumer uses to detect
   # loss.
+  #
+  # The operation identity is the one `SessionState` commits into
+  # `model_attempt_opened_v1` and `model_attempt_settled_v1`, never a second
+  # derivation of the same run and turn. A separately derived identity produces
+  # a different domain for the same attempt, and a consumer then cannot bind a
+  # delta to the settlement that produced it.
   defp model_progress_fun(state, work) do
     domain =
       StreamDomain.derive(
         :model,
         state.session_id,
-        model_operation_id(work),
+        SessionState.model_operation_id(work.run_id, work.turn_number),
         Map.get(work, :model_attempt, 1)
       )
 
@@ -2181,8 +2187,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
        :ok
      end}
   end
-
-  defp model_operation_id(work), do: stable_id("model-operation", work.run_id, work.turn_number)
 
   # Concept: an authoritative coordinator closes every ordinary terminal domain
   # exactly once.

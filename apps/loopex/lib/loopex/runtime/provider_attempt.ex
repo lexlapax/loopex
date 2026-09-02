@@ -72,6 +72,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @callback_keys ["canonical_request_bytes" | @reply_keys]
 
   @identity_keys ["provider", "model", "endpoint"]
+  @usage_keys ["input_tokens", "output_tokens"]
   @tool_call_keys ["id", "name", "arguments"]
 
   @uint64_max 18_446_744_073_709_551_615
@@ -259,6 +260,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
          :ok <- callback_keys(encoded),
          {:ok, identity} <- reply_identity(Map.get(encoded, "identity")),
          {:ok, calls} <- reply_tool_calls(Map.get(encoded, "tool_calls")),
+         {:ok, usage} <- reply_usage(Map.get(encoded, "usage")),
          {:ok, text} <- valid_text(Map.get(encoded, "text")),
          {:ok, delta_count} <- reply_delta_count(Map.get(encoded, "delta_count")),
          {:ok, streamed} <- reply_streamed(Map.get(encoded, "streamed"), delta_count),
@@ -269,7 +271,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
        %{
          "text" => text,
          "identity" => identity,
-         "usage" => normalize_usage(Map.get(encoded, "usage")),
+         "usage" => usage,
          "tool_calls" => calls,
          "delta_count" => delta_count,
          "streamed" => streamed,
@@ -571,6 +573,38 @@ defmodule Loopex.Runtime.ProviderAttempt do
   end
 
   defp reply_tool_call(_call), do: {:error, :unreadable_model_answer}
+
+  # Concept: a usage map is closed like every other level of the callback
+  # reply, and only the values inside it are classified rather than refused.
+  #
+  # Technical depth: ADR 0018 admits no extra key at any level of
+  # `bounded_adapter_reply_v2`, and its normalized usage is built from exactly
+  # `input_tokens` and `output_tokens`. A member outside that pair is an
+  # unreadable answer here rather than a value `normalize_usage/1` silently
+  # drops, because dropping it retains a usage the provider did not state and
+  # lets an arbitrary provider term reach the Store measurement in the members
+  # around it. Absence stays legal -- the pair classifies to `missing` or
+  # `partial` -- and a present but negative, non-integer, or oversized value
+  # stays a classification rather than a refusal, since ADR 0018 combination 1
+  # keeps such a reply canonical on the exact remaining allowance. A usage that
+  # is not a map at all is classified `malformed` for the same reason; it names
+  # no key to close.
+  defp reply_usage(usage) when is_map(usage) and not is_struct(usage) do
+    with {:ok, encoded} <- stringify(usage),
+         :ok <- subset_keys(encoded, @usage_keys) do
+      {:ok, normalize_usage(encoded)}
+    else
+      _other -> {:error, :unreadable_model_answer}
+    end
+  end
+
+  defp reply_usage(usage), do: {:ok, normalize_usage(usage)}
+
+  defp subset_keys(map, allowed) do
+    if MapSet.subset?(MapSet.new(Map.keys(map)), MapSet.new(allowed)),
+      do: :ok,
+      else: {:error, :unreadable_model_answer}
+  end
 
   defp valid_text(text) do
     if is_binary(text) and String.valid?(text),
