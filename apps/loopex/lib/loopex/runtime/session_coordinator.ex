@@ -1269,13 +1269,54 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # why, and the task continues. A required-only candidate that still fails has
   # nothing optional left to remove and becomes the compact refusal.
   defp stage_candidate(state, staging, [], project_receipt),
-    do: staged_proposal(state, staging, [], project_receipt)
+    do: required_only_proposal(state, staging, project_receipt)
 
   defp stage_candidate(state, staging, blocks, project_receipt) do
     case staged_proposal(state, staging, blocks, project_receipt) do
-      {:refused, %{"dimension" => dimension} = refusal}
+      {:refused_not_required_only, %{"dimension" => dimension} = refusal}
       when dimension in ["context_tokens", "context_record_bytes"] ->
-        staged_proposal(state, staging, [], withheld_project_receipt(dimension, refusal))
+        required_only_proposal(state, staging, withheld_project_receipt(dimension, refusal))
+
+      {:refused_not_required_only, _refusal} ->
+        required_only_refusal(state, staging, project_receipt)
+
+      other ->
+        other
+    end
+  end
+
+  # Concept: a refusal is described by the same context that decided it.
+  #
+  # Technical depth: the compact refusal's four counts and ordered descriptor
+  # digest describe the required-only sequence ADR 0017 fixes at evaluation step
+  # 2, and those counts have no member for an optional project descriptor. A
+  # dimension no withholding can cure -- the strict system class ceiling, record
+  # depth, record cardinality -- is therefore re-decided over the required-only
+  # set before anything is retained, so the counts partition the sequence behind
+  # the digest and `not_evaluated_required_failure` is the truth about a project
+  # whose budget contribution was never reached. A required-only candidate
+  # admitted here is discarded rather than staged: its receipt still claims the
+  # project resolution that produced the optional block it does not contain, so
+  # retaining it would commit a receipt describing a different request. ADR 0017
+  # makes optional content unable to be the sole cause of a structural refusal in
+  # M2, so reaching that state means the invariant is broken and the session is
+  # unavailable rather than the owner inventing an operator verdict.
+  defp required_only_refusal(state, staging, project_receipt) do
+    case required_only_proposal(state, staging, project_receipt) do
+      {:ok, _admissible} -> {:error, :context_optional_class_sole_refusal}
+      required_only -> required_only
+    end
+  end
+
+  # Technical depth: a required-only candidate carries no project descriptor, so
+  # its four counts always partition its own descriptor sequence. A refusal it
+  # cannot describe means the sequence and the counts have drifted apart in the
+  # live constructor, which is a broken invariant rather than an operator
+  # verdict, and nothing is staged or retained under it.
+  defp required_only_proposal(state, staging, project_receipt) do
+    case staged_proposal(state, staging, [], project_receipt) do
+      {:refused_not_required_only, _refusal} ->
+        {:error, :context_required_only_refusal_undescribable}
 
       other ->
         other
@@ -1310,7 +1351,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
            context_receipt(
              request,
              context_sources(
-               project_receipt,
+               Enum.take(project_sources(project_receipt), length(blocks)),
                Conversation.session_entries(staging.elements),
                staging.steer,
                staging.run_id
@@ -1511,9 +1552,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
     |> Base.encode16(case: :lower)
   end
 
-  defp context_sources(project_receipt, session_entries, steer, run_id) do
+  # Technical depth: the project sources are the ones the staged blocks actually
+  # carry, not the ones the receipt's resolution would imply. A required-only
+  # candidate measured under an eligible resolution keeps that resolution in its
+  # receipt while contributing no descriptor, and a source list derived from the
+  # receipt alone would describe a message the request does not contain.
+  defp context_sources(project_sources, session_entries, steer, run_id) do
     [source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system")] ++
-      project_sources(project_receipt) ++
+      project_sources ++
       Enum.map(session_entries, fn {source_reference, _message} ->
         source(source_reference, "session")
       end) ++ steer_sources(steer, run_id)

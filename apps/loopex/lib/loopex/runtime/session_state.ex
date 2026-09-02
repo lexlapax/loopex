@@ -623,7 +623,10 @@ defmodule Loopex.Runtime.SessionState do
 
   @doc false
   @spec propose_model_request(t(), binary(), Loopex.Model.request(), keyword()) ::
-          {:ok, proposal()} | {:error, term()}
+          {:ok, proposal()}
+          | {:refused, map()}
+          | {:refused_not_required_only, map()}
+          | {:error, term()}
   def propose_model_request(%__MODULE__{} = state, run_id, request, options \\ [])
       when is_binary(run_id) and is_map(request) and is_list(options) do
     applied_steer = Keyword.get(options, :applied_steer)
@@ -673,7 +676,7 @@ defmodule Loopex.Runtime.SessionState do
       )
     else
       {:refused, refusal} ->
-        {:refused, context_refusal_record(record, refusal, work, turn_number)}
+        context_refusal_result(record, refusal, work, turn_number)
 
       {:error, reason} ->
         {:error, reason}
@@ -727,7 +730,7 @@ defmodule Loopex.Runtime.SessionState do
   # by the live constructor. No descriptor body, source reference, or oversized
   # candidate is retained, which is what makes the refusal's size independent of
   # history length.
-  defp context_refusal_record(record, refusal, work, turn_number) do
+  defp context_refusal_result(record, refusal, work, turn_number) do
     receipt = Map.fetch!(record, "context_receipt")
     blocks = Map.fetch!(receipt, "blocks")
     request = Map.fetch!(record, "request")
@@ -739,6 +742,33 @@ defmodule Loopex.Runtime.SessionState do
     system = Enum.count(message_blocks, &(&1["provenance_class"] == "system"))
     session = Enum.count(message_blocks, &(&1["provenance_class"] == "session")) - steer
 
+    if system + session + steer + tools == length(blocks) do
+      {:refused,
+       compact_refusal(receipt, refusal, work, turn_number, %{
+         system: system,
+         session: session,
+         steer: steer,
+         tools: tools
+       })}
+    else
+      {:refused_not_required_only, refusal}
+    end
+  end
+
+  # Concept: four counts that do not add up to the sequence they claim to
+  # describe are not a refusal an operator can trust.
+  #
+  # Technical depth: ADR 0017 gives the compact refusal exactly the system,
+  # session, steer, and tool counts, and makes their sum the descriptor count of
+  # the sequence whose bytes produced `provider_estimated_tokens` and
+  # `ordered_descriptor_digest`. There is no count for a project descriptor, so a
+  # candidate carrying one cannot be described by this record at all, and the
+  # reducer cannot detect that later: recovery holds no descriptor bodies. The
+  # live constructor is the only place with that preimage, so a candidate whose
+  # sequence is not the required-only one is reported as
+  # `:refused_not_required_only` -- enough for its caller to withhold the
+  # optional class and re-decide, and never a record that can be retained
+  defp compact_refusal(receipt, refusal, work, turn_number, counts) do
     %{
       "run_id" => Map.fetch!(work, :run_id),
       "turn_id" => stable_id("turn", Map.fetch!(work, :run_id), turn_number),
@@ -747,10 +777,10 @@ defmodule Loopex.Runtime.SessionState do
       "token_estimator" => Bounds.estimator(),
       "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
       "project_disposition" => refusal_project_disposition(receipt),
-      "system_message_count" => system,
-      "session_message_count" => session,
-      "steer_message_count" => steer,
-      "tool_definition_count" => tools,
+      "system_message_count" => counts.system,
+      "session_message_count" => counts.session,
+      "steer_message_count" => counts.steer,
+      "tool_definition_count" => counts.tools,
       "provider_estimated_tokens" => Map.fetch!(receipt, "provider_estimated_tokens"),
       "context_token_budget" => Map.fetch!(receipt, "context_token_budget"),
       "record_byte_cost" => Map.fetch!(refusal, "record_byte_cost"),
