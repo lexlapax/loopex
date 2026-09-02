@@ -407,6 +407,16 @@ defmodule Loopex.CancellationTest do
     end
   end
 
+  # Concept: the cleanup grace this run actually committed, not the one the
+  # fixture happens to default to today.
+  defp committed_cleanup_grace_ms(fixture) do
+    fixture.runtime
+    |> coordinator_of()
+    |> :sys.get_state()
+    |> Map.fetch!(:durable)
+    |> Map.fetch!(:cleanup_grace_ms)
+  end
+
   defp settled?(fixture, session_id, attempts \\ 300) do
     case Loopex.session_status(fixture.runtime, session_id) do
       {:ok, %{active_run_id: nil}} ->
@@ -450,10 +460,25 @@ defmodule Loopex.CancellationTest do
     dispatched_before = length(AgentLoopTestModel.dispatched(fixture.model))
     model_monitor = Process.monitor(model)
 
+    # ADR 0018 combination 2: an abort admitted against an open provider attempt
+    # does not kill the call. The attempt is left to answer inside its reserve so
+    # a late reply survives as evidence-only with the usage it reported; stopping
+    # the worker at admission would throw away the only account of what the call
+    # already cost. Only the reserve's expiry stops it, so the worker outlives
+    # the admission by design and the run is cancelled either way.
+    {:ok, %{execute_result_reserve_ms: reserve_ms}} =
+      Loopex.Executor.cancellation_bounds(committed_cleanup_grace_ms(fixture))
+
     assert {:accepted, "abort-1"} =
              Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
 
-    assert_receive {:DOWN, ^model_monitor, :process, ^model, _reason}, 1_000
+    # The reserve is derived from the run's committed grace rather than written
+    # here as a number: a bound copied out of the formula goes stale the moment
+    # the formula moves, and a bound shorter than the reserve fails against a
+    # correct runtime, which is what a fixed one second did.
+    refute_receive {:DOWN, ^model_monitor, :process, ^model, _reason}, 500
+
+    assert_receive {:DOWN, ^model_monitor, :process, ^model, _reason}, reserve_ms + 2_000
     assert settled?(fixture, session_id)
 
     finished = Enum.find(events(attachment), &(&1.kind == "run.finished"))
@@ -1456,14 +1481,25 @@ defmodule Loopex.CancellationTest do
 
     assert_internal_transaction_identity(state, terminal)
 
-    abandoned_state =
-      put_in(state.pending_work[run_id].stage, "model_dispatched")
+    # ADR 0018: a recovered open attempt is combination 3 -- dispatched-or-unknown,
+    # `model_call_failed`, estimated, no conversation, `owner_loss` and terminal.
+    owner_loss_state =
+      put_in(state.pending_work[run_id], %{
+        stage: "model_attempt_open",
+        run_id: run_id,
+        turn_id: "turn-internal-identity",
+        turn_number: 1,
+        request: request,
+        model_attempt: 1,
+        model_termination: nil,
+        pending_calls: []
+      })
 
-    abandoned = fn candidate ->
-      SessionState.propose_model_attempt_abandoned(candidate, run_id)
+    owner_loss = fn candidate ->
+      SessionState.propose_model_attempt_settled(candidate, run_id, :owner_loss)
     end
 
-    assert_internal_transaction_identity(abandoned_state, abandoned)
+    assert_internal_transaction_identity(owner_loss_state, owner_loss)
   end
 
   test "a retained stale-owner run terminal cannot poison its successor's transaction identity" do

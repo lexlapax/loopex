@@ -1432,7 +1432,9 @@ defmodule LoopexCliTest do
                        command_workspace
                      ])
 
-            assert observed =~ "observed_default_composition"
+            # The composition-edge observer's own reason term is returned unrendered, as the
+            # `run` cell above already asserts; `=~` on an atom is not a string match.
+            assert observed == :observed_default_composition
           end)
         end)
       after

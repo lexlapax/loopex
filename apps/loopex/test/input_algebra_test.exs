@@ -8,6 +8,7 @@ defmodule Loopex.InputAlgebraTest do
 
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopTestModel
+  alias Loopex.M1RuntimeTestStore
   alias Loopex.Runtime.SessionState
 
   defp call(id), do: %{id: id, name: "write", arguments: %{"path" => id}}
@@ -498,11 +499,27 @@ defmodule Loopex.InputAlgebraTest do
   end
 
   test "at most one unapplied steer and one queued follow up exist and both survive owner succession" do
-    {fixture, attachment, session_id, run_id, _model} =
-      start_held([
-        %{text: "still working", calls: [call("c2")], hold: self()},
-        %{text: "still working", calls: [call("c3")], hold: self()}
-      ])
+    # ADR 0018 combination 4: an exact `not_dispatched` attempt one selects retry while no
+    # termination has won, so the succession below lands on a retry-permitted run that
+    # survives; combination 3 would settle an attempt still open at succession `owner_loss`
+    # and terminal, ending the run before either queue could be observed again.
+    fixture =
+      start(
+        script: [
+          %{hold: self(), raw_result: {:error, {:not_dispatched, "model_call_failed"}}},
+          %{text: "still working", calls: [call("c2")], hold: self()},
+          %{text: "still working", calls: [call("c3")], hold: self()}
+        ]
+      )
+
+    {:ok, session_id} = Loopex.create_session(fixture.runtime, %{"t" => "x"}, command_id: "cs")
+    {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
+
+    {:accepted, "p1"} =
+      Loopex.command(attachment, %{type: :prompt, command_id: "p1", content: "the task"})
+
+    assert_receive {:holding, model}, 2_000
+    run_id = run_id_of(fixture, session_id)
 
     {:accepted, "s1"} =
       Loopex.command(attachment, %{
@@ -527,10 +544,28 @@ defmodule Loopex.InputAlgebraTest do
     assert {:error, :follow_up_pending} =
              Loopex.command(attachment, %{type: :follow_up, command_id: "f2", content: "second"})
 
+    # ADR 0018: the settlement is held after linearization, so the succession sees a
+    # journal whose attempt one is settled `retry` and whose run is still active.
+    :ok =
+      M1RuntimeTestStore.delay_after_record(
+        fixture.store,
+        "model_attempt_settled_v1",
+        self()
+      )
+
+    send(model, :release)
+
+    assert_receive {:record_linearized, settlement_waiter, _store, "model_attempt_settled_v1",
+                    _transition, {:committed, _tx_id, _receipt}},
+                   5_000
+
     # A fresh owner rebuilds both from the journal, so the refusals still hold
     # after succession rather than the queues quietly emptying with the process.
     assert {:ok, ^session_id} =
              Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-1")
+
+    M1RuntimeTestStore.release(settlement_waiter)
+    assert_receive {:holding, _successor_model}, 5_000
 
     {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
 

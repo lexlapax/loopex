@@ -2187,11 +2187,33 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     binding = Map.put(attempt_identity(opened), "session_id", session_id)
     predecessor = coordinator_of(fixture.runtime)
 
-    # The successor is started by Control's resume handler, so Control must be
-    # running until owner_advanced has linearized; it is frozen only then, so the
-    # successor's handoff and the predecessor's permit request queue behind it.
-    :ok = M1RuntimeTestStore.delay_after_record(fixture.store, "owner_advanced", self())
+    # ADR 0018: after its open record commits, the predecessor makes exactly two Control
+    # calls before it can ask for a permit -- the publication fence, then the ownership
+    # re-read. Neither can be queued alongside the permit request, so both are answered
+    # here, while the predecessor is still Control's current owner and therefore gets
+    # `:ok` rather than `:superseded_owner`; the permit request it finally issues is then
+    # a real one for the handoff below to overtake. The exact pair is asserted, so a
+    # production change to that sequence fails here rather than silently mis-sequencing
+    # the cell into the `:after_send` case.
+    suspend_process(control)
+    M1RuntimeTestStore.release(open_waiter)
 
+    for {expected, thaw_predecessor?} <- [{:post_commit, true}, {:current_owner, false}] do
+      [{:"$gen_call", _from, request} = call] = await_queued_control_calls(control, 1)
+      assert elem(request, 0) == expected
+
+      # The predecessor is blocked inside this exact call, so freezing it here is
+      # race-free: it cannot issue its permit request during the drain window.
+      suspend_process(predecessor)
+      resume_process(control)
+      await_control_call_consumed(control, call)
+      suspend_process(control)
+      if thaw_predecessor?, do: resume_process(predecessor)
+    end
+
+    # ADR 0008: Control registers the successor when it acquires the owner, before
+    # `advance_owner` linearizes, so queueing the acquisition ahead of the thawed
+    # predecessor's permit request is what puts the handoff first.
     resume =
       Task.async(fn ->
         Loopex.resume_session(fixture.runtime, session_id,
@@ -2199,14 +2221,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         )
       end)
 
-    assert_receive {:record_linearized, owner_waiter, _store, "owner_advanced", _transition,
-                    {:committed, _owner_tx, _owner_receipt}},
-                   5_000
-
-    suspend_process(control)
-    M1RuntimeTestStore.release(owner_waiter)
-    [_successor_handoff] = await_queued_control_calls(control, 1)
-    M1RuntimeTestStore.release(open_waiter)
+    [_successor_acquisition] = await_queued_control_calls(control, 1)
+    resume_process(predecessor)
 
     {provider_message, _provider_request, worker} =
       await_queued_provider_call(fixture.runtime, control, binding)
@@ -2762,8 +2778,10 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   defp structural_boundary_values(:cardinality),
     do: [@record_cardinality_limit - 1, @record_cardinality_limit, @record_cardinality_limit + 1]
 
+  # ADR 0018: the structural limits apply to the whole settlement, whose result projection
+  # puts tool-call arguments six nodes below the record root.
   defp structural_boundary_values(:depth) do
-    [@record_depth_limit - 6, @record_depth_limit - 5, @record_depth_limit - 4]
+    [@record_depth_limit - 7, @record_depth_limit - 6, @record_depth_limit - 5]
   end
 
   defp structural_arguments(:depth, 0), do: %{"path" => "x", "nested" => "leaf"}
@@ -2814,17 +2832,11 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     Map.get(element, :kind) in [:assistant_message, :assistant_tool_calls]
   end
 
+  # ADR 0018: the 65,536-byte ceiling applies to the Store's own normalized item, whose
+  # `kind` stays an atom key, so a binary-key rewrite overstates every record by three bytes.
   defp record_bytes(record) do
-    normalized =
-      if Map.has_key?(record, :kind) do
-        record
-        |> Map.put("kind", Map.fetch!(record, :kind))
-        |> Map.delete(:kind)
-      else
-        record
-      end
-
-    byte_size(:erlang.term_to_binary(normalized, [:deterministic]))
+    assert {:ok, _normalized, bytes} = normalize(record)
+    bytes
   end
 
   defp normalize(item), do: apply(Store, :normalize_and_measure_item, [:record, item])
@@ -2928,7 +2940,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     attempt_zero = rewrite_attempt_positions(records, first_run_id, %{1 => 0, 2 => 1})
     attempt_three = rewrite_attempt_positions(records, first_run_id, %{1 => 3, 2 => 4})
 
-    {_removed, without_proof} =
+    # ADR 0018: attempt two without an exact attempt-one settlement is invalid history, and
+    # `Enum.map_reduce/3` returns `{mapped, acc}` so the mapped history is the first element.
+    {without_proof, _removed} =
       Enum.map_reduce(records, false, fn record, removed ->
         payload = record.payload
 

@@ -75,7 +75,9 @@ defmodule Loopex.ReferenceClientTest do
     Fixture.await_terminal(fixture)
 
     records = Fixture.records(fixture, fixture.client.session_id)
-    admitted = Enum.find(records, &(&1.payload.kind == "command_admitted"))
+    # ADR 0013: a prompt admission is `prompt_admitted_v2`, which commits the declared
+    # `deadline_ms` duration rather than a `deadline` instant fixed at admission.
+    admitted = Enum.find(records, &(&1.payload.kind == "prompt_admitted_v2"))
     staged = Enum.find(records, &(&1.payload.kind == "model_request_committed"))
 
     assert admitted.payload["deadline_ms"] == 300_000
@@ -103,8 +105,10 @@ defmodule Loopex.ReferenceClientTest do
                }
              )
 
+    # ADR 0013: the refused prompt must leave no `prompt_admitted_v2` record; the
+    # pre-rename kind this checked is now written only by non-prompt commands.
     refute Enum.any?(Fixture.records(fixture, fixture.client.session_id), fn record ->
-             record.payload.kind == "command_admitted"
+             record.payload.kind == "prompt_admitted_v2"
            end)
   end
 

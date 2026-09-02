@@ -347,7 +347,9 @@ defmodule Loopex.SessionLifecycleTest do
 
     delivered = drain_events(current_attachment)
     assert Enum.map(delivered, & &1.event_sequence) == [1]
-    assert Enum.map(delivered, & &1.kind) == ["user.message_appended", "run.started"]
+    # ADR 0018: `run.started` is published only by the transaction that opens attempt one,
+    # so a run recovered before that open exposes no public start.
+    assert Enum.map(delivered, & &1.kind) == ["user.message_appended"]
 
     control_before_reply = control_projection(fixture.runtime, session_id)
     store_before_reply = M1RuntimeTestStore.inspect_state(fixture.store_pid)

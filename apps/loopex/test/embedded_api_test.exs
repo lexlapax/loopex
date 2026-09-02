@@ -88,8 +88,10 @@ defmodule Loopex.EmbeddedApiTest do
     # ADR 0017: a model-less prompt commits one event. The abort's terminal is
     # the second, committed after the attachment buffered the first, so the
     # identity of a delivered event is proved across a history read.
+    # ADR 0006: Control admits commands from the one current attachment, which the
+    # attach above became, so the abort is issued through it rather than the superseded one.
     assert {:accepted, "delivery-abort"} =
-             Loopex.command(command_attachment, %{type: :abort, command_id: "delivery-abort"})
+             Loopex.command(attachment, %{type: :abort, command_id: "delivery-abort"})
 
     eventually(fn -> committed_event_count(fixture, session_id) == 2 end)
     stored = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id].events
