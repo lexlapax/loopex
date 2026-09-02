@@ -26,6 +26,21 @@ defmodule Loopex.LLM.ReqLLM do
   that happens to sit in the operator's environment cannot be spent by this lane
   by accident.
 
+  A failure says one more thing than that it failed: whether the provider was
+  reached at all. This adapter refuses locally — no credential, a request it will
+  not send, a model it cannot resolve, a deadline already spent — before it hands
+  anything to the provider library, and only those refusals are reported as
+  `not_dispatched`. From the handoff onward every ending is
+  `dispatched_or_unknown`, including the endings that look local: a library
+  error, an unfinished stream, a timeout, a crash, or a library result that calls
+  itself undispatched. The caller may open a second attempt on the first kind and
+  must never open one on the second, so this classification is what stands
+  between an ambiguous attempt and a second bill.
+
+  Neither classified failure carries a reason. Both carry the literal
+  `"model_call_failed"`, so no provider term, credential, or tenant identifier
+  rides out of this module on the failure plane at all.
+
   ## Technical depth
 
   `ReqLLM` here is the top-level library module `Elixir.ReqLLM`; Elixir resolves
@@ -54,9 +69,17 @@ defmodule Loopex.LLM.ReqLLM do
   runner redacts its captured output as well; these are two independent planes
   and each needs its own containment.
 
-  `complete/2` returns before any dispatch when the credential is absent, so a
-  missing credential is a reported absence rather than a provider call with an
-  empty key.
+  The classification boundary is one position in the code: the
+  `ReqLLM.stream_text/3` call in `dispatch/6`. Everything above it is computed
+  from the committed request, the environment, and the bundled catalog, with no
+  transport constructed and no bytes handed over. Everything from that call
+  onward is ambiguous by construction, which is why the tag is decided by where
+  the adapter stands and never by reading the value that came back — a library
+  that answers `not_dispatched` after invocation is answering about its own last
+  step, not about the handoff that already happened.
+
+  `complete/2` builds its own request and is classified the same way, so a caller
+  holding no committed request still learns whether its attempt was spent.
   """
 
   @behaviour Loopex.Model
@@ -81,6 +104,20 @@ defmodule Loopex.LLM.ReqLLM do
 
   @unknown_endpoint "unknown"
   @redacted "[redacted credential]"
+
+  # Concept: a failed call reports its transport class and nothing else.
+  #
+  # Technical depth: ADR 0018 fixes the second element as this literal on both
+  # classified errors. A caller reads the class and never the cause, so the
+  # bound on what may cross this edge is the absence of a cause rather than a
+  # scrubbing of one.
+  @call_failed "model_call_failed"
+
+  # Concept: the identifier bound a reply may carry.
+  #
+  # Technical depth: ADR 0018 admits `nil` or a nonempty UTF-8 binary of at most
+  # this many bytes for `provider_response_id`.
+  @response_id_bytes 256
 
   @typedoc """
   ## Concept
@@ -206,19 +243,22 @@ defmodule Loopex.LLM.ReqLLM do
   A convenience for callers that hold no committed request, used by the
   credential-free adapter lane. It declares its own sampling bound explicitly,
   because there is no default anywhere and a request without one is refused.
+
+  A request this function could not even build is a refusal before any handoff,
+  so it is classified `not_dispatched` like every other local refusal rather than
+  reported in a second shape only this arity uses.
   """
   @spec complete(String.t(), String.t()) ::
           {:ok, reply()}
-          | {:error, {:credential_unset, String.t()}}
-          | {:error, {:unresolved_model, String.t(), term()}}
-          | {:error, {:provider_call_failed, String.t()}}
+          | {:error, {:not_dispatched, String.t()}}
+          | {:error, {:dispatched_or_unknown, String.t()}}
   def complete(model_spec, prompt) when is_binary(model_spec) and is_binary(prompt) do
-    with {:ok, request} <-
-           Model.request(model_spec, [%{"role" => "user", "content" => prompt}],
-             sampling: %{"max_tokens" => @max_tokens},
-             deadline: System.system_time(:millisecond) + 60_000
-           ) do
-      complete(request, [], Model.discard_progress())
+    case Model.request(model_spec, [%{"role" => "user", "content" => prompt}],
+           sampling: %{"max_tokens" => @max_tokens},
+           deadline: System.system_time(:millisecond) + 60_000
+         ) do
+      {:ok, request} -> complete(request, [], Model.discard_progress())
+      _refused -> {:error, {:not_dispatched, @call_failed}}
     end
   end
 
@@ -240,22 +280,49 @@ defmodule Loopex.LLM.ReqLLM do
   the stream is drained rather than beside it.
 
   A stream that failed, was cut off, or produced a reply that could not be
-  assembled returns `{:error, reason}` instead of a reply. Deltas already emitted
-  stay emitted; the coordinator closes that attempt's domain abandoned and
-  commits no assistant message, which is what makes a partial answer impossible
-  to mistake for a short one.
+  assembled is `{:error, {:dispatched_or_unknown, "model_call_failed"}}` instead
+  of a reply. Deltas already emitted stay emitted; the coordinator closes that
+  attempt's domain abandoned and commits no assistant message, which is what
+  makes a partial answer impossible to mistake for a short one.
+
+  Everything this function refuses on its own — a request that is not the one
+  core committed, a message it cannot render, an absent credential, a model it
+  cannot resolve, a tool definition it will not send, a deadline already spent —
+  is `{:error, {:not_dispatched, "model_call_failed"}}`, and every one of those
+  refusals happens before the provider library is called.
   """
   @impl Loopex.Model
   @spec complete(Model.request(), keyword(), Model.progress_fun()) ::
-          {:ok, reply()} | {:error, term()}
+          {:ok, reply()}
+          | {:error, {:not_dispatched, String.t()}}
+          | {:error, {:dispatched_or_unknown, String.t()}}
   def complete(request, options, progress)
       when is_map(request) and is_list(options) and is_function(progress, 1) do
+    case staged(request) do
+      {:ok, context, identity, call_options, credential} ->
+        dispatch(request, context, identity, call_options, credential, progress)
+
+      _refused ->
+        {:error, {:not_dispatched, @call_failed}}
+    end
+  end
+
+  # Concept: everything one call needs, gathered while a refusal is still
+  # provably a refusal.
+  #
+  # Technical depth: each step reads the committed request, the environment, or
+  # the bundled catalog. None of them constructs a transport or hands a byte to
+  # one, which is what entitles their failures to the `not_dispatched` tag; the
+  # transport bound belongs here for the same reason, because a deadline already
+  # spent is discovered before the call rather than during it.
+  defp staged(request) do
     with :ok <- Model.validate_request(request),
          {:ok, context} <- context_of(request),
          {:ok, credential} <- credential(),
          {:ok, identity} <- identity(request.model),
-         {:ok, tools} <- provider_tools(Model.model_facing_tools(request)) do
-      dispatch(request, context, credential, identity, tools, progress)
+         {:ok, tools} <- provider_tools(Model.model_facing_tools(request)),
+         {:ok, call_options} <- call_options(request, credential, tools) do
+      {:ok, context, identity, call_options, credential}
     end
   end
 
@@ -351,15 +418,66 @@ defmodule Loopex.LLM.ReqLLM do
   # for byte. Usage and the provider's response identifier come from the metadata
   # the provider sends after the content, which is why they are read once the
   # stream is drained rather than beside it.
-  defp dispatch(request, context, credential, identity, tools, progress) do
-    with {:ok, options} <- call_options(request, credential, tools) do
-      case ReqLLM.stream_text(request.model, context, options) do
-        {:ok, response} ->
-          drain(response, request, identity, progress, credential)
+  defp dispatch(request, context, identity, call_options, credential, progress) do
+    case isolated(fn ->
+           handoff(request, context, identity, call_options, credential, progress)
+         end) do
+      {:ok, reply} -> {:ok, reply}
+      _ambiguous -> {:error, {:dispatched_or_unknown, @call_failed}}
+    end
+  end
 
-        {:error, error} ->
-          {:error, {:provider_call_failed, scrub_error(error, credential)}}
-      end
+  # Concept: the position that decides the classification. Above it a refusal is
+  # a refusal; from here on the only provable fact is that the request bytes were
+  # handed over.
+  #
+  # Technical depth: ADR 0018 lets only an adapter that has neither invoked
+  # provider transport nor handed request bytes to it answer `not_dispatched`,
+  # and `ReqLLM.stream_text/3` is exactly that handoff. So a library error, an
+  # unfinished stream, a reply that could not be assembled, a tool call that
+  # could not be reconstructed, a timeout, a raise, a throw, an exit, a value of
+  # no recognized shape, and a library result that tags itself `not_dispatched`
+  # all collapse to the same ambiguity here. None of them observes the network,
+  # and the tag a library supplies describes its own last step rather than the
+  # handoff that already happened -- reading it would let the library overrule
+  # the one fact this adapter actually knows.
+  #
+  # The reason is dropped rather than scrubbed. `drain/5` still bounds and
+  # redacts what it builds, because the streaming suite reads those reasons
+  # through `reply_from_stream/4`, but nothing built below this line reaches a
+  # caller of `complete/3`.
+  defp handoff(request, context, identity, call_options, credential, progress) do
+    case ReqLLM.stream_text(request.model, context, call_options) do
+      {:ok, response} -> drain(response, request, identity, progress, credential)
+      _failed -> :provider_call_failed
+    end
+  end
+
+  # Concept: a crash inside the provider library is an answer, not the end of the
+  # process that asked.
+  #
+  # Technical depth: the library links its stream server to whoever opens it, so
+  # a throw or an exit raised while the request is being built travels back along
+  # that link and kills the caller before it can classify anything -- and an
+  # attempt whose caller died reports nothing at all, which is the one outcome
+  # ADR 0018 cannot use. The worker is monitored and not linked, so that death
+  # arrives as a `DOWN` this function reads and turns into ambiguity.
+  #
+  # The worker carries no timeout of its own. The transport bound derived from
+  # the run's committed deadline is the only bound in this path; a second one
+  # invented here would be exactly the undeclared bound that one replaced, and it
+  # would fire on a call the run still had time for.
+  defp isolated(call) do
+    owner = self()
+    {worker, monitor} = spawn_monitor(fn -> send(owner, {__MODULE__, self(), call.()}) end)
+
+    receive do
+      {__MODULE__, ^worker, outcome} ->
+        Process.demonitor(monitor, [:flush])
+        outcome
+
+      {:DOWN, ^monitor, :process, ^worker, _reason} ->
+        :provider_call_crashed
     end
   end
 
@@ -749,7 +867,23 @@ defmodule Loopex.LLM.ReqLLM do
     metadata
     |> Map.get(:headers, [])
     |> header("request-id")
+    |> bounded_response_id()
   end
+
+  # Concept: a header that cannot be the provider's identifier is an absence
+  # rather than a value.
+  #
+  # Technical depth: a reply may carry `nil` or a nonempty UTF-8 binary of at
+  # most `@response_id_bytes` bytes, so anything longer or not valid UTF-8 fails
+  # the reply shape rather than the header. Truncating it would produce an
+  # identifier no auditor could look up in the provider's account, which is the
+  # one thing this field exists not to do.
+  defp bounded_response_id(value)
+       when is_binary(value) and value != "" and byte_size(value) <= @response_id_bytes do
+    if String.valid?(value), do: value, else: nil
+  end
+
+  defp bounded_response_id(_absent), do: nil
 
   defp header(headers, name) when is_list(headers) do
     Enum.find_value(headers, fn

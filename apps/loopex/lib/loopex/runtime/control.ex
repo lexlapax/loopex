@@ -131,6 +131,27 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
+  # Concept: authorizing one provider attempt and sending its one-use permit are
+  # the same serialized Control operation.
+  #
+  # Technical depth: ADR 0018 makes Control's direct send to the blocked worker
+  # the provider-dispatch linearization point. Returning the authorization to the
+  # coordinator so it could wake its own worker would leave a handoff-sized gap
+  # between the ownership check and the send, and a worker that asked Control for
+  # itself would let its call overtake the coordinator's readiness messages. The
+  # call is unbounded for the same reason `current_owner/3` is: a finite timeout
+  # here would manufacture a dispatch verdict out of scheduling latency, and
+  # ambiguity is never `not_dispatched`.
+  @doc false
+  @spec provider_dispatch(pid(), map(), map()) :: {:ok, :dispatched} | {:error, term()}
+  def provider_dispatch(control, binding, authority) do
+    try do
+      GenServer.call(control, {:provider_dispatch, binding, authority}, :infinity)
+    catch
+      :exit, _reason -> {:error, :runtime_unavailable}
+    end
+  end
+
   @doc false
   @spec post_commit(pid(), binary(), SessionCoordinator.owner(), map(), map()) ::
           :ok | {:error, term()}
@@ -174,6 +195,15 @@ defmodule Loopex.Runtime.Control do
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
        sessions: %{},
        monitor_to_session: %{},
+       # Concept: the full attempt identities this runtime has already
+       # authorized, and the one worker and reference each was bound to.
+       #
+       # Technical depth: ADR 0018 requires the spend to outlive the coordinator
+       # and the worker for the complete ownership generation, so it is held
+       # here rather than in either. A later request for the same
+       # `{session, run, turn, operation, attempt}` is refused even when it
+       # supplies a fresh PID and a fresh reference.
+       spent_attempts: %{},
        generation_counter: 0
      }}
   end
@@ -306,6 +336,33 @@ defmodule Loopex.Runtime.Control do
 
       {:error, :superseded_owner} = error ->
         {:reply, error, state}
+    end
+  end
+
+  # Concept: one attempt, one permit, sent from here and nowhere else.
+  #
+  # Technical depth: every member of the request is compared with this Control's
+  # own serialized state before anything is sent — the caller is still the
+  # prepared current owner, the journal position carrying the open row is
+  # current, the worker is the one the coordinator started, the deadline has not
+  # elapsed, and the full attempt identity has never been permitted. The spend
+  # and the send happen together, so a succession linearizes either entirely
+  # before the send or entirely after it. A refusal here is ephemeral: it is the
+  # coordinator's to retain durably, and only while that coordinator is still
+  # authoritative.
+  def handle_call({:provider_dispatch, binding, authority}, {caller, _tag}, state) do
+    with {:ok, session_id} <- provider_binding_session(binding),
+         {:ok, entry} <- provider_current_owner(state, session_id, authority, caller),
+         :ok <- provider_position_current(entry, authority),
+         :ok <- provider_worker_ready(authority),
+         :ok <- provider_before_deadline(authority),
+         :ok <- provider_attempt_unspent(state, binding) do
+      %{worker: worker, permit_reference: reference} = authority
+      spent = Map.put(state.spent_attempts, binding, {worker, reference})
+      send(worker, {:loopex_provider_permit, reference, binding})
+      {:reply, {:ok, :dispatched}, %{state | spent_attempts: spent}}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -670,7 +727,8 @@ defmodule Loopex.Runtime.Control do
           grant_decision: state.grant_decision,
           fault_to: state.fault_to,
           cleanup_grace_ms: state.cleanup_grace_ms,
-          context_token_budget: state.context_token_budget
+          context_token_budget: state.context_token_budget,
+          runtime_id: state.runtime_id
         ]
 
         case DynamicSupervisor.start_child(session_supervisor, {SessionCoordinator, options}) do
@@ -915,6 +973,53 @@ defmodule Loopex.Runtime.Control do
       options[:attachment_key],
       options[:after_event_sequence]
     }
+  end
+
+  defp provider_binding_session(%{"session_id" => session_id}) when is_binary(session_id),
+    do: {:ok, session_id}
+
+  defp provider_binding_session(_binding), do: {:error, :invalid_provider_attempt_binding}
+
+  defp provider_current_owner(state, session_id, %{coordinator: coordinator} = authority, caller)
+       when is_pid(coordinator) do
+    with %{status: :active, coordinator: ^coordinator, owner: owner} = entry <-
+           Map.get(state.sessions, session_id),
+         true <- caller == coordinator,
+         true <- owner == Map.get(authority, :owner),
+         true <- state.runtime_id == Map.get(authority, :runtime_id) do
+      {:ok, entry}
+    else
+      _other -> {:error, :superseded_owner}
+    end
+  end
+
+  defp provider_current_owner(_state, _session_id, _authority, _caller),
+    do: {:error, :superseded_owner}
+
+  defp provider_position_current(%{journal_version: current}, %{journal_version: named}) do
+    if current == named, do: :ok, else: {:error, :stale_attempt_open_position}
+  end
+
+  defp provider_position_current(_entry, _authority), do: {:error, :stale_attempt_open_position}
+
+  defp provider_worker_ready(%{worker: worker}) when is_pid(worker) do
+    if Process.alive?(worker), do: :ok, else: {:error, :provider_worker_unavailable}
+  end
+
+  defp provider_worker_ready(_authority), do: {:error, :provider_worker_unavailable}
+
+  defp provider_before_deadline(%{deadline: deadline}) when is_integer(deadline) do
+    if System.system_time(:millisecond) < deadline,
+      do: :ok,
+      else: {:error, :deadline_elapsed}
+  end
+
+  defp provider_before_deadline(_authority), do: {:error, :deadline_elapsed}
+
+  defp provider_attempt_unspent(state, binding) do
+    if Map.has_key?(state.spent_attempts, binding),
+      do: {:error, :provider_attempt_already_permitted},
+      else: :ok
   end
 
   defp current_owner_post_commit_fence(state, session_id, owner) do
