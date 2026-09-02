@@ -76,7 +76,10 @@ defmodule LoopexCompositionTest do
     assert event.kind == "user.message_appended"
     assert event["content"] == "say hello"
 
-    assert {:ok, started} = Loopex.next_event(attachment)
+    # ADR 0017: the accepted prompt publishes its user message and stages the
+    # first request in a later transaction, so `run.started` follows rather
+    # than accompanies it. The wait is bounded; `next_event/1` stays non-blocking.
+    assert {:ok, started} = await_next_event(attachment)
     assert started.kind == "run.started"
 
     # And the page really is a page. The ceiling is part of the promise: the
@@ -564,4 +567,18 @@ defmodule LoopexCompositionTest do
     do: term |> Tuple.to_list() |> contains_exact?(target)
 
   defp contains_exact?(_term, _target), do: false
+
+  defp await_next_event(attachment, attempts \\ 1_000)
+  defp await_next_event(_attachment, 0), do: {:error, :empty}
+
+  defp await_next_event(attachment, attempts) do
+    case Loopex.next_event(attachment) do
+      {:ok, event} ->
+        {:ok, event}
+
+      _empty ->
+        Process.sleep(5)
+        await_next_event(attachment, attempts - 1)
+    end
+  end
 end

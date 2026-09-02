@@ -1232,7 +1232,7 @@ require_bound_artifact \
   fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999 \
   .tool-versions
 require_bound_artifact \
-  841a7095352d032c6495665420b5f46d258e4b4288dbed6610ea5ca4e7bdc09a \
+  809ca8b835182751f493ef1c931d309f36a73ae48cf78208f84b81fcb05e74a4 \
   apps/loopex_composition/test/kernel_composition_test.exs
 require_bound_artifact \
   50319510018a4b3e2fab2e5998f3b7979209982b9cabc15e7fa69cfc5782a8cc \

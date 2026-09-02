@@ -156,11 +156,11 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `01ef9d4c2adaa1147b4c675cef677b3bf8cd937c5ee54fb9e5625fb7046ab253` | `scripts/check-m2-gate.sh` |
+| `c94f61e7164aefa07190e61acc60e6ddb3257d88a7006708dcd6befa5199129b` | `scripts/check-m2-gate.sh` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
-| `841a7095352d032c6495665420b5f46d258e4b4288dbed6610ea5ca4e7bdc09a` | `apps/loopex_composition/test/kernel_composition_test.exs` |
+| `809ca8b835182751f493ef1c931d309f36a73ae48cf78208f84b81fcb05e74a4` | `apps/loopex_composition/test/kernel_composition_test.exs` |
 | `50319510018a4b3e2fab2e5998f3b7979209982b9cabc15e7fa69cfc5782a8cc` | `apps/loopex/test/gate_isolation_test.exs` |
 
 `scripts/m1-exunit-runner.exs` is bound at exactly the bytes `M1` closed with.
@@ -1743,6 +1743,37 @@ request self-validation cannot answer for the receipt relation under test.
 
 | Generation | Artifact | Rebound SHA-256 |
 | --- | --- | --- |
-| 4 | `scripts/check-m2-gate.sh` | `01ef9d4c2adaa1147b4c675cef677b3bf8cd937c5ee54fb9e5625fb7046ab253` |
-| 4 | `apps/loopex_composition/test/kernel_composition_test.exs` | `841a7095352d032c6495665420b5f46d258e4b4288dbed6610ea5ca4e7bdc09a` |
+| 4 | `scripts/check-m2-gate.sh` | `c94f61e7164aefa07190e61acc60e6ddb3257d88a7006708dcd6befa5199129b` |
+| 4 | `apps/loopex_composition/test/kernel_composition_test.exs` | `809ca8b835182751f493ef1c931d309f36a73ae48cf78208f84b81fcb05e74a4` |
 | 4 | `apps/loopex/test/gate_isolation_test.exs` | `50319510018a4b3e2fab2e5998f3b7979209982b9cabc15e7fa69cfc5782a8cc` |
+
+<a id="amendment-5"></a>
+## Amendment 5 — Let the Composition Page Wait for Its Run
+
+**Acceptance: OUTSTANDING.** This section advances the generation and rebinds the amended artifacts named below. The prior Acceptance row and `In review` lifecycle state remain at this proposal. Its immediate one-parent child must rebind Acceptance to this exact revision and add one new amendment-5-specific disposition anchor without changing any other byte.
+
+Amendment 4 accepted ADR 0017, under which an accepted prompt publishes its
+user message and emits no `run.started` until its first request stages in a
+later transaction. The digest-bound composition corpus asserted `run.started`
+was readable the instant the prompt command returned, which only a blocking
+`next_event/1` or staging-before-acknowledgement could satisfy; the first
+changes a public contract, and the second deadlocks the provider-attempt
+corpus on its store holds. Neither is a change ADR 0017 authorizes.
+
+This amendment inserts one bounded wait between the two reads in `one page of
+shipped code starts the application tree a runtime a session a prompt and its
+events`, leaving `next_event/1` non-blocking and every other byte of the
+corpus, its nine case names, its minimum, and the one-hundred-eighty-line
+ceiling unchanged. The runner rebinds the corpus digest it verifies.
+
+**Maintainer disposition.** The maintainer, on 2026-09-01, authorized this
+amendment to bypass the exact-SHA independent review the ordinary transaction
+requires, as a recorded override: the change is one assertion's wait, its
+correctness is proved by the corpus itself, and the review cost exceeded the
+change. The rebind that follows records that override as its disposition.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 5 | `scripts/check-m2-gate.sh` | `c94f61e7164aefa07190e61acc60e6ddb3257d88a7006708dcd6befa5199129b` |
+| 5 | `apps/loopex_composition/test/kernel_composition_test.exs` | `809ca8b835182751f493ef1c931d309f36a73ae48cf78208f84b81fcb05e74a4` |
+
