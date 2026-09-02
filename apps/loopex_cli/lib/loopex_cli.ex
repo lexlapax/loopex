@@ -479,7 +479,7 @@ defmodule LoopexCli do
   defp continue_attached(:cancel, attachment, _status, _activation) do
     case facade(Loopex, :command, [attachment, %{type: :abort, command_id: unique_id()}]) do
       {:accepted, _id} -> Render.stream(attachment)
-      {:error, reason} -> {:error, "the session could not be reconciled: #{inspect(reason)}"}
+      {:error, reason} -> {:error, reconciliation_of(reason, attachment.session_id)}
     end
   end
 
@@ -542,8 +542,21 @@ defmodule LoopexCli do
   # placement key is precisely what ADR 0008 makes the host responsible for
   # preventing.
   defp cancel({flags, words}, options) do
-    with {:ok, session_id} <- positional(words, "session identifier"),
-         {:ok, policy} <- reconciling_policy(flags),
+    with {:ok, session_id} <- positional(words, "session identifier") do
+      cancel_session(session_id, flags, options)
+    end
+  end
+
+  # Concept: the session identifier stays in scope for the failure paths, so a
+  # refusal can say which session it is about.
+  #
+  # Technical depth: `else` sees no binding made by its own `with`, so naming the
+  # session in a refusal means resolving the operator's positional argument
+  # first. Everything after it keeps the order it had: the policy is resolved
+  # before the placement key is read, and the live-owner refusal still arrives
+  # before any composition starts.
+  defp cancel_session(session_id, flags, options) do
+    with {:ok, policy} <- reconciling_policy(flags),
          {:ok, root} <- state_root(flags),
          :none <- Placement.live_owner(root),
          {:ok, runtime} <- start_runtime(flags, policy, options) do
@@ -560,11 +573,58 @@ defmodule LoopexCli do
       # and facade refusals in their own terms, and wrapping those in a sentence
       # about reconciliation would rename a decision the operator has to act on.
       # Only the abort itself, which is the reconciliation, is described that way,
-      # and it says so where it happens.
+      # and it says so where it happens. A store that could not be opened or
+      # replayed refused in no words at all, so that one class is given some
+      # rather than inspected into the terminal.
       {:error, reason} ->
-        {:error, reason}
+        {:error, stated(reason, session_id)}
     end
   end
+
+  @store_unreadable "its state store could not be opened or read"
+
+  # Concept: an operator is told which session failed and what kind of thing
+  # failed, and is never shown the runtime term that carried it.
+  #
+  # Technical depth: a store that cannot open or replay refuses with an internal
+  # tuple, and one reached a terminal verbatim as `{:invalid_history, 0,
+  # :frame_does_not_match_transition}` -- a statement about the log's replay
+  # audit, addressed to nobody who can act on it, carrying durable bytes into a
+  # terminal on the way. The classes an operator acts on differently are named
+  # here and nothing else is. `stated/2` leaves every other refusal exactly as it
+  # was written, because those already arrived in words; `reconciliation_of/2`
+  # answers for the abort itself, which has no other sentence to fall back to.
+  # Neither keeps the term: this command configures no diagnostics sink, and
+  # stderr is not one.
+  defp stated(reason, session_id) do
+    case failure_class(reason) do
+      nil -> reason
+      class -> reconciliation_refusal(session_id, class)
+    end
+  end
+
+  defp reconciliation_of(reason, session_id),
+    do: reconciliation_refusal(session_id, failure_class(reason))
+
+  defp reconciliation_refusal(session_id, nil),
+    do: "session #{session_id} could not be reconciled"
+
+  defp reconciliation_refusal(session_id, class),
+    do: "session #{session_id} could not be reconciled: " <> class
+
+  defp failure_class({:invalid_history, _index, _detail}),
+    do: "its recorded history could not be replayed"
+
+  defp failure_class({:store_unavailable, _path, _reason}), do: @store_unreadable
+  defp failure_class({:log_unavailable, _detail}), do: @store_unreadable
+  defp failure_class(:store_unavailable), do: @store_unreadable
+  defp failure_class({:store_file_invalid, _path}), do: @store_unreadable
+  defp failure_class({:store_log_too_large, _size, _limit}), do: @store_unreadable
+
+  defp failure_class({:store_writer_active, _path}),
+    do: "another process is already writing this state root's store"
+
+  defp failure_class(_reason), do: nil
 
   defp artifact({flags, words}) do
     with {:ok, reference} <- positional(words, "artifact reference"),
