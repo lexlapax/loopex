@@ -56,8 +56,16 @@ defmodule Loopex.LLM.ReqLLM.RealModelLaneTest do
         assert is_binary(original)
         changed = Map.put(request, field, original <> "changed")
 
-        assert adapter.complete(changed, [], Model.discard_progress()) ==
-                 {:error, {:not_dispatched, "model_call_failed"}}
+        # ADR 0018 bounds the shipped provider adapter's pre-transport refusal to
+        # the generic not-dispatched shape; the in-process deterministic adapter
+        # has no transport and keeps naming the mismatch.
+        expected =
+          case adapter do
+            ReqLLM -> {:error, {:not_dispatched, "model_call_failed"}}
+            Deterministic -> {:error, :canonical_model_request_mismatch}
+          end
+
+        assert adapter.complete(changed, [], Model.discard_progress()) == expected
       end
     after
       if previous, do: System.put_env(variable, previous)
