@@ -14,9 +14,12 @@ defmodule Loopex.Store.Local.Log do
   repairs a strict torn final frame, and surfaces a complete malformed or
   checksum-invalid frame as corruption. Semantic replay is performed separately
   by `Loopex.Store.Local.State`, so a checksummed but illegal owner/version
-  history is still refused. Recovery explicitly loads the fixed modules that
-  define envelope atoms before safe decoding; caller-controlled records and
-  events cannot contribute durable atoms.
+  history is still refused. The log is a file, not a path: startup establishes
+  that file and its identity, and an append that no longer finds it fails closed
+  instead of creating a replacement whose only frame is the one in flight.
+  Recovery explicitly loads the fixed modules that define envelope atoms before
+  safe decoding; caller-controlled records and events cannot contribute durable
+  atoms.
   """
 
   @magic "LXST\x02"
@@ -35,12 +38,22 @@ defmodule Loopex.Store.Local.Log do
            | {:torn, non_neg_integer(), pos_integer(), <<_::256>>}
            | {:corrupt, non_neg_integer()}
 
+  # Concept: which physical file this Store's appends belong to.
+  #
+  # Technical depth: the device and inode of the log established at startup. A
+  # path is a name and names are re-bindable; the pair is the file itself, so an
+  # unlinked-and-recreated log at the same path is a different log and is
+  # refused rather than appended to.
+  @typep identity :: {non_neg_integer(), non_neg_integer()}
+
   @doc false
-  @spec prepare_path(Path.t()) :: :ok | {:error, term()}
+  @spec prepare_path(Path.t()) :: {:ok, identity()} | {:error, term()}
   def prepare_path(path) when is_binary(path) do
     with :ok <- ensure_parent(path),
-         :ok <- validate_store_file(path) do
-      :ok
+         :ok <- validate_store_file(path),
+         :ok <- create_log(path),
+         {:ok, stat} <- stat_log(path) do
+      {:ok, identity(stat)}
     end
   end
 
@@ -157,15 +170,24 @@ defmodule Loopex.Store.Local.Log do
   `:ok`. A failure is commit-ambiguous and makes the Store process terminate so
   recovery re-reads the durable bytes rather than continuing from a speculative
   cache.
+
+  An append writes to the exact log `Loopex.Store.Local.Log.prepare_path/1`
+  established for this Store and never brings a log or its parent directory back
+  into existence. A log removed or replaced underneath a live Store yields
+  `{:error, {:log_unavailable, :enoent | :replaced}}`, which is commit-ambiguous
+  like any other append failure.
   """
-  @spec append(Path.t(), map()) :: :ok | {:error, term()}
-  def append(path, frame) when is_binary(path) and is_map(frame) do
-    with :ok <- ensure_parent(path),
-         {:ok, bytes} <- encode(frame),
-         :ok <- admit_size(path, byte_size(bytes)),
+  @spec append(Path.t(), map(), identity()) :: :ok | {:error, term()}
+  def append(path, frame, identity)
+      when is_binary(path) and is_map(frame) and is_tuple(identity) do
+    with {:ok, bytes} <- encode(frame),
+         {:ok, stat} <- stat_log(path),
+         :ok <- match_identity(stat, identity),
+         :ok <- admit_size(stat.size, byte_size(bytes)),
          {:ok, io} <- open_append(path) do
       result =
-        with :ok <- :file.write(io, bytes),
+        with :ok <- confirm_identity(path, identity),
+             :ok <- :file.write(io, bytes),
              :ok <- :file.sync(io) do
           :ok
         end
@@ -174,6 +196,7 @@ defmodule Loopex.Store.Local.Log do
 
       case {result, close_result} do
         {:ok, :ok} -> sync_parent(path)
+        {{:error, {:log_unavailable, _detail} = reason}, _close} -> {:error, reason}
         {{:error, reason}, _close} -> {:error, {:store_write_failed, reason}}
         {:ok, {:error, reason}} -> {:error, {:store_close_failed, reason}}
       end
@@ -322,6 +345,65 @@ defmodule Loopex.Store.Local.Log do
 
   defp ensure_parent(path), do: ensure_directory(Path.dirname(path))
 
+  # Concept: the log file exists from the moment the Store opens, not from its
+  # first commit.
+  #
+  # Technical depth: an append can then be a pure write to an established file,
+  # which is what lets it refuse to create one. Exclusive creation never
+  # truncates an existing log, and the parent sync makes the new directory entry
+  # durable before recovery reads it.
+  defp create_log(path) do
+    case :file.open(String.to_charlist(path), [:raw, :write, :binary, :exclusive]) do
+      {:ok, io} ->
+        case :file.close(io) do
+          :ok -> sync_parent(path)
+          {:error, reason} -> {:error, {:store_close_failed, reason}}
+        end
+
+      {:error, :eexist} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, {:store_unavailable, path, reason}}
+    end
+  end
+
+  defp identity(%File.Stat{major_device: device, inode: inode}), do: {device, inode}
+
+  defp stat_log(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular} = stat} -> {:ok, stat}
+      {:ok, _stat} -> {:error, {:store_file_invalid, path}}
+      {:error, :enoent} -> {:error, {:log_unavailable, :enoent}}
+      {:error, reason} -> {:error, {:store_unavailable, path, reason}}
+    end
+  end
+
+  defp match_identity(stat, identity) do
+    if identity(stat) == identity do
+      :ok
+    else
+      {:error, {:log_unavailable, :replaced}}
+    end
+  end
+
+  # Concept: the fence closes after the handle is open, not before.
+  #
+  # Technical depth: `:file.open/2` in append mode creates a missing file, so a
+  # check that only ran before the open would leave a window in which a removal
+  # is answered by a new, empty, history-free log -- the exact shape recovery
+  # cannot distinguish from a legitimately fresh Store. Re-reading the path once
+  # the handle is held makes detection unconditional: a removed log, or one
+  # another writer recreated, no longer carries the established identity and no
+  # frame is written. Where the removal raced this open, the recreated file is
+  # left in place empty rather than unlinked, because the path no longer names
+  # anything this Store is entitled to delete.
+  defp confirm_identity(path, identity) do
+    with {:ok, stat} <- stat_log(path) do
+      match_identity(stat, identity)
+    end
+  end
+
   defp validate_store_file(path) do
     case File.lstat(path) do
       {:ok, %File.Stat{type: :regular, links: 1}} -> :ok
@@ -369,20 +451,11 @@ defmodule Loopex.Store.Local.Log do
     end
   end
 
-  defp admit_size(path, append_bytes) do
-    current_size =
-      case File.stat(path) do
-        {:ok, stat} -> {:ok, stat.size}
-        {:error, :enoent} -> {:ok, 0}
-        {:error, reason} -> {:error, {:store_unavailable, path, reason}}
-      end
-
-    with {:ok, size} <- current_size do
-      if size + append_bytes <= @max_log_bytes do
-        :ok
-      else
-        {:error, {:store_capacity_exceeded, @max_log_bytes}}
-      end
+  defp admit_size(size, append_bytes) do
+    if size + append_bytes <= @max_log_bytes do
+      :ok
+    else
+      {:error, {:store_capacity_exceeded, @max_log_bytes}}
     end
   end
 
