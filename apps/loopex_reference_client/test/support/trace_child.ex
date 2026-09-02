@@ -63,8 +63,8 @@ defmodule Loopex.ReferenceClientTraceChild do
         records = Fixture.records(fixture, fixture.client.session_id)
         events = Fixture.events(fixture, fixture.client.session_id)
         first_result = model_results(records) |> List.first()
-        identity = first_result.payload["reply"]["identity"]
-        tool_calls = first_result.payload["reply"]["tool_calls"]
+        identity = first_result.payload["result"]["reply"]["identity"]
+        tool_calls = first_result.payload["result"]["reply"]["tool_calls"]
 
         true = length(model_results(records)) == 1
         true = length(tool_calls) == 1
@@ -128,7 +128,7 @@ defmodule Loopex.ReferenceClientTraceChild do
     records = Fixture.records(fixture, session_id)
     events = Fixture.events(fixture, session_id)
     results = model_results(records)
-    identity = List.last(results).payload["reply"]["identity"]
+    identity = List.last(results).payload["result"]["reply"]["identity"]
 
     projected =
       records
@@ -180,8 +180,9 @@ defmodule Loopex.ReferenceClientTraceChild do
       dispatches_after_restart: Map.get(dispatches, job_id, 0),
       dispatch_map: dispatches,
       model_results: length(results),
-      provider_response_ids: Enum.map(results, & &1.payload["reply"]["provider_response_id"]),
-      usage: Enum.map(results, & &1.payload["reply"]["usage"]),
+      provider_response_ids:
+        Enum.map(results, & &1.payload["result"]["reply"]["provider_response_id"]),
+      usage: Enum.map(results, & &1.payload["result"]["reply"]["usage"]),
       tool_started: Enum.count(events, &(&1.kind == "tool.started")),
       tool_finished: Enum.count(events, &(&1.kind == "tool.finished")),
       terminal_outcome: List.last(events)["outcome"],
@@ -205,8 +206,15 @@ defmodule Loopex.ReferenceClientTraceChild do
     {:ok, _started} = Application.ensure_all_started(:loopex_reference_client)
   end
 
-  defp model_results(records),
-    do: Enum.filter(records, &(&1.payload.kind == "model_result_committed"))
+  # ADR 0018: a turn's reply is retained on the attempt settlement whose
+  # conversation is canonical, as the eight-key projection under `result`.
+  defp model_results(records) do
+    Enum.filter(
+      records,
+      &(&1.payload.kind == "model_attempt_settled_v1" and
+          &1.payload["conversation"] == "canonical")
+    )
+  end
 
   defp read_credential! do
     <<size::unsigned-big-32>> = read_exact!(4)

@@ -76,7 +76,15 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
     records = Fixture.records(fixture, fixture.client.session_id)
 
     requests = Enum.filter(records, &(&1.payload.kind == "model_request_committed"))
-    results = Enum.filter(records, &(&1.payload.kind == "model_result_committed"))
+    # ADR 0018: a turn's reply is retained on the attempt settlement whose
+    # conversation is canonical, as the eight-key durable projection under
+    # `result`, joined to its request by the staged request digest.
+    results =
+      Enum.filter(
+        records,
+        &(&1.payload.kind == "model_attempt_settled_v1" and
+            &1.payload["conversation"] == "canonical")
+      )
 
     # This is an inherited M1 protection. M2's loop may run for more turns in
     # general, but this task deliberately needs exactly the request that chooses
@@ -88,10 +96,14 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
 
     Enum.zip(requests, results)
     |> Enum.each(fn {request_record, result_record} ->
-      assert result_record.payload["reply"]["canonical_request_bytes"] ==
-               request_record.payload["request"]["canonical_request_bytes"]
+      reply = result_record.payload["result"]["reply"]
 
-      assert result_record.payload["reply"]["staged_request_digest"] ==
+      # The committed request record is the bytes' only durable home; the reply
+      # names them by digest and never carries them (ADR 0018 technical).
+      assert is_binary(request_record.payload["request"]["canonical_request_bytes"])
+      refute Map.has_key?(reply, "canonical_request_bytes")
+
+      assert reply["staged_request_digest"] ==
                request_record.payload["request"]["staged_request_digest"]
     end)
 
