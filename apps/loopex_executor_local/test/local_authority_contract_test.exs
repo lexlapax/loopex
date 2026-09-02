@@ -84,7 +84,31 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
   @identity "local-authority-contract"
   @fence 91
-  @grace 41
+  # Every job in this file writes its receipt under the retention share ADR 0016
+  # derives from the committed cleanup period, and that write is `File.open/2`,
+  # `IO.binwrite/2`, two `:file.sync/1` calls and a rename. A literal period of
+  # 41 gave those five syscalls 11 ms. On an idle box they take 1 ms at the
+  # median and 6 ms at the worst and every case here passed; on a box whose
+  # cores are all busy they take 10 ms at the median and 48 ms at the worst, so
+  # any case that settles a receipt failed with `{:receipt_not_retained,
+  # :receipt_retention_abandoned_at_run_deadline}` wherever the scheduler
+  # happened to be slow. Nothing about the executor was in doubt in those runs:
+  # it abandoned the write at exactly the bound the formula gave it.
+  #
+  # The period is therefore taken from that one formula rather than written
+  # down. It is the smallest committed value whose own receipt-retention share
+  # covers a real fsynced ledger write, so the allowance these cases depend on
+  # is named as a duration a write needs and cannot be widened by quietly
+  # growing a number. It stays distinct from the 5_000 startup default, so the
+  # cases asserting that a receipt reports the committed period rather than the
+  # composed one still discriminate, and it stays indivisible by four, so a
+  # second derivation by `div/2` in place of ADR 0016's ceiling would still
+  # disagree with it.
+  @ledger_write_allowance_ms 500
+  @grace Enum.find(1..(4 * @ledger_write_allowance_ms), fn candidate ->
+           {:ok, bounds} = Executor.cancellation_bounds(candidate)
+           bounds.receipt_retention_ms >= @ledger_write_allowance_ms
+         end)
   @max_uint64 18_446_744_073_709_551_615
 
   test "a prepared Local root binds one exact canonical generation before returning" do
@@ -747,11 +771,24 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     ready = Path.join(fixture.workspace, "ready")
     escaped = Path.join(fixture.workspace, "escaped")
 
+    # The shell traps TERM, so the group survives cooperative termination and
+    # goes only to this executor's forced kill -- and every step of that
+    # sequence is bounded by the committed cleanup period, not by a constant.
+    # A descendant told to write a third of a second from now therefore proves
+    # the kill landed only while that period happens to be shorter than a third
+    # of a second, which is a fact about the fixture rather than about the
+    # termination. The natural write is placed a whole further period after the
+    # budget can expire and the observation a further one again, so a longer
+    # committed period moves all three together instead of turning a literal
+    # delay into a verdict.
+    escape_delay_ms = 2 * @grace
+    observation_ms = escape_delay_ms + @grace
+
     request =
       job(fixture, "owner-loss-job", %{
         "command" =>
           "trap '' TERM; printf ready > #{shell_path(ready)}; " <>
-            "(sleep 0.35; printf escaped > #{shell_path(escaped)}) & wait"
+            "(sleep #{escape_delay_ms / 1_000}; printf escaped > #{shell_path(escaped)}) & wait"
       })
 
     parent = self()
@@ -767,7 +804,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     Process.exit(local, :kill)
     refute Process.alive?(local)
 
-    Process.sleep(700)
+    Process.sleep(observation_ms)
 
     refute File.exists?(escaped),
            "an operating-system descendant wrote after its natural delay and owner death"
