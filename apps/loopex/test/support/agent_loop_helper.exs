@@ -99,7 +99,11 @@ defmodule Loopex.AgentLoopTestModel do
             reply = %{
               text: text,
               identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
-              usage: Map.get(turn, :usage, %{}),
+              # ADR 0018: a dispatched attempt whose usage is not a complete reported
+              # pair is charged the whole remaining allowance. A scripted provider that
+              # completes a turn reports usage like a real one; a case that wants the
+              # conservative charge passes an incomplete `usage:` explicitly.
+              usage: Map.get(turn, :usage, %{input_tokens: 1, output_tokens: 1}),
               tool_calls: Map.get(turn, :calls, []),
               delta_count: Map.get(turn, :delta_count, length(Map.get(turn, :deltas, []))),
               streamed: Map.get(turn, :deltas, []) != [],
