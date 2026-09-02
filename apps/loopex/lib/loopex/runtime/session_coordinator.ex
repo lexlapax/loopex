@@ -185,22 +185,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # coordinator compares the caller in `from` against the holder it was started
   # with. Routing either through a helper process would make the holder rule
   # unenforceable, because the coordinator would then only ever see the proxy.
-  # The bound is the status bound rather than `:infinity`: neither call proposes
-  # a Store mutation, so a deadline here cannot manufacture a durable fact, and a
-  # prepared owner that cannot answer must not strand its caller over a session
-  # that is by construction doing nothing.
+  #
+  # The bound is `:infinity`, and that is the point rather than an omission.
+  # These two calls decide a one-use capability: the message that carries them
+  # is not withdrawn when its caller stops waiting, so a bounded call that
+  # expired would answer `:session_unavailable` while the coordinator went on to
+  # spend the very activation the caller was told it had not got -- and a
+  # prepared owner spends it by starting the recovered run. Neither call
+  # proposes a Store mutation, so waiting cannot commit anything, and a
+  # coordinator that never answers is a dead process rather than a deadline:
+  # `safe_call/3` turns its exit into the refusal that is actually true.
   @doc false
   @spec activate_resume(pid(), owner(), reference()) :: {:ok, binary()} | {:error, term()}
   def activate_resume(coordinator, owner, capability)
       when is_pid(coordinator) and is_map(owner) and is_reference(capability),
-      do:
-        safe_call(coordinator, {:activate_resume, owner, capability}, @session_status_timeout_ms)
+      do: safe_call(coordinator, {:activate_resume, owner, capability}, :infinity)
 
   @doc false
   @spec abandon_resume(pid(), owner(), reference()) :: :ok | {:error, term()}
   def abandon_resume(coordinator, owner, capability)
       when is_pid(coordinator) and is_map(owner) and is_reference(capability),
-      do: safe_call(coordinator, {:abandon_resume, owner, capability}, @session_status_timeout_ms)
+      do: safe_call(coordinator, {:abandon_resume, owner, capability}, :infinity)
 
   @impl GenServer
   def init(options) do
