@@ -25,6 +25,7 @@ defmodule Loopex.Executor.Local do
 
   alias Loopex.Executor
   alias Loopex.Executor.Local.CodingTools
+  alias Loopex.Executor.Local.Ledger
   alias Loopex.Executor.Local.WorkspaceLease
 
   @max_output_bytes 1_048_576
@@ -87,6 +88,24 @@ defmodule Loopex.Executor.Local do
   # its own.
   @default_process_probe "/bin/ps"
   @receipt_reserve_share 4
+  @max_uint64 18_446_744_073_709_551_615
+
+  # How often a joining request looks for the one operation's receipt. It is a
+  # poll rather than a wait because the operation may belong to another VM, and
+  # it is short because the join is already bounded by the job's own deadline.
+  @join_poll_ms 25
+
+  # The longest single `receive` slice this executor ever arms. Admitted cleanup
+  # periods and job deadlines span the whole positive unsigned 64-bit range,
+  # which no VM timer accepts, so every long wait is spent against one instant in
+  # slices no larger than this.
+  @timer_slice_ms 3_600_000
+
+  # The longest an admission waits for another instance's root claim before
+  # reporting the ledger unavailable. It bounds contention between executors
+  # sharing one root, is capped by the job's own deadline, and never becomes
+  # permission: only the holder releases the claim.
+  @claim_wait_ms 5_000
 
   # The share of what remains that a signalled group gets to exit on its own
   # before it is killed. It is a share rather than a number so that it cannot
@@ -276,6 +295,44 @@ defmodule Loopex.Executor.Local do
   @spec cleanup_grace_ms(t()) :: non_neg_integer()
   def cleanup_grace_ms(executor) when is_pid(executor),
     do: GenServer.call(executor, :cleanup_grace_ms)
+
+  @doc """
+  ## Concept
+
+  The cleanup period this executor starts new work with when a job names none.
+
+  ## Technical depth
+
+  ADR 0016 makes the committed session value the one a job actually runs under,
+  carried by the `JobRequest` itself. This is the startup default beside it, and
+  the retained `cleanup_grace_ms/1` name is an alias for exactly this value.
+  Neither is the period of an active job: reading a period off the executor while
+  a job declaring a different one is running would report the wrong number for
+  the only question worth asking.
+  """
+  @spec default_cleanup_grace_ms(t()) :: non_neg_integer()
+  def default_cleanup_grace_ms(executor) when is_pid(executor),
+    do: GenServer.call(executor, :cleanup_grace_ms)
+
+  @doc """
+  ## Concept
+
+  Validates or exclusively creates one prepared receipt-ledger root and returns
+  the private authority over it.
+
+  ## Technical depth
+
+  The placement boundary ADR 0016 names. A host prepares the root once and every
+  executor sharing it inherits the same generation, admission marker set, open
+  index, and refusal or receipt truth. A whole-root move presented at another
+  expanded path, a replacement directory, and an isolated copy of the generation
+  file are refused. The returned authority is edge-private: it never enters a
+  job, grant, receipt, event, log, or diagnostic.
+  """
+  @spec prepare_placement(binary(), binary(), pos_integer()) ::
+          {:ok, Ledger.prepared()} | {:error, term()}
+  def prepare_placement(ledger_root, executor_identity, cleanup_grace_ms),
+    do: Ledger.prepare(ledger_root, executor_identity, cleanup_grace_ms)
 
   @doc """
   ## Concept
@@ -472,16 +529,26 @@ defmodule Loopex.Executor.Local do
 
     process_probe = Keyword.get(options, :process_probe, @default_process_probe)
 
+    # Concept: one paired sample of both clocks, from one place a case can
+    # substitute.
+    #
+    # Technical depth: ADR 0016 requires the wall and monotonic instants used to
+    # derive a job's effect-action deadline to come from one sample, so the two
+    # cannot be taken either side of a scheduling gap. This is a reversible edge
+    # seam and enters no job, ledger record, receipt, event, or public API.
+    clock_provider = Keyword.get(options, :clock_provider, &paired_now/0)
+
     valid =
       is_binary(identity) and byte_size(identity) > 0 and is_integer(epoch) and epoch >= 0 and
         is_integer(fencing_token) and fencing_token >= 0 and is_map(leases) and
         is_integer(cleanup_grace_ms) and cleanup_grace_ms >= 0 and
         is_binary(process_probe) and String.starts_with?(process_probe, "/") and
-        not String.contains?(process_probe, <<0>>) and
+        not String.contains?(process_probe, <<0>>) and is_function(clock_provider, 0) and
         Enum.all?(leases, fn {id, pid} -> is_binary(id) and is_pid(pid) end)
 
     with true <- valid,
-         :ok <- File.mkdir_p(ledger_root) do
+         {:ok, ledger} <-
+           Ledger.prepare(ledger_root, identity, max(cleanup_grace_ms, 1)) do
       # Concept: the configured period is kept where the code that cleans up can
       # read it, including the code that runs outside this server.
       #
@@ -502,15 +569,41 @@ defmodule Loopex.Executor.Local do
          fencing_token: fencing_token,
          leases: leases,
          ledger_root: ledger_root,
+         ledger: ledger,
+         quarantine: reconcile(ledger),
+         clock: clock_provider,
          artifacts: artifacts,
          cleanup_grace_ms: cleanup_grace_ms,
          process_probe: process_probe,
          dispatches: %{}
        }}
     else
+      {:error, reason} -> {:stop, reason}
       _other -> {:stop, :invalid_executor_configuration}
     end
   end
+
+  # Concept: an executor reconciles the complete open index before it accepts
+  # any new work, and unresolved truth quarantines the root rather than being
+  # cleared by starting again.
+  #
+  # Technical depth: the index is read as one complete bounded snapshot under the
+  # root-wide claim, so no entry can appear or vanish while the decision is being
+  # made and the decision is fixed before the claim is released. An entry that is
+  # present and valid means some effect was admitted and never settled: new
+  # effects are refused with reconciliation required. Malformed truth, a held or
+  # stranded claim, capacity, or an unreadable snapshot are ledger-unavailable,
+  # which is a different fact and must not be reported as the reconcilable one.
+  defp reconcile(ledger) do
+    case Ledger.with_claim(ledger, fn -> Ledger.open_snapshot(ledger) end) do
+      {:ok, []} -> nil
+      {:ok, entries} -> {:reconciliation_required, length(entries)}
+      {:error, reason} -> reason
+    end
+  end
+
+  defp paired_now,
+    do: {System.system_time(:millisecond), System.monotonic_time(:millisecond)}
 
   @impl GenServer
   def handle_call({:receipt, job_id}, _from, state),
@@ -526,6 +619,14 @@ defmodule Loopex.Executor.Local do
     do: {:reply, state.process_probe, state}
 
   def handle_call({:execute, job, grant, options, progress}, _from, state) do
+    if state.quarantine do
+      {:reply, {:error, state.quarantine}, state}
+    else
+      dispatch_execute(state, job, grant, options, progress)
+    end
+  end
+
+  defp dispatch_execute(state, job, grant, options, progress) do
     case read_receipt(state.ledger_root, Map.get(job, :job_id, "")) do
       {:ok, receipt} ->
         if Map.get(receipt, :canonical_request_digest) ==
@@ -585,7 +686,6 @@ defmodule Loopex.Executor.Local do
            }),
          true <- job.executor_identity == state.identity,
          true <- job.origin_executor_epoch == state.epoch,
-         true <- job.run_deadline > System.system_time(:millisecond),
          {:ok, arguments} <- validate_arguments(tool, job.validated_arguments) do
       {:ok, tool, lease_pid, lease.path, arguments}
     else
@@ -646,33 +746,275 @@ defmodule Loopex.Executor.Local do
 
     case final_prestart_validation(state, job, grant) do
       {:ok, tool, lease_pid, workspace, arguments} ->
+        admitted_execute(state, job, tool, lease_pid, workspace, arguments, options, progress)
+
+      {:error, {:refused_before_effect, reason}} ->
+        publish_refusal(state, job, reason)
+        {:reply, {:error, {:refused_before_effect, reason}}, state}
+    end
+  end
+
+  # Concept: nothing runs until this root has durably said that this exact
+  # request was admitted.
+  #
+  # Technical depth: the marker and open entry are published and parent-synced
+  # under the root-wide claim, and only then does the effect start. A second
+  # executor sharing the root cannot observe an admissible gap: it either sees no
+  # marker and takes the claim itself, or sees this one and joins the single
+  # operation. `observed_at_ms` is the wall half of the one paired sample taken
+  # here and is carried to terminal construction rather than resampled, so the
+  # receipt reports when the effect was admitted and not when it finished.
+  defp admitted_execute(state, job, tool, lease_pid, workspace, arguments, options, progress) do
+    case admit(state, job) do
+      {:ok, admission} ->
         next_state =
           update_in(state.dispatches, fn dispatches ->
             Map.update(dispatches, job.job_id, 1, &(&1 + 1))
           end)
 
         lease = {Process.monitor(lease_pid), lease_pid}
+        Process.put(:loopex_admission, admission)
 
         try do
           receipt =
             run_tool(next_state, job, tool, workspace, arguments, options, lease, progress)
 
-          case retain_receipt_under_lease(
-                 next_state.ledger_root,
-                 receipt,
-                 lease,
-                 job.run_deadline
-               ) do
-            {:ok, retained} -> {:reply, {:ok, retained}, next_state}
-            {:error, reason} -> {:reply, {:error, {:receipt_not_retained, reason}}, next_state}
-          end
+          settle_receipt(next_state, job, receipt, lease)
         after
+          Process.delete(:loopex_admission)
           Process.demonitor(elem(lease, 0), [:flush])
         end
+
+      :join ->
+        {:reply, join_admitted_operation(state, job), state}
+
+      {:error, {:refused_before_effect, _reason} = refusal} ->
+        {:reply, {:error, refusal}, state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  # Concept: the receipt, its retention, and the removal of this job's open
+  # authority spend one allowance, and no phase refreshes it.
+  #
+  # Technical depth: the allowance is the committed cleanup period's own quarter,
+  # which is also the value the receipt reports. Open authority is removed only
+  # for a receipt whose captured-group cleanup is confirmed; an `outcome_unknown`
+  # whose cleanup is unconfirmed deliberately leaves the entry, and therefore
+  # quarantines the root until an operator reconciles it.
+  defp settle_receipt(state, job, receipt, lease) do
+    bound = receipt.receipt_retention_bound_ms
+
+    case retain_receipt_under_lease(state.ledger_root, receipt, lease, bound) do
+      {:ok, retained} ->
+        if retained.cleanup_confirmation == :confirmed do
+          _ =
+            Ledger.with_claim(state.ledger, fn ->
+              Ledger.close_open(state.ledger, job.job_id)
+            end)
+        end
+
+        {:reply, {:ok, retained}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, {:receipt_not_retained, reason}}, state}
+    end
+  end
+
+  # Concept: one serialized decision about whether this exact request may begin.
+  #
+  # Technical depth: the claim orders admission against another executor's
+  # admission, against a refusal, and against startup reconciliation. Inside it
+  # the two independent fences are checked against one paired clock sample: the
+  # wall instant against the job's immutable `effective_job_deadline`, and the
+  # derived monotonic action deadline under checked arithmetic. A sample that
+  # cannot produce a finite action deadline is unavailable authority, never
+  # permission.
+  defp admit(state, job) do
+    remaining = job.effective_job_deadline - System.system_time(:millisecond)
+    wait = min(max(remaining, 0), @claim_wait_ms)
+
+    Ledger.with_claim(
+      state.ledger,
+      fn ->
+        case Ledger.read_marker(state.ledger, job.job_id) do
+          :absent ->
+            open_admission(state, job)
+
+          {:ok, record} ->
+            cond do
+              record["canonical_request_digest"] != job.canonical_request_digest ->
+                {:error, :job_id_conflict}
+
+              Map.get(record, :ledger_kind) == Ledger.refusal_kind() ->
+                {:error, {:refused_before_effect, refusal_reason(record)}}
+
+              true ->
+                :join
+            end
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+      end,
+      wait
+    )
+  end
+
+  # Concept: the deadline is derived from one sample, and the permit is decided
+  # by another taken immediately before it.
+  #
+  # Technical depth: the first paired sample fixes the private monotonic action
+  # deadline for this job and is never taken again. The second is the last
+  # effect-authorizing transition before publication, and it rechecks both fences
+  # independently: current wall time must precede the job's immutable
+  # `effective_job_deadline`, and current monotonic time must precede the derived
+  # action deadline. A backward wall jump between the two therefore cannot extend
+  # authority past the monotonic fence, and a forward one expires it by wall
+  # truth. Both checks precede the marker, so a job refused here has no admission
+  # to withdraw.
+  defp open_admission(state, job) do
+    with {:ok, wall, monotonic} <- sample(state),
+         {:ok, action} <- derive_action_deadline(wall, monotonic, job),
+         :ok <- authorize_effect(state, job, action),
+         :ok <-
+           Ledger.admit(
+             state.ledger,
+             Ledger.marker(job),
+             Ledger.open_entry(job, state.identity)
+           ) do
+      {:ok, %{wall: wall, monotonic: monotonic, action: action, observed_at_ms: wall}}
+    else
+      {:error, {:refused_before_effect, reason}} ->
+        publish_refusal(state, job, reason, :claim_held)
+        {:error, {:refused_before_effect, reason}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp authorize_effect(state, job, action) do
+    with {:ok, wall, monotonic} <- sample(state) do
+      if wall < job.effective_job_deadline and monotonic < action,
+        do: :ok,
+        else: {:error, {:refused_before_effect, :effective_deadline_reached}}
+    end
+  end
+
+  defp derive_action_deadline(wall, monotonic, job) do
+    if wall < job.effective_job_deadline,
+      do: checked_add(monotonic, job.effective_job_deadline - wall),
+      else: {:error, {:refused_before_effect, :effective_deadline_reached}}
+  end
+
+  # Concept: a clock that answers with something other than a pair of instants
+  # has told this executor nothing it may act on.
+  #
+  # Technical depth: the monotonic half is deliberately not required to be
+  # nonnegative -- the VM's monotonic origin is normally negative -- so only the
+  # shape is checked here and the magnitude is checked by the arithmetic that
+  # uses it.
+  defp sample(state) do
+    case state.clock.() do
+      {wall, monotonic} when is_integer(wall) and is_integer(monotonic) ->
+        {:ok, wall, monotonic}
+
+      _unusable ->
+        {:error, {:refused_before_effect, :effect_start_authority_unavailable}}
+    end
+  end
+
+  # Checked, never wrapping: a monotonic instant plus a remaining wall duration
+  # must stay inside the admitted unsigned 64-bit range, or this job has no
+  # action deadline this executor can enforce and no effect may begin.
+  defp checked_add(monotonic, remaining) do
+    sum = monotonic + remaining
+
+    if remaining >= 0 and sum <= @max_uint64,
+      do: {:ok, sum},
+      else: {:error, {:refused_before_effect, :effect_start_authority_unavailable}}
+  end
+
+  # Concept: a request naming a live admission joins that one operation and
+  # returns its receipt; it never starts a second effect.
+  #
+  # Technical depth: the wait polls because the operation belongs to another
+  # process, possibly in another VM, and there is no message to wait on. It is
+  # bounded by the job's own immutable wall deadline, and reaching that bound is
+  # an unresolved join rather than a verdict about the effect.
+  defp join_admitted_operation(state, job) do
+    if System.system_time(:millisecond) >= job.effective_job_deadline do
+      {:error, :effect_join_unresolved}
+    else
+      case read_receipt(state.ledger_root, job.job_id) do
+        {:ok, receipt} ->
+          {:ok, receipt}
+
+        :absent ->
+          Process.sleep(@join_poll_ms)
+          join_admitted_operation(state, job)
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  # Concept: a refusal is durable before it is reported, so "no effect began" is
+  # a fact on the root rather than a claim in one process's memory.
+  #
+  # Technical depth: a refusal replaces exactly the marker path it names, which
+  # is how a pre-marker deadline records the refusal without inventing an
+  # admission. A reason outside the sixteen admitted codes is not journaled: a
+  # record no reader can interpret is not proof of anything, and the caller still
+  # receives its truthful pre-effect answer.
+  defp publish_refusal(state, job, reason, claim \\ :take_claim) do
+    {code, field} =
+      case reason do
+        {code, field} when is_atom(code) -> {code, field}
+        code -> {code, nil}
+      end
+
+    case durable_refusal(job, code, field) do
+      {:ok, refusal} when claim == :claim_held ->
+        Ledger.refuse(state.ledger, refusal)
+
+      {:ok, refusal} ->
+        Ledger.with_claim(state.ledger, fn -> Ledger.refuse(state.ledger, refusal) end)
+
+      :error ->
+        :ok
+    end
+  rescue
+    _malformed_job -> :ok
+  end
+
+  # Concept: a refusal binds the exact request it refused, so a request whose own
+  # identity could not be validated has no refusal to bind.
+  #
+  # Technical depth: `invalid_job_request` and `canonical_job_request_mismatch`
+  # are precisely the two codes reached because the digest presented cannot be
+  # trusted. Journaling one under that digest would publish an authority record
+  # naming bytes nobody validated, and would then conflict with the truthful
+  # request that follows under the same identity. The caller still receives its
+  # exact pre-effect answer; what is withheld is the durable claim.
+  defp durable_refusal(_job, code, _field)
+       when code in [:invalid_job_request, :canonical_job_request_mismatch],
+       do: :error
+
+  defp durable_refusal(job, code, field), do: Ledger.refusal(job, code, field)
+
+  defp refusal_reason(record) do
+    case record["reason"] do
+      %{"code" => code, "field" => nil} -> String.to_existing_atom(code)
+      %{"code" => code, "field" => field} -> {String.to_existing_atom(code), field}
+      _malformed -> :effect_start_authority_unavailable
+    end
+  rescue
+    ArgumentError -> :effect_start_authority_unavailable
   end
 
   defp resolve_tool(job) do
@@ -796,7 +1138,7 @@ defmodule Loopex.Executor.Local do
         arguments,
         options,
         lease,
-        deadline,
+        fence(state, deadline),
         limits,
         progress,
         progress_identity(state, job)
@@ -830,11 +1172,12 @@ defmodule Loopex.Executor.Local do
        ) do
     args = launcher_arguments(arguments)
     deadline = effective_deadline(job, tool)
+    fence = fence(state, deadline)
 
     port = open_launcher("/usr/bin/env", args, demonstration_environment(), workspace)
 
     notify(options, {:executor_process_started, job.job_id, tool.id, [@search_path_name]})
-    {outcome, output} = await_port(port, monitor, lease_pid, <<>>, deadline)
+    {outcome, output} = await_port(port, monitor, lease_pid, <<>>, fence)
 
     receipt(state, job, tool, outcome, output, demonstration_environment(), [], deadline, 0)
   end
@@ -881,10 +1224,7 @@ defmodule Loopex.Executor.Local do
   # The peek that remains is not the guarantee; it is the cheap branch for a DOWN
   # that has already arrived, which lets this executor write the truthful receipt
   # once rather than write a false one and then replace it.
-  defp retain_receipt_under_lease(root, receipt, {monitor, lease_pid} = lease, deadline) do
-    bound = receipt_retention_bound(deadline)
-    receipt = Map.put(receipt, :receipt_retention_bound_ms, bound)
-
+  defp retain_receipt_under_lease(root, receipt, {monitor, lease_pid} = lease, bound) do
     receive do
       {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
         retain_now(root, unproven_receipt(receipt), lease)
@@ -979,6 +1319,26 @@ defmodule Loopex.Executor.Local do
 
     {worker, reference} = spawn_monitor(fn -> send(parent, {tag, work.()}) end)
 
+    await_bounded_work(
+      worker,
+      reference,
+      tag,
+      monitor,
+      lease_pid,
+      System.monotonic_time(:millisecond) + bound
+    )
+  end
+
+  # Concept: one allowance, spent in slices, refreshed by nothing.
+  #
+  # Technical depth: an admitted cleanup period spans the whole positive unsigned
+  # 64-bit range, and a `receive ... after` above the VM's timer ceiling raises
+  # rather than waiting. Each slice recomputes what remains against the same
+  # monotonic instant, so slicing changes how the wait is implemented and not how
+  # long it is; no slice extends the allowance the caller was given.
+  defp await_bounded_work(worker, reference, tag, monitor, lease_pid, deadline) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
     receive do
       {^tag, result} ->
         Process.demonitor(reference, [:flush])
@@ -990,7 +1350,10 @@ defmodule Loopex.Executor.Local do
       {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
         abandon_worker(:workspace_lease_lost, worker, reference, tag)
     after
-      bound -> abandon_worker(:bound_reached, worker, reference, tag)
+      min(remaining, @timer_slice_ms) ->
+        if System.monotonic_time(:millisecond) >= deadline,
+          do: abandon_worker(:bound_reached, worker, reference, tag),
+          else: await_bounded_work(worker, reference, tag, monitor, lease_pid, deadline)
     end
   end
 
@@ -1111,7 +1474,7 @@ defmodule Loopex.Executor.Local do
          _identity
        )
        when kind in [:read, :write, :edit] do
-    remaining = deadline - System.system_time(:millisecond)
+    remaining = fence_remaining(deadline)
 
     if remaining <= 0 do
       {{:failed, "the effective deadline passed before this tool began"}, 0}
@@ -1975,24 +2338,40 @@ defmodule Loopex.Executor.Local do
   # minimum rather than the session's number is what keeps it fail-closed: a
   # caller cannot widen a tool's declared budget by declaring a larger one.
   defp effective_deadline(job, tool) do
-    case declared_wall_time(job, tool) do
-      nil -> job.run_deadline
-      budget -> min(job.run_deadline, System.system_time(:millisecond) + budget)
+    case tool_wall_time(tool) do
+      nil -> job.effective_job_deadline
+      budget -> min(job.effective_job_deadline, System.system_time(:millisecond) + budget)
     end
   end
 
-  defp declared_wall_time(job, tool) do
-    case Enum.reject([job_wall_time(job), tool_wall_time(tool)], &is_nil/1) do
-      [] -> nil
-      declared -> Enum.min(declared)
-    end
+  # Concept: the two fences a running effect is measured against, derived once
+  # from the admission sample and never refreshed.
+  #
+  # Technical depth: the wall half is the earlier of the job's immutable
+  # `effective_job_deadline` and the tool's own declared ceiling. The monotonic
+  # half is the admission sample's monotonic instant plus exactly that wall
+  # remainder, so a backward wall jump cannot extend authority past the monotonic
+  # fence and a forward one expires it by wall truth. No wall instant is ever
+  # compared with or added to a monotonic instant.
+  defp fence(state, deadline) do
+    admission = Process.get(:loopex_admission)
+
+    %{
+      wall_deadline: deadline,
+      action_deadline: min(admission.action, admission.monotonic + (deadline - admission.wall)),
+      clock: state.clock
+    }
   end
 
-  defp job_wall_time(%{resource_budgets: %{"max_wall_time_ms" => budget}})
-       when is_integer(budget) and budget > 0,
-       do: budget
-
-  defp job_wall_time(_job), do: nil
+  # Concept: what remains is the smaller of the two independent fences.
+  #
+  # Technical depth: one paired sample answers both, so the two halves cannot be
+  # taken either side of a scheduling gap and disagree about the same instant.
+  # Either fence reaching zero ends the allowance; neither can lengthen it.
+  defp fence_remaining(%{wall_deadline: wall_deadline, action_deadline: action, clock: clock}) do
+    {wall_now, monotonic_now} = clock.()
+    min(wall_deadline - wall_now, action - monotonic_now)
+  end
 
   defp tool_wall_time(%{coding: %{"budgets" => %{"wall_time_ms" => budget}}})
        when is_integer(budget) and budget > 0,
@@ -2142,25 +2521,6 @@ defmodule Loopex.Executor.Local do
   # receipt for a job that needed no cleanup carries more than the configured
   # period, because that job never exceeded anything and still owns its run
   # instant.
-
-  # Concept: retaining the receipt follows a cleanup episode under its own
-  # declared quarter-period reserve, and uses the run's own instant where no
-  # cleanup episode ran.
-  #
-  # Technical depth: this took the run's remaining time plus a fresh grace. On
-  # the path that matters -- a job cleaning up at or after its deadline -- the
-  # remaining time is nothing, so the receipt received a whole second grace after
-  # the sequence that terminated the group had spent the first. A quarter-period
-  # reserve is sufficient to retain the bounded record without giving the write
-  # a second full cleanup period. Where no cleanup ran, the run has not exceeded
-  # anything and still owns its instant, so it keeps the grace it always had
-  # beyond it.
-  defp receipt_retention_bound(deadline) do
-    case cleanup_episode() do
-      nil -> max(deadline - System.system_time(:millisecond), 0) + cleanup_grace_ms()
-      _until -> receipt_reserve_ms(cleanup_grace_ms())
-    end
-  end
 
   # Concept: retaining output is work the lease still covers and the run still
   # owns, so it is waited on rather than simply called.
@@ -2450,7 +2810,7 @@ defmodule Loopex.Executor.Local do
   defp collect_output(port, deadline, collector, options, job, lease, artifact_limit, owner) do
     {monitor, lease_pid} = lease
     {owner_monitor, owner_pid} = owner
-    remaining = deadline - System.system_time(:millisecond)
+    remaining = fence_remaining(deadline)
 
     if remaining <= 0 do
       {output, group, progress_count} = collected_output(collector, artifact_limit)
@@ -3112,7 +3472,7 @@ defmodule Loopex.Executor.Local do
   # would claim the stop; `:outcome_unknown` claims only what was observed, and
   # is what stops a coordinator blindly retrying an effectful job.
   defp await_port(port, monitor, lease_pid, output, deadline) do
-    remaining = deadline - System.system_time(:millisecond)
+    remaining = fence_remaining(deadline)
 
     if remaining <= 0 do
       if Port.info(port), do: Port.close(port)
@@ -3177,15 +3537,57 @@ defmodule Loopex.Executor.Local do
       outcome: outcome,
       output: output,
       progress_count: progress_count,
-      observed_at_ms: System.system_time(:millisecond),
+      # Concept: when the effect was admitted, not when it happened to finish.
+      #
+      # Technical depth: ADR 0016 makes this the wall half of the one paired
+      # sample taken at effect admission, carried here unchanged. Resampling at
+      # completion would make a slow effect report an instant at which its own
+      # authority had not yet been established, and would make two receipts for
+      # one operation disagree about when it began.
+      observed_at_ms: admitted_at_ms(),
       child_environment_names: environment_names(environment),
       provider_credential_present: credential_present?(environment),
-      cleanup_grace_ms: state.cleanup_grace_ms,
+      # Concept: the period this job ran under is the one its request carried.
+      #
+      # Technical depth: ADR 0016 makes the committed session value a canonical
+      # `JobRequest` member. Reporting this executor's startup default instead
+      # would make the durable record name a period the cleanup did not run
+      # under whenever a session declared its own.
+      cleanup_grace_ms: job.cleanup_grace_ms,
+      cleanup_confirmation: cleanup_confirmation(outcome),
+      receipt_retention_bound_ms: committed_retention_ms(job),
       process_probe: state.process_probe,
       effective_deadline_ms: deadline,
       run_deadline_ms: job.run_deadline,
       artifacts: artifacts
     }
+  end
+
+  defp admitted_at_ms do
+    case Process.get(:loopex_admission) do
+      %{observed_at_ms: observed} -> observed
+      _no_admission -> System.system_time(:millisecond)
+    end
+  end
+
+  # Concept: whether this job's captured process group was positively confirmed
+  # gone.
+  #
+  # Technical depth: it is derived from the same evidence the outcome is, rather
+  # than guessed beside it. Every path in this executor that cannot confirm the
+  # captured group quiescent, cannot confirm an abandoned worker stopped, or lost
+  # the lease that authorized the effect already reports `:outcome_unknown`;
+  # every other terminal was reached with either nothing to clean up or a
+  # positively confirmed group. That coupling is what makes the two facts
+  # consistent by construction, and it is exactly ADR 0016's relation: an
+  # unconfirmed cleanup is conforming only beside `outcome_unknown`. Escaped
+  # descendants remain outside this claim, as ADR 0012 and ADR 0016 both state.
+  defp cleanup_confirmation(:outcome_unknown), do: :unconfirmed
+  defp cleanup_confirmation(_settled), do: :confirmed
+
+  defp committed_retention_ms(job) do
+    {:ok, bounds} = Executor.cancellation_bounds(job.cleanup_grace_ms)
+    bounds.receipt_retention_ms
   end
 
   # The staging name is chosen by the caller rather than here, because a caller
@@ -3265,11 +3667,30 @@ defmodule Loopex.Executor.Local do
   defp decode_receipt(bytes, job_id) do
     receipt = :erlang.binary_to_term(bytes, [:safe])
 
-    if is_map(receipt) and Map.get(receipt, :job_id) == job_id,
-      do: {:ok, receipt},
-      else: {:error, :invalid_retained_receipt}
+    if is_map(receipt) and Map.get(receipt, :job_id) == job_id and
+         cleanup_facts_readable?(receipt),
+       do: {:ok, receipt},
+       else: {:error, :invalid_retained_receipt}
   rescue
     _error -> {:error, :invalid_retained_receipt}
+  end
+
+  # Concept: a retained receipt whose cleanup facts are missing, unreadable, or
+  # contradictory is not a receipt this executor will hand back.
+  #
+  # Technical depth: ADR 0016 makes both facts mandatory on every terminal
+  # receipt and fixes one relation between them -- an unconfirmed cleanup is
+  # conforming only beside `outcome_unknown`. Failing closed here is what stops a
+  # rewritten or truncated ledger file from replaying as a settled operation
+  # whose captured group may still be running. The retention bound is required
+  # positive because zero is not a duration any phase can be spent against.
+  defp cleanup_facts_readable?(receipt) do
+    confirmation = Map.get(receipt, :cleanup_confirmation)
+    bound = Map.get(receipt, :receipt_retention_bound_ms)
+
+    confirmation in [:confirmed, :unconfirmed] and is_integer(bound) and
+      bound in 1..@max_uint64 and
+      (confirmation == :confirmed or Map.get(receipt, :outcome) == :outcome_unknown)
   end
 
   defp receipt_path(root, job_id) do
