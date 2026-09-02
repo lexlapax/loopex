@@ -526,6 +526,12 @@ defmodule Loopex.Store do
   invalid keys, key-normalization collisions, and other non-plain data keep the
   ordinary invalid-data result and are never relabelled structural overages.
 
+  The returned item is the exact shape a transaction retains: every caller key
+  becomes a bounded binary, and the required `kind` and `event_id` members are
+  restored as atom keys. The reported cost is that item's own deterministic
+  external-term size, so a caller can hand the returned item straight to
+  `transact/2` and know what it will be measured as.
+
   In `:event` mode the atom and binary spellings of `event_sequence`,
   `owner_epoch`, and `owner_incarnation_id` are reserved at every map.
 
@@ -549,16 +555,20 @@ defmodule Loopex.Store do
   # Concept: the root carries required members no other node has.
   #
   # Technical depth: raw root cardinality is counted before `kind` and, for an
-  # event, `event_id` are extracted, and restoring their logical binary
-  # spellings cannot raise the admitted count. There is therefore no second or
-  # synthetic post-normalization overage.
+  # event, `event_id` are extracted, and restoring those same members cannot
+  # raise the admitted count. There is therefore no second or synthetic
+  # post-normalization overage. They are restored as atom keys, which is the
+  # shape every other Store path already retains, so a caller can hand the
+  # returned item straight to a transaction. Their logical spellings `"kind"`
+  # and `"event_id"` order them among their siblings; both carry validated
+  # binaries, so no traversal outcome depends on where in that order they sit.
   defp normalize_measured_root(plane, item) when is_map(item) and not is_struct(item) do
     with :ok <- measured_cardinality(map_size(item)),
          {:ok, kind, without_kind} <- take_required(item, :kind, "kind"),
          {:ok, normalized_kind} <- normalize_kind(kind),
          {:ok, required, rest} <- take_measured_event_id(plane, without_kind),
          {:ok, normalized_rest} <- measured_map_members(plane, rest, 0) do
-      {:ok, normalized_rest |> Map.merge(required) |> Map.put("kind", normalized_kind)}
+      {:ok, normalized_rest |> Map.merge(required) |> Map.put(:kind, normalized_kind)}
     else
       {:error, {:item_structure_exceeded, _dimension, _observed, _limit}} = structural ->
         structural
@@ -578,7 +588,7 @@ defmodule Loopex.Store do
   defp take_measured_event_id(:event, item) do
     with {:ok, event_id, rest} <- take_required(item, :event_id, "event_id"),
          {:ok, validated} <- validate_identifier(event_id) do
-      {:ok, %{"event_id" => validated}, rest}
+      {:ok, %{event_id: validated}, rest}
     end
   end
 
@@ -1514,14 +1524,21 @@ defmodule Loopex.Store do
 
   defp contains_reserved_event_field?(_value), do: false
 
+  # Concept: an item that is too large says how large it was.
+  #
+  # Technical depth: the caller preflighting through
+  # `normalize_and_measure_item/2` compares the same count against the same
+  # ceiling, so reporting the observation and the limit here lets a refusal be
+  # reconciled with that preflight instead of leaving an operator to rediscover
+  # the number that was already measured.
   defp validate_plain_map(map) when is_map(map) and not is_struct(map) do
     case plain?(map, 0) do
       true ->
-        encoded = :erlang.term_to_binary(map, [:deterministic])
+        observed = byte_size(:erlang.term_to_binary(map, [:deterministic]))
 
-        if byte_size(encoded) <= @max_item_bytes,
+        if observed <= @max_item_bytes,
           do: :ok,
-          else: {:error, :item_too_large}
+          else: {:error, {:item_too_large, observed, @max_item_bytes}}
 
       false ->
         {:error, :not_plain_data}

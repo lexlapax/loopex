@@ -510,11 +510,15 @@ defmodule Loopex.Runtime do
   # asked for.
   #
   # ADR 0017 further requires a direct Runtime caller to supply the value and
-  # refuses omission with the same reason. That refusal is not applied here yet:
-  # every currently green embedded corpus starts Runtime without the option, so
-  # turning omission into a refusal in this revision would make those runtimes
-  # unstartable. Omission therefore carries the same reference policy value the
-  # composition inserts, and closing that gap is a separate accepted step.
+  # refuses omission by this same name, so that a later change to a default
+  # cannot silently re-decide a ceiling an embedder never chose. That refusal
+  # is not applied here. Nine currently green test files start Runtime without
+  # the option -- runtime, session lifecycle, tool registry, cancellation,
+  # embedded API, session directory, CLI, project-resource trust, and the
+  # shared agent-loop helper -- and refusing omission in this revision makes
+  # every one of those runtimes unstartable. Closing the gap is one mechanical
+  # pass over those callers plus this clause, and it is deliberately left as a
+  # single reviewable change rather than folded in here.
   @default_context_token_budget 8_192
 
   defp validate_context_token_budget(nil), do: {:ok, @default_context_token_budget}
