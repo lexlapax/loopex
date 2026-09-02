@@ -44,6 +44,7 @@ defmodule Loopex.Runtime.SessionState do
                           selector_revision token_estimator totals transformer_identity
                           transformer_revision
                         ))
+  @uint64_max 18_446_744_073_709_551_615
   @descriptor_canonicalization_version "loopex.canonical.v1"
   @descriptor_digest_domain "loopex.context.descriptors.v1"
   @context_refusal_keys Enum.sort([
@@ -1063,7 +1064,7 @@ defmodule Loopex.Runtime.SessionState do
 
     events = prompt_events(state.session_id, command.command_id, run_id, command.content)
 
-    build_proposal(state, command.command_id, record, events, reply)
+    admitted_proposal(state, command, digest, "prompt", record, events, reply)
   end
 
   defp propose_new(%__MODULE__{} = state, %{type: :prompt} = command, digest) do
@@ -1106,7 +1107,15 @@ defmodule Loopex.Runtime.SessionState do
           kind: "command_admitted"
         }
 
-        build_proposal(state, command.command_id, record, [], {:accepted, command.command_id})
+        admitted_proposal(
+          state,
+          command,
+          digest,
+          "steer",
+          record,
+          [],
+          {:accepted, command.command_id}
+        )
     end
   end
 
@@ -1145,7 +1154,16 @@ defmodule Loopex.Runtime.SessionState do
         kind: "command_admitted"
       }
 
-      build_proposal(state, command.command_id, record, [], {:accepted, command.command_id})
+      admitted_proposal(
+        state,
+        command,
+        digest,
+        "follow_up",
+        record,
+        [],
+        {:accepted, command.command_id},
+        promoted_follow_up_events(state, command)
+      )
     end
   end
 
@@ -1233,6 +1251,47 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: only a command that would otherwise be accepted is measured.
+  #
+  # Technical depth: ADR 0011's active-run, matching-run, and queue preconditions
+  # decide first, so a refusal here is always about durable representability
+  # rather than a command that had another answer waiting. Replay is unaffected:
+  # a retained refusal answers before any of this runs again.
+  # Concept: the follow-up is measured against the event promotion will
+  # deterministically emit, not only against its own record.
+  #
+  # Technical depth: promotion's successor run and event identities are already
+  # derivable at admission, so the exact unstamped payload Store will validate
+  # can be built and sized now. These candidates are measured and discarded; the
+  # events promotion actually emits are produced by the reducer when the
+  # predecessor's terminal applies.
+  defp promoted_follow_up_events(state, command) do
+    prompt_events(
+      state.session_id,
+      command.command_id,
+      promoted_run_id(state, command),
+      command.content
+    )
+  end
+
+  defp admitted_proposal(state, command, digest, type, record, events, reply, candidates \\ nil) do
+    run_id = Map.get(record, "run_id") || promoted_run_id(state, command)
+
+    case preflight_command(state, record, candidates || events, run_id) do
+      :ok ->
+        build_proposal(state, command.command_id, record, events, reply)
+
+      {:refused, dimension, candidate, observed} ->
+        command_too_large(state, command, digest, type, dimension, candidate, observed)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp promoted_run_id(state, command),
+    do: stable_id("run", state.session_id, command.command_id)
+
   defp proposal(tx_id, record, events, next, reply) do
     %{tx_id: tx_id, records: [record], events: events, next: next, reply: reply}
   end
@@ -1306,7 +1365,7 @@ defmodule Loopex.Runtime.SessionState do
            payload: %{kind: kind} = record
          }
        )
-       when kind in ["command_admitted", "prompt_admitted_v2"] do
+       when kind in ["command_admitted", "prompt_admitted_v2", "command_admission_refused_v1"] do
     if version == state.journal_version + 1 and owner_epoch == state.owner_epoch and
          incarnation == state.owner_incarnation_id and is_binary(incarnation) and
          admissible_command_kind?(kind, record) do
@@ -1414,6 +1473,30 @@ defmodule Loopex.Runtime.SessionState do
   defp admissible_command_kind?("prompt_admitted_v2", record),
     do: record["command_type"] == "prompt" and record["admission"] == "accepted"
 
+  # Technical depth: `observed` must be a positive integer strictly above the
+  # fixed limit. A retained refusal at or below the ceiling describes a candidate
+  # that would have fitted, which is invalid history rather than a refusal to
+  # replay.
+  defp admissible_command_kind?("command_admission_refused_v1", record) do
+    record["admission"] == "rejected_durable_candidate_bytes" and
+      record["limit"] == 65_536 and
+      is_integer(record["observed"]) and record["observed"] > 65_536 and
+      valid_refused_candidate?(record["dimension"], record["candidate"])
+  end
+
+  defp valid_refused_candidate?("command_record_bytes", candidate),
+    do: candidate in ~w(prompt_record steer_record follow_up_record)
+
+  defp valid_refused_candidate?("command_event_bytes", candidate),
+    do: candidate == "follow_up_user_message_event"
+
+  defp valid_refused_candidate?("future_bound_record_bytes", candidate),
+    do: candidate in ~w(max_turns_private_terminal max_turns_public_finish
+        token_budget_private_terminal token_budget_public_finish
+        deadline_private_terminal deadline_public_finish)
+
+  defp valid_refused_candidate?(_dimension, _candidate), do: false
+
   defp command_effect(
          %{active_run_id: nil} = state,
          record,
@@ -1494,6 +1577,18 @@ defmodule Loopex.Runtime.SessionState do
       {:ok, {:accepted, command_id}, active, state.pending_work, state.expected_events,
        %{follow_up: %{command_id: command_id, content: content}}}
     end
+  end
+
+  # Technical depth: an oversized command installs no run, steer, or follow-up,
+  # emits no public event, and leaves every queue exactly as it was. Its retained
+  # answer is the same composite the live caller received.
+  defp command_effect(state, record, _type, "rejected_durable_candidate_bytes", _command_id) do
+    reply =
+      {:error,
+       {:command_admission_too_large, Map.get(record, "dimension"), Map.get(record, "candidate"),
+        Map.get(record, "observed"), 65_536}}
+
+    {:ok, reply, state.active_run_id, state.pending_work, state.expected_events, %{}}
   end
 
   defp command_effect(state, _record, type, "rejected_" <> reason, _command_id)
@@ -3249,8 +3344,7 @@ defmodule Loopex.Runtime.SessionState do
          {:ok, type} <- fetch_type(command) do
       case type do
         :prompt ->
-          with {:ok, content} <- fetch_binary(command, :content),
-               true <- byte_size(content) <= @max_command_bytes do
+          with {:ok, content} <- fetch_binary(command, :content) do
             {:ok, %{type: :prompt, command_id: command_id, content: content}}
           else
             _other -> {:error, :invalid_command}
@@ -3267,16 +3361,14 @@ defmodule Loopex.Runtime.SessionState do
         # put an operator's words into a run they did not mean.
         :steer ->
           with {:ok, run_id} <- fetch_binary(command, :run_id),
-               {:ok, content} <- fetch_binary(command, :content),
-               true <- byte_size(content) <= @max_command_bytes do
+               {:ok, content} <- fetch_binary(command, :content) do
             {:ok, %{type: :steer, command_id: command_id, run_id: run_id, content: content}}
           else
             _other -> {:error, :invalid_command}
           end
 
         :follow_up ->
-          with {:ok, content} <- fetch_binary(command, :content),
-               true <- byte_size(content) <= @max_command_bytes do
+          with {:ok, content} <- fetch_binary(command, :content) do
             {:ok, %{type: :follow_up, command_id: command_id, content: content}}
           else
             _other -> {:error, :invalid_command}
@@ -3295,7 +3387,7 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp fetch_binary(command, key) do
+  defp fetch_binary(command, key) when key in [:command_id, :run_id] do
     case fetch(command, key) do
       {:ok, value}
       when is_binary(value) and byte_size(value) > 0 and byte_size(value) <= @max_command_bytes ->
@@ -3303,6 +3395,22 @@ defmodule Loopex.Runtime.SessionState do
 
       _other ->
         {:error, :invalid_command}
+    end
+  end
+
+  # Concept: how much an operator may say is decided by whether it can be
+  # written down, not by a second ceiling next to that one.
+  #
+  # Technical depth: ADR 0017 preserves the existing content domain and makes
+  # representability an explicit durable admission result instead. Content is
+  # still required to be a non-empty binary, but its size is decided by the
+  # exact command-record measurement, which refuses an over-large body by name
+  # and retains a compact refusal rather than collapsing it into the same
+  # `invalid_command` a malformed request gets.
+  defp fetch_binary(command, key) do
+    case fetch(command, key) do
+      {:ok, value} when is_binary(value) and byte_size(value) > 0 -> {:ok, value}
+      _other -> {:error, :invalid_command}
     end
   end
 
@@ -3754,4 +3862,183 @@ defmodule Loopex.Runtime.SessionState do
 
   defp consume_context_refusal(_state, _run_id, _outcome, _record),
     do: {:error, :invalid_context_refusal_pair}
+
+  # Concept: a command is only accepted if every durable fact it makes reachable
+  # can actually be written down.
+  #
+  # Technical depth: ADR 0017 keeps the three bound domains as unbounded positive
+  # integers, so an operator may name a value that is semantically valid and
+  # still produces a terminal no Store item can hold. Rather than narrowing the
+  # domain, the exact accepted record, the exact unstamped event deterministic
+  # promotion emits, and every deterministic future bound terminal are measured
+  # before the transaction is proposed. Measurement uses the same shared Store
+  # sizer the transaction itself will use, so admission and commit cannot
+  # disagree, and no giant candidate is ever encoded to learn it is too large.
+  defp preflight_command(state, record, events, run_id) do
+    with :ok <-
+           preflight_candidate(:record, record, "command_record_bytes", command_candidate(record)),
+         :ok <- preflight_events(events, record),
+         :ok <- preflight_future_bounds(state, record, run_id) do
+      :ok
+    end
+  end
+
+  defp command_candidate(%{"command_type" => type}), do: "#{type}_record"
+
+  # Technical depth: prompt's immediate user-message event is strictly dominated
+  # by the accepted record that carries the same content plus more, so it is
+  # measured as defence in depth but can never be the selected refusal. Only the
+  # follow-up's deterministically promoted event is independently reachable.
+  defp preflight_events(events, %{"command_type" => "follow_up"}) do
+    Enum.reduce_while(events, :ok, fn event, :ok ->
+      case preflight_candidate(
+             :event,
+             event,
+             "command_event_bytes",
+             "follow_up_user_message_event"
+           ) do
+        :ok -> {:cont, :ok}
+        refusal -> {:halt, refusal}
+      end
+    end)
+  end
+
+  defp preflight_events(events, _record) do
+    Enum.reduce_while(events, :ok, fn event, :ok ->
+      case Store.normalize_and_measure_item(:event, event) do
+        {:ok, _normalized, bytes} when bytes <= 65_536 -> {:cont, :ok}
+        _other -> {:halt, {:error, :undominated_command_event}}
+      end
+    end)
+  end
+
+  defp preflight_candidate(plane, candidate, dimension, name) do
+    case Store.normalize_and_measure_item(plane, candidate) do
+      {:ok, _normalized, bytes} when bytes <= 65_536 -> :ok
+      {:ok, _normalized, bytes} -> {:refused, dimension, name, bytes}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Concept: the conservative worst case of every bound this run can reach.
+  #
+  # Technical depth: `max_turns` reserves its own committed value. `token_budget`
+  # reserves the largest one-turn overshoot after a call admitted with one token
+  # remaining, because each complete provider usage member is a non-negative
+  # unsigned 64-bit integer. `deadline_ms` reserves the maximum supported
+  # absolute clock instant, not the configured duration, because that is what the
+  # terminal actually carries. Each bound is measured on both planes and across
+  # every legal accounting source, since a later provider result can lawfully
+  # change the source without changing the run identity or the bound.
+  defp preflight_future_bounds(_state, %{"command_type" => "steer"}, _run_id), do: :ok
+
+  defp preflight_future_bounds(state, record, run_id) do
+    max_turns = Map.get(record, "max_turns")
+    token_budget = Map.get(record, "token_budget")
+
+    if is_integer(max_turns) and is_integer(token_budget) do
+      [
+        {"max_turns", max_turns, max_turns},
+        {"token_budget", token_budget, token_budget - 1 + 2 * @uint64_max},
+        {"deadline", @uint64_max, @uint64_max}
+      ]
+      |> Enum.reduce_while(:ok, fn bound, :ok ->
+        case preflight_bound(state, run_id, bound) do
+          :ok -> {:cont, :ok}
+          refusal -> {:halt, refusal}
+        end
+      end)
+    else
+      :ok
+    end
+  end
+
+  defp preflight_bound(state, run_id, {bound, declared_limit, observed}) do
+    [{:record, "private_terminal"}, {:event, "public_finish"}]
+    |> Enum.reduce_while(:ok, fn {plane, suffix}, :ok ->
+      candidate =
+        Enum.max_by(
+          Enum.map([nil, "reported", "estimated"], fn source ->
+            future_bound_candidate(state, plane, run_id, bound, declared_limit, observed, source)
+          end),
+          &bound_candidate_size/1
+        )
+
+      case preflight_candidate(
+             plane,
+             candidate,
+             "future_bound_record_bytes",
+             "#{bound}_#{suffix}"
+           ) do
+        :ok -> {:cont, :ok}
+        refusal -> {:halt, refusal}
+      end
+    end)
+  end
+
+  defp bound_candidate_size(candidate) do
+    case Store.normalize_and_measure_item(
+           if(Map.has_key?(candidate, :event_id), do: :event, else: :record),
+           candidate
+         ) do
+      {:ok, _normalized, bytes} -> bytes
+      {:error, _reason} -> 0
+    end
+  end
+
+  defp future_bound_candidate(state, :record, run_id, bound, declared_limit, observed, source) do
+    %{
+      "run_id" => run_id,
+      "outcome" => "bound_reached",
+      "bound" => bound,
+      "observed" => observed,
+      "declared_limit" => declared_limit,
+      "accounting_source" => source,
+      "reconciliation_ref" => nil,
+      "cleanup_grace_ms" => state.cleanup_grace_ms,
+      "command_id" => nil,
+      kind: "run_terminal_committed"
+    }
+  end
+
+  defp future_bound_candidate(state, :event, run_id, bound, declared_limit, observed, source) do
+    %{
+      "run_id" => run_id,
+      "outcome" => "bound_reached",
+      "reconciliation_ref" => nil,
+      "cleanup_grace_ms" => state.cleanup_grace_ms,
+      "command_id" => nil,
+      "bound" => bound,
+      "observed" => observed,
+      "declared_limit" => declared_limit,
+      "accounting_source" => source,
+      event_id: stable_id("event-run-finished", state.session_id, run_id),
+      kind: "run.finished"
+    }
+  end
+
+  # Concept: an oversized command mutates nothing and says exactly which
+  # candidate it could not have written.
+  #
+  # Technical depth: the compact nine-key refusal carries no command body and no
+  # resolved giant integer, is itself proved representable before it is proposed,
+  # starts no run, model task, executor job, effect, or queue work, and emits no
+  # public event. Replay derives the same answer from the retained record before
+  # any current default or run state is consulted.
+  defp command_too_large(state, command, digest, type, dimension, candidate, observed) do
+    record = %{
+      "command_id" => command.command_id,
+      "command_digest" => digest,
+      "command_type" => type,
+      "admission" => "rejected_durable_candidate_bytes",
+      "dimension" => dimension,
+      "candidate" => candidate,
+      "observed" => observed,
+      "limit" => 65_536,
+      kind: "command_admission_refused_v1"
+    }
+
+    reply = {:error, {:command_admission_too_large, dimension, candidate, observed, 65_536}}
+    build_proposal(state, command.command_id, record, [], reply)
+  end
 end
