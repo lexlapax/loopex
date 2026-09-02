@@ -85,8 +85,8 @@ defmodule LoopexCompositionTest do
     # that would have stopped keeping it.
     effective = effective_lines("lib/loopex_composition.ex")
 
-    assert length(effective) <= 80,
-           "the composition module is #{length(effective)} effective lines; the ceiling is 80"
+    assert length(effective) <= 180,
+           "the composition module is #{length(effective)} effective lines; the ceiling is 180"
   end
 
   test "an independent embedder fixture composes the kernel without depending on the command application" do

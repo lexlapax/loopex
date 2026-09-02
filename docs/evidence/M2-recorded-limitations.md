@@ -99,6 +99,48 @@ race is not closure evidence: the locked deterministic containment cases and
 their mutation records carry that burden, while these two probes preserve the
 known reproduction shapes for investigation.
 
+<a id="local-authority-trusted-root"></a>
+## Local effect authority trusts the whole ledger root
+
+**Rule.** [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept)
+makes one prepared Local ledger root the durable authority for effect admission,
+receipt publication, cancellation, and recovery. Two conforming Local instances
+using that same intact root cannot both authorize one operation, and unresolved
+open truth quarantines the root instead of guessing that an effect did not run.
+
+**What this milestone proves.** Genesis, admission, open, refusal, and receipt
+records are serialized under one root-wide generation and first-writer claim.
+Whole-root move or replacement and an isolated copied generation are refused in
+the negative demonstrations. A captured command group or filesystem worker is
+owned by the exact Local authority that launched it; a numeric pid or process
+group is observation data and never becomes authority by itself.
+
+**What the proof does not cover.** The ledger root is a trusted administrative
+unit, not a tamper-proof store. Partial copy or deletion, restoring an earlier
+snapshot, filesystem inode reuse, or an administrator rewriting generation,
+open, refusal, or receipt records can remove or replay the facts the admission
+protocol relies on. No in-process check can distinguish those changes from the
+history they imitate. M2 claims neither automatic cross-root detection nor safe
+recovery after such administrative mutation.
+
+**What an operator can observe.** Restoring the root to a point before an open
+effect while its old operating-system child may still exist can make a later
+runtime unable to prove whether admitting the operation would duplicate it.
+Depending on which facts survive, Local refuses or quarantines the root; if an
+administrator deliberately forges a self-consistent older history, the durable
+exactly-once argument no longer applies. The safe rollback procedure is to
+positively terminate every authority and captured child that used the old root,
+or reboot the host when that cannot be proved, then activate the prior source
+against a fresh empty root. Application stop alone is insufficient because an
+owned operating-system child can outlive it.
+
+**Disposition.** Maintainer, 2026-09-01: accept the ledger root as the trusted
+atomic administrative boundary and retain this limitation, as part of the
+[recorded acceptance of ADRs 0015–0018](../developer/agent-context-map.md#disposition-adrs-0015-through-0018-acceptance-2026-09-01).
+This records the boundary ADR 0016 already chose; it does not waive a failed
+ledger check, authorize automatic cleanup, or turn unavailable authority into a
+clean verdict.
+
 <a id="cleanup-grace-not-session-visible"></a>
 ## Withdrawn: the cleanup period is session configuration after all
 

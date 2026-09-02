@@ -166,15 +166,33 @@ The host-facing sequence uses the public facade only:
 :ok = Loopex.stop(runtime)
 ```
 
+`runtime_options` must include a positive `:context_token_budget` chosen by the
+direct host; Core Runtime supplies no default. It also carries the session's
+`:cleanup_grace_ms`, whether chosen explicitly or resolved by that host before
+start. Those are committed run/session policy, not adapter configuration, and a
+restart or recovery never substitutes its current process defaults for the
+retained values.
+
 `Loopex.snapshot/1` returns the attachment's exact durable anchor.
 `Loopex.attachment_status/1` reports bounded transient queue information.
 `Loopex.progress/2` and `Loopex.diagnostic/2` are transient. None of those
 observations grants authority or substitutes for Store history.
 
+Recovery that may race an operator interrupt is deliberately two phase.
+`prepare_resume_session/3` and `prepare_resume_known_session/4` return either a
+replayed result or an opaque one-use activation capability while ordinary work
+remains paused. The caller then invokes `activate_resume/1` or
+`abandon_resume/1`. The reference command installs the interrupt owner with
+`LoopexCli.Interrupt.install_prepared(attachment, cleanup_ms, activation)` and
+may consume the same pair through
+`LoopexCli.Interrupt.abandon_resume(attachment, activation)`. Handler
+installation alone never schedules recovered work, and a durable abort admitted
+first defeats later activation.
+
 ### Reference Composition
 
 `LoopexComposition` assembles the reference local stack in one module under a
-hard ceiling of eighty effective lines, counting neither blank lines nor
+hard ceiling of one hundred eighty effective lines, counting neither blank lines nor
 comments. `start/1` starts the applications an `escript` does not start for it,
 opens the durable store and the artifact store under the caller's resolved state
 root, opens a workspace lease and the local executor, and returns a runtime
@@ -187,6 +205,8 @@ already composed with the four bootstrap coding tools:
     state_root: state_root,
     workspace: workspace_path,
     policy: MyHost.Policy,
+    context_token_budget: 8_192,
+    cleanup_grace_ms: 5_000,
     progress_to: self()
   )
 ```
@@ -196,6 +216,12 @@ already composed with the four bootstrap coding tools:
 permissive default shipped here would answer the host's question once for every
 embedder that depends on it, which is why both permissive policies in this
 repository live in clients an operator must name.
+
+The composition's reference context policy defaults omission to 8,192 estimated
+tokens and forwards an explicit valid `:context_token_budget` unchanged as
+Runtime's required top-level option. The estimate is neither provider capacity
+nor billing. Its cleanup default is likewise resolved before Runtime and Local
+start so the session, executor, and command observe one committed value.
 
 `:state_root` and `:workspace` are resolved by the caller, never discovered
 here, and no value is read from application environment.

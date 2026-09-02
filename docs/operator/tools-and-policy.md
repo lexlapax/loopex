@@ -93,15 +93,28 @@ them running with nobody's name on them. Each job carries that committed absolut
 deadline and the wall-time budget the session declared for it, and runs under the
 earliest of that instant, that budget, and the budget the tool's own definition
 names — so a bound cannot be widened by declaring a larger one.
-Expiry enters the same cancellation sequence and the owned process tree is
-confirmed cleaned before the run commits its bound, and the receipt records the
-instant the work actually ran under.
+Expiry enters the same cancellation sequence and each captured executor process
+group associated with the run's operations is confirmed quiescent before the
+run commits its bound, and the receipt records the instant the work actually ran
+under.
 
 An executor integration participates in that sequence through required
 `cancel/2`, whose answers are `{:ok, :cleaned}`, `{:ok, :unconfirmed}`, or
 `{:error, term()}`. Only confirmed cleanup permits a clean cancellation result;
 an error, unconfirmed answer, failed call, or legacy module missing the required
 callback is reported as `outcome_unknown`.
+
+The Local executor's ledger root is also part of its authority, not merely a
+cache directory. Keep that root as one intact administrative unit. Copying or
+deleting only part of it, restoring an older snapshot, reusing its filesystem
+identity, or rewriting its records can erase the facts that distinguish an
+unfinished effect from one that never started. Loopex may quarantine or refuse
+such a root, but it cannot prove a forged or rolled-back history from inside that
+history. Before rolling back or replacing it, positively terminate every Local
+authority and operating-system child that used it; if that cannot be proved,
+reboot the host, then use the prior source with a fresh empty root. Stopping only
+the application is not sufficient. The exact limitation and disposition are
+retained in [M2's evidence record](../evidence/M2-recorded-limitations.md#local-authority-trusted-root).
 
 <a id="operator-tools-policy"></a>
 ## Host Policy
@@ -269,21 +282,36 @@ nothing.
 
 Executor progress proves its identity, epochs, digest, and fence before anything
 narrower is projected; an event that fails validation is dropped and counted
-rather than being forwarded to the operator. The shipped local executor emits no
-progress, so that path is exercised by conformance rather than by an operator's
-own runs; a receipt from it reports a progress count of zero truthfully.
+rather than being forwarded to the operator. The shipped local executor emits
+bounded `bash` child bytes before completion with zero-based producer sequence
+and contiguous byte offsets, and its receipt count equals the callbacks it
+actually made. The filesystem and demonstration tools may emit no progress and
+report a count of zero truthfully.
 
 ### Artifact References
 
-An artifact reference is a plain map with `digest`, `media_type`, `size`, `role`,
-and `locator`. The locator is opaque: it is the retrieval handle and carries no
-path an operator is expected to construct. Storage is content-addressed under
-`<state root>/artifacts`, written to a temporary name and renamed into place, so
-a partially written object is never readable under its final name.
+An artifact reference is a plain eight-member map. Its object identity is
+`digest`, `size`, and opaque `locator`; its public interpretation adds
+`media_type` and `role`; and its separately immutable retention identity is
+`use_canonicalization_version`, `use_digest`, and the digest-derived
+`use_locator`. Exact session, run, operation, attempt, and tool-call provenance
+stays in the private use record and is never copied into the compact reference.
 
-`Loopex.Store.Local.Artifacts.fetch/2` verifies the digest on read. A round trip
-is byte-exact, and a missing artifact reports unavailable rather than returning
-empty content.
+The object locator is the retrieval handle and carries no path an operator is
+expected to construct. `loopex artifact` takes the compact reference, extracts
+that locator, and retrieves through the Core-owned `Loopex.ArtifactStore`
+facade. An embedder makes the same public read with
+`Loopex.ArtifactStore.retrieve(store, locator)`: Core calls validated
+locator-only `stat`, then fetches and verifies the exact object identity and
+bytes. An authorized host resolves private provenance separately with
+`Loopex.ArtifactStore.describe(store, reference)`; ordinary retrieval neither
+reconstructs nor accepts use metadata.
+
+The local adapter publishes the content-addressed object and then its immutable
+use record under `<state root>/artifacts`, syncing each before success. A failed
+use publication can leave an unreachable object orphan but never a successful
+reference to missing provenance. A round trip is byte-exact, and a missing or
+corrupt object or use reports unavailable rather than returning empty content.
 
 ### Credential Boundary
 

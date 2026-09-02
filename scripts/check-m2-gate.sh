@@ -227,26 +227,47 @@ defmodule Loopex.M2Probe.Model do
           []
       end
 
-    # Technical depth: M2 renames the model request's digest field to
-    # staged_request_digest so it stops sharing an identifier with the
-    # executor's attempt-bound canonical_request_digest. The probe asks for the
-    # M2 name first and falls back to the M1 name, exactly as it does for the
-    # streaming callback arity, because it must keep observing the M1 tree it
-    # runs against today. It echoes back only the field names the request
-    # actually carried, so it adds no key to either shape.
-    digest_fields = Map.take(request, [:staged_request_digest, :canonical_request_digest])
-
-    {:ok,
-     Map.merge(
+    if function_exported?(Loopex.Store, :max_item_bytes, 0) do
+      # ADR 0018's exact callback boundary reports complete usage so the probe
+      # can observe several turns without conservative accounting consuming the
+      # remaining run allowance after its first call. The branch is discovered
+      # from ADR 0017's public Store ceiling rather than a private reducer name.
+      {:ok,
        %{
-         text: "probe turn #{turn}",
-         identity: %{provider: "probe", model: request.model, endpoint: "in-process"},
-         usage: %{input_tokens: nil, output_tokens: nil},
-         tool_calls: tool_calls,
-         canonical_request_bytes: request.canonical_request_bytes
-       },
-       digest_fields
-     )}
+         "text" => "probe turn #{turn}",
+         "identity" => %{
+           "provider" => "probe",
+           "model" => request.model,
+           "endpoint" => "in-process"
+         },
+         "usage" => %{"status" => "reported", "input_tokens" => 1, "output_tokens" => 1},
+         "tool_calls" =>
+           Enum.map(tool_calls, fn call ->
+             %{"id" => call.id, "name" => call.name, "arguments" => call.arguments}
+           end),
+         "delta_count" => if(is_function(progress, 1), do: 1, else: 0),
+         "streamed" => is_function(progress, 1),
+         "provider_response_id" => nil,
+         "canonical_request_bytes" => request.canonical_request_bytes,
+         "staged_request_digest" => request.staged_request_digest
+       }}
+    else
+      # The pre-Amendment-4 M2 shape, retained so A and R observe the same
+      # existing loop while the new behavioral selectors remain red.
+      digest_fields = Map.take(request, [:staged_request_digest, :canonical_request_digest])
+
+      {:ok,
+       Map.merge(
+         %{
+           text: "probe turn #{turn}",
+           identity: %{provider: "probe", model: request.model, endpoint: "in-process"},
+           usage: %{input_tokens: nil, output_tokens: nil},
+           tool_calls: tool_calls,
+           canonical_request_bytes: request.canonical_request_bytes
+         },
+         digest_fields
+       )}
+    end
   end
 end
 
@@ -345,12 +366,17 @@ defmodule Loopex.M2Probe do
   # gate could never pass.
   defp start_runtime(base) do
     attempts =
-      for {shape, tool_option} <- [
+      for runtime_configuration <- [
+            [context_token_budget: 8_192, cleanup_grace_ms: 5_000],
+            [cleanup_grace_ms: 5_000],
+            []
+          ],
+          {shape, tool_option} <- [
             {"named_set", {:tools, coding_tools()}},
             {"single_hand_written", {:tool, demonstration_tool()}}
           ],
           authority <- [{:policy, Loopex.M2Probe.Policy}, {:grant_decision, {:host_policy, :allow}}] do
-        {shape, [tool_option, authority]}
+        {shape, runtime_configuration ++ [tool_option, authority]}
       end
 
     started =
@@ -632,12 +658,21 @@ require_feature \
   "the wall clock deadline ends the run bound reached before another provider call" \
   "a reached deadline whose cleanup cannot be confirmed ends outcome unknown rather than bound reached" \
   "a retried tool operation keeps its operation identity and reconciles against its own attempt bound request digest" \
-  "a provider retry of a model call redispatches the same staged request bytes and reuses their staged request digest under a new recorded attempt" \
   "a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" \
   "the committed absolute deadline is propagated into the model call rather than an independent per call timeout" \
   "a reply committed before an admitted abort completes the turn and an abort admitted first keeps the late reply as attempt evidence only" \
-  "a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated" \
-  "every sampling bound is a declared committed value with no implicit default"
+  "every sampling bound is a declared committed value with no implicit default" \
+  "a committed run deadline bounds a host policy consultation without inventing a policy verdict" \
+  "a queued policy result processed after the committed deadline cannot authorize an effect" \
+  "an atom valued executor receipt is normalized before bounded projection" \
+  "an effect intent whose store commit crosses the deadline never reaches the executor" \
+  "an executor event that names the live call but any wrong binding never reaches the operator" \
+  "an operator abort remains responsive while host policy is blocked" \
+  "every declared executor receipt field is validated live and during reconciliation" \
+  "executor receipts are bounded projected and bind every repeated job identity" \
+  "reconciling an unknown effect resolves its steer and promotes its follow up atomically" \
+  "several tool calls in one turn are dispatched in the model's own call order" \
+  "the runtime commits the assistant reply and never assembles canonical history from streamed deltas"
 
 require_feature \
   "the operator never sees an answer until the run ends; nothing streams and no delta algebra exists" \
@@ -654,7 +689,10 @@ require_feature \
   "the committed assistant message is built from the reply and never assembled from deltas" \
   "a cancelled stream commits no assistant message and a late reply never becomes canonical" \
   "an adapter that emits no deltas is conformant and declares that it does not stream" \
-  "the model reply contract declares the optional provider response identifier"
+  "the model reply contract declares the optional provider response identifier" \
+  "the shipped adapter splits oversized provider text before it reaches progress" \
+  "the shipped adapter refuses terminal-control provider progress before emission" \
+  "the delta payload ceiling counts the provider-controlled call identifier and tool name"
 
 require_feature \
   "the operator cannot redirect a running task or queue the next one; there is no prompt steer follow-up algebra" \
@@ -699,6 +737,12 @@ require_feature \
   "post commit reports runtime unavailability without inventing owner supersession"
 
 require_feature \
+  "the reference prompt has no locked duration derivation or unknown bound refusal" \
+  apps/loopex_reference_client/test/reference_client_test.exs \
+  "the reference prompt commits a five minute duration and derives its instant at staging" \
+  "the reference prompt refuses an unknown bound key before admitting a command"
+
+require_feature \
   "the operator has no coding tools; read, write, edit, and bash do not exist" \
   apps/loopex_executor_local/test/coding_tools_test.exs \
   "read returns bounded chunked content and reports truncation" \
@@ -713,12 +757,176 @@ require_feature \
 require_feature \
   "oversized tool output has nowhere to go; there is no artifact store and a long result is simply lost" \
   apps/loopex_store_local/test/artifact_store_conformance_test.exs \
-  "every artifact store implementation satisfies one conformance suite" \
-  "tool output beyond its declared bound spills to an artifact instead of truncating silently" \
-  "the durable artifact event carries digest media type size role and an opaque reference" \
-  "the model facing result stays under its bound and names what was truncated" \
-  "the operator retrieves a spilled artifact by its opaque reference through the public facade" \
-  "an artifact round trips byte exactly and a missing artifact reports unavailable"
+  "one object supports two exact immutable uses in every artifact adapter" \
+  "retaining a large value keeps every byte while its bounded notice names the artifact" \
+  "the compact artifact reference carries object and use identity without private provenance" \
+  "artifact reference fields are bounded and invalid metadata is refused before success" \
+  "artifact use metadata is closed allocation bounded and preserves every opaque identifier" \
+  "artifact use allocation guard rejects every oversized scalar before adapter access" \
+  "Core put proves input object and exact described use before returning success" \
+  "locator only stat and object fetch never reconstruct or accept use provenance" \
+  "a referenced use remains required when its object bytes are still available" \
+  "a referenced object and use remain exact after the local adapter is reopened" \
+  "artifact use publication is immutable and concurrent identical puts converge" \
+  "the truncation notice stays bounded and names the complete retained artifact" \
+  "the public retrieval facade resolves an opaque locator through validated object identity" \
+  "public retrieval refuses dishonest stat identity and dishonest fetched bytes" \
+  "stat and fetch refuse same size and different size artifact corruption" \
+  "fetch refuses a reference whose claimed exact size differs from the stored bytes" \
+  "opening an absent artifact root durably publishes every new directory component" \
+  "artifact publication leaves unrelated store files unchanged" \
+  "artifact publication syncs file bytes before its durable directory entry" \
+  "unsafe opaque locators are refused before an adapter can resolve them" \
+  "a locator the store never issued reports unavailable rather than raising" \
+  "an artifact round trips byte exactly and a missing artifact reports unavailable" \
+  "failed artifact use staging write file sync publication compare or parent sync returns no reference" \
+  "existing artifact use comparison admits identical bytes and preserves different partial or unreadable values"
+
+require_feature \
+  "artifact use metadata can leak into a durable receipt or public event while the store cases stay green" \
+  apps/loopex/test/artifact_runtime_test.exs \
+  "one Core-retained use is the exact reference journaled published recovered and privately described" \
+  "a malformed or legacy artifact reference fails closed before durable or public success"
+
+require_feature \
+  "the shipped executor can bypass Core artifact validation or lose private retention provenance" \
+  apps/loopex_executor_local/test/artifact_retention_contract_test.exs \
+  "a real local executor spills through core with the complete private artifact use" \
+  "a real executor refuses a dishonest retained artifact instead of returning its reference"
+
+require_feature \
+  "durable Store items have no shared allocation-safe byte, depth, or cardinality admission" \
+  apps/loopex/test/store_item_budget_test.exs \
+  "the shared Store item normalizer reports exact byte depth and cardinality boundaries" \
+  "event normalization and transaction-only protections remain exact and separate" \
+  "generated normalization equals real Store transaction normalization and byte admission" \
+  "oversized map and improper list report the first structural witness while admitted invalid keys stay distinct"
+
+require_feature \
+  "provider context can be admitted without one committed policy and independent Store-item preflight" \
+  apps/loopex/test/context_admission_test.exs \
+  "Runtime rejects an omitted or invalid context token budget before Control or Store starts" \
+  "live required context commits every exact first failure and dispatches no provider" \
+  "a dead preparer makes real Core abandonment unconfirmed without activation or dispatch" \
+  "command admission preflights every durable candidate and refuses an unrepresentable future terminal before work" \
+  "deadline staging checks clock domain and absolute uint64 addition before dispatch and replays one exact pair" \
+  "prompt steer and follow-up refusal commit-unknown re-present one exact command binding" \
+  "the named reference fixture binds exact context definition-list retained-component and receipt fixed point" \
+  "optional project stages empty or is wholly withheld and recomputed by token or record budget" \
+  "structured source goldens receipt arithmetic digest framing and malformed replay form one locked matrix" \
+  "self consistent message tool and project substitutions cannot outrun adjacent receipt relations" \
+  "a required-context refusal retains only the compact safe projection and calls no provider" \
+  "context refusal promotion and recovery preserve the predecessor budget into its successor" \
+  "context refusal replay validates every compact dimension relation and rejects every broken pair" \
+  "revision two phase and cross version replay fail closed in both directions" \
+  "page-size-one replay survives a crash after the refusal row and applies its terminal once" \
+  "a prepared resume exposes retained context so omission recovers it and a mismatch can abandon before activation" \
+  "project resolution locks zero or one shapes first failure order and bounded inspection"
+
+require_feature \
+  "the reference composition can replace an explicit context budget or default a non-omitted value" \
+  apps/loopex_composition/test/context_admission_test.exs \
+  "the reference composition defaults only omission to 8192 and forwards an explicit context budget unchanged"
+
+require_feature \
+  "the reference command can resolve defaults after replay or cross prepared-owner conflict without truthful abandonment" \
+  apps/loopex_cli/test/context_budget_commands_test.exs \
+  "the reference commands default only omission and reject or forward one top-level context budget" \
+  "CLI renders only the exact safe context failure projection" \
+  "resume recovers an omitted or equal active context and abandons an unequal owner before dispatch" \
+  "cancel recovers an omitted or equal active context and refuses an unequal owner before abort" \
+  "resume and cancel report context conflict owner unconfirmed before activation or abort" \
+  "a settled prepared owner with no active context accepts omission or an explicit future default"
+
+require_feature \
+  "provider dispatch has no durable attempt authority, exact retry proof, or conservative recovery settlement" \
+  apps/loopex/test/provider_attempt_protocol_test.exs \
+  "the request and first attempt open atomically before one direct one-use Control permit can invoke the provider" \
+  "a reply whose stream evidence or digest contradicts itself is refused not repaired" \
+  "the durable reply retains every adapter value byte for byte and replay rebuilds none" \
+  "a crash after a page-size-one request row recovers its consecutive open without dispatching either page" \
+  "a page-size-one settlement row applies no terminal semantics until its consecutive terminal row" \
+  "a blocked provider worker ignores wrong stale and duplicate permits and invokes once only for its exact fresh permit" \
+  "same-owner worker death before a proved Control refusal retries once without charging the dead attempt" \
+  "a third-party Model task DOWN after dispatch is ambiguous terminal evidence and never retries" \
+  "the authoritative origin closes its model stream before a terminal outcome can publish" \
+  "Control death or a lost reply before and after permit send never redispatches and only post-send cells invoke once" \
+  "a live owner handoff immediately before Control send invokes none while handoff immediately after send preserves only the predecessor call" \
+  "a deadline proved before permit send settles uncharged with no call while a deadline after send settles that attempt conservatively without retry" \
+  "only exact pre-canary not_dispatched proof opens one retry whose accounting and stream domain stay bound to its attempt" \
+  "two exact not-dispatched settlements consume the version-one allowance with no third attempt" \
+  "succession preserves retry permission but never resets or reopens the two-attempt allowance" \
+  "reply preflight admits one below and at each Store byte depth and cardinality limit and compacts one above" \
+  "a callback aggregate over the Store byte limit completes when its request and durable reply projections each fit" \
+  "a credential-shaped raw provider error becomes one generic terminal and enters no retained runtime plane" \
+  "request-open commit-unknown re-presents identical bytes and dispatches only after the retained pair resolves" \
+  "retry-open commit-unknown re-presents identical bytes and dispatches attempt two only after the retained open resolves" \
+  "continue-settlement commit-unknown re-presents identical accounting and conversation bytes before tool or next-turn dispatch" \
+  "terminal-settlement commit-unknown re-presents identical accounting conversation and terminal bytes before closure or publication" \
+  "provider settlement atomically preserves accounting and first durable termination precedence without false effect or bound outcomes" \
+  "recovery settles an unresolved open without redispatch and never reuses or closes the dead predecessor stream"
+
+require_feature \
+  "the shipped provider adapter cannot distinguish pre-canary non-dispatch from ambiguous transport failure" \
+  apps/loopex_llm_reqllm/test/provider_attempt_adapter_contract_test.exs \
+  "the shipped adapter declares not_dispatched only before its transport canary and ambiguity after it"
+
+require_feature \
+  "the configured cancellation period is not one measured durable value across admission, cleanup, receipts, and terminals" \
+  apps/loopex/test/cancellation_observation_contract_test.exs \
+  "the committed cleanup period propagates through genesis status job receipt and terminal" \
+  "the versioned genesis decoder refuses missing extra invalid and legacy cleanup truth" \
+  "the cleanup period is a canonical job fact rather than an executor side option" \
+  "cancellation bounds follow the exact formula and invalid input never calls the executor" \
+  "configured cancellation observes a delayed callback beyond the legacy sixty second bound" \
+  "configured cancellation enters a uint64 observation wait without handing it to one VM timer" \
+  "the execute-result reserve admits one late receipt but expiry stays outcome unknown" \
+  "genesis and effect intent are measured before owner or executor authority" \
+  "the complete genesis admits exactly 65536 canonical bytes and refuses one byte more"
+
+require_feature \
+  "Local has no durable root-wide effect authority, dual-clock fence, receipt reserve, or unresolved-root quarantine" \
+  apps/loopex_executor_local/test/local_authority_contract_test.exs \
+  "a prepared Local root binds one exact canonical generation before returning" \
+  "same-path directory replacement and an isolated generation copy both refuse" \
+  "generation validation rejects extra keys broken relations symlinks and oversized bytes" \
+  "placement publication syncs the generation file and its parent before returning" \
+  "two Local instances sharing one root issue one effect permit and conflict on changed bytes" \
+  "wall truth and the immutable monotonic action deadline fence effects independently" \
+  "a later effect transition reuses the handoff deadline after wall time moves backward" \
+  "a Local receipt reports the committed cleanup facts and fits the Store item envelope" \
+  "missing malformed and contradictory cleanup facts make a retained receipt unavailable" \
+  "receipt fitting spills complete bytes and fail-closed artifact answers claim no suffix" \
+  "complete root snapshots enforce both entry capacity and the byte ceiling" \
+  "observed_at is sampled at effect admission and not resampled after delayed work" \
+  "effect admission retains exact marker and open authority and observes file before parent sync" \
+  "deadline refusal precedes admission while post-admission cancellation cannot rewrite no-effect truth" \
+  "Local owner loss terminates launch-owned authority and quarantines unresolved root truth" \
+  "restart refuses a malformed open-index tail without downgrading existing open authority" \
+  "stopping only the Local runtime can leave a bypassed OS child alive and rollback requires positive termination"
+
+require_feature \
+  "prepared recovery has no one-use activation capability and cannot distinguish omission from conflicting configuration" \
+  apps/loopex_cli/test/prepared_recovery_contract_test.exs \
+  "an active recovered run stays paused until one-use activation and propagates cleanup" \
+  "abandonment of an active prepared owner prevents activation and dispatch" \
+  "a preparer that dies before holder transfer cannot leave an activatable owner" \
+  "prepared interrupt transfer survives preparer death and an abort wins before dispatch" \
+  "the prepared interrupt owner can abandon its capability without activating work" \
+  "commit unknown abort admission permanently fences prepared activation without dispatch" \
+  "resume omission recovers the committed cleanup period before active work resumes" \
+  "resume and cancel cleanup mismatches abandon their prepared owner without manual release" \
+  "explicit cancel recovers the committed cleanup bound and aborts while work stays paused" \
+  "configured interrupt joins concurrent signals under one abort identity and bound" \
+  "a configured signal before any prompt dispatches no work and legacy install remains available" \
+  "prepared recovery and separately prepared Local authority stay out of durable and rendered planes" \
+  "the operator renderer emits only a generic failure for a credential shaped raw provider error"
+
+require_feature \
+  "the shipped reference stack cannot carry a non-default cleanup value through real receipt restart prepared resume and cancel recovery" \
+  apps/loopex_reference_client/test/configured_recovery_contract_test.exs \
+  "a non-default cleanup value crosses real Local receipt restart prepared resume and cancel recovery" \
+  "prepared restart activation reconciles the retained effect once without redispatch"
 
 require_feature \
   "host policy cannot refuse a tool call; there is no policy port and no working deny path" \
@@ -727,6 +935,8 @@ require_feature \
   "a host policy deny decision issues no grant and starts no operating system process" \
   "a denied tool call commits a truthful denied outcome the operator can read" \
   "the run continues or terminates truthfully after a denial and never retries the refused call" \
+  "a denied read only call reaches neither the executor nor a durable effect path" \
+  "model tool context and client input cannot mint or widen a host grant" \
   "a policy that raises times out or returns a malformed value fails closed into denial" \
   "defer is declared and refused in this milestone rather than treated as allow or deny" \
   "every executor backed tool requires a policy decision including a read only tool" \
@@ -741,13 +951,15 @@ require_feature \
 require_feature \
   "the operator cannot stage project resources into the model's context; there is no discovery manifest or trust decision" \
   apps/loopex/test/project_resource_trust_test.exs \
-  "discovery resolves a canonical ordered resource set under declared path size and total limits" \
+  "discovery resolves one canonical resource under declared path and size limits and retains the future shape total" \
   "the operator is shown every resolved path its provenance and the manifest digest" \
+  "the real operator decision path displays resolved path provenance trust and both digests" \
   "an explicit trust decision binds workspace revision manifest and digests" \
   "a changed workspace revision manifest or content invalidates the decision" \
   "a headless run without a matching positive decision stages no project block journals a declined receipt and still runs" \
   "an ordinary workspace read stays a policy governed tool effect and is never context staging" \
-  "an admitted project block changes no tool set policy decision bound or grant"
+  "an admitted project block changes no tool set policy decision bound or grant" \
+  "project manifest and trust labels are closed bounded safe text before retention"
 
 require_feature \
   "the operator cannot stop a running task; cancellation is recorded but nothing is cancelled" \
@@ -755,11 +967,17 @@ require_feature \
   "an interrupt reaches the run through the public facade and through no private path" \
   "an abort admitted during a model call cancels the run and schedules no new work" \
   "an abort admitted during a tool call cancels the executor job and confirms cleanup before committing cancelled" \
-  "a run finishes cancelled only when every owned operation is validated terminal and every owned process tree is confirmed cleaned" \
+  "confirmed executor cleanup cannot replace a missing operation terminal fact when deriving cancelled" \
   "a validated terminal tool fact committed before the abort is preserved and not overwritten" \
   "an effect without sufficient evidence ends outcome unknown and is never blindly retried" \
   "a second interrupt reports what is still being cleaned up rather than abandoning the session" \
+  "a cancellation executor without cancel/2 is unconfirmed" \
   "the operator observes what was cancelled and what actually happened"
+
+require_feature \
+  "a starting executor job can be pronounced clean when its cancellation never answers" \
+  apps/loopex_executor_local/test/executor_test.exs \
+  "a starting job whose cancellation does not answer becomes unconfirmed"
 
 require_feature \
   "the operator cannot find yesterday's work; nothing enumerates the sessions in a state root" \
@@ -767,8 +985,10 @@ require_feature \
   "a fresh operating system process lists the sessions in a resolved state root" \
   "the state root resolves from LOOPEX_HOME and never from application environment" \
   "a session resumes under the durable runtime placement identity that created it" \
+  "a fresh operating system process re-presents the runtime placement identity persisted by its predecessor" \
   "resuming a session through a different runtime identity is refused with an explicit reason" \
-  "a repeated resume command identity returns its historical result while a fresh identity acquires ownership"
+  "a repeated resume command identity returns its historical result while a fresh identity acquires ownership" \
+  "Store replay of a resume command survives a missing directory cache"
 
 require_feature \
   "there is no loopex command; the only way to run a session is a test selector" \
@@ -776,19 +996,24 @@ require_feature \
   "loopex run submits a prompt and streams the answer with its tool calls and results" \
   "the operator steers a running task and queues a follow-up from the same terminal" \
   "prompt steer follow up and abort have distinct explicit affordances and input naming neither is refused" \
+  "each command refuses malformed ambiguous or irrelevant arguments before doing work" \
   "tool progress from a running executor job reaches the operator's terminal before the tool finishes" \
   "loopex sessions lists the operator's sessions and loopex resume continues one" \
   "an interrupt signal delivered to a running loopex process cancels the task through the public facade" \
   "an interrupt whose cleanup cannot be confirmed reports outcome unknown with its reconciliation reference" \
   "loopex cancel reconciles a session left behind by a dead process and is refused against a live owner" \
+  "a reused live pid cannot inherit a stale placement lock" \
   "the policy option selects the governing host policy and a refusal is reported in the transcript" \
   "the command ships its own permissive policy that is named explicitly, prints one notice, and is never an implicit fallback" \
-  "loopex artifact retrieves a spilled artifact by its opaque reference" \
+  "loopex artifact retrieves spilled bytes by the object locator carried in its compact reference" \
   "project resource trust is decided at the terminal and a non interactive run without a decision proceeds with the block withheld" \
   "the command surface drives only the public facade and owns no loop store cursor or authority" \
+  "the command retrieves artifacts through the ArtifactStore facade and never calls a composed adapter directly" \
+  "the command exposes exactly run sessions resume cancel and artifact and no wire or line framing surface" \
   "a dropped stream closure leaves the terminal falling back to the durable record without inferring abandonment or starting a timer" \
-  "the base system prompt and active tool definitions measure under one thousand tokens" \
-  "argument parsing and terminal output use only the standard library"
+  "the runtime measures exact staged system and tool bytes while the provider facing base stays under one thousand tokens" \
+  "argument parsing and terminal output use only the standard library" \
+  "the operator declares how long a stopped run may spend stopping and a bad value is refused"
 
 require_feature \
   "an embedder cannot depend on a shipped composition; the only composition is test support" \
@@ -796,7 +1021,12 @@ require_feature \
   "one page of shipped code starts the application tree a runtime a session a prompt and its events" \
   "an independent embedder fixture composes the kernel without depending on the command application" \
   "the shipped composition requires a host supplied policy and ships no permissive default" \
-  "the composition resolves its state root explicitly and never through application environment"
+  "the composition resolves its state root explicitly and never through application environment" \
+  "the composition forwards the executor's declared cleanup period and probe" \
+  "required host inputs are validated before the first effect" \
+  "a later error raise or exit cleans every process acquired before it" \
+  "stopping the runtime releases the composition owner and every private process" \
+  "abnormal runtime death releases the composition owner and every private process"
 
 # The attended real-provider demonstration is mandatory closure evidence rather
 # than an outcome. It is locked here exactly as an outcome selector is.
@@ -898,7 +1128,12 @@ require_feature \
   "the runner's own build and root isolation has no locked definition, so an ambient environment variable can defeat it unnoticed" \
   apps/loopex/test/gate_isolation_test.exs \
   "an ambient MIX_BUILD_PATH cannot redirect gate owned compilation out of the owned build root" \
-  "the gate refuses an owned root that resolves inside the checkout or the operator's product state"
+  "the gate refuses an owned root that resolves inside the checkout or the operator's product state" \
+  "the evidence lifecycle admits its direct evidence closure and later descendants" \
+  "the evidence lifecycle requires one atomic direct four document evidence child" \
+  "closure binds the evidence commit in one transition and changes only derived status bytes" \
+  "closed evidence closure and disposition cannot mutate or bypass their reviewed transition" \
+  "candidate scoped retained digests answer for the revision each record names"
 
 require_feature \
   "the dependency corpus does not yet describe the M2 eight-application inventory or the composition role" \
@@ -907,6 +1142,30 @@ require_feature \
   "the M2 planned inventory admits exactly eight applications with their declared roles" \
   "a composition depends on the edge applications it composes and on no client or external package" \
   "a client depends on at most one composition and never on another client"
+
+require_feature \
+  "the live status corpus no longer protects prerequisite and closed gate generation governance" \
+  apps/loopex/test/status_check_test.exs \
+  "a milestone cannot outrun the ADR dispositions its plan pair declares" \
+  "a Closed milestone's gate is amended by an accepted generation, not a rebind" \
+  "a gate generation table fails closed on every malformed shape" \
+  "a gate generations table is append-only in both admitted directions" \
+  "the integrated phase is derived from the register's closed rows"
+
+require_feature \
+  "the history walk no longer protects prerequisite and closed gate generation governance" \
+  apps/loopex/test/history_anchoring_test.exs \
+  "an unavailable walk is unavailable evidence in both history checks" \
+  "a declared Bound Artifacts table that binds nothing is refused" \
+  "the real history reader carries the register and refuses a laundered prerequisite" \
+  "a completed Acceptance row is judged even while the register still says Open" \
+  "a Closed milestone cannot conceal an outstanding prerequisite behind an Open successor" \
+  "accepting a prerequisite later cannot legalise an earlier acceptance" \
+  "a Closed milestone's gate generation is one atomic proposal and one rebind" \
+  "recorded gate generations are append-only across reachable history" \
+  "a gate generation rebind cannot bind an interposed revision that changes nothing" \
+  "a gate generation rebind cannot bind an interposed revision carrying unrelated bytes" \
+  "a gate generation rebind cannot bind a merge or a revision behind one"
 
 # ---------------------------------------------------------------------------
 # Bound artifacts, closure documents, and platform, still read-only.
@@ -931,6 +1190,27 @@ file_digest() {
   printf '%s' "${output%% *}"
 }
 
+revision_file_digest() {
+  local revision="$1" path="$2" output
+  git cat-file -e "$revision:$path" 2>/dev/null || return 1
+
+  case "$digest_dialect" in
+    shasum) output="$(git show "$revision:$path" 2>/dev/null | shasum -a 256)" ;;
+    sha256sum) output="$(git show "$revision:$path" 2>/dev/null | sha256sum)" ;;
+  esac
+
+  [ -n "$output" ] || return 1
+  printf '%s' "${output%% *}"
+}
+
+require_candidate_digest() {
+  local candidate="$1" path="$2" recorded="$3" context="$4" actual
+  actual="$(revision_file_digest "$candidate" "$path")" \
+    || fail "$context cannot read $path at candidate $candidate"
+  [ "$recorded" = "$actual" ] \
+    || fail "$context records $recorded for $path, not candidate $candidate's $actual"
+}
+
 require_bound_artifact() {
   local expected="$1" path="$2" actual
   [ -f "$path" ] || fail "bound artifact $path is missing"
@@ -951,6 +1231,12 @@ require_bound_artifact \
 require_bound_artifact \
   fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999 \
   .tool-versions
+require_bound_artifact \
+  841a7095352d032c6495665420b5f46d258e4b4288dbed6610ea5ca4e7bdc09a \
+  apps/loopex_composition/test/kernel_composition_test.exs
+require_bound_artifact \
+  50319510018a4b3e2fab2e5998f3b7979209982b9cabc15e7fa69cfc5782a8cc \
+  apps/loopex/test/gate_isolation_test.exs
 
 closure_documents=(
   CHANGELOG.md
@@ -963,6 +1249,7 @@ closure_documents=(
   docs/plans/M2-technical.md
   docs/plans/M2-gate.md
   docs/evidence/README.md
+  docs/evidence/M2-recorded-limitations.md
   docs/evidence/M2-toolchain-matrix.md
   docs/evidence/M2-negative-demonstrations.md
   docs/evidence/M2-coding-demonstration.md
@@ -1319,7 +1606,7 @@ run_selector() {
   fi
 }
 
-run_selector 1 apps/loopex/test/agent_loop_test.exs default 89 zero \
+run_selector 1 apps/loopex/test/agent_loop_test.exs default 100 zero \
   "passed=a prompt runs until the model stops requesting tools rather than after a fixed number of turns" \
   "passed=every model request carries the committed conversation history including the original prompt" \
   "passed=an assistant tool call and its real tool result are committed and replayed to the model" \
@@ -1332,11 +1619,9 @@ run_selector 1 apps/loopex/test/agent_loop_test.exs default 89 zero \
   "passed=the committed absolute deadline is propagated into the model call rather than an independent per call timeout" \
   "passed=a prompt fixes its deadline at first request staging and not at admission" \
   "passed=every sampling bound is a declared committed value with no implicit default" \
-  "passed=a provider retry of a model call redispatches the same staged request bytes and reuses their staged request digest under a new recorded attempt" \
   "passed=the retry allowance a run has already spent is not handed back by a succession" \
   "passed=a tool call whose run deadline already passed is not dispatched and still commits a terminal fact" \
   "passed=a committed request that expired while its owner was down is not redispatched to the provider" \
-  "passed=a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated" \
   "passed=a reached deadline whose cleanup cannot be confirmed ends outcome unknown rather than bound reached" \
   "passed=an unproven effect ends the run rather than letting the model be asked again" \
   "passed=an unproven effect outranks the model stopping on its own and the run never finishes completed" \
@@ -1402,15 +1687,25 @@ run_selector 1 apps/loopex/test/agent_loop_test.exs default 89 zero \
   "passed=a model tool call preserves a JSON number argument through durable dispatch" \
   "passed=a schema-invalid tool call fails before policy or executor sees it" \
   "passed=an undeclared late provider field becomes bounded error and never reaches the journal" \
-  "passed=an unreadable live model reply abandons and retries its attempt" \
   "passed=nested provider fields are projected out of valid late evidence" \
   "passed=a deeply nested late provider term becomes bounded error at the Store boundary" \
   "passed=a malformed streamed flag in a late reply becomes bounded error" \
   "passed=a late reply whose streamed flag contradicts its count becomes bounded error" \
   "passed=an oversized valid late reply is retained as bounded error" \
-  "passed=a late model error retains only its generic bounded category"
+  "passed=a late model error retains only its generic bounded category" \
+  "passed=a committed run deadline bounds a host policy consultation without inventing a policy verdict" \
+  "passed=a queued policy result processed after the committed deadline cannot authorize an effect" \
+  "passed=an atom valued executor receipt is normalized before bounded projection" \
+  "passed=an effect intent whose store commit crosses the deadline never reaches the executor" \
+  "passed=an executor event that names the live call but any wrong binding never reaches the operator" \
+  "passed=an operator abort remains responsive while host policy is blocked" \
+  "passed=every declared executor receipt field is validated live and during reconciliation" \
+  "passed=executor receipts are bounded projected and bind every repeated job identity" \
+  "passed=reconciling an unknown effect resolves its steer and promotes its follow up atomically" \
+  "passed=several tool calls in one turn are dispatched in the model's own call order" \
+  "passed=the runtime commits the assistant reply and never assembles canonical history from streamed deltas"
 
-run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs default 16 zero \
+run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs default 19 zero \
   "passed=every model adapter satisfies one streaming conformance suite" \
   "passed=each canonical delta kind is bounded plain data carrying no provider or host term" \
   "passed=a text delta is observable while its operation is still incomplete rather than after the reply returns" \
@@ -1426,7 +1721,10 @@ run_selector 2 apps/loopex_llm_reqllm/test/streaming_conformance_test.exs defaul
   "passed=a delta missing a field its kind declares is refused rather than projected" \
   "passed=a delta field whose size the ceiling cannot see is refused rather than projected" \
   "passed=an abandoned domain is closed and stated rather than guessed from a stream that stopped" \
-  "passed=the model reply contract declares the optional provider response identifier"
+  "passed=the model reply contract declares the optional provider response identifier" \
+  "passed=the shipped adapter splits oversized provider text before it reaches progress" \
+  "passed=the shipped adapter refuses terminal-control provider progress before emission" \
+  "passed=the delta payload ceiling counts the provider-controlled call identifier and tool name"
 
 run_selector 3 apps/loopex/test/input_algebra_test.exs default 9 zero \
   "passed=a prompt starts a run only while the session is settled and is otherwise refused" \
@@ -1480,19 +1778,39 @@ run_selector 4 apps/loopex_executor_local/test/coding_tools_test.exs default 39 
   "passed=the two containment mechanisms obligation four names by name are the ones the code uses" \
   "passed=a cleanup helper that outlives its bound is terminated rather than left running"
 
-run_selector 5 apps/loopex_store_local/test/artifact_store_conformance_test.exs default 6 zero \
-  "passed=every artifact store implementation satisfies one conformance suite" \
-  "passed=tool output beyond its declared bound spills to an artifact instead of truncating silently" \
-  "passed=the durable artifact event carries digest media type size role and an opaque reference" \
-  "passed=the model facing result stays under its bound and names what was truncated" \
-  "passed=the operator retrieves a spilled artifact by its opaque reference through the public facade" \
-  "passed=an artifact round trips byte exactly and a missing artifact reports unavailable"
+run_selector 5 apps/loopex_store_local/test/artifact_store_conformance_test.exs default 24 zero \
+  "passed=one object supports two exact immutable uses in every artifact adapter" \
+  "passed=retaining a large value keeps every byte while its bounded notice names the artifact" \
+  "passed=the compact artifact reference carries object and use identity without private provenance" \
+  "passed=artifact reference fields are bounded and invalid metadata is refused before success" \
+  "passed=artifact use metadata is closed allocation bounded and preserves every opaque identifier" \
+  "passed=artifact use allocation guard rejects every oversized scalar before adapter access" \
+  "passed=Core put proves input object and exact described use before returning success" \
+  "passed=locator only stat and object fetch never reconstruct or accept use provenance" \
+  "passed=a referenced use remains required when its object bytes are still available" \
+  "passed=a referenced object and use remain exact after the local adapter is reopened" \
+  "passed=artifact use publication is immutable and concurrent identical puts converge" \
+  "passed=the truncation notice stays bounded and names the complete retained artifact" \
+  "passed=the public retrieval facade resolves an opaque locator through validated object identity" \
+  "passed=public retrieval refuses dishonest stat identity and dishonest fetched bytes" \
+  "passed=stat and fetch refuse same size and different size artifact corruption" \
+  "passed=fetch refuses a reference whose claimed exact size differs from the stored bytes" \
+  "passed=opening an absent artifact root durably publishes every new directory component" \
+  "passed=artifact publication leaves unrelated store files unchanged" \
+  "passed=artifact publication syncs file bytes before its durable directory entry" \
+  "passed=unsafe opaque locators are refused before an adapter can resolve them" \
+  "passed=a locator the store never issued reports unavailable rather than raising" \
+  "passed=an artifact round trips byte exactly and a missing artifact reports unavailable" \
+  "passed=failed artifact use staging write file sync publication compare or parent sync returns no reference" \
+  "passed=existing artifact use comparison admits identical bytes and preserves different partial or unreadable values"
 
-run_selector 6a apps/loopex_executor_local/test/host_policy_test.exs default 8 zero \
+run_selector 6a apps/loopex_executor_local/test/host_policy_test.exs default 10 zero \
   "passed=every host policy implementation satisfies one policy port conformance suite" \
   "passed=a host policy deny decision issues no grant and starts no operating system process" \
   "passed=a denied tool call commits a truthful denied outcome the operator can read" \
   "passed=the run continues or terminates truthfully after a denial and never retries the refused call" \
+  "passed=a denied read only call reaches neither the executor nor a durable effect path" \
+  "passed=model tool context and client input cannot mint or widen a host grant" \
   "passed=a policy that raises times out or returns a malformed value fails closed into denial" \
   "passed=defer is declared and refused in this milestone rather than treated as allow or deny" \
   "passed=every executor backed tool requires a policy decision including a read only tool" \
@@ -1502,21 +1820,23 @@ run_selector 6b apps/loopex_reference_client/test/allow_all_policy_test.exs defa
   "passed=the shipped allow all policy allows every decision it is asked" \
   "passed=the shipped allow all policy emits exactly one permissive authority notice"
 
-run_selector 7 apps/loopex/test/project_resource_trust_test.exs default 7 zero \
-  "passed=discovery resolves a canonical ordered resource set under declared path size and total limits" \
+run_selector 7 apps/loopex/test/project_resource_trust_test.exs default 9 zero \
+  "passed=discovery resolves one canonical resource under declared path and size limits and retains the future shape total" \
   "passed=the operator is shown every resolved path its provenance and the manifest digest" \
+  "passed=the real operator decision path displays resolved path provenance trust and both digests" \
   "passed=an explicit trust decision binds workspace revision manifest and digests" \
   "passed=a changed workspace revision manifest or content invalidates the decision" \
   "passed=a headless run without a matching positive decision stages no project block journals a declined receipt and still runs" \
   "passed=an ordinary workspace read stays a policy governed tool effect and is never context staging" \
-  "passed=an admitted project block changes no tool set policy decision bound or grant"
+  "passed=an admitted project block changes no tool set policy decision bound or grant" \
+  "passed=project manifest and trust labels are closed bounded safe text before retention"
 
-run_selector 8 apps/loopex/test/cancellation_test.exs default 24 zero \
+run_selector 8a apps/loopex/test/cancellation_test.exs default 25 zero \
   "passed=an interrupt reaches the run through the public facade and through no private path" \
   "passed=an abort admitted during a model call cancels the run and schedules no new work" \
   "passed=an abort admitted during a tool call cancels the executor job and confirms cleanup before committing cancelled" \
   "passed=cleanup commits a valid executor receipt queued behind its own settlement" \
-  "passed=a run finishes cancelled only when every owned operation is validated terminal and every owned process tree is confirmed cleaned" \
+  "passed=confirmed executor cleanup cannot replace a missing operation terminal fact when deriving cancelled" \
   "passed=a validated terminal tool fact committed before the abort is preserved and not overwritten" \
   "passed=an effect without sufficient evidence ends outcome unknown and is never blindly retried" \
   "passed=a second interrupt reports what is still being cleaned up rather than abandoning the session" \
@@ -1526,6 +1846,7 @@ run_selector 8 apps/loopex/test/cancellation_test.exs default 24 zero \
   "passed=the abort is durable before its cleanup runs and its ending is a second commit" \
   "passed=the coordinator answers while a host cancellation is still running" \
   "passed=a host cancellation that never answers is bounded and settles unconfirmed" \
+  "passed=a cancellation executor without cancel/2 is unconfirmed" \
   "passed=a run being cleaned up is still active and admits nothing new until its ending commits" \
   "passed=an executor that never answered leaves its call a terminal fact of its own" \
   "passed=a recovering owner ends the abandoned call before it ends the run" \
@@ -1537,38 +1858,51 @@ run_selector 8 apps/loopex/test/cancellation_test.exs default 24 zero \
   "passed=an abort during an in flight tool call treats an executor cancellation error as outcome unknown with a reconciliation reference" \
   "passed=an abort admitted after an unprovable effect committed never rewrites the run to cancelled"
 
-run_selector 9 apps/loopex/test/session_directory_test.exs default 5 zero \
+run_selector 8b apps/loopex_executor_local/test/executor_test.exs default 7 zero \
+  "passed=a starting job whose cancellation does not answer becomes unconfirmed"
+
+run_selector 9 apps/loopex/test/session_directory_test.exs default 7 zero \
   "passed=a fresh operating system process lists the sessions in a resolved state root" \
   "passed=the state root resolves from LOOPEX_HOME and never from application environment" \
   "passed=a session resumes under the durable runtime placement identity that created it" \
+  "passed=a fresh operating system process re-presents the runtime placement identity persisted by its predecessor" \
   "passed=resuming a session through a different runtime identity is refused with an explicit reason" \
-  "passed=a repeated resume command identity returns its historical result while a fresh identity acquires ownership"
+  "passed=a repeated resume command identity returns its historical result while a fresh identity acquires ownership" \
+  "passed=Store replay of a resume command survives a missing directory cache"
 
-run_selector 10 apps/loopex_cli/test/cli_test.exs default 17 zero \
+run_selector 10 apps/loopex_cli/test/cli_test.exs default 21 zero \
   "passed=loopex run submits a prompt and streams the answer with its tool calls and results" \
   "passed=the operator steers a running task and queues a follow-up from the same terminal" \
   "passed=prompt steer follow up and abort have distinct explicit affordances and input naming neither is refused" \
+  "passed=each command refuses malformed ambiguous or irrelevant arguments before doing work" \
   "passed=tool progress from a running executor job reaches the operator's terminal before the tool finishes" \
   "passed=loopex sessions lists the operator's sessions and loopex resume continues one" \
   "passed=an interrupt signal delivered to a running loopex process cancels the task through the public facade" \
   "passed=an interrupt whose cleanup cannot be confirmed reports outcome unknown with its reconciliation reference" \
   "passed=loopex cancel reconciles a session left behind by a dead process and is refused against a live owner" \
+  "passed=a reused live pid cannot inherit a stale placement lock" \
   "passed=the policy option selects the governing host policy and a refusal is reported in the transcript" \
   "passed=the command ships its own permissive policy that is named explicitly, prints one notice, and is never an implicit fallback" \
-  "passed=loopex artifact retrieves a spilled artifact by its opaque reference" \
+  "passed=loopex artifact retrieves spilled bytes by the object locator carried in its compact reference" \
   "passed=project resource trust is decided at the terminal and a non interactive run without a decision proceeds with the block withheld" \
   "passed=the command surface drives only the public facade and owns no loop store cursor or authority" \
+  "passed=the command retrieves artifacts through the ArtifactStore facade and never calls a composed adapter directly" \
+  "passed=the command exposes exactly run sessions resume cancel and artifact and no wire or line framing surface" \
   "passed=a dropped stream closure leaves the terminal falling back to the durable record without inferring abandonment or starting a timer" \
-  "passed=the base system prompt and active tool definitions measure under one thousand tokens" \
+  "passed=the runtime measures exact staged system and tool bytes while the provider facing base stays under one thousand tokens" \
   "passed=argument parsing and terminal output use only the standard library" \
   "passed=the operator declares how long a stopped run may spend stopping and a bad value is refused"
 
-run_selector 11 apps/loopex_composition/test/kernel_composition_test.exs default 5 zero \
+run_selector 11 apps/loopex_composition/test/kernel_composition_test.exs default 9 zero \
   "passed=one page of shipped code starts the application tree a runtime a session a prompt and its events" \
   "passed=an independent embedder fixture composes the kernel without depending on the command application" \
   "passed=the shipped composition requires a host supplied policy and ships no permissive default" \
   "passed=the composition resolves its state root explicitly and never through application environment" \
-  "passed=the composition forwards the executor's declared cleanup period and probe"
+  "passed=the composition forwards the executor's declared cleanup period and probe" \
+  "passed=required host inputs are validated before the first effect" \
+  "passed=a later error raise or exit cleans every process acquired before it" \
+  "passed=stopping the runtime releases the composition owner and every private process" \
+  "passed=abnormal runtime death releases the composition owner and every private process"
 
 # The tool registry is the internal mechanism the loop and the tools resolve
 # through. It is locked supporting coverage, not an outcome of its own.
@@ -1591,6 +1925,135 @@ run_selector stream-mechanics apps/loopex/test/session_lifecycle_test.exs defaul
   "passed=progress reports runtime unavailability without inventing owner supersession" \
   "passed=progress closure reports runtime unavailability without inventing owner supersession" \
   "passed=post commit reports runtime unavailability without inventing owner supersession"
+
+run_selector reference-bounds apps/loopex_reference_client/test/reference_client_test.exs default 4 zero \
+  "passed=the reference prompt commits a five minute duration and derives its instant at staging" \
+  "passed=the reference prompt refuses an unknown bound key before admitting a command"
+
+# Artifact adapter conformance cannot prove which compact members the runtime
+# retains or publishes. This separate role protects the cross-boundary
+# projection and the privacy of the immutable use metadata.
+run_selector artifact-runtime apps/loopex/test/artifact_runtime_test.exs default 2 zero \
+  "passed=one Core-retained use is the exact reference journaled published recovered and privately described" \
+  "passed=a malformed or legacy artifact reference fails closed before durable or public success"
+
+run_selector artifact-retention apps/loopex_executor_local/test/artifact_retention_contract_test.exs default 2 zero \
+  "passed=a real local executor spills through core with the complete private artifact use" \
+  "passed=a real executor refuses a dishonest retained artifact instead of returning its reference"
+
+run_selector store-item-budget apps/loopex/test/store_item_budget_test.exs default 4 zero \
+  "passed=the shared Store item normalizer reports exact byte depth and cardinality boundaries" \
+  "passed=event normalization and transaction-only protections remain exact and separate" \
+  "passed=generated normalization equals real Store transaction normalization and byte admission" \
+  "passed=oversized map and improper list report the first structural witness while admitted invalid keys stay distinct"
+
+run_selector context-admission apps/loopex/test/context_admission_test.exs default 17 zero \
+  "passed=Runtime rejects an omitted or invalid context token budget before Control or Store starts" \
+  "passed=live required context commits every exact first failure and dispatches no provider" \
+  "passed=a dead preparer makes real Core abandonment unconfirmed without activation or dispatch" \
+  "passed=command admission preflights every durable candidate and refuses an unrepresentable future terminal before work" \
+  "passed=deadline staging checks clock domain and absolute uint64 addition before dispatch and replays one exact pair" \
+  "passed=prompt steer and follow-up refusal commit-unknown re-present one exact command binding" \
+  "passed=the named reference fixture binds exact context definition-list retained-component and receipt fixed point" \
+  "passed=optional project stages empty or is wholly withheld and recomputed by token or record budget" \
+  "passed=structured source goldens receipt arithmetic digest framing and malformed replay form one locked matrix" \
+  "passed=self consistent message tool and project substitutions cannot outrun adjacent receipt relations" \
+  "passed=a required-context refusal retains only the compact safe projection and calls no provider" \
+  "passed=context refusal promotion and recovery preserve the predecessor budget into its successor" \
+  "passed=context refusal replay validates every compact dimension relation and rejects every broken pair" \
+  "passed=revision two phase and cross version replay fail closed in both directions" \
+  "passed=page-size-one replay survives a crash after the refusal row and applies its terminal once" \
+  "passed=a prepared resume exposes retained context so omission recovers it and a mismatch can abandon before activation" \
+  "passed=project resolution locks zero or one shapes first failure order and bounded inspection"
+
+run_selector composition-context apps/loopex_composition/test/context_admission_test.exs default 1 zero \
+  "passed=the reference composition defaults only omission to 8192 and forwards an explicit context budget unchanged"
+
+run_selector command-context apps/loopex_cli/test/context_budget_commands_test.exs default 6 zero \
+  "passed=the reference commands default only omission and reject or forward one top-level context budget" \
+  "passed=CLI renders only the exact safe context failure projection" \
+  "passed=resume recovers an omitted or equal active context and abandons an unequal owner before dispatch" \
+  "passed=cancel recovers an omitted or equal active context and refuses an unequal owner before abort" \
+  "passed=resume and cancel report context conflict owner unconfirmed before activation or abort" \
+  "passed=a settled prepared owner with no active context accepts omission or an explicit future default"
+
+run_selector provider-attempt apps/loopex/test/provider_attempt_protocol_test.exs default 24 zero \
+  "passed=the request and first attempt open atomically before one direct one-use Control permit can invoke the provider" \
+  "passed=a reply whose stream evidence or digest contradicts itself is refused not repaired" \
+  "passed=the durable reply retains every adapter value byte for byte and replay rebuilds none" \
+  "passed=a crash after a page-size-one request row recovers its consecutive open without dispatching either page" \
+  "passed=a page-size-one settlement row applies no terminal semantics until its consecutive terminal row" \
+  "passed=a blocked provider worker ignores wrong stale and duplicate permits and invokes once only for its exact fresh permit" \
+  "passed=same-owner worker death before a proved Control refusal retries once without charging the dead attempt" \
+  "passed=a third-party Model task DOWN after dispatch is ambiguous terminal evidence and never retries" \
+  "passed=the authoritative origin closes its model stream before a terminal outcome can publish" \
+  "passed=Control death or a lost reply before and after permit send never redispatches and only post-send cells invoke once" \
+  "passed=a live owner handoff immediately before Control send invokes none while handoff immediately after send preserves only the predecessor call" \
+  "passed=a deadline proved before permit send settles uncharged with no call while a deadline after send settles that attempt conservatively without retry" \
+  "passed=only exact pre-canary not_dispatched proof opens one retry whose accounting and stream domain stay bound to its attempt" \
+  "passed=two exact not-dispatched settlements consume the version-one allowance with no third attempt" \
+  "passed=succession preserves retry permission but never resets or reopens the two-attempt allowance" \
+  "passed=reply preflight admits one below and at each Store byte depth and cardinality limit and compacts one above" \
+  "passed=a callback aggregate over the Store byte limit completes when its request and durable reply projections each fit" \
+  "passed=a credential-shaped raw provider error becomes one generic terminal and enters no retained runtime plane" \
+  "passed=request-open commit-unknown re-presents identical bytes and dispatches only after the retained pair resolves" \
+  "passed=retry-open commit-unknown re-presents identical bytes and dispatches attempt two only after the retained open resolves" \
+  "passed=continue-settlement commit-unknown re-presents identical accounting and conversation bytes before tool or next-turn dispatch" \
+  "passed=terminal-settlement commit-unknown re-presents identical accounting conversation and terminal bytes before closure or publication" \
+  "passed=provider settlement atomically preserves accounting and first durable termination precedence without false effect or bound outcomes" \
+  "passed=recovery settles an unresolved open without redispatch and never reuses or closes the dead predecessor stream"
+
+run_selector provider-adapter apps/loopex_llm_reqllm/test/provider_attempt_adapter_contract_test.exs default 1 zero \
+  "passed=the shipped adapter declares not_dispatched only before its transport canary and ambiguity after it"
+
+run_selector cancellation-observation apps/loopex/test/cancellation_observation_contract_test.exs default 9 zero \
+  "passed=the committed cleanup period propagates through genesis status job receipt and terminal" \
+  "passed=the versioned genesis decoder refuses missing extra invalid and legacy cleanup truth" \
+  "passed=the cleanup period is a canonical job fact rather than an executor side option" \
+  "passed=cancellation bounds follow the exact formula and invalid input never calls the executor" \
+  "passed=configured cancellation observes a delayed callback beyond the legacy sixty second bound" \
+  "passed=configured cancellation enters a uint64 observation wait without handing it to one VM timer" \
+  "passed=the execute-result reserve admits one late receipt but expiry stays outcome unknown" \
+  "passed=genesis and effect intent are measured before owner or executor authority" \
+  "passed=the complete genesis admits exactly 65536 canonical bytes and refuses one byte more"
+
+run_selector local-authority apps/loopex_executor_local/test/local_authority_contract_test.exs default 17 zero \
+  "passed=a prepared Local root binds one exact canonical generation before returning" \
+  "passed=same-path directory replacement and an isolated generation copy both refuse" \
+  "passed=generation validation rejects extra keys broken relations symlinks and oversized bytes" \
+  "passed=placement publication syncs the generation file and its parent before returning" \
+  "passed=two Local instances sharing one root issue one effect permit and conflict on changed bytes" \
+  "passed=wall truth and the immutable monotonic action deadline fence effects independently" \
+  "passed=a later effect transition reuses the handoff deadline after wall time moves backward" \
+  "passed=a Local receipt reports the committed cleanup facts and fits the Store item envelope" \
+  "passed=missing malformed and contradictory cleanup facts make a retained receipt unavailable" \
+  "passed=receipt fitting spills complete bytes and fail-closed artifact answers claim no suffix" \
+  "passed=complete root snapshots enforce both entry capacity and the byte ceiling" \
+  "passed=observed_at is sampled at effect admission and not resampled after delayed work" \
+  "passed=effect admission retains exact marker and open authority and observes file before parent sync" \
+  "passed=deadline refusal precedes admission while post-admission cancellation cannot rewrite no-effect truth" \
+  "passed=Local owner loss terminates launch-owned authority and quarantines unresolved root truth" \
+  "passed=restart refuses a malformed open-index tail without downgrading existing open authority" \
+  "passed=stopping only the Local runtime can leave a bypassed OS child alive and rollback requires positive termination"
+
+run_selector prepared-recovery apps/loopex_cli/test/prepared_recovery_contract_test.exs default 13 zero \
+  "passed=an active recovered run stays paused until one-use activation and propagates cleanup" \
+  "passed=abandonment of an active prepared owner prevents activation and dispatch" \
+  "passed=a preparer that dies before holder transfer cannot leave an activatable owner" \
+  "passed=prepared interrupt transfer survives preparer death and an abort wins before dispatch" \
+  "passed=the prepared interrupt owner can abandon its capability without activating work" \
+  "passed=commit unknown abort admission permanently fences prepared activation without dispatch" \
+  "passed=resume omission recovers the committed cleanup period before active work resumes" \
+  "passed=resume and cancel cleanup mismatches abandon their prepared owner without manual release" \
+  "passed=explicit cancel recovers the committed cleanup bound and aborts while work stays paused" \
+  "passed=configured interrupt joins concurrent signals under one abort identity and bound" \
+  "passed=a configured signal before any prompt dispatches no work and legacy install remains available" \
+  "passed=prepared recovery and separately prepared Local authority stay out of durable and rendered planes" \
+  "passed=the operator renderer emits only a generic failure for a credential shaped raw provider error"
+
+run_selector reference-cancellation apps/loopex_reference_client/test/configured_recovery_contract_test.exs default 2 zero \
+  "passed=a non-default cleanup value crosses real Local receipt restart prepared resume and cancel recovery" \
+  "passed=prepared restart activation reconciles the retained effect once without redispatch"
 
 # Mandatory closure evidence: the attended real-provider demonstration.
 run_selector demonstration apps/loopex_cli/test/coding_task_test.exs default 5 positive \
@@ -1686,9 +2149,14 @@ run_selector mechanics apps/loopex/test/m1_exunit_runner_test.exs default 5 zero
   "passed=fake stdout at_exit and early halt cannot manufacture one authoritative result" \
   "passed=only the declared internal dependency closure is reachable and startup never receives the provider key"
 
-run_selector mechanics apps/loopex/test/gate_isolation_test.exs default 2 zero \
+run_selector mechanics apps/loopex/test/gate_isolation_test.exs default 7 zero \
   "passed=an ambient MIX_BUILD_PATH cannot redirect gate owned compilation out of the owned build root" \
-  "passed=the gate refuses an owned root that resolves inside the checkout or the operator's product state"
+  "passed=the gate refuses an owned root that resolves inside the checkout or the operator's product state" \
+  "passed=the evidence lifecycle admits its direct evidence closure and later descendants" \
+  "passed=the evidence lifecycle requires one atomic direct four document evidence child" \
+  "passed=closure binds the evidence commit in one transition and changes only derived status bytes" \
+  "passed=closed evidence closure and disposition cannot mutate or bypass their reviewed transition" \
+  "passed=candidate scoped retained digests answer for the revision each record names"
 
 run_selector mechanics apps/loopex/test/deps_budget_test.exs default 28 zero \
   "passed=the repository satisfies the dependency budget and direction" \
@@ -1740,6 +2208,20 @@ require_safe_tracked_path() {
     || fail "$context names $path, which is not a tracked file at this revision"
 }
 
+require_safe_tracked_path_at() {
+  local revision="$1" path="$2" context="$3" entry
+  case "$path" in
+    /* | *..* | *//*)
+      fail "$context names an unsafe path $path"
+      ;;
+  esac
+
+  entry="$(git ls-tree "$revision" -- "$path" 2>/dev/null)" \
+    || fail "$context cannot inspect $path at candidate $revision"
+  [[ "$entry" =~ ^100644\ blob\ [0-9a-f]{40,64}$'\t' ]] \
+    || fail "$context names $path, which is not a tracked ordinary file at candidate $revision"
+}
+
 validate_negative_demonstrations() {
   local path=docs/evidence/M2-negative-demonstrations.md
   [ -f "$path" ] || fail "the negative demonstration record does not exist"
@@ -1753,19 +2235,24 @@ validate_negative_demonstrations() {
     "project_resource_trust_admission|apps/loopex/test/project_resource_trust_test.exs"
     "cancellation_cleanup_confirmation|apps/loopex/test/cancellation_test.exs"
     "command_surface_facade_only|apps/loopex_cli/test/cli_test.exs"
+    "artifact_use_object_binding|apps/loopex_store_local/test/artifact_store_conformance_test.exs"
+    "local_whole_root_replacement_refusal|apps/loopex_executor_local/test/local_authority_contract_test.exs"
+    "local_generation_copy_refusal|apps/loopex_executor_local/test/local_authority_contract_test.exs"
+    "context_model_projection_accounting|apps/loopex/test/context_admission_test.exs"
+    "provider_attempt_one_use_permit|apps/loopex/test/provider_attempt_protocol_test.exs"
   )
 
   local declared
   declared="$(grep -c '"mechanism_disabled"' "$path")"
-  [ "$declared" -eq 8 ] \
-    || fail "the negative demonstrations must be exactly eight records, not $declared"
+  [ "$declared" -eq 13 ] \
+    || fail "the negative demonstrations must be exactly thirteen records, not $declared"
 
   local records=() line
   while IFS= read -r line; do
     records+=("$line")
   done < <(grep -E '^\{"mechanism_disabled":' "$path")
 
-  [ "${#records[@]}" -eq 8 ] \
+  [ "${#records[@]}" -eq 13 ] \
     || fail "only ${#records[@]} negative demonstration records are one-line JSON objects in the canonical key order"
 
   local index=0 record pair want_mechanism want_selector
@@ -1788,16 +2275,12 @@ validate_negative_demonstrations() {
     [ "$selector" = "$want_selector" ] \
       || fail "the $mechanism demonstration names $selector, not its locked $want_selector"
 
-    require_safe_tracked_path "$selector" "the $mechanism demonstration"
-    require_safe_tracked_path "$artifact" "the $mechanism demonstration"
-
     git merge-base --is-ancestor "$candidate" HEAD 2>/dev/null \
       || fail "the $mechanism demonstration names candidate $candidate, which is not reachable from this revision"
-
-    actual="$(file_digest "$artifact")" \
-      || fail "the $mechanism demonstration artifact $artifact could not be digested"
-    [ "$actual" = "$restored" ] \
-      || fail "the $mechanism demonstration restored $artifact to $restored, which is not this revision's ${actual}"
+    require_safe_tracked_path_at "$candidate" "$selector" "the $mechanism demonstration"
+    require_safe_tracked_path_at "$candidate" "$artifact" "the $mechanism demonstration"
+    require_candidate_digest \
+      "$candidate" "$artifact" "$restored" "the $mechanism demonstration"
 
     index=$(( index + 1 ))
   done
@@ -1973,6 +2456,535 @@ matrix_field() {
   printf '%s' "${rest%% *}"
 }
 
+m2_evidence_lifecycle_program() {
+  cat <<'LOOPEX_M2_EVIDENCE_LIFECYCLE'
+defmodule Loopex.M2EvidenceLifecycle do
+  @evidence_paths [
+    "docs/evidence/M2-coding-demonstration.md",
+    "docs/evidence/M2-negative-demonstrations.md",
+    "docs/evidence/M2-real-call-attestations.md",
+    "docs/evidence/M2-toolchain-matrix.md"
+  ]
+  @plan "docs/plans/M2.md"
+  @plans_index "docs/plans/README.md"
+  @root_readme "README.md"
+  @dispositions "docs/developer/agent-context-map.md"
+  @empty_closure "| Closure | — | — | — |"
+  @closure_paths Enum.sort([@plan, @plans_index, @root_readme, @dispositions])
+
+  def main do
+    candidate = System.get_env("LOOPEX_M2_SOURCE_CANDIDATE", "")
+
+    case validate(candidate) do
+      :ok -> IO.puts("M2 evidence lifecycle OK")
+      {:error, reason} ->
+        IO.puts(:stderr, "M2 evidence lifecycle refused: #{reason}")
+        System.halt(1)
+    end
+  rescue
+    _exception ->
+      IO.puts(:stderr, "M2 evidence lifecycle refused: evidence history is unavailable")
+      System.halt(1)
+  catch
+    _kind, _reason ->
+      IO.puts(:stderr, "M2 evidence lifecycle refused: evidence history is unavailable")
+      System.halt(1)
+  end
+
+  def validate(candidate) do
+    with :ok <- exact_candidate(candidate),
+         :ok <- complete_history(),
+         :ok <- commit_exists(candidate),
+         true <- ancestor?(candidate, "HEAD") || {:error, "source candidate is not reachable"},
+         {:ok, revisions} <- revisions(),
+         {:ok, evidence} <- unique_evidence(candidate, revisions),
+         :ok <- evidence_blobs_retained(evidence, "HEAD"),
+         {:ok, evidence_plan} <- revision_file(evidence, @plan),
+         {:ok, @empty_closure} <- closure_row(evidence_plan),
+         :ok <- state_is(evidence, "In review"),
+         {:ok, head_plan} <- revision_file("HEAD", @plan),
+         {:ok, current_closure} <- closure_row(head_plan),
+         :ok <- validate_current_state(candidate, evidence, current_closure, revisions) do
+      :ok
+    else
+      false -> {:error, "evidence history is unavailable"}
+      {:ok, row} -> {:error, "evidence child already carries Closure: #{row}"}
+      {:error, _reason} = error -> error
+      _other -> {:error, "evidence history is unavailable"}
+    end
+  end
+
+  defp exact_candidate(candidate) do
+    if Regex.match?(~r/^[0-9a-f]{40}$/, candidate),
+      do: :ok,
+      else: {:error, "matrix names no exact source candidate"}
+  end
+
+  defp complete_history do
+    with {:ok, shallow} <- git(["rev-parse", "--is-shallow-repository"]),
+         true <- String.trim(shallow) == "false" || {:error, "history is shallow"},
+         {:ok, replacements} <- git(["replace", "-l"]),
+         true <- String.trim(replacements) == "" || {:error, "history uses replacement objects"},
+         {:ok, grafts_path} <- git(["rev-parse", "--git-path", "info/grafts"]),
+         :ok <- empty_or_absent(String.trim(grafts_path)) do
+      :ok
+    else
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp empty_or_absent(path) do
+    case File.read(path) do
+      {:ok, ""} -> :ok
+      {:ok, _bytes} -> {:error, "history uses grafts"}
+      {:error, :enoent} -> :ok
+      {:error, _reason} -> {:error, "history completeness cannot be established"}
+    end
+  end
+
+  defp commit_exists(revision) do
+    case git(["cat-file", "-e", "#{revision}^{commit}"]) do
+      {:ok, _output} -> :ok
+      {:error, _output} -> {:error, "source candidate is not a commit"}
+    end
+  end
+
+  defp revisions do
+    with {:ok, output} <- git(["rev-list", "--parents", "HEAD"]) do
+      parsed =
+        output
+        |> String.split("\n", trim: true)
+        |> Map.new(fn line ->
+          [revision | parents] = String.split(line, " ", trim: true)
+          {revision, parents}
+        end)
+
+      {:ok, parsed}
+    end
+  end
+
+  defp unique_evidence(candidate, revisions) do
+    candidates =
+      revisions
+      |> Enum.filter(fn {_revision, parents} -> parents == [candidate] end)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.filter(&evidence_edge?(candidate, &1))
+
+    case candidates do
+      [evidence] -> {:ok, evidence}
+      [] -> {:error, "source candidate has no direct evidence-only child"}
+      _many -> {:error, "source candidate has more than one direct evidence-only child"}
+    end
+  end
+
+  defp evidence_edge?(candidate, revision) do
+    with {:ok, paths} <- changed_paths(candidate, revision),
+         true <- paths == Enum.sort(@evidence_paths),
+         true <- Enum.all?(@evidence_paths, &ordinary_blob?(revision, &1)) do
+      true
+    else
+      _other -> false
+    end
+  end
+
+  defp ordinary_blob?(revision, path) do
+    case git(["ls-tree", revision, "--", path]) do
+      {:ok, output} -> Regex.match?(~r/^100644 blob [0-9a-f]{40,64}\t/, output)
+      {:error, _output} -> false
+    end
+  end
+
+  defp evidence_blobs_retained(evidence, revision) do
+    case Enum.find(@evidence_paths, fn path -> blob_id(evidence, path) != blob_id(revision, path) end) do
+      nil -> :ok
+      path -> {:error, "retained evidence changed after the evidence commit: #{path}"}
+    end
+  end
+
+  defp validate_current_state(_candidate, evidence, @empty_closure, _revisions) do
+    with {:ok, head} <- git(["rev-parse", "HEAD"]),
+         true <- String.trim(head) == evidence || {:error, "an open milestone has commits after its evidence child"},
+         :ok <- state_is("HEAD", "In review") do
+      :ok
+    else
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp validate_current_state(_candidate, evidence, _closure, revisions) do
+    with {:ok, descendants} <- descendant_records(evidence, revisions),
+         {:ok, transition} <- unique_closure_transition(evidence, descendants),
+         :ok <- transition_shape(evidence, transition),
+         {:ok, closure} <- closure_record(transition),
+         :ok <- closure_binds_evidence(closure, evidence),
+         :ok <- closure_matches_acceptance(closure, evidence),
+         :ok <- plan_changes_only_closure(evidence, transition),
+         :ok <- derived_status_only(evidence, transition),
+         {:ok, disposition_record} <- new_disposition(evidence, transition, closure.target),
+         :ok <- state_is(transition, "Closed"),
+         :ok <- descendants_follow_transition(evidence, transition, descendants),
+         :ok <- retain_closure(evidence, descendants, transition, closure.row, disposition_record) do
+      :ok
+    end
+  end
+
+  defp descendant_records(evidence, revisions) do
+    records =
+      revisions
+      |> Enum.filter(fn {revision, _parents} -> ancestor?(evidence, revision) end)
+      |> Map.new(fn {revision, parents} ->
+        plan = required_revision_file!(revision, @plan)
+        {revision, %{parents: parents, closure: required_closure_row!(plan)}}
+      end)
+
+    {:ok, records}
+  rescue
+    _exception -> {:error, "a descendant has no readable M2 Closure record"}
+  end
+
+  defp unique_closure_transition(evidence, descendants) do
+    first =
+      descendants
+      |> Enum.filter(fn {revision, %{parents: parents, closure: closure}} ->
+        revision != evidence and closure != @empty_closure and
+          Enum.all?(Enum.filter(parents, &Map.has_key?(descendants, &1)), fn parent ->
+            descendants[parent].closure == @empty_closure
+          end)
+      end)
+      |> Enum.map(&elem(&1, 0))
+
+    case first do
+      [transition] -> {:ok, transition}
+      [] -> {:error, "no unique first Closure transition is reachable"}
+      _many -> {:error, "more than one first Closure transition is reachable"}
+    end
+  end
+
+  defp transition_shape(evidence, transition) do
+    with {:ok, parents} <- parents_of(transition),
+         true <- parents == [evidence] || {:error, "Closure transition is not the direct one-parent child of evidence"},
+         {:ok, paths} <- changed_paths(evidence, transition),
+         true <- paths == @closure_paths || {:error, "Closure transition changes bytes outside the four allowed paths"} do
+      :ok
+    else
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp closure_record(revision) do
+    with {:ok, plan} <- revision_file(revision, @plan),
+         {:ok, row} <- closure_row(plan),
+         [_, authority, target, candidate, concept, technical, gate] <-
+           Regex.run(
+             ~r/^\| Closure \| ([^|]+?) \| \[disposition\]\(([^)]+)\) \| candidate `([0-9a-f]{40})`; concept `(sha256:[0-9a-f]{64})`; technical `(sha256:[0-9a-f]{64})`; gate `(sha256:[0-9a-f]{64})` \|$/,
+             row
+           ),
+         true <- String.trim(authority) not in ["", "—"] || {:error, "Closure authority is empty"} do
+      {:ok,
+       %{
+         row: row,
+         target: target,
+         candidate: candidate,
+         concept: concept,
+         technical: technical,
+         gate: gate
+       }}
+    else
+      {:error, _reason} = error -> error
+      _other -> {:error, "Closure row is malformed"}
+    end
+  end
+
+  defp closure_binds_evidence(%{candidate: evidence}, evidence), do: :ok
+  defp closure_binds_evidence(_closure, _evidence), do: {:error, "Closure does not bind the evidence commit"}
+
+  defp closure_matches_acceptance(closure, evidence) do
+    with {:ok, plan} <- revision_file(evidence, @plan),
+         {:ok, acceptance} <- acceptance_record(plan),
+         true <-
+           {closure.concept, closure.technical, closure.gate} ==
+             {acceptance.concept, acceptance.technical, acceptance.gate} ||
+             {:error, "Closure does not bind the accepted envelope and gate digests"} do
+      :ok
+    else
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp acceptance_record(plan) do
+    with {:ok, row} <- unique_row(plan, "Acceptance"),
+         [_, concept, technical, gate] <-
+           Regex.run(
+             ~r/^\| Acceptance \| [^|]+ \| \[disposition\]\([^)]+\) \| candidate `[0-9a-f]{40}`; concept `(sha256:[0-9a-f]{64})`; technical `(sha256:[0-9a-f]{64})`; gate `(sha256:[0-9a-f]{64})` \|$/,
+             row
+           ) do
+      {:ok, %{concept: concept, technical: technical, gate: gate}}
+    else
+      _other -> {:error, "Acceptance row at evidence is malformed"}
+    end
+  end
+
+  defp plan_changes_only_closure(evidence, transition) do
+    with {:ok, before} <- revision_file(evidence, @plan),
+         {:ok, after_bytes} <- revision_file(transition, @plan),
+         {:ok, before_row} <- closure_row(before),
+         {:ok, after_row} <- closure_row(after_bytes),
+         true <- String.replace(after_bytes, after_row, before_row, global: false) == before ||
+                   {:error, "M2 plan changes more than the Closure row"} do
+      :ok
+    else
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp derived_status_only(evidence, transition) do
+    with {:ok, plans_before} <- revision_file(evidence, @plans_index),
+         {:ok, plans_after} <- revision_file(transition, @plans_index),
+         :ok <- only_marker_changes(plans_before, plans_after, [
+           {"<!-- loopex:current-status:start -->", "<!-- loopex:current-status:end -->"},
+           {"<!-- loopex:milestone-register:start -->", "<!-- loopex:milestone-register:end -->"}
+         ]),
+         {:ok, root_before} <- revision_file(evidence, @root_readme),
+         {:ok, root_after} <- revision_file(transition, @root_readme),
+         :ok <- only_marker_changes(root_before, root_after, [
+           {"<!-- loopex:readme-status:start -->", "<!-- loopex:readme-status:end -->"}
+         ]) do
+      :ok
+    end
+  end
+
+  defp only_marker_changes(before, after_bytes, markers) do
+    with {:ok, before_parts} <- marker_parts(before, markers),
+         {:ok, after_parts} <- marker_parts(after_bytes, markers),
+         true <- Enum.all?(markers, fn marker -> before_parts[marker].body != after_parts[marker].body end) ||
+                   {:error, "a required derived status marker did not change"},
+         true <- normalize_markers(before, markers) == normalize_markers(after_bytes, markers) ||
+                   {:error, "a lifecycle summary changes outside its derived markers"} do
+      :ok
+    else
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp marker_parts(bytes, markers) do
+    Enum.reduce_while(markers, {:ok, %{}}, fn {start_marker, end_marker} = marker, {:ok, found} ->
+      pattern = ~r/#{Regex.escape(start_marker)}(.*?)#{Regex.escape(end_marker)}/s
+
+      case Regex.scan(pattern, bytes) do
+        [[whole, body]] -> {:cont, {:ok, Map.put(found, marker, %{whole: whole, body: body})}}
+        _other -> {:halt, {:error, "a derived status marker is absent or duplicated"}}
+      end
+    end)
+  end
+
+  defp normalize_markers(bytes, markers) do
+    Enum.reduce(markers, bytes, fn {start_marker, end_marker}, normalized ->
+      Regex.replace(
+        ~r/#{Regex.escape(start_marker)}.*?#{Regex.escape(end_marker)}/s,
+        normalized,
+        start_marker <> "\n<derived-status>\n" <> end_marker
+      )
+    end)
+  end
+
+  defp new_disposition(evidence, transition, target) do
+    with [_, anchor] <- Regex.run(~r/^\.\.\/developer\/agent-context-map\.md#([a-z0-9][a-z0-9-]*)$/, target),
+         {:ok, before} <- revision_file(evidence, @dispositions),
+         {:ok, after_bytes} <- revision_file(transition, @dispositions),
+         marker = ~s(<a id="#{anchor}"></a>),
+         true <- count(before, marker) == 0 || {:error, "Closure disposition anchor already existed at evidence"},
+         true <- count(after_bytes, marker) == 1 || {:error, "Closure disposition anchor is absent or duplicated"},
+         true <- String.starts_with?(after_bytes, before) || {:error, "Closure transition rewrites prior disposition bytes"},
+         appended = binary_part(after_bytes, byte_size(before), byte_size(after_bytes) - byte_size(before)),
+         {:ok, block} <- disposition_block(after_bytes, marker),
+         true <- appended == "\n" <> block || {:error, "Closure transition adds bytes outside its new disposition record"},
+         true <- count(appended, "<a id=") == 1 || {:error, "Closure transition adds more than one disposition anchor"},
+         true <- complete_disposition_block?(block, marker) || {:error, "Closure disposition record is incomplete"} do
+      {:ok, %{marker: marker, block: block}}
+    else
+      {:error, _reason} = error -> error
+      _other -> {:error, "Closure disposition target is not the durable context map"}
+    end
+  end
+
+  defp complete_disposition_block?(block, marker) do
+    Regex.match?(
+      ~r/^#{Regex.escape(marker)}\n(?:##|###|####|#####|######) [^\n]+\n\n\S/s,
+      block
+    ) and String.ends_with?(block, "\n")
+  end
+
+  defp disposition_block(bytes, marker) do
+    case :binary.match(bytes, marker) do
+      {start, _length} ->
+        tail = binary_part(bytes, start, byte_size(bytes) - start)
+
+        finish =
+          case :binary.match(tail, "\n<a id=", scope: {byte_size(marker), byte_size(tail) - byte_size(marker)}) do
+            {index, _length} -> index
+            :nomatch -> byte_size(tail)
+          end
+
+        {:ok, binary_part(tail, 0, finish)}
+
+      :nomatch ->
+        {:error, "Closure disposition block is absent"}
+    end
+  end
+
+  defp descendants_follow_transition(evidence, transition, descendants) do
+    case Enum.find(Map.keys(descendants), fn revision ->
+           revision != evidence and not ancestor?(transition, revision)
+         end) do
+      nil -> :ok
+      revision -> {:error, "an evidence descendant bypasses the Closure transition: #{revision}"}
+    end
+  end
+
+  defp retain_closure(evidence, descendants, transition, closure_row, disposition_record) do
+    Enum.reduce_while(descendants, :ok, fn {revision, %{closure: row}}, :ok ->
+      cond do
+        not ancestor?(transition, revision) ->
+          {:cont, :ok}
+
+        row != closure_row ->
+          {:halt, {:error, "Closure row changed after the transition at #{revision}"}}
+
+        true ->
+          case evidence_blobs_retained(evidence, revision) do
+            :ok ->
+              with {:ok, bytes} <- revision_file(revision, @dispositions),
+                   {:ok, block} <- exact_disposition_block(bytes, disposition_record),
+                   true <- block == disposition_record.block ||
+                             {:error, "Closure disposition changed after the transition at #{revision}"} do
+                {:cont, :ok}
+              else
+                {:error, _reason} = error -> {:halt, error}
+              end
+
+            {:error, _reason} = error ->
+              {:halt, error}
+          end
+      end
+    end)
+  end
+
+  defp exact_disposition_block(bytes, %{marker: marker}) do
+    with [_match] <- :binary.matches(bytes, marker),
+         {:ok, block} <- disposition_block(bytes, marker) do
+      {:ok, block}
+    else
+      _other -> {:error, "Closure disposition anchor is absent or duplicated"}
+    end
+  end
+
+  defp state_is(revision, expected) do
+    with {:ok, index} <- revision_file(revision, @plans_index),
+         [_, state] <- Regex.run(~r/^\| M2 \| ([^|]+?) \|/m, index),
+         true <- String.trim(state) == expected || {:error, "M2 is not #{expected} at #{revision}"} do
+      :ok
+    else
+      {:error, _reason} = error -> error
+      _other -> {:error, "M2 register row is absent at #{revision}"}
+    end
+  end
+
+  defp parents_of(revision) do
+    with {:ok, line} <- git(["rev-list", "--parents", "-n", "1", revision]),
+         [_revision | parents] <- String.split(String.trim(line), " ", trim: true) do
+      {:ok, parents}
+    else
+      _other -> {:error, "revision parents are unavailable"}
+    end
+  end
+
+  defp changed_paths(left, right) do
+    with {:ok, output} <- git(["diff", "--name-only", "--no-renames", left, right]) do
+      {:ok, output |> String.split("\n", trim: true) |> Enum.sort()}
+    end
+  end
+
+  defp blob_id(revision, path) do
+    case git(["rev-parse", "#{revision}:#{path}"]) do
+      {:ok, output} -> String.trim(output)
+      {:error, _output} -> :unavailable
+    end
+  end
+
+  defp revision_file(revision, path) do
+    case git(["show", "#{revision}:#{path}"]) do
+      {:ok, bytes} -> {:ok, bytes}
+      {:error, _output} -> {:error, "#{path} is unavailable at #{revision}"}
+    end
+  end
+
+  defp required_revision_file!(revision, path) do
+    case revision_file(revision, path) do
+      {:ok, bytes} -> bytes
+      {:error, reason} -> raise reason
+    end
+  end
+
+  defp closure_row(plan), do: unique_row(plan, "Closure")
+
+  defp required_closure_row!(plan) do
+    case closure_row(plan) do
+      {:ok, row} -> row
+      {:error, reason} -> raise reason
+    end
+  end
+
+  defp unique_row(plan, name) do
+    rows = Regex.scan(~r/^\| #{Regex.escape(name)} \|.*$/m, plan) |> Enum.map(&hd/1)
+
+    case rows do
+      [row] -> {:ok, row}
+      _other -> {:error, "M2 plan carries no unique #{name} row"}
+    end
+  end
+
+  defp count(bytes, needle), do: length(:binary.matches(bytes, needle))
+
+  defp ancestor?(left, right) do
+    match?({:ok, _output}, git(["merge-base", "--is-ancestor", left, right]))
+  end
+
+  defp git(args) do
+    case System.cmd("git", args, stderr_to_stdout: true) do
+      {output, 0} -> {:ok, output}
+      {output, _status} -> {:error, String.trim(output)}
+    end
+  end
+end
+
+Loopex.M2EvidenceLifecycle.main()
+LOOPEX_M2_EVIDENCE_LIFECYCLE
+}
+
+validate_evidence_lifecycle() {
+  local candidate="$1" output status
+  output="$(
+    LOOPEX_M2_SOURCE_CANDIDATE="$candidate" \
+      elixir -e "$(m2_evidence_lifecycle_program)" 2>&1
+  )"
+  status=$?
+
+  [ "$status" -eq 0 ] || fail "$output"
+  [ "$output" = "M2 evidence lifecycle OK" ] \
+    || fail "the evidence lifecycle validator returned an unrecognised result"
+}
+
+matrix_candidate_digest_artifacts() {
+  printf '%s\n' \
+    "gate_sha256|$GATE_DOCUMENT" \
+    "runner_sha256|scripts/check-m2-gate.sh" \
+    "exunit_runner_sha256|scripts/m1-exunit-runner.exs" \
+    "exunit_corpus_sha256|apps/loopex/test/m1_exunit_runner_test.exs" \
+    "gate_corpus_sha256|apps/loopex/test/gate_isolation_test.exs" \
+    "composition_corpus_sha256|apps/loopex_composition/test/kernel_composition_test.exs" \
+    "tool_versions_sha256|.tool-versions"
+}
+
 validate_matrix() {
   local path=docs/evidence/M2-toolchain-matrix.md
   [ -f "$path" ] || fail "the retained matrix does not exist"
@@ -1999,17 +3011,12 @@ validate_matrix() {
     || fail "the retained matrix names a command other than the ordinary gate"
 
   local key file
-  for key in \
-    "gate_sha256:$GATE_DOCUMENT" \
-    "runner_sha256:scripts/check-m2-gate.sh" \
-    "exunit_runner_sha256:scripts/m1-exunit-runner.exs" \
-    "tool_versions_sha256:.tool-versions"; do
-    file="${key#*:}"
-    expect="$(file_digest "$file")" \
-      || fail "$file could not be digested for the retained matrix"
-    [ "$(matrix_field "$header" "${key%%:*}")" = "$expect" ] \
-      || fail "the retained matrix records a ${key%%:*} that is not this revision's $file"
-  done
+  while IFS='|' read -r key file; do
+    expect="$(matrix_field "$header" "$key")" \
+      || fail "the retained matrix records no $key"
+    require_candidate_digest \
+      "$candidate" "$file" "$expect" "the retained matrix $key"
+  done < <(matrix_candidate_digest_artifacts)
 
   local lane line reference_identity="" identity field
   for lane in darwin-floor darwin-current linux-current; do
@@ -2056,8 +3063,6 @@ validate_matrix() {
   done
 
   local m0_digest
-  m0_digest="$(file_digest docs/plans/M0-gate.md)" \
-    || fail "the closed M0 gate document could not be digested"
   for lane in floor current; do
     count="$(grep -cE "^m0 lane=$lane " "$path")"
     [ "$count" -eq 1 ] \
@@ -2065,8 +3070,11 @@ validate_matrix() {
     line="$(grep -E "^m0 lane=$lane " "$path" | head -1)"
     [ "$(matrix_field "$line" candidate)" = "$candidate" ] \
       || fail "the M0 $lane re-proof names a different candidate than the matrix row"
-    [ "$(matrix_field "$line" gate_sha256)" = "$m0_digest" ] \
-      || fail "the M0 $lane re-proof names a gate digest that is not this revision's M0 gate"
+    m0_digest="$(matrix_field "$line" gate_sha256)" \
+      || fail "the M0 $lane re-proof names no gate digest"
+    require_candidate_digest \
+      "$candidate" docs/plans/M0-gate.md "$m0_digest" \
+      "the M0 $lane re-proof"
     [ "$(matrix_field "$line" command)" = "bash:scripts/check-m0-gate.sh" ] \
       || fail "the M0 $lane re-proof names a command other than the M0 gate"
     [ "$(matrix_field "$line" verdict)" = "GREEN" ] \
@@ -2079,12 +3087,32 @@ validate_matrix() {
   [ "$(matrix_field "$(grep -E '^m0 lane=current ' "$path" | head -1)" elixir)" = "1.20.3" ] \
     || fail "the M0 current re-proof was not recorded on Elixir 1.20.3"
 
-  local changed
-  changed="$(git diff --name-only "$candidate" HEAD | LC_ALL=C sort | tr '\n' ' ')"
-  case "$changed" in
-    "" | "docs/evidence/M2-coding-demonstration.md docs/evidence/M2-negative-demonstrations.md docs/evidence/M2-real-call-attestations.md docs/evidence/M2-toolchain-matrix.md ") : ;;
-    *) fail "this revision changes product bytes relative to the captured candidate: $changed" ;;
-  esac
+  count="$(grep -cE '^m1 candidate=' "$path")"
+  [ "$count" -eq 1 ] \
+    || fail "the retained matrix must carry exactly one M1 re-proof, not $count"
+  line="$(grep -E '^m1 candidate=' "$path" | head -1)"
+  [ "$(matrix_field "$line" candidate)" = "$candidate" ] \
+    || fail "the M1 re-proof names a different candidate than the matrix row"
+  [ "$(matrix_field "$line" command)" = "bash-p:scripts/check-m1-gate.sh" ] \
+    || fail "the M1 re-proof names a command other than the privileged M1 gate"
+  [ "$(matrix_field "$line" elixir)" = "1.20.3" ] \
+    || fail "the M1 re-proof was not recorded on Elixir 1.20.3"
+  [ "$(matrix_field "$line" otp)" = "29.0.5" ] \
+    || fail "the M1 re-proof was not recorded on OTP 29.0.5"
+  [[ "$(matrix_field "$line" seed)" =~ ^[0-9]{1,6}$ ]] \
+    || fail "the M1 re-proof records no canonical seed"
+  [[ "$(matrix_field "$line" executed)" =~ ^[1-9][0-9]*$ ]] \
+    || fail "the M1 re-proof executed no protected cases"
+  [ "$(matrix_field "$line" verdict)" = "GREEN" ] \
+    || fail "the M1 re-proof is not GREEN"
+  [ "$(matrix_field "$line" exit)" = "0" ] \
+    || fail "the M1 re-proof did not exit zero"
+  expect="$(matrix_field "$line" gate_sha256)" \
+    || fail "the M1 re-proof names no gate digest"
+  require_candidate_digest \
+    "$candidate" docs/plans/M1-gate.md "$expect" "the M1 re-proof"
+
+  validate_evidence_lifecycle "$candidate"
 }
 
 validate_negative_demonstrations

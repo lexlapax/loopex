@@ -64,17 +64,28 @@ the exact document set its milestone must update.
   scope and not a sandbox: it matches a command's leading word, a compound
   command reaches past it, and it says that in its own notice.
 - An `ArtifactStore` port and local adapter. Tool output beyond a declared bound
-  spills rather than poisoning the conversation: the durable event carries the
-  content digest, media type, size, role, and an opaque reference, the
-  model-facing result stays bounded and says what was truncated, and the
-  operator reads the whole thing back through the public facade.
-- Cancellation that reports what happened. An interrupt reaches the run through
-  the public facade, and `cancelled` commits only where every owned operation
-  reached a validated terminal fact and every owned process tree was confirmed
-  cleaned; anything less ends `outcome_unknown` carrying its reconciliation
-  reference. A terminal Ctrl-C is not one of the signals the emulator will hand
-  to a program, so it ends the process without cleanup and `loopex cancel`
-  reconciles the session it leaves behind.
+  spills rather than poisoning the conversation: Core derives an immutable
+  object identity from the exact bytes and a separate immutable use identity
+  from the closed retention provenance, the adapter durably publishes object
+  then use before reporting success, and the compact eight-member reference
+  carries both identities without exposing that private provenance. The
+  model-facing result stays bounded and says what was truncated; the operator
+  retrieves byte-exact content by opaque object locator through validated
+  `stat` and `fetch`, while authorized runtime code resolves the use through
+  `describe`.
+- Cancellation that reports what happened. One positive cleanup period is
+  committed with the session and drives executor observation, receipt
+  retention, terminal reserve, command liveness, and prepared recovery without
+  substituting a later process default. An interrupt uses the public facade and
+  a prepared attachment whose one-use activation capability remains paused
+  until configuration is reconciled. `cancelled` commits only where every owned
+  operation reached a validated terminal fact and every captured executor
+  process group associated with those operations was confirmed quiescent;
+  anything less ends `outcome_unknown` carrying its
+  reconciliation reference. The local executor admits effects under one
+  prepared, fenced ledger generation and quarantines unresolved authority
+  across restart; its trusted-root and host-rollback limits are recorded rather
+  than presented as exactly-once behavior outside that boundary.
 - A session directory. A fresh operating-system process lists the sessions in a
   state root resolved from `LOOPEX_HOME`, resumes one under the durable runtime
   placement identity that created it, and refuses a resume through a different
@@ -82,8 +93,18 @@ the exact document set its milestone must update.
 - Behaviour-shaping project resources enter the model's context only by an
   operator's explicit decision, and a run without one fails closed toward
   withholding the content rather than toward refusing the runtime.
+- Context admission measures the exact final provider-visible messages and
+  active model-facing tool projections separately from the exact normalized
+  Store record. The direct runtime host commits a positive context-token budget;
+  the reference composition and command resolve their documented default, and
+  recovery reuses retained truth rather than the current process default.
+- Provider attempts consume one durable permit before dispatch. Every admitted
+  terminal answer settles that permit with bounded provider-neutral identity,
+  usage, and classification; incomplete usage charges the committed remaining
+  allowance, post-effect uncertainty stops the run, and recovery never invents
+  a second billable attempt or a clean answer from silence.
 - `loopex_composition`, a shipped reference stack an embedder depends on rather
-  than copies: one module under an eighty-effective-line ceiling that starts the
+  than copies: one module under a one-hundred-eighty-effective-line ceiling that starts the
   application tree and a runtime, names the concrete Store, Model, Executor, and
   ArtifactStore, resolves its state root explicitly, and refuses to start unless
   the host supplies the policy that governs the run.

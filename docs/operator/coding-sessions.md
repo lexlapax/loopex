@@ -52,14 +52,21 @@ anywhere on your `PATH`. It reads the provider credential from
 named the authority that governs it; see
 [Tools and policy](tools-and-policy.md#operator-tools-policy).
 
-Three options decide where the session's data and work live and how long a
-stopped run may spend stopping:
+Four options decide where the session's data and work live, how much
+provider-visible context one request may admit under the repository estimator,
+and how long a stopped run may spend stopping:
 
 | Option | Meaning | Default |
 | --- | --- | --- |
 | `--state-root` | Where durable session records and artifacts are kept | resolved from `LOOPEX_HOME` |
 | `--workspace` | The directory the tools act on | the current directory |
+| `--context-token-budget` | Maximum estimated tokens in one exact provider-visible request | 8192 |
 | `--cleanup-grace-ms` | How long stopping a running tool may take, in milliseconds | 5000 |
+
+The context value is admission policy, not the provider model's published
+capacity and not a billing estimate. It is committed when a new prompt starts a
+run and reused by promotion and recovery; a current default never replaces an
+active run's retained value.
 
 The answer reaches standard output as the model produces it, in whatever
 granularity the model adapter delivers. The shipped adapter streams, so an
@@ -101,7 +108,8 @@ Stopping reports what happened. It does not promise that what happened was
 clean.
 
 A run ends `cancelled` **only** where every owned operation reached a validated
-terminal fact and every owned process tree was confirmed cleaned. Anything less
+terminal fact and every captured executor process group associated with those
+operations was confirmed quiescent. Anything less
 ends `outcome_unknown` and carries a reconciliation reference, which the
 terminal prints:
 
@@ -222,19 +230,22 @@ Developer companion:
 
 ```text
 loopex run --policy <name> [--state-root DIR] [--workspace DIR]
-           [--cleanup-grace-ms MS] "<prompt>"
+           [--cleanup-grace-ms MS] [--context-token-budget TOKENS] "<prompt>"
 loopex run --policy <name> --steer "<text>" "<prompt>"
 loopex run --policy <name> --follow-up "<text>" "<prompt>"
 loopex sessions [--state-root DIR]
 loopex resume <session> --policy <name> [--state-root DIR]
+              [--cleanup-grace-ms MS] [--context-token-budget TOKENS]
 loopex cancel <session> [--policy <name>] [--state-root DIR]
+              [--cleanup-grace-ms MS] [--context-token-budget TOKENS]
 loopex artifact <reference> [--state-root DIR]
 ```
 
 Recognised flags are exactly `--policy`, `--state-root`, `--workspace`,
-`--steer`, `--follow-up`, and `--cleanup-grace-ms`. Any other flag is refused by
-name, and `--cleanup-grace-ms` is refused before a runtime starts unless it is a
-positive whole number of milliseconds. The parser
+`--steer`, `--follow-up`, `--cleanup-grace-ms`, and
+`--context-token-budget`. Any other flag is refused by name, and both numeric
+options are refused before a runtime starts unless they are positive whole
+numbers within the unsigned 64-bit domain. The parser
 accepts `--flag value`, `--flag=value`, and bare positional words, and uses the
 standard library only: a dependency here would land in an operator's install for
 the sake of flag parsing.
@@ -291,17 +302,25 @@ loopex: `loopex resume` continues reading from the durable record
 
 ### Interrupt Handling in Detail
 
-`install/1` in `LoopexCli.Interrupt` sets `SIGTERM`, `SIGHUP`, and `SIGQUIT` to
-`handle`, removes the runtime's own `:erl_signal_handler`, and installs the
-command's handler on `:erl_signal_server`.
+`install/1` in `LoopexCli.Interrupt` is the compatibility entry. Production
+uses `install(attachment, cleanup_ms)` for an ordinary active run and
+`install_prepared(attachment, cleanup_ms, activation)` for recovered work that
+must remain paused until the interrupt owner decides whether to activate it.
+`abandon_resume(attachment, activation)` consumes that exact prepared pair
+without scheduling recovered work. Installation sets `SIGTERM`, `SIGHUP`, and
+`SIGQUIT` to `handle`, removes the runtime's own `:erl_signal_handler`, and
+installs the command's handler on `:erl_signal_server`.
 
 Removing the default handler is necessary rather than incidental: it stops the
 emulator on `SIGTERM` immediately, which would race the abort the command
 submits and end the process before the run could commit what it observed. Owning
-termination means owning the case where cleanup never finishes, so a backstop
-halts the process with status `130` after ten seconds — while watching the
-terminal that installed it, so a terminal that already reported and exited is
-never halted after the fact.
+termination means owning the case where cleanup never finishes. One checked
+formula derives the command backstop from the session's committed cleanup
+period, receipt-retention share, and terminal reserve. The command arms it once,
+extends it once after durable abort admission, and never treats expiry as a
+cleanup verdict. If it expires, it halts the process with status `130` while
+watching the terminal that installed it, so a terminal that already reported
+and exited is never halted after the fact.
 
 `SIGINT` is absent because `os:set_signal/2` refuses the name: the emulator
 reserves it for the break handler. No amount of handler installation changes

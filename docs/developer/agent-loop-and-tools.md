@@ -14,8 +14,9 @@ Three declared bounds stop a run the model will not stop itself: a maximum
 number of model turns, a cumulative token budget, and a wall-clock deadline.
 Reaching one is not a failure. A run ends `completed` when the model stops
 asking for tools, `bound_reached` when a declared bound decides, `cancelled`
-when an abort proved every owned operation terminal and every owned process tree
-cleaned, and `outcome_unknown` when it could not. Nothing infers an outcome from
+when an abort proved every owned operation terminal and every captured executor
+process group associated with those operations quiescent, and `outcome_unknown`
+when it could not. Nothing infers an outcome from
 silence.
 
 Authority stays with the host. Every executor-backed call consults
@@ -243,11 +244,31 @@ rule, and the two were deliberately separated:
 | --- | --- | --- |
 | Digest name | `staged_request_digest` | `canonical_request_digest` |
 | Covers attempt identity | no | yes, `operation_id` and `attempt` are job fields |
-| A retry | redispatches the same committed bytes under a newly recorded attempt and reuses the digest | canonicalizes its own attempt and therefore computes a new digest |
-| Attempt limit in M2 | two model attempts per turn | governed by the effect's idempotency class and reconciliation |
+| A retry | opens a new durable attempt over the same staged bytes and digest only after exact pretransport refusal | canonicalizes its own attempt and therefore computes a new digest |
+| Attempt limit in M2 | attempt one, then attempt two only after attempt one settles `not_dispatched` | governed by the effect's idempotency class and reconciliation |
 
 One identifier carrying both rules carried two opposite retry meanings, which is
 why the model side was renamed and the bytes kept their name.
+
+The staged digest is identity, not dispatch authority. First staging commits
+`model_request_committed` and `model_attempt_opened_v1` together; a request row
+without its consecutive open row exposes no dispatchable request. After the
+open fact is durable, Runtime Control validates the complete current owner,
+operation, attempt, digest, journal position, worker, permit reference, and
+deadline, then sends one fresh permit directly to that worker. That send is the
+provider-dispatch linearization point. The spent attempt identity survives
+owner and worker replacement, so no timeout, lost reply, dead worker, or
+successor can mint a second call for it.
+
+A conforming adapter may report `not_dispatched` only before it invokes or
+hands bytes to provider transport. Every other error, timeout, process death,
+malformed answer, contradicted tag, and recovered open attempt is
+`dispatched_or_unknown`: it ends that model operation without creating an
+executor `outcome_unknown`, because a provider call is not a Loopex-controlled
+effect that reconciliation can complete safely. A successful reply carries a
+closed provider-neutral identity, normalized usage, tool calls, stream facts,
+response identifier, and the exact staged digest; raw provider structures and
+reasons cross no Core, Store, public, progress, diagnostic, or fixture plane.
 
 ### Declared Bounds and the Split Deadline
 
@@ -273,14 +294,18 @@ own is `completed` and stays `completed`. A non-integer `deadline` raises rather
 than returning `:continue`, because Elixir orders numbers below atoms and
 `now >= nil` would make an uncommitted deadline a silently unreachable bound.
 
-`charge/3` charges a turn against the budget and records where the number came
-from: reported provider usage where the reply carries it, a measured estimate of
-request plus reply bytes where usage is absent or partial, and — for a turn that
-produced no complete reply at all — the measured request bytes plus that turn's
-committed `max_tokens` in full. The over-charge is deliberate: otherwise
-aborting every turn would be the cheapest way to stay inside a budget. The
-estimator is `loopex.conservative_bytes.v1`, one token per three bytes rounded
-up, dependency-free and biased to over-count.
+Provider accounting settles atomically with the attempt result. A reply with a
+complete valid input/output pair charges those exact reported values. Missing,
+partial, malformed, negative, non-integer, or unsigned-64-overflow usage is
+normalized as unreported; every possibly dispatched attempt with unreported
+usage charges exactly the run's remaining cumulative allowance. Exact
+pretransport `not_dispatched` proof charges nothing. The settlement, accounting,
+conversation disposition, retry/continue/terminal choice, and paired run
+terminal where one is owed are one Store transaction, so commit-unknown replay
+cannot apply cost without outcome or make retry authority reappear. Estimated
+accounting that consumes the allowance is not itself a fabricated
+`bound_reached`; the ordinary next pre-staging bound check remains the only
+selector.
 
 The deadline is declared as a *duration* (`deadline_ms`) and becomes an absolute
 instant exactly once, when a run stages its first model request. A durable
@@ -416,38 +441,60 @@ with `:policy_unavailable`.
 Cancellation of a running job uses the required `Loopex.Executor.cancel/2`
 callback, which stops one named job and reports `{:ok, :cleaned}`,
 `{:ok, :unconfirmed}`, or `{:error, term()}`. Only the first answer confirms
-cleanup. The facade maps the other answers, a raise, exit, timeout, malformed
+cleanup. Production invokes it through configured `cancel/4`; one checked
+formula derives the observation window from the session's committed cleanup
+period. The facade maps every other answer, raise, exit, timeout, malformed
 answer, and the defensive case of a legacy module missing the required callback
-to unconfirmed cleanup. That widening of the executor boundary is recorded in
-[M2 recorded limitations](../evidence/M2-recorded-limitations.md).
+to unconfirmed cleanup. Retained `cancel/3` keeps its fixed defensive bound for
+direct compatibility callers and is never selected by production coordination.
 
 ### Tool Output, Spill, and Artifacts
 
-`Loopex.ArtifactStore` declares `put/3`, `fetch/2`, and `stat/2`. The `handle`
-is edge-private placement state that is never journaled, published, or
-transported; the `artifact_reference` — `digest`, `media_type`, `size`, `role`,
-`locator` — is the only thing that crosses a boundary, and `locator` is opaque
-to core. `roles/0` is the closed list `["tool_output"]`.
+`Loopex.ArtifactStore` is both the Core-owned caller facade and the adapter
+behaviour. Callers use `put/3`, `fetch/2`, `stat/2`, `describe/2`, and
+locator-only `retrieve/2`; after Core normalization an adapter implements
+`put/3`, `fetch/2`, `stat/2`, and `describe/2`. The `handle` is edge-private
+placement state that is never journaled, published, or transported.
+
+The compact `artifact_reference` has exactly eight members. Object identity is
+`digest`, `size`, and opaque `locator`; public interpretation is `media_type`
+and `role`; immutable use identity is `use_canonicalization_version`,
+`use_digest`, and the digest-derived `use_locator`. Exact session, run,
+operation, positive attempt, and tool-call provenance is retained only in the
+private use record and never crosses the public boundary. `roles/0` is the
+closed list `["tool_output"]`.
 `truncation_notice/3` is the bounded model-facing form that names how much was
 kept, how much there was, and the artifact that holds the rest, because a bound
 that silently discards the remainder is data loss dressed as a bound.
 
 `Loopex.Store.Local.Artifacts` implements the port over a resolved root. Object
 paths are derived from the content's own SHA-256 with a two-hex-character
-fan-out directory, so `put/3` is idempotent by construction; writes go to a
-temporary name in the same directory and are renamed into place; an object
-already present is read and compared before it counts as a hit; `fetch/2`
-verifies the digest and returns `:artifact_integrity_failed` rather than bytes
-that are not what was stored, and `:unknown_artifact` rather than an empty
-success. The declared ceiling is 64 MiB and an oversized `put/3` fails closed.
-Nothing is collected automatically.
+fan-out directory. It durably publishes the immutable object first, then the
+canonicalization-versioned immutable use sidecar. Concurrent identical
+publications converge; an existing different object or use fails unavailable;
+and success is returned only after both are durable. A failed use publication
+may leave an unreachable object orphan, never a reference whose required use is
+missing. `stat/2` returns only the object triple, `fetch/2` accepts that object
+truth and verifies exact bytes, and `describe/2` resolves the use locator. The
+declared object ceiling is 64 MiB, the exact canonical use ceiling is 131,072
+bytes, and nothing is collected automatically in M2.
+
+Core computes digest and size from the exact input, validates every adapter
+answer, reconstructs and checks the complete use, and immediately resolves the
+returned use locator before success. A substituted locator, digest, size, use,
+version, role, or media type; missing or corrupt sidecar; unknown object; or
+malformed legacy five-member reference fails closed. Public `retrieve/2` accepts
+only the opaque object locator, calls validated `stat` then `fetch`, and neither
+reconstructs nor accepts private provenance.
 
 `Loopex.Executor.Local` bounds its own output through `CodingTools.bound_output/2`
-and hands the whole of it to the store its host composed, so a truncated result
-carries `ArtifactStore.truncation_notice/3` naming the reference and the receipt
-carries that reference in `artifacts`. The reference reaches the public plane on
-`tool.finished`, the terminal prints the locator, and
-`loopex artifact <reference>` reads it back.
+and hands the whole of it to the Core facade its host composed, with the exact
+validated session, run, operation, attempt, and tool-call identities. A
+truncated result carries `ArtifactStore.truncation_notice/3` naming the compact
+reference, and the receipt carries that reference in `artifacts`. The reference
+reaches the public plane on `tool.finished`; the terminal prints it; and
+`loopex artifact <reference>` extracts its object locator and reads exact bytes
+back through the same Core facade.
 
 Two paths do not spill, and both keep the marker instead. A host that composed no
 artifact store — the executor's `:artifacts` option is optional — and a store
@@ -508,6 +555,39 @@ and cleanup confirmation all describe the same work. A descendant that calls
 The effective deadline of a job is the earlier of the run's deadline and the
 tool's own wall-time budget.
 
+### Context and Durable-Record Admission
+
+Context policy and Store capacity are independent. Runtime requires one positive
+unsigned-64-bit `:context_token_budget` at the top level; it is not a fourth run
+bound and can never produce `bound_reached`. The reference composition and
+command resolve omission to `8_192`, while direct Runtime omission and every
+explicit invalid value fail before Runtime Control, session state, or Store.
+Recovery and promoted follow-up work reuse the committed value. Prepared
+`resume` and `cancel` compare an explicit value only after cleanup configuration
+matches, abandon before activation or abort on conflict, and treat a settled
+session's nil active value as no comparison rather than as the reference
+default.
+
+`loopex.context_bytes.v1` measures the exact final provider-visible messages and
+active model-facing tool projections. Store separately normalizes and measures
+each private record and unstamped public-event payload against its exact 65,536-
+byte item ceiling before that value can commit or authorize later work. The
+reference fixture makes the distinction concrete: system plus four projected
+tools is 2,393 canonical bytes and 799 estimated tokens; the system message
+plus the four full canonical definitions occupy 4,382 component bytes and
+measure 1,462 estimator tokens when each component is measured separately;
+a 65,536-byte project file wraps to a 65,653-byte provider message and 21,885
+estimated tokens. None of those estimates claims provider capacity, billing, or
+tokenizer equality.
+
+Optional project content that alone exceeds context is withheld whole with a
+compact declined receipt. Required system, history, steer, or tool context
+overflow commits one compact non-retryable failure and opens no model attempt.
+Every content-bearing prompt, steer, and follow-up also preflights its exact
+accepted record and reachable event/terminal shapes. Replay is consulted before
+current defaults and current run state, so a retried command reproduces the
+durable answer instead of being reinterpreted under a later process configuration.
+
 ### Project Resources
 
 Discovery is shallow and content-independent: the reference stage names exactly
@@ -545,16 +625,27 @@ The coordinator is the sole serial writer. Its pending-work stages are committed
 facts, so a successor resumes from the journal rather than from anyone's memory:
 
 1. `model_pending` — project the conversation from committed elements, append any
-   admitted project blocks and at most one pending steer, build the canonical
-   request, and commit the exact bytes, digest, applied steer, and context
-   receipt before any adapter sees them.
-2. `model_dispatched` — dispatch exactly those bytes through `Loopex.Model` with
-   a progress function closed over the derived model domain.
-3. On reply — close the model domain with the reply's own `delta_count`, charge
-   the turn, and commit the assistant message and its `assistant.message_appended`
-   event. A reply that never arrives closes the domain `:abandoned`, is charged
-   in full, and is redispatched under a newly recorded attempt, up to two model
-   attempts per turn.
+   admitted project blocks and at most one pending steer, measure the exact final
+   provider context and exact normalized Store records independently, and refuse
+   either dimension before dispatch when it exceeds its committed ceiling. A
+   successful first staging commits the exact request bytes, digest, applied
+   steer, context receipt, and `model_attempt_opened_v1` for attempt one in one
+   ordered transaction before any adapter sees them.
+2. `model_attempt_open` — start a worker that cannot call the adapter until
+   Runtime Control validates the current owner, attempt, journal position,
+   worker, fresh reference, and deadline and sends that worker its one-use
+   permit. The send opens exactly one attempt-scoped model stream domain and is
+   the provider-dispatch linearization point.
+3. On reply or failure — validate the provider-neutral result and atomically
+   commit `model_attempt_settled_v1` with its accounting, conversation
+   disposition, and retry/continue/terminal choice. A valid canonical reply
+   closes from its own `delta_count` and commits the assistant message and
+   event. Exact pretransport `not_dispatched` on attempt one charges nothing and
+   permits one separately committed attempt-two open. Every ambiguous, timed
+   out, malformed, dead, or recovered-open attempt charges the exact remaining
+   allowance, enters no conversation, and ends the model operation without
+   redispatch. Late abort/deadline replies are evidence-only; a successor never
+   fabricates the dead predecessor's stream closure.
 4. `effect_pending` — take the head of the turn's remaining calls, in the
    assistant's own order; refuse dispatch past the run deadline; otherwise
    resolve the model's tool name against the session's active set, build the
