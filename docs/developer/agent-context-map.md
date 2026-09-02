@@ -1307,3 +1307,32 @@ Acceptance row to its exact proposal. It does not close `M2`, accept a closure
 candidate, authorize product integration, authorize a release, or dispose of
 any recorded limitation. The milestone remains `In review`.
 
+<a id="disposition-m2-gate-amendment-7-2026-09-02"></a>
+### M2 gate Amendment 7 acceptance — 2026-09-02
+
+The maintainer explicitly accepted
+[Amendment 7](../plans/M2-gate.md#amendment-7) to the accepted `M2` plan pair
+and locked gate as proposed at exact candidate
+`1cd8a48440fa1cb7b519feab4ddfeb81ccec5e28`, **without the independent exact-SHA review the
+ordinary amendment transaction requires**, as a recorded maintainer override.
+Acceptance binds the amended normative envelopes and gate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept envelope | `sha256:d2891e3b4d24db846da01606ef64090ee3098532bd7b29540a1557de320d4a7c` |
+| Technical depth envelope | `sha256:d2c1350b56e0f63a8986b38e452d2c3adc0bab26ab760764f331dd178b7628ca` |
+| Gate | `sha256:2effbe8eb785adc0eda40b6e24a4569e863a0008234b49559147fb9d74681051` |
+
+Amendment 7 moves one locked case, body unchanged, from the core
+project-resource-trust selector to the command selector, because the case
+proves the terminal display of the trust decision through command modules a
+core selector VM cannot load. Outcome 7's minimum falls to eight and the
+command selector's rises to twenty-two. Both plan envelopes are unchanged. The
+override rests on the change altering nothing the case proves; it is the
+twelfth recorded override of this milestone.
+
+**Scope of this record.** It accepts Amendment 7 alone and rebinds the `M2`
+Acceptance row to its exact proposal. It does not close `M2`, accept a closure
+candidate, authorize product integration, authorize a release, or dispose of
+any recorded limitation. The milestone remains `In review`.
+
