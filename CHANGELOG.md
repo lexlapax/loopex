@@ -549,8 +549,153 @@ the exact document set its milestone must update.
   `request.messages` directly, while the real path had the model seeing its
   original instruction again on every turn.
 
+- A provider library that crashed inside the streaming call left its error
+  uncaught, and the argument list of the frame it crashed on carried the
+  credential, so the VM's own crash report could print it. Every raise, throw,
+  and exit under that call is now caught and reported as the same bounded
+  classification the ordinary failure branches produce. An interrupted stream is
+  likewise an error for all three endings rather than only for a raise, so a
+  progress function or a lazy stream that threw or exited no longer escapes the
+  byte bound, the credential substitution, and the declared return. Reading a
+  reply from a stream opened elsewhere now scrubs against the credential this
+  adapter would itself call with instead of against nothing, which is what makes
+  the scrubbed errors that path documents true for a caller that has one set.
+- A model attempt settlement could carry combinations the attempt contract
+  excludes, and the run then crashed on history it had accepted rather than
+  refusing history it cannot accept. Choosing a retry at the attempt limit is
+  refused, so no owner installs permission for an attempt that can never open.
+  A reply that carries a termination is admitted only as evidence-only, so a
+  late answer is either the conversation or evidence retained beside it and
+  never a retained answer the run has no record of having received.
+- An abort or a deadline that arrived after this owner opened a model attempt
+  and before it asked for the permit that dispatches one settled the attempt as
+  possibly dispatched, charging the run's whole remaining token allowance for a
+  call nothing could have made. That window settles `not_dispatched` and charges
+  nothing. It is claimed only where this owner opened the attempt itself and has
+  not yet reached the permit request: an attempt inherited from a dead
+  predecessor, and one whose permit request lost its reply, both stay ambiguous
+  for the reason they always did.
+- Spent provider-attempt identities are released at the one moment a runtime
+  stops holding a session, so a host that resumes and finishes many sessions no
+  longer keeps one entry per attempt of every session it has finished with.
+  Replacing a coordinator or a worker still releases nothing, because a
+  successor must go on being refused the identity its predecessor spent. The
+  retention that remains is recorded at
+  [M2 recorded limitations](docs/evidence/M2-recorded-limitations.md#spent-attempt-retention).
+- `Loopex.activate_resume/1` and `Loopex.abandon_resume/1` wait for the
+  coordinator's answer rather than expiring after five seconds. The message
+  carrying either call is not withdrawn when its caller stops waiting, so an
+  expired call could report the session unavailable while the coordinator went
+  on to spend the very activation the caller was told it had not got — and a
+  prepared owner spends it by starting the recovered run. Neither call proposes
+  a durable mutation, so waiting commits nothing, and a coordinator that has
+  died still refuses, because its exit is the true answer.
+- A deadline admission whose commit was refused or left unknown was discarded,
+  and the settlement that followed read an unset termination — selecting a retry
+  and a model-call failure for a run that had actually reached its declared
+  deadline. A refusal that only says ownership moved now leaves the owner to its
+  successor, which rereads the deadline and admits it. Every other refusal makes
+  the session unavailable rather than manufacturing the settlement, accounting,
+  conversation, or terminal that a commit which did not happen would have
+  produced.
+- The wait a coordinator spends on an executor result when the committed cleanup
+  period cannot be read is derived from the one formula that derives every other
+  cleanup bound, applied to the shortest period that formula admits. It was a
+  restated literal, so a change to the formula would have moved every production
+  wait except that one and nothing would have said so.
+- A context refusal on a dimension that withholding optional content cannot cure
+  — the strict system-class ceiling, record depth, record cardinality — was
+  built from the descriptor set that still included optional project content
+  while the four counts it publishes described only the required one, and its
+  project disposition claimed the project had never been evaluated. Such a
+  refusal is now decided on and built from a required-only candidate before
+  anything is retained, so the counts partition the exact sequence behind the
+  receipt's ordered descriptor digest and the disposition is true. A staged
+  request's source list likewise names the blocks the request actually carries
+  rather than the ones its resolution would imply, so a required-only candidate
+  measured under an eligible project resolution no longer describes a message it
+  does not contain. The residual gap this leaves is recorded at
+  [M2 recorded limitations](docs/evidence/M2-recorded-limitations.md#adr-0017-step-five).
+- A durable record whose own byte size did not converge to a fixed point
+  continued as though it had, staging a request whose receipt stated a byte cost
+  of zero. Non-convergence is now the Store-unavailable reason it is, and the
+  session becomes unavailable rather than reporting a dimension, terminal, or
+  dispatch behind a measurement that was never taken. A record that breaches the
+  Store's depth or cardinality still reaches the admission boundary unresolved,
+  because that is where it is refused by its exact structural dimension.
+- An attaching caller's snapshot scan is fenced by resolution the way delivery
+  already was. The scan ran to the durable tail, so an attachment installed
+  while an owner held an unresolved transaction anchored on rows no consumer
+  could yet read and set its cursor past them — and those rows were then never
+  delivered on the event plane. The scan stops at the same acknowledged position
+  the delivery pump stops at, and a session this runtime does not own carries no
+  fence and scans to the end, exactly as its delivery does.
+- A durable command record naming a refusal this version does not know is
+  refused as invalid history instead of ending recovery with an error. The token
+  was converted to an existing atom with no rescue, so whether replay raised
+  depended on which atoms the VM happened to have loaded and one durable history
+  could replay on a warm node and abort on a colder one.
+- Reconciliation and receipt matching require a field to be present before it
+  can match. An absent key read as nothing satisfied any expected value that was
+  legitimately nothing — a job with no tool call or no tool version, among
+  others — so an answer that simply omitted every such field was admitted as
+  though it had stated them. Only a field the responder actually carries can
+  match.
+- The Local executor decides its quarantine when it reserves a job, inside the
+  same root-wide claim that reads the root's retained terminal truth, rather
+  than once at start-up. A ledger root is shared, so a verdict frozen at
+  start-up was wrong in both directions: a peer instance that stranded an open
+  entry never stopped an already running executor, and a root an operator had
+  reconciled could not admit again without restarting the executor. The request
+  being decided and the jobs this instance holds reserved are live entries
+  rather than abandoned ones, so a root carrying two concurrent jobs stays
+  usable and the second instance of a joined operation still joins. A claim a
+  peer holds for the length of its own admission is ordinary contention: it is
+  waited for out of the requester's own remaining allowance, never past it, and
+  never past the ceiling one contended root is worth.
+- The reserve the lease-lost path gives a receipt write comes from the one
+  formula that fixes receipt retention, which rounds up and never yields less
+  than a millisecond. A second local derivation by integer division disagreed
+  with it below four milliseconds, so a committed cleanup period of three
+  declared one millisecond of retention in every receipt and reserved none for
+  writing it.
+- A refusal the Local executor writes no longer renames over an admission marker
+  another instance published for the same job — "no effect began" written across
+  the exact record proving one had. An admission found at the marker path is
+  reported as `{:ledger_conflict, :admission_marker_present}` and left exactly
+  as it is; an absent marker and an existing refusal both still admit the write,
+  because neither of them claims an effect began.
+- A `loopex` placement lock record this version cannot decode is probed for
+  liveness rather than reclaimed outright. A lock written by a newer record
+  version is undecodable and names a live process, so reclaiming it put two
+  runtime controls on one placement key — the outcome the lock exists to
+  prevent, reached by the one input an operator running two Loopex versions is
+  most likely to produce. The process identifier is salvaged from the record's
+  bytes and probed: an absent process is the stale lock the reclaim path was
+  written for, a live one refuses and names the process holding it, and bytes
+  naming no process at all refuse as unattributable. Both refusals are
+  recoverable by hand, and reclaiming a live owner is not.
+
 ### Changed
 
+- The Store answers one refusal taxonomy for every path that admits an item.
+  Building a transaction, preflighting a record through
+  `Loopex.Store.normalize_and_measure_item/2`, and validating a transaction all
+  run the same normalizer and the same measurement, so the same bytes get the
+  same answer whichever way a caller reaches the boundary. An item that is not
+  bounded plain data refuses as `:invalid_item` for a private record and
+  `:invalid_event` for a public event, in place of `:not_plain_data`,
+  `:not_plain_event_data`, `:invalid_record`, and `:reserved_event_field`. A
+  depth or cardinality breach refuses as
+  `{:item_structure_exceeded, dimension, observed, limit}` and an oversized item
+  as `{:item_too_large, observed, limit}`, and both now survive a list's own
+  refusal instead of collapsing into `:invalid_records` or `:invalid_events`, so
+  a preflight and a commit can no longer disagree about one item. The builder's
+  separate traversal is gone along with the disagreements it carried: a scalar
+  at depth thirteen was admitted where the shared normalizer refuses it, an
+  atom key nested inside an event was admitted where the normalizer rewrites it,
+  and an untrusted list's length was taken by walking a spine the shared counter
+  refuses to walk.
 - An executor that refused a job before its effect started now says so in the
   answer, by returning `{:error, {:refused_before_effect, reason}}`. The runtime
   commits that as an ordinary terminal `failed` carrying `reason`; every other
