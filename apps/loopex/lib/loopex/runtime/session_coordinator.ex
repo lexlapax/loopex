@@ -155,6 +155,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # rather than something to decode with the current encoder and hope.
   @descriptor_canonicalization_version "loopex.canonical.v1"
   @descriptor_digest_domain "loopex.context.descriptors.v1"
+  @uint64_max 18_446_744_073_709_551_615
 
   @doc false
   @spec session_status(pid(), owner()) :: {:ok, map()} | {:error, term()}
@@ -1052,14 +1053,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     {blocks, project_receipt} = project_blocks(state)
 
-    staging = %{
-      run_id: run_id,
-      elements: elements,
-      steer: steer,
-      deadline: run_deadline(declared)
-    }
+    staging = %{run_id: run_id, elements: elements, steer: steer}
 
-    with {:ok, max_tokens} <- declared_max_tokens(state),
+    with {:ok, deadline} <- run_deadline(declared),
+         staging = Map.put(staging, :deadline, deadline),
+         {:ok, max_tokens} <- declared_max_tokens(state),
          staging = Map.put(staging, :max_tokens, max_tokens),
          {:ok, proposal} <- stage_candidate(state, staging, blocks, project_receipt),
          {:ok, next} <- commit_internal(state, proposal) do
@@ -1075,6 +1073,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # never re-enters staging, so changing context, configuration, or policy
       # requires a newly admitted run.
       {:refused, refusal} -> commit_context_refusal(state, run_id, refusal)
+      {:deadline_unrepresentable, category} -> commit_deadline_failure(state, run_id, category)
       {:error, reason} -> {:stop, {:model_request_failed, reason}, state}
     end
   end
@@ -1144,6 +1143,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
         applied_steer: staging.steer && staging.steer.command_id,
         context_receipt: receipt
       )
+    end
+  end
+
+  defp commit_deadline_failure(state, run_id, category) do
+    state = disarm_deadline(state, run_id)
+
+    with {:ok, proposal} <- SessionState.propose_deadline_failure(state.durable, run_id, category),
+         {:ok, next} <- commit_internal(state, proposal) do
+      send(self(), :advance_work)
+      {:noreply, %{next | adopted: MapSet.delete(next.adopted, run_id)}}
+    else
+      {:error, reason} -> {:stop, {:deadline_staging_failed, reason}, state}
     end
   end
 
@@ -1226,7 +1237,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp reconciliation_ref(state, run_id),
     do: stable_id("reconciliation", state.session_id, run_id)
 
-  defp declared_limit(declared, :deadline), do: run_deadline(declared)
+  # Technical depth: a run can only reach its deadline bound after it staged a
+  # request, and staging is what commits the absolute instant, so the declared
+  # value is always the committed one here rather than a fresh checked addition.
+  defp declared_limit(declared, :deadline), do: committed_deadline(declared)
   defp declared_limit(declared, bound), do: Map.fetch!(declared, bound)
 
   # Concept: project context is admitted, never assumed.
@@ -1463,10 +1477,39 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # unchanged for every later turn. Only turn one converts the declared duration
   # into an instant, which is why a recovering owner resumes the deadline the run
   # actually had rather than granting it the downtime it slept through.
-  defp run_deadline(%{deadline: deadline}) when is_integer(deadline), do: deadline
+  # Concept: the instant this run was actually bound by, once staging committed
+  # one.
+  #
+  # Technical depth: a run only reaches its deadline bound after a request was
+  # staged, and staging is what converts the declared duration into an absolute
+  # instant, so every reader after that point uses the committed value rather
+  # than performing a fresh checked addition against its own clock.
+  defp committed_deadline(%{deadline: deadline}) when is_integer(deadline), do: deadline
 
-  defp run_deadline(%{deadline_ms: deadline_ms}),
-    do: System.system_time(:millisecond) + deadline_ms
+  defp run_deadline(%{deadline: deadline}) when is_integer(deadline), do: {:ok, deadline}
+
+  # Concept: an absolute deadline is arithmetic that has to be checked, not
+  # assumed.
+  #
+  # Technical depth: ADR 0017 requires the clock reading to be a non-negative
+  # unsigned 64-bit integer and the checked addition of the committed duration
+  # to stay inside that domain. Arithmetic never wraps, and a failure of either
+  # is a compact durable fact rather than a giant instant staged into a request
+  # or a provider call made against a deadline nothing can represent.
+  defp run_deadline(%{deadline_ms: deadline_ms}) do
+    now = System.system_time(:millisecond)
+
+    cond do
+      not (is_integer(now) and now >= 0 and now <= @uint64_max) ->
+        {:deadline_unrepresentable, "clock_out_of_domain"}
+
+      now + deadline_ms > @uint64_max ->
+        {:deadline_unrepresentable, "deadline_addition_overflow"}
+
+      true ->
+        {:ok, now + deadline_ms}
+    end
+  end
 
   defp declared_max_tokens(state) do
     configured =
@@ -1585,7 +1628,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     detail = %{
       bound: "deadline",
       observed: System.system_time(:millisecond),
-      declared_limit: run_deadline(declared),
+      declared_limit: committed_deadline(declared),
       accounting_source: charged.source && Atom.to_string(charged.source)
     }
 
@@ -2114,7 +2157,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       in_flight?(state, :policy, work.run_id) ->
         {:noreply, state}
 
-      System.system_time(:millisecond) >= run_deadline(declared) ->
+      System.system_time(:millisecond) >= committed_deadline(declared) ->
         commit_tool_terminal(
           state,
           work,

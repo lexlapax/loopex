@@ -1389,6 +1389,7 @@ defmodule Loopex.Runtime.SessionState do
        )
        when kind in [
               "context_admission_refused_v1",
+              "deadline_staging_failed_v1",
               "model_request_committed",
               "model_result_committed",
               "model_attempt_evidence_retained",
@@ -2006,7 +2007,41 @@ defmodule Loopex.Runtime.SessionState do
   # duplicated, or mismatched row, is invalid incomplete history.
   defp apply_internal_record(state, %{kind: "context_admission_refused_v1"} = refusal) do
     with :ok <- validate_context_refusal(state, refusal) do
-      {:ok, %{state | context_refusal: refusal}, []}
+      {:ok,
+       %{
+         state
+         | context_refusal: %{
+             run_id: Map.get(refusal, "run_id"),
+             failure: context_failure(refusal)
+           }
+       }, []}
+    end
+  end
+
+  # Concept: a run whose deadline cannot be represented never opens an attempt.
+  #
+  # Technical depth: ADR 0017 requires the clock reading and the checked
+  # addition to be proved at first staging, before any model attempt or stream
+  # domain exists. The compact first row never retains the invalid or giant
+  # value -- only which of the two domain facts failed -- and is itself proved
+  # representable. Its terminal completes the same transient-marker pair the
+  # context refusal uses, so recovery applies no terminal effect until the
+  # matching consecutive row arrives.
+  defp apply_internal_record(state, %{kind: "deadline_staging_failed_v1"} = failure) do
+    run_id = Map.get(failure, "run_id")
+    work = Map.get(state.pending_work, run_id)
+
+    with true <- map_size(failure) == 4,
+         true <- run_id == state.active_run_id,
+         %{stage: stage} <- work,
+         true <- stage in ["model_pending", "turn_settled"],
+         true <-
+           Map.get(failure, "turn_id") == stable_id("turn", run_id, next_turn_number(work)),
+         true <-
+           Map.get(failure, "category") in ["clock_out_of_domain", "deadline_addition_overflow"] do
+      {:ok, %{state | context_refusal: %{run_id: run_id, failure: deadline_failure()}}, []}
+    else
+      _invalid -> {:error, :invalid_deadline_staging_failure}
     end
   end
 
@@ -3709,6 +3744,28 @@ defmodule Loopex.Runtime.SessionState do
     do: is_integer(value) and value > 0 and value <= 18_446_744_073_709_551_615
 
   @doc false
+  @spec propose_deadline_failure(t(), binary(), binary()) :: {:ok, proposal()} | {:error, term()}
+  def propose_deadline_failure(%__MODULE__{} = state, run_id, category)
+      when is_binary(run_id) and is_binary(category) do
+    work = Map.get(state.pending_work, run_id, %{turn_number: 1})
+    turn_id = stable_id("turn", run_id, next_turn_number(work))
+
+    failure = %{
+      "run_id" => run_id,
+      "turn_id" => turn_id,
+      "category" => category,
+      kind: "deadline_staging_failed_v1"
+    }
+
+    terminal =
+      state
+      |> run_terminal_record(run_id, "failed", %{})
+      |> Map.put("failure", deadline_failure())
+
+    internal_proposal(state, stable_id("deadline-failure", run_id, turn_id), [failure, terminal])
+  end
+
+  @doc false
   @spec propose_context_refusal(t(), binary(), map()) :: {:ok, proposal()} | {:error, term()}
   def propose_context_refusal(%__MODULE__{} = state, run_id, refusal)
       when is_binary(run_id) and is_map(refusal) do
@@ -3731,6 +3788,9 @@ defmodule Loopex.Runtime.SessionState do
   # makes it exclusive to a failed context terminal. It copies the refusal's own
   # committed observations rather than deriving new ones, so the private
   # terminal, the public event, and the retained receipt cannot disagree.
+  defp deadline_failure,
+    do: %{"category" => "deadline_preflight_failed", "retryable" => false}
+
   defp context_failure(refusal) do
     %{
       "category" => Map.fetch!(refusal, "category"),
@@ -3838,15 +3898,12 @@ defmodule Loopex.Runtime.SessionState do
   # history rather than authority to abandon a run. Every other outcome must
   # arrive with no marker pending at all.
   defp consume_context_refusal(
-         %{context_refusal: refusal} = state,
+         %{context_refusal: %{run_id: marked, failure: failure}} = state,
          run_id,
          "failed",
          record
-       )
-       when is_map(refusal) do
-    failure = context_failure(refusal)
-
-    if Map.get(refusal, "run_id") == run_id and Map.get(record, "failure") == failure do
+       ) do
+    if marked == run_id and Map.get(record, "failure") == failure do
       {:ok, %{state | context_refusal: nil}, failure}
     else
       {:error, :invalid_context_refusal_pair}
