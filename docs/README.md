@@ -77,11 +77,12 @@ whose path or explicit fragment does not resolve.
 - [Development setup](../DEVELOPMENT.md) — local prerequisites and validation
   commands.
 - [Coding sessions](operator/coding-sessions.md#concept) — running, streaming,
-  steering, resuming, and stopping a coding task with the `loopex` command, and
-  what stopping does and does not promise.
+  steering, resuming, and stopping a coding task with the `loopex` command, the
+  project-resource trust decision, the configuration a resumed session recovers,
+  and what stopping does and does not promise.
 - [Tools and policy](operator/tools-and-policy.md#concept) — the four coding
-  tools, what local execution reaches, host authority, artifacts, and what the
-  local store keeps on disk.
+  tools, what local execution reaches, host authority, artifacts and how to read
+  one back, and what the local store keeps on disk.
 - [Runtime operations and first run](operator/runtime.md#concept) — current
   source-tree features, exact working-loop demonstrations, credentials, events,
   shutdown, and recovery.

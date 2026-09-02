@@ -28,7 +28,7 @@ load only the sections a task needs rather than reading it end to end.
 | --- | --- |
 | [Development charter](development-charter.md#concept) · [technical](development-charter-technical.md#technical-depth) | Clarity before mechanism, traceable depth, proportional documentation, capability routing. |
 | [Runtime and embedding](runtime-and-embedding.md#concept) | Application shape, explicit runtime composition, commit ordering, embedded API, the shipped reference composition, recovery, and verification entrypoints. |
-| [Agent loop and tools](agent-loop-and-tools.md#concept) | The M2 turn machine: the tool contract and registry, canonical encoding, conversation projection, request digests, bounds, streaming, policy, artifacts, and commit ordering. |
+| [Agent loop and tools](agent-loop-and-tools.md#concept) | The M2 turn machine: the tool contract and registry, canonical encoding, conversation projection, request digests, provider attempts and their settlement, bounds, streaming, policy, artifacts, context and record admission, project resources, and commit ordering. |
 | [Compatibility surfaces](compatibility-surfaces.md#concept) | Every surface M2 touches, why none is labelled or frozen, and what that means for an embedder. |
 | [Agent context map](agent-context-map.md) | Task-oriented routing into Concept first and exact Technical depth second; current client-ecosystem facts. |
 | [Adapter smoke evidence](agent-adapter-smoke.md) | Retained proof that development clients load the canonical contract and skills. |

@@ -42,8 +42,10 @@ M2 makes that loop a command:
 `loopex` submits a prompt into a durable session, the answer streams as it is
 produced, the loop runs as many turns as the task needs while the model sees the
 whole conversation and the real output of every tool it ran, four coding tools
-act on a real workspace under a host policy that can refuse, and yesterday's
-session can be found and continued. The marked status capsule above and the
+act on a real workspace under a host policy that can refuse, a repository's own
+behaviour-shaping files reach the model only by an explicit decision taken at
+the terminal, and yesterday's session can be found and continued. The marked
+status capsule above and the
 canonical plan register state whether those bytes are still a milestone
 candidate or part of the closed product baseline.
 
