@@ -300,9 +300,36 @@ defmodule Loopex.Executor.Local.Ledger do
   inventing an admission. It is written to a staging name, synced, atomically
   renamed, and its parent synced, so no reader can observe a partially written
   refusal.
+
+  The replacement is conditional, and the caller must already hold the root
+  claim. Renaming over the marker path unconditionally meant a refusal could
+  erase an admission another instance had just published for the same job --
+  "no effect began" written over the exact record proving one had. Nothing but
+  call-site ordering stood between that and a lost effect, and call-site
+  ordering is a property of one module rather than of this shared root. An
+  admission marker is therefore reported as
+  `{:ledger_conflict, :admission_marker_present}` and left exactly as it is. An
+  absent marker and an existing refusal both still admit the write, because
+  neither of them claims an effect began.
   """
   @spec refuse(prepared(), map()) :: :ok | {:error, term()}
-  def refuse(%{root: root}, refusal), do: replace(marker_path(root, refusal["job_id"]), refusal)
+  def refuse(%{root: root} = prepared, refusal) do
+    job_id = refusal["job_id"]
+
+    case read_marker(prepared, job_id) do
+      :absent ->
+        replace(marker_path(root, job_id), refusal)
+
+      {:ok, %{ledger_kind: @refusal_kind}} ->
+        replace(marker_path(root, job_id), refusal)
+
+      {:ok, _admission} ->
+        {:error, {:ledger_conflict, :admission_marker_present}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   @doc """
   ## Concept

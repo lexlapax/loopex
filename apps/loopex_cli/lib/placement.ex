@@ -124,14 +124,20 @@ defmodule LoopexCli.Placement do
 
     case File.read(path) do
       {:ok, bytes} ->
-        with {:ok, owner} <- decode_owner(bytes) do
-          case owner_status(owner, process_probe) do
-            {:ok, :alive} -> {:ok, owner.pid}
-            {:ok, :dead} -> :none
-            {:error, reason} -> owner_probe_error(reason)
-          end
-        else
-          :error -> :none
+        case decode_owner(bytes) do
+          {:ok, owner} ->
+            case owner_status(owner, process_probe) do
+              {:ok, :alive} -> {:ok, owner.pid}
+              {:ok, :dead} -> :none
+              {:error, reason} -> owner_probe_error(reason)
+            end
+
+          :error ->
+            case unreadable_owner_status(bytes, process_probe) do
+              {:ok, {:alive, pid}} -> {:ok, pid}
+              {:ok, :dead} -> :none
+              {:error, reason} -> owner_probe_error(reason)
+            end
         end
 
       {:error, :enoent} ->
@@ -161,7 +167,19 @@ defmodule LoopexCli.Placement do
             end
 
           :error ->
-            reclaim_owner(path, process_probe)
+            case unreadable_owner_status(bytes, process_probe) do
+              {:ok, :dead} ->
+                reclaim_owner(path, process_probe)
+
+              {:ok, {:alive, pid}} ->
+                {:error,
+                 "the placement lock at #{path} names live process #{pid} but this version " <>
+                   "cannot read the record; stop that process and remove the file, or pass " <>
+                   "--state-root to work somewhere else"}
+
+              {:error, reason} ->
+                owner_probe_error(reason)
+            end
         end
 
       {:error, :enoent} ->
@@ -397,8 +415,8 @@ defmodule LoopexCli.Placement do
   # Technical depth: `ps` exposes a stable start identity for the lifetime of a
   # process. The lock stores that identity with the numeric pid. Re-probing and
   # comparing both turns pid reuse into a stale record instead of a false live
-  # owner. A malformed or legacy pid-only record is unattributed and therefore
-  # reclaimable.
+  # owner. A record this version cannot decode is still probed for liveness by
+  # `unreadable_owner_status/2` rather than assumed unowned.
   defp current_owner(process_probe) do
     pid = System.pid()
 
@@ -413,6 +431,58 @@ defmodule LoopexCli.Placement do
       {:ok, owner} -> owner_status(owner, process_probe)
       :error -> {:error, :malformed_owner_record}
     end
+  end
+
+  # Concept: a lock record this version cannot read is not evidence that the
+  # process holding the root is gone.
+  #
+  # Technical depth: `decode_owner/1` refuses anything but this exact record
+  # version, and an undecodable record used to be reclaimed outright. A lock
+  # written by a future record version is undecodable and names a live process,
+  # so reclaiming it put two Runtime Controls on one `(Store, runtime_id)` key --
+  # precisely what this lock exists to prevent, reached by the one input an
+  # operator running two Loopex versions is most likely to produce. The numeric
+  # process identifier is salvaged where the bytes contain one and probed for
+  # liveness: an absent process is the stale record the reclaim path was written
+  # for, and a live one is refused. Bytes naming no process at all attribute the
+  # lock to nobody and are refused too, because deciding is what removing a live
+  # owner's lock would require. Either refusal is recoverable by hand, and
+  # reclaiming a live owner is not.
+  #
+  # Liveness alone is deliberately weaker than `owner_status/2`: without a
+  # readable incarnation there is nothing to compare, so a reused identifier
+  # reads as live. That is the safe direction for a record whose meaning is
+  # already unknown.
+  defp unreadable_owner_status(bytes, process_probe) do
+    case salvaged_pid(bytes) do
+      {:ok, pid} ->
+        case process_probe.(pid) do
+          {:ok, _incarnation} -> {:ok, {:alive, pid}}
+          {:error, :process_absent} -> {:ok, :dead}
+          {:error, reason} -> {:error, {:process_incarnation_unavailable, reason}}
+        end
+
+      :error ->
+        {:error, :unattributable_owner_record}
+    end
+  end
+
+  # The first line that is exactly a positive decimal integer. Every record this
+  # command has ever written puts the identifier on its own line, so a foreign
+  # version and the legacy identifier-only record are both covered without
+  # guessing at the rest of the bytes.
+  defp salvaged_pid(bytes) do
+    bytes
+    |> String.split("\n")
+    |> Enum.find_value(:error, fn line ->
+      case Integer.parse(line) do
+        {number, ""} when number > 0 ->
+          if Integer.to_string(number) == line, do: {:ok, line}
+
+        _other ->
+          nil
+      end
+    end)
   end
 
   defp owner_status(%{pid: pid, incarnation: expected}, process_probe) do

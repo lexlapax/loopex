@@ -87,7 +87,6 @@ defmodule Loopex.Executor.Local do
   # period plus this share, in the worst case where the sequence spends all of
   # its own.
   @default_process_probe "/bin/ps"
-  @receipt_reserve_share 4
   @max_uint64 18_446_744_073_709_551_615
 
   # How often a joining request looks for the one operation's receipt. It is a
@@ -482,7 +481,22 @@ defmodule Loopex.Executor.Local do
     {cleanup_until(), cleanup_grace_ms(), process_probe()}
   end
 
-  defp receipt_reserve_ms(grace), do: div(grace, @receipt_reserve_share)
+  # Concept: the reserve a receipt gets is the retention bound that receipt
+  # declares, and there is one formula for it.
+  #
+  # Technical depth: ADR 0016 gives core `max(1, ceil(grace_ms / 4))` and
+  # `Executor.cancellation_bounds/1` is where it lives. This was a second local
+  # derivation by integer division, and the two disagreed below four
+  # milliseconds: a committed period of three declared one millisecond of
+  # retention in every receipt and reserved zero for it, so the lease-lost
+  # retention path was handed a budget that had already expired. Reading the one
+  # formula removes the disagreement rather than restating it correctly twice.
+  # The match is deliberate: the committed period was admitted before this
+  # executor started, so a period the bounds refuse cannot reach here.
+  defp receipt_reserve_ms(grace) do
+    {:ok, bounds} = Executor.cancellation_bounds(grace)
+    bounds.receipt_retention_ms
+  end
 
   defp cleanup_remaining(until), do: max(until - cleanup_now_ms(), 0)
   # Concept: a cleanup budget is a length of time, and a length of time is not
@@ -618,7 +632,6 @@ defmodule Loopex.Executor.Local do
          leases: leases,
          ledger_root: ledger_root,
          ledger: ledger,
-         quarantine: reconcile(ledger),
          clock: clock_provider,
          artifacts: artifacts,
          cleanup_grace_ms: cleanup_grace_ms,
@@ -633,22 +646,44 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # Concept: an executor reconciles the complete open index before it accepts
-  # any new work, and unresolved truth quarantines the root rather than being
-  # cleared by starting again.
+  # Concept: unresolved open authority on this root quarantines new effects, and
+  # the root is shared, so the answer is the index as it is now.
   #
-  # Technical depth: the index is read as one complete bounded snapshot under the
-  # root-wide claim, so no entry can appear or vanish while the decision is being
-  # made and the decision is fixed before the claim is released. An entry that is
-  # present and valid means some effect was admitted and never settled: new
-  # effects are refused with reconciliation required. Malformed truth, a held or
-  # stranded claim, capacity, or an unreadable snapshot are ledger-unavailable,
-  # which is a different fact and must not be reported as the reconcilable one.
-  defp reconcile(ledger) do
-    case Ledger.with_claim(ledger, fn -> Ledger.open_snapshot(ledger) end) do
-      {:ok, []} -> nil
-      {:ok, entries} -> {:reconciliation_required, length(entries)}
-      {:error, reason} -> reason
+  # Technical depth: the caller already holds the root-wide claim, so the index is
+  # read as one complete bounded snapshot: no entry can appear or vanish while the
+  # decision is being made, and the decision is fixed before the claim is
+  # released. An entry that is present, valid, and unresolved means some effect
+  # was admitted and never settled: new effects are refused with reconciliation
+  # required. Malformed truth, capacity, or an unreadable snapshot are
+  # ledger-unavailable, which is a different fact and must not be reported as the
+  # reconcilable one.
+  #
+  # This used to be read once in `init/1` and cached. Every Local sharing one
+  # prepared root shares its open index and its refusal truth, so a verdict frozen
+  # at start-up was wrong in both directions: a peer instance that stranded an
+  # open entry never stopped an already running executor, and an operator who
+  # reconciled a root could not make a running executor admit again without
+  # restarting it. A held claim was worse still, because a peer holding the claim
+  # for the length of one admission quarantined this instance for its whole life.
+  #
+  # `resolved` is the exact set of open entries that are not evidence of anything
+  # unresolved: the request being decided, whose own entry means it is already
+  # admitted and must be joined rather than refused, and every job this instance
+  # currently holds reserved, whose entry means work in flight here. Reading a
+  # live entry as an abandoned one would make a root unusable the moment it
+  # carried two concurrent jobs, and would refuse the second instance of the pair
+  # that ADR 0016 requires to join a single operation. Everything else is a peer's
+  # authority this instance cannot resolve, and that is exactly what quarantines.
+  defp reconcile(ledger, resolved) do
+    case Ledger.open_snapshot(ledger) do
+      {:ok, entries} ->
+        case Enum.reject(entries, &(&1["job_id"] in resolved)) do
+          [] -> nil
+          unresolved -> {:reconciliation_required, length(unresolved)}
+        end
+
+      {:error, reason} ->
+        reason
     end
   end
 
@@ -678,25 +713,73 @@ defmodule Loopex.Executor.Local do
   def handle_call({:reserve, job}, {caller, _tag}, state) do
     job_id = Map.get(job, :job_id, "")
 
-    cond do
-      state.quarantine ->
-        {:reply, {:error, state.quarantine}, state}
+    case reserve_decision(state, job, job_id) do
+      :reserve ->
+        {:reply, {:ok, placement(state)},
+         %{state | reserved: Map.put(state.reserved, job_id, caller)}}
 
-      true ->
-        case read_receipt(state.ledger_root, job_id) do
-          {:ok, receipt} ->
-            if Map.get(receipt, :canonical_request_digest) ==
-                 Map.get(job, :canonical_request_digest),
-               do: {:reply, {:retained, receipt}, state},
-               else: {:reply, {:error, :job_id_conflict}, state}
+      answer ->
+        {:reply, answer, state}
+    end
+  end
 
-          :absent ->
-            {:reply, {:ok, placement(state)},
-             %{state | reserved: Map.put(state.reserved, job_id, caller)}}
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
+  # Concept: this decision combines the root's open authority with its terminal
+  # truth, so it takes the root-wide claim and reads both while mutation is
+  # excluded.
+  #
+  # Technical depth: ADR 0016 requires exactly that of every decision joining an
+  # open entry to a terminal, and requires that no later unlocked read become its
+  # authority. The open index and the receipt were previously read apart: the
+  # index once at start-up and cached forever, the receipt here with nothing
+  # excluding a peer that was admitting or refusing the same job at that instant.
+  # Both now happen inside one claim, and the answer is fixed before it is
+  # released. The cost is one directory creation and one bounded snapshot per
+  # reservation; the claim is waited for rather than refused outright, because a
+  # peer holding it for the length of its own admission is ordinary contention and
+  # not unavailability.
+  defp reserve_decision(state, job, job_id) do
+    Ledger.with_claim(
+      state.ledger,
+      fn ->
+        case reconcile(state.ledger, resolved_jobs(state, job_id)) do
+          nil -> settled_or_reserved(state, job, job_id)
+          quarantine -> {:error, quarantine}
         end
+      end,
+      claim_wait(job)
+    )
+  end
+
+  defp resolved_jobs(state, job_id),
+    do: MapSet.new([job_id | Map.keys(state.reserved)])
+
+  defp settled_or_reserved(state, job, job_id) do
+    case read_receipt(state.ledger_root, job_id) do
+      {:ok, receipt} ->
+        if Map.get(receipt, :canonical_request_digest) ==
+             Map.get(job, :canonical_request_digest),
+           do: {:retained, receipt},
+           else: {:error, :job_id_conflict}
+
+      :absent ->
+        :reserve
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # A claim is waited for out of the requester's own remaining allowance, never
+  # past it, and never past the ceiling one contended root is worth. A request
+  # that has not yet been validated may not carry a deadline at all, and its
+  # missing member is not an argument for waiting longer than the ceiling.
+  defp claim_wait(job) do
+    case Map.get(job, :effective_job_deadline) do
+      deadline when is_integer(deadline) ->
+        min(max(deadline - System.system_time(:millisecond), 0), @claim_wait_ms)
+
+      _absent ->
+        @claim_wait_ms
     end
   end
 
@@ -705,13 +788,13 @@ defmodule Loopex.Executor.Local do
   #
   # Technical depth: identity, epoch, fence, leases, ledger root and authority,
   # clock, artifact store, configured period and probe, plus the in-flight table
-  # and this server's own pid. The quarantine, the reservation map, and the
-  # dispatch counts stay here, because they are facts about the executor rather
-  # than about the job. It carries the same member names the serialized state
-  # used, so every function below reads one shape whichever process it runs in.
+  # and this server's own pid. The reservation map and the dispatch counts stay
+  # here, because they are facts about the executor rather than about the job. It
+  # carries the same member names the serialized state used, so every function
+  # below reads one shape whichever process it runs in.
   defp placement(state) do
     state
-    |> Map.drop([:quarantine, :reserved, :dispatches])
+    |> Map.drop([:reserved, :dispatches])
     |> Map.put(:executor, self())
   end
 
@@ -940,16 +1023,13 @@ defmodule Loopex.Executor.Local do
   # Concept: one serialized decision about whether this exact request may begin.
   #
   # Technical depth: the claim orders admission against another executor's
-  # admission, against a refusal, and against startup reconciliation. Inside it
-  # the two independent fences are checked against one paired clock sample: the
+  # admission, against a refusal, and against a peer's reconciliation read. Inside
+  # it the two independent fences are checked against one paired clock sample: the
   # wall instant against the job's immutable `effective_job_deadline`, and the
   # derived monotonic action deadline under checked arithmetic. A sample that
   # cannot produce a finite action deadline is unavailable authority, never
   # permission.
   defp admit(state, job) do
-    remaining = job.effective_job_deadline - System.system_time(:millisecond)
-    wait = min(max(remaining, 0), @claim_wait_ms)
-
     Ledger.with_claim(
       state.ledger,
       fn ->
@@ -973,7 +1053,7 @@ defmodule Loopex.Executor.Local do
             {:error, reason}
         end
       end,
-      wait
+      claim_wait(job)
     )
   end
 
@@ -3770,10 +3850,7 @@ defmodule Loopex.Executor.Local do
   defp cleanup_confirmation(:outcome_unknown), do: :unconfirmed
   defp cleanup_confirmation(_settled), do: :confirmed
 
-  defp committed_retention_ms(job) do
-    {:ok, bounds} = Executor.cancellation_bounds(job.cleanup_grace_ms)
-    bounds.receipt_retention_ms
-  end
+  defp committed_retention_ms(job), do: receipt_reserve_ms(job.cleanup_grace_ms)
 
   # The staging name is chosen by the caller rather than here, because a caller
   # that may have to abandon this write is the one that has to be able to remove
