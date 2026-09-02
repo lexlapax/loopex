@@ -125,6 +125,18 @@ reboot the host, then use the prior source with a fresh empty root. Stopping onl
 the application is not sufficient. The exact limitation and disposition are
 retained in [M2's evidence record](../evidence/M2-recorded-limitations.md#local-authority-trusted-root).
 
+The quarantine that root can carry is decided when a job is reserved, not once
+when an executor starts, because the root is shared. An open entry stranded by
+any executor using it refuses new effects until the root is reconciled — on an
+executor that was already running when the entry was stranded, not only on the
+next one to start — and once you have reconciled the root, effects are admitted
+again without restarting the executor the quarantine had stopped. Work in flight
+is not mistaken for abandoned work: a root carrying two concurrent jobs stays
+usable, and a request joins its own open entry rather than being refused by it.
+A moment's wait at a busy root is ordinary contention rather than
+unavailability, and that wait comes out of the job's own remaining time and
+never past it.
+
 <a id="operator-tools-policy"></a>
 ## Host Policy
 
@@ -349,6 +361,14 @@ environment and whether the provider credential was present, so the command-side
 claim is journalled rather than asserted. A provider error is bounded and has the
 credential's bytes substituted out before any caller, report, or terminal can
 see it.
+
+A crash inside the provider library is covered by that too. The call the adapter
+makes carries the credential in its arguments, so an error left uncaught there
+could reach the emulator's own crash report with those arguments printed beside
+it. Every raise, throw, and exit under that call is caught and reported as the
+same bounded classification an ordinary provider failure produces, and an
+interrupted stream is an error carrying a bounded, credential-substituted reason
+for all three endings rather than only for a raise.
 
 ## Related
 

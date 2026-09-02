@@ -138,7 +138,10 @@ After a normal stop or an ungraceful VM or OS-process death:
 A receipt is admitted only when the current query, operation, attempt, canonical
 request digest, session and executor epochs, executor identity, and fencing
 token all match the journaled intent. Stale, unsolicited, incomplete, or
-mismatched recovery evidence is refused.
+mismatched recovery evidence is refused. A field the answer does not carry is a
+mismatch rather than a match, so an omitted field never satisfies an expected
+value that happens to be absent itself, and only what the responder actually
+states can be admitted.
 
 <a id="operator-runtime-failures"></a>
 ## Failure Interpretation

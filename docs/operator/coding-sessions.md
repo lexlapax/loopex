@@ -178,6 +178,21 @@ under a running owner is exactly that race. A lock left by a process that is gon
 is recognised as stale by asking the operating system whether that process is
 still alive, not by waiting out a timeout, and is reclaimed automatically.
 
+A lock this version cannot read is not evidence that its owner is gone. That is
+the shape a newer `loopex` writes, and running two versions against one state
+root is the likeliest way to produce one. The process identifier is salvaged out
+of the record and probed the same way: an absent process makes the lock stale and
+reclaimable, and a live one refuses.
+
+```text
+loopex: the placement lock at /path/to/placement.lock names live process 41022
+but this version cannot read the record; stop that process and remove the file,
+or pass --state-root to work somewhere else
+```
+
+Bytes naming no process at all attribute the lock to nobody, and refuse too.
+Both refusals you can clear by hand; reclaiming a live owner you cannot.
+
 <a id="operator-sessions-finding"></a>
 ## Finding and Continuing Work
 
@@ -412,7 +427,10 @@ It defaults to five seconds. Bounded defensive teardown of a timed-out helper
 may follow after that work allowance is spent.
 
 Writing the receipt afterwards is bounded separately, by a declared share of the
-period — a quarter — rather than by whatever the sequence left. The declared
+period — a quarter, rounded up, and never less than one millisecond — rather
+than by whatever the sequence left. One formula fixes that share, and every
+path that reserves time for a receipt reads it, so the bound a receipt declares
+is the bound something actually set aside for writing it. The declared
 work allowances therefore total five quarters of the configured period: six and
 a quarter seconds at the default. That is an allowance total rather than a
 strict wall-clock ceiling because bounded teardown may follow an exceeded bound.
