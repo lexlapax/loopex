@@ -6988,6 +6988,30 @@ defmodule Loopex.AgentLoopTest do
         |> Map.put(:retained_receipt, Map.put(valid_receipt, field, wrong))
 
       assert {:error, {:mismatch, ^field}} = Loopex.reconcile(resumed, response)
+
+      # Concept: a field the receipt does not carry is a mismatch, not a pass.
+      #
+      # Technical depth: `Loopex.Effect.match_fields/3` already states this for a
+      # live result, and the reconciliation comparators now match it. Reading an
+      # absent key as `nil` made the comparison depend on the distant invariant
+      # that no compared job field is ever `nil`; asserting presence here keeps
+      # the answer true whether or not that stays so.
+      omitted =
+        query
+        |> Map.put(:evidence, "receipt")
+        |> Map.put(:retained_receipt, Map.delete(valid_receipt, field))
+
+      assert {:error, {:mismatch, ^field}} = Loopex.reconcile(resumed, omitted)
+    end
+
+    for field <- Loopex.Runtime.SessionCoordinator.reconciliation_fields() do
+      omitted =
+        query
+        |> Map.delete(field)
+        |> Map.put(:evidence, "receipt")
+        |> Map.put(:retained_receipt, valid_receipt)
+
+      assert {:error, {:mismatch, ^field}} = Loopex.reconcile(resumed, omitted)
     end
 
     unsupported_response =
