@@ -75,7 +75,6 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @tool_call_keys ["id", "name", "arguments"]
 
   @uint64_max 18_446_744_073_709_551_615
-  @item_bytes 65_536
   @response_id_bytes 256
 
   @attempt_limit 2
@@ -322,57 +321,6 @@ defmodule Loopex.Runtime.ProviderAttempt do
   end
 
   def normalize_usage(_usage), do: unreported("malformed")
-
-  @doc """
-  ## Concept
-
-  The exact size the Store will retain a private record at.
-
-  ## Technical depth
-
-  Measured over the canonical string-keyed item, which is the form the journal
-  holds, rather than over the in-memory proposal whose `kind` is still an atom.
-  Measuring the proposal instead reports three bytes fewer than the Store keeps,
-  which would admit an item one byte over the ceiling and then discover it at
-  the transaction boundary — the surprise the pre-commit preflight exists to
-  prevent.
-  """
-  @spec record_bytes(map()) :: non_neg_integer()
-  def record_bytes(record) when is_map(record) do
-    canonical =
-      case Map.fetch(record, :kind) do
-        {:ok, kind} -> record |> Map.delete(:kind) |> Map.put("kind", kind)
-        :error -> record
-      end
-
-    byte_size(:erlang.term_to_binary(canonical, [:deterministic]))
-  end
-
-  @doc """
-  ## Concept
-
-  The Store's fixed ceiling for one retained item.
-
-  ## Technical depth
-
-  Named here so the preflight and the reducer compare against one number.
-  """
-  @spec item_bytes() :: pos_integer()
-  def item_bytes, do: @item_bytes
-
-  @doc """
-  ## Concept
-
-  Whether a durable reply projection fits inside its own settlement record.
-
-  ## Technical depth
-
-  Measured on the complete intended settlement, never on the reply alone: what
-  the Store retains is the record, and a reply that fits by itself can still
-  overflow the verdict that carries it.
-  """
-  @spec fits?(map()) :: boolean()
-  def fits?(settlement), do: record_bytes(settlement) <= @item_bytes
 
   # Concept: a settlement is one indivisible verdict, so its members are
   # validated as a combination.

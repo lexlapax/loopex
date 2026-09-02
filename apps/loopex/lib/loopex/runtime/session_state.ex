@@ -1043,7 +1043,10 @@ defmodule Loopex.Runtime.SessionState do
       kind: "model_attempt_settled_v1"
     }
 
-    ProviderAttempt.fits?(candidate) and Store.validate_private_record(candidate) == :ok
+    case Store.normalize_and_measure_item(:record, candidate) do
+      {:ok, _normalized, bytes} -> bytes <= Store.max_item_bytes()
+      {:error, _refused} -> false
+    end
   end
 
   defp raw_reply_usage(raw) when is_map(raw) and not is_struct(raw) do
@@ -2294,7 +2297,9 @@ defmodule Loopex.Runtime.SessionState do
               }
 
             "failed" ->
-              %{"failure" => failure, "reason" => reason}
+              %{}
+              |> then(&if(failure, do: Map.put(&1, "failure", failure), else: &1))
+              |> then(&if(reason, do: Map.put(&1, "reason", reason), else: &1))
 
             _completed ->
               %{}
@@ -4198,6 +4203,19 @@ defmodule Loopex.Runtime.SessionState do
     else
       {:error, :invalid_context_refusal_pair}
     end
+  end
+
+  # Concept: a run can fail for a reason that is not a context refusal.
+  #
+  # Technical depth: ADR 0018 adds terminal model-call failure, which ends a run
+  # `failed` with a bounded category and no refusal marker. A `failed` terminal
+  # is therefore paired with a refusal only when one was actually admitted; one
+  # carrying a refusal projection without its marker, or a marker without its
+  # projection, is still invalid history.
+  defp consume_context_refusal(%{context_refusal: nil} = state, _run_id, "failed", record) do
+    if Map.has_key?(record, "failure"),
+      do: {:error, :invalid_context_refusal_pair},
+      else: {:ok, state, nil}
   end
 
   defp consume_context_refusal(%{context_refusal: nil} = state, _run_id, outcome, record)
