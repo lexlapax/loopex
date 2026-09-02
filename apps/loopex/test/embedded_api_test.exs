@@ -153,12 +153,10 @@ defmodule Loopex.EmbeddedApiTest do
 
     # An accepted abort is an admission, not an ending: ADR 0009 orders the
     # admission, then the cleanup, then the run's terminal, so the ending is
-    # still to come when `command/2` returns. Draining immediately reads an empty
-    # queue about a third of the time, which is a race in this case rather than
-    # in the runtime.
-    eventually(fn -> committed_event_count(fixture, session_id) == 2 end)
-
-    assert [%{event_sequence: 2, kind: "run.finished"}] = drain_events(original)
+    # still to come when `command/2` returns. And ADR 0018 fences delivery on
+    # the publication watermark, so the durable count is not the delivery
+    # signal either: the terminal is polled off the attachment itself.
+    assert [%{event_sequence: 2, kind: "run.finished"}] = await_delivered(original, 1)
     :ok = M1RuntimeTestStore.block_next_event_read(fixture.store_pid, self())
 
     attaching =
@@ -438,6 +436,24 @@ defmodule Loopex.EmbeddedApiTest do
       {:error, :empty} -> Enum.reverse(accumulated)
     end
   end
+
+  # Drains the attachment until at least `count` events have been delivered,
+  # because delivery follows the publication fence rather than the commit.
+  defp await_delivered(attachment, count, accumulated \\ [], attempts \\ 400)
+
+  defp await_delivered(attachment, count, accumulated, attempts) when attempts > 0 do
+    delivered = accumulated ++ drain_events(attachment)
+
+    if length(delivered) >= count do
+      delivered
+    else
+      Process.sleep(5)
+      await_delivered(attachment, count, delivered, attempts - 1)
+    end
+  end
+
+  defp await_delivered(_attachment, count, accumulated, 0),
+    do: flunk("expected #{count} delivered events, saw #{length(accumulated)}")
 
   defp committed_event_count(fixture, session_id) do
     fixture.store_pid
