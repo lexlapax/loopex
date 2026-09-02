@@ -397,3 +397,32 @@ issues and fix them after M2 closes through an M0 gate generation under
 proposal, weaken either M0 re-proof, or add the repair to M2 scope. Any future
 proposal `A` still requires exact-SHA review and explicit acceptance, and its
 `R` still requires the prescribed transition review.
+
+<a id="item-byte-fixture-spelling"></a>
+## Store item byte targets in the locked context corpus
+
+**Rule.** [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept)
+defines `Store.normalize_and_measure_item/2` as returning the normalized item
+with its required `kind` and `event_id` members restored to atom keys, and
+`encoded_bytes` as the deterministic external-term size of exactly that
+returned item, which is the item `Store.transact/2` commits.
+
+**What is true.** Two Amendment 4 test files derived their byte targets from a
+binary-spelled `"kind"`/`"event_id"` shape instead: `sized_record/1` and
+`sized_event/1` in `apps/loopex/test/store_item_budget_test.exs`, and
+`independent_record_size/1` in `apps/loopex/test/context_admission_test.exs`.
+An atom key and its binary spelling differ by exactly three bytes in the
+external term format, so those fixtures could not agree with the ADR, with
+`store_item_budget_test.exs`'s own `bytes == term_to_binary(normalized)`
+assertion, with the genesis equality it asserts, or with every existing test
+that reads a committed record's `payload.kind`. The production normalizer was
+never wrong; the fixture arithmetic was.
+
+**Disposition.** Maintainer, 2026-09-01: correct those fixtures directly to
+measure the atom-restored shape, without a gate amendment. The files are
+locked by case name and minimum, which the correction preserves, not by digest.
+This is an explicit maintainer override of the ordinary rule that a locked test
+is not rewritten during implementation: the change corrects a fixture defect
+to the accepted ADR's stated convention and alters no claim any case makes. The
+correcting commit carries the same record in its message.
+
