@@ -1248,3 +1248,33 @@ review. The administrative transition changes only the `M2` Acceptance row and
 this new disposition record; the accepted amendment sections, normative
 envelopes, locked gate, portable enforcement, register, and product bytes are
 unchanged.
+
+<a id="disposition-m2-gate-amendment-5-2026-09-01"></a>
+### M2 gate Amendment 5 acceptance — 2026-09-01
+
+The maintainer explicitly accepted
+[Amendment 5](../plans/M2-gate.md#amendment-5) to the accepted `M2` plan pair
+and locked gate as proposed at exact candidate
+`c2cf96453f11fd4ac1eff7ee37dad7b68a3e02ec`, **without the independent exact-SHA review the
+ordinary amendment transaction requires**, as a recorded maintainer override.
+Acceptance binds the amended normative envelopes and gate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept envelope | `sha256:d2891e3b4d24db846da01606ef64090ee3098532bd7b29540a1557de320d4a7c` |
+| Technical depth envelope | `sha256:d2c1350b56e0f63a8986b38e452d2c3adc0bab26ab760764f331dd178b7628ca` |
+| Gate | `sha256:f15d603712beb4973016f831e626b105dfdeca9020ae7cabb92fc89087a81b86` |
+
+Amendment 5 inserts one bounded wait between the two event reads of the
+digest-bound composition case, because ADR 0017 places `run.started` in the
+first staging transaction rather than the prompt admission the case read it
+after, and rebinds that corpus and the runner. Both plan envelopes are
+unchanged. The override rests on the change being one assertion's wait whose
+correctness the corpus itself proves; it is the fifth recorded override of
+this milestone and the only one applied to a digest-bound artifact.
+
+**Scope of this record.** It accepts Amendment 5 alone and rebinds the `M2`
+Acceptance row to its exact proposal. It does not close `M2`, accept a closure
+candidate, authorize product integration, authorize a release, or dispose of
+any recorded limitation. The milestone remains `In review`.
+

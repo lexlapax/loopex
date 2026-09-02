@@ -1556,7 +1556,13 @@ defmodule LoopexCliTest do
     # ~2 MiB in memory.
     assert byte_size(retained) == 65_537
 
-    assert {:error, :over_limit, %{"observed_bytes" => 65_537, "limit_bytes" => 65_536}} =
+    assert {:error, :over_limit,
+            %{
+              "dimension" => "project_resource_bytes",
+              "observed" => 65_537,
+              "limit" => 65_536,
+              "label" => _label
+            }} =
              Loopex.ProjectResource.digest(LoopexCli.ProjectResources.runtime_manifest(manifest))
 
     # The same reader is bounded when the file grows after its identity is
@@ -2381,7 +2387,11 @@ defmodule LoopexCliTest do
     tool_descriptors = Enum.take(receipt["blocks"], -length(request.tools))
     system_message_bytes = LoopexProtocol.Canonical.encode(hd(request.messages))
 
-    assert system_descriptor["source_reference"] == "loopex.system.v1"
+    assert system_descriptor["source_reference"] == %{
+             "kind" => "system",
+             "identity" => "loopex.system.v1"
+           }
+
     assert system_descriptor["byte_cost"] == byte_size(system_message_bytes)
     assert system_descriptor["token_cost"] == Loopex.Bounds.estimate(system_message_bytes)
 

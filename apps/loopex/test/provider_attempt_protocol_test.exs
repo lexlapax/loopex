@@ -1809,6 +1809,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         found
 
       :error ->
+        # A queued call must exist before the coordinator is frozen, or the
+        # coordinator can never issue the request this loop is waiting for.
+        _queued = await_queued_control_call(control)
         suspend_process(coordinator)
 
         case queued_provider_request(runtime, control, binding) do

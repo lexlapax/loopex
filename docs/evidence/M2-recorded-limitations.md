@@ -498,3 +498,52 @@ receipt with its atom-valued members rendered as strings - directly, without a
 gate amendment. Fourth recorded override; the case still proves the retained
 receipt fits the item envelope.
 
+<a id="adr-0017-corpus-corrections"></a>
+## Locked corpus corrections forced by ADR 0017
+
+**Rule.** ADR 0017 replaces the scalar `source_reference` with structured
+descriptors, closes the project-resource refusal reasons and detail shape,
+charges tools at their model-facing projection, admits a prompt as
+`prompt_admitted_v2` with no `run.started` until its first request stages, and
+refuses every non-active revocation state or non-null expiry as
+`binding_changed/invalid_decision`. ADR 0016 replaced `session_genesis` with
+`session_genesis_v2`.
+
+**What is true.** Locked cases in the agent-loop, project-resource-trust,
+session-lifecycle, embedded-API, command, and context-admission corpora
+asserted the earlier spellings; each correction was verified against the
+quoted clause by an independent reviewer before it was applied. Two fixture
+defects were corrected in the same pass: the context corpus read `payload` on
+public events its store double keeps flat, and one budget literal was tuned to
+the tool charge ADR 0017 superseded. One helper race introduced by Amendment 4
+itself - freezing the coordinator before any Control call was queued - was
+corrected in the provider-attempt corpus.
+
+**Disposition.** Maintainer, 2026-09-01: apply every correction directly,
+without a gate amendment. Fifth recorded override; names and minimums are
+unchanged and no assertion changes meaning beyond the accepted ADR.
+
+<a id="adr-0018-corpus-corrections"></a>
+## Locked corpus corrections forced by ADR 0018
+
+**Rule.** ADR 0018 replaces the model-result and attempt-evidence records with
+one settlement record, permits a retry only after an exact `not_dispatched`
+settlement, closes the origin's stream from durable settlement, requires
+Control to verify the prepared current owner on every permit, charges any
+dispatched attempt without complete reported usage with the whole remaining
+allowance, and classifies the shipped adapter's pre-transport refusals as
+`not_dispatched`.
+
+**What is true.** Thirty-one name-locked agent-loop cases, six provider-attempt
+fixtures, and three adapter corpora asserted the earlier shapes; an independent
+reviewer classified every failure against the quoted clause and separated the
+two production defects it also found, which are repaired in production rather
+than in any test. The three agent-loop cases Amendment 4 released by name were
+rewritten to the ADR's shape under new names; the test double that proxies
+Control now forwards provider dispatch with its original caller; and the
+scripted model double reports usage by default, as a real provider does.
+
+**Disposition.** Maintainer, 2026-09-01: apply every correction directly,
+without a gate amendment. Sixth recorded override; minimums are unchanged and
+the two production defects are fixed before any corrected case is counted.
+
