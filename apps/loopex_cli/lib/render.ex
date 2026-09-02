@@ -274,6 +274,9 @@ defmodule LoopexCli.Render do
         IO.puts(:stderr, "\nloopex: stopped, but the effect's outcome is unknown")
         IO.puts(:stderr, "loopex: reconcile with #{terminal_text(event["reconciliation_ref"])}")
 
+      "failed" ->
+        IO.puts(:stderr, "\nloopex: failed#{failure_text(event["failure"])}")
+
       other ->
         IO.puts(:stderr, "\nloopex: #{terminal_text(other)}")
     end
@@ -307,6 +310,28 @@ defmodule LoopexCli.Render do
   end
 
   defp terminal_text(value), do: inspect(value, printable_limit: :infinity, limit: :infinity)
+
+  # Concept: a context-admission failure says which dimension was exceeded, by
+  # how much, and against what -- and says nothing else.
+  #
+  # Technical depth: ADR 0017 gives this terminal an exact five-member bounded
+  # projection. Only those five members are read here. Descriptor bodies, source
+  # references, and any other member a producer attached are never rendered,
+  # because the whole point of the compact projection is that an operator can
+  # act on the refusal without receiving the private context that caused it.
+  defp failure_text(%{"category" => "context_budget_exceeded"} = failure) do
+    " " <>
+      terminal_text(failure["category"]) <>
+      " (retryable " <>
+      terminal_text(failure["retryable"]) <>
+      "; " <>
+      terminal_text(failure["dimension"]) <>
+      " " <>
+      terminal_text(failure["observed"]) <>
+      " against " <> terminal_text(failure["limit"]) <> ")"
+  end
+
+  defp failure_text(_failure), do: ""
 
   # Concept: the retrieval instruction remains one literal argument when copied
   # into a POSIX shell.
