@@ -145,9 +145,13 @@ defmodule Loopex.SessionDirectoryTest do
     end
     """
 
+    # The child is compared on its exact output. Under the bound selector runner
+    # it inherits no locale, and on Linux a VM without one prints a latin1
+    # encoding warning on that same stream, so the child's locale is set here
+    # rather than read from whatever environment happens to launch the suite.
     assert {^runtime_id, 0} =
              System.cmd(elixir, ["-pa", ebin, "-e", expression],
-               env: [{"LOOPEX_HOME", root}],
+               env: [{"LOOPEX_HOME", root}, {"LANG", "C.UTF-8"}, {"LC_ALL", "C.UTF-8"}],
                stderr_to_stdout: true
              )
   end
