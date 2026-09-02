@@ -2521,6 +2521,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     {:ok, runtime} =
       Loopex.start_link(
+        context_token_budget: 8_192,
         runtime_id: Keyword.fetch!(options, :runtime_id),
         store: page_one_store,
         progress_to: Keyword.get(options, :progress_to),
@@ -2563,6 +2564,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     {:ok, runtime} =
       Loopex.start_link(
+        context_token_budget: 8_192,
         runtime_id: Keyword.fetch!(options, :runtime_id),
         store: store,
         progress_to: Keyword.get(options, :progress_to),

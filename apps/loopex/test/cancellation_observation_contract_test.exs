@@ -496,7 +496,13 @@ defmodule Loopex.CancellationObservationContractTest do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: "genesis-preflight")
     on_exit(fn -> stop_process(store_pid) end)
 
-    {:ok, runtime} = Loopex.start_link(runtime_id: "genesis-preflight", store: store)
+    {:ok, runtime} =
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        runtime_id: "genesis-preflight",
+        store: store
+      )
+
     on_exit(fn -> stop_runtime(runtime) end)
 
     before = M1RuntimeTestStore.inspect_state(store_pid)
@@ -566,6 +572,7 @@ defmodule Loopex.CancellationObservationContractTest do
 
     {:ok, runtime} =
       Loopex.start_link(
+        context_token_budget: 8_192,
         runtime_id: "genesis-exact-boundary",
         store: store,
         cleanup_grace_ms: grace
@@ -604,6 +611,7 @@ defmodule Loopex.CancellationObservationContractTest do
 
     {:ok, runtime} =
       Loopex.start_link(
+        context_token_budget: 8_192,
         runtime_id: "cancellation-observation-#{System.unique_integer([:positive])}",
         store: store,
         model: %{

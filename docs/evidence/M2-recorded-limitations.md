@@ -438,7 +438,10 @@ behalf.
 **What is true.** Nine locked test files and the shared agent-loop helper
 started a runtime without the option, because they predate the ADR: the
 agent-loop, runtime, session-lifecycle, tool-registry, cancellation, embedded
-API, session-directory, command, and project-resource-trust corpora. Refusing
+API, session-directory, command, and project-resource-trust corpora, and the
+same correction reached the cancellation-observation, provider-attempt,
+host-policy, prepared-recovery, and context-budget-command corpora once their
+other reds cleared enough to expose it. Refusing
 omission as the ADR requires made every one of those runtimes unstartable.
 
 **Disposition.** Maintainer, 2026-09-01: add the option at every runtime start

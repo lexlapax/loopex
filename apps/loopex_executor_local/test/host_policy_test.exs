@@ -451,11 +451,17 @@ defmodule Loopex.Executor.LocalHostPolicyTest do
     # child starts, rather than discovering the missing authority at the first
     # tool call with a run underway and an operator waiting.
     assert {:error, :host_policy_required} =
-             Loopex.start_link(runtime_id: "no-policy", store: store, tools: [definition])
+             Loopex.start_link(
+               context_token_budget: 8_192,
+               runtime_id: "no-policy",
+               store: store,
+               tools: [definition]
+             )
 
     # Naming one is what makes it apply. Nothing supplies it implicitly.
     assert {:error, :host_policy_required} =
              Loopex.start_link(
+               context_token_budget: 8_192,
                runtime_id: "still-no-policy",
                store: store,
                tools: [definition],
