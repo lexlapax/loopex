@@ -347,7 +347,15 @@ defmodule Loopex.Runtime.ProviderAttempt do
          :ok <- validate_result(result),
          :ok <- validate_accounting(accounting),
          :ok <-
-           validate_combination(transport, termination, conversation, next, result, accounting) do
+           validate_combination(
+             record["attempt"],
+             transport,
+             termination,
+             conversation,
+             next,
+             result,
+             accounting
+           ) do
       :ok
     else
       {:error, reason} -> {:error, reason}
@@ -411,7 +419,15 @@ defmodule Loopex.Runtime.ProviderAttempt do
 
   defp validate_accounting(_accounting), do: {:error, :invalid_attempt_settlement}
 
-  defp validate_combination(transport, termination, conversation, next, result, accounting) do
+  defp validate_combination(
+         attempt,
+         transport,
+         termination,
+         conversation,
+         next,
+         result,
+         accounting
+       ) do
     reply? = match?(%{"kind" => "reply"}, result)
     source = accounting["source"]
 
@@ -438,6 +454,17 @@ defmodule Loopex.Runtime.ProviderAttempt do
           (transport != "not_dispatched" or termination != nil) ->
         {:error, :invalid_attempt_settlement}
 
+      # Technical depth: ADR 0018 names "attempt-two retry" invalid history, and
+      # combination 4 selects terminal model-call failure at the limit "because
+      # version 1 has no remaining allowance". Reading the attempt here is what
+      # makes that refusal a refusal. Without it the record validates, the
+      # reducer installs `retry_permitted(next_attempt: 3)`, and the position the
+      # attempt-open record then refuses is one this settlement already created:
+      # the owner crashes on history it accepted rather than refusing history it
+      # cannot accept.
+      next == "retry" and attempt >= @attempt_limit ->
+        {:error, :invalid_attempt_settlement}
+
       # Continuing means the model asked for tools it can still be given.
       next == "continue" and not continuing_reply?(result, conversation, termination) ->
         {:error, :invalid_attempt_settlement}
@@ -447,6 +474,16 @@ defmodule Loopex.Runtime.ProviderAttempt do
         {:error, :invalid_attempt_settlement}
 
       conversation == "evidence_only" and (not reply? or termination == nil) ->
+        {:error, :invalid_attempt_settlement}
+
+      # Technical depth: ADR 0018 combination 2 fixes a late valid reply as
+      # evidence-only, which is the whole of what the plane is for -- the answer
+      # arrived, the ending was already chosen, and the reply is retained as
+      # evidence rather than as the conversation. A reply carrying a termination
+      # and claiming no conversation at all is a retained answer the run has no
+      # record of having received, which is neither of the two dispositions the
+      # table admits.
+      reply? and termination != nil and conversation != "evidence_only" ->
         {:error, :invalid_attempt_settlement}
 
       true ->
