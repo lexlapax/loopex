@@ -319,6 +319,13 @@ defmodule Loopex.AgentLoopControlBoundaryProxy do
         reply = GenServer.call(real_control, request, :infinity)
         hold_and_reply(real_control, observer, from, request, :post_commit, reply)
 
+      {:"$gen_call", from, {:provider_dispatch, _binding, _authority} = request} ->
+        # ADR 0018: Control verifies that the caller is the prepared current
+        # owner, so the raw call is forwarded with its original `from` rather than
+        # re-issued by this proxy, which would make the proxy the caller.
+        send(real_control, {:"$gen_call", from, request})
+        loop(real_control, observer, armed)
+
       {:"$gen_call", from, request} ->
         GenServer.reply(from, GenServer.call(real_control, request, :infinity))
         loop(real_control, observer, armed)
@@ -929,7 +936,7 @@ defmodule Loopex.AgentLoopTest do
     records = Fixture.records(fixture, session_id)
 
     assert [%{payload: evidence}] =
-             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_evidence_retained"))
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
 
     {run_id, events, records, evidence}
   end
@@ -948,10 +955,17 @@ defmodule Loopex.AgentLoopTest do
     {:error, _reason} =
       Loopex.Store.validate_private_record(%{
         "run_id" => "run_00000000000000000000000000000000",
+        "turn_id" => "turn_00000000000000000000000000000000",
+        "operation_id" => "model-operation_" <> String.duplicate("0", 40),
         "attempt" => 1,
+        "staged_request_digest" => String.duplicate("0", 64),
+        "transport" => "dispatched_or_unknown",
         "termination" => "abort",
-        "evidence" => %{"kind" => "reply", "reply" => reply},
-        kind: "model_attempt_evidence_retained"
+        "conversation" => "evidence_only",
+        "next" => "terminal",
+        "result" => %{"kind" => "reply", "reply" => reply},
+        "accounting" => %{"source" => "reported", "input_tokens" => 1, "output_tokens" => 1},
+        kind: "model_attempt_settled_v1"
       })
 
     text
@@ -1154,10 +1168,11 @@ defmodule Loopex.AgentLoopTest do
     assert job.validated_arguments == %{"threshold" => 0.5}
 
     assert Enum.any?(Fixture.records(fixture, session_id), fn record ->
-             record.payload[:kind] == "model_result_committed" and
-               get_in(record.payload, ["reply", "tool_calls", Access.at(0), "arguments"]) == %{
-                 "threshold" => 0.5
-               }
+             record.payload[:kind] == "model_attempt_settled_v1" and
+               get_in(record.payload, ["result", "reply", "tool_calls", Access.at(0), "arguments"]) ==
+                 %{
+                   "threshold" => 0.5
+                 }
            end)
   end
 
@@ -1693,7 +1708,10 @@ defmodule Loopex.AgentLoopTest do
 
   test "a provider retry of a model call redispatches the same staged request bytes and reuses their staged request digest under a new recorded attempt" do
     # The first attempt errors; the second returns normally.
-    script = [%{text: "", calls: [], error: :provider_unavailable}, %{text: "done", calls: []}]
+    script = [
+      %{text: "", calls: [], error: {:not_dispatched, "model_call_failed"}},
+      %{text: "done", calls: []}
+    ]
 
     fixture = start(script: script)
     {_session_id, attachment, _reply} = Fixture.run(fixture, "go")
@@ -1730,10 +1748,10 @@ defmodule Loopex.AgentLoopTest do
     fixture =
       start(
         script: [
-          %{text: "", calls: [], error: :provider_unavailable},
-          %{text: "", calls: [], error: :provider_unavailable, hold: parent},
-          %{text: "", calls: [], error: :provider_unavailable},
-          %{text: "", calls: [], error: :provider_unavailable}
+          %{text: "", calls: [], error: {:not_dispatched, "model_call_failed"}},
+          %{text: "", calls: [], error: {:not_dispatched, "model_call_failed"}, hold: parent},
+          %{text: "", calls: [], error: {:not_dispatched, "model_call_failed"}},
+          %{text: "", calls: [], error: {:not_dispatched, "model_call_failed"}}
         ]
       )
 
@@ -1755,7 +1773,7 @@ defmodule Loopex.AgentLoopTest do
     attempts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
       |> Enum.map(& &1.payload["attempt"])
 
     # Numbered by the run rather than by whichever owner observed them, and never
@@ -1787,7 +1805,7 @@ defmodule Loopex.AgentLoopTest do
     final_attempts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
       |> Enum.map(& &1.payload["attempt"])
 
     assert final_attempts == [1, 2]
@@ -1870,18 +1888,15 @@ defmodule Loopex.AgentLoopTest do
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == dispatched_before
   end
 
-  test "a cancelled turn is charged its request bytes and its committed max tokens in full and marked estimated" do
+  test "a cancelled turn is charged the whole remaining allowance and marked estimated" do
     # A turn that produced no complete reply is charged its allowance in full, so
     # abandoning turns is not the cheapest way to stay inside a budget.
     request_bytes = String.duplicate("b", 30)
-    assert {charge, :estimated} = Bounds.charge(nil, request_bytes, 500)
-    assert charge == Bounds.estimate(request_bytes) + 500
 
     # A completed turn with reported usage is charged what the provider said,
     # which is strictly less than the full allowance here.
     reply = %{usage: %{"input_tokens" => 5, "output_tokens" => 5}, text: "hi"}
     assert {10, :reported} = Bounds.charge(reply, request_bytes, 500)
-    assert 10 < charge
 
     # And the run actually commits that charge rather than holding it in the
     # owner's memory, where a succession would lose it. The abandoned attempt is
@@ -1903,7 +1918,7 @@ defmodule Loopex.AgentLoopTest do
     abandoned =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
 
     assert Enum.map(abandoned, & &1.payload["attempt"]) == [1]
 
@@ -1911,7 +1926,7 @@ defmodule Loopex.AgentLoopTest do
     assert finished["outcome"] == "bound_reached"
     assert finished["bound"] == "token_budget"
     assert finished["accounting_source"] == "estimated"
-    assert finished["observed"] >= 500
+    assert finished["observed"] == 400
   end
 
   test "a reached deadline whose cleanup cannot be confirmed ends outcome unknown rather than bound reached" do
@@ -2191,11 +2206,11 @@ defmodule Loopex.AgentLoopTest do
       fixture
       |> Fixture.records(session_id)
       |> Enum.find(
-        &(&1.payload[:kind] == "model_result_committed" and
-            get_in(&1.payload, ["reply", "text"]) == "AUTHORITATIVE")
+        &(&1.payload[:kind] == "model_attempt_settled_v1" and
+            get_in(&1.payload, ["result", "reply", "text"]) == "AUTHORITATIVE")
       )
 
-    assert committed.payload["reply"]["text"] == "AUTHORITATIVE"
+    assert committed.payload["result"]["reply"]["text"] == "AUTHORITATIVE"
 
     # The next provider request is the production consumer of canonical
     # conversation history. An event and the raw model-result record can both be
@@ -2290,19 +2305,19 @@ defmodule Loopex.AgentLoopTest do
     # arrive is a durable attempt-evidence record and the diagnostic is only its
     # live notification.
     records = Fixture.records(fixture, session_id)
-    assistants = Enum.filter(records, &(&1.payload[:kind] == "model_result_committed"))
+    assistants = Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
 
     assert assistants == []
 
     assert [%{payload: evidence}] =
-             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_evidence_retained"))
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
 
     assert evidence["run_id"] == run_id
     assert evidence["attempt"] == 1
     assert evidence["termination"] == "abort"
-    assert evidence["evidence"]["kind"] == "reply"
+    assert evidence["result"]["kind"] == "reply"
 
-    retained_reply = evidence["evidence"]["reply"]
+    retained_reply = evidence["result"]["reply"]
 
     assert Map.keys(retained_reply) |> Enum.sort() ==
              ~w(canonical_request_bytes delta_count identity provider_response_id staged_request_digest streamed text tool_calls usage)
@@ -2365,18 +2380,18 @@ defmodule Loopex.AgentLoopTest do
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
         other.store,
-        "model_result_committed",
+        "model_attempt_settled_v1",
         self()
       )
 
     send(in_time_model, :release)
 
     assert_receive {:record_held_before_linearization, result_waiter, _store,
-                    "model_result_committed", transaction},
+                    "model_attempt_settled_v1", transaction},
                    5_000
 
     assert Enum.map(transaction.records, &(Map.get(&1, :kind) || Map.get(&1, "kind"))) == [
-             "model_result_committed",
+             "model_attempt_settled_v1",
              "run_terminal_committed"
            ]
 
@@ -2409,10 +2424,12 @@ defmodule Loopex.AgentLoopTest do
 
     [result_record, terminal_record] =
       records
-      |> Enum.filter(&(&1.payload[:kind] in ["model_result_committed", "run_terminal_committed"]))
+      |> Enum.filter(
+        &(&1.payload[:kind] in ["model_attempt_settled_v1", "run_terminal_committed"])
+      )
 
     assert terminal_record.journal_version == result_record.journal_version + 1
-    assert result_record.payload["reply"]["text"] == "in time"
+    assert result_record.payload["result"]["reply"]["text"] == "in time"
     assert terminal_record.payload["outcome"] == "completed"
   end
 
@@ -2481,8 +2498,9 @@ defmodule Loopex.AgentLoopTest do
 
     GenServer.reply(from, :ok)
 
-    assert :waiting == await_worker_result_drain(coordinator, abort),
-           "the abort returned instead of waiting for the worker's ordered result or DOWN"
+    # ADR 0018 combination 2: a late valid reply after a committed abort is
+    # evidence-only, so the abort is acknowledged without draining the worker;
+    # the reply is retained when it arrives.
 
     send(model, :release)
     assert {:accepted, "abort-after-supervisor-reply"} = Task.await(abort, 5_000)
@@ -2495,12 +2513,12 @@ defmodule Loopex.AgentLoopTest do
     records = Fixture.records(fixture, session_id)
 
     assert [%{payload: evidence}] =
-             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_evidence_retained"))
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
 
     assert evidence["run_id"] == run_id
     assert evidence["attempt"] == 1
     assert evidence["termination"] == "abort"
-    assert evidence["evidence"]["reply"]["text"] == "late after supervisor"
+    assert evidence["result"]["reply"]["text"] == "late after supervisor"
   end
 
   test "late model evidence binds the provider retry attempt that produced it" do
@@ -2509,7 +2527,7 @@ defmodule Loopex.AgentLoopTest do
     fixture =
       start(
         script: [
-          %{text: "", calls: [], error: :provider_unavailable},
+          %{text: "", calls: [], error: {:not_dispatched, "model_call_failed"}},
           %{text: "late retry", calls: [], hold: parent}
         ],
         diagnostics_to: parent
@@ -2532,16 +2550,16 @@ defmodule Loopex.AgentLoopTest do
     records = Fixture.records(fixture, session_id)
 
     assert [%{payload: evidence}] =
-             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_evidence_retained"))
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
 
     assert evidence["run_id"] == run_id
     assert evidence["attempt"] == 2
     assert evidence["termination"] == "abort"
-    assert evidence["evidence"]["reply"]["text"] == "late retry"
+    assert evidence["result"]["reply"]["text"] == "late retry"
 
     stale_records =
       Enum.map(records, fn
-        %{payload: %{kind: "model_attempt_evidence_retained"} = payload} = record ->
+        %{payload: %{kind: "model_attempt_settled_v1"} = payload} = record ->
           %{record | payload: Map.put(payload, "attempt", 1)}
 
         record ->
@@ -2571,7 +2589,7 @@ defmodule Loopex.AgentLoopTest do
     :ok =
       M1RuntimeTestStore.refuse_next_record(
         fixture.store,
-        "model_attempt_evidence_retained"
+        "model_attempt_settled_v1"
       )
 
     coordinator = coordinator_of(fixture.runtime)
@@ -2619,9 +2637,9 @@ defmodule Loopex.AgentLoopTest do
 
     records = Fixture.records(fixture, session_id)
 
-    refute Enum.any?(records, &(&1.payload[:kind] == "model_attempt_evidence_retained"))
+    refute Enum.any?(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
 
-    assert Enum.any?(records, &(&1.payload[:kind] == "model_attempt_abandoned"))
+    assert Enum.any?(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
 
     assert [%{payload: terminal}] =
              Enum.filter(records, &(&1.payload[:kind] == "run_terminal_committed"))
@@ -2654,17 +2672,17 @@ defmodule Loopex.AgentLoopTest do
     records = Fixture.records(fixture, session_id)
 
     assert [%{payload: evidence}] =
-             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_evidence_retained"))
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
 
     assert evidence["run_id"] == run_id
     assert evidence["termination"] == "abort"
 
-    assert evidence["evidence"] == %{
+    assert evidence["result"] == %{
              "kind" => "error",
-             "reason" => "model_call_failed"
+             "category" => "model_call_failed"
            }
 
-    refute Enum.any?(records, &(&1.payload[:kind] == "model_result_committed"))
+    refute Enum.any?(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
   end
 
   test "an unreadable late model reply is retained as a bounded error instead of crashing cleanup" do
@@ -2706,11 +2724,11 @@ defmodule Loopex.AgentLoopTest do
     assert [%{payload: evidence}] =
              fixture
              |> Fixture.records(session_id)
-             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_evidence_retained"))
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
 
-    assert evidence["evidence"] == %{
+    assert evidence["result"] == %{
              "kind" => "error",
-             "reason" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer"
            }
   end
 
@@ -2729,15 +2747,15 @@ defmodule Loopex.AgentLoopTest do
 
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
 
-    assert evidence["evidence"] == %{
+    assert evidence["result"] == %{
              "kind" => "error",
-             "reason" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer"
            }
 
     refute :erlang.term_to_binary(records) =~ secret
   end
 
-  test "an unreadable live model reply abandons and retries its attempt" do
+  test "an unreadable live model reply is one ambiguous attempt that never retries" do
     secret = "sk-live-provider-secret-before-retry"
 
     fixture =
@@ -2752,35 +2770,39 @@ defmodule Loopex.AgentLoopTest do
     events = drain(attachment)
     records = Fixture.records(fixture, session_id)
 
-    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
-    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
+    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "failed"
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
 
     assert records
-           |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
-           |> Enum.map(& &1.payload["attempt"]) == [1]
+           |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+           |> Enum.map(
+             &{&1.payload["attempt"], &1.payload["transport"],
+              get_in(&1.payload, ["result", "category"])}
+           ) == [{1, "dispatched_or_unknown", "unreadable_model_answer"}]
 
     refute :erlang.term_to_binary(records) =~ secret
 
+    # An exact not-dispatched settlement is the only cell that opens a retry;
+    # the retried reply is unreadable, so the second attempt is the terminal one.
     exhausted =
       start(
         script: [
-          %{error: :provider_unavailable},
+          %{error: {:not_dispatched, "model_call_failed"}},
           %{text: "still unreadable", calls: [], reply_overrides: %{credential: secret}}
         ]
       )
 
-    {exhausted_session, _attachment, _reply} = Fixture.run(exhausted, "go")
-    exhausted_coordinator = coordinator_of(exhausted.runtime)
-    exhausted_reference = Process.monitor(exhausted_coordinator)
+    {exhausted_session, exhausted_attachment, _reply} = Fixture.run(exhausted, "go")
 
-    assert_receive {:DOWN, ^exhausted_reference, :process, ^exhausted_coordinator, _reason},
-                   5_000
+    assert Enum.find(drain(exhausted_attachment), &(&1.kind == "run.finished"))["outcome"] ==
+             "failed"
 
     exhausted_records = Fixture.records(exhausted, exhausted_session)
 
     assert exhausted_records
-           |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
-           |> Enum.map(& &1.payload["attempt"]) == [1, 2]
+           |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+           |> Enum.map(&{&1.payload["attempt"], &1.payload["transport"]}) ==
+             [{1, "not_dispatched"}, {2, "dispatched_or_unknown"}]
 
     refute :erlang.term_to_binary(exhausted_records) =~ secret
   end
@@ -2816,7 +2838,7 @@ defmodule Loopex.AgentLoopTest do
 
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
 
-    assert %{"kind" => "reply", "reply" => reply} = evidence["evidence"]
+    assert %{"kind" => "reply", "reply" => reply} = evidence["result"]
 
     assert reply["identity"] == %{
              "provider" => "scripted",
@@ -2855,9 +2877,9 @@ defmodule Loopex.AgentLoopTest do
 
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
 
-    assert evidence["evidence"] == %{
+    assert evidence["result"] == %{
              "kind" => "error",
-             "reason" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer"
            }
   end
 
@@ -2875,9 +2897,9 @@ defmodule Loopex.AgentLoopTest do
 
       assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
 
-      assert evidence["evidence"] == %{
+      assert evidence["result"] == %{
                "kind" => "error",
-               "reason" => "unreadable_model_answer"
+               "category" => "unreadable_model_answer"
              }
     end
   end
@@ -2895,9 +2917,9 @@ defmodule Loopex.AgentLoopTest do
 
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
 
-    assert evidence["evidence"] == %{
+    assert evidence["result"] == %{
              "kind" => "error",
-             "reason" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer"
            }
   end
 
@@ -2914,9 +2936,9 @@ defmodule Loopex.AgentLoopTest do
 
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
 
-    assert evidence["evidence"] == %{
+    assert evidence["result"] == %{
              "kind" => "error",
-             "reason" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer"
            }
 
     assert :erlang.external_size(records) < 65_536
@@ -2937,9 +2959,9 @@ defmodule Loopex.AgentLoopTest do
 
       assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
 
-      assert evidence["evidence"] == %{
+      assert evidence["result"] == %{
                "kind" => "error",
-               "reason" => "model_call_failed"
+               "category" => "model_call_failed"
              }
     end
   end
@@ -2998,11 +3020,11 @@ defmodule Loopex.AgentLoopTest do
     assert [%{payload: evidence}] =
              fixture
              |> Fixture.records(session_id)
-             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_evidence_retained"))
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
 
     assert evidence["termination"] == "deadline"
-    assert evidence["evidence"]["kind"] == "reply"
-    assert evidence["evidence"]["reply"]["text"] == "late at deadline"
+    assert evidence["result"]["kind"] == "reply"
+    assert evidence["result"]["reply"]["text"] == "late at deadline"
   end
 
   test "executor progress proves its whole identity before anything is projected" do
@@ -3780,7 +3802,7 @@ defmodule Loopex.AgentLoopTest do
         [%{text: "answer", calls: [], deltas: ["partial"], hold: parent}],
         progress_to: self(),
         before_prompt: fn store ->
-          :ok = M1RuntimeTestStore.refuse_next_record(store, "model_result_committed")
+          :ok = M1RuntimeTestStore.refuse_next_record(store, "model_attempt_settled_v1")
         end
       )
 
@@ -3806,7 +3828,7 @@ defmodule Loopex.AgentLoopTest do
 
     refute fixture.session_id
            |> then(&Fixture.records(fixture, &1))
-           |> Enum.any?(&(&1.payload[:kind] == "model_result_committed")),
+           |> Enum.any?(&(&1.payload[:kind] == "model_attempt_settled_v1")),
            "the Store refusal did not reach the model-result transaction this case names"
   end
 
@@ -4275,7 +4297,7 @@ defmodule Loopex.AgentLoopTest do
     attempts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
       |> Enum.map(& &1.payload["attempt"])
 
     assert 1 in attempts,
@@ -4420,7 +4442,7 @@ defmodule Loopex.AgentLoopTest do
           %{
             text: "",
             calls: [],
-            error: :provider_unavailable,
+            error: {:not_dispatched, "model_call_failed"},
             hold: self(),
             hold_timeout_ms: 30_000,
             deltas: ["a"]
@@ -4498,7 +4520,7 @@ defmodule Loopex.AgentLoopTest do
     attempts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
       |> Enum.map(& &1.payload["attempt"])
 
     assert 1 in attempts,
@@ -4571,7 +4593,7 @@ defmodule Loopex.AgentLoopTest do
     assert_receive {:control_boundary_waiting, ^control_proxy, boundary_reference, boundary},
                    5_000
 
-    assert boundary == :close_progress,
+    assert boundary == :post_commit,
            "the model error used #{inspect(boundary)} instead of one atomic close boundary"
 
     resume =
@@ -4634,7 +4656,7 @@ defmodule Loopex.AgentLoopTest do
     attempts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
       |> Enum.map(& &1.payload["attempt"])
 
     assert attempts == [1],
@@ -4726,8 +4748,8 @@ defmodule Loopex.AgentLoopTest do
 
     records = Fixture.records(fixture, session_id)
 
-    assert Enum.count(records, &(&1.payload[:kind] == "model_attempt_abandoned")) == 1
-    assert Enum.count(records, &(&1.payload[:kind] == "model_result_committed")) == 1
+    assert Enum.count(records, &(&1.payload[:kind] == "model_attempt_settled_v1")) == 1
+    assert Enum.count(records, &(&1.payload[:kind] == "model_attempt_settled_v1")) == 1
 
     progress = receive_progress()
 
@@ -4956,7 +4978,7 @@ defmodule Loopex.AgentLoopTest do
     attempts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_abandoned"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
       |> Enum.map(& &1.payload["attempt"])
 
     assert attempts == [1]
@@ -4985,7 +5007,7 @@ defmodule Loopex.AgentLoopTest do
     :ok =
       M1RuntimeTestStore.delay_after_record(
         fixture.store,
-        "model_result_committed",
+        "model_attempt_settled_v1",
         self()
       )
 
@@ -5013,7 +5035,7 @@ defmodule Loopex.AgentLoopTest do
 
     send(model, :release)
 
-    assert_receive {:record_linearized, result_waiter, _store, "model_result_committed",
+    assert_receive {:record_linearized, result_waiter, _store, "model_attempt_settled_v1",
                     :session_journal_commit, {:committed, _tx_id, _receipt}},
                    5_000
 
@@ -5056,8 +5078,8 @@ defmodule Loopex.AgentLoopTest do
 
     records = Fixture.records(fixture, session_id)
 
-    assert Enum.count(records, &(&1.payload[:kind] == "model_result_committed")) == 1
-    refute Enum.any?(records, &(&1.payload[:kind] == "model_attempt_abandoned"))
+    assert Enum.count(records, &(&1.payload[:kind] == "model_attempt_settled_v1")) == 1
+    refute Enum.any?(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
   end
 
   test "a model result admitted before handoff still closes complete after ownership moves" do
@@ -5107,7 +5129,7 @@ defmodule Loopex.AgentLoopTest do
 
     assert Enum.count(
              Fixture.records(fixture, session_id),
-             &(&1.payload[:kind] == "model_result_committed")
+             &(&1.payload[:kind] == "model_attempt_settled_v1")
            ) == 1,
            "the case reached Control before the model result was durable"
 
@@ -5147,7 +5169,7 @@ defmodule Loopex.AgentLoopTest do
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
 
     records = Fixture.records(fixture, session_id)
-    refute Enum.any?(records, &(&1.payload[:kind] == "model_attempt_abandoned"))
+    refute Enum.any?(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
   end
 
   test "a live executor supersession ends its old stream without claiming the effect abandoned" do
@@ -6411,8 +6433,8 @@ defmodule Loopex.AgentLoopTest do
     counts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_result_committed"))
-      |> Enum.map(&get_in(&1.payload, ["reply", "delta_count"]))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+      |> Enum.map(&get_in(&1.payload, ["result", "reply", "delta_count"]))
 
     assert Enum.all?(counts, &(is_nil(&1) or (is_integer(&1) and &1 >= 0))),
            "a durable assistant message carries #{inspect(counts)} as a count"

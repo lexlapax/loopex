@@ -78,15 +78,11 @@ defmodule Loopex.Runtime.SessionState do
   alias Loopex.Bounds
   alias Loopex.Conversation
   alias Loopex.Runtime.ContextAdmission
+  alias Loopex.Runtime.ProviderAttempt
   alias Loopex.Store
   alias LoopexProtocol.Canonical
   alias LoopexProtocol.ToolDefinition
 
-  @model_reply_required_fields ~w(text identity usage tool_calls canonical_request_bytes staged_request_digest)
-  @model_reply_optional_fields ~w(delta_count streamed provider_response_id)
-  @model_identity_fields [:provider, :model, :endpoint]
-  @model_usage_fields ~w(input_tokens output_tokens)
-  @max_provider_response_id_bytes 256
   @receipt_required_fields [
     :protocol_version,
     :job_id,
@@ -615,7 +611,7 @@ defmodule Loopex.Runtime.SessionState do
           {:ok, proposal()} | {:error, term()}
   def propose_run_terminal(%__MODULE__{} = state, run_id, proposed, detail)
       when is_binary(run_id) and
-             proposed in ["completed", "bound_reached", "outcome_unknown", "cancelled"] do
+             proposed in ["completed", "bound_reached", "outcome_unknown", "cancelled", "failed"] do
     record = run_terminal_record(state, run_id, proposed, detail)
 
     internal_proposal(
@@ -635,10 +631,13 @@ defmodule Loopex.Runtime.SessionState do
 
     work = Map.get(state.pending_work, run_id, %{turn_number: 1})
     turn_number = next_turn_number(work)
+    turn_id = stable_id("turn", run_id, turn_number)
 
     record = %{
       "run_id" => run_id,
-      "turn_id" => stable_id("turn", run_id, turn_number),
+      "turn_id" => turn_id,
+      "operation_id" => model_operation_id(run_id, turn_number),
+      "staged_request_digest" => request.staged_request_digest,
       "request" => encode_plain(request),
       "applied_steer" => applied_steer,
       "context_receipt" => context_receipt,
@@ -646,20 +645,33 @@ defmodule Loopex.Runtime.SessionState do
     }
 
     # Concept: a request that cannot be staged is refused here, before any
-    # provider sees it.
+    # provider sees it, and one that can is committed with the attempt that may
+    # send it.
     #
     # Technical depth: admission runs against the exact record about to be
     # proposed, so what is judged is what would have been written. A refusal
     # returns the compact projection its caller commits instead of this
-    # transaction; it never becomes a partially staged request.
-    case admit_context_candidate(record) do
-      {:ok, fixed} ->
-        internal_proposal(
-          state,
-          stable_id("model-request", run_id, request.staged_request_digest),
-          fixed
-        )
-
+    # transaction; it never becomes a partially staged request. ADR 0018 then
+    # makes the attempt-open row the only dispatch authority, so the admitted
+    # request row alone must never be enough to call a provider: committing them
+    # separately would leave a window in which the bytes exist and the authority
+    # does not, and a crash inside it would hand a successor a staged request
+    # whose attempt nobody opened.
+    with {:ok, fixed} <- admit_context_candidate(record),
+         {:ok, opened} <-
+           ProviderAttempt.opened_record(%{
+             run_id: run_id,
+             turn_id: turn_id,
+             operation_id: model_operation_id(run_id, turn_number),
+             attempt: 1,
+             staged_request_digest: request.staged_request_digest
+           }) do
+      internal_proposal(
+        state,
+        stable_id("model-request", run_id, request.staged_request_digest),
+        [fixed, opened]
+      )
+    else
       {:refused, refusal} ->
         {:refused, context_refusal_record(record, refusal, work, turn_number)}
 
@@ -784,64 +796,309 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  @doc false
-  @spec propose_model_result(t(), binary(), map(), map()) :: {:ok, proposal()} | {:error, term()}
-  def propose_model_result(%__MODULE__{} = state, run_id, reply, generations \\ %{})
-      when is_binary(run_id) and is_map(reply) and is_map(generations) do
-    with %{request: request} <- Map.get(state.pending_work, run_id),
-         {:ok, canonical_reply} <- canonical_model_reply(reply, request) do
-      propose_validated_model_result(state, run_id, canonical_reply, generations)
+  @doc """
+  ## Concept
+
+  The deterministic identity of one staged model operation.
+
+  ## Technical depth
+
+  Derived from the run and its turn number, so every attempt of one operation
+  names the same identity and a successor rebuilding the run from the journal
+  derives the identity its predecessor used. ADR 0018 does not accept an
+  adapter-supplied identity here.
+  """
+  @spec model_operation_id(binary(), pos_integer()) :: binary()
+  def model_operation_id(run_id, turn_number),
+    do: stable_id("model-operation", run_id, turn_number)
+
+  @doc """
+  ## Concept
+
+  Opens the one retry version one of the attempt record permits.
+
+  ## Technical depth
+
+  Legal only from `model_retry_permitted`, which exists only after an exact
+  attempt-one settlement whose transport was `not_dispatched`. Applying the
+  record consumes that permission permanently, so a proved non-commit may
+  re-present the identical bytes while a committed open can never be repeated.
+  """
+  @spec propose_model_attempt_open(t(), binary()) :: {:ok, proposal()} | {:error, term()}
+  def propose_model_attempt_open(%__MODULE__{} = state, run_id) when is_binary(run_id) do
+    with %{stage: "model_retry_permitted", next_attempt: attempt, request: request} = work <-
+           Map.get(state.pending_work, run_id),
+         {:ok, opened} <-
+           ProviderAttempt.opened_record(%{
+             run_id: run_id,
+             turn_id: work.turn_id,
+             operation_id: model_operation_id(run_id, work.turn_number),
+             attempt: attempt,
+             staged_request_digest: request.staged_request_digest
+           }) do
+      internal_proposal(
+        state,
+        stable_id("model-attempt-open", run_id, {request.staged_request_digest, attempt}),
+        opened
+      )
     else
-      _other -> {:error, :invalid_model_reply}
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :no_retry_permitted}
     end
   end
 
-  # Concept: a stream statistic that is not a count is refused before it becomes
-  # durable, not after.
-  #
-  # Technical depth: `delta_count` and `progress_count` are the numbers ADR 0011
-  # closes a complete domain on, and a consumer compares them against what
-  # arrived to detect loss. Nothing checked either. A model adapter returning
-  # `delta_count: -1` had that value committed into the assistant message and
-  # published on the closure, so the durable record carried a statistic that
-  # describes no stream and the loss comparison became meaningless. Zero is exact
-  # and needs no sentinel; anything below it is not a count.
-  defp validate_stream_count(count) when is_integer(count) and count >= 0, do: :ok
-  defp validate_stream_count(_count), do: {:error, :invalid_stream_count}
+  @doc """
+  ## Concept
 
-  defp propose_validated_model_result(state, run_id, reply, generations) do
-    attempt =
-      state.pending_work
-      |> Map.get(run_id, %{})
-      |> Map.get(:model_attempt, 1)
+  Admits an elapsed run deadline against the attempt it interrupted.
 
-    record = %{
+  ## Technical depth
+
+  A separate durable row rather than a field of the settlement, because the
+  journal order of abort, deadline, and settlement is what classifies the
+  attempt. A stop signal is cleanup only and never reaches here.
+  """
+  @spec propose_model_termination(t(), binary(), non_neg_integer()) ::
+          {:ok, proposal()} | {:error, term()}
+  def propose_model_termination(%__MODULE__{} = state, run_id, observed)
+      when is_binary(run_id) and is_integer(observed) do
+    with %{stage: "model_attempt_open", request: request} = work <-
+           Map.get(state.pending_work, run_id),
+         deadline when is_integer(deadline) <- Map.get(state.deadlines, run_id),
+         true <- observed >= deadline do
+      record = %{
+        "run_id" => run_id,
+        "turn_id" => work.turn_id,
+        "operation_id" => model_operation_id(run_id, work.turn_number),
+        "attempt" => work.model_attempt,
+        "staged_request_digest" => request.staged_request_digest,
+        "cause" => "deadline",
+        "deadline" => deadline,
+        "observed" => observed,
+        kind: "model_termination_admitted_v1"
+      }
+
+      internal_proposal(
+        state,
+        stable_id(
+          "model-termination",
+          run_id,
+          {request.staged_request_digest, work.model_attempt}
+        ),
+        record
+      )
+    else
+      _other -> {:error, :no_open_model_attempt}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Settles one provider attempt: what the transport is known to have done, what
+  the answer cost, whether it entered the conversation, and what happens next —
+  as one indivisible verdict.
+
+  ## Technical depth
+
+  `outcome` is the only thing the caller supplies. Everything else in the
+  twelve-key record is derived here from committed history, because the members
+  are not independent: which termination won is journal order, whether the
+  answer is canonical follows from that, and the accounting follows from the
+  transport and the reply's own usage. A caller that could name them separately
+  could name a combination ADR 0018 calls invalid history.
+  """
+  @spec propose_model_attempt_settled(
+          t(),
+          binary(),
+          {:reply, term()} | :not_dispatched | :dispatched_or_unknown | :owner_loss
+        ) :: {:ok, proposal()} | {:error, term()}
+  def propose_model_attempt_settled(%__MODULE__{} = state, run_id, outcome)
+      when is_binary(run_id) do
+    case Map.get(state.pending_work, run_id) do
+      %{stage: "model_attempt_open"} = work ->
+        settle_open_attempt(state, run_id, work, outcome)
+
+      _absent ->
+        {:error, :no_open_model_attempt}
+    end
+  end
+
+  defp settle_open_attempt(state, run_id, work, outcome) do
+    request = work.request
+    attempt = work.model_attempt
+    termination = attempt_termination(state, run_id, work, outcome)
+    {result, conversation, usage} = attempt_result(work, outcome, termination)
+    transport = attempt_transport(outcome)
+    next = attempt_next(transport, termination, result, attempt)
+    accounting = attempt_accounting(transport, usage)
+
+    settlement = %{
       "run_id" => run_id,
-      "reply" => encode_plain(reply),
-      "generations" => encode_plain(generations),
-      kind: "model_result_committed"
+      "turn_id" => work.turn_id,
+      "operation_id" => model_operation_id(run_id, work.turn_number),
+      "attempt" => attempt,
+      "staged_request_digest" => request.staged_request_digest,
+      "transport" => transport,
+      "termination" => termination,
+      "conversation" => conversation,
+      "next" => next,
+      "result" => result,
+      "accounting" => accounting,
+      kind: "model_attempt_settled_v1"
     }
 
     records =
-      if reply.tool_calls == [] do
-        [record, run_terminal_record(state, run_id, "completed", %{})]
+      if next == "terminal" do
+        [
+          settlement,
+          run_terminal_record(state, run_id, attempt_terminal(termination, result), %{
+            bound: termination == "deadline" && "deadline",
+            observed: termination == "deadline" && Map.get(state.deadlines, run_id),
+            declared_limit: termination == "deadline" && Map.get(state.deadlines, run_id),
+            reason: terminal_reason(result)
+          })
+        ]
       else
-        [record]
+        [settlement]
       end
 
     internal_proposal(
       state,
-      # ADR 0010 keeps the staged request bytes and their digest unchanged
-      # across provider attempts. ADR 0006 separately requires a new
-      # transaction ID after a proved non-commit. Binding the result transaction
-      # to both values preserves those two distinct identities: exact
-      # re-presentation within one attempt is stable, while a successor's
-      # recorded retry cannot collide with its predecessor's terminal
-      # non-commit merely because it dispatched the same bytes.
-      stable_id("model-result", run_id, {reply.staged_request_digest, attempt}),
+      stable_id("model-attempt-settled", run_id, {request.staged_request_digest, attempt}),
       records
     )
   end
+
+  # Concept: the first committed of abort, deadline, and settlement classifies
+  # the attempt, and this reads that order rather than restating it.
+  #
+  # Technical depth: an owner loss is the weakest of the three: it is claimed
+  # only where neither an admitted abort nor an admitted deadline already won,
+  # because a recovered attempt whose run was already aborted ends as the abort
+  # its operator asked for, not as an anonymous succession.
+  defp attempt_termination(state, run_id, work, outcome) do
+    cond do
+      match?(%{run_id: ^run_id}, state.aborting) -> "abort"
+      Map.get(work, :model_termination) == "deadline" -> "deadline"
+      outcome == :owner_loss -> "owner_loss"
+      true -> nil
+    end
+  end
+
+  defp attempt_transport(:not_dispatched), do: "not_dispatched"
+  defp attempt_transport(_other), do: "dispatched_or_unknown"
+
+  # Concept: a reply that cannot be retained truthfully becomes the compact
+  # unreadable answer, and it keeps whatever complete usage the provider did
+  # report.
+  #
+  # Technical depth: the settlement is preflighted at its exact retained size
+  # before it is proposed. A reply that passed validation but whose complete
+  # settlement does not fit is compacted here rather than discovered at the
+  # Store boundary, where the run would have no verdict at all.
+  #
+  # Both ways a reply can fail to be retained land in the same compact record.
+  # ADR 0018 combination 5 is the only combination that names
+  # `unreadable_model_answer`, and it is the answer this runtime could not read,
+  # whether it contradicted itself or would not fit; combination 3's
+  # `model_call_failed` names an attempt that returned no answer at all -- a
+  # live ambiguous error or a recovered open attempt -- and takes the estimated
+  # remaining allowance because there is no reported figure to keep. Complete
+  # usage the provider did report survives either compaction, because
+  # combination 5 "preserves complete reported usage when available"; the
+  # validated reply supplies it where canonicalization succeeded, and the raw
+  # answer's normalized usage supplies it where canonicalization refused the
+  # reply before there was a validated one.
+  defp attempt_result(work, {:reply, raw}, termination) do
+    case ProviderAttempt.canonical_reply(raw, work.request) do
+      {:ok, reply} ->
+        result = %{"kind" => "reply", "reply" => reply}
+        conversation = if termination, do: "evidence_only", else: "canonical"
+
+        if reply_settlement_fits?(work, result, reply["usage"]) do
+          {result, conversation, reply["usage"]}
+        else
+          {unreadable_result(), "none", reply["usage"]}
+        end
+
+      {:error, _reason} ->
+        {unreadable_result(), "none", raw_reply_usage(raw)}
+    end
+  end
+
+  defp attempt_result(_work, _outcome, _termination),
+    do: {%{"kind" => "error", "category" => "model_call_failed"}, "none", nil}
+
+  defp unreadable_result, do: %{"kind" => "error", "category" => "unreadable_model_answer"}
+
+  # Concept: the compact answer is preflighted against the same ceiling the
+  # complete one is measured with.
+  #
+  # Technical depth: measured on the intended settlement rather than the reply,
+  # since the Store retains the record. The paired terminal is a separate item
+  # and is measured on its own.
+  defp reply_settlement_fits?(work, result, usage) do
+    candidate = %{
+      "run_id" => work.run_id,
+      "turn_id" => work.turn_id,
+      "operation_id" => model_operation_id(work.run_id, work.turn_number),
+      "attempt" => work.model_attempt,
+      "staged_request_digest" => work.request.staged_request_digest,
+      "transport" => "dispatched_or_unknown",
+      "termination" => nil,
+      "conversation" => "canonical",
+      "next" => "terminal",
+      "result" => result,
+      "accounting" => attempt_accounting("dispatched_or_unknown", usage),
+      kind: "model_attempt_settled_v1"
+    }
+
+    case Store.normalize_and_measure_item(:record, candidate) do
+      {:ok, _normalized, bytes} -> bytes <= Store.max_item_bytes()
+      {:error, _refused} -> false
+    end
+  end
+
+  defp raw_reply_usage(raw) when is_map(raw) and not is_struct(raw) do
+    case Map.get(raw, :usage, Map.get(raw, "usage", :absent)) do
+      :absent -> nil
+      usage -> ProviderAttempt.normalize_usage(usage)
+    end
+  end
+
+  defp raw_reply_usage(_raw), do: nil
+
+  defp attempt_accounting("not_dispatched", _usage),
+    do: %{"source" => "none", "basis" => "not_dispatched"}
+
+  defp attempt_accounting(_transport, %{
+         "status" => "reported",
+         "input_tokens" => input,
+         "output_tokens" => output
+       }),
+       do: %{"source" => "reported", "input_tokens" => input, "output_tokens" => output}
+
+  defp attempt_accounting(_transport, _usage),
+    do: %{"source" => "estimated", "basis" => "remaining_allowance"}
+
+  defp attempt_next("not_dispatched", nil, _result, attempt) do
+    if attempt < ProviderAttempt.attempt_limit(), do: "retry", else: "terminal"
+  end
+
+  defp attempt_next(_transport, nil, %{"kind" => "reply", "reply" => reply}, _attempt) do
+    if reply["tool_calls"] == [], do: "terminal", else: "continue"
+  end
+
+  defp attempt_next(_transport, _termination, _result, _attempt), do: "terminal"
+
+  defp attempt_terminal("abort", _result), do: "cancelled"
+  defp attempt_terminal("deadline", _result), do: "bound_reached"
+  defp attempt_terminal(_termination, %{"kind" => "reply"}), do: "completed"
+  defp attempt_terminal(_termination, _result), do: "failed"
+
+  defp terminal_reason(%{"kind" => "error", "category" => category}), do: category
+  defp terminal_reason(_result), do: nil
 
   @doc false
   @spec propose_effect_intent(
@@ -964,93 +1221,6 @@ defmodule Loopex.Runtime.SessionState do
     }
 
     internal_proposal(state, stable_id("tool-result", run_id, tool_call_id), record)
-  end
-
-  @doc """
-  ## Concept
-
-  Records that a model attempt was abandoned: charges the turn it produced no
-  complete reply for, and advances the attempt identity the next dispatch runs
-  under.
-
-  ## Technical depth
-
-  The charge is its request bytes plus that turn's committed output allowance, in
-  full, marked estimated. That deliberately over-charges: charging zero would
-  make aborting every turn the cheapest way to stay inside a budget, and a bound
-  that can be evaded by giving up is not a bound.
-
-  Both halves are one durable transition rather than two pieces of coordinator
-  memory. An owner that dies between attempts hands its successor a journal, and
-  a successor that rebuilds the run as attempt one with nothing charged repeats
-  the nominal retry allowance after every succession and reopens the stream
-  domain the abandoned attempt already used. Only the attempt currently
-  dispatched may be abandoned, so replaying the record twice is refused rather
-  than charged twice.
-  """
-  @spec propose_model_attempt_abandoned(t(), binary()) :: {:ok, proposal()} | {:error, term()}
-  def propose_model_attempt_abandoned(%__MODULE__{} = state, run_id) when is_binary(run_id) do
-    case Map.get(state.pending_work, run_id) do
-      %{stage: "model_dispatched"} = work ->
-        attempt = Map.get(work, :model_attempt, 1)
-
-        record = %{
-          "run_id" => run_id,
-          "attempt" => attempt,
-          kind: "model_attempt_abandoned"
-        }
-
-        internal_proposal(
-          state,
-          stable_id("model-attempt", run_id, attempt),
-          record
-        )
-
-      _absent ->
-        {:error, :no_attempt_pending}
-    end
-  end
-
-  @doc """
-  ## Concept
-
-  Retains the answer a model attempt produced after stopping that attempt had
-  already won the journal order.
-
-  ## Technical depth
-
-  The record is attempt evidence only. It changes no conversation, public event,
-  bound, or terminal outcome. A reply is validated against the exact staged
-  request still held by the dispatched attempt before its plain bytes are
-  retained; an unreadable or failed answer retains only one bounded failure
-  reason. The following `model_attempt_abandoned` transition remains the one
-  that charges the attempt and advances its identity.
-  """
-  @spec propose_model_attempt_evidence(t(), binary(), :abort | :deadline, term()) ::
-          {:ok, proposal()} | {:error, term()}
-  def propose_model_attempt_evidence(%__MODULE__{} = state, run_id, termination, result)
-      when is_binary(run_id) and termination in [:abort, :deadline] do
-    with %{stage: "model_dispatched"} = work <- Map.get(state.pending_work, run_id),
-         attempt = Map.get(work, :model_attempt, 1),
-         {:ok, evidence} <- encode_model_attempt_evidence(result, work.request),
-         {:ok, record} <-
-           bounded_model_attempt_record(%{
-             "run_id" => run_id,
-             "attempt" => attempt,
-             "termination" => Atom.to_string(termination),
-             "evidence" => evidence,
-             kind: "model_attempt_evidence_retained"
-           }) do
-      internal_proposal(
-        state,
-        stable_id("model-attempt-evidence", run_id, attempt),
-        record
-      )
-    else
-      nil -> {:error, :no_attempt_pending}
-      {:error, reason} -> {:error, reason}
-      _other -> {:error, :invalid_model_attempt_evidence}
-    end
   end
 
   @doc false
@@ -1426,9 +1596,9 @@ defmodule Loopex.Runtime.SessionState do
               "context_admission_refused_v1",
               "deadline_staging_failed_v1",
               "model_request_committed",
-              "model_result_committed",
-              "model_attempt_evidence_retained",
-              "model_attempt_abandoned",
+              "model_attempt_opened_v1",
+              "model_attempt_settled_v1",
+              "model_termination_admitted_v1",
               "effect_intent_committed",
               "executor_receipt_committed",
               "outcome_unknown_committed",
@@ -1765,11 +1935,21 @@ defmodule Loopex.Runtime.SessionState do
     )
   end
 
+  # Concept: the request row alone stages nothing observable.
+  #
+  # Technical depth: ADR 0018 makes the consecutive attempt-open row the
+  # dispatch authority, so applying the request alone must expose no staged
+  # request, attempt, stream domain, conversation, accounting, queue effect, or
+  # public start. The decoded bytes are held under `:staged` until that row
+  # arrives, which is why a page boundary between the two is legal and a
+  # recovery that stops between them dispatches nothing.
   defp apply_internal_record(
          state,
          %{
            "run_id" => run_id,
            "turn_id" => turn_id,
+           "operation_id" => operation_id,
+           "staged_request_digest" => staged_request_digest,
            "request" => request,
            "applied_steer" => applied_steer,
            kind: "model_request_committed"
@@ -1781,74 +1961,88 @@ defmodule Loopex.Runtime.SessionState do
          :ok <- Loopex.Model.validate_request(request),
          turn_number = next_turn_number(work),
          true <- turn_id == stable_id("turn", run_id, turn_number),
+         true <- operation_id == model_operation_id(run_id, turn_number),
+         true <- staged_request_digest == request.staged_request_digest,
          :ok <- validate_context_receipt(state, record, request, run_id, applied_steer) do
-      # Concept: staging a request is what advances the turn.
-      #
-      # Technical depth: a settled turn advances only here, inside the same
-      # transaction that commits the bytes about to be dispatched. There is no
-      # separate "turn advanced" record to fall out of step with the request it
-      # was supposed to accompany.
       next_work =
-        Map.merge(work, %{
-          stage: "model_dispatched",
-          turn_id: turn_id,
-          turn_number: turn_number,
-          request: request,
-          pending_calls: []
+        work
+        |> Map.drop([:request, :model_attempt, :model_termination, :settlement, :next_attempt])
+        |> Map.merge(%{
+          stage: "model_request_pending_attempt_open",
+          pending_calls: [],
+          staged: %{
+            turn_id: turn_id,
+            turn_number: turn_number,
+            request: request,
+            applied_steer: applied_steer
+          }
         })
 
-      deadlines = Map.put_new(state.deadlines, run_id, request.deadline)
-
-      # Concept: a steer becomes applied in the same transaction that dispatches
-      # the request carrying it, and nowhere else.
-      #
-      # Technical depth: its exact bytes enter the conversation as a user-role
-      # element here, so the record of what was said and the record of what was
-      # sent cannot disagree. A steer is never recorded applied unless a
-      # committed request actually carried it.
-      started = run_started_events(state.session_id, work.command_id, run_id, turn_number)
-
-      {state, events} =
-        case applied_steer && Map.get(state.steer, run_id) do
-          %{command_id: ^applied_steer, content: content} = steer ->
-            element = %{
-              kind: :user_message,
-              run_id: run_id,
-              command_id: applied_steer,
-              content: content
-            }
-
-            {state
-             |> append_element(run_id, element)
-             |> Map.update!(:steer, &Map.put(&1, run_id, %{steer | state: "applied"})),
-             [steer_event(state.session_id, applied_steer, run_id, "applied", nil)]}
-
-          _absent ->
-            {state, []}
-        end
-
-      {:ok, put_pending(%{state | deadlines: deadlines}, run_id, next_work), started ++ events}
+      {:ok, put_pending(state, run_id, next_work), []}
     else
       _other -> {:error, :invalid_model_request_transition}
     end
   end
 
-  defp apply_internal_record(state, %{
-         "run_id" => run_id,
-         "reply" => reply,
-         "generations" => generations,
-         kind: "model_result_committed"
-       }) do
-    with {:ok, reply} <- decode_reply(reply),
-         %{stage: "model_dispatched", request: request} = work <-
-           Map.get(state.pending_work, run_id),
-         true <- reply.canonical_request_bytes == request.canonical_request_bytes,
-         true <- reply.staged_request_digest == request.staged_request_digest,
-         true <- is_binary(reply.text),
-         true <- is_list(reply.tool_calls) do
-      apply_model_reply(state, work, reply, generations)
+  # Concept: opening the attempt is what makes a staged request dispatchable.
+  #
+  # Technical depth: attempt one is the second row of the first-staging
+  # transaction and promotes everything that row deferred — the turn, the staged
+  # request, the run's deadline instant, any steer the request carried, and the
+  # run's public start. Attempt two comes from `model_retry_permitted` alone and
+  # consumes that permission permanently, which is what bounds the version-one
+  # allowance across succession: the limit is read from committed history rather
+  # than from whichever owner happens to be alive.
+  defp apply_internal_record(state, %{kind: "model_attempt_opened_v1"} = record) do
+    with :ok <- ProviderAttempt.validate_opened(record),
+         run_id = record["run_id"],
+         work when is_map(work) <- Map.get(state.pending_work, run_id) do
+      open_model_attempt(state, run_id, work, record)
     else
-      _other -> {:error, :invalid_model_result_transition}
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :invalid_model_attempt_open_transition}
+    end
+  end
+
+  # Concept: a deadline is admitted against the attempt it interrupted before
+  # anything settles it.
+  #
+  # Technical depth: the row changes no accounting, conversation, or terminal.
+  # It fixes the journal order that later classifies the attempt, which is what
+  # makes "abort versus deadline is journal order" a fact replay can read.
+  defp apply_internal_record(state, %{kind: "model_termination_admitted_v1"} = record) do
+    with :ok <- ProviderAttempt.validate_termination(record),
+         run_id = record["run_id"],
+         %{stage: "model_attempt_open", request: request} = work <-
+           Map.get(state.pending_work, run_id),
+         true <- attempt_identity_matches?(record, run_id, work, request),
+         true <- record["deadline"] == Map.get(state.deadlines, run_id),
+         nil <- Map.get(work, :model_termination) do
+      {:ok, put_pending(state, run_id, Map.put(work, :model_termination, "deadline")), []}
+    else
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :invalid_model_termination_transition}
+    end
+  end
+
+  # Concept: one attempt's verdict is applied whole or not at all.
+  #
+  # Technical depth: a `terminal` settlement applies nothing on its own — it
+  # installs `model_attempt_pending_terminal` holding its own bytes, and the
+  # exact consecutive `run_terminal_committed` applies the accounting,
+  # conversation, and ending together. `retry` and `continue` settlements are
+  # complete in one row because neither ends the run.
+  defp apply_internal_record(state, %{kind: "model_attempt_settled_v1"} = record) do
+    with :ok <- ProviderAttempt.validate_settled(record),
+         run_id = record["run_id"],
+         %{stage: "model_attempt_open", request: request} = work <-
+           Map.get(state.pending_work, run_id),
+         true <- attempt_identity_matches?(record, run_id, work, request),
+         true <- settlement_termination_agrees?(state, run_id, work, record) do
+      apply_attempt_settlement(state, run_id, work, record)
+    else
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :invalid_model_attempt_settlement_transition}
     end
   end
 
@@ -2008,50 +2202,6 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp apply_internal_record(state, %{
-         "run_id" => run_id,
-         "attempt" => attempt,
-         kind: "model_attempt_abandoned"
-       }) do
-    with %{stage: "model_dispatched", request: request} = work <-
-           Map.get(state.pending_work, run_id),
-         true <- Map.get(work, :model_attempt, 1) == attempt do
-      {charge, source} =
-        Bounds.charge(nil, request.canonical_request_bytes, Loopex.Model.max_tokens(request))
-
-      # Concept: the abandoned attempt is paid for, and the next one is a
-      # different attempt.
-      #
-      # Technical depth: the increment is what makes the retried dispatch open a
-      # new stream domain instead of reusing the abandoned one, and it is what
-      # bounds the retries across succession, because the limit is now read from
-      # committed history rather than from whichever owner happens to be alive.
-      next_work = Map.put(work, :model_attempt, attempt + 1)
-
-      {:ok, put_pending(charge_run(state, run_id, charge, source), run_id, next_work), []}
-    else
-      _other -> {:error, :invalid_model_attempt_transition}
-    end
-  end
-
-  defp apply_internal_record(state, %{
-         "run_id" => run_id,
-         "attempt" => attempt,
-         "termination" => termination,
-         "evidence" => evidence,
-         kind: "model_attempt_evidence_retained"
-       }) do
-    with %{stage: "model_dispatched", request: request} = work <-
-           Map.get(state.pending_work, run_id),
-         true <- Map.get(work, :model_attempt, 1) == attempt,
-         true <- termination in ["abort", "deadline"],
-         :ok <- validate_model_attempt_evidence(evidence, request) do
-      {:ok, state, []}
-    else
-      _other -> {:error, :invalid_model_attempt_evidence}
-    end
-  end
-
   # Concept: applying the refusal row alone changes nothing durable.
   #
   # Technical depth: ADR 0017 makes the refusal and its terminal one semantic
@@ -2113,13 +2263,23 @@ defmodule Loopex.Runtime.SessionState do
            "reconciliation_ref" => reconciliation_ref,
            "cleanup_grace_ms" => cleanup_grace_ms,
            "command_id" => command_id,
+           "reason" => reason,
            kind: "run_terminal_committed"
          } = record
        ) do
-    with %{stage: stage} <- Map.get(state.pending_work, run_id),
+    # Concept: a terminal that completes a settlement applies that settlement
+    # first, in the same transaction.
+    #
+    # Technical depth: ADR 0018 defers every semantic effect of a terminal
+    # settlement to its consecutive terminal row, so this is where the deferred
+    # accounting, conversation, and stage transition are applied. A terminal
+    # arriving against any other stage is the ordinary ending it always was.
+    with {:ok, state, work, settled_events} <- complete_pending_terminal(state, run_id),
+         %{stage: stage} <- work,
          true <-
            outcome in ["completed", "bound_reached", "outcome_unknown", "cancelled", "failed"],
          true <- terminal_admitted?(state, run_id, stage, outcome, bound),
+         true <- is_nil(reason) or is_binary(reason),
          {:ok, state, failure} <- consume_context_refusal(state, run_id, outcome, record) do
       # Concept: bound_reached carries the bound and the observed value and
       # nothing else.
@@ -2148,7 +2308,9 @@ defmodule Loopex.Runtime.SessionState do
               }
 
             "failed" ->
-              %{"failure" => failure}
+              %{}
+              |> then(&if(failure, do: Map.put(&1, "failure", failure), else: &1))
+              |> then(&if(reason, do: Map.put(&1, "reason", reason), else: &1))
 
             _completed ->
               %{}
@@ -2166,7 +2328,8 @@ defmodule Loopex.Runtime.SessionState do
       {state, steer_events} = resolve_steer(state, run_id, unapplied_reason(outcome, bound))
       {state, promotion_events} = promote_follow_up(state, run_id)
 
-      {:ok, %{state | aborting: nil}, [event] ++ steer_events ++ promotion_events}
+      {:ok, %{state | aborting: nil},
+       settled_events ++ [event] ++ steer_events ++ promotion_events}
     else
       _other -> {:error, :invalid_run_terminal_transition}
     end
@@ -2355,60 +2518,274 @@ defmodule Loopex.Runtime.SessionState do
     }
   end
 
-  # Concept: one committed reply becomes one assistant message and the turn's
-  # list of calls to run.
+  # Concept: opening the attempt promotes everything the request row deferred.
   #
-  # Technical depth: the assistant message is built from the adapter's return
-  # value and never assembled from deltas — core has nothing to assemble from,
-  # which makes that structural rather than a rule to remember. A malformed,
-  # truncated, or duplicated call never becomes a call entry: the whole batch is
-  # refused, because a turn that silently dropped one of the model's calls would
-  # project a conversation the model never had.
-  #
-  # No bound is evaluated here. Whether the run continues depends on wall clock,
-  # and a decision that reads the clock cannot be replayed; the coordinator
-  # therefore evaluates bounds against the settled turn and commits the outcome
-  # as its own durable fact.
-  defp apply_model_reply(state, work, reply, generations) do
-    case normalize_calls(reply.tool_calls, generations) do
-      {:ok, calls} ->
-        run_id = work.run_id
+  # Technical depth: attempt one and attempt two reach `model_attempt_open` from
+  # two different states, and neither may reach it from the other's. Attempt one
+  # comes only from a staged request whose open row is the next one; attempt two
+  # comes only from a retry permission an exact attempt-one `not_dispatched`
+  # settlement created, and consumes it.
+  defp open_model_attempt(
+         state,
+         run_id,
+         %{stage: "model_request_pending_attempt_open", staged: staged} = work,
+         record
+       ) do
+    with 1 <- record["attempt"],
+         true <- record["run_id"] == run_id,
+         true <- record["turn_id"] == staged.turn_id,
+         true <- record["operation_id"] == model_operation_id(run_id, staged.turn_number),
+         true <- record["staged_request_digest"] == staged.request.staged_request_digest do
+      request = staged.request
 
-        assistant = %{
-          kind: :assistant_message,
+      next_work =
+        work
+        |> Map.delete(:staged)
+        |> Map.merge(%{
+          stage: "model_attempt_open",
+          turn_id: staged.turn_id,
+          turn_number: staged.turn_number,
+          request: request,
+          model_attempt: 1,
+          model_termination: nil,
+          pending_calls: []
+        })
+
+      state = %{state | deadlines: Map.put_new(state.deadlines, run_id, request.deadline)}
+      {state, steer_events} = apply_staged_steer(state, run_id, staged.applied_steer)
+
+      {:ok, put_pending(state, run_id, next_work),
+       run_started_events(
+         state.session_id,
+         Map.get(work, :command_id),
+         run_id,
+         staged.turn_number
+       ) ++
+         steer_events}
+    else
+      _other -> {:error, :invalid_model_attempt_open_transition}
+    end
+  end
+
+  defp open_model_attempt(
+         state,
+         run_id,
+         %{stage: "model_retry_permitted", next_attempt: expected, request: request} = work,
+         record
+       ) do
+    with ^expected <- record["attempt"],
+         true <- record["run_id"] == run_id,
+         true <- record["turn_id"] == work.turn_id,
+         true <- record["operation_id"] == model_operation_id(run_id, work.turn_number),
+         true <- record["staged_request_digest"] == request.staged_request_digest do
+      next_work =
+        work
+        |> Map.delete(:next_attempt)
+        |> Map.merge(%{stage: "model_attempt_open", model_attempt: expected})
+
+      {:ok, put_pending(state, run_id, next_work), []}
+    else
+      _other -> {:error, :invalid_model_attempt_open_transition}
+    end
+  end
+
+  defp open_model_attempt(_state, _run_id, _work, _record),
+    do: {:error, :invalid_model_attempt_open_transition}
+
+  # Concept: a steer becomes applied in the same transaction that opens the
+  # attempt carrying it, and nowhere else.
+  #
+  # Technical depth: its exact bytes enter the conversation as a user-role
+  # element here, so the record of what was said and the record of what was sent
+  # cannot disagree. A steer is never recorded applied unless a committed
+  # request actually carried it and an attempt actually opened over it.
+  defp apply_staged_steer(state, _run_id, nil), do: {state, []}
+
+  defp apply_staged_steer(state, run_id, applied_steer) do
+    case Map.get(state.steer, run_id) do
+      %{command_id: ^applied_steer, content: content} = steer ->
+        element = %{
+          kind: :user_message,
           run_id: run_id,
-          turn_number: work.turn_number,
-          content: reply.text,
-          tool_calls: calls,
-          stop_reason: if(calls == [], do: "end_turn", else: "tool_use"),
-          usage: reply.usage
+          command_id: applied_steer,
+          content: content
         }
 
-        {charge, source} =
-          Bounds.charge(
-            reply,
-            work.request.canonical_request_bytes,
-            Loopex.Model.max_tokens(work.request)
-          )
+        {state
+         |> append_element(run_id, element)
+         |> Map.update!(:steer, &Map.put(&1, run_id, %{steer | state: "applied"})),
+         [steer_event(state.session_id, applied_steer, run_id, "applied", nil)]}
 
-        next_work =
-          if calls == [] do
-            Map.merge(work, %{stage: "turn_settled", pending_calls: []})
-          else
-            Map.merge(work, %{stage: "effect_pending", pending_calls: calls})
-          end
-
-        next =
-          state
-          |> append_element(run_id, assistant)
-          |> charge_run(run_id, charge, source)
-          |> put_pending(run_id, next_work)
-
-        {:ok, next, [assistant_event(state.session_id, run_id, work.turn_id, reply.text)]}
-
-      :error ->
-        {:error, :invalid_model_tool_call}
+      _absent ->
+        {state, []}
     end
+  end
+
+  defp attempt_identity_matches?(record, run_id, work, request) do
+    record["run_id"] == run_id and record["turn_id"] == work.turn_id and
+      record["operation_id"] == model_operation_id(run_id, work.turn_number) and
+      record["attempt"] == work.model_attempt and
+      record["staged_request_digest"] == request.staged_request_digest
+  end
+
+  # Concept: which termination won is journal order, so a settlement may only
+  # state the one the journal already fixed.
+  #
+  # Technical depth: `owner_loss` is admitted only where neither an abort nor a
+  # deadline had already won, because a recovered attempt whose run was already
+  # aborted ends as the abort its operator asked for.
+  defp settlement_termination_agrees?(state, run_id, work, record) do
+    case record["termination"] do
+      "abort" -> match?(%{run_id: ^run_id}, state.aborting)
+      "deadline" -> Map.get(work, :model_termination) == "deadline"
+      "owner_loss" -> no_committed_termination?(state, run_id, work)
+      nil -> no_committed_termination?(state, run_id, work)
+    end
+  end
+
+  defp no_committed_termination?(state, run_id, work) do
+    not match?(%{run_id: ^run_id}, state.aborting) and
+      Map.get(work, :model_termination) != "deadline"
+  end
+
+  defp apply_attempt_settlement(state, run_id, work, %{"next" => "retry"} = record) do
+    next_work =
+      work
+      |> Map.drop([:model_attempt, :model_termination])
+      |> Map.merge(%{
+        stage: "model_retry_permitted",
+        next_attempt: record["attempt"] + 1
+      })
+
+    {:ok, put_pending(state, run_id, next_work), []}
+  end
+
+  defp apply_attempt_settlement(state, run_id, work, %{"next" => "continue"} = record),
+    do: apply_settled_verdict(state, run_id, work, record)
+
+  defp apply_attempt_settlement(state, run_id, work, %{"next" => "terminal"} = record) do
+    next_work = Map.merge(work, %{stage: "model_attempt_pending_terminal", settlement: record})
+
+    {:ok, put_pending(state, run_id, next_work), []}
+  end
+
+  # Concept: the deferred half of a terminal settlement, applied by the exact
+  # terminal row that completes it.
+  #
+  # Technical depth: a settlement row applied alone installs
+  # `model_attempt_pending_terminal` and changes nothing an operator or a
+  # projection can see. This is where that verdict finally lands, inside the
+  # same transaction as the ending it belongs to, so a page boundary between the
+  # two rows exposes no half-applied run.
+  defp complete_pending_terminal(state, run_id) do
+    case Map.get(state.pending_work, run_id) do
+      %{stage: "model_attempt_pending_terminal", settlement: settlement} = work ->
+        case apply_settled_verdict(state, run_id, Map.delete(work, :settlement), settlement) do
+          {:ok, next, events} -> {:ok, next, Map.get(next.pending_work, run_id), events}
+          {:error, reason} -> {:error, reason}
+        end
+
+      %{} = work ->
+        {:ok, state, work, []}
+
+      _absent ->
+        {:error, :invalid_run_terminal_transition}
+    end
+  end
+
+  # Concept: the settlement's accounting and its conversation are applied
+  # together or not at all.
+  #
+  # Technical depth: the durable reply is read back by key and never rebuilt.
+  # Tool generations are resolved from the staged request's own tools rather
+  # than retained a second time, so the settlement stays the exact twelve-key
+  # record and replay still names the tool each call resolved to.
+  defp apply_settled_verdict(state, run_id, work, record) do
+    state = apply_attempt_accounting(state, run_id, record["accounting"])
+
+    case {record["conversation"], record["result"]} do
+      {"canonical", %{"kind" => "reply", "reply" => reply}} ->
+        case normalize_calls(settled_calls(reply), request_generations(work.request)) do
+          {:ok, calls} ->
+            assistant = %{
+              kind: :assistant_message,
+              run_id: run_id,
+              turn_number: work.turn_number,
+              content: reply["text"],
+              # Concept: the retained element names each call the way the reply
+              # named it.
+              #
+              # Technical depth: the dispatch queue keys calls by
+              # `tool_call_id`, which is the identity the executor boundary
+              # binds. The conversation element keeps that member and adds the
+              # adapter's own `id` beside it, so a projection reads back the
+              # bytes the provider produced rather than a renamed copy of them.
+              tool_calls: Enum.map(calls, &Map.put(&1, :id, &1.tool_call_id)),
+              stop_reason: if(calls == [], do: "end_turn", else: "tool_use"),
+              usage: reply["usage"]
+            }
+
+            next_work =
+              if calls == [] do
+                Map.merge(work, %{stage: "turn_settled", pending_calls: []})
+              else
+                Map.merge(work, %{stage: "effect_pending", pending_calls: calls})
+              end
+
+            next =
+              state
+              |> append_element(run_id, assistant)
+              |> put_pending(run_id, next_work)
+
+            {:ok, next, [assistant_event(state.session_id, run_id, work.turn_id, reply["text"])]}
+
+          :error ->
+            {:error, :invalid_model_tool_call}
+        end
+
+      _no_canonical_answer ->
+        next_work = Map.merge(work, %{stage: "turn_settled", pending_calls: []})
+        {:ok, put_pending(state, run_id, next_work), []}
+    end
+  end
+
+  defp settled_calls(reply) do
+    Enum.map(reply["tool_calls"], fn call ->
+      %{id: call["id"], name: call["name"], arguments: call["arguments"]}
+    end)
+  end
+
+  defp request_generations(%{tools: tools}) when is_list(tools) do
+    Map.new(tools, fn definition ->
+      {Map.get(definition, "name"),
+       definition |> LoopexProtocol.ToolDefinition.generation() |> Tuple.to_list()}
+    end)
+  rescue
+    _error -> %{}
+  end
+
+  defp request_generations(_request), do: %{}
+
+  # Concept: `estimated` consumes the exact remaining cumulative allowance, not
+  # a repeat of one turn's own estimate.
+  #
+  # Technical depth: ADR 0018 makes the conservative charge run-control truth,
+  # so it sets cumulative tokens to the committed budget and adds exactly the
+  # difference. Reaching the limit that way is not itself `bound_reached`; the
+  # ordinary next pre-staging check remains the selector.
+  defp apply_attempt_accounting(state, _run_id, %{"source" => "none"}), do: state
+
+  defp apply_attempt_accounting(state, run_id, %{
+         "source" => "reported",
+         "input_tokens" => input,
+         "output_tokens" => output
+       }),
+       do: charge_run(state, run_id, input + output, :reported)
+
+  defp apply_attempt_accounting(state, run_id, %{"source" => "estimated"}) do
+    budget = state.bounds |> Map.get(run_id, %{}) |> Map.get(:token_budget, 0)
+    charged = Map.get(state.charged, run_id, %{tokens: 0, source: nil})
+    charge_run(state, run_id, max(budget - charged.tokens, 0), :estimated)
   end
 
   # Concept: turn one is turn one; every settled turn moves to the next.
@@ -2549,123 +2926,14 @@ defmodule Loopex.Runtime.SessionState do
     end)
   end
 
-  defp encode_model_attempt_evidence({:ok, reply}, request) when is_map(reply) do
-    case canonical_model_reply(reply, request) do
-      {:ok, canonical_reply} ->
-        {:ok, %{"kind" => "reply", "reply" => encode_plain(canonical_reply)}}
-
-      {:error, _reason} ->
-        unreadable_model_attempt_evidence()
-    end
-  end
-
-  defp encode_model_attempt_evidence(result, _request) do
-    {:ok, %{"kind" => "error", "reason" => model_attempt_error_reason(result)}}
-  end
-
-  defp validate_model_attempt_evidence(
-         %{"kind" => "reply", "reply" => encoded},
-         request
-       )
-       when is_map(encoded) do
-    with {:ok, reply} <- canonical_model_reply(encoded, request),
-         true <- reply.canonical_request_bytes == request.canonical_request_bytes,
-         true <- reply.staged_request_digest == request.staged_request_digest,
-         true <- is_binary(reply.text) do
-      :ok
-    else
-      _other -> {:error, :invalid_model_attempt_evidence}
-    end
-  end
-
-  defp validate_model_attempt_evidence(
-         %{"kind" => "error", "reason" => reason} = evidence,
-         _request
-       )
-       when map_size(evidence) == 2 and is_binary(reason) and byte_size(reason) > 0 and
-              byte_size(reason) <= 256,
-       do: :ok
-
-  defp validate_model_attempt_evidence(_evidence, _request),
-    do: {:error, :invalid_model_attempt_evidence}
-
-  # Provider error details are not durable evidence. Even an atom can be minted
-  # from a credential or tenant value by a broken adapter, so retaining its name
-  # is not structurally secret-safe. The durable fact is only that the model call
-  # failed; live diagnostics may carry the adapter's separately scrubbed detail.
-  defp model_attempt_error_reason({:error, _reason}), do: "model_call_failed"
-
-  defp model_attempt_error_reason(_result), do: "unreadable_model_answer"
-
-  defp unreadable_model_attempt_evidence,
-    do: {:ok, %{"kind" => "error", "reason" => "unreadable_model_answer"}}
-
-  # Concept: late evidence takes the Store's actual durable-record boundary,
-  # rather than guessing a second size ceiling beside it.
+  # Concept: a stream statistic that is not a count is refused before it becomes
+  # durable, not after.
   #
-  # Technical depth: a provider-neutral reply may still be too large to retain
-  # once wrapped with its run and attempt identity. Validate the complete record
-  # through the same normalizer and ceiling the real Store transaction uses. A
-  # refusal becomes the one small error form, which is then checked through that
-  # boundary too; cleanup therefore distinguishes an unreadable answer from an
-  # unavailable Store instead of letting record size impersonate Store loss.
-  defp bounded_model_attempt_record(record) do
-    case Store.validate_private_record(record) do
-      :ok ->
-        {:ok, record}
-
-      {:error, _reason} ->
-        bounded =
-          Map.put(record, "evidence", %{"kind" => "error", "reason" => "unreadable_model_answer"})
-
-        case Store.validate_private_record(bounded) do
-          :ok -> {:ok, bounded}
-          {:error, reason} -> {:error, reason}
-        end
-    end
-  end
-
-  # Concept: only the provider-neutral reply contract crosses into durable
-  # state; an adapter's private fields never hitchhike beside it.
-  #
-  # Technical depth: normalize atom and binary keys without collisions, require
-  # the exact top-level provider-neutral field set, and project nested identity,
-  # usage, and tool-call maps onto their declared fields rather than retaining an
-  # adapter's input map. This keeps a credential, provider struct, malformed
-  # stream statistic, or unmeasured vendor payload out even when all required
-  # fields beside it are valid.
-  defp canonical_model_reply(reply, request) when is_map(reply) do
-    with :ok <- Store.validate_private_record(%{"reply" => reply, kind: "model_reply_candidate"}),
-         {:ok, encoded} <- encode_plain_unique(reply),
-         {:ok, decoded} <- decode_reply(encoded),
-         true <- decoded.canonical_request_bytes == request.canonical_request_bytes,
-         true <- decoded.staged_request_digest == request.staged_request_digest do
-      {:ok, decoded}
-    else
-      _other -> {:error, :invalid_model_reply}
-    end
-  end
-
-  defp validate_model_reply_keys(encoded) do
-    exact_required_and_optional_keys(
-      encoded,
-      @model_reply_required_fields,
-      @model_reply_optional_fields
-    )
-  end
-
-  defp exact_required_and_optional_keys(map, required, optional) when is_map(map) do
-    keys = Map.keys(map) |> MapSet.new()
-    required = MapSet.new(required)
-    allowed = MapSet.union(required, MapSet.new(optional))
-
-    if MapSet.subset?(required, keys) and MapSet.subset?(keys, allowed),
-      do: :ok,
-      else: {:error, :invalid_model_reply}
-  end
-
-  defp exact_required_and_optional_keys(_map, _required, _optional),
-    do: {:error, :invalid_model_reply}
+  # Technical depth: `progress_count` is the number ADR 0011 closes a complete
+  # domain on, and a consumer compares it against what arrived to detect loss.
+  # Zero is exact and needs no sentinel; anything below it is not a count.
+  defp validate_stream_count(count) when is_integer(count) and count >= 0, do: :ok
+  defp validate_stream_count(_count), do: {:error, :invalid_stream_count}
 
   defp encode_plain_unique(value)
        when is_binary(value) or is_integer(value) or is_float(value) or
@@ -2716,112 +2984,6 @@ defmodule Loopex.Runtime.SessionState do
 
     decode_top(encoded, fields)
   end
-
-  defp decode_reply(encoded) do
-    fields = [
-      :text,
-      :identity,
-      :usage,
-      :tool_calls,
-      :canonical_request_bytes,
-      :staged_request_digest
-    ]
-
-    # Concept: streaming statistics are additions, not requirements.
-    #
-    # Technical depth: `delta_count` and `streamed` are attempt-private evidence
-    # about how a reply was produced. An adapter that does not stream has nothing
-    # to say about them, and refusing its reply would make the arity change a
-    # behaviour change for exactly the adapters ADR 0011 says stay conformant.
-    # They default to "emitted nothing", which is what their absence means.
-    delta_count = Map.get(encoded, "delta_count", 0)
-    streamed = Map.get(encoded, "streamed", false)
-    provider_response_id = Map.get(encoded, "provider_response_id", :absent)
-
-    with :ok <- validate_model_reply_keys(encoded),
-         {:ok, reply} <- decode_top(encoded, fields),
-         {:ok, identity} <- decode_model_identity(reply.identity),
-         {:ok, usage} <- decode_model_usage(reply.usage),
-         {:ok, calls} <- decode_tool_calls(reply.tool_calls),
-         :ok <- validate_stream_count(delta_count),
-         true <- is_boolean(streamed),
-         true <- Map.has_key?(encoded, "delta_count") == Map.has_key?(encoded, "streamed"),
-         true <- streamed == delta_count > 0,
-         true <- is_binary(reply.text),
-         true <- Enum.all?(calls, &valid_model_tool_call?/1),
-         true <- is_binary(reply.canonical_request_bytes),
-         true <- is_binary(reply.staged_request_digest),
-         true <- valid_provider_response_id?(provider_response_id) do
-      decoded =
-        reply
-        |> Map.put(:identity, identity)
-        |> Map.put(:usage, usage)
-        |> Map.put(:tool_calls, calls)
-        |> Map.put(:delta_count, delta_count)
-        |> Map.put(:streamed, streamed)
-
-      if provider_response_id == :absent,
-        do: {:ok, decoded},
-        else: {:ok, Map.put(decoded, :provider_response_id, provider_response_id)}
-    else
-      _other -> {:error, :invalid_model_reply}
-    end
-  end
-
-  defp decode_model_identity(identity) when is_map(identity) do
-    with {:ok, decoded} <- decode_top(identity, @model_identity_fields),
-         true <- Enum.all?(Map.values(decoded), &(is_binary(&1) and &1 != "")) do
-      {:ok, decoded}
-    else
-      _other -> {:error, :invalid_model_reply}
-    end
-  end
-
-  defp decode_model_identity(_identity), do: {:error, :invalid_model_reply}
-
-  defp decode_model_usage(usage) when is_map(usage) do
-    projected = Map.take(usage, @model_usage_fields)
-
-    if Enum.all?(Map.values(projected), fn
-         value when is_integer(value) and value >= 0 -> true
-         nil -> true
-         _other -> false
-       end) do
-      {:ok, projected}
-    else
-      {:error, :invalid_model_reply}
-    end
-  end
-
-  defp decode_model_usage(_usage), do: {:error, :invalid_model_reply}
-
-  defp valid_model_tool_call?(%{id: id, name: name, arguments: arguments}),
-    do: is_binary(id) and id != "" and is_binary(name) and name != "" and is_map(arguments)
-
-  defp valid_model_tool_call?(_call), do: false
-
-  defp valid_provider_response_id?(:absent), do: true
-  defp valid_provider_response_id?(nil), do: true
-
-  defp valid_provider_response_id?(value) when is_binary(value),
-    do: byte_size(value) > 0 and byte_size(value) <= @max_provider_response_id_bytes
-
-  defp valid_provider_response_id?(_value), do: false
-
-  defp decode_tool_calls(calls) when is_list(calls) do
-    Enum.reduce_while(calls, {:ok, []}, fn call, {:ok, decoded} ->
-      case decode_top(call, [:id, :name, :arguments]) do
-        {:ok, found} -> {:cont, {:ok, [found | decoded]}}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, decoded} -> {:ok, Enum.reverse(decoded)}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp decode_tool_calls(_calls), do: {:error, :invalid_plain_record}
 
   # Concept: a job reconstructed from the journal is the same named value the
   # dispatcher built, including the wall instant it was authorized under.
@@ -3413,6 +3575,13 @@ defmodule Loopex.Runtime.SessionState do
       "observed" => Map.get(detail, :observed),
       "declared_limit" => Map.get(detail, :declared_limit),
       "accounting_source" => Map.get(detail, :accounting_source),
+      # Concept: an ending that failed names the bounded category that failed
+      # it, and never the provider's own words.
+      #
+      # Technical depth: ADR 0018 fixes exactly two categories, so an operator
+      # renderer can say which one without a raw provider reason ever reaching a
+      # retained, public, or rendered plane.
+      "reason" => Map.get(detail, :reason),
       "reconciliation_ref" => terminal_reference(state, run_id, outcome, detail),
       # Concept: an ending that stopped work says what bounded the stopping.
       #
@@ -4053,6 +4222,19 @@ defmodule Loopex.Runtime.SessionState do
     else
       {:error, :invalid_context_refusal_pair}
     end
+  end
+
+  # Concept: a run can fail for a reason that is not a context refusal.
+  #
+  # Technical depth: ADR 0018 adds terminal model-call failure, which ends a run
+  # `failed` with a bounded category and no refusal marker. A `failed` terminal
+  # is therefore paired with a refusal only when one was actually admitted; one
+  # carrying a refusal projection without its marker, or a marker without its
+  # projection, is still invalid history.
+  defp consume_context_refusal(%{context_refusal: nil} = state, _run_id, "failed", record) do
+    if Map.has_key?(record, "failure"),
+      do: {:error, :invalid_context_refusal_pair},
+      else: {:ok, state, nil}
   end
 
   defp consume_context_refusal(%{context_refusal: nil} = state, _run_id, outcome, record)

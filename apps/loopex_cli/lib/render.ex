@@ -275,7 +275,7 @@ defmodule LoopexCli.Render do
         IO.puts(:stderr, "loopex: reconcile with #{terminal_text(event["reconciliation_ref"])}")
 
       "failed" ->
-        IO.puts(:stderr, "\nloopex: failed#{failure_text(event["failure"])}")
+        IO.puts(:stderr, "\nloopex: failed#{failure_text(event)}")
 
       other ->
         IO.puts(:stderr, "\nloopex: #{terminal_text(other)}")
@@ -319,19 +319,36 @@ defmodule LoopexCli.Render do
   # references, and any other member a producer attached are never rendered,
   # because the whole point of the compact projection is that an operator can
   # act on the refusal without receiving the private context that caused it.
-  defp failure_text(%{"category" => "context_budget_exceeded"} = failure) do
+  # Concept: a failed run says what failed, whatever failed.
+  #
+  # Technical depth: one category was projected and every other dropped, so a
+  # provider failure reached the operator as the bare word "failed" -- the one
+  # ending where the reason is the only thing that tells them what to do next.
+  # The projection stays a fixed whitelist rather than the failure map: category
+  # and retryable always, and the measured dimension only where the failure
+  # declares one. Failures carry private descriptors and provider text that must
+  # never reach a terminal, so naming the admitted fields is what keeps a field
+  # added to a later category from becoming rendered output by default.
+  defp failure_text(%{"failure" => %{"category" => category} = failure})
+       when is_binary(category) do
     " " <>
-      terminal_text(failure["category"]) <>
-      " (retryable " <>
-      terminal_text(failure["retryable"]) <>
-      "; " <>
-      terminal_text(failure["dimension"]) <>
-      " " <>
-      terminal_text(failure["observed"]) <>
-      " against " <> terminal_text(failure["limit"]) <> ")"
+      terminal_text(category) <>
+      " (retryable " <> terminal_text(failure["retryable"]) <> measured_text(failure) <> ")"
   end
 
-  defp failure_text(_failure), do: ""
+  defp failure_text(%{"reason" => reason}) when is_binary(reason),
+    do: " " <> terminal_text(reason)
+
+  defp failure_text(_event), do: ""
+
+  defp measured_text(%{"dimension" => dimension} = failure) when is_binary(dimension) do
+    "; " <>
+      terminal_text(dimension) <>
+      " " <>
+      terminal_text(failure["observed"]) <> " against " <> terminal_text(failure["limit"])
+  end
+
+  defp measured_text(_failure), do: ""
 
   # Concept: the retrieval instruction remains one literal argument when copied
   # into a POSIX shell.

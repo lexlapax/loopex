@@ -51,7 +51,7 @@ defmodule Loopex.LLM.ReqLLM.AdapterTest do
 
     try do
       assert Adapter.complete(Adapter.default_model(), "unreachable") ==
-               {:error, {:credential_unset, variable}}
+               {:error, {:not_dispatched, "model_call_failed"}}
     after
       if previous, do: System.put_env(variable, previous)
     end

@@ -43,22 +43,24 @@ defmodule Loopex.LLM.ReqLLM.ProviderTest do
         assert is_binary(reply.text)
         assert String.trim(reply.text) != "", "the provider returned no assistant text"
 
-      {:error, {:credential_unset, variable}} ->
-        # Concept: a missing credential is unavailable evidence, and unavailable
-        # evidence fails. Skipping would report a pass for a lane that never ran.
+      {:error, {:not_dispatched, "model_call_failed"}} ->
+        # Concept: a refusal before the transport - a missing credential, an
+        # unresolved model, an invalid request - is unavailable evidence, and
+        # unavailable evidence fails. Skipping would report a pass for a lane
+        # that never ran. ADR 0018 bounds the reason to this generic shape, so the
+        # credential variable is named here rather than read from the refusal.
+        variable = Adapter.credential_variable()
+
         flunk("""
-        evidence unavailable: #{variable} is not set
+        evidence unavailable: the adapter refused before its transport
 
         Outcome 7 requires one real model call from the adapter application. \
         Export #{variable} for a provider that serves #{model_spec} and invoke \
         this lane again. A skipped lane is not a pass.
         """)
 
-      {:error, {:unresolved_model, spec, reason}} ->
-        flunk("evidence unavailable: #{inspect(spec)} did not resolve (#{inspect(reason)})")
-
-      {:error, {:provider_call_failed, detail}} ->
-        flunk("the real model call failed: #{detail}")
+      {:error, {:dispatched_or_unknown, "model_call_failed"}} ->
+        flunk("the real model call failed after the transport was entered")
     end
   end
 end

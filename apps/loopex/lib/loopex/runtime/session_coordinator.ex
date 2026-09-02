@@ -178,6 +178,30 @@ defmodule Loopex.Runtime.SessionCoordinator do
       when is_pid(coordinator) and is_map(owner) and is_map(response),
       do: safe_call(coordinator, {:reconcile, owner, response}, :infinity)
 
+  # Concept: the two answers a prepared owner's capability can be given, asked
+  # by the holder itself rather than on its behalf.
+  #
+  # Technical depth: both are called from the holder's own process, so the
+  # coordinator compares the caller in `from` against the holder it was started
+  # with. Routing either through a helper process would make the holder rule
+  # unenforceable, because the coordinator would then only ever see the proxy.
+  # The bound is the status bound rather than `:infinity`: neither call proposes
+  # a Store mutation, so a deadline here cannot manufacture a durable fact, and a
+  # prepared owner that cannot answer must not strand its caller over a session
+  # that is by construction doing nothing.
+  @doc false
+  @spec activate_resume(pid(), owner(), reference()) :: {:ok, binary()} | {:error, term()}
+  def activate_resume(coordinator, owner, capability)
+      when is_pid(coordinator) and is_map(owner) and is_reference(capability),
+      do:
+        safe_call(coordinator, {:activate_resume, owner, capability}, @session_status_timeout_ms)
+
+  @doc false
+  @spec abandon_resume(pid(), owner(), reference()) :: :ok | {:error, term()}
+  def abandon_resume(coordinator, owner, capability)
+      when is_pid(coordinator) and is_map(owner) and is_reference(capability),
+      do: safe_call(coordinator, {:abandon_resume, owner, capability}, @session_status_timeout_ms)
+
   @impl GenServer
   def init(options) do
     {:ok,
@@ -218,6 +242,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
        fault_to: Keyword.fetch!(options, :fault_to),
        cleanup_grace_ms: Keyword.fetch!(options, :cleanup_grace_ms),
        context_token_budget: Keyword.fetch!(options, :context_token_budget),
+       runtime_id: Keyword.fetch!(options, :runtime_id),
+       model_reserves: %{},
        # The runs whose model dispatch this owner staged itself. A run at
        # `model_dispatched` that is not in here was dispatched by a predecessor,
        # and its attempt is abandoned rather than re-run under the same identity.
@@ -231,6 +257,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
        query: nil,
        owner: nil,
        durable: nil,
+       # Concept: whether this owner is allowed to schedule the work it
+       # recovered, and who may decide that.
+       #
+       # Technical depth: `nil` is an ordinary owner, which schedules as soon as
+       # it is ready. A prepared owner carries the runtime-local reference
+       # Control minted for it, the process that asked for the preparation, and
+       # one of `:prepared`, `:spent`, `:abandoned`, or `:fenced`. Only `:spent`
+       # schedules. The reference and holder are transient BEAM values and are
+       # never proposed to the Store or returned in a refusal.
+       prepared: prepared_state(Keyword.get(options, :prepared)),
        superseded: false
      }, {:continue, :acquire_owner}}
   end
@@ -253,7 +289,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       true ->
         case Control.current_owner(state.control, state.session_id, state.owner) do
           :ok ->
-            commit_command(state, command)
+            state |> fence_prepared_resume(command) |> commit_command(command)
 
           {:error, :superseded_owner} ->
             {:reply, {:error, :superseded_owner}, %{state | superseded: true}}
@@ -282,6 +318,37 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:reply, {:ok, status}, state}
     else
       {:reply, {:error, :session_unavailable}, state}
+    end
+  end
+
+  def handle_call({:activate_resume, supplied_owner, capability}, {caller, _tag}, state) do
+    case prepared_holder(state, supplied_owner, capability, caller) do
+      {:ok, prepared} ->
+        send(self(), :advance_work)
+        {:reply, {:ok, state.session_id}, %{state | prepared: %{prepared | state: :spent}}}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:abandon_resume, supplied_owner, capability}, {caller, _tag}, state) do
+    case prepared_holder(state, supplied_owner, capability, caller) do
+      {:ok, prepared} ->
+        {:reply, :ok, %{state | prepared: %{prepared | state: :abandoned}}}
+
+      # Concept: giving up something already given up is not a failure.
+      #
+      # Technical depth: abandonment is the fail-closed direction, so repeating
+      # it changes nothing an operator could be surprised by. Spending is not
+      # idempotent in the same way and keeps its refusal, because a caller that
+      # abandons what it already activated is asking to undo work that has
+      # already become the session's own.
+      {:error, :resume_activation_abandoned} ->
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -437,10 +504,50 @@ defmodule Loopex.Runtime.SessionCoordinator do
   def handle_info({:cleanup_settled, run_id, disposition}, state),
     do: complete_cleanup(state, run_id, disposition)
 
+  # Concept: the reserve elapsing is not a verdict about the provider; it is the
+  # end of this coordinator's willingness to wait for one.
+  #
+  # Technical depth: the attempt was possibly dispatched, so the worker is
+  # stopped and the attempt settles conservatively. Whatever the worker had
+  # already produced is drained first, because a reply that landed inside the
+  # reserve is the attempt's own evidence and its usage is exact.
+  def handle_info({:model_reserve, run_id}, state) do
+    state = %{state | model_reserves: Map.delete(state.model_reserves, run_id)}
+
+    case in_flight_of(state, :model, run_id) do
+      nil ->
+        {:noreply, state}
+
+      {reference, pid} ->
+        _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
+        answer = take_worker_result(reference)
+        state = %{state | in_flight: Map.delete(state.in_flight, reference)}
+
+        case answer do
+          {:ok, reply} when is_map(reply) ->
+            settle_model_attempt(state, run_id, {:reply, reply})
+
+          _unproved ->
+            settle_model_attempt(state, run_id, :dispatched_or_unknown)
+        end
+    end
+  end
+
   def handle_info({:DOWN, reference, :process, _pid, reason}, state) do
     case Map.pop(state.in_flight, reference) do
       {nil, _remaining} ->
         {:noreply, state}
+
+      # Concept: a provider worker that died after a possible permit send proves
+      # nothing about the transport.
+      #
+      # Technical depth: a third-party adapter that raises, throws, or exits
+      # reaches this coordinator as a task `DOWN`. ADR 0018 classifies it
+      # dispatched-or-unknown: it is charged, it enters no conversation, and it
+      # never retries. Stopping the session here instead would leave the run
+      # with no ending at all.
+      {{:model, run_id, _pid}, remaining} ->
+        settle_model_attempt(%{state | in_flight: remaining}, run_id, :dispatched_or_unknown)
 
       # A cleanup worker that died told this coordinator nothing, which is
       # unproved cleanup rather than a reason to stop the session: the run still
@@ -776,7 +883,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
           durable: durable,
           transaction: nil,
           incarnation: nil,
-          recovery_records: []
+          recovery_records: [],
+          prepared: recovered_runs(state.prepared, durable)
       }
 
       GenServer.cast(state.control, {:owner_ready, self(), state.owner, durable})
@@ -962,7 +1070,25 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # entry to scheduling, rather than inside a stage.
         case SessionState.aborting_run(state.durable) do
           nil ->
-            case SessionState.pending_work(state.durable) do
+            # Concept: a prepared owner schedules nothing until its holder says
+            # so, while an abort put to it still finishes.
+            #
+            # Technical depth: the pause sits here, at the same single entry to
+            # scheduling, so recovery, ownership, history reconstruction, status,
+            # attachment, and abort admission all keep their ordinary paths and
+            # only the dispatch of recovered work waits. It is scoped to the runs
+            # this owner actually found pending when it recovered them: work an
+            # operator admits afterwards belongs to a decision they have already
+            # made, so it dispatches normally, which is what keeps an abandoned
+            # or aborted prepared owner a usable session rather than a
+            # permanently silent one. `:spent` releases the recovered runs too;
+            # `:prepared`, `:abandoned`, and `:fenced` keep them paused, which is
+            # what makes abandonment and the abort fence permanent rather than
+            # merely current.
+            case Enum.reject(
+                   SessionState.pending_work(state.durable),
+                   &resume_paused?(state, &1)
+                 ) do
               [] -> {:noreply, state}
               [work | _rest] -> advance_run(state, work)
             end
@@ -982,6 +1108,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp advance_work(state), do: {:noreply, state}
+
+  defp resume_paused?(%{prepared: nil}, _work), do: false
+  defp resume_paused?(%{prepared: %{state: :spent}}, _work), do: false
+
+  defp resume_paused?(%{prepared: %{recovered: recovered}}, %{run_id: run_id}),
+    do: MapSet.member?(recovered, run_id)
+
+  defp resume_paused?(_state, _work), do: false
 
   # Concept: an abort is on disk and this owner is not cleaning it up. Either it
   # already is, or it never will.
@@ -1047,8 +1181,28 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp dispatch_stage(state, %{stage: "model_pending"} = work),
     do: before_deadline(state, work, &prepare_model_request/2)
 
-  defp dispatch_stage(state, %{stage: "model_dispatched"} = work),
+  defp dispatch_stage(state, %{stage: "model_attempt_open"} = work),
     do: before_deadline(state, work, &start_model_work/2)
+
+  # Concept: a permitted retry is opened before anything is dispatched under it.
+  #
+  # Technical depth: ADR 0018 makes the attempt-two open record its own
+  # transaction, committed only after rereading ownership, abort, deadline, and
+  # the exact attempt-one settlement. Applying it consumes the retry permission
+  # permanently, so a proved non-commit may re-present identical bytes while a
+  # committed open can never be repeated.
+  defp dispatch_stage(state, %{stage: "model_retry_permitted"} = work),
+    do: before_deadline(state, work, &open_retry_attempt/2)
+
+  # A staged request whose consecutive attempt-open row is not in the journal has
+  # no dispatch authority and no verdict this owner may invent. The Store commits
+  # both rows or neither, so reaching here means the retained history is not one
+  # this reducer can advance.
+  defp dispatch_stage(state, %{stage: "model_request_pending_attempt_open"}),
+    do: {:stop, {:model_request_failed, :incomplete_staging_transaction}, state}
+
+  defp dispatch_stage(state, %{stage: "model_attempt_pending_terminal"}),
+    do: {:stop, {:model_result_failed, :incomplete_settlement_transaction}, state}
 
   defp dispatch_stage(state, %{stage: "effect_pending"} = work), do: prepare_effect(state, work)
 
@@ -1665,132 +1819,290 @@ defmodule Loopex.Runtime.SessionCoordinator do
     {:noreply, begin_cleanup(state, run_id, {:deadline, detail})}
   end
 
+  # Concept: an attempt this owner opened is dispatched under one permit it must
+  # ask Control for; an attempt it inherited is settled, never re-sent.
+  #
+  # Technical depth: ADR 0018 makes the staged bytes recovery identity rather
+  # than redispatch authority. A predecessor that died with an attempt open left
+  # a call that may already have been billed, and no generic evidence
+  # distinguishes that from a call the transport never entered — so a successor
+  # settles it dispatched-or-unknown with owner-loss evidence and opens no
+  # second call.
   defp start_model_work(state, work) do
     cond do
       in_flight?(state, :model, work.run_id) ->
         {:noreply, state}
 
+      Map.has_key?(state.pending_cleanup, work.run_id) ->
+        {:noreply, state}
+
       not MapSet.member?(state.adopted, work.run_id) ->
-        adopt_inherited_attempt(state, work)
+        settle_model_attempt(state, work.run_id, :owner_loss)
 
       true ->
-        module = state.model.module
-        request = work.request
-        options = state.model.options
-        {stream, progress} = model_progress_fun(state, work)
+        dispatch_provider_attempt(state, work)
+    end
+  end
 
-        task =
-          Task.Supervisor.async_nolink(state.owner_workers, fn ->
+  # Concept: the worker is started blocked, and only Control can release it.
+  #
+  # Technical depth: the task's first act is a selective receive for the exact
+  # fresh reference and the exact full attempt binding, so a duplicate, stale, or
+  # wrong permit cannot match it and cannot reach the adapter. It carries no
+  # timeout of its own: a bound here would be a dispatch verdict invented out of
+  # scheduling latency, and the coordinator terminates the worker itself
+  # whenever Control refuses.
+  defp dispatch_provider_attempt(state, work) do
+    run_id = work.run_id
+    request = work.request
+    module = state.model.module
+    options = state.model.options
+    {stream, progress} = model_progress_fun(state, work)
+
+    permit_reference = make_ref()
+    binding = attempt_binding(state, work)
+
+    task =
+      Task.Supervisor.async_nolink(state.owner_workers, fn ->
+        receive do
+          {:loopex_provider_permit, ^permit_reference, ^binding} ->
             module.complete(request, options, progress)
-          end)
+        end
+      end)
 
-        state = %{state | streams: Map.put(state.streams, {:model, work.run_id}, stream)}
-        state = arm_deadline(state, work.run_id)
-        {:noreply, put_in_flight(state, task.ref, {:model, work.run_id, task.pid})}
+    authority = %{
+      runtime_id: state.runtime_id,
+      owner: state.owner,
+      coordinator: self(),
+      worker: task.pid,
+      permit_reference: permit_reference,
+      journal_version: state.durable.journal_version,
+      deadline: committed_deadline(state, run_id)
+    }
+
+    state = %{state | streams: Map.put(state.streams, {:model, run_id}, stream)}
+    state = put_in_flight(state, task.ref, {:model, run_id, task.pid})
+
+    case Control.provider_dispatch(state.control, binding, authority) do
+      {:ok, :dispatched} ->
+        {:noreply, arm_deadline(state, run_id)}
+
+      {:error, :superseded_owner} ->
+        # Control moved the session away before it handled this request, so the
+        # predecessor cannot retain its ephemeral refusal. The successor
+        # recovers the open attempt conservatively; this owner settles nothing.
+        state
+        |> discard_provider_worker(run_id, task)
+        |> Map.put(:superseded, true)
+        |> continue_after_owner_loss()
+
+      {:error, :runtime_unavailable} ->
+        # Control is gone, so nothing can be settled against it and nothing was
+        # proved about the transport. The successor rebuilds this decision.
+        {:noreply, discard_provider_worker(state, run_id, task)}
+
+      {:error, :deadline_elapsed} ->
+        state
+        |> discard_provider_worker(run_id, task)
+        |> admit_model_deadline(run_id)
+        |> settle_model_attempt(run_id, :not_dispatched)
+
+      {:error, _refused_before_send} ->
+        # Control refused before sending while this owner remained
+        # authoritative, which is the one observation that proves the transport
+        # was never entered. It is durably settled as exactly that.
+        state
+        |> discard_provider_worker(run_id, task)
+        |> settle_model_attempt(run_id, :not_dispatched)
     end
   end
 
-  # Concept: a provider call this owner did not make is not this owner's
-  # attempt, and dispatching those bytes again is a second call.
+  # Concept: the full identity one permit authorizes, and the only shape a
+  # blocked worker will accept.
   #
-  # Technical depth: a predecessor that died with a model call in flight leaves
-  # the run at `model_dispatched`, and a successor used to dispatch the same
-  # staged bytes under the same attempt. ADR 0011 makes a stream domain one
-  # *attempt's* progress stream, so reusing the attempt reuses the domain and two
-  # owners produce into one label. A review drove it end to end: the successor
-  # emitted sequence zero and a complete closure, and the predecessor's producer
-  # then emitted sequences zero, one and two under the identical domain, so the
-  # closure was no longer last and sequence zero appeared twice.
-  #
-  # Abandoning the inherited attempt is what the abandonment record already
-  # exists to do, and its own reducer says so: the increment is what makes a
-  # redispatch open a new domain rather than reuse the abandoned one, and what
-  # bounds retries across succession. It also charges the call the predecessor
-  # actually made, which a successor silently reusing the attempt did not.
-  #
-  # A run this owner staged itself is adopted at that commit, so the ordinary
-  # first dispatch is never mistaken for an inherited one, and the abandonment
-  # adopts the run so the retry that follows is this owner's own.
-  #
-  # A live predecessor closes its relay when Control supersedes it. If it dies
-  # first, its linked transient plane ends without fabricating a disposition;
-  # absence is the incomplete view ADR 0011 defines. This successor never
-  # fabricates that closure or its count; it advances the durable attempt and
-  # opens a different domain for the replacement dispatch.
-  defp adopt_inherited_attempt(state, work) do
-    state = adopt_run(state, work.run_id)
-
-    if retry_available?(state, work.run_id) do
-      case commit_abandoned_attempt(state, work.run_id) do
-        {:ok, next} ->
-          if retry_available?(next, work.run_id) do
-            send(self(), :advance_work)
-            {:noreply, next}
-          else
-            {:stop, {:model_failed, :retry_exhausted}, next}
-          end
-
-        {:error, :no_attempt_pending} ->
-          send(self(), :advance_work)
-          {:noreply, state}
-
-        {:error, reason} ->
-          {:stop, {:model_attempt_failed, reason}, state}
-      end
-    else
-      # The durable attempt is already the first one the declared allowance does
-      # not permit. It was never dispatched, so abandoning it would both charge
-      # work that did not happen and advance to another identity a later owner
-      # could mistake for permission to call again.
-      {:stop, {:model_failed, :retry_exhausted}, state}
-    end
+  # Technical depth: the members are exactly the committed attempt-open record
+  # plus the session it belongs to, so Control, the coordinator, and the worker
+  # all compare the same value and no two of them can hold different ideas of
+  # which attempt is being authorized.
+  defp attempt_binding(state, work) do
+    %{
+      "session_id" => state.session_id,
+      "run_id" => work.run_id,
+      "turn_id" => work.turn_id,
+      "operation_id" => SessionState.model_operation_id(work.run_id, work.turn_number),
+      "attempt" => work.model_attempt,
+      "staged_request_digest" => work.request.staged_request_digest
+    }
   end
 
-  defp accept_counted_model_result(state, run_id, reply, count) do
-    state = disarm_deadline(state, run_id)
+  # A worker that was never released holds no attempt: it is stopped, its slot
+  # cleared, and the domain it would have produced into discarded without a
+  # closure, because nothing was ever emitted into it.
+  defp discard_provider_worker(state, run_id, task) do
+    _ = Task.Supervisor.terminate_child(state.owner_workers, task.pid)
+    _ = take_worker_result(task.ref)
 
-    case SessionState.propose_model_result(
-           state.durable,
-           run_id,
-           reply,
-           active_generations(state)
-         ) do
+    state
+    |> Map.put(:in_flight, Map.delete(state.in_flight, task.ref))
+    |> discard_model_stream(run_id)
+    |> disarm_deadline(run_id)
+  end
+
+  defp open_retry_attempt(state, work) do
+    case SessionState.propose_model_attempt_open(state.durable, work.run_id) do
       {:ok, proposal} ->
-        case retain_terminal_operation_fact(state, proposal) do
+        case commit_internal(state, proposal) do
           {:ok, next} ->
-            next = close_model_stream(next, run_id, {:complete, count})
             send(self(), :advance_work)
-            {:noreply, next}
-
-          {:retained, next} ->
-            # The Store already fixed the reply and its producer count before
-            # Control moved to the successor. That retained fact, rather than
-            # this stale coordinator's authority, is what makes `complete`
-            # truthful. The successor never closes or reuses this relay.
-            next
-            |> close_model_stream(run_id, {:complete, count})
-            |> continue_after_owner_loss()
+            {:noreply, adopt_run(next, work.run_id)}
 
           {:error, reason}
           when reason in [:stale_owner_epoch, :stale_owner_incarnation_id, :superseded_owner] ->
-            # No model result committed under this transaction, so the stale
-            # owner has no retained fact and no authority for a closure. Ending
-            # the relay without one leaves the successor to own abandonment and
-            # retry under the durable attempt transition.
-            state
-            |> discard_model_stream(run_id)
-            |> Map.put(:superseded, true)
-            |> continue_after_owner_loss()
+            continue_after_owner_loss(%{state | superseded: true})
 
           {:error, reason} ->
-            {:stop, {:model_result_failed, reason}, state}
+            {:stop, {:model_attempt_failed, reason}, state}
         end
 
       {:error, reason} ->
-        case reason do
-          :invalid_model_reply -> accept_model_result(state, run_id, {:error, reason})
-          _other -> {:stop, {:model_result_failed, reason}, state}
+        {:stop, {:model_attempt_failed, reason}, state}
+    end
+  end
+
+  # Concept: one verdict, committed once, for whatever the attempt turned out to
+  # be.
+  #
+  # Technical depth: the reply, the classified failure, and the recovered open
+  # attempt all reach the journal through this one transaction, so the
+  # accounting, conversation, next action, and terminal can never be applied
+  # apart from each other. A Store fact retained after ownership moved still
+  # fixes this attempt's disposition, which is what lets the originating owner
+  # close its own relay truthfully and nothing more.
+  defp settle_model_attempt(state, run_id, outcome) do
+    state = disarm_deadline(state, run_id)
+    state = cancel_model_reserve(state, run_id)
+
+    case SessionState.propose_model_attempt_settled(state.durable, run_id, outcome) do
+      {:ok, proposal} ->
+        commit_model_settlement(state, run_id, proposal)
+
+      {:error, :no_open_model_attempt} ->
+        send(self(), :advance_work)
+        {:noreply, clear_model_cleanup(state, run_id)}
+
+      {:error, reason} ->
+        {:stop, {:model_result_failed, reason}, state}
+    end
+  end
+
+  defp commit_model_settlement(state, run_id, proposal) do
+    settlement = hd(proposal.records)
+
+    case retain_terminal_operation_fact(state, proposal) do
+      {:ok, next} ->
+        next = close_settled_model_stream(next, run_id, settlement)
+        report_evidence_only_settlement(next, run_id, settlement)
+        send(self(), :advance_work)
+        {:noreply, clear_model_cleanup(next, run_id)}
+
+      {:retained, next} ->
+        # The Store fixed this attempt's verdict before Control moved to the
+        # successor. That retained fact, rather than this stale coordinator's
+        # authority, is what makes the closure truthful; the successor never
+        # closes or reuses this relay.
+        next = close_settled_model_stream(next, run_id, settlement)
+        report_evidence_only_settlement(next, run_id, settlement)
+
+        next
+        |> clear_model_cleanup(run_id)
+        |> continue_after_owner_loss()
+
+      {:error, reason}
+      when reason in [:stale_owner_epoch, :stale_owner_incarnation_id, :superseded_owner] ->
+        state
+        |> discard_model_stream(run_id)
+        |> Map.put(:superseded, true)
+        |> continue_after_owner_loss()
+
+      {:error, reason} ->
+        {:stop, {:model_result_failed, reason}, state}
+    end
+  end
+
+  # Concept: a closure the journal already proves is stated directly; one that
+  # nothing durable proves still needs Control to say this owner may state it.
+  #
+  # Technical depth: ADR 0018 lets an origin "whose retained result already
+  # proves the closure" close from durable settlement before outcome
+  # publication, and ADR 0014 keeps that disposition truthful after ownership
+  # moves. A retained reply carries its own `delta_count`, so `{:complete,
+  # count}` restates a figure the Store fixed, and a predecessor superseded
+  # during handoff must still emit it -- routing it through Control instead
+  # leaves the originating domain with no closure at all, because Control
+  # rightly refuses a superseded owner. An abandoned close states nothing the
+  # journal proves, so it keeps Control's admission, which also prevents a
+  # handoff from beginning between the ownership check and the closing send.
+  # The unreadable answer is retained but is not a retained reply: it fixes no
+  # producer count, so it abandons.
+  defp close_settled_model_stream(state, run_id, settlement) do
+    case settlement["result"] do
+      %{"kind" => "reply", "reply" => reply} ->
+        case reply["delta_count"] do
+          count when is_integer(count) and count >= 0 ->
+            close_model_stream(state, run_id, {:complete, count})
+
+          _not_a_count ->
+            close_current_model_stream(state, run_id, :abandoned)
         end
+
+      _no_retained_reply ->
+        close_current_model_stream(state, run_id, :abandoned)
+    end
+  end
+
+  # Concept: an operator watching a run still learns that a reply arrived too
+  # late to become part of it.
+  #
+  # Technical depth: ADR 0018 combination 2 keeps a late valid reply as
+  # attempt evidence in the `evidence_only` conversation, which is the durable
+  # fact. This is only its live notification on the transient diagnostics
+  # plane, emitted after the settlement is retained so it never announces
+  # something the journal does not hold. Nothing durable, public, or
+  # progress-bearing depends on it.
+  defp report_evidence_only_settlement(state, run_id, %{"conversation" => "evidence_only"}) do
+    emit_diagnostic(state, %{
+      "kind" => "late_result_discarded",
+      "run_id" => run_id,
+      "operation" => "model",
+      "outcome" => "reply"
+    })
+  end
+
+  defp report_evidence_only_settlement(_state, _run_id, _settlement), do: :ok
+
+  defp clear_model_cleanup(state, run_id),
+    do: %{state | pending_cleanup: Map.delete(state.pending_cleanup, run_id)}
+
+  # Concept: the elapsed deadline is on disk before anything settles under it.
+  #
+  # Technical depth: ADR 0018 classifies an attempt by the journal order of
+  # abort, deadline, and settlement, so the deadline needs a row of its own. A
+  # run whose attempt is not open, or whose deadline was already admitted, adds
+  # nothing.
+  defp admit_model_deadline(state, run_id) do
+    case SessionState.propose_model_termination(
+           state.durable,
+           run_id,
+           System.system_time(:millisecond)
+         ) do
+      {:ok, proposal} ->
+        case commit_internal(state, proposal) do
+          {:ok, next} -> next
+          {:error, _reason} -> state
+        end
+
+      {:error, _reason} ->
+        state
     end
   end
 
@@ -2340,6 +2652,74 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # ask is a no-op; if it did not, the ask is what ends the job, and nothing is
   # committed until it answers.
   defp begin_cleanup(state, run_id, purpose) do
+    cond do
+      Map.has_key?(state.pending_cleanup, run_id) ->
+        state
+
+      match?(%{stage: "model_attempt_open"}, Map.get(state.durable.pending_work, run_id)) ->
+        begin_model_termination(state, run_id, purpose)
+
+      true ->
+        begin_effect_cleanup(state, run_id, purpose)
+    end
+  end
+
+  # Concept: a termination that reaches an open provider attempt waits for that
+  # attempt's own answer, inside a reserve, and never throws it away.
+  #
+  # Technical depth: the call may already have been billed, so killing the
+  # worker at admission discards the only evidence of what it cost. The
+  # termination is admitted durably first, the attempt is left to answer, and
+  # the settlement that follows carries a late valid reply as evidence-only with
+  # its reported usage. The reserve is `execute_result_reserve_ms`, derived from
+  # the committed cleanup period exactly as the executor's own result reserve
+  # is: expiry proves only that the reserve elapsed, so the worker is stopped
+  # and the attempt settles conservatively rather than waiting on a provider
+  # that may never answer.
+  defp begin_model_termination(state, run_id, purpose) do
+    state =
+      state
+      |> disarm_deadline(run_id)
+      |> cancel_policy_consultation(run_id)
+
+    state =
+      if match?({:deadline, _detail}, purpose),
+        do: admit_model_deadline(state, run_id),
+        else: state
+
+    state = %{
+      state
+      | pending_cleanup: Map.put(state.pending_cleanup, run_id, %{purpose: purpose, model: nil})
+    }
+
+    case in_flight_of(state, :model, run_id) do
+      nil ->
+        {:noreply, next} = settle_model_attempt(state, run_id, :dispatched_or_unknown)
+        next
+
+      {_reference, _pid} ->
+        arm_model_reserve(state, run_id)
+    end
+  end
+
+  defp arm_model_reserve(state, run_id) do
+    state = cancel_model_reserve(state, run_id)
+    timer = Process.send_after(self(), {:model_reserve, run_id}, execute_result_reserve_ms(state))
+    %{state | model_reserves: Map.put(state.model_reserves, run_id, timer)}
+  end
+
+  defp cancel_model_reserve(state, run_id) do
+    case Map.pop(state.model_reserves, run_id) do
+      {nil, _remaining} ->
+        state
+
+      {timer, remaining} ->
+        _ = Process.cancel_timer(timer)
+        %{state | model_reserves: remaining}
+    end
+  end
+
+  defp begin_effect_cleanup(state, run_id, purpose) do
     if Map.has_key?(state.pending_cleanup, run_id) do
       state
     else
@@ -2465,31 +2845,29 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # in memory, so a run cannot escape its own token budget by being aborted and a
   # successor owner cannot rebuild the abandoned attempt and spend the nominal
   # retry allowance a second time.
-  defp cancel_model_attempt(state, run_id, purpose) do
-    {state, retained} =
-      case in_flight_of(state, :model, run_id) do
-        nil ->
-          {state, :cleaned}
+  # Concept: a cleanup that is not stopping a provider attempt still stops any
+  # worker this owner happens to hold.
+  #
+  # Technical depth: an open provider attempt takes the termination path above,
+  # which admits the termination durably and waits for the attempt's own answer
+  # inside its reserve. Reaching here therefore means the run's durable stage is
+  # not an open attempt, so there is no attempt to charge and nothing a
+  # settlement could say; only a stray worker has to be released.
+  defp cancel_model_attempt(state, run_id, _purpose) do
+    case in_flight_of(state, :model, run_id) do
+      nil ->
+        {state, :cleaned}
 
-        {reference, pid} ->
-          _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
-          answer = take_worker_result(reference)
+      {reference, pid} ->
+        _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
+        _ = take_worker_result(reference)
 
-          {state, retained} =
-            state
-            |> Map.put(:in_flight, Map.delete(state.in_flight, reference))
-            |> retain_cancelled_model_answer(run_id, purpose, answer)
+        next =
+          state
+          |> Map.put(:in_flight, Map.delete(state.in_flight, reference))
+          |> close_current_model_stream(run_id, :abandoned)
 
-          {close_current_model_stream(state, run_id, :abandoned), retained}
-      end
-
-    # The charge follows the dispatched turn rather than the live task: a
-    # successor that inherits a request its predecessor dispatched still owes the
-    # allowance that turn spent, and it holds no task to find.
-    case commit_abandoned_attempt(state, run_id) do
-      {:ok, next} -> {next, retained}
-      {:error, :no_attempt_pending} -> {state, retained}
-      {:error, _reason} -> {state, :unconfirmed}
+        {next, :cleaned}
     end
   end
 
@@ -2552,32 +2930,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       {:DOWN, ^reference, :process, _pid, _reason} ->
         :none
-    end
-  end
-
-  defp retain_cancelled_model_answer(state, _run_id, _purpose, :none),
-    do: {state, :cleaned}
-
-  defp retain_cancelled_model_answer(state, run_id, purpose, {:ok, reply}),
-    do: retain_model_attempt_evidence(state, run_id, purpose, {:ok, reply})
-
-  defp retain_cancelled_model_answer(state, run_id, purpose, {:answered, answer}),
-    do: retain_model_attempt_evidence(state, run_id, purpose, answer)
-
-  defp retain_model_attempt_evidence(state, run_id, purpose, result) do
-    termination = if match?({:deadline, _detail}, purpose), do: :deadline, else: :abort
-
-    with {:ok, proposal} <-
-           SessionState.propose_model_attempt_evidence(
-             state.durable,
-             run_id,
-             termination,
-             result
-           ),
-         {:ok, next} <- commit_internal(state, proposal) do
-      {report_late_result(next, run_id, :model, result), :cleaned}
-    else
-      {:error, _reason} -> {state, :unconfirmed}
     end
   end
 
@@ -2892,12 +3244,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Technical depth: committed with the reply that used them, so the assistant
   # message records the exact bytes each call resolved through rather than a
   # bare name a later registry edit could repoint.
-  defp active_generations(state) do
-    Map.new(state.active_tools, fn definition ->
-      {Map.fetch!(definition, "name"), Tuple.to_list(ToolDefinition.generation(definition))}
-    end)
-  end
-
   defp resolve_active_tool(state, name) do
     case Enum.find(state.active_tools, &(Map.fetch!(&1, "name") == name)) do
       nil -> {:error, {:unknown_tool, name}}
@@ -3033,98 +3379,24 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: a reply whose stream statistic is not a count is an answer this
-  # runtime cannot use, not an answer it publishes anyway.
+  # Concept: what the adapter returned decides only which classification the
+  # attempt settles under; it never decides whether another call may be made.
   #
-  # Technical depth: `delta_count` reached the closing item and the durable
-  # assistant message unchecked, so an adapter returning minus one published a
-  # closure a consumer can compare nothing against and committed the same value.
-  # It takes the abandoned path rather than killing the owner, because that is
-  # what a provider answer this runtime cannot read already means: the domain
-  # closes on what the relay actually emitted, the attempt is charged, and the
-  # turn is retried under a new attempt.
-  defp accept_model_result(state, run_id, {:ok, reply}) when is_map(reply) do
-    case Map.get(reply, :delta_count, 0) do
-      count when is_integer(count) and count >= 0 ->
-        accept_counted_model_result(state, run_id, reply, count)
+  # Technical depth: ADR 0018 admits exactly one exact pre-transport refusal
+  # tag. Everything else an adapter can produce — a wrong tag, a legacy reason,
+  # a raise the task turned into an exit, a malformed reply, a timeout — is a
+  # possibly billed call and settles dispatched-or-unknown. The raw reason is
+  # read only to select the tag and is never carried into the settlement, so a
+  # credential-shaped provider error reaches no retained, public, progress,
+  # diagnostic, or rendered plane.
+  defp accept_model_result(state, run_id, {:ok, reply}) when is_map(reply),
+    do: settle_model_attempt(state, run_id, {:reply, reply})
 
-      _not_a_count ->
-        accept_model_result(state, run_id, {:error, :invalid_delta_count})
-    end
-  end
+  defp accept_model_result(state, run_id, {:error, {:not_dispatched, "model_call_failed"}}),
+    do: settle_model_attempt(state, run_id, :not_dispatched)
 
-  defp accept_model_result(state, run_id, result) do
-    # An attempt that returned no reply still owes its closure, so a consumer can
-    # tell an abandoned stream from one that merely went quiet, and still owes
-    # its charge, so giving up is not cheaper than finishing.
-    state = close_current_model_stream(state, run_id, :abandoned)
-
-    if state.superseded do
-      # The successor owns the abandonment once Control's closing fence says
-      # this coordinator no longer owns the plane. Attempting the same
-      # deterministic abandonment transaction here lets the Store retain a
-      # stale-owner non-commit under the identity the successor must use, so the
-      # successor sees a binding conflict instead of advancing the attempt.
-      continue_after_owner_loss(state)
-    else
-      # Concept: a provider retry redispatches the bytes that were already
-      # committed.
-      #
-      # Technical depth: nothing is recomputed. The same staged bytes and the same
-      # staged_request_digest go out again under a newly recorded attempt, because
-      # the model request has no operation or attempt member for a digest to cover.
-      # That is the opposite of the executor rule, where each attempt canonicalizes
-      # its own attempt identity and therefore computes its own digest — which is
-      # exactly why the two digests no longer share one name.
-      case commit_abandoned_attempt(state, run_id) do
-        {:ok, next} ->
-          if retry_available?(next, run_id) do
-            send(self(), :advance_work)
-            {:noreply, next}
-          else
-            {:stop, {:model_failed, result}, next}
-          end
-
-        {:error, :no_attempt_pending} ->
-          {:stop, {:model_failed, result}, state}
-
-        {:error, reason} ->
-          {:stop, {:model_attempt_failed, reason}, state}
-      end
-    end
-  end
-
-  @model_attempt_limit 2
-
-  # Concept: the attempt an owner is on, and the tokens the abandoned one spent,
-  # are facts about the run rather than notes in one process's memory.
-  #
-  # Technical depth: both used to live only in the coordinator's own state. A
-  # successor rebuilt the run from the journal, found attempt one and no charge,
-  # and could therefore spend the nominal retry allowance again after every
-  # succession while reopening the stream domain the abandoned attempt had
-  # already used. Committing the transition is what makes the retry allowance and
-  # the token budget survive the owner that was counting them. The deadline timer
-  # is disarmed here because this attempt no longer owns a live provider call;
-  # the next dispatch arms the same instant again.
-  defp commit_abandoned_attempt(state, run_id) do
-    state = disarm_deadline(state, run_id)
-
-    case SessionState.propose_model_attempt_abandoned(state.durable, run_id) do
-      {:ok, proposal} -> commit_internal(state, proposal)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp retry_available?(state, run_id) do
-    case Map.get(state.durable.pending_work, run_id) do
-      %{stage: "model_dispatched"} = work ->
-        Map.get(work, :model_attempt, 1) <= @model_attempt_limit
-
-      _absent ->
-        false
-    end
-  end
+  defp accept_model_result(state, run_id, _ambiguous),
+    do: settle_model_attempt(state, run_id, :dispatched_or_unknown)
 
   defp accept_executor_result(state, run_id, {:ok, receipt}) when is_map(receipt) do
     case state.fault_to do
@@ -3443,6 +3715,77 @@ defmodule Loopex.Runtime.SessionCoordinator do
       supplied_owner != state.owner -> {:error, :superseded_owner}
       true -> Control.current_owner(state.control, state.session_id, state.owner)
     end
+  end
+
+  # Concept: only this owner's current holder, presenting the exact capability
+  # it was given, decides anything about paused work.
+  #
+  # Technical depth: the owner argument, the coordinator's readiness, and
+  # Control's current-owner fence are checked exactly as an ordinary command
+  # checks them, so a superseded prepared owner cannot activate a session that
+  # has moved on. The reference comparison is `===` on a runtime-local
+  # `make_ref/0`, which cannot be constructed by a caller that was not given it,
+  # and the holder comparison uses the calling process from `from` rather than
+  # anything the caller supplied. Every refusal is a bare atom: the capability
+  # and its holder never appear in a value the caller can print.
+  defp prepared_holder(state, supplied_owner, capability, caller) do
+    with :ok <- ready_current?(state, supplied_owner),
+         %{capability: ^capability} = prepared <- state.prepared,
+         :prepared <- prepared.state,
+         ^caller <- prepared.holder do
+      {:ok, prepared}
+    else
+      nil -> {:error, :resume_activation_unknown}
+      :spent -> {:error, :resume_activation_spent}
+      :abandoned -> {:error, :resume_activation_abandoned}
+      :fenced -> {:error, :resume_activation_fenced}
+      %{} -> {:error, :resume_activation_unknown}
+      {:error, reason} -> {:error, reason}
+      holder when is_pid(holder) -> {:error, :resume_activation_holder_mismatch}
+    end
+  end
+
+  # Concept: once an abort has been put to this owner, the work it recovered can
+  # never be started, whatever the abort's own admission turns out to be.
+  #
+  # Technical depth: ADR 0016 makes accepted abort admission permanently
+  # invalidate activation and forbids pending, unavailable, or commit-unknown
+  # admission from ever permitting recovered work. The fence is therefore set
+  # before the Store transaction rather than after its receipt: an admission
+  # whose result never comes back leaves this owner unable to prove either
+  # outcome, and the only answer that is true under both is that the paused work
+  # stays paused. The abort itself is unaffected -- cleanup and its terminal are
+  # exactly the ordinary path -- because the gate excludes only ordinary
+  # scheduling.
+  defp fence_prepared_resume(%{prepared: %{state: :prepared} = prepared} = state, %{type: :abort}),
+       do: %{state | prepared: %{prepared | state: :fenced}}
+
+  defp fence_prepared_resume(state, _command), do: state
+
+  defp prepared_state(%{capability: capability, holder: holder})
+       when is_reference(capability) and is_pid(holder),
+       do: %{capability: capability, holder: holder, state: :prepared, recovered: MapSet.new()}
+
+  defp prepared_state(_absent), do: nil
+
+  # Concept: exactly which work this preparation is holding back.
+  #
+  # Technical depth: fixed once, from the history this owner reconstructed,
+  # rather than recomputed as the session moves. A prepared owner that pauses
+  # whatever happens to be pending would also silence a prompt the operator
+  # admitted after deciding to abandon or abort, which is a session that has
+  # stopped answering rather than one whose recovered work is waiting.
+  defp recovered_runs(nil, _durable), do: nil
+
+  defp recovered_runs(prepared, durable) do
+    %{
+      prepared
+      | recovered:
+          durable
+          |> SessionState.pending_work()
+          |> Enum.map(&Map.fetch!(&1, :run_id))
+          |> MapSet.new()
+    }
   end
 
   defp pending_effect(state) do

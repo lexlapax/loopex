@@ -241,10 +241,14 @@ defmodule LoopexCli do
          {:ok, prompt} <- prompt_of(words),
          {:ok, runtime} <- start_runtime(flags, policy, options),
          {:ok, session_id} <- create(runtime),
-         {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
+         {:ok, attachment} <-
+           facade(Loopex, :attach, [runtime, session_id, [after_event_sequence: 0]]) do
       Interrupt.install(attachment)
 
-      case Loopex.command(attachment, %{type: :prompt, command_id: "run-1", content: prompt}) do
+      case facade(Loopex, :command, [
+             attachment,
+             %{type: :prompt, command_id: "run-1", content: prompt}
+           ]) do
         {:accepted, _id} ->
           case track(flags, session_id) do
             :ok ->
@@ -299,12 +303,10 @@ defmodule LoopexCli do
   defp submit_steer(attachment, content) do
     Render.stream(attachment,
       on_run_started: fn run_id ->
-        case Loopex.command(attachment, %{
-               type: :steer,
-               command_id: unique_id(),
-               run_id: run_id,
-               content: content
-             }) do
+        case facade(Loopex, :command, [
+               attachment,
+               %{type: :steer, command_id: unique_id(), run_id: run_id, content: content}
+             ]) do
           {:accepted, _id} ->
             :ok
 
@@ -321,11 +323,10 @@ defmodule LoopexCli do
   # and its steering settle. Submitting it before the stream begins is what makes
   # it queued rather than a second prompt racing the first.
   defp submit_follow_up(attachment, content) do
-    case Loopex.command(attachment, %{
-           type: :follow_up,
-           command_id: unique_id(),
-           content: content
-         }) do
+    case facade(Loopex, :command, [
+           attachment,
+           %{type: :follow_up, command_id: unique_id(), content: content}
+         ]) do
       {:accepted, _id} -> Render.stream(attachment)
       {:error, reason} -> {:error, "the follow-up was refused: #{inspect(reason)}"}
     end
@@ -369,8 +370,8 @@ defmodule LoopexCli do
   """
   @spec record_session(Path.t(), binary()) :: :ok | {:error, binary()}
   def record_session(root, session_id) do
-    with {:ok, placement} <- Loopex.runtime_placement_id(root),
-         :ok <- Loopex.track_session(root, session_id, placement) do
+    with {:ok, placement} <- facade(Loopex, :runtime_placement_id, [root]),
+         :ok <- facade(Loopex, :track_session, [root, session_id, placement]) do
       :ok
     else
       {:error, reason} ->
@@ -387,7 +388,7 @@ defmodule LoopexCli do
   defp sessions({flags, words}) do
     with :ok <- no_positionals(words, "sessions"),
          {:ok, root} <- state_root(flags),
-         {:ok, entries} <- Loopex.list_sessions(root) do
+         {:ok, entries} <- facade(Loopex, :list_sessions, [root]) do
       Render.sessions(entries)
     end
   end
@@ -396,14 +397,142 @@ defmodule LoopexCli do
     with {:ok, session_id} <- positional(words, "session identifier"),
          {:ok, policy} <- policy(Map.get(flags, "policy")),
          {:ok, runtime} <- start_runtime(flags, policy, options),
-         {:ok, root} <- state_root(flags),
-         {:ok, _resumed} <-
-           Loopex.resume_known_session(root, runtime, session_id, unique_id()),
-         {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
-      Interrupt.install(attachment)
-      Render.stream(attachment)
+         {:ok, root} <- state_root(flags) do
+      recover(:resume, root, runtime, session_id, flags)
     end
   end
+
+  # Concept: an operator continuing or stopping a session gets that session's
+  # own configuration back, and finds out before anything moves if what they
+  # asked for disagrees with it.
+  #
+  # Technical depth: ADR 0016's prepared recovery. Ownership is acquired and the
+  # session's complete history rebuilt, but the recovered work stays paused, so
+  # the committed cleanup period and active context ceiling can be read from the
+  # owner itself and compared with what the operator named. An omitted flag takes
+  # the committed value; an equal one agrees; a different one is refused — and
+  # refused only after the prepared owner has been given up and this command's
+  # placement lock released, because a refusal that left an owner holding a
+  # paused session and a lock naming this process would cost the operator their
+  # next move as well as this one. Cleanup is compared before context so a
+  # command that got both wrong is told about the one it must fix first, rather
+  # than about a ceiling it may not have to change at all. A settled session
+  # reports no active context and therefore compares none: an explicit ceiling
+  # there governs the next run, not one that already ended.
+  defp recover(command, root, runtime, session_id, flags) do
+    case facade(Loopex, :prepare_resume_known_session, [root, runtime, session_id, unique_id()]) do
+      {:ok, {:prepared, activation}} ->
+        settle(command, runtime, session_id, flags, activation)
+
+      {:ok, {:replayed, _resumed}} ->
+        settle(command, runtime, session_id, flags, nil)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp settle(command, runtime, session_id, flags, activation) do
+    case facade(Loopex, :session_status, [runtime, session_id]) do
+      {:ok, status} ->
+        case agreed_configuration(flags, status) do
+          :ok -> continue(command, runtime, session_id, status, activation)
+          {:conflict, conflict} -> refuse_configuration(conflict, activation)
+        end
+
+      {:error, reason} ->
+        _ = give_up(activation)
+        {:error, reason}
+    end
+  end
+
+  defp continue(command, runtime, session_id, status, activation) do
+    case facade(Loopex, :attach, [runtime, session_id, [after_event_sequence: 0]]) do
+      {:ok, attachment} -> continue_attached(command, attachment, status, activation)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Concept: continuing starts the paused work; reconciling never does.
+  #
+  # Technical depth: `resume` spends the activation and only then installs the
+  # interrupt handler, sized by the period this session committed rather than by
+  # a number the command invented. `cancel` spends nothing: it admits the
+  # ordinary public abort while the recovered work is still paused, which is what
+  # keeps a reconciling command from starting the very run it was asked to end.
+  # A session with no active run has nothing to abort, so `cancel` reports its
+  # settled history instead of refusing over an abort the session cannot accept.
+  defp continue_attached(:resume, attachment, status, activation) do
+    case activate(activation) do
+      {:ok, _session_id} ->
+        Interrupt.install(attachment, Map.fetch!(status, :cleanup_grace_ms))
+        Render.stream(attachment)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp continue_attached(:cancel, attachment, %{active_run_id: nil}, _activation),
+    do: Render.stream(attachment)
+
+  defp continue_attached(:cancel, attachment, _status, _activation) do
+    case facade(Loopex, :command, [attachment, %{type: :abort, command_id: unique_id()}]) do
+      {:accepted, _id} -> Render.stream(attachment)
+      {:error, reason} -> {:error, "the session could not be reconciled: #{inspect(reason)}"}
+    end
+  end
+
+  defp activate(nil), do: {:ok, :replayed}
+  defp activate(activation), do: facade(Loopex, :activate_resume, [activation])
+
+  defp give_up(nil), do: :ok
+  defp give_up(activation), do: facade(Loopex, :abandon_resume, [activation])
+
+  defp refuse_configuration(conflict, activation) do
+    refusal =
+      case give_up(activation) do
+        :ok -> {:error, conflict}
+        {:error, reason} -> {:error, {unconfirmed_conflict(conflict), reason}}
+      end
+
+    _ = release_placement()
+    refusal
+  end
+
+  defp unconfirmed_conflict(:cleanup_grace_ms_configuration_conflict),
+    do: :cleanup_grace_ms_configuration_conflict_owner_unconfirmed
+
+  defp unconfirmed_conflict(:context_token_budget_configuration_conflict),
+    do: :context_token_budget_configuration_conflict_owner_unconfirmed
+
+  defp agreed_configuration(flags, status) do
+    with :ok <-
+           agrees(
+             cleanup_grace(flags),
+             :cleanup_grace_ms,
+             Map.get(status, :cleanup_grace_ms),
+             :cleanup_grace_ms_configuration_conflict
+           ) do
+      agrees(
+        context_token_budget(flags),
+        :context_token_budget,
+        Map.get(status, :active_context_token_budget),
+        :context_token_budget_configuration_conflict
+      )
+    end
+  end
+
+  defp agrees({:ok, supplied}, key, committed, conflict) do
+    case Keyword.fetch(supplied, key) do
+      :error -> :ok
+      {:ok, _named} when is_nil(committed) -> :ok
+      {:ok, ^committed} -> :ok
+      {:ok, _different} -> {:conflict, conflict}
+    end
+  end
+
+  defp agrees({:error, _refusal}, _key, _committed, _conflict), do: :ok
 
   # Concept: reconcile a session a dead process left behind.
   #
@@ -417,25 +546,23 @@ defmodule LoopexCli do
          {:ok, policy} <- reconciling_policy(flags),
          {:ok, root} <- state_root(flags),
          :none <- Placement.live_owner(root),
-         {:ok, runtime} <- start_runtime(flags, policy, options),
-         {:ok, _resumed} <-
-           Loopex.resume_known_session(root, runtime, session_id, unique_id()),
-         {:ok, attachment} <- Loopex.attach(runtime, session_id, after_event_sequence: 0) do
-      case Loopex.command(attachment, %{type: :abort, command_id: unique_id()}) do
-        {:accepted, _id} -> Render.stream(attachment)
-        {:error, reason} -> {:error, "the session could not be reconciled: #{inspect(reason)}"}
-      end
+         {:ok, runtime} <- start_runtime(flags, policy, options) do
+      recover(:cancel, root, runtime, session_id, flags)
     else
       {:ok, owner} ->
         {:error,
          "a live loopex process (pid #{owner}) owns this state root; " <>
            "cancel from that terminal, or stop it first"}
 
-      {:error, reason} when is_binary(reason) ->
-        {:error, reason}
-
+      # Concept: a refusal keeps the words it was refused in.
+      #
+      # Technical depth: the recovery pipeline reports configuration conflicts
+      # and facade refusals in their own terms, and wrapping those in a sentence
+      # about reconciliation would rename a decision the operator has to act on.
+      # Only the abort itself, which is the reconciliation, is described that way,
+      # and it says so where it happens.
       {:error, reason} ->
-        {:error, "the session could not be reconciled: #{inspect(reason)}"}
+        {:error, reason}
     end
   end
 
@@ -557,7 +684,7 @@ defmodule LoopexCli do
          {:ok, cleanup} <- cleanup_grace(flags),
          {:ok, context} <- context_token_budget(flags),
          :ok <- own_placement(root) do
-      {:ok, placement} = Loopex.runtime_placement_id(root)
+      {:ok, placement} = facade(Loopex, :runtime_placement_id, [root])
 
       # Concept: what a workspace says about how an agent should behave is shown
       # to the operator before the run starts.
@@ -660,13 +787,13 @@ defmodule LoopexCli do
   end
 
   defp create(runtime) do
-    Loopex.create_session(runtime, %{"surface" => "cli"}, command_id: unique_id())
+    facade(Loopex, :create_session, [runtime, %{"surface" => "cli"}, [command_id: unique_id()]])
   end
 
   defp state_root(flags) do
     case Map.get(flags, "state-root") do
       root when is_binary(root) -> {:ok, root}
-      _absent -> Loopex.state_root()
+      _absent -> facade(Loopex, :state_root, [])
     end
   end
 
@@ -699,6 +826,21 @@ defmodule LoopexCli do
     do: {:error, "this command takes exactly one #{expected}"}
 
   defp unique_id, do: "cli-" <> Integer.to_string(System.unique_integer([:positive]))
+
+  # Concept: every facade call this command makes goes through one seam, so a
+  # case can watch the real command decide, in order, without a second command
+  # written for the test to drive.
+  #
+  # Technical depth: the same shape the composition uses for its edge and effect
+  # seams. The default is `apply/3`, so the shipped path is the ordinary call and
+  # nothing about it is conditional on a test being present. It is process-local
+  # rather than global, so an observer installed by one case cannot reach
+  # another. It observes; it grants nothing: what a facade call is allowed to do
+  # is decided inside the kernel, which this command does not run.
+  @facade :"$loopex_cli_facade_observer"
+
+  defp facade(module, function, arguments),
+    do: Process.get(@facade, &apply/3).(module, function, arguments)
 
   defp usage do
     """

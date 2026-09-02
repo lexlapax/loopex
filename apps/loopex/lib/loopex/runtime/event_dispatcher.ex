@@ -19,6 +19,14 @@ defmodule Loopex.Runtime.EventDispatcher do
   Attachments, queued events, progress, and diagnostics are redacted from OTP
   status and disappear on dispatcher restart. The same durable outbox rows can
   then be attached and delivered again with identical IDs and sequences.
+
+  Publication is fenced at the acknowledged position. A durable outbox row is
+  delivered only once `Loopex.Runtime.Control` has recorded the commit that
+  produced it as resolved, so a session whose owner is holding an unresolved
+  `commit_unknown` publishes nothing from that transaction until the
+  re-presentation settles. A session with no current owner in this runtime
+  carries no fence, because no transaction of this runtime's is outstanding
+  against it and its durable outbox is already reconstructed truth.
   """
 
   use GenServer
@@ -72,6 +80,59 @@ defmodule Loopex.Runtime.EventDispatcher do
     end
   end
 
+  # Concept: the position public delivery is allowed to reach.
+  #
+  # Technical depth: Control pushes this rather than the dispatcher pulling it,
+  # because Control already calls into the dispatcher while handling
+  # `route_command`, and a dispatcher that called Control back would close a
+  # two-process cycle that one busy session could deadlock.
+  #
+  # It is a call rather than a cast, and it has to be. A caller told that its
+  # command was accepted may read the events that command produced immediately,
+  # and message order between Control and that caller is undefined, so a cast
+  # leaves a window in which the fence withholds rows whose commit has already
+  # resolved -- indistinguishable, to that reader, from a session that produced
+  # nothing. Waiting here closes the window: the watermark is installed before
+  # the commit's own reply travels. The wait is unbounded for the same reason
+  # `Loopex.Runtime.Control.post_commit/5` is, and the reason is sharper here: a
+  # deadline would leave the watermark behind durable truth permanently rather
+  # than briefly, withholding every later row of that session for a commit that
+  # in fact resolved.
+  @doc false
+  @spec acknowledge(pid(), binary(), non_neg_integer()) :: :ok
+  def acknowledge(root, session_id, position)
+      when is_pid(root) and is_binary(session_id) and is_integer(position) and position >= 0 do
+    case RuntimeSupervisor.children(root) do
+      {:ok, %{dispatcher: dispatcher}} ->
+        try do
+          GenServer.call(dispatcher, {:acknowledge, session_id, position}, :infinity)
+        catch
+          :exit, _reason -> :ok
+        end
+
+      _other ->
+        :ok
+    end
+  end
+
+  # Concept: a session this runtime no longer owns is no longer fenced by it.
+  #
+  # Technical depth: the fence exists to withhold rows one live owner has not
+  # resolved. Once that owner is gone, the durable outbox is the only truth left
+  # and a successor reconstructs from it, so retaining a stale watermark would
+  # withhold committed history from every later reader for no protection.
+  @doc false
+  @spec release_fence(pid(), binary()) :: :ok
+  def release_fence(root, session_id) when is_pid(root) and is_binary(session_id) do
+    case RuntimeSupervisor.children(root) do
+      {:ok, %{dispatcher: dispatcher}} ->
+        GenServer.cast(dispatcher, {:release_fence, session_id})
+
+      _other ->
+        :ok
+    end
+  end
+
   @impl GenServer
   def init(options) do
     Process.flag(:trap_exit, true)
@@ -85,6 +146,7 @@ defmodule Loopex.Runtime.EventDispatcher do
        diagnostics_to: Keyword.fetch!(options, :diagnostics_to),
        attachments: %{},
        pending_scans: %{},
+       acknowledged: %{},
        counter: 0
      }}
   end
@@ -149,7 +211,7 @@ defmodule Loopex.Runtime.EventDispatcher do
             {:reply, {:ok, event}, next}
 
           {:empty, _queue} ->
-            pumped = pump(state.store, attachment)
+            pumped = pump(state, attachment)
 
             case :queue.out(pumped.queue) do
               {{:value, event}, queue} ->
@@ -187,7 +249,7 @@ defmodule Loopex.Runtime.EventDispatcher do
     reply =
       case fetch_attachment(state, token, session_id, attachment_id, incarnation_id) do
         {:ok, %{status: :active} = attachment} ->
-          pumped = pump(state.store, attachment)
+          pumped = pump(state, attachment)
 
           {:ok,
            %{
@@ -248,7 +310,15 @@ defmodule Loopex.Runtime.EventDispatcher do
     {:reply, reply, state}
   end
 
+  def handle_call({:acknowledge, session_id, position}, _from, state) do
+    acknowledged = Map.update(state.acknowledged, session_id, position, &max(&1, position))
+    {:reply, :ok, %{state | acknowledged: acknowledged}}
+  end
+
   @impl GenServer
+  def handle_cast({:release_fence, session_id}, state),
+    do: {:noreply, %{state | acknowledged: Map.delete(state.acknowledged, session_id)}}
+
   def handle_cast({:invalidate, session_id}, state) do
     retained =
       state.attachments
@@ -325,11 +395,24 @@ defmodule Loopex.Runtime.EventDispatcher do
     |> Map.put(:log, [])
   end
 
-  defp pump(store, %{status: :active} = attachment) do
-    room = attachment.capacity - attachment.queue_depth
-    limit = min(max(room + 1, 1), @max_page)
+  # Concept: read no further than the position this runtime has acknowledged.
+  #
+  # Technical depth: the fence is applied to the read rather than to the queue,
+  # so an unacknowledged row is never fetched, never counted against capacity,
+  # and never advances `seen`. A later pump re-reads from the same position once
+  # the watermark moves, which is what makes the withholding temporary rather
+  # than a gap. With no watermark for the session the read is unbounded, which
+  # is the dormant-session case: this runtime holds no transaction against it.
+  defp pump(state, attachment) do
+    cond do
+      attachment.status != :active -> attachment
+      publishable_limit(state, attachment) == 0 -> attachment
+      true -> pump_page(state, attachment, publishable_limit(state, attachment))
+    end
+  end
 
-    case Store.load_events(store, attachment.session_id, attachment.seen, limit) do
+  defp pump_page(state, attachment, limit) do
+    case Store.load_events(state.store, attachment.session_id, attachment.seen, limit) do
       {:ok, []} ->
         attachment
 
@@ -339,7 +422,7 @@ defmodule Loopex.Runtime.EventDispatcher do
         cond do
           next.status != :active -> next
           disposition == :historical_backlog -> next
-          length(events) == limit and next.queue_depth < next.capacity -> pump(store, next)
+          length(events) == limit and next.queue_depth < next.capacity -> pump(state, next)
           true -> next
         end
 
@@ -351,7 +434,15 @@ defmodule Loopex.Runtime.EventDispatcher do
     end
   end
 
-  defp pump(_store, attachment), do: attachment
+  defp publishable_limit(state, attachment) do
+    room = attachment.capacity - attachment.queue_depth
+    page = min(max(room + 1, 1), @max_page)
+
+    case Map.fetch(state.acknowledged, attachment.session_id) do
+      :error -> page
+      {:ok, acknowledged} -> min(page, max(acknowledged - attachment.seen, 0))
+    end
+  end
 
   defp install_attachment(
          state,
@@ -383,7 +474,7 @@ defmodule Loopex.Runtime.EventDispatcher do
         metadata: transient_metadata(pending.options)
       }
 
-      attachment = pump(state.store, attachment)
+      attachment = pump(state, attachment)
 
       retained =
         state.attachments
