@@ -1867,7 +1867,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     case SessionState.propose_model_attempt_settled(state.durable, run_id, outcome) do
       {:ok, proposal} ->
-        commit_model_settlement(state, run_id, proposal, outcome)
+        commit_model_settlement(state, run_id, proposal)
 
       {:error, :no_open_model_attempt} ->
         send(self(), :advance_work)
@@ -1878,10 +1878,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp commit_model_settlement(state, run_id, proposal, outcome) do
+  defp commit_model_settlement(state, run_id, proposal) do
+    settlement = hd(proposal.records)
+
     case retain_terminal_operation_fact(state, proposal) do
       {:ok, next} ->
-        next = close_settled_model_stream(next, run_id, outcome)
+        next = close_settled_model_stream(next, run_id, settlement)
+        report_evidence_only_settlement(next, run_id, settlement)
         send(self(), :advance_work)
         {:noreply, clear_model_cleanup(next, run_id)}
 
@@ -1890,8 +1893,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # successor. That retained fact, rather than this stale coordinator's
         # authority, is what makes the closure truthful; the successor never
         # closes or reuses this relay.
+        next = close_settled_model_stream(next, run_id, settlement)
+        report_evidence_only_settlement(next, run_id, settlement)
+
         next
-        |> close_settled_model_stream(run_id, outcome)
         |> clear_model_cleanup(run_id)
         |> continue_after_owner_loss()
 
@@ -1907,18 +1912,56 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp close_settled_model_stream(state, run_id, {:reply, reply}) when is_map(reply) do
-    case Map.get(reply, :delta_count, Map.get(reply, "delta_count")) do
-      count when is_integer(count) and count >= 0 ->
-        close_current_model_stream(state, run_id, {:complete, count})
+  # Concept: a closure the journal already proves is stated directly; one that
+  # nothing durable proves still needs Control to say this owner may state it.
+  #
+  # Technical depth: ADR 0018 lets an origin "whose retained result already
+  # proves the closure" close from durable settlement before outcome
+  # publication, and ADR 0014 keeps that disposition truthful after ownership
+  # moves. A retained reply carries its own `delta_count`, so `{:complete,
+  # count}` restates a figure the Store fixed, and a predecessor superseded
+  # during handoff must still emit it -- routing it through Control instead
+  # leaves the originating domain with no closure at all, because Control
+  # rightly refuses a superseded owner. An abandoned close states nothing the
+  # journal proves, so it keeps Control's admission, which also prevents a
+  # handoff from beginning between the ownership check and the closing send.
+  # The unreadable answer is retained but is not a retained reply: it fixes no
+  # producer count, so it abandons.
+  defp close_settled_model_stream(state, run_id, settlement) do
+    case settlement["result"] do
+      %{"kind" => "reply", "reply" => reply} ->
+        case reply["delta_count"] do
+          count when is_integer(count) and count >= 0 ->
+            close_model_stream(state, run_id, {:complete, count})
 
-      _not_a_count ->
+          _not_a_count ->
+            close_current_model_stream(state, run_id, :abandoned)
+        end
+
+      _no_retained_reply ->
         close_current_model_stream(state, run_id, :abandoned)
     end
   end
 
-  defp close_settled_model_stream(state, run_id, _outcome),
-    do: close_current_model_stream(state, run_id, :abandoned)
+  # Concept: an operator watching a run still learns that a reply arrived too
+  # late to become part of it.
+  #
+  # Technical depth: ADR 0018 combination 2 keeps a late valid reply as
+  # attempt evidence in the `evidence_only` conversation, which is the durable
+  # fact. This is only its live notification on the transient diagnostics
+  # plane, emitted after the settlement is retained so it never announces
+  # something the journal does not hold. Nothing durable, public, or
+  # progress-bearing depends on it.
+  defp report_evidence_only_settlement(state, run_id, %{"conversation" => "evidence_only"}) do
+    emit_diagnostic(state, %{
+      "kind" => "late_result_discarded",
+      "run_id" => run_id,
+      "operation" => "model",
+      "outcome" => "reply"
+    })
+  end
+
+  defp report_evidence_only_settlement(_state, _run_id, _settlement), do: :ok
 
   defp clear_model_cleanup(state, run_id),
     do: %{state | pending_cleanup: Map.delete(state.pending_cleanup, run_id)}

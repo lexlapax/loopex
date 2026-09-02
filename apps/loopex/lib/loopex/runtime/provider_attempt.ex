@@ -461,6 +461,23 @@ defmodule Loopex.Runtime.ProviderAttempt do
       }
   end
 
+  # Concept: the compact unreadable answer is the one result that may carry
+  # reported usage without a retained reply to show it against.
+  #
+  # Technical depth: ADR 0018 combination 5 says the compacted record
+  # "preserves complete reported usage when available", and compaction is
+  # exactly what removed the reply those numbers came from. Refusing the pair
+  # here would make a record Core itself built self-invalid and cost the run its
+  # verdict over an answer the provider did charge for. The licence is narrow on
+  # purpose: `model_call_failed` names an attempt with no readable answer at
+  # all, keeps combination 3's estimated remaining allowance, and still has no
+  # way to claim a reported figure.
+  defp reported_matches?(
+         %{"kind" => "error", "category" => "unreadable_model_answer"},
+         _accounting
+       ),
+       do: true
+
   defp reported_matches?(_result, _accounting), do: false
 
   defp continuing_reply?(%{"kind" => "reply", "reply" => reply}, conversation, termination),
