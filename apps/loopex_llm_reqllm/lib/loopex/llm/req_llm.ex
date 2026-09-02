@@ -446,11 +446,31 @@ defmodule Loopex.LLM.ReqLLM do
   # redacts what it builds, because the streaming suite reads those reasons
   # through `reply_from_stream/4`, but nothing built below this line reaches a
   # caller of `complete/3`.
+  #
+  # Technical depth: nothing raised, thrown, or exited under this call may leave
+  # the worker uncaught. `call_options` carries the credential and is the
+  # argument list of the frame this call sits on, so an uncaught error here is
+  # reported by the VM with a stacktrace that can carry those arguments -- and
+  # ADR 0018 requires credential-shaped raw errors to be absent from every
+  # prohibited plane, of which the logger's crash report is one. Catching here
+  # rather than reporting the reason keeps the same bounded classification the
+  # branches below already produce.
+  #
+  # This does not make `isolated/1` redundant. A `try` catches only what is
+  # raised inside this process's own call stack; the exit signal the library's
+  # linked stream server sends is delivered to the process rather than to this
+  # frame, and it is still the monitored worker that turns that death into an
+  # answer.
   defp handoff(request, context, identity, call_options, credential, progress) do
     case ReqLLM.stream_text(request.model, context, call_options) do
       {:ok, response} -> drain(response, request, identity, progress, credential)
       _failed -> :provider_call_failed
     end
+  rescue
+    _raised -> :provider_call_failed
+  catch
+    _thrown -> :provider_call_failed
+    :exit, _reason -> :provider_call_failed
   end
 
   # Concept: a crash inside the provider library is an answer, not the end of the
@@ -499,7 +519,11 @@ defmodule Loopex.LLM.ReqLLM do
 
   The response is a `ReqLLM.StreamResponse` — accepted and read here, never
   returned. Errors are already bounded and scrubbed, so a caller may report them
-  without inspecting a provider term.
+  without inspecting a provider term: every reason is capped at the same byte
+  bound `complete/3` applies, and the credential this adapter would itself call
+  with is substituted out of it. A caller that opened its own stream under some
+  other secret is the only case that cannot be covered, because that value is
+  never one this adapter is told.
   """
   @spec reply_from_stream(
           ReqLLM.StreamResponse.t(),
@@ -509,7 +533,24 @@ defmodule Loopex.LLM.ReqLLM do
         ) :: {:ok, reply()} | {:error, term()}
   def reply_from_stream(response, request, identity, progress)
       when is_map(request) and is_map(identity) and is_function(progress, 1) do
-    drain(response, request, identity, progress, nil)
+    drain(response, request, identity, progress, ambient_credential())
+  end
+
+  # Concept: the credential to keep out of a reason, where there is one to keep
+  # out.
+  #
+  # Technical depth: this path passed `nil` unconditionally while the function
+  # documented scrubbed errors, which made the claim true only for a caller that
+  # had no credential set at all. The bound never depended on a secret; only the
+  # substitution does, and the substitution needs a value to look for. This is
+  # the same read `staged/1` makes, so what is substituted is exactly the value
+  # a real call would have been made with, and an unset variable stays `nil` and
+  # leaves the deterministic lane byte-identical.
+  defp ambient_credential do
+    case credential() do
+      {:ok, value} -> value
+      _absent -> nil
+    end
   end
 
   # Concept: an interrupted stream produces an error, never the fragment that
@@ -551,6 +592,14 @@ defmodule Loopex.LLM.ReqLLM do
     end
   rescue
     interrupted -> {:error, {:stream_interrupted, scrub_error(interrupted, credential)}}
+  catch
+    # Technical depth: a `rescue` alone admits only raised exceptions, so a
+    # progress function or a lazy stream that threw or exited left this frame
+    # uncaught -- past the bound, past the substitution, and out of the declared
+    # `{:ok, reply} | {:error, term()}` this function documents. Both endings are
+    # the same fact as a raise: the stream did not produce a reply.
+    thrown -> {:error, {:stream_interrupted, scrub_error({:throw, thrown}, credential)}}
+    :exit, reason -> {:error, {:stream_interrupted, scrub_error({:exit, reason}, credential)}}
   end
 
   defp finish_drain(response, request, identity, chunks, text, deltas, credential) do
