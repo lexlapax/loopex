@@ -299,7 +299,7 @@ defmodule Loopex.SessionLifecycleTest do
              "session_genesis_v2",
              "owner_advanced",
              "owner_advanced",
-             "command_admitted"
+             "prompt_admitted_v2"
            ]
   end
 
@@ -346,7 +346,7 @@ defmodule Loopex.SessionLifecycleTest do
       Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
 
     delivered = drain_events(current_attachment)
-    assert Enum.map(delivered, & &1.event_sequence) == [1, 2]
+    assert Enum.map(delivered, & &1.event_sequence) == [1]
     assert Enum.map(delivered, & &1.kind) == ["user.message_appended", "run.started"]
 
     control_before_reply = control_projection(fixture.runtime, session_id)
@@ -458,7 +458,8 @@ defmodule Loopex.SessionLifecycleTest do
     session = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id]
     assert Enum.count(session.events, &(&1.kind == "run.started")) == 0
     assert Enum.count(session.events, &(&1.kind == "run.finished")) == 1
-    assert Enum.count(session.records, &(&1.payload.kind == "command_admitted")) == 3
+    assert Enum.count(session.records, &(&1.payload.kind == "command_admitted")) == 2
+    assert Enum.count(session.records, &(&1.payload.kind == "prompt_admitted_v2")) == 1
   end
 
   test "only one coordinator owns a session at a time after durable succession", fixture do

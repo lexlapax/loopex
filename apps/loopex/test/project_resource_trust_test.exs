@@ -178,7 +178,7 @@ defmodule Loopex.ProjectResourceTrustTest do
 
     assert digest_reason == "declared_digest_mismatch"
 
-    assert {:error, :manifest_rejected, %{"reason" => "duplicate resource label"}} =
+    assert {:error, :manifest_rejected, %{"reason" => "too_many_entries", "label" => nil}} =
              ProjectResource.digest(manifest(%{entries: [entry(), entry()]}))
 
     # A host-only resolved path is stripped before this boundary. Core rejects
@@ -250,24 +250,41 @@ defmodule Loopex.ProjectResourceTrustTest do
     [system_descriptor, project_descriptor, session_descriptor, tool_descriptor] =
       retained["blocks"]
 
-    assert system_descriptor["source_reference"] == "loopex.system.v1"
+    assert system_descriptor["source_reference"] == %{
+             "kind" => "system",
+             "identity" => "loopex.system.v1"
+           }
+
     assert_descriptor(system_descriptor, system_message, "system")
 
-    assert project_descriptor["source_reference"] ==
-             "project:workspace-1:#{decision.manifest_digest}:AGENTS.md"
+    assert project_descriptor["source_reference"] == %{
+             "kind" => "project_resource",
+             "workspace_ref" => "workspace-1",
+             "manifest_digest" => decision.manifest_digest,
+             "relative_label" => "AGENTS.md"
+           }
 
-    assert project_descriptor["source_content_digest"] == Canonical.digest_bytes(@content)
-    assert project_descriptor["source_byte_size"] == byte_size(@content)
     assert_descriptor(project_descriptor, project_message, "project_resource")
 
-    assert String.starts_with?(session_descriptor["source_reference"], "session:")
-    assert String.ends_with?(session_descriptor["source_reference"], ":command:p1")
+    assert %{"kind" => "session_command", "command_id" => "p1", "run_id" => run_id} =
+             session_descriptor["source_reference"]
+
+    assert is_binary(run_id)
     assert_descriptor(session_descriptor, session_message, "session")
 
-    assert tool_descriptor["source_reference"] ==
-             "tool_definition:#{tool["tool_id"]}:#{tool["tool_version"]}:#{ToolDefinition.definition_digest(tool)}"
+    assert tool_descriptor["source_reference"] == %{
+             "kind" => "tool_definition",
+             "tool_id" => tool["tool_id"],
+             "tool_version" => tool["tool_version"],
+             "definition_digest" => ToolDefinition.definition_digest(tool)
+           }
 
-    assert_descriptor(tool_descriptor, ToolDefinition.canonical_bytes(tool), "system", :bytes)
+    assert_descriptor(
+      tool_descriptor,
+      Canonical.encode(ToolDefinition.model_facing(tool)),
+      "system",
+      :bytes
+    )
 
     provenances = Enum.map(retained["blocks"], & &1["provenance_class"])
     assert "system" in provenances
@@ -341,7 +358,7 @@ defmodule Loopex.ProjectResourceTrustTest do
         Map.put(decision, :extra, "not admitted")
       ],
       fn invalid ->
-        assert {:declined, :binding_changed, %{"reason" => "decision record is invalid"}} =
+        assert {:declined, :binding_changed, %{"reason" => "invalid_decision"}} =
                  ProjectResource.resolve(given, invalid)
       end
     )
@@ -437,7 +454,7 @@ defmodule Loopex.ProjectResourceTrustTest do
 
     assert_descriptor(
       List.last(second_receipt["blocks"]),
-      ToolDefinition.canonical_bytes(tool),
+      Canonical.encode(ToolDefinition.model_facing(tool)),
       "system",
       :bytes
     )

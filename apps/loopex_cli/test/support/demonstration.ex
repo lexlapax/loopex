@@ -51,6 +51,7 @@ defmodule LoopexCli.Demonstration do
 
     {:ok, runtime} =
       Loopex.start_link(
+        context_token_budget: Keyword.get(options, :context_token_budget, 8_192),
         runtime_id: Keyword.get(options, :runtime_id, "demonstration"),
         store: store,
         policy: Keyword.get(options, :policy, LoopexCli.Policy.AllowAll),

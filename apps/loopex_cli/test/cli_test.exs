@@ -2397,7 +2397,7 @@ defmodule LoopexCliTest do
 
     Enum.zip(request.tools, tool_descriptors)
     |> Enum.each(fn {tool, descriptor} ->
-      bytes = LoopexProtocol.ToolDefinition.canonical_bytes(tool)
+      bytes = LoopexProtocol.Canonical.encode(LoopexProtocol.ToolDefinition.model_facing(tool))
       assert descriptor["byte_cost"] == byte_size(bytes)
       assert descriptor["token_cost"] == Loopex.Bounds.estimate(bytes)
     end)

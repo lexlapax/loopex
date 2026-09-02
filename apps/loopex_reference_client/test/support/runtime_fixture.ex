@@ -133,6 +133,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
     }
 
     runtime_options = [
+      context_token_budget: 8_192,
       runtime_id: "runtime-#{label}",
       store: store,
       model: %{
