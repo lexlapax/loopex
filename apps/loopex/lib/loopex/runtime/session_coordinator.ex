@@ -248,6 +248,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
        # `model_dispatched` that is not in here was dispatched by a predecessor,
        # and its attempt is abandoned rather than re-run under the same identity.
        adopted: MapSet.new(),
+       # Concept: the runs whose attempt identity this owner has already asked
+       # Control to spend.
+       #
+       # Technical depth: ADR 0018 makes Control's permit send the
+       # provider-dispatch linearization point, so an attempt this owner opened
+       # and has not yet carried to `Control.provider_dispatch/3` is provably
+       # `not_dispatched`. `adopted` cannot answer that on its own: it stays set
+       # for the whole run, and a request that reached Control and lost its reply
+       # is ambiguous while still adopted. A run enters here immediately before
+       # that call and leaves when its attempt settles, so the next attempt
+       # starts from the same proof the first one did.
+       permit_requested: MapSet.new(),
        in_flight: %{},
        pending_cleanup: %{},
        streams: %{},
@@ -1929,6 +1941,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
     state = %{state | streams: Map.put(state.streams, {:model, run_id}, stream)}
     state = put_in_flight(state, task.ref, {:model, run_id, task.pid})
 
+    # Technical depth: recorded before the call rather than after its reply,
+    # because the reply is exactly what a lost Control answer does not deliver.
+    # From here on this owner cannot prove the identity was never spent.
+    state = %{state | permit_requested: MapSet.put(state.permit_requested, run_id)}
+
     case Control.provider_dispatch(state.control, binding, authority) do
       {:ok, :dispatched} ->
         {:noreply, arm_deadline(state, run_id)}
@@ -2027,6 +2044,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp settle_model_attempt(state, run_id, outcome) do
     state = disarm_deadline(state, run_id)
     state = cancel_model_reserve(state, run_id)
+
+    # The attempt being settled is the one that request belonged to. A retry
+    # opens a new attempt identity, which no owner has asked Control to spend.
+    state = %{state | permit_requested: MapSet.delete(state.permit_requested, run_id)}
 
     case SessionState.propose_model_attempt_settled(state.durable, run_id, outcome) do
       {:ok, proposal} ->
@@ -2759,11 +2780,38 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     case in_flight_of(state, :model, run_id) do
       nil ->
-        {:noreply, next} = settle_model_attempt(state, run_id, :dispatched_or_unknown)
+        {:noreply, next} =
+          settle_model_attempt(state, run_id, unstarted_attempt_outcome(state, run_id))
+
         next
 
       {_reference, _pid} ->
         arm_model_reserve(state, run_id)
+    end
+  end
+
+  # Concept: an attempt this owner opened and never carried to Control cost
+  # nothing, and is settled as the refusal it is.
+  #
+  # Technical depth: ADR 0018's dispatch table gives `not_dispatched` to the
+  # cells where no permit can have been sent, and combination 4 leaves them
+  # uncharged. Between the attempt-open commit and `Control.provider_dispatch/3`
+  # this owner is exactly such a cell: it holds the open attempt itself, it has
+  # not asked for the identity to be spent, and no other process may ask for it.
+  # Settling that window `dispatched_or_unknown` charges the whole remaining
+  # allowance for a call nothing could have made.
+  #
+  # Both members are required. An attempt inherited from a dead owner is not in
+  # `adopted`, and a predecessor may have reached Control before it died, so a
+  # recovered-open attempt stays ambiguous. A request whose Control reply was
+  # lost is in `permit_requested`, and stays ambiguous for the same reason
+  # Control's own death does.
+  defp unstarted_attempt_outcome(state, run_id) do
+    if MapSet.member?(state.adopted, run_id) and
+         not MapSet.member?(state.permit_requested, run_id) do
+      :not_dispatched
+    else
+      :dispatched_or_unknown
     end
   end
 
