@@ -46,10 +46,37 @@ defmodule Loopex.Runtime.SessionState do
                         ))
   @descriptor_canonicalization_version "loopex.canonical.v1"
   @descriptor_digest_domain "loopex.context.descriptors.v1"
+  @context_refusal_keys Enum.sort([
+                          :kind,
+                          "run_id",
+                          "turn_id",
+                          "category",
+                          "dimension",
+                          "token_estimator",
+                          "descriptor_canonicalization_version",
+                          "project_disposition",
+                          "system_message_count",
+                          "session_message_count",
+                          "steer_message_count",
+                          "tool_definition_count",
+                          "provider_estimated_tokens",
+                          "context_token_budget",
+                          "record_byte_cost",
+                          "context_record_byte_ceiling",
+                          "ordered_descriptor_digest",
+                          "observed",
+                          "limit"
+                        ])
+  @context_project_dispositions ~w(
+    not_evaluated_required_failure no_manifest manifest_rejected over_limit
+    no_decision binding_changed staged_empty context_token_budget
+    context_record_bytes
+  )
 
   alias Loopex.ArtifactStore
   alias Loopex.Bounds
   alias Loopex.Conversation
+  alias Loopex.Runtime.ContextAdmission
   alias Loopex.Store
   alias LoopexProtocol.Canonical
   alias LoopexProtocol.ToolDefinition
@@ -130,6 +157,7 @@ defmodule Loopex.Runtime.SessionState do
           conversation: map(),
           bounds: map(),
           context_budgets: map(),
+          context_refusal: map() | nil,
           deadlines: map(),
           steer: map(),
           follow_up: map() | nil,
@@ -154,6 +182,12 @@ defmodule Loopex.Runtime.SessionState do
             # succession, and restart must all reuse the value the predecessor
             # committed rather than whatever the current process now defaults to.
             context_budgets: %{},
+            # The transient marker ADR 0017 installs when the first row of a
+            # context refusal has been applied and its terminal has not. It is
+            # in-memory only: it changes no durable-derived run state, and a
+            # recovery that reaches the durable head still holding it is
+            # incomplete history rather than a settled session.
+            context_refusal: nil,
             deadlines: %{},
             steer: %{},
             follow_up: nil,
@@ -211,6 +245,12 @@ defmodule Loopex.Runtime.SessionState do
   def recover(session_id, records, events)
       when is_binary(session_id) and is_list(records) and is_list(events) do
     with {:ok, state} <- replay_records(%__MODULE__{session_id: session_id}, records),
+         # Concept: half a refusal is not a settled session.
+         #
+         # Technical depth: reaching the durable head with the transient marker
+         # still installed means the terminal row that completes the pair is
+         # missing, which is incomplete history rather than a run to resume.
+         nil <- state.context_refusal,
          {:ok, event_sequence} <- replay_event_sequences(events),
          true <- expected_public_history?(events, state.expected_events),
          {:ok, projection} <- replay_projection(events, event_sequence),
@@ -218,6 +258,7 @@ defmodule Loopex.Runtime.SessionState do
       {:ok, %{state | event_sequence: event_sequence}}
     else
       false -> {:error, :private_public_projection_mismatch}
+      %{} -> {:error, :incomplete_context_refusal_pair}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -600,12 +641,107 @@ defmodule Loopex.Runtime.SessionState do
       kind: "model_request_committed"
     }
 
-    with {:ok, fixed} <- resolve_record_byte_cost(record) do
-      internal_proposal(
-        state,
-        stable_id("model-request", run_id, request.staged_request_digest),
-        fixed
-      )
+    # Concept: a request that cannot be staged is refused here, before any
+    # provider sees it.
+    #
+    # Technical depth: admission runs against the exact record about to be
+    # proposed, so what is judged is what would have been written. A refusal
+    # returns the compact projection its caller commits instead of this
+    # transaction; it never becomes a partially staged request.
+    case admit_context_candidate(record) do
+      {:ok, fixed} ->
+        internal_proposal(
+          state,
+          stable_id("model-request", run_id, request.staged_request_digest),
+          fixed
+        )
+
+      {:refused, refusal} ->
+        {:refused, context_refusal_record(record, refusal, work, turn_number)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp admit_context_candidate(%{"context_receipt" => receipt} = record) when is_map(receipt) do
+    observations = %{
+      system_class_tokens: get_in(receipt, ["totals", "by_provenance", "system", "token_cost"]),
+      provider_estimated_tokens: Map.get(receipt, "provider_estimated_tokens"),
+      context_token_budget: Map.get(receipt, "context_token_budget"),
+      context_record_byte_ceiling: Store.max_item_bytes(),
+      context_record_depth_limit: Store.max_item_depth(),
+      context_record_cardinality_limit: Store.max_item_cardinality()
+    }
+
+    candidate =
+      case resolve_record_byte_cost(record) do
+        {:ok, fixed} -> fixed
+        {:error, _structural} -> record
+      end
+
+    case ContextAdmission.preflight_required_candidate(candidate, observations) do
+      :ok -> {:ok, candidate}
+      {:refused, refusal} -> {:refused, refusal}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp admit_context_candidate(record), do: resolve_record_byte_cost(record)
+
+  # Concept: the refusal keeps what an operator can act on and nothing that
+  # caused it.
+  #
+  # Technical depth: the four counts partition the exact descriptor sequence
+  # whose bytes produced the token estimate and the ordered digest, so
+  # incrementing or reclassifying one without changing that sequence is refused
+  # by the live constructor. No descriptor body, source reference, or oversized
+  # candidate is retained, which is what makes the refusal's size independent of
+  # history length.
+  defp context_refusal_record(record, refusal, work, turn_number) do
+    receipt = Map.fetch!(record, "context_receipt")
+    blocks = Map.fetch!(receipt, "blocks")
+    request = Map.fetch!(record, "request")
+    tools = length(Map.get(request, "tools", []))
+    messages = length(blocks) - tools
+    steer = if Map.get(record, "applied_steer"), do: 1, else: 0
+
+    message_blocks = Enum.take(blocks, messages)
+    system = Enum.count(message_blocks, &(&1["provenance_class"] == "system"))
+    session = Enum.count(message_blocks, &(&1["provenance_class"] == "session")) - steer
+
+    %{
+      "run_id" => Map.fetch!(work, :run_id),
+      "turn_id" => stable_id("turn", Map.fetch!(work, :run_id), turn_number),
+      "category" => "context_budget_exceeded",
+      "dimension" => Map.fetch!(refusal, "dimension"),
+      "token_estimator" => Bounds.estimator(),
+      "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
+      "project_disposition" => refusal_project_disposition(receipt),
+      "system_message_count" => system,
+      "session_message_count" => session,
+      "steer_message_count" => steer,
+      "tool_definition_count" => tools,
+      "provider_estimated_tokens" => Map.fetch!(receipt, "provider_estimated_tokens"),
+      "context_token_budget" => Map.fetch!(receipt, "context_token_budget"),
+      "record_byte_cost" => Map.fetch!(refusal, "record_byte_cost"),
+      "context_record_byte_ceiling" => Store.max_item_bytes(),
+      "ordered_descriptor_digest" => Map.fetch!(receipt, "ordered_descriptor_digest"),
+      "observed" => Map.fetch!(refusal, "observed"),
+      "limit" => Map.fetch!(refusal, "limit"),
+      kind: "context_admission_refused_v1"
+    }
+  end
+
+  # Technical depth: a truthfully empty staged manifest keeps `staged_empty`
+  # rather than being relabelled absent or declined, and an eligible project
+  # that was never reached because required content already failed says exactly
+  # that instead of suggesting it was staged.
+  defp refusal_project_disposition(receipt) do
+    case Map.fetch!(receipt, "project_resource") do
+      %{"disposition" => "staged", "detail" => %{"entries" => []}} -> "staged_empty"
+      %{"disposition" => "staged"} -> "not_evaluated_required_failure"
+      %{"disposition" => disposition} -> disposition
     end
   end
 
@@ -1193,6 +1329,7 @@ defmodule Loopex.Runtime.SessionState do
          }
        )
        when kind in [
+              "context_admission_refused_v1",
               "model_request_committed",
               "model_result_committed",
               "model_attempt_evidence_retained",
@@ -1204,7 +1341,8 @@ defmodule Loopex.Runtime.SessionState do
               "tool_result_committed"
             ] do
     if version == state.journal_version + 1 and owner_epoch == state.owner_epoch and
-         incarnation == state.owner_incarnation_id and is_binary(incarnation) do
+         incarnation == state.owner_incarnation_id and is_binary(incarnation) and
+         context_refusal_tail?(state, kind) do
       case apply_internal_record(state, record) do
         {:ok, next, events} ->
           {:ok,
@@ -1223,6 +1361,18 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp replay_record(_state, _record), do: {:error, :invalid_private_history}
+
+  # Concept: nothing may come between a refusal and the terminal that completes
+  # it.
+  #
+  # Technical depth: once the first row installs the marker, the immediately
+  # next journal version must be the matching terminal. An intervening,
+  # duplicated, or reordered row is invalid history, which is what makes the
+  # pair one semantic unit across a pagination boundary as well as within a
+  # single page.
+  defp context_refusal_tail?(%{context_refusal: nil}, _kind), do: true
+  defp context_refusal_tail?(_state, "run_terminal_committed"), do: true
+  defp context_refusal_tail?(_state, _kind), do: false
 
   defp apply_command_record(state, record) do
     with {:ok, command_id} <- record_binary(record, "command_id"),
@@ -1750,21 +1900,41 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp apply_internal_record(state, %{
-         "run_id" => run_id,
-         "outcome" => outcome,
-         "bound" => bound,
-         "observed" => observed,
-         "declared_limit" => declared_limit,
-         "accounting_source" => accounting_source,
-         "reconciliation_ref" => reconciliation_ref,
-         "cleanup_grace_ms" => cleanup_grace_ms,
-         "command_id" => command_id,
-         kind: "run_terminal_committed"
-       }) do
+  # Concept: applying the refusal row alone changes nothing durable.
+  #
+  # Technical depth: ADR 0017 makes the refusal and its terminal one semantic
+  # unit spread over two consecutive journal rows. The first row installs only a
+  # transient marker: no run state moves, no event is emitted, no queue
+  # resolves, and nothing is dispatched. A pagination boundary between the two
+  # rows is legitimate and carries the marker into the next fetch. Reaching the
+  # durable head with the marker still pending, or observing any intervening,
+  # duplicated, or mismatched row, is invalid incomplete history.
+  defp apply_internal_record(state, %{kind: "context_admission_refused_v1"} = refusal) do
+    with :ok <- validate_context_refusal(state, refusal) do
+      {:ok, %{state | context_refusal: refusal}, []}
+    end
+  end
+
+  defp apply_internal_record(
+         state,
+         %{
+           "run_id" => run_id,
+           "outcome" => outcome,
+           "bound" => bound,
+           "observed" => observed,
+           "declared_limit" => declared_limit,
+           "accounting_source" => accounting_source,
+           "reconciliation_ref" => reconciliation_ref,
+           "cleanup_grace_ms" => cleanup_grace_ms,
+           "command_id" => command_id,
+           kind: "run_terminal_committed"
+         } = record
+       ) do
     with %{stage: stage} <- Map.get(state.pending_work, run_id),
-         true <- outcome in ["completed", "bound_reached", "outcome_unknown", "cancelled"],
-         true <- terminal_admitted?(state, run_id, stage, outcome, bound) do
+         true <-
+           outcome in ["completed", "bound_reached", "outcome_unknown", "cancelled", "failed"],
+         true <- terminal_admitted?(state, run_id, stage, outcome, bound),
+         {:ok, state, failure} <- consume_context_refusal(state, run_id, outcome, record) do
       # Concept: bound_reached carries the bound and the observed value and
       # nothing else.
       #
@@ -1790,6 +1960,9 @@ defmodule Loopex.Runtime.SessionState do
                 "declared_limit" => declared_limit,
                 "accounting_source" => accounting_source
               }
+
+            "failed" ->
+              %{"failure" => failure}
 
             _completed ->
               %{}
@@ -1874,6 +2047,18 @@ defmodule Loopex.Runtime.SessionState do
 
   defp terminal_admitted?(_state, _run_id, "turn_settled", _outcome, _bound), do: true
 
+  # Concept: a context refusal ends the run at the request-staging boundary and
+  # nowhere else.
+  #
+  # Technical depth: ADR 0017 admits the refusal pair only from `model_pending`
+  # or `turn_settled`, before any staged request, provider attempt, effect
+  # intent, or executor job exists for that turn. The same pair presented from a
+  # later stage is invalid history rather than authority to abandon work that is
+  # already in flight.
+  defp terminal_admitted?(_state, _run_id, stage, "failed", _bound)
+       when stage in ["model_pending", "turn_settled"],
+       do: true
+
   defp terminal_admitted?(state, run_id, _stage, "outcome_unknown", _bound),
     do: unproven_effect?(state, run_id)
 
@@ -1929,6 +2114,11 @@ defmodule Loopex.Runtime.SessionState do
           follow_up: nil,
           pending_work: state.pending_work |> Map.delete(run_id) |> Map.put(promoted, work),
           bounds: Map.put(state.bounds, promoted, declared),
+          # ADR 0013 as amended by ADR 0017: promotion inherits all four
+          # committed values from the predecessor rather than reading whatever
+          # the current process now defaults to.
+          context_budgets:
+            Map.put(state.context_budgets, promoted, Map.get(state.context_budgets, run_id)),
           conversation: Map.put(state.conversation, promoted, [element])
       }
 
@@ -3409,4 +3599,159 @@ defmodule Loopex.Runtime.SessionState do
 
   defp positive_uint64?(value),
     do: is_integer(value) and value > 0 and value <= 18_446_744_073_709_551_615
+
+  @doc false
+  @spec propose_context_refusal(t(), binary(), map()) :: {:ok, proposal()} | {:error, term()}
+  def propose_context_refusal(%__MODULE__{} = state, run_id, refusal)
+      when is_binary(run_id) and is_map(refusal) do
+    terminal =
+      state
+      |> run_terminal_record(run_id, "failed", %{})
+      |> Map.put("failure", context_failure(refusal))
+
+    internal_proposal(
+      state,
+      stable_id("context-refusal", run_id, Map.fetch!(refusal, "turn_id")),
+      [refusal, terminal]
+    )
+  end
+
+  # Concept: the four fields an operator can act on, plus the one fact that
+  # makes the ending final.
+  #
+  # Technical depth: ADR 0017 fixes this projection at exactly five members and
+  # makes it exclusive to a failed context terminal. It copies the refusal's own
+  # committed observations rather than deriving new ones, so the private
+  # terminal, the public event, and the retained receipt cannot disagree.
+  defp context_failure(refusal) do
+    %{
+      "category" => Map.fetch!(refusal, "category"),
+      "retryable" => false,
+      "dimension" => Map.fetch!(refusal, "dimension"),
+      "observed" => Map.fetch!(refusal, "observed"),
+      "limit" => Map.fetch!(refusal, "limit")
+    }
+  end
+
+  defp validate_context_refusal(state, refusal) do
+    run_id = Map.get(refusal, "run_id")
+    work = Map.get(state.pending_work, run_id)
+
+    with true <- Enum.sort(Map.keys(refusal)) == @context_refusal_keys,
+         true <- run_id == state.active_run_id,
+         %{stage: stage} <- work,
+         true <- stage in ["model_pending", "turn_settled"],
+         true <- Map.get(refusal, "turn_id") == stable_id("turn", run_id, next_turn_number(work)),
+         true <- Map.get(refusal, "category") == "context_budget_exceeded",
+         true <- Map.get(refusal, "token_estimator") == Bounds.estimator(),
+         true <-
+           Map.get(refusal, "descriptor_canonicalization_version") ==
+             @descriptor_canonicalization_version,
+         true <- Map.get(refusal, "context_record_byte_ceiling") == Store.max_item_bytes(),
+         true <-
+           Map.get(refusal, "context_token_budget") == Map.get(state.context_budgets, run_id),
+         true <- Map.get(refusal, "project_disposition") in @context_project_dispositions,
+         true <- valid_descriptor_counts?(refusal),
+         true <- valid_context_dimension?(refusal) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_context_refusal}
+    end
+  end
+
+  defp valid_descriptor_counts?(refusal) do
+    Enum.all?(
+      ~w(system_message_count session_message_count steer_message_count tool_definition_count
+         provider_estimated_tokens),
+      &(is_integer(Map.get(refusal, &1)) and Map.get(refusal, &1) >= 0)
+    ) and is_binary(Map.get(refusal, "ordered_descriptor_digest"))
+  end
+
+  # Concept: each dimension admits only the relations its own preimage makes
+  # derivable.
+  #
+  # Technical depth: recovery has no descriptor bodies and no rejected candidate
+  # from which to recompute a refusal, so it validates the relations that hold
+  # by construction and treats the rest as committed observations the Store
+  # transaction digest already protects. `record_byte_cost` is non-nil for the
+  # byte dimension alone, because the token and structural dimensions are
+  # decided before any record is constructed.
+  defp valid_context_dimension?(%{
+         "dimension" => "context_tokens",
+         "observed" => observed,
+         "limit" => limit,
+         "provider_estimated_tokens" => estimated,
+         "context_token_budget" => budget,
+         "record_byte_cost" => nil
+       }),
+       do: observed == estimated and limit == budget and observed > limit
+
+  defp valid_context_dimension?(%{
+         "dimension" => "context_record_bytes",
+         "observed" => observed,
+         "limit" => limit,
+         "record_byte_cost" => cost
+       }),
+       do: observed == cost and limit == 65_536 and observed > limit
+
+  defp valid_context_dimension?(%{
+         "dimension" => "context_record_depth",
+         "observed" => observed,
+         "limit" => limit,
+         "record_byte_cost" => nil
+       }),
+       do: observed == 13 and limit == 12
+
+  defp valid_context_dimension?(%{
+         "dimension" => "context_record_cardinality",
+         "observed" => observed,
+         "limit" => limit,
+         "record_byte_cost" => nil
+       }),
+       do: observed == 1_025 and limit == 1_024
+
+  defp valid_context_dimension?(%{
+         "dimension" => "system_class_tokens",
+         "observed" => observed,
+         "limit" => limit,
+         "provider_estimated_tokens" => estimated,
+         "record_byte_cost" => nil
+       }),
+       do: limit == 1_000 and observed >= limit and observed <= estimated
+
+  defp valid_context_dimension?(_refusal), do: false
+
+  # Concept: the terminal row is what makes the refusal real.
+  #
+  # Technical depth: the marker installed by the first row is consumed here and
+  # both records apply as one semantic unit. A failed context terminal without a
+  # pending marker, a marker whose refusal names another run, or a terminal
+  # whose failure projection disagrees with the retained refusal is invalid
+  # history rather than authority to abandon a run. Every other outcome must
+  # arrive with no marker pending at all.
+  defp consume_context_refusal(
+         %{context_refusal: refusal} = state,
+         run_id,
+         "failed",
+         record
+       )
+       when is_map(refusal) do
+    failure = context_failure(refusal)
+
+    if Map.get(refusal, "run_id") == run_id and Map.get(record, "failure") == failure do
+      {:ok, %{state | context_refusal: nil}, failure}
+    else
+      {:error, :invalid_context_refusal_pair}
+    end
+  end
+
+  defp consume_context_refusal(%{context_refusal: nil} = state, _run_id, outcome, record)
+       when outcome != "failed" do
+    if Map.has_key?(record, "failure"),
+      do: {:error, :invalid_run_terminal_transition},
+      else: {:ok, state, nil}
+  end
+
+  defp consume_context_refusal(_state, _run_id, _outcome, _record),
+    do: {:error, :invalid_context_refusal_pair}
 end

@@ -1050,37 +1050,112 @@ defmodule Loopex.Runtime.SessionCoordinator do
     # against a request the run never sent.
     steer = SessionState.pending_steer(state.durable, run_id)
 
+    {blocks, project_receipt} = project_blocks(state)
+
+    staging = %{
+      run_id: run_id,
+      elements: elements,
+      steer: steer,
+      deadline: run_deadline(declared)
+    }
+
     with {:ok, max_tokens} <- declared_max_tokens(state),
-         {blocks, project_receipt} = project_blocks(state),
-         system = system_block(state),
-         session_entries = Conversation.session_entries(elements),
-         messages =
-           Conversation.project(elements, system: system, project_blocks: blocks),
-         messages = messages ++ steer_message(steer),
-         deadline = run_deadline(declared),
-         {:ok, request} <-
-           Model.request(state.model.model, messages,
-             tools: state.active_tools,
-             sampling: %{"max_tokens" => max_tokens},
-             deadline: deadline
-           ),
-         {:ok, receipt} <-
-           context_receipt(
-             request,
-             context_sources(project_receipt, session_entries, steer, run_id),
-             project_receipt,
-             state.context_token_budget
-           ),
-         {:ok, proposal} <-
-           SessionState.propose_model_request(state.durable, run_id, request,
-             applied_steer: steer && steer.command_id,
-             context_receipt: receipt
-           ),
+         staging = Map.put(staging, :max_tokens, max_tokens),
+         {:ok, proposal} <- stage_candidate(state, staging, blocks, project_receipt),
          {:ok, next} <- commit_internal(state, proposal) do
       send(self(), :advance_work)
       {:noreply, adopt_run(next, run_id)}
     else
+      # Concept: a request that cannot be admitted ends its run, and calls
+      # nobody.
+      #
+      # Technical depth: ADR 0017 commits the compact refusal, the failed
+      # terminal, and its public event in one transaction, and dispatches
+      # nothing. The run is over: a retained terminal is final and the same run
+      # never re-enters staging, so changing context, configuration, or policy
+      # requires a newly admitted run.
+      {:refused, refusal} -> commit_context_refusal(state, run_id, refusal)
       {:error, reason} -> {:stop, {:model_request_failed, reason}, state}
+    end
+  end
+
+  # Concept: optional project content is withheld whole, and only after the
+  # required request has been proved admissible without it.
+  #
+  # Technical depth: ADR 0017 permits withholding exactly one class and never
+  # trimming. If the optional-inclusive candidate exceeds the committed token
+  # total or the Store record ceiling, the whole project class is removed, the
+  # request is canonicalized again, and the record cost is resolved to its own
+  # fixed point. The declined receipt names the dimension, the optional-inclusive
+  # observation, and the limit, so an operator can see what was withheld and
+  # why, and the task continues. A required-only candidate that still fails has
+  # nothing optional left to remove and becomes the compact refusal.
+  defp stage_candidate(state, staging, [], project_receipt),
+    do: staged_proposal(state, staging, [], project_receipt)
+
+  defp stage_candidate(state, staging, blocks, project_receipt) do
+    case staged_proposal(state, staging, blocks, project_receipt) do
+      {:refused, %{"dimension" => dimension} = refusal}
+      when dimension in ["context_tokens", "context_record_bytes"] ->
+        staged_proposal(state, staging, [], withheld_project_receipt(dimension, refusal))
+
+      other ->
+        other
+    end
+  end
+
+  defp withheld_project_receipt(dimension, refusal) do
+    disposition =
+      case dimension do
+        "context_tokens" -> :context_token_budget
+        "context_record_bytes" -> :context_record_bytes
+      end
+
+    ProjectResource.receipt(disposition, %{
+      "dimension" => dimension,
+      "observed" => Map.fetch!(refusal, "observed"),
+      "limit" => Map.fetch!(refusal, "limit")
+    })
+  end
+
+  defp staged_proposal(state, staging, blocks, project_receipt) do
+    messages =
+      Conversation.project(staging.elements, system: system_block(state), project_blocks: blocks)
+
+    with {:ok, request} <-
+           Model.request(state.model.model, messages ++ steer_message(staging.steer),
+             tools: state.active_tools,
+             sampling: %{"max_tokens" => staging.max_tokens},
+             deadline: staging.deadline
+           ),
+         {:ok, receipt} <-
+           context_receipt(
+             request,
+             context_sources(
+               project_receipt,
+               Conversation.session_entries(staging.elements),
+               staging.steer,
+               staging.run_id
+             ),
+             project_receipt,
+             state.context_token_budget
+           ) do
+      SessionState.propose_model_request(state.durable, staging.run_id, request,
+        applied_steer: staging.steer && staging.steer.command_id,
+        context_receipt: receipt
+      )
+    end
+  end
+
+  defp commit_context_refusal(state, run_id, refusal) do
+    state = disarm_deadline(state, run_id)
+
+    with {:ok, proposal} <- SessionState.propose_context_refusal(state.durable, run_id, refusal),
+         {:ok, next} <- commit_internal(state, proposal) do
+      send(self(), :advance_work)
+      {:noreply, %{next | adopted: MapSet.delete(next.adopted, run_id)}}
+    else
+      {:error, reason} -> {:stop, {:context_refusal_failed, reason}, state}
     end
   end
 
