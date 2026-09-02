@@ -113,7 +113,7 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
     events = Fixture.events(fixture, fixture.client.session_id)
     assert List.last(events)["outcome"] == "completed"
 
-    identity = List.last(results).payload["reply"]["identity"]
+    identity = List.last(results).payload["result"]["reply"]["identity"]
 
     announce_attestation(results)
 
@@ -133,7 +133,7 @@ defmodule Loopex.ReferenceClient.RealModelSessionTest do
   # is how the run hands them over; nothing here writes a tracked file, because a
   # case that wrote its own evidence would be attesting to itself.
   defp announce_attestation(results) do
-    replies = Enum.map(results, & &1.payload["reply"])
+    replies = Enum.map(results, & &1.payload["result"]["reply"])
     ids = Enum.map(replies, & &1["provider_response_id"])
     input = Enum.reduce(replies, 0, &((&1["usage"]["input_tokens"] || 0) + &2))
     output = Enum.reduce(replies, 0, &((&1["usage"]["output_tokens"] || 0) + &2))
