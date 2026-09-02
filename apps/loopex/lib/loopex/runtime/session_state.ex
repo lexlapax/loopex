@@ -36,10 +36,23 @@ defmodule Loopex.Runtime.SessionState do
   or promotion, and `charged` accumulates that run's token charge with the
   source that produced it.
   """
+  @context_receipt_keys Enum.sort(~w(
+                          blocks context_record_byte_ceiling context_token_budget
+                          descriptor_canonicalization_version ordered_descriptor_digest
+                          project_resource provider_estimated_tokens provider_identity
+                          provider_revision record_byte_cost selector_identity
+                          selector_revision token_estimator totals transformer_identity
+                          transformer_revision
+                        ))
+  @descriptor_canonicalization_version "loopex.canonical.v1"
+  @descriptor_digest_domain "loopex.context.descriptors.v1"
+
   alias Loopex.ArtifactStore
   alias Loopex.Bounds
   alias Loopex.Conversation
   alias Loopex.Store
+  alias LoopexProtocol.Canonical
+  alias LoopexProtocol.ToolDefinition
 
   @model_reply_required_fields ~w(text identity usage tool_calls canonical_request_bytes staged_request_digest)
   @model_reply_optional_fields ~w(delta_count streamed provider_response_id)
@@ -587,11 +600,48 @@ defmodule Loopex.Runtime.SessionState do
       kind: "model_request_committed"
     }
 
-    internal_proposal(
-      state,
-      stable_id("model-request", run_id, request.staged_request_digest),
-      record
-    )
+    with {:ok, fixed} <- resolve_record_byte_cost(record) do
+      internal_proposal(
+        state,
+        stable_id("model-request", run_id, request.staged_request_digest),
+        fixed
+      )
+    end
+  end
+
+  # Concept: the record says how large it is, and that statement is true of the
+  # record that actually contains it.
+  #
+  # Technical depth: the cost cannot be measured against a value its own
+  # insertion invalidates, so ADR 0017 resolves it by fixed point: start at zero,
+  # measure the normalized candidate, write that count back, and repeat until the
+  # embedded value equals the next measurement. The sequence is monotone and can
+  # only move when the deterministic integer encoding crosses one of finitely
+  # many widths, so it converges; failing to converge is Store unavailability
+  # rather than a fabricated context dimension. Nothing is encoded here -- the
+  # shared Store sizer answers without allocating the candidate.
+  defp resolve_record_byte_cost(%{"context_receipt" => receipt} = record)
+       when is_map(receipt) do
+    if Map.has_key?(receipt, "record_byte_cost") do
+      converge_record_byte_cost(record, 0, 8)
+    else
+      {:ok, record}
+    end
+  end
+
+  defp resolve_record_byte_cost(record), do: {:ok, record}
+
+  defp converge_record_byte_cost(_record, _current, 0),
+    do: {:error, :context_record_preflight_unavailable}
+
+  defp converge_record_byte_cost(record, current, fuel) do
+    candidate = put_in(record, ["context_receipt", "record_byte_cost"], current)
+
+    case Loopex.Store.normalize_and_measure_item(:record, candidate) do
+      {:ok, normalized, ^current} -> {:ok, normalized}
+      {:ok, _normalized, measured} -> converge_record_byte_cost(record, measured, fuel - 1)
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc false
@@ -1418,20 +1468,23 @@ defmodule Loopex.Runtime.SessionState do
     )
   end
 
-  defp apply_internal_record(state, %{
-         "run_id" => run_id,
-         "turn_id" => turn_id,
-         "request" => request,
-         "applied_steer" => applied_steer,
-         "context_receipt" => _context_receipt,
-         kind: "model_request_committed"
-       }) do
+  defp apply_internal_record(
+         state,
+         %{
+           "run_id" => run_id,
+           "turn_id" => turn_id,
+           "request" => request,
+           "applied_steer" => applied_steer,
+           kind: "model_request_committed"
+         } = record
+       ) do
     with {:ok, request} <- decode_request(request),
          %{stage: stage} = work when stage in ["model_pending", "turn_settled"] <-
            Map.get(state.pending_work, run_id),
          :ok <- Loopex.Model.validate_request(request),
          turn_number = next_turn_number(work),
-         true <- turn_id == stable_id("turn", run_id, turn_number) do
+         true <- turn_id == stable_id("turn", run_id, turn_number),
+         :ok <- validate_context_receipt(state, record, request, run_id, applied_steer) do
       # Concept: staging a request is what advances the turn.
       #
       # Technical depth: a settled turn advances only here, inside the same
@@ -3080,4 +3133,280 @@ defmodule Loopex.Runtime.SessionState do
     encoded = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
     String.slice(namespace, 0, 8) <> "_" <> binary_part(encoded, 0, 30)
   end
+
+  # Concept: a receipt is checked against the request it sits next to, never
+  # against itself.
+  #
+  # Technical depth: an internally consistent receipt whose arithmetic balances
+  # can still describe a different message set, a different tool projection, a
+  # different descriptor order, or a different session source binding. ADR 0017
+  # therefore makes validation record-relative: the expected descriptor sequence
+  # is reconstructed from the exact final request members and the reducer's own
+  # session, steer, and project bindings, and the retained list must equal it
+  # member for member. Every cost, digest, bucket, total, and the ordered
+  # descriptor digest are then recomputed rather than trusted.
+  defp validate_context_receipt(state, record, request, run_id, applied_steer) do
+    receipt = Map.get(record, "context_receipt")
+
+    with :ok <- validate_receipt_shell(receipt),
+         {:ok, sources} <- expected_context_sources(state, receipt, run_id, applied_steer),
+         {:ok, expected} <- expected_context_blocks(request, sources),
+         true <- Map.get(receipt, "blocks") == expected,
+         :ok <- validate_receipt_totals(receipt, expected) do
+      :ok
+    else
+      {:error, reason} -> {:error, reason}
+      _mismatch -> {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp validate_receipt_shell(receipt) when is_map(receipt) do
+    with true <- Enum.sort(Map.keys(receipt)) == @context_receipt_keys,
+         true <- Map.get(receipt, "provider_identity") == "loopex.context.reference",
+         true <- Map.get(receipt, "provider_revision") == 2,
+         true <- Map.get(receipt, "transformer_identity") == nil,
+         true <- Map.get(receipt, "transformer_revision") == nil,
+         true <- Map.get(receipt, "selector_identity") == nil,
+         true <- Map.get(receipt, "selector_revision") == nil,
+         true <- Map.get(receipt, "token_estimator") == Bounds.estimator(),
+         true <-
+           Map.get(receipt, "descriptor_canonicalization_version") ==
+             @descriptor_canonicalization_version,
+         true <- Map.get(receipt, "context_record_byte_ceiling") == Store.max_item_bytes(),
+         true <- positive_uint64?(Map.get(receipt, "context_token_budget")),
+         :ok <- validate_project_receipt(Map.get(receipt, "project_resource")) do
+      :ok
+    else
+      {:error, reason} -> {:error, reason}
+      _invalid -> {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp validate_receipt_shell(_receipt), do: {:error, :invalid_context_receipt}
+
+  # Concept: the three provenance buckets always sum back to the one outer
+  # total.
+  #
+  # Technical depth: recomputed from the reconstructed descriptor list, so a
+  # receipt whose own arithmetic is self-consistent but describes a different
+  # list is still refused. `provider_estimated_tokens` is the outer token total
+  # and never an independently retained number.
+  defp validate_receipt_totals(receipt, blocks) do
+    totals = expected_context_totals(blocks)
+
+    if Map.get(receipt, "totals") == totals and
+         Map.get(receipt, "provider_estimated_tokens") == totals["token_cost"] and
+         Map.get(receipt, "ordered_descriptor_digest") == ordered_descriptor_digest(blocks) do
+      :ok
+    else
+      {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp expected_context_blocks(request, sources) do
+    tools = Enum.map(request.tools, &ToolDefinition.model_facing/1)
+    members = request.messages ++ tools
+
+    if length(request.messages) == length(sources) do
+      {:ok,
+       members
+       |> Enum.zip(sources ++ Enum.map(request.tools, &expected_tool_source/1))
+       |> Enum.map(fn {member, source} ->
+         bytes = Canonical.encode(member)
+
+         Map.merge(source, %{
+           "content_digest" => Canonical.digest_bytes(bytes),
+           "byte_cost" => byte_size(bytes),
+           "token_cost" => Bounds.estimate(bytes)
+         })
+       end)}
+    else
+      {:error, :invalid_context_receipt}
+    end
+  end
+
+  defp expected_tool_source(tool) do
+    context_source(
+      %{
+        "kind" => "tool_definition",
+        "tool_id" => Map.fetch!(tool, "tool_id"),
+        "tool_version" => Map.fetch!(tool, "tool_version"),
+        "definition_digest" => ToolDefinition.definition_digest(tool)
+      },
+      "system"
+    )
+  end
+
+  # Concept: session and steer identities come from the reducer's own committed
+  # lineage, not from the receipt being checked.
+  #
+  # Technical depth: the elements read here are the ones committed before this
+  # request row, which is exactly the set the staging owner projected, and the
+  # steer is the one this record says it applied. A receipt that renames a run,
+  # command, turn, or call therefore stops matching even when its own digest was
+  # recomputed to agree with the rename.
+  defp expected_context_sources(state, receipt, run_id, applied_steer) do
+    elements = Map.get(state.conversation, run_id, [])
+
+    steer =
+      case applied_steer && Map.get(state.steer, run_id) do
+        %{command_id: ^applied_steer} ->
+          [
+            context_source(
+              %{
+                "kind" => "session_steer",
+                "run_id" => run_id,
+                "command_id" => applied_steer
+              },
+              "session"
+            )
+          ]
+
+        _absent ->
+          []
+      end
+
+    {:ok,
+     [context_source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system")] ++
+       expected_project_sources(Map.get(receipt, "project_resource")) ++
+       Enum.map(Conversation.session_entries(elements), fn {reference, _message} ->
+         context_source(reference, "session")
+       end) ++ steer}
+  end
+
+  defp expected_project_sources(%{
+         "disposition" => "staged",
+         "detail" => %{
+           "workspace_ref" => workspace_ref,
+           "manifest_digest" => manifest_digest,
+           "entries" => entries
+         }
+       })
+       when is_list(entries) do
+    Enum.map(entries, fn entry ->
+      context_source(
+        %{
+          "kind" => "project_resource",
+          "workspace_ref" => workspace_ref,
+          "manifest_digest" => manifest_digest,
+          "relative_label" => Map.get(entry, "relative_label")
+        },
+        "project_resource"
+      )
+    end)
+  end
+
+  defp expected_project_sources(_declined), do: []
+
+  defp context_source(source_reference, provenance_class) do
+    trust_class =
+      case provenance_class do
+        "system" -> "host_owned_trusted_brain_content"
+        "session" -> "session_owned_durable_truth"
+        "project_resource" -> "untrusted_behavior_shaping_data"
+      end
+
+    %{
+      "source_reference" => source_reference,
+      "provenance_class" => provenance_class,
+      "trust_class" => trust_class
+    }
+  end
+
+  defp expected_context_totals(blocks) do
+    by_provenance =
+      Map.new(~w(system session project_resource), fn provenance ->
+        {provenance,
+         sum_context_costs(Enum.filter(blocks, &(&1["provenance_class"] == provenance)))}
+      end)
+
+    Map.put(sum_context_costs(blocks), "by_provenance", by_provenance)
+  end
+
+  defp sum_context_costs(blocks) do
+    Enum.reduce(blocks, %{"byte_cost" => 0, "token_cost" => 0}, fn block, totals ->
+      %{
+        "byte_cost" => totals["byte_cost"] + block["byte_cost"],
+        "token_cost" => totals["token_cost"] + block["token_cost"]
+      }
+    end)
+  end
+
+  # Concept: the ordered descriptor list is bound by one digest, reproducible
+  # only from the exact framing.
+  #
+  # Technical depth: domain byte, zero separator, then each descriptor's
+  # eight-byte unsigned big-endian canonical length followed by its canonical
+  # bytes. Reordering two descriptors, omitting a length, or changing one
+  # descriptor changes the digest, and no aggregate encoding of the list is
+  # allocated to compute it.
+  defp ordered_descriptor_digest(blocks) do
+    blocks
+    |> Enum.reduce(
+      :crypto.hash_update(:crypto.hash_init(:sha256), @descriptor_digest_domain <> <<0>>),
+      fn block, context ->
+        bytes = Canonical.encode(block)
+
+        context
+        |> :crypto.hash_update(<<byte_size(bytes)::unsigned-big-integer-size(64)>>)
+        |> :crypto.hash_update(bytes)
+      end
+    )
+    |> :crypto.hash_final()
+    |> Base.encode16(case: :lower)
+  end
+
+  # Concept: the project receipt is a closed shape, not an open detail map.
+  #
+  # Technical depth: ADR 0017 replaces ADR 0010's open map with exactly four
+  # outer members and one exact detail shape per disposition. An unknown or
+  # missing member in either is invalid history rather than something a later
+  # reader is expected to ignore.
+  defp validate_project_receipt(
+         %{
+           "class" => "project_resource",
+           "receipt_revision" => 2,
+           "disposition" => disposition,
+           "detail" => detail
+         } = receipt
+       )
+       when is_map(detail) do
+    if map_size(receipt) == 4 and valid_project_detail?(disposition, detail) do
+      :ok
+    else
+      {:error, :invalid_project_receipt}
+    end
+  end
+
+  defp validate_project_receipt(_receipt), do: {:error, :invalid_project_receipt}
+
+  defp valid_project_detail?("no_manifest", detail), do: detail == %{}
+
+  defp valid_project_detail?("staged", detail),
+    do:
+      exact_keys?(detail, ~w(decision_source entries manifest_digest workspace_ref)) and
+        is_list(Map.get(detail, "entries"))
+
+  defp valid_project_detail?("manifest_rejected", detail),
+    do: exact_keys?(detail, ~w(label reason))
+
+  defp valid_project_detail?("over_limit", detail),
+    do: exact_keys?(detail, ~w(dimension label limit observed))
+
+  defp valid_project_detail?("no_decision", detail),
+    do: exact_keys?(detail, ~w(manifest_digest))
+
+  defp valid_project_detail?("binding_changed", detail),
+    do: exact_keys?(detail, ~w(decision_manifest_digest expected_manifest_digest reason))
+
+  defp valid_project_detail?(disposition, detail)
+       when disposition in ["context_token_budget", "context_record_bytes"],
+       do: exact_keys?(detail, ~w(dimension limit observed))
+
+  defp valid_project_detail?(_disposition, _detail), do: false
+
+  defp exact_keys?(map, keys), do: Enum.sort(Map.keys(map)) == keys
+
+  defp positive_uint64?(value),
+    do: is_integer(value) and value > 0 and value <= 18_446_744_073_709_551_615
 end
