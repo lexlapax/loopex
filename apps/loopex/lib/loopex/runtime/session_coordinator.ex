@@ -190,6 +190,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
        succession_id: Keyword.fetch!(options, :succession_id),
        owner_command: Keyword.get(options, :owner_command),
        prior_tx_id: Keyword.get(options, :prior_tx_id),
+       # The journal prefix the owner-discovery scan already read. Recovery
+       # continues from its tail instead of reading the same rows a second time.
+       recovery_records: [],
        attempt: 1,
        # Technical depth: one counter for the whole acquisition, never reset. A
        # counter reset by succession contention would multiply the budget by
@@ -560,7 +563,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp discover_and_advance_owner(%{owner_command: owner_command} = state)
        when is_map(owner_command) do
-    with {:ok, prior_tx_id} <- discover_prior_tx_id(state),
+    with {:ok, prior_tx_id, scanned} <- discover_prior_tx_id(state),
          :ok <- prior_transaction_resolved(state, prior_tx_id),
          {:ok, head} <- ownership_head(state),
          {:ok, attempt_generation, expected_generation} <- owner_attempt_generation(state),
@@ -578,6 +581,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           state
           | phase: :acquiring,
             prior_tx_id: prior_tx_id,
+            recovery_records: scanned,
             transaction: transaction,
             incarnation: incarnation
         },
@@ -590,7 +594,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp discover_and_advance_owner(state) do
-    with {:ok, prior_tx_id} <- discover_prior_tx_id(state),
+    with {:ok, prior_tx_id, scanned} <- discover_prior_tx_id(state),
          :ok <- prior_transaction_resolved(state, prior_tx_id),
          {:ok, head} <- ownership_head(state),
          {:ok, transaction, incarnation} <- build_owner_candidate(state, head) do
@@ -598,6 +602,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         state
         | phase: :acquiring,
           prior_tx_id: prior_tx_id,
+          recovery_records: scanned,
           transaction: transaction,
           incarnation: incarnation
       })
@@ -690,12 +695,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: a resume reads its session's journal once, not twice.
+  #
+  # Technical depth: discovery needs the last `owner_advanced` transaction id and
+  # recovery needs every row, and both used to scan from version zero. On a long
+  # session that doubled the read cost of every resume, and it made the rows
+  # between the two scans arrive twice for no benefit. Discovery now hands back
+  # the prefix it read and recovery continues from its tail. The prefix is a
+  # contiguous scan from the journal head, and the reducer still checks that each
+  # applied row is exactly one version past the last, so a prefix that is not
+  # contiguous with what follows is refused as invalid history rather than
+  # silently stitched.
   defp discover_prior_tx_id(%{prior_tx_id: prior_tx_id}) when is_binary(prior_tx_id),
-    do: {:ok, prior_tx_id}
+    do: {:ok, prior_tx_id, []}
 
   defp discover_prior_tx_id(state) do
     case load_all_records(state.store, state.session_id) do
-      {:ok, records} -> {:ok, last_owner_transaction_id(records)}
+      {:ok, records} -> {:ok, last_owner_transaction_id(records), records}
       {:error, :store_unavailable} -> :retry
       :unavailable -> :retry
       {:error, reason} -> {:error, reason}
@@ -789,13 +805,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp recover_committed_owner(state) do
-    with {:ok, records} <- load_all_records(state.store, state.session_id),
+    with {:ok, records} <-
+           load_all_records(state.store, state.session_id, state.recovery_records),
          {:ok, events} <- load_all_events(state.store, state.session_id),
          {:ok, durable} <- SessionState.recover(state.session_id, records, events),
          true <- durable.owner_epoch == state.owner.owner_epoch,
          true <- durable.owner_incarnation_id == state.owner.owner_incarnation_id,
          true <- durable.owner_transaction_id == state.owner.transaction_id do
-      ready = %{state | phase: :ready, durable: durable, transaction: nil, incarnation: nil}
+      ready = %{
+        state
+        | phase: :ready,
+          durable: durable,
+          transaction: nil,
+          incarnation: nil,
+          recovery_records: []
+      }
+
       GenServer.cast(state.control, {:owner_ready, self(), state.owner, durable})
       send(self(), :advance_work)
       {:noreply, ready}
@@ -3687,9 +3712,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp load_all_records(store, session_id),
-    do:
-      load_pages(&Store.load_records(store, session_id, &1, @page_size), :journal_version, 0, [])
+  defp load_all_records(store, session_id, prefix \\ []) do
+    position =
+      case List.last(prefix) do
+        %{journal_version: version} when is_integer(version) and version > 0 -> version
+        _empty -> 0
+      end
+
+    case load_pages(
+           &Store.load_records(store, session_id, &1, @page_size),
+           :journal_version,
+           position,
+           []
+         ) do
+      {:ok, rows} -> {:ok, prefix ++ rows}
+      other -> other
+    end
+  end
 
   defp load_all_events(store, session_id),
     do: load_pages(&Store.load_events(store, session_id, &1, @page_size), :event_sequence, 0, [])
