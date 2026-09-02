@@ -523,3 +523,27 @@ corrected in the provider-attempt corpus.
 without a gate amendment. Fifth recorded override; names and minimums are
 unchanged and no assertion changes meaning beyond the accepted ADR.
 
+<a id="adr-0018-corpus-corrections"></a>
+## Locked corpus corrections forced by ADR 0018
+
+**Rule.** ADR 0018 replaces the model-result and attempt-evidence records with
+one settlement record, permits a retry only after an exact `not_dispatched`
+settlement, closes the origin's stream from durable settlement, requires
+Control to verify the prepared current owner on every permit, charges any
+dispatched attempt without complete reported usage with the whole remaining
+allowance, and classifies the shipped adapter's pre-transport refusals as
+`not_dispatched`.
+
+**What is true.** Thirty-one name-locked agent-loop cases, six provider-attempt
+fixtures, and three adapter corpora asserted the earlier shapes; an independent
+reviewer classified every failure against the quoted clause and separated the
+two production defects it also found, which are repaired in production rather
+than in any test. The three agent-loop cases Amendment 4 released by name were
+rewritten to the ADR's shape under new names; the test double that proxies
+Control now forwards provider dispatch with its original caller; and the
+scripted model double reports usage by default, as a real provider does.
+
+**Disposition.** Maintainer, 2026-09-01: apply every correction directly,
+without a gate amendment. Sixth recorded override; minimums are unchanged and
+the two production defects are fixed before any corrected case is counted.
+
