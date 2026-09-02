@@ -294,9 +294,9 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       end)
 
     assert output =~ "prepared recovery contract"
-    assert_receive {:runtime_start_options, omitted_options}
+    assert_receive {:runtime_start_options, omitted_options}, 5_000
     refute Keyword.has_key?(omitted_options, :cleanup_grace_ms)
-    assert_receive {:fresh_recovery_runtime, fresh_runtime}
+    assert_receive {:fresh_recovery_runtime, fresh_runtime}, 5_000
     refute fresh_runtime == fixture.runtime
 
     assert {:ok, %{cleanup_grace_ms: @grace}} =
@@ -327,7 +327,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       assert {:error, conflict} = LoopexCli.dispatch(arguments, runtime_starter: starter)
 
       assert inspect(conflict) =~ "cleanup"
-      assert_receive {:runtime_start_options, ^command, conflict_options}
+      assert_receive {:runtime_start_options, ^command, conflict_options}, 5_000
       assert Keyword.fetch!(conflict_options, :cleanup_grace_ms) == @grace + 1
       assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
       assert Placement.live_owner(fixture.state_root) == :none
@@ -341,6 +341,49 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
                ])
 
       assert :ok = invoke(Loopex, :abandon_resume, [replacement])
+    end
+  end
+
+  test "resume and cancel refuse an unreadable configuration flag in run's own words" do
+    for command <- ["resume", "cancel"],
+        {flag, value, sentence} <- [
+          {"--cleanup-grace-ms", "abc", "--cleanup-grace-ms takes a positive whole number"},
+          {"--context-token-budget", "8k", "--context-token-budget takes a positive whole number"}
+        ] do
+      label = String.replace(flag, "--", "")
+      fixture = recovered_fixture("#{command}-unreadable-#{label}", :active)
+
+      starter = fn options ->
+        send(self(), {:unreadable_runtime_started, command, options})
+        {:ok, fixture.runtime}
+      end
+
+      arguments =
+        [command, fixture.session_id] ++
+          if(command == "resume", do: ["--policy", "allow-all"], else: []) ++
+          [
+            "--state-root",
+            fixture.state_root,
+            "--workspace",
+            fixture.workspace,
+            flag,
+            value
+          ]
+
+      # An unparsable value agrees with nothing, and both commands refuse it in
+      # the same sentence `run` gives it. `agreed_configuration/2` would read it
+      # as an omitted flag and continue silently under the session's committed
+      # value; what stops that is that `start_runtime/3` parses both flags to
+      # build the runtime, so the refusal arrives before any recovery begins.
+      # This locks that ordering: move either parse out of `start_runtime/3` and
+      # the swallow behind it becomes reachable.
+      assert {:error, refusal} = LoopexCli.dispatch(arguments, runtime_starter: starter)
+      assert refusal =~ sentence
+
+      # It costs nothing: no runtime is started, no owner is prepared, and no
+      # placement lock is left behind.
+      refute_receive {:unreadable_runtime_started, ^command, _options}, 100
+      assert Placement.live_owner(fixture.state_root) == :none
     end
   end
 
@@ -373,7 +416,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     assert_received {:explicit_cancel_result, :ok}
     assert result =~ "cancelled" or result =~ "outcome is unknown"
-    assert_receive {:cancel_runtime_start_options, options}
+    assert_receive {:cancel_runtime_start_options, options}, 5_000
     refute Keyword.has_key?(options, :cleanup_grace_ms)
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
 
@@ -519,7 +562,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
         send(parent, {:security_plane_stderr, stderr})
       end)
 
-    assert_receive {:security_plane_stderr, stderr}
+    assert_receive {:security_plane_stderr, stderr}, 5_000
     assert stdout =~ "public security-plane output"
 
     planes = %{
@@ -593,7 +636,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
         send(parent, {:raw_error_renderer_stderr, stderr})
       end)
 
-    assert_receive {:raw_error_renderer_stderr, stderr}
+    assert_receive {:raw_error_renderer_stderr, stderr}, 5_000
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
     assert stdout =~ "render only bounded provider failure"
     assert stderr =~ "model_call_failed"

@@ -78,6 +78,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
   alias Loopex.Executor
   alias Loopex.Executor.Local
+  alias Loopex.Executor.Local.Ledger
   alias Loopex.Executor.Local.WorkspaceLease
   alias Loopex.Executor.LocalAuthorityContractTest.ArtifactStore
 
@@ -935,7 +936,227 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     end
   end
 
-  defp prepared_fixture(label) do
+  test "a peer's stranded open entry quarantines a running instance until it is reconciled" do
+    fixture = prepared_fixture("peer-strand")
+
+    {:ok, running} = start_local(fixture)
+    on_exit(fn -> stop(running) end)
+
+    {:ok, peer} = start_local(fixture)
+    Process.unlink(peer)
+    on_exit(fn -> stop(peer) end)
+
+    stranded =
+      job(fixture, "peer-stranded", %{
+        "relative_path" => "never-settles.txt",
+        "content" => "held",
+        "delay_ms" => 5_000
+      })
+
+    parent = self()
+
+    worker =
+      spawn(fn -> Local.execute(peer, stranded, grant(stranded), [notify: parent], nil) end)
+
+    assert_receive {:executor_process_started, "peer-stranded", _tool, _environment}, 5_000
+
+    # The peer's authority is open on the shared root. Killing its worker and
+    # then the peer itself leaves the entry with nothing that will ever settle
+    # it, which is the state an operator finds after a host dies mid-effect.
+    Process.exit(worker, :kill)
+    stop(peer)
+
+    assert [{open_path, open_record}] =
+             fixture.ledger |> ledger_records() |> records_by_kind("local_open_effect_v1")
+
+    assert open_record["job_id"] == "peer-stranded"
+
+    # `running` never restarted, so a verdict decided when it started cannot see
+    # this entry. ADR 0016 makes the open index shared truth, so its next
+    # admission decision must read the index as it is now and refuse.
+    different =
+      job(fixture, "after-peer-strand", %{"path" => "forbidden.txt", "content" => "no"})
+
+    assert {:error, {:reconciliation_required, 1}} =
+             Local.execute(running, different, grant(different), [], nil)
+
+    refute File.exists?(Path.join(fixture.workspace, "forbidden.txt"))
+
+    # Exact reconciliation closes the entry, and the same instance admits again
+    # without being restarted -- which a verdict frozen at start-up could not do
+    # either.
+    File.rm!(open_path)
+
+    assert {:ok, %{outcome: :completed}} =
+             Local.execute(running, different, grant(different), [], nil)
+
+    assert File.read!(Path.join(fixture.workspace, "forbidden.txt")) == "no"
+  end
+
+  test "a peer's live job does not quarantine the instance that owns its own concurrent job" do
+    fixture = prepared_fixture("concurrent-open")
+
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    parent = self()
+
+    held =
+      job(fixture, "concurrent-held", %{
+        "relative_path" => "held.txt",
+        "content" => "held",
+        "delay_ms" => 1_500
+      })
+
+    holder =
+      Task.async(fn -> Local.execute(local, held, grant(held), [notify: parent], nil) end)
+
+    assert_receive {:executor_process_started, "concurrent-held", _tool, _environment}, 5_000
+
+    # One open entry exists and it is this instance's own live work. Reading it
+    # as unresolved authority would make a root unusable the moment it carried
+    # two jobs, which is a different failure from the one the quarantine exists
+    # to cause.
+    second = job(fixture, "concurrent-second", %{"path" => "second.txt", "content" => "yes"})
+
+    assert {:ok, %{outcome: :completed}} =
+             Local.execute(local, second, grant(second), [], nil)
+
+    assert {:ok, %{outcome: :completed}} = Task.await(holder, 15_000)
+  end
+
+  test "the lease-lost retention path reserves the receipt's own declared retention bound" do
+    # ADR 0016 gives one formula for `receipt_retention_ms`, and a committed
+    # period of three is exactly where a second derivation by integer division
+    # disagreed with it: every receipt declared one millisecond of retention and
+    # the lease-lost path reserved zero for it. Proving the pure function proves
+    # only the pure function, so this observes the budget the running system
+    # actually hands the retention worker.
+    grace = 3
+    assert {:ok, bounds} = Executor.cancellation_bounds(grace)
+    assert bounds.receipt_retention_ms == 1
+
+    fixture = prepared_fixture("lease-lost-reserve", grace)
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    request =
+      job(fixture, "lease-lost-reserve", %{"command" => "sleep 0.4; printf 'done\\n'"})
+
+    parent = self()
+
+    {:module, Local} = Code.ensure_loaded(Local)
+
+    # A refutation over an untraced function proves nothing, so the pattern is
+    # asserted to have matched exactly the one entry this reads.
+    assert :erlang.trace_pattern({Local, :bounded_work, 3}, true, [:local]) == 1
+    assert :erlang.trace_pattern({Local, :retain_now, 3}, true, [:local]) == 1
+
+    on_exit(fn ->
+      _ = :erlang.trace_pattern({Local, :bounded_work, 3}, false, [:local])
+      _ = :erlang.trace_pattern({Local, :retain_now, 3}, false, [:local])
+    end)
+
+    task =
+      Task.async(fn ->
+        # The whole job runs in its caller, so tracing that process from its own
+        # first instruction removes any window between arming the trace and the
+        # calls it has to see.
+        :erlang.trace(self(), true, [:call, {:tracer, parent}])
+        Local.execute(local, request, grant(request), [notify: parent], nil)
+      end)
+
+    assert_receive {:executor_process_started, "lease-lost-reserve", _tool, _environment}, 5_000
+
+    # The lease that authorised the effect dies while the tool is still running.
+    # The bash path monitors it locally, so the parent monitor's DOWN is still
+    # in the mailbox when the receipt is settled, which is the lease-lost
+    # retention this reserve belongs to.
+    stop(fixture.lease)
+
+    _ = Task.yield(task, 15_000) || Task.shutdown(task, :brutal_kill)
+
+    events = collect_call_trace()
+
+    assert Enum.any?(events, &match?({Local, :retain_now, _arguments}, &1)),
+           "the lease-lost retention path was never reached, so its reserve was not observed"
+
+    reserve = lease_lost_reserve!(events)
+
+    assert reserve == bounds.receipt_retention_ms,
+           "the lease-lost retention reserved #{reserve} ms where every receipt for this " <>
+             "period declares #{bounds.receipt_retention_ms} ms"
+  end
+
+  test "a refusal never renames over an admission marker for the same job" do
+    fixture = prepared_fixture("refusal-conflict")
+
+    assert {:ok, prepared} =
+             invoke(Local, :prepare_placement, [fixture.ledger, @identity, @grace])
+
+    admitted = job(fixture, "refused-over-admission", %{"path" => "x.txt", "content" => "x"})
+
+    assert :ok =
+             Ledger.with_claim(prepared, fn ->
+               Ledger.admit(
+                 prepared,
+                 Ledger.marker(admitted),
+                 Ledger.open_entry(admitted, @identity)
+               )
+             end)
+
+    assert {:ok, refusal} = Ledger.refusal(admitted, :workspace_lease_not_held)
+
+    # "No effect began" written over the exact record proving one did is the one
+    # rewrite this plane must never make, and call-site ordering in one module is
+    # not a property of a root two instances share.
+    assert {:error, {:ledger_conflict, :admission_marker_present}} =
+             Ledger.with_claim(prepared, fn -> Ledger.refuse(prepared, refusal) end)
+
+    assert {:ok, marker} = Ledger.read_marker(prepared, admitted.job_id)
+    assert marker.ledger_kind == Ledger.marker_kind()
+    assert marker["canonical_request_digest"] == admitted.canonical_request_digest
+
+    # An absent marker and an existing refusal both still admit the write,
+    # because neither of them claims an effect began.
+    unadmitted = job(fixture, "refused-twice", %{"path" => "y.txt", "content" => "y"})
+    assert {:ok, first} = Ledger.refusal(unadmitted, :workspace_lease_not_held)
+    assert {:ok, second} = Ledger.refusal(unadmitted, :effective_deadline_reached)
+
+    assert :ok = Ledger.with_claim(prepared, fn -> Ledger.refuse(prepared, first) end)
+    assert :ok = Ledger.with_claim(prepared, fn -> Ledger.refuse(prepared, second) end)
+
+    assert {:ok, replaced} = Ledger.read_marker(prepared, unadmitted.job_id)
+    assert replaced.ledger_kind == Ledger.refusal_kind()
+    assert replaced["reason"]["code"] == "effective_deadline_reached"
+  end
+
+  # The trace is ordered per process, and `retain_now/3` calls `bounded_work/3`
+  # directly, so the first bounded reserve after that entry is the one the
+  # lease-lost retention chose.
+  defp lease_lost_reserve!(events) do
+    events
+    |> Enum.drop_while(&(not match?({Local, :retain_now, _arguments}, &1)))
+    |> Enum.find_value(fn
+      {Local, :bounded_work, [_work, reserve, _lease]} -> {:ok, reserve}
+      _other -> nil
+    end)
+    |> case do
+      {:ok, reserve} -> reserve
+      nil -> flunk("the lease-lost retention entered no bounded work")
+    end
+  end
+
+  defp collect_call_trace(acc \\ []) do
+    receive do
+      {:trace, _pid, :call, {module, function, arguments}} ->
+        collect_call_trace([{module, function, arguments} | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  defp prepared_fixture(label, grace \\ @grace) do
     workspace = temporary_root("workspace-#{label}")
     ledger = temporary_root("ledger-#{label}")
     File.mkdir_p!(workspace)
@@ -945,7 +1166,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
       File.rm_rf(ledger)
     end)
 
-    assert {:ok, _prepared} = invoke(Local, :prepare_placement, [ledger, @identity, @grace])
+    assert {:ok, _prepared} = invoke(Local, :prepare_placement, [ledger, @identity, grace])
     generation = generation_record!(ledger)
     lease_id = "lease-#{System.unique_integer([:positive])}"
     {:ok, lease} = WorkspaceLease.start_link(id: lease_id, path: workspace, fencing_token: @fence)
@@ -955,7 +1176,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
       workspace: workspace,
       ledger: ledger,
       epoch: generation["executor_epoch"],
-      grace: @grace,
+      grace: grace,
       lease_id: lease_id,
       lease: lease
     }

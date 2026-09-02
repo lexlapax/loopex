@@ -2131,17 +2131,47 @@ defmodule Loopex.ContextAdmissionTest do
     trace_hash_calls(true)
 
     try do
+      # Concept: the refutation below is only evidence if the tracer would have
+      # spoken, and it is only evidence about hashing if it watches the process
+      # that hashes.
+      #
+      # Technical depth: a body small enough to reach the digest comparison is
+      # hashed, so this is a positive control on the exact call the refutation
+      # names -- same module, same function, same arity, same traced process. A
+      # trace pattern that matched nothing, or an implementation that hashed
+      # through some other entry, makes this fail rather than making the
+      # refutation vacuously true.
+      assert {control_result, control_hashes} =
+               hash_calls(fn ->
+                 ProjectResource.resolve(
+                   %{
+                     entries: [project_entry("abc", String.duplicate("0", 64))],
+                     workspace: project_workspace()
+                   },
+                   nil
+                 )
+               end)
+
+      assert {:declined, :manifest_rejected,
+              %{"reason" => "declared_digest_mismatch", "label" => "AGENTS.md"}} =
+               control_result
+
+      assert control_hashes > 0,
+             "no hash was observed on a path that must hash, so the refutation below is vacuous"
+
+      assert {oversized_result, oversized_hashes} =
+               hash_calls(fn -> ProjectResource.resolve(oversized_manifest, nil) end)
+
       assert {:declined, :over_limit,
               %{
                 "dimension" => "project_resource_bytes",
                 "observed" => ^rejected_size,
                 "limit" => @record_limit,
                 "label" => "AGENTS.md"
-              }} = ProjectResource.resolve(oversized_manifest, nil)
+              }} = oversized_result
 
-      refute_receive {:trace, _pid, :call, {:crypto, :hash, _arguments}},
-                     0,
-                     "an oversized body was hashed before its O(1) byte refusal"
+      assert oversized_hashes == 0,
+             "an oversized body was hashed before its O(1) byte refusal"
     after
       trace_hash_calls(false)
     end
@@ -2992,9 +3022,44 @@ defmodule Loopex.ContextAdmissionTest do
     end)
   end
 
+  # Concept: run one piece of work and report both what it answered and how many
+  # times it hashed.
+  #
+  # Technical depth: a process cannot be its own `:call` tracer -- the VM
+  # delivers nothing -- so tracing this process and then working in it produced
+  # an empty mailbox whatever the implementation did, and every refutation over
+  # it was vacuous. The work therefore runs in a child whose tracer is this
+  # process. The child is awaited to `:normal` before the mailbox is counted, so
+  # the count covers the whole call rather than whatever had been delivered by
+  # the time the answer arrived.
+  defp hash_calls(work) do
+    parent = self()
+    reference = make_ref()
+
+    {pid, monitor} =
+      spawn_monitor(fn ->
+        :erlang.trace(self(), true, [:call, {:tracer, parent}])
+        result = work.()
+        _ = :erlang.trace(self(), false, [:call])
+        send(parent, {reference, result})
+      end)
+
+    assert_receive {^reference, result}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, 5_000
+
+    {result, count_hash_traces(pid)}
+  end
+
+  defp count_hash_traces(pid, count \\ 0) do
+    receive do
+      {:trace, ^pid, :call, {:crypto, :hash, _arguments}} -> count_hash_traces(pid, count + 1)
+    after
+      0 -> count
+    end
+  end
+
   defp trace_hash_calls(enabled) do
     flag = if enabled, do: true, else: false
-    :erlang.trace(self(), flag, [:call])
     :erlang.trace_pattern({:crypto, :hash, 2}, flag, [:local])
   end
 

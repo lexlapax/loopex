@@ -1001,6 +1001,55 @@ defmodule LoopexCliTest do
     assert :ok = Placement.release(reclaimed)
   end
 
+  test "a lock record this version cannot read is not reclaimed from a live process" do
+    {state_root, _workspace} = roots()
+    lock_path = Path.join(state_root, "placement.lock")
+
+    assert {:ok, owner_handle} = Placement.acquire(state_root)
+    [version, pid, incarnation, ""] = String.split(File.read!(owner_handle), "\n")
+    assert pid == System.pid()
+    assert :ok = Placement.release(owner_handle)
+
+    # A lock written by a future record version does not decode here, and it
+    # names a process that is deliberately live. The reclaim path exists for a
+    # record left by a process that is gone; applying it to this one puts two
+    # Runtime Controls on one placement key, which is the exact race the lock
+    # exists to prevent.
+    refute version == "loopex-placement-v2"
+    foreign_record = Enum.join(["loopex-placement-v2", pid, incarnation, ""], "\n")
+    File.write!(lock_path, foreign_record)
+
+    assert {:ok, ^pid} = Placement.live_owner(state_root)
+    assert {:error, refused} = Placement.acquire(state_root)
+    assert refused =~ "cannot read the record"
+    assert refused =~ pid
+    assert File.read!(lock_path) == foreign_record
+
+    # A record this version cannot read that names a process which is gone is
+    # still the stale lock the reclaim path was written for.
+    own = System.pid()
+
+    probe = fn
+      ^own -> {:ok, "own incarnation"}
+      _other -> {:error, :process_absent}
+    end
+
+    File.write!(
+      lock_path,
+      Enum.join(["loopex-placement-v2", "999999", incarnation, ""], "\n")
+    )
+
+    assert :none = Placement.live_owner(state_root, probe)
+    assert {:ok, reclaimed} = Placement.acquire(state_root, probe)
+    assert :ok = Placement.release(reclaimed)
+
+    # Bytes naming no process at all attribute the lock to nobody, and deciding
+    # is what removing a live owner's lock would require.
+    File.write!(lock_path, "not a placement record at all\n")
+    assert {:error, unattributed} = Placement.acquire(state_root, probe)
+    assert unattributed =~ "could not be verified"
+  end
+
   test "placement refuses rather than reclaiming when process identity cannot be inspected" do
     {state_root, _workspace} = roots()
     lock_path = Path.join(state_root, "placement.lock")

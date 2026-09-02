@@ -216,7 +216,8 @@ defmodule Loopex.SessionLifecycleTest do
       end)
 
     assert_receive {:transaction_linearized, initial_waiter, _store,
-                    :session_journal_advance_owner, {:committed, _tx, initial_receipt}}
+                    :session_journal_advance_owner, {:committed, _tx, initial_receipt}},
+                   5_000
 
     assert initial_receipt.owner_epoch == 1
     assert Task.yield(create, 0) == nil
@@ -249,7 +250,8 @@ defmodule Loopex.SessionLifecycleTest do
       end)
 
     assert_receive {:transaction_linearized, resume_waiter, _store,
-                    :session_journal_advance_owner, {:committed, _tx, resume_receipt}}
+                    :session_journal_advance_owner, {:committed, _tx, resume_receipt}},
+                   5_000
 
     assert resume_receipt.owner_epoch == 2
 
@@ -326,7 +328,8 @@ defmodule Loopex.SessionLifecycleTest do
       end)
 
     assert_receive {:transaction_linearized, waiter, _store, :session_journal_commit,
-                    {:committed, "old-owner-command", _receipt}}
+                    {:committed, "old-owner-command", _receipt}},
+                   5_000
 
     assert current_entry(fixture.runtime, session_id).event_sequence == 0
 

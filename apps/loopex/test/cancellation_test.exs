@@ -435,16 +435,14 @@ defmodule Loopex.CancellationTest do
     {fixture, attachment, session_id, model} = held()
 
     # The only route is the public command. Nothing signals a coordinator, writes
-    # a control file, or opens a channel of its own.
+    # a control file, or opens a channel of its own. The facade below is what
+    # carried it: the same attachment that submits a prompt submits the
+    # interrupt, with no second surface involved.
     assert {:accepted, "abort-1"} =
              Loopex.command(attachment, %{type: :abort, command_id: "abort-1"})
 
     send(model, :release)
     assert settled?(fixture, session_id)
-
-    # The facade is what carried it: the same attachment that submits a prompt
-    # submits the interrupt, with no second surface involved.
-    assert function_exported?(Loopex, :command, 2)
   end
 
   test "an abort admitted during a model call cancels the run and schedules no new work" do

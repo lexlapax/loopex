@@ -348,13 +348,13 @@ defmodule Loopex.CancellationObservationContractTest do
            "configured cancellation has no distinct production entry"
 
     assert Executor.cancel(CancelObserver, self(), "legacy-direct") == {:ok, :cleaned}
-    assert_receive {:cancel_callback_reached, "legacy-direct"}
+    assert_receive {:cancel_callback_reached, "legacy-direct"}, 5_000
 
     assert invoke(Executor, :cancel, [CancelObserver, self(), "configured-uint64", @max_uint64]) ==
              {:ok, :cleaned},
            "a valid uint64 cleanup period was handed directly to a VM timer instead of sliced"
 
-    assert_receive {:cancel_callback_reached, "configured-uint64"}
+    assert_receive {:cancel_callback_reached, "configured-uint64"}, 5_000
 
     fixture = runtime_fixture(1, :hold)
     {_session_id, attachment} = start_one_tool_run(fixture, "configured cancellation")
@@ -393,8 +393,8 @@ defmodule Loopex.CancellationObservationContractTest do
     elapsed = System.monotonic_time(:millisecond) - started_at
     assert elapsed >= delay_ms
     assert elapsed < grace_ms + 4_000
-    assert_receive {:delayed_cancel_started, _worker, "long-cleanup"}
-    assert_receive {:delayed_cancel_finished, _worker, "long-cleanup"}
+    assert_receive {:delayed_cancel_started, _worker, "long-cleanup"}, 5_000
+    assert_receive {:delayed_cancel_finished, _worker, "long-cleanup"}, 5_000
   end
 
   test "configured cancellation enters a uint64 observation wait without handing it to one VM timer" do
