@@ -104,6 +104,15 @@ An executor integration participates in that sequence through required
 an error, unconfirmed answer, failed call, or legacy module missing the required
 callback is reported as `outcome_unknown`.
 
+How long that answer is waited for is the session's cleanup period, not a number
+this runtime invented. One committed period derives every observation window a
+stop uses — how long an executor is watched for its answer, what its receipt
+write gets, what the original caller is left with afterwards, and what the
+terminal itself is allowed. So declaring a longer period with
+`--cleanup-grace-ms` genuinely buys a slow-but-working executor more time
+instead of having it cut off and reported unproven, and no window is ever
+derived from another one's already-spent clock.
+
 The Local executor's ledger root is also part of its authority, not merely a
 cache directory. Keep that root as one intact administrative unit. Copying or
 deleting only part of it, restoring an older snapshot, reusing its filesystem
@@ -192,17 +201,33 @@ A tool whose output exceeds its declared bound does not get truncated into the
 conversation and does not silently lose the rest. The full bytes spill to an
 artifact store under your state root, and the durable event carries the content
 digest, media type, size, logical role, and an opaque retrieval reference. Your
-terminal prints the reference beside the tool's outcome, so you can read it back
-without going looking for it.
+terminal prints the reference beside the tool's outcome, already written as the
+command that reads it back:
+
+```text
+    output beyond the tool's bound was retained: 240113 bytes,
+    read it with `loopex artifact -- '3f9c1a…d80b'`
+```
 
 The model sees a bounded result that names what was truncated. You retrieve the
 whole output by that reference:
 
 ```text
-loopex artifact 3f9c1a…  > full-output.txt
+loopex artifact -- '3f9c1a…d80b' > full-output.txt
 ```
 
-A reference to nothing says so rather than printing emptiness.
+The `--` is there because a locator belongs to whichever artifact store the
+command was composed with, and nothing constrains its spelling: one that begins
+with `--` would otherwise be unreachable. A reference to nothing says
+`no artifact is retained for <reference>` rather than printing emptiness, and a
+reference whose bytes are unreadable or fail their own digest says
+`the artifact could not be read` rather than handing you content it cannot
+vouch for.
+
+An artifact is held up to 64 MiB, and nothing collects it afterwards. Artifacts
+stay under the state root until you remove them; an artifact outlives the run
+that produced it, which is the point of retrieving one tomorrow, and it is also
+why the directory only grows.
 
 **Where there is no store, the rest is lost.** The executor takes its artifact
 store from whoever composed it, and the shipped `loopex` command always supplies
