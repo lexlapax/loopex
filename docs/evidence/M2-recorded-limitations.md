@@ -607,3 +607,54 @@ candidate's identity and invalidate the acceptance record that names it.
 next commit, rather than rewrite bound history. Ninth recorded override; a
 waiver of portable enforcement for exactly those nine commits.
 
+<a id="corpus-adr-0018-supersession"></a>
+## Corpus supersession to the ADR 0018 settlement shapes
+
+**Rule.** Locked test names and minimum counts are immutable; assertion content
+follows the accepted contract it proves.
+
+**What is true.** ADR 0018 replaced three attempt records with one settlement
+record, made a dispatched attempt without a readable answer terminal, closed the
+reply key sets, and moved the publication fence ahead of the permit request.
+After the implementation merged, an independent classification of every
+remaining red found nineteen assertions that predated those decisions, nine
+defects in test support, and three production regressions. The regressions
+were repaired in product code. The corpus edits are:
+
+- Nineteen supersessions: refutations of a record kind that now always exists
+  discriminate on the settlement's `termination` or `conversation`; cases that
+  expected a second dispatch after an unanswered or owner-lost attempt expect
+  one dispatch and a terminal `owner_loss` or `failed` settlement with the
+  estimated charge asserted on the record; the extra-key and oversized
+  late-reply cases assert the compact refusal and size the eight-key durable
+  reply without `canonical_request_bytes`; the abandoned-record and
+  command-admission renames are completed in the files the rename missed.
+- Nine test-support corrections: the Control-boundary proxy forwards the
+  provider-dispatch call raw in all three modes; a byte helper measures the
+  record the Store retains; a transposed `map_reduce` binding; the
+  live-handoff case sequences succession at Control rather than through a
+  hook that could not fire, and now also asserts the exact fence and
+  ownership calls that precede a permit request; an abort issued through a
+  superseded attachment; an atom compared as a string; the depth boundary
+  values corrected to the projection's real depth; a vacuous refute renamed;
+  an `on_exit` resume guarded against the coordinator's own shutdown.
+- Three scoped rewrites: a settlement Store refusal is asserted as session
+  unavailability with no fabricated settlement or terminal; nested provider
+  fields are asserted refused rather than projected; the succession case
+  scripts a `not_dispatched` first attempt so the run survives and both
+  queues can be proved.
+- Two additions: a boundary case proving the settlement preflight measures the
+  record it commits (red before the repair, green after), and the
+  abort-during-model-call bound derived from the cancellation reserve.
+- The freeze helper in the provider-attempt suite tracks its own state rather
+  than inferring it from the scheduler. That change is hygiene, not the
+  repair: the suite's whole-file flake was then proved to be mailbox
+  introspection of a suspended process, which cannot see a call still in
+  the outer signal queue, and its repair is dispositioned separately.
+
+**Disposition.** Maintainer, 2026-09-02, in two approvals: the classified set,
+then a six-item addendum uncovered when the first set unblocked later
+assertions. Tenth recorded override; review of each edit was waived, the
+classification report and per-file before-and-after counts are retained with
+the milestone's evidence.
+

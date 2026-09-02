@@ -2456,18 +2456,44 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     end
   end
 
-  defp suspend_process(pid) do
-    if Process.info(pid, :status) != {:status, :suspended} do
-      true = :erlang.suspend_process(pid)
-    end
+  # Concept: the freeze this fixture asks for is the freeze it gets, whatever the
+  # scheduler reports at that instant.
+  #
+  # Technical depth: these helpers used to skip the suspend, or the resume, when
+  # `Process.info(pid, :status)` disagreed with the freeze being asked for, which
+  # let a scheduler observation decide whether a freeze happened at all. The freeze
+  # is no longer inferred from the scheduler: this process records what it has
+  # suspended and issues one suspend and one resume to match, which is the pairing
+  # `:erlang.suspend_process/1` itself counts. `drain_one_control_call/1` re-freezes
+  # through these same helpers and needs no separate bookkeeping.
+  #
+  # There is deliberately no `on_exit` resume. It would run in a process that never
+  # suspended the target, where `:erlang.resume_process/1` raises, and the BEAM
+  # already releases a suspension when its suspender exits, so the callback was
+  # either a no-op or a crash and never cleanup.
+  @frozen_processes :provider_attempt_frozen_processes
 
-    on_exit(fn -> resume_process(pid) end)
-    :ok
+  defp suspend_process(pid) do
+    frozen = Process.get(@frozen_processes, %{})
+
+    if Map.get(frozen, pid, false) do
+      :ok
+    else
+      true = :erlang.suspend_process(pid)
+      Process.put(@frozen_processes, Map.put(frozen, pid, true))
+      :ok
+    end
   end
 
   defp resume_process(pid) do
-    if Process.alive?(pid) and Process.info(pid, :status) == {:status, :suspended} do
-      true = :erlang.resume_process(pid)
+    frozen = Process.get(@frozen_processes, %{})
+
+    if Map.get(frozen, pid, false) do
+      if Process.alive?(pid) do
+        true = :erlang.resume_process(pid)
+      end
+
+      Process.put(@frozen_processes, Map.put(frozen, pid, false))
     end
 
     :ok

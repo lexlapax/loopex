@@ -1614,8 +1614,18 @@ defmodule Loopex.AgentLoopTest do
 
     :ok = :sys.suspend(coordinator)
 
+    # The coordinator can begin shutting down between this liveness check and the
+    # system message, so the resume is guarded exactly as the same cleanup is in
+    # the Store-refusal case below: an exiting process needs no resume, and a
+    # race in cleanup must not be reported as a failure of the case.
     on_exit(fn ->
-      if Process.alive?(coordinator), do: :sys.resume(coordinator)
+      if Process.alive?(coordinator) do
+        try do
+          :sys.resume(coordinator)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
     end)
 
     send(policy_pid, :release)
@@ -2494,8 +2504,11 @@ defmodule Loopex.AgentLoopTest do
 
     retained_reply = evidence["result"]["reply"]
 
+    # ADR 0018 technical:207: the durable `bounded_canonical_reply_v2` is the
+    # eight-key map obtained by omitting only `canonical_request_bytes` from the
+    # validated adapter reply.
     assert Map.keys(retained_reply) |> Enum.sort() ==
-             ~w(canonical_request_bytes delta_count identity provider_response_id staged_request_digest streamed text tool_calls usage)
+             ~w(delta_count identity provider_response_id staged_request_digest streamed text tool_calls usage)
 
     assert retained_reply["text"] == "late reply"
     assert retained_reply["provider_response_id"] == "req_late_reply_1"
@@ -2506,7 +2519,14 @@ defmodule Loopex.AgentLoopTest do
              "endpoint" => "in-process"
            }
 
-    assert retained_reply["usage"] == %{"input_tokens" => 17, "output_tokens" => 4}
+    # ADR 0018 technical:162-165: the reply's exact usage is the normalized
+    # tagged map, which the durable projection retains byte-for-byte rather than
+    # rebuilding as a bare token pair.
+    assert retained_reply["usage"] == %{
+             "status" => "reported",
+             "input_tokens" => 17,
+             "output_tokens" => 4
+           }
 
     assert retained_reply["tool_calls"] == [
              %{
@@ -2521,8 +2541,11 @@ defmodule Loopex.AgentLoopTest do
 
     staged = Enum.find(records, &(&1.payload[:kind] == "model_request_committed"))
 
-    assert retained_reply["canonical_request_bytes"] ==
-             staged.payload["request"]["canonical_request_bytes"]
+    # ADR 0018 technical:203-207: the echoed request bytes are validated for
+    # byte-for-byte equality and then omitted, so the committed request record
+    # stays their only durable home and the digest is what joins the two.
+    refute Map.has_key?(retained_reply, "canonical_request_bytes")
+    assert is_binary(staged.payload["request"]["canonical_request_bytes"])
 
     assert retained_reply["staged_request_digest"] ==
              staged.payload["request"]["staged_request_digest"]
@@ -2747,7 +2770,11 @@ defmodule Loopex.AgentLoopTest do
           record
       end)
 
-    assert {:error, :invalid_model_attempt_evidence} =
+    # ADR 0018: a settlement whose attempt does not match the open attempt it
+    # claims is refused by the settlement transition itself
+    # (session_state.ex ~:2047-2057), which is the only refusal this rebinding
+    # can produce.
+    assert {:error, :invalid_model_attempt_settlement_transition} =
              Loopex.Runtime.SessionState.recover(
                session_id,
                stale_records,
@@ -4893,8 +4920,11 @@ defmodule Loopex.AgentLoopTest do
           )
       end
 
-    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
-    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 2
+    # ADR 0018 combination 3: the successor owns the abandonment of the attempt it
+    # inherited and settles it terminal, so the run ends failed on that one
+    # attempt and no replacement is dispatched.
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "failed"
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
 
     attempts =
       fixture
@@ -4960,7 +4990,7 @@ defmodule Loopex.AgentLoopTest do
 
     assert_receive {:holding, model}, 5_000
 
-    assert_receive {:loopex_progress, %{kind: :text_delta} = first_delta},
+    assert_receive {:loopex_progress, %{kind: :text_delta}},
                    5_000,
                    "the first attempt did not publish its delta before the close boundary"
 
@@ -4971,11 +5001,15 @@ defmodule Loopex.AgentLoopTest do
                    5_000,
                    "the model-error path never reached the unavailable Control boundary"
 
-    assert await_dispatch_count(fixture, 2),
-           "runtime unavailability was treated as owner loss and suppressed the retry"
-
+    # ADR 0018 combination 3: a live ambiguous error is dispatched-or-unknown,
+    # takes the exact remaining allowance, and is terminal -- so this run ends on
+    # its one attempt. Unavailability still must not be read as owner loss, which
+    # is what the surviving-owner assertions below prove.
     assert Enum.find(drain(attachment), &(&1.kind == "run.finished"))["outcome"] ==
-             "completed"
+             "failed"
+
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1,
+           "runtime unavailability produced a second dispatch ADR 0018 does not permit"
 
     assert Process.alive?(predecessor),
            "the live coordinator was reaped after an unavailable ownership answer"
@@ -4991,23 +5025,33 @@ defmodule Loopex.AgentLoopTest do
 
     records = Fixture.records(fixture, session_id)
 
-    assert Enum.count(records, &(&1.payload[:kind] == "model_attempt_settled_v1")) == 1
-    assert Enum.count(records, &(&1.payload[:kind] == "model_attempt_settled_v1")) == 1
+    assert [%{payload: settlement}] =
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
+
+    assert settlement["attempt"] == 1
+    assert settlement["conversation"] == "none"
+    assert settlement["next"] == "terminal"
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "model_call_failed"
+           }
+
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
 
     progress = receive_progress()
 
-    assert Enum.count(progress, &(&1.kind == :model_stream_closed)) == 1,
-           "the unavailable first close fabricated a closure or the successful retry did not close"
-
-    assert [retry_delta] = Enum.filter(progress, &(&1.kind == :text_delta))
-
-    refute first_delta.stream_domain_id == retry_delta.stream_domain_id,
-           "the retry reused the unavailable attempt's stream domain"
-
-    [closure] = Enum.filter(progress, &(&1.kind == :model_stream_closed))
-
-    assert closure.stream_domain_id == retry_delta.stream_domain_id,
-           "the only truthful closure did not belong to the completed retry"
+    # ADR 0011 makes the closure a statement this owner has to be permitted to
+    # make, and the one close this attempt owed was refused at the unavailable
+    # boundary. The domain therefore ends without a terminal item rather than
+    # gaining an invented one, and combination 3 leaves no retry domain to supply
+    # a different closure -- so the delta received above is the only item this run
+    # publishes.
+    assert progress == [],
+           "the refused close fabricated a closure or a second attempt published progress"
   end
 
   test "handoff cannot move between progress admission and relay emission" do
@@ -5121,7 +5165,22 @@ defmodule Loopex.AgentLoopTest do
                    "the notified predecessor did not close its empty domain abandoned"
 
     {:ok, resumed} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
-    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "completed"
+    assert Enum.find(drain(resumed), &(&1.kind == "run.finished"))["outcome"] == "failed"
+
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1,
+           "the successor re-dispatched the attempt it inherited"
+
+    # ADR 0018 combination 3: the successor recovers the open dispatched attempt
+    # as owner loss and settles it terminal, so it re-dispatches nothing.
+    assert [%{payload: settlement}] =
+             fixture
+             |> Fixture.records(session_id)
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+
+    assert settlement["attempt"] == 1
+    assert settlement["termination"] == "owner_loss"
+    assert settlement["next"] == "terminal"
+
     refute Process.alive?(model)
   end
 
