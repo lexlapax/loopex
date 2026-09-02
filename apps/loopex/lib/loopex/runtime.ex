@@ -402,9 +402,9 @@ defmodule Loopex.Runtime do
              cleanup_grace_ms: nil,
              context_token_budget: nil
            ),
+         {:ok, runtime_id} <- fetch_identifier(validated, :runtime_id),
          {:ok, context_token_budget} <-
            validate_context_token_budget(validated[:context_token_budget]),
-         {:ok, runtime_id} <- fetch_identifier(validated, :runtime_id),
          {:ok, %Store{} = store} <- Keyword.fetch(validated, :store),
          {:ok, attachment_capacity} <- validate_capacity(validated[:attachment_capacity]),
          {:ok, progress_to} <- validate_sink(validated[:progress_to]),
