@@ -479,3 +479,19 @@ raise the identifier bound, without a gate amendment. This is the third explicit
 maintainer override of the rule that locked tests are not rewritten during
 implementation; the correcting commits name each file and clause.
 
+<a id="receipt-envelope-durable-projection"></a>
+## The receipt envelope check and plain boundary data
+
+**Rule.** Durable records carry plain boundary data; the Store refuses atoms as
+values. ADR 0016 bounds the canonical retained receipt at 65,536 bytes.
+
+**What is true.** One locked Local authority case validated the in-memory
+receipt, whose `outcome` and `cleanup_confirmation` are atoms, as a Store
+private record. That form is never retained; the runtime encodes those members
+as strings before commit.
+
+**Disposition.** Maintainer, 2026-09-01: validate the durable projection - the
+receipt with its atom-valued members rendered as strings - directly, without a
+gate amendment. Fourth recorded override; the case still proves the retained
+receipt fits the item envelope.
+

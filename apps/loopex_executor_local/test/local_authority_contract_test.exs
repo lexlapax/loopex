@@ -406,8 +406,21 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     assert {:ok, bounds} = invoke(Executor, :cancellation_bounds, [@grace])
     assert receipt.receipt_retention_bound_ms == bounds.receipt_retention_ms
 
-    assert Loopex.Store.validate_private_record(Map.put(receipt, :kind, "executor_receipt")) ==
-             :ok
+    # The Store admits plain boundary data only, so the envelope check runs on
+    # the durable projection the runtime retains: the receipt's atom-valued
+    # members rendered as the strings its record carries.
+    durable =
+      receipt
+      |> Map.put(:kind, "executor_receipt")
+      |> Map.new(fn
+        {key, value} when is_atom(value) and not is_boolean(value) and not is_nil(value) ->
+          {key, Atom.to_string(value)}
+
+        member ->
+          member
+      end)
+
+    assert Loopex.Store.validate_private_record(durable) == :ok
   end
 
   test "missing malformed and contradictory cleanup facts make a retained receipt unavailable" do
