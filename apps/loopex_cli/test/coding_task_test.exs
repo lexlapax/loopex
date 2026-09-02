@@ -509,10 +509,16 @@ defmodule LoopexCli.CodingTaskTest do
 
     records = Demonstration.records(store, session_id)
 
+    # ADR 0018: a turn's reply lives on the attempt settlement whose
+    # conversation is canonical; the retained reply is the eight-key durable
+    # projection under `result`.
     replies =
       records
-      |> Enum.filter(&(&1.payload.kind == "model_result_committed"))
-      |> Enum.map(& &1.payload["reply"])
+      |> Enum.filter(
+        &(&1.payload.kind == "model_attempt_settled_v1" and
+            &1.payload["conversation"] == "canonical")
+      )
+      |> Enum.map(&get_in(&1.payload, ["result", "reply"]))
 
     tool_calls =
       replies
