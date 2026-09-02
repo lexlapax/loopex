@@ -1006,6 +1006,170 @@ defmodule Loopex.ContextAdmissionTest do
     end
   end
 
+  # Concept: a refusal has to describe the request that was actually refused.
+  #
+  # Technical depth: ADR 0017 gives the compact refusal exactly four counts --
+  # system, session, steer, tool -- and states that they partition the exact
+  # sequence whose bytes determine `provider_estimated_tokens` and
+  # `ordered_descriptor_digest`, and that all four plus the digest describe the
+  # required-only set fixed at evaluation step 2. There is no count for an
+  # optional project descriptor, so a candidate carrying one is not describable
+  # by this record at all. The reducer cannot catch that later: recovery retains
+  # no descriptor bodies, so it can only check count domains and the
+  # per-dimension relations. The live constructor holds the preimage, so it is
+  # the boundary that has to prove the partition.
+  test "the live constructor never describes a project-bearing candidate as a required-only refusal" do
+    manifest = %{
+      entries: [project_entry(String.duplicate("p", 4_000))],
+      workspace: project_workspace()
+    }
+
+    {:ok, manifest_digest, _entries} = ProjectResource.digest(manifest)
+
+    with_project =
+      staged_candidate("partition-with-project",
+        project_manifest: manifest,
+        project_decision: project_decision(manifest_digest)
+      )
+
+    assert Enum.count(
+             with_project.receipt["blocks"],
+             &(&1["provenance_class"] == "project_resource")
+           ) == 1
+
+    over_budget = put_in(with_project.receipt, ["context_token_budget"], 1)
+
+    assert {:refused_not_required_only, %{"dimension" => "context_tokens"}} =
+             SessionState.propose_model_request(
+               with_project.state,
+               with_project.run_id,
+               with_project.request,
+               context_receipt: over_budget
+             )
+
+    padded =
+      update_in(with_project.receipt, ["blocks"], fn [first | _rest] = blocks ->
+        blocks ++ List.duplicate(first, @max_item_cardinality + 1 - length(blocks))
+      end)
+
+    assert length(padded["blocks"]) == @max_item_cardinality + 1
+
+    assert {:refused_not_required_only,
+            %{"dimension" => "context_record_cardinality", "observed" => 1_025}} =
+             SessionState.propose_model_request(
+               with_project.state,
+               with_project.run_id,
+               with_project.request,
+               context_receipt: padded
+             )
+
+    # Technical depth: the same boundary, handed the required-only sequence,
+    # produces the compact record and its four counts add up to exactly the
+    # descriptor list behind the retained digest and estimated-token total.
+    required_only = staged_candidate("partition-required-only", [])
+
+    blocks = required_only.receipt["blocks"]
+    assert Enum.all?(blocks, &(&1["provenance_class"] != "project_resource"))
+    assert required_only.receipt["ordered_descriptor_digest"] == descriptor_digest(blocks)
+
+    assert {:refused, compact} =
+             SessionState.propose_model_request(
+               required_only.state,
+               required_only.run_id,
+               required_only.request,
+               context_receipt: put_in(required_only.receipt, ["context_token_budget"], 1)
+             )
+
+    assert compact["system_message_count"] + compact["session_message_count"] +
+             compact["steer_message_count"] + compact["tool_definition_count"] == length(blocks)
+
+    assert compact["ordered_descriptor_digest"] ==
+             required_only.receipt["ordered_descriptor_digest"]
+
+    assert compact["provider_estimated_tokens"] ==
+             required_only.receipt["provider_estimated_tokens"]
+
+    assert compact["project_disposition"] == "no_manifest"
+  end
+
+  # Concept: an optional project that was never weighed is not charged for a
+  # failure it had no part in.
+  #
+  # Technical depth: the strict `system` class ceiling is decided over required
+  # content alone, so ADR 0017 evaluation step 3 reaches it before the optional
+  # class is added at step 6. The retained refusal therefore carries the
+  # required-only estimate and counts -- identical to the same request staged
+  # with no manifest at all -- and `not_evaluated_required_failure` is a true
+  # statement rather than a label on a project that was already staged, measured
+  # and charged. The control staging proves the withheld class was not empty.
+  test "a system class refusal beside a staged project retains the required-only estimate" do
+    manifest = %{
+      entries: [project_entry(String.duplicate("q", 4_000))],
+      workspace: project_workspace()
+    }
+
+    {:ok, manifest_digest, _entries} = ProjectResource.digest(manifest)
+    tools = @reference_tool_definitions ++ [padded_tool_definition()]
+
+    with_project =
+      system_class_refusal("system-class-with-project", tools,
+        project_manifest: manifest,
+        project_decision: project_decision(manifest_digest)
+      )
+
+    without_project = system_class_refusal("system-class-without-project", tools, [])
+
+    for observed <- [with_project, without_project] do
+      assert observed.failure == %{
+               "category" => "context_budget_exceeded",
+               "retryable" => false,
+               "dimension" => "system_class_tokens",
+               "observed" => with_project.failure["observed"],
+               "limit" => 1_000
+             }
+
+      assert observed.refusal["system_message_count"] == 1
+      assert observed.refusal["session_message_count"] == 1
+      assert observed.refusal["steer_message_count"] == 0
+      assert observed.refusal["tool_definition_count"] == length(tools)
+
+      assert observed.refusal["system_message_count"] + observed.refusal["session_message_count"] +
+               observed.refusal["steer_message_count"] +
+               observed.refusal["tool_definition_count"] == length(tools) + 2
+    end
+
+    assert with_project.refusal["provider_estimated_tokens"] ==
+             without_project.refusal["provider_estimated_tokens"]
+
+    assert with_project.refusal["project_disposition"] == "not_evaluated_required_failure"
+    assert without_project.refusal["project_disposition"] == "no_manifest"
+
+    control = run_project_stage("system-class-control", manifest, @uint64_max)
+    assert control.project["disposition"] == "staged"
+    assert project_bucket(control.receipt)["token_cost"] > 0
+  end
+
+  # Technical depth: the fixed-point resolution is skipped only for a
+  # structurally inadmissible candidate, which is then named by its own
+  # structural dimension instead of being carried forward with an unresolved
+  # self-size. Every other resolution failure is returned unchanged.
+  test "a structurally inadmissible candidate is still named by its structural dimension" do
+    required_only = staged_candidate("structural-dimension", [])
+
+    nested =
+      update_in(required_only.receipt, ["blocks"], fn [first | rest] ->
+        [Map.put(first, "source_reference", nested_value(@max_item_depth - 3)) | rest]
+      end)
+
+    assert {:refused, %{"dimension" => "context_record_depth", "record_byte_cost" => nil}} =
+             SessionState.propose_model_request(
+               required_only.state,
+               required_only.run_id,
+               required_only.request,
+               context_receipt: nested
+             )
+  end
+
   test "structured source goldens receipt arithmetic digest framing and malformed replay form one locked matrix" do
     for {source_reference, canonical_hex, digest} <- source_reference_goldens() do
       bytes = Canonical.encode(source_reference)
@@ -2672,6 +2836,83 @@ defmodule Loopex.ContextAdmissionTest do
       revocation_state: "active"
     }
     |> Map.merge(Map.new(overrides))
+  end
+
+  # Technical depth: staging is driven to its committed request, then the
+  # journal is replayed up to but not including that record. The recovered state
+  # is therefore the exact boundary the constructor is called from, and the
+  # captured request and retained receipt are the exact live preimage rather
+  # than a hand-built imitation of one.
+  defp staged_candidate(label, options) do
+    fixture =
+      start_fixture([context_token_budget: @uint64_max, script: [%{text: "done"}]] ++ options)
+
+    {session_id, attachment} = create_attached_session(fixture)
+
+    assert {:accepted, ^label} =
+             Loopex.command(attachment, %{type: :prompt, command_id: label, content: label})
+
+    assert_receive {:context_model_invoked, _worker, request}, 5_000
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+
+    all_records = records(fixture, session_id)
+    staged = records_through_kind(all_records, "model_request_committed")
+    prefix = Enum.take(staged, length(staged) - 1)
+    event_prefix = recoverable_event_prefix(session_id, prefix, events(fixture, session_id))
+
+    assert {:ok, state} = SessionState.recover(session_id, prefix, event_prefix)
+
+    committed = List.last(staged)
+
+    %{
+      state: state,
+      run_id: committed.payload["run_id"],
+      request: request,
+      receipt: committed.payload["context_receipt"]
+    }
+  end
+
+  defp system_class_refusal(label, tools, options) do
+    fixture =
+      start_fixture(
+        [
+          context_token_budget: @uint64_max,
+          script: [%{text: "must not dispatch"}],
+          tools: tools
+        ] ++ options
+      )
+
+    {session_id, attachment} = create_attached_session(fixture)
+
+    assert {:accepted, ^label} =
+             Loopex.command(attachment, %{
+               type: :prompt,
+               command_id: label,
+               content: "one required system class over its ceiling"
+             })
+
+    finished = await_event(attachment, "run.finished")
+    assert Loopex.ContextAdmissionTestModel.requests(fixture.model) == []
+
+    [refusal] =
+      fixture
+      |> records(session_id)
+      |> Enum.filter(&kind?(&1, "context_admission_refused_v1"))
+
+    %{failure: finished["failure"], refusal: refusal.payload}
+  end
+
+  # Technical depth: tool projections are `system` provenance, so one more
+  # bounded definition is what pushes the required system subtotal to its strict
+  # 1,000-token ceiling without touching session or project content.
+  defp padded_tool_definition do
+    @reference_tool_definitions
+    |> hd()
+    |> Map.merge(%{
+      "tool_id" => "loopex.padded",
+      "name" => "padded",
+      "description" => String.duplicate("bounded description text. ", 40)
+    })
   end
 
   defp run_project_stage(label, manifest, context_token_budget) do
