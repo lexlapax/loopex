@@ -2703,10 +2703,25 @@ defmodule Loopex.AgentLoopTest do
     send(model, :release)
     assert {:accepted, "abort-after-supervisor-reply"} = Task.await(abort, 5_000)
 
-    :ok = :sys.resume(workers)
+    # The suspended supervisor still holds the terminate call in its mailbox.
+    # Resuming it before the late reply has been retained lets it really stop
+    # the worker, and on a slow scheduler that raced the reply's delivery; so
+    # the run's terminal, which commits with the settlement, is awaited first.
+    finished =
+      Enum.reduce_while(1..1_000, nil, fn _attempt, _acc ->
+        case Enum.find(drain(attachment), &(&1.kind == "run.finished")) do
+          nil ->
+            Process.sleep(5)
+            {:cont, nil}
 
-    events = drain(attachment)
-    assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
+          event ->
+            {:halt, event}
+        end
+      end)
+
+    assert finished, "the run never published its terminal after the late reply"
+    :ok = :sys.resume(workers)
+    assert finished["outcome"] == "cancelled"
 
     records = Fixture.records(fixture, session_id)
 
