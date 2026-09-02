@@ -658,3 +658,34 @@ assertions. Tenth recorded override; review of each edit was waived, the
 classification report and per-file before-and-after counts are retained with
 the milestone's evidence.
 
+<a id="adr-0017-step-five"></a>
+## ADR 0017 evaluation step 5 is not implemented in M2
+
+**Rule.** ADR 0017's evaluation order proves required-only record
+admissibility before optional evaluation: a structural walk over a
+structurally maximal instance of the project-receipt schema, a separately
+resolved and measured required-only lower-bound candidate, and generated
+evidence binding that implication at every list cardinality through 1,024.
+
+**What is true.** No implementation and no evidence of step 5 exists in the
+milestone. The admission path judges exactly the candidate it is handed. An
+independent audit found the consequence that mattered live: a refusal on a
+dimension that withholding cannot cure was built from the optional-inclusive
+descriptor set while its counts described the required-only one, and its
+project disposition claimed the project was never evaluated. That is repaired:
+every retained refusal is now decided on and built from a required-only
+candidate, and the live constructor refuses to describe a project-bearing
+candidate as a required-only refusal. The residual gap is that the
+required-only candidate carries the true project receipt rather than the
+ADR's smallest exact receipt shape, so its byte bound is not a strict lower
+bound; that can matter only within roughly one hundred fifty bytes of the
+65,536-byte ceiling on the depth and cardinality path, which no M2 workload
+reaches, and it is inert for the system-class and withholding dimensions.
+
+**Disposition.** Maintainer, 2026-09-02: record step 5 as an approved M2
+limitation. Implementing it changes what a replayed `observed` and
+`record_byte_cost` mean on a byte refusal, from a final cost to a lower bound
+the reducer today binds as equal, and that semantic decision belongs to the
+milestone that implements it together with the generated cardinality
+property. Thirteenth recorded override.
+
