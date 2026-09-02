@@ -1867,10 +1867,27 @@ defmodule Loopex.Runtime.SessionState do
     {:ok, reply, state.active_run_id, state.pending_work, state.expected_events, %{}}
   end
 
+  # Concept: a durable refusal token names one of the refusals this owner
+  # writes, or it is not a record this owner can apply.
+  #
+  # Technical depth: the reason was `String.to_existing_atom/1` of a field read
+  # straight out of the journal, unrescued where every comparable site rescues.
+  # Whether it raised depended on which atoms the VM had loaded, so the same
+  # durable history could replay on one node and abort recovery with an
+  # `ArgumentError` on a colder one, and a token from another version aborted
+  # rather than being refused. The mapping is closed over the tokens `refusal/6`
+  # writes for these two command types; any other token is invalid history and
+  # takes the ordinary typed refusal, creating no atom on either path.
   defp command_effect(state, _record, type, "rejected_" <> reason, _command_id)
        when type in ["steer", "follow_up"] do
-    {:ok, {:error, String.to_existing_atom(reason)}, state.active_run_id, state.pending_work,
-     state.expected_events, %{}}
+    case rejected_command_reason(reason) do
+      {:ok, refusal} ->
+        {:ok, {:error, refusal}, state.active_run_id, state.pending_work, state.expected_events,
+         %{}}
+
+      :error ->
+        {:error, :invalid_command_transition}
+    end
   end
 
   defp command_effect(
@@ -1937,6 +1954,12 @@ defmodule Loopex.Runtime.SessionState do
 
   defp command_effect(_state, _record, _command_type, _admission, _command_id),
     do: {:error, :invalid_command_transition}
+
+  defp rejected_command_reason("run_mismatch"), do: {:ok, :run_mismatch}
+  defp rejected_command_reason("steer_pending"), do: {:ok, :steer_pending}
+  defp rejected_command_reason("no_active_run"), do: {:ok, :no_active_run}
+  defp rejected_command_reason("follow_up_pending"), do: {:ok, :follow_up_pending}
+  defp rejected_command_reason(_reason), do: :error
 
   # Concept: an internal transition keeps one identity while its exact Store
   # presentation is unresolved, and receives a fresh one after ownership or the

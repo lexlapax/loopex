@@ -24,7 +24,11 @@ defmodule Loopex.Runtime.EventDispatcher do
   delivered only once `Loopex.Runtime.Control` has recorded the commit that
   produced it as resolved, so a session whose owner is holding an unresolved
   `commit_unknown` publishes nothing from that transaction until the
-  re-presentation settles. A session with no current owner in this runtime
+  re-presentation settles. The fence binds both paths that reach the outbox: an
+  attaching caller's snapshot scan stops at the same acknowledged position, so
+  its anchor never reports run state derived from a row no consumer may yet
+  read, and the attachment's first read starts there rather than at the durable
+  tail. A session with no current owner in this runtime
   carries no fence, because no transaction of this runtime's is outstanding
   against it and its durable outbox is already reconstructed truth.
   """
@@ -158,13 +162,14 @@ defmodule Loopex.Runtime.EventDispatcher do
       scan_id = make_ref()
       parent = self()
       store = state.store
+      bound = scan_bound(state, session_id)
 
       worker =
         spawn_link(fn ->
           send(
             parent,
             {:attachment_scan_finished, scan_id,
-             scan_attachment(store, session_id, options[:after_event_sequence])}
+             scan_attachment(store, session_id, options[:after_event_sequence], bound)}
           )
         end)
 
@@ -570,23 +575,42 @@ defmodule Loopex.Runtime.EventDispatcher do
   defp put_attachment(state, attachment),
     do: %{state | attachments: Map.put(state.attachments, attachment.id, attachment)}
 
-  defp scan_attachment(store, session_id, requested_anchor) do
+  # Concept: the same publication fence, applied to the attach scan.
+  #
+  # Technical depth: `publishable_limit/2` fences the pump, but an attaching
+  # caller reaches the outbox by a second path, and an unfenced scan anchors its
+  # snapshot at the durable tail. That tail can hold rows of an unresolved
+  # `commit_unknown`, so an attachment installed on it would answer with truth
+  # every already-attached consumer is withheld from and would set `seen` past
+  # those rows, which are then never delivered on the event plane. The bound is
+  # read from the dispatcher's own watermark map inside the call, because the
+  # scan worker is a bare process with no dispatcher state, and a watermark read
+  # later could only be higher -- a bound that is stale is conservative, never
+  # permissive. With no watermark the scan is unbounded, for the reason the pump
+  # is: nothing this runtime holds is outstanding against a session it does not
+  # own, so no row of its reconstructed outbox is withheld.
+  defp scan_bound(state, session_id), do: Map.get(state.acknowledged, session_id, :unbounded)
+
+  defp scan_attachment(store, session_id, requested_anchor, bound) do
     with {:ok, scan} <- SessionState.start_snapshot_scan(session_id, requested_anchor) do
-      scan_event_pages(store, session_id, 0, scan)
+      scan_event_pages(store, session_id, 0, scan, bound)
     end
   end
 
-  defp scan_event_pages(store, session_id, position, scan) do
-    case Store.load_events(store, session_id, position, @max_page) do
+  defp scan_event_pages(store, session_id, position, scan, bound) do
+    case Store.load_events(store, session_id, position, scan_page_limit(position, bound)) do
       {:ok, []} ->
         SessionState.finish_snapshot_scan(scan)
 
       {:ok, rows} when is_list(rows) ->
-        with {:ok, next_scan} <- SessionState.scan_snapshot_page(scan, rows),
-             %{event_sequence: next_position} when next_position > position <- List.last(rows) do
-          scan_event_pages(store, session_id, next_position, next_scan)
-        else
-          _other -> {:error, :invalid_store_page}
+        case Enum.split_while(rows, &(not beyond_scan_bound?(&1, bound))) do
+          {admitted, []} ->
+            continue_scan(store, session_id, position, scan, bound, admitted)
+
+          {admitted, _withheld} ->
+            with {:ok, bounded} <- SessionState.scan_snapshot_page(scan, admitted) do
+              SessionState.finish_snapshot_scan(bounded)
+            end
         end
 
       :unavailable ->
@@ -596,6 +620,39 @@ defmodule Loopex.Runtime.EventDispatcher do
         {:error, reason}
     end
   end
+
+  defp continue_scan(store, session_id, position, scan, bound, rows) do
+    with {:ok, next_scan} <- SessionState.scan_snapshot_page(scan, rows),
+         %{event_sequence: next_position} when next_position > position <- List.last(rows) do
+      scan_event_pages(store, session_id, next_position, next_scan, bound)
+    else
+      _other -> {:error, :invalid_store_page}
+    end
+  end
+
+  # Concept: ask for one row more than the fence allows.
+  #
+  # Technical depth: the paging loop ends when a page falls short, and a bounded
+  # scan has two ways to fall short -- the store ran out of history, or the
+  # watermark did. Requesting the extra row lets one read answer both, so the
+  # scan neither stops a page early on a session that has more readable history
+  # nor spends another round trip proving it has none. A row past the bound is
+  # never admitted to the snapshot; it is the witness that the fence, not the
+  # store, ended the scan.
+  defp scan_page_limit(_position, :unbounded), do: @max_page
+
+  defp scan_page_limit(position, bound) when is_integer(bound),
+    do: bound |> Kernel.-(position) |> max(0) |> Kernel.+(1) |> min(@max_page)
+
+  # Technical depth: a row whose sequence is missing or malformed is deliberately
+  # not withheld here. It stays in the admitted prefix so the snapshot scan
+  # refuses it as invalid history, which is the answer it already gives; reading
+  # it as "past the bound" would end the scan quietly on a corrupt page.
+  defp beyond_scan_bound?(%{event_sequence: sequence}, bound)
+       when is_integer(bound) and is_integer(sequence),
+       do: sequence > bound
+
+  defp beyond_scan_bound?(_row, _bound), do: false
 
   defp valid_event?(event, expected) do
     match?(

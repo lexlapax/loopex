@@ -3992,11 +3992,21 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: a field the answer does not carry is a mismatch, not a pass.
+  #
+  # Technical depth: this is `Loopex.Effect.match_fields/3`'s rule applied to the
+  # solicited reconciliation answer. `Map.get/2` reads an absent key as `nil`,
+  # so any expected value that is legitimately `nil` -- a job with no tool call
+  # or no tool version, among others -- was satisfied by an answer that simply
+  # omitted the field, and an answer omitting every such field was admitted as
+  # though it had matched. Asking `is_map_key/2` first makes presence part of
+  # the comparison, so only a field the responder actually stated can match.
   defp compare_reconciliation_fields(response, expected) do
     Enum.reduce_while(@reconciliation_fields, :ok, fn field, :ok ->
-      if Map.get(response, field) == Map.fetch!(expected, field),
-        do: {:cont, :ok},
-        else: {:halt, {:error, {:mismatch, field}}}
+      if is_map_key(response, field) and
+           Map.fetch!(response, field) == Map.fetch!(expected, field),
+         do: {:cont, :ok},
+         else: {:halt, {:error, {:mismatch, field}}}
     end)
   end
 
@@ -4020,8 +4030,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
       tool_version: job.tool_version
     ]
 
+    # Technical depth: presence first, for the reason
+    # `compare_reconciliation_fields/2` states. A retained receipt is the
+    # strongest claim a late origin can make, so a field it does not carry must
+    # never be read as agreeing with a `nil` the job happens to hold.
     Enum.reduce_while(receipt_fields, :ok, fn {field, expected}, :ok ->
-      if Map.get(receipt, field) == expected,
+      if is_map_key(receipt, field) and Map.fetch!(receipt, field) == expected,
         do: {:cont, :ok},
         else: {:halt, {:error, {:mismatch, field}}}
     end)

@@ -42,15 +42,13 @@ defmodule Loopex.Store do
   @max_items 1_024
   @max_depth 12
   @canonical_field_names [:canonical_record_bytes, :canonical_mutation_digest]
+  # Concept: the stamps the Store owns and a caller may never supply.
+  #
+  # Technical depth: only the binary spellings are listed because every key
+  # reaches the reserved check already normalized. An atom key is rewritten to
+  # its binary spelling before it is compared, so the atom forms need no
+  # separate list and cannot slip past one that has drifted from the other.
   @reserved_event_binary_fields ["event_sequence", "owner_epoch", "owner_incarnation_id"]
-  @reserved_event_fields [
-    :event_sequence,
-    :owner_epoch,
-    :owner_incarnation_id,
-    "event_sequence",
-    "owner_epoch",
-    "owner_incarnation_id"
-  ]
 
   @typedoc """
   ## Concept
@@ -1040,7 +1038,7 @@ defmodule Loopex.Store do
   @spec validate_private_record(term()) :: :ok | {:error, term()}
   def validate_private_record(record) do
     with {:ok, normalized} <- normalize_record(record) do
-      validate_record(normalized)
+      validate_item(:record, normalized)
     end
   end
 
@@ -1207,7 +1205,7 @@ defmodule Loopex.Store do
   end
 
   defp validate_shape(:runtime_control_create_session, transaction) do
-    validate_record(Map.get(transaction, :genesis))
+    validate_item(:record, Map.get(transaction, :genesis))
   end
 
   defp validate_shape(:runtime_control_stage_owner_attempt, transaction) do
@@ -1313,7 +1311,8 @@ defmodule Loopex.Store do
          true <- length(ids) == MapSet.size(MapSet.new(ids)) do
       {:ok, normalized}
     else
-      _other -> {:error, :invalid_events}
+      false -> {:error, :invalid_events}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -1323,7 +1322,7 @@ defmodule Loopex.Store do
     Enum.reduce_while(values, {:ok, []}, fn value, {:ok, normalized} ->
       case fun.(value) do
         {:ok, item} -> {:cont, {:ok, [item | normalized]}}
-        {:error, _reason} -> {:halt, {:error, error}}
+        {:error, reason} -> {:halt, {:error, item_refusal(reason, error)}}
       end
     end)
     |> case do
@@ -1332,68 +1331,33 @@ defmodule Loopex.Store do
     end
   end
 
-  defp normalize_record(record) when is_map(record) and not is_struct(record) do
-    with {:ok, kind, rest} <- take_required(record, :kind, "kind"),
-         {:ok, normalized_kind} <- normalize_kind(kind),
-         {:ok, normalized_rest} <- normalize_user_map(rest, 0) do
-      {:ok, Map.put(normalized_rest, :kind, normalized_kind)}
-    else
-      _other -> {:error, :invalid_record}
-    end
-  end
+  # Concept: a member's structural refusal is the list's refusal.
+  #
+  # Technical depth: an ordinary invalid member collapses into the list's own
+  # result, because which member was malformed tells a caller nothing it can
+  # act on. A structural or size refusal is different: it already names its
+  # dimension, the observation, and the limit, and it is the exact tuple a
+  # caller preflighting through `normalize_and_measure_item/2` holds. Collapsing
+  # it would leave the preflight and the builder disagreeing about one item.
+  defp item_refusal({:item_structure_exceeded, _dimension, _observed, _limit} = refusal, _error),
+    do: refusal
 
-  defp normalize_record(_record), do: {:error, :invalid_record}
+  defp item_refusal({:item_too_large, _observed, _limit} = refusal, _error), do: refusal
+  defp item_refusal(_reason, error), do: error
 
-  defp normalize_event(event) when is_map(event) and not is_struct(event) do
-    with false <- Enum.any?(@reserved_event_fields, &Map.has_key?(event, &1)),
-         {:ok, event_id, without_id} <- take_required(event, :event_id, "event_id"),
-         {:ok, _event_id} <- validate_identifier(event_id),
-         {:ok, kind, rest} <- take_required(without_id, :kind, "kind"),
-         {:ok, normalized_kind} <- normalize_kind(kind),
-         {:ok, normalized_rest} <- normalize_event_map(rest, 0) do
-      {:ok,
-       normalized_rest
-       |> Map.put(:event_id, event_id)
-       |> Map.put(:kind, normalized_kind)}
-    else
-      _other -> {:error, :invalid_event}
-    end
-  end
+  # Concept: the builders normalize through the same normalizer the preflight
+  # and the transaction validator use.
+  #
+  # Technical depth: ADR 0017 requires one implementation and one refusal
+  # taxonomy for every path that admits an item. A second builder-local
+  # traversal is not a duplicate that merely costs bytes: it checked depth only
+  # where it happened to recurse into a map, so a scalar the shared normalizer
+  # rejects at depth 13 was admitted here, and it asked `length/1` of an
+  # untrusted list, which walks a spine the shared counter refuses to walk.
+  # Delegating leaves exactly one answer to "may this item be stored".
+  defp normalize_record(record), do: normalize_measured_root(:record, record)
 
-  defp normalize_event(_event), do: {:error, :invalid_event}
-
-  defp normalize_event_map(map, depth)
-       when is_map(map) and not is_struct(map) and map_size(map) <= @max_items and
-              depth <= @max_depth do
-    Enum.reduce_while(map, {:ok, %{}}, fn {key, value}, {:ok, normalized} ->
-      with {:ok, normalized_key} <- normalize_user_key(key),
-           false <- normalized_key in @reserved_event_binary_fields,
-           false <- Map.has_key?(normalized, normalized_key),
-           {:ok, normalized_value} <- normalize_event_value(value, depth + 1) do
-        {:cont, {:ok, Map.put(normalized, normalized_key, normalized_value)}}
-      else
-        _other -> {:halt, {:error, :not_plain_event_data}}
-      end
-    end)
-  end
-
-  defp normalize_event_map(_map, _depth), do: {:error, :not_plain_event_data}
-
-  defp normalize_event_value(value, _depth)
-       when is_binary(value) or is_integer(value) or is_float(value),
-       do: {:ok, value}
-
-  defp normalize_event_value(value, _depth) when value in [nil, true, false], do: {:ok, value}
-
-  defp normalize_event_value(value, depth)
-       when is_list(value) and length(value) <= @max_items and depth <= @max_depth do
-    normalize_list(value, &normalize_event_value(&1, depth + 1), :not_plain_event_data)
-  end
-
-  defp normalize_event_value(value, depth) when is_map(value) and not is_struct(value),
-    do: normalize_event_map(value, depth)
-
-  defp normalize_event_value(_value, _depth), do: {:error, :not_plain_event_data}
+  defp normalize_event(event), do: normalize_measured_root(:event, event)
 
   defp reject_owner_capability(events, owner_incarnation_id) do
     if Enum.any?(events, &contains_value?(&1, owner_incarnation_id)) do
@@ -1433,22 +1397,6 @@ defmodule Loopex.Store do
 
   defp normalize_kind(_kind), do: {:error, :invalid_kind}
 
-  defp normalize_user_map(map, depth)
-       when is_map(map) and not is_struct(map) and map_size(map) <= @max_items and
-              depth <= @max_depth do
-    Enum.reduce_while(map, {:ok, %{}}, fn {key, value}, {:ok, normalized} ->
-      with {:ok, normalized_key} <- normalize_user_key(key),
-           false <- Map.has_key?(normalized, normalized_key),
-           {:ok, normalized_value} <- normalize_user_value(value, depth + 1) do
-        {:cont, {:ok, Map.put(normalized, normalized_key, normalized_value)}}
-      else
-        _other -> {:halt, {:error, :not_plain_data}}
-      end
-    end)
-  end
-
-  defp normalize_user_map(_map, _depth), do: {:error, :not_plain_data}
-
   defp normalize_user_key(key) when is_atom(key), do: normalize_user_key(Atom.to_string(key))
 
   defp normalize_user_key(key)
@@ -1457,95 +1405,63 @@ defmodule Loopex.Store do
 
   defp normalize_user_key(_key), do: {:error, :not_plain_data}
 
-  defp normalize_user_value(value, _depth)
-       when is_binary(value) or is_integer(value) or is_float(value),
-       do: {:ok, value}
-
-  defp normalize_user_value(value, _depth) when value in [nil, true, false], do: {:ok, value}
-
-  defp normalize_user_value(value, depth)
-       when is_list(value) and length(value) <= @max_items and depth <= @max_depth do
-    normalize_list(value, &normalize_user_value(&1, depth + 1), :not_plain_data)
-  end
-
-  defp normalize_user_value(value, depth) when is_map(value) and not is_struct(value),
-    do: normalize_user_map(value, depth)
-
-  defp normalize_user_value(_value, _depth), do: {:error, :not_plain_data}
-
   defp validate_records(records) when is_list(records) and records != [] do
-    case length(records) <= @max_items and Enum.all?(records, &(validate_record(&1) == :ok)) do
-      true -> :ok
-      false -> {:error, :invalid_records}
-    end
+    if length(records) <= @max_items,
+      do: validate_items(:record, records, :invalid_records),
+      else: {:error, :invalid_records}
   end
 
   defp validate_records(_records), do: {:error, :invalid_records}
 
   defp validate_events(events) when is_list(events) and length(events) <= @max_items do
-    with true <- Enum.all?(events, &(validate_event(&1) == :ok)),
+    with :ok <- validate_items(:event, events, :invalid_events),
          ids = Enum.map(events, &Map.fetch!(&1, :event_id)),
          true <- length(ids) == MapSet.size(MapSet.new(ids)) do
       :ok
     else
-      _other -> {:error, :invalid_events}
+      false -> {:error, :invalid_events}
+      {:error, reason} -> {:error, reason}
     end
   end
 
   defp validate_events(_events), do: {:error, :invalid_events}
 
-  defp validate_record(%{kind: kind} = record) when is_binary(kind) do
-    validate_plain_map(record)
-  end
-
-  defp validate_record(_record), do: {:error, :invalid_record}
-
-  defp validate_event(%{event_id: event_id, kind: kind} = event) when is_binary(kind) do
-    with {:ok, _event_id} <- validate_identifier(event_id),
-         false <- contains_reserved_event_field?(event),
-         :ok <- validate_plain_map(event) do
-      :ok
-    else
-      true -> {:error, :reserved_event_field}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp validate_event(_event), do: {:error, :invalid_event}
-
-  defp contains_reserved_event_field?(value) when is_list(value),
-    do: Enum.any?(value, &contains_reserved_event_field?/1)
-
-  defp contains_reserved_event_field?(value) when is_map(value) do
-    Enum.any?(value, fn {key, item} ->
-      key in @reserved_event_fields or contains_reserved_event_field?(item)
+  defp validate_items(plane, items, error) do
+    Enum.reduce_while(items, :ok, fn item, :ok ->
+      case validate_item(plane, item) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, item_refusal(reason, error)}}
+      end
     end)
   end
 
-  defp contains_reserved_event_field?(_value), do: false
-
-  # Concept: an item that is too large says how large it was.
+  # Concept: an item is valid when the shared normalizer returns it unchanged
+  # and within the byte ceiling.
   #
-  # Technical depth: the caller preflighting through
-  # `normalize_and_measure_item/2` compares the same count against the same
-  # ceiling, so reporting the observation and the limit here lets a refusal be
-  # reconciled with that preflight instead of leaving an operator to rediscover
-  # the number that was already measured.
-  defp validate_plain_map(map) when is_map(map) and not is_struct(map) do
-    case plain?(map, 0) do
-      true ->
-        observed = byte_size(:erlang.term_to_binary(map, [:deterministic]))
+  # Technical depth: this is the transaction side of ADR 0017's one-normalizer
+  # rule. A second structural predicate here would be a second answer to the
+  # same question, and the two drifted: the predicate walked untrusted lists
+  # with `length/1` and admitted a nested atom key that the normalizer rewrites.
+  # Comparing against the normalizer's own output settles both at once -- an
+  # item that is not already exactly what the normalizer produces is not
+  # canonical, whatever else is true of it -- and the measured size is the same
+  # count the preflight reported, so an oversized item still says how large it
+  # was rather than making an operator rediscover the number.
+  defp validate_item(plane, item) do
+    case normalize_and_measure_item(plane, item) do
+      {:ok, ^item, observed} when observed <= @max_item_bytes ->
+        :ok
 
-        if observed <= @max_item_bytes,
-          do: :ok,
-          else: {:error, {:item_too_large, observed, @max_item_bytes}}
+      {:ok, ^item, observed} ->
+        {:error, {:item_too_large, observed, @max_item_bytes}}
 
-      false ->
-        {:error, :not_plain_data}
+      {:ok, _normalized, _observed} ->
+        {:error, invalid_item_reason(plane)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
-
-  defp validate_plain_map(_map), do: {:error, :not_plain_data}
 
   defp validate_encoded_items(transaction) do
     fields =
@@ -1729,24 +1645,4 @@ defmodule Loopex.Store do
   catch
     _kind, _reason -> fallback
   end
-
-  defp plain?(_value, depth) when depth > @max_depth, do: false
-
-  defp plain?(value, _depth) when is_binary(value) or is_integer(value) or is_float(value),
-    do: true
-
-  defp plain?(value, _depth) when value in [nil, true, false], do: true
-
-  defp plain?(value, depth) when is_list(value) do
-    length(value) <= @max_items and Enum.all?(value, &plain?(&1, depth + 1))
-  end
-
-  defp plain?(value, depth) when is_map(value) and not is_struct(value) do
-    map_size(value) <= @max_items and
-      Enum.all?(value, fn {key, item} ->
-        (key in [:event_id, :kind] or is_binary(key)) and plain?(item, depth + 1)
-      end)
-  end
-
-  defp plain?(_value, _depth), do: false
 end
