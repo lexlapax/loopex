@@ -997,9 +997,20 @@ defmodule Loopex.Runtime.SessionState do
   # before it is proposed. A reply that passed validation but whose complete
   # settlement does not fit is compacted here rather than discovered at the
   # Store boundary, where the run would have no verdict at all.
+  #
+  # Both ways a reply can fail to be retained land in the same compact record.
+  # ADR 0018 combination 5 is the only combination that names
+  # `unreadable_model_answer`, and it is the answer this runtime could not read,
+  # whether it contradicted itself or would not fit; combination 3's
+  # `model_call_failed` names an attempt that returned no answer at all -- a
+  # live ambiguous error or a recovered open attempt -- and takes the estimated
+  # remaining allowance because there is no reported figure to keep. Complete
+  # usage the provider did report survives either compaction, because
+  # combination 5 "preserves complete reported usage when available"; the
+  # validated reply supplies it where canonicalization succeeded, and the raw
+  # answer's normalized usage supplies it where canonicalization refused the
+  # reply before there was a validated one.
   defp attempt_result(work, {:reply, raw}, termination) do
-    usage = raw_reply_usage(raw)
-
     case ProviderAttempt.canonical_reply(raw, work.request) do
       {:ok, reply} ->
         result = %{"kind" => "reply", "reply" => reply}
@@ -1008,11 +1019,11 @@ defmodule Loopex.Runtime.SessionState do
         if reply_settlement_fits?(work, result, reply["usage"]) do
           {result, conversation, reply["usage"]}
         else
-          {unreadable_result(), "none", usage}
+          {unreadable_result(), "none", reply["usage"]}
         end
 
       {:error, _reason} ->
-        {unreadable_result(), "none", usage}
+        {unreadable_result(), "none", raw_reply_usage(raw)}
     end
   end
 
