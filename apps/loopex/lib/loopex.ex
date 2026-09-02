@@ -69,17 +69,21 @@ defmodule Loopex do
 
   ## Technical depth
 
-  Session options become the genesis payload of the Store's atomic
-  runtime-control transaction. Acknowledgement waits for both that commit and a
-  fresh session-owner succession. Exact command re-presentation returns the
-  retained session ID; changed canonical genesis conflicts.
+  Session options become the `options` member of the `session_genesis_v2`
+  payload of the Store's atomic runtime-control transaction; the runtime's
+  committed cleanup period becomes its `runtime_configuration`. The complete
+  canonical item is measured before the transaction, so an oversized
+  configuration is `session_configuration_too_large` rather than an incidental
+  Store error after session authority was acquired. Acknowledgement waits for
+  both that commit and a fresh session-owner succession. Exact command
+  re-presentation returns the retained session ID; changed canonical genesis
+  conflicts.
   """
   @spec create_session(Runtime.t(), map(), keyword()) :: {:ok, binary()} | {:error, term()}
   def create_session(runtime, session_options, options)
       when is_map(session_options) and is_list(options) do
     with {:ok, command_id} <- Keyword.fetch(options, :command_id) do
-      genesis = %{"options" => session_options, kind: "session_genesis"}
-      Runtime.create_session(runtime, command_id, genesis)
+      Runtime.create_session(runtime, command_id, session_options)
     else
       :error -> {:error, :command_id_required}
     end

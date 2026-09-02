@@ -214,9 +214,9 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
-  def handle_call({:create_session, token, command_id, genesis}, from, state) do
+  def handle_call({:create_session, token, command_id, session_options}, from, state) do
     if token == state.token do
-      create_session(state, command_id, genesis, from)
+      create_session(state, command_id, session_options, from)
     else
       {:reply, {:error, :runtime_unavailable}, state}
     end
@@ -512,8 +512,21 @@ defmodule Loopex.Runtime.Control do
     |> Map.put(:log, [])
   end
 
-  defp create_session(state, command_id, genesis, from) do
+  # Concept: the session's committed cleanup period is written into the record
+  # that creates the session, and the complete record is measured before
+  # anything acquires authority over that session.
+  #
+  # Technical depth: ADR 0016 fixes `session_genesis_v2` with two closed key
+  # sets and a 65,536-byte ceiling on the complete canonical item. The
+  # measurement happens here, before `Store.create_session/3` and therefore
+  # before any owner is started, so an over-ceiling configuration receives its
+  # declared `session_configuration_too_large` refusal rather than an incidental
+  # Store error attributed to a session that already exists. The period is this
+  # runtime's option, which ADR 0016 makes a default for new sessions only:
+  # recovery reconstructs the committed value from this record instead.
+  defp create_session(state, command_id, session_options, from) do
     with true <- valid_identifier?(command_id),
+         {:ok, genesis} <- session_genesis(session_options, state.cleanup_grace_ms),
          {:ok, transaction} <- Store.create_session(state.runtime_id, command_id, genesis) do
       {outcome, lane} = resolve_transaction(state.lane, transaction)
       state = %{state | lane: lane}
@@ -546,9 +559,33 @@ defmodule Loopex.Runtime.Control do
           {:reply, {:error, :commit_unknown}, state}
       end
     else
-      _other -> {:reply, {:error, :invalid_session_creation}, state}
+      {:error, :session_configuration_too_large} ->
+        {:reply, {:error, :session_configuration_too_large}, state}
+
+      _other ->
+        {:reply, {:error, :invalid_session_creation}, state}
     end
   end
+
+  @genesis_item_bytes 65_536
+
+  defp session_genesis(session_options, cleanup_grace_ms) when is_map(session_options) do
+    genesis = %{
+      "options" => session_options,
+      "runtime_configuration" => %{"cleanup_grace_ms" => cleanup_grace_ms},
+      kind: "session_genesis_v2"
+    }
+
+    if canonical_item_bytes(genesis) <= @genesis_item_bytes,
+      do: {:ok, genesis},
+      else: {:error, :session_configuration_too_large}
+  end
+
+  defp session_genesis(_session_options, _cleanup_grace_ms),
+    do: {:error, :invalid_session_creation}
+
+  defp canonical_item_bytes(item),
+    do: item |> :erlang.term_to_binary([:deterministic]) |> byte_size()
 
   defp start_owner(state, session_id, succession_id, from, owner_command \\ nil) do
     case Map.get(state.sessions, session_id) do

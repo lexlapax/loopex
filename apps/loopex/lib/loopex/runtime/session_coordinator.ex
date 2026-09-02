@@ -259,6 +259,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         journal_version: state.durable.journal_version,
         event_sequence: state.durable.event_sequence,
         active_run_id: state.durable.active_run_id,
+        cleanup_grace_ms: state.durable.cleanup_grace_ms,
         pending_work_ids:
           Enum.map(SessionState.pending_work(state.durable), &Map.fetch!(&1, :run_id))
       }
@@ -737,7 +738,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
     with {:ok, records} <- load_all_records(state.store, state.session_id),
          {:ok, events} <- load_all_events(state.store, state.session_id),
          {:ok, durable} <- SessionState.recover(state.session_id, records, events),
-         durable = SessionState.declare_cleanup_grace(durable, state.cleanup_grace_ms),
          true <- durable.owner_epoch == state.owner.owner_epoch,
          true <- durable.owner_incarnation_id == state.owner.owner_incarnation_id,
          true <- durable.owner_transaction_id == state.owner.transaction_id do
@@ -2138,13 +2138,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
     state
   end
 
+  # Concept: the executor is observed for the period the session committed, not
+  # for a fixed number this runtime chose.
+  #
+  # Technical depth: ADR 0016 makes `Executor.cancel/4` the production entry and
+  # keeps `cancel/3`'s fixed defensive bound for direct callers only. Selecting
+  # the legacy entry here would report a valid long cleanup unproven the moment
+  # it passed sixty seconds, which is a false `outcome_unknown` for work that was
+  # cleaning up exactly as configured.
   defp dispatch_host_cancel(state, run_id, job_id) do
     module = state.executor.module
     reference = state.executor.reference
+    grace = state.durable.cleanup_grace_ms
 
     task =
       Task.Supervisor.async_nolink(state.workers, fn ->
-        Executor.cancel(module, reference, job_id)
+        Executor.cancel(module, reference, job_id, grace)
       end)
 
     put_in_flight(state, task.ref, {:cleanup, run_id, task.pid})
@@ -2371,10 +2380,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
         end
 
       {reference, pid} ->
-        _ = Task.Supervisor.terminate_child(state.workers, pid)
         state = %{state | in_flight: Map.delete(state.in_flight, reference)}
 
-        case take_worker_result(reference) do
+        case await_execute_result(state, reference, pid) do
           {:ok, receipt} when is_map(receipt) ->
             case retain_executor_fact(state, run_id, receipt) do
               {:ok, next} -> {next, :cleaned}
@@ -2386,6 +2394,49 @@ defmodule Loopex.Runtime.SessionCoordinator do
           _unproved ->
             {close_current_tool_stream(state, run_id, :abandoned), :unconfirmed}
         end
+    end
+  end
+
+  # Concept: the cancellation answer and the original call's own answer are two
+  # different boundaries, and the second gets a reserve of its own.
+  #
+  # Technical depth: ADR 0016 gives the in-flight `execute/5` caller
+  # `execute_result_reserve_ms` after the cancellation answer, derived from the
+  # committed cleanup period. A receipt released inside that reserve is the
+  # operation's own terminal fact and is admitted, so a job that stopped cleanly
+  # ends `cancelled` rather than being discarded because this coordinator stopped
+  # listening first. Expiry proves only that the reserve elapsed: the worker is
+  # terminated and the operation is unproved, which is `outcome_unknown` carrying
+  # a reconciliation reference, never a clean verdict. Nothing that arrives after
+  # that changes state, because the worker that would have produced it is gone.
+  defp await_execute_result(state, reference, pid) do
+    reserve = execute_result_reserve_ms(state)
+
+    receive do
+      {^reference, {:ok, value}} ->
+        Process.demonitor(reference, [:flush])
+        {:ok, value}
+
+      {^reference, other} ->
+        Process.demonitor(reference, [:flush])
+        {:answered, other}
+
+      {:DOWN, ^reference, :process, _pid, _reason} ->
+        :none
+    after
+      reserve ->
+        _ = Task.Supervisor.terminate_child(state.workers, pid)
+        take_worker_result(reference)
+    end
+  end
+
+  defp execute_result_reserve_ms(state) do
+    case Executor.cancellation_bounds(state.durable.cleanup_grace_ms) do
+      {:ok, %{execute_result_reserve_ms: reserve}} -> reserve
+      # An unreadable committed period is not permission to wait forever, and it
+      # is not a verdict either: the shortest admitted reserve is spent and the
+      # operation is reported unproved.
+      {:error, _reason} -> 2_001
     end
   end
 
@@ -2708,7 +2759,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
       idempotency_class: Map.fetch!(definition, "idempotency_class"),
       fencing_token: executor.fencing_token,
       artifact_policy: %{"retain" => true},
-      output_policy: %{"capture" => true}
+      output_policy: %{"capture" => true},
+      # Concept: the period the hand will clean up under is a fact of the
+      # request, dispatched with it rather than configured beside it.
+      #
+      # Technical depth: ADR 0016 makes the committed session value a canonical
+      # `JobRequest` member, so it is covered by `canonical_request_digest` and
+      # the executor spends the session's declared period rather than its own
+      # startup default. It is read from the recovered durable state, which is
+      # where the genesis record put it, so a session recovered by a differently
+      # configured process still dispatches its own committed value.
+      cleanup_grace_ms: state.durable.cleanup_grace_ms
     })
   end
 

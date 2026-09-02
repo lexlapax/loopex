@@ -55,32 +55,20 @@ defmodule Loopex.Executor do
     :fencing_token
   ]
 
-  @job_fields [
-    :protocol_version,
-    :job_id,
-    :operation_id,
-    :attempt,
-    :session_id,
-    :run_id,
-    :turn_id,
-    :tool_call_id,
-    :origin_session_epoch,
-    :origin_executor_epoch,
-    :executor_identity,
-    :required_capabilities,
-    :tool_id,
-    :tool_version,
-    :effect_class,
-    :validated_arguments,
-    :workspace_ref,
-    :workspace_lease,
-    :run_deadline,
-    :resource_budgets,
-    :idempotency_class,
-    :fencing_token,
-    :artifact_policy,
-    :output_policy
-  ]
+  alias Loopex.Executor.JobRequest
+
+  @job_fields JobRequest.semantic_fields()
+
+  # Concept: the cleanup period is a fact of the request, not a setting of the
+  # hand that runs it.
+  #
+  # Technical depth: ADR 0016 makes the committed session value a canonical
+  # `JobRequest` member, so it participates in `canonical_request_digest` and a
+  # job dispatched under one period can never be joined or replayed under
+  # another. The admitted domain is the positive unsigned 64-bit range; every
+  # scalar entry refuses outside it before any host callback runs.
+  @max_cleanup_grace_ms 18_446_744_073_709_551_615
+  @default_cleanup_grace_ms 5_000
 
   @typedoc """
   ## Concept
@@ -93,7 +81,7 @@ defmodule Loopex.Executor do
   `canonical_request_bytes` and `canonical_request_digest` bind exactly the
   ordered fields returned by `job_fields/0`.
   """
-  @type job_request :: map()
+  @type job_request :: JobRequest.t()
 
   @typedoc """
   ## Concept
@@ -251,7 +239,7 @@ defmodule Loopex.Executor do
   @spec cancel(module(), term(), binary()) :: {:ok, :cleaned} | {:ok, :unconfirmed}
   def cancel(module, reference, job_id) when is_atom(module) and is_binary(job_id) do
     if function_exported?(module, :cancel, 2) do
-      bounded_cancel(module, reference, job_id)
+      bounded_cancel(module, reference, job_id, @cancel_bound_ms)
     else
       # Concept: an executor that declares no cancellation has confirmed
       # nothing, and silence is not a clean stop.
@@ -284,9 +272,26 @@ defmodule Loopex.Executor do
   # The worker is killed rather than left running when the bound is reached: a
   # caller that stopped waiting has no use for an answer that arrives later, and
   # an abandoned worker holding a port would outlive the run that owned it.
-  defp bounded_cancel(module, reference, job_id) do
+  defp bounded_cancel(module, reference, job_id, bound) do
     {pid, monitor} =
       spawn_monitor(fn -> exit({:loopex_cancel_answer, module.cancel(reference, job_id)}) end)
+
+    await_cancel(pid, monitor, System.monotonic_time(:millisecond) + bound)
+  end
+
+  # Concept: an admitted observation period is spent, never handed to one timer.
+  #
+  # Technical depth: `cancellation_bounds/1` admits the whole positive unsigned
+  # 64-bit range, and a `receive ... after` larger than the VM's timer ceiling
+  # raises rather than waiting. The wait is therefore one monotonic deadline
+  # consumed in safe finite slices: each slice recomputes what remains against
+  # the same instant, so no slice refreshes the allowance and the observation is
+  # exact for every admitted value. Monotonic time is used because this is a
+  # duration, and a wall-clock step must not lengthen or shorten it.
+  @cancel_slice_ms 3_600_000
+
+  defp await_cancel(pid, monitor, deadline) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
 
     receive do
       {:DOWN, ^monitor, :process, ^pid, {:loopex_cancel_answer, answer}} ->
@@ -295,10 +300,93 @@ defmodule Loopex.Executor do
       {:DOWN, ^monitor, :process, ^pid, _abnormal} ->
         {:ok, :unconfirmed}
     after
-      @cancel_bound_ms ->
-        Process.demonitor(monitor, [:flush])
-        Process.exit(pid, :kill)
-        {:ok, :unconfirmed}
+      min(remaining, @cancel_slice_ms) ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          Process.demonitor(monitor, [:flush])
+          Process.exit(pid, :kill)
+          {:ok, :unconfirmed}
+        else
+          await_cancel(pid, monitor, deadline)
+        end
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  The complete set of cancellation observation bounds one committed cleanup
+  period derives.
+
+  ## Technical depth
+
+  ADR 0016 fixes this formula in Core so no caller invents a wait and no
+  executor is asked for its configuration. `executor_observe_ms` bounds the
+  `cancel/2` callback, `receipt_retention_ms` bounds the durable account of what
+  happened, `execute_result_reserve_ms` is the distinct window the original
+  `execute/5` caller gets after the cancellation answer, `terminal_reserve_ms`
+  and `session_cache_ms` bound terminal rendering and session caching, and
+  `cli_backstop_ms` is the sum a process-liveness backstop must cover. The
+  intervals stay distinct: the observe bound never doubles as the result
+  reserve, and no bound is derived from another's already-spent instant.
+
+  `grace_ms` is exactly `1..18_446_744_073_709_551_615`. Anything else —
+  including a float, a zero, a negative, or a value one above the range — is
+  `{:error, :invalid_cleanup_grace}` and reaches no callback.
+  """
+  @spec cancellation_bounds(term()) :: {:ok, map()} | {:error, :invalid_cleanup_grace}
+  def cancellation_bounds(grace_ms)
+      when is_integer(grace_ms) and grace_ms >= 1 and grace_ms <= @max_cleanup_grace_ms do
+    quarter = max(1, div(grace_ms + 3, 4))
+    observe = max(10_000, grace_ms + 2_000)
+    reserve = quarter + 2_000
+    terminal = max(10_000, reserve)
+
+    {:ok,
+     %{
+       executor_observe_ms: observe,
+       receipt_retention_ms: quarter,
+       execute_result_reserve_ms: reserve,
+       terminal_reserve_ms: terminal,
+       session_cache_ms: terminal,
+       cli_backstop_ms: observe + reserve + terminal
+     }}
+  end
+
+  def cancellation_bounds(_grace_ms), do: {:error, :invalid_cleanup_grace}
+
+  @doc """
+  ## Concept
+
+  Asks an executor to stop a job under the cleanup period the session committed.
+
+  ## Technical depth
+
+  This is the production cancellation entry. The observation bound is derived
+  from `grace_ms` by `cancellation_bounds/1` rather than from this runtime's
+  defensive constant, so a session that committed a long valid cleanup period is
+  observed for that period instead of being cut off and reported unproven.
+  `cancel/3` keeps ADR 0012's fixed defensive bound for a direct caller that has
+  no committed value; production coordination never selects it.
+
+  An invalid period is refused before the callback runs, because a bound that
+  cannot be computed is not a bound that may be guessed. Every other failure
+  reads exactly as it does through `cancel/3`: silence, a raise, an exit, or an
+  answer outside the two admitted shapes is `{:ok, :unconfirmed}`.
+  """
+  @spec cancel(module(), term(), binary(), term()) ::
+          {:ok, :cleaned} | {:ok, :unconfirmed} | {:error, :invalid_cleanup_grace}
+  def cancel(module, reference, job_id, grace_ms)
+      when is_atom(module) and is_binary(job_id) do
+    case cancellation_bounds(grace_ms) do
+      {:ok, %{executor_observe_ms: bound}} ->
+        if function_exported?(module, :cancel, 2) do
+          bounded_cancel(module, reference, job_id, bound)
+        else
+          {:ok, :unconfirmed}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -337,8 +425,6 @@ defmodule Loopex.Executor do
   period the hand did not actually use is exactly the false record reporting it
   is meant to prevent.
   """
-  @default_cleanup_grace_ms 5_000
-
   @spec default_cleanup_grace_ms() :: pos_integer()
   def default_cleanup_grace_ms, do: @default_cleanup_grace_ms
 
@@ -381,13 +467,31 @@ defmodule Loopex.Executor do
   """
   @spec job(map()) :: {:ok, job_request()} | {:error, term()}
   def job(fields) when is_map(fields) do
-    with true <- Map.keys(fields) |> Enum.sort() == Enum.sort(@job_fields),
-         :ok <- validate_job_fields(fields),
-         {:ok, bytes} <- canonical_bytes(fields) do
+    # Concept: a caller that named no cleanup period gets the one this port
+    # declares; every other semantic field must be supplied.
+    #
+    # Technical depth: ADR 0009 makes the cleanup grace a declared value with a
+    # default, and ADR 0016 makes that value part of the digested projection. A
+    # direct caller with no committed session value therefore digests the port's
+    # default rather than a missing member, while a session hands its own
+    # committed value and any change to it changes the digest. Derived members a
+    # caller hands back -- which is what rebuilding a job from another job's
+    # projection does -- are recomputed rather than trusted; any other extra key
+    # is an unknown field and refuses, so a misspelt semantic field cannot be
+    # silently dropped from what the digest covers.
+    fields = Map.put_new(fields, :cleanup_grace_ms, @default_cleanup_grace_ms)
+    semantic = Map.take(fields, @job_fields)
+
+    with true <- map_size(semantic) == length(@job_fields),
+         [] <- Map.keys(fields) -- (@job_fields ++ JobRequest.derived_fields()),
+         :ok <- validate_job_fields(semantic),
+         {:ok, bytes} <- canonical_bytes(semantic) do
       {:ok,
-       fields
+       JobRequest
+       |> struct!(semantic)
        |> Map.put(:canonical_request_bytes, bytes)
-       |> Map.put(:canonical_request_digest, digest(bytes))}
+       |> Map.put(:canonical_request_digest, digest(bytes))
+       |> Map.put(:effective_job_deadline, effective_job_deadline(semantic))}
     else
       _other -> {:error, :invalid_job_request}
     end
@@ -567,7 +671,8 @@ defmodule Loopex.Executor do
          idempotency_class: idempotency,
          fencing_token: fencing_token,
          artifact_policy: artifact_policy,
-         output_policy: output_policy
+         output_policy: output_policy,
+         cleanup_grace_ms: cleanup_grace_ms
        }) do
     identifiers = [
       job_id,
@@ -589,7 +694,9 @@ defmodule Loopex.Executor do
         executor_epoch >= 0 and is_integer(deadline) and deadline > 0 and
         is_integer(fencing_token) and fencing_token >= 0 and bounded_binary?(effect_class) and
         bounded_binary?(idempotency) and plain?(capabilities) and plain?(arguments) and
-        plain?(budgets) and plain?(artifact_policy) and plain?(output_policy)
+        plain?(budgets) and plain?(artifact_policy) and plain?(output_policy) and
+        is_integer(cleanup_grace_ms) and cleanup_grace_ms >= 1 and
+        cleanup_grace_ms <= @max_cleanup_grace_ms
 
     if valid, do: :ok, else: {:error, :invalid_job_request}
   end
@@ -601,6 +708,27 @@ defmodule Loopex.Executor do
     {:ok, :erlang.term_to_binary(ordered, [:deterministic])}
   rescue
     _error -> {:error, :invalid_job_request}
+  end
+
+  # Concept: the one wall-clock instant past which this job may not act, fixed
+  # when the job is built.
+  #
+  # Technical depth: ADR 0009 lets a request declare a wall-time ceiling beside
+  # its run deadline. The earlier of the two is the instant every later
+  # effect-authorizing transition compares current wall time against, and it is
+  # derived once so a later transition cannot refresh its own allowance by
+  # recomputing `now + budget`. It is deliberately outside the digested
+  # projection: the digest binds the declared budget and deadline, which are the
+  # facts an independent party can recompute, while this instant depends on when
+  # the job was built.
+  defp effective_job_deadline(%{run_deadline: deadline, resource_budgets: budgets}) do
+    case budgets do
+      %{"max_wall_time_ms" => budget} when is_integer(budget) and budget > 0 ->
+        min(deadline, System.system_time(:millisecond) + budget)
+
+      _no_declared_ceiling ->
+        deadline
+    end
   end
 
   defp digest(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
