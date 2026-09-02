@@ -1211,7 +1211,7 @@ defmodule LoopexCliTest do
     end
   end
 
-  test "loopex artifact retrieves a spilled artifact by its opaque reference" do
+  test "loopex artifact retrieves spilled bytes by the object locator carried in its compact reference" do
     {state_root, _workspace} = roots()
     {:ok, store} = LoopexComposition.artifacts(state_root)
 
@@ -2353,7 +2353,7 @@ defmodule LoopexCliTest do
     assert ProgressConsumer.status(bad_tools, "tool-bad") == :invalid
   end
 
-  test "the base context budget measures the exact system and tool bytes the runtime stages" do
+  test "the runtime measures exact staged system and tool bytes while the provider facing base stays under one thousand tokens" do
     definitions = Loopex.Executor.Local.CodingTools.definitions()
     assert length(definitions) == 4
 

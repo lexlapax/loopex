@@ -54,7 +54,7 @@ belongs to under
 | Model port | `Loopex.Model` behaviour, request and reply shapes, delta contract | 2, public protocol semantics | Unstable |
 | Executor port | `Loopex.Executor` behaviour, job, grant, receipt, `cancel/2` | 3, executor protocol | Unstable |
 | Policy port | `Loopex.Policy` behaviour, request, context, refusal categories | 2, public protocol semantics | Unstable |
-| Artifact-store port | `Loopex.ArtifactStore` behaviour and `artifact_reference` | 6, artifact formats | Unstable |
+| Artifact-store port | `Loopex.ArtifactStore` object/use behaviour and eight-member `artifact_reference` | 6, artifact formats | Unstable |
 | Durable record shapes | committed record kinds, replayed by `Loopex.Runtime.SessionState` | 1, private journal and store schema | Unstable, and changed in M2 |
 | Public event shapes | `Loopex.attach/3`, `Loopex.next_event/1` | 2, public protocol | Unstable |
 | Tool definition contract | `LoopexProtocol.ToolDefinition`, `LoopexProtocol.Canonical` | 2 and 3 | Unstable, new in M2 |
@@ -71,10 +71,16 @@ so nothing has welded two surfaces together by shipping them in one artifact.
 `resume_session/3`, `resume_known_session/4`, `attach/3`, `command/2`,
 `next_event/1`, `snapshot/1`, `attachment_status/1`, `progress/2`,
 `diagnostic/2`, `session_status/2`, `reconciliation_query/1`, `reconcile/2`,
-`state_root/0`, `runtime_placement_id/1`, `track_session/3`, `list_sessions/1`,
-and `version/0`. The runtime start options are part of this surface, including
+`prepare_resume_session/3`, `prepare_resume_known_session/4`,
+`activate_resume/1`, `abandon_resume/1`, `state_root/0`,
+`runtime_placement_id/1`, `track_session/3`, `list_sessions/1`, and `version/0`.
+Prepared resume entries return an opaque one-use activation capability; neither
+preparation nor handler installation schedules recovered work. The runtime
+start options are part of this surface, including
 `:tools`, `:active_tools`, `:policy`, `:bounds`, `:sampling`, `:progress_to`,
-`:diagnostics_to`, and `:cleanup_grace_ms`.
+`:diagnostics_to`, `:cleanup_grace_ms`, and the required positive
+`:context_token_budget`. Direct Runtime callers choose that context value;
+Runtime supplies no default.
 
 **Ports.** Core declares exactly five behaviours: `Loopex.Store`,
 `Loopex.Model`, `Loopex.Executor`, `Loopex.Policy`, and
@@ -91,15 +97,28 @@ it does not restore conformance to an implementation that omits the callback. An
 implementation of any port is written against bytes that may change in the next
 milestone.
 
-The shipped local executor gains two start options, `cleanup_grace_ms` and
-`process_probe`, each readable back from the running executor and recorded on
-every receipt it retains. `process_probe` is the local executor's own
-configuration and defaults to `/bin/ps`. `cleanup_grace_ms` is not: ADR 0009
-makes the cleanup period a declared *session* configuration value, so the
-default lives on the port as `Loopex.Executor.default_cleanup_grace_ms/0` and the
-session declares it. `LoopexComposition.start/1` hands one number to both, which
-is what stops a run's terminal naming a period its cleanup did not run under. An
-embedder that passes neither behaves exactly as before.
+The shipped local executor's `process_probe` start option is edge configuration,
+defaults to `/bin/ps`, and is recorded on receipts that use it. The cleanup
+period is different: the session commits it, every job and terminal carries it,
+and `Loopex.Executor.cancellation_bounds/1` derives each production observation
+window from it. `Loopex.Executor.cancel/4` applies that configured observation
+around required callback `cancel/2`; retained `cancel/3` is a defensive legacy
+entry and production coordination never selects it. Local's
+`prepare_placement/3` prepares the durable ledger generation under the same
+committed value before effect authority exists. These additions are source and
+behaviour changes to direct integrations even though every surface remains
+unreleased.
+
+**Artifact object and use identity.** The adapter callbacks are `put/3`,
+`fetch/2`, `stat/2`, and `describe/2`. Core owns the caller-facing
+`Loopex.ArtifactStore` facade, computes and validates the object and immutable
+use identities, and exposes locator-only `retrieve/2`; runtime, command, and
+embedders do not call a concrete adapter. The compact reference has eight
+members: object digest, size, and locator; media type and role; and use
+canonicalization version, digest, and digest-derived locator. The exact five
+provenance labels remain private behind `describe/2`. This breaks every caller
+or adapter written against M2's earlier five-member reference or three-callback
+shape; no compatibility decoder reconstructs missing use truth.
 
 `Loopex.Executor`'s job request gains one declared budget,
 `resource_budgets["max_wall_time_ms"]`, beside the output ceiling already there.
@@ -158,17 +177,24 @@ measurements do not otherwise know is measured by encoding it, so an unbounded
 integer no longer measures as nothing. Both are behaviour changes for an adapter
 that compiles unchanged, and the shipped adapter already emitted complete deltas.
 
-**Durable records.** The committed record kinds are `session_genesis`,
-`owner_advanced`, `command_admitted`, `model_request_committed`,
-`model_result_committed`, `model_attempt_evidence_retained`,
-`model_attempt_abandoned`,
-`effect_intent_committed`, `executor_receipt_committed`,
-`tool_result_committed`, `outcome_unknown_committed`, and
-`run_terminal_committed`. Their payloads carry
-the M2 loop's new content — projected conversation elements, staged request
-bytes and their `staged_request_digest`, generation triples, declared bounds and
-charged tokens, denials, and terminal detail. This is the surface an M1-era data
-root fails on.
+**Durable records.** M2's session schema includes `session_genesis_v2`,
+`owner_advanced`, `prompt_admitted_v2`, the other input-command admissions and
+`command_admission_refused_v1`, `model_request_committed`,
+`model_attempt_opened_v1`, `model_termination_admitted_v1`,
+`model_attempt_settled_v1`, `context_admission_refused_v1`,
+`deadline_staging_failed_v1`, `effect_intent_committed`,
+`executor_receipt_committed`, `tool_result_committed`,
+`outcome_unknown_committed`, and `run_terminal_committed`. The model-attempt
+records replace the earlier `model_result_committed`,
+`model_attempt_evidence_retained`, and `model_attempt_abandoned` vocabulary:
+opening identifies one permitted attempt, settlement atomically carries bounded
+result, accounting, conversation disposition, and next action, and only exact
+pretransport refusal permits attempt two. The payloads also carry projected
+conversation elements, staged request bytes and digest, tool generations,
+context and Store-admission observations, declared bounds, cleanup truth,
+denials, and terminal detail. The Local executor's generation, admission, open,
+refusal, and receipt ledgers and ArtifactStore object/use records are separate
+kind-owned durability domains. This is the surface an M1-era data root fails on.
 
 **Public events.** The event kinds are `user.message_appended`, `run.started`,
 `assistant.message_appended`, `tool.started`, `tool.finished`, `run.finished`,
@@ -192,11 +218,14 @@ breaking change to every retained digest. See
 
 **Reference composition.** `LoopexComposition.start/1` requires `:runtime_id`,
 `:state_root`, `:workspace`, and `:policy`, and accepts `:progress_to`,
-`:diagnostics_to`, and `:cleanup_grace_ms`; it passes `:project_manifest` and
-`:project_decision` through to the runtime, and hands `:cleanup_grace_ms` to the
-session and the executor together so a run's ending cannot report a period its
-cleanup did not run under. `:process_probe` reaches the executor alone, which is
-where that option belongs. It names four concrete implementations, so an embedder that
+`:diagnostics_to`, `:cleanup_grace_ms`, and `:context_token_budget`; omission of
+the context option selects the reference policy default of 8,192, while an
+explicit valid value is forwarded unchanged as the required top-level Runtime
+option. It passes `:project_manifest` and `:project_decision` through to the
+runtime, and hands `:cleanup_grace_ms` to the session and the executor together
+so a run's ending cannot report a period its cleanup did not run under.
+`:process_probe` reaches the executor alone, which is where that option belongs.
+It names four concrete implementations, so an embedder that
 depends on it transitively acquires the reference adapters and their external
 dependency whether or not every one is used. An embedder who wants a different
 Store, Model, Executor, or ArtifactStore composes the ports and the `Loopex`
@@ -205,7 +234,16 @@ facade directly instead. See
 
 **Operator command.** `loopex run`, `sessions`, `resume`, `cancel`, and
 `artifact`, with the flags `--policy`, `--state-root`, `--workspace`,
-`--steer`, `--follow-up`, and `--cleanup-grace-ms`. An unrecognised flag is refused rather than
+`--steer`, `--follow-up`, `--cleanup-grace-ms`, and
+`--context-token-budget`. The reference command defaults a new prompt's context
+value to 8,192; prepared `resume` and `cancel` recover an active run's committed
+value on omission and refuse an explicit conflict before activation or abort.
+The command's cross-application interrupt entries are `install/1`,
+`install/2`, `install_prepared(attachment, cleanup_ms, activation)`, and
+`abandon_resume(attachment, activation)`. Prepared installation binds the
+handler to the attachment and the exact one-use capability; abandonment consumes
+that same pair without scheduling recovered work.
+An unrecognised flag is refused rather than
 ignored, which means adding a flag is observable and removing one is breaking.
 `loopex artifact` reads objects through the `Loopex.ArtifactStore` port, so the
 subcommand follows whatever artifact store a composition supplies rather than

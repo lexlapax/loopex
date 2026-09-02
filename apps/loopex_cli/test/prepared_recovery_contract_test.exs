@@ -1,0 +1,900 @@
+Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
+Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+
+defmodule LoopexCli.PreparedRecoveryContractTest do
+  @moduledoc false
+
+  use ExUnit.Case, async: false
+
+  import ExUnit.CaptureIO
+
+  alias Loopex.M1RuntimeTestStore
+  alias Loopex.Executor.Local
+  alias LoopexCli.Interrupt
+  alias LoopexCli.Placement
+  alias LoopexCli.Render
+
+  @grace 7_311
+
+  setup do
+    on_exit(fn ->
+      _ = :gen_event.delete_handler(:erl_signal_server, Interrupt, [])
+      _ = :gen_event.add_handler(:erl_signal_server, :erl_signal_handler, [])
+      _ = LoopexCli.release_placement()
+    end)
+
+    :ok
+  end
+
+  test "an active recovered run stays paused until one-use activation and propagates cleanup" do
+    fixture =
+      recovered_fixture("activation", :active,
+        script: [
+          %{text: "", hold: self(), hold_timeout_ms: 30_000},
+          %{
+            text: "",
+            calls: [
+              %{id: "recovered-call", name: "write", arguments: %{"path" => "recovered.txt"}}
+            ]
+          },
+          %{text: "recovered active run", calls: []}
+        ],
+        tools: [Loopex.AgentLoopFixture.tool_definition()]
+      )
+
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-once"
+             ])
+
+    Process.sleep(100)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+
+    assert {:ok, fixture.session_id} == invoke(Loopex, :activate_resume, [activation])
+    assert_refused(invoke(Loopex, :activate_resume, [activation]))
+
+    {:ok, resumed} = Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+    drain(resumed)
+
+    assert [job] = Loopex.AgentLoopTestExecutor.jobs(fixture.executor)
+    assert Map.fetch(job, :cleanup_grace_ms) == {:ok, @grace}
+
+    assert {:ok, %{cleanup_grace_ms: @grace, active_run_id: nil}} =
+             Loopex.session_status(fixture.runtime, fixture.session_id)
+  end
+
+  test "abandonment of an active prepared owner prevents activation and dispatch" do
+    fixture = recovered_fixture("abandon", :active)
+
+    assert {:ok, {:prepared, abandoned}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-abandon"
+             ])
+
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert :ok = invoke(Loopex, :abandon_resume, [abandoned])
+    assert_refused(invoke(Loopex, :activate_resume, [abandoned]))
+    Process.sleep(100)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  test "a preparer that dies before holder transfer cannot leave an activatable owner" do
+    fixture = recovered_fixture("preparer-death", :active)
+    parent = self()
+
+    {preparer, monitor} =
+      spawn_monitor(fn ->
+        send(
+          parent,
+          {:prepared_by_short_lived_owner,
+           invoke(Loopex, :prepare_resume_known_session, [
+             fixture.state_root,
+             fixture.runtime,
+             fixture.session_id,
+             "prepare-short-lived"
+           ])}
+        )
+      end)
+
+    assert_receive {:prepared_by_short_lived_owner, preparation}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, ^preparer, :normal}, 1_000
+    assert {:ok, {:prepared, activation}} = preparation
+    assert_refused(invoke(Loopex, :activate_resume, [activation]))
+    Process.sleep(100)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  test "prepared interrupt transfer survives preparer death and an abort wins before dispatch" do
+    fixture = recovered_fixture("prepared-interrupt", :active)
+    parent = self()
+
+    {preparer, monitor} =
+      spawn_monitor(fn ->
+        result =
+          with {:ok, {:prepared, activation}} <-
+                 invoke(Loopex, :prepare_resume_known_session, [
+                   fixture.state_root,
+                   fixture.runtime,
+                   fixture.session_id,
+                   "prepare-interrupt"
+                 ]),
+               :ok <-
+                 invoke(Interrupt, :install_prepared, [
+                   fixture.attachment,
+                   @grace,
+                   activation
+                 ]) do
+            {:ok, activation}
+          end
+
+        send(parent, {:prepared_interrupt_installed, result})
+      end)
+
+    assert_receive {:prepared_interrupt_installed, installation}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, ^preparer, :normal}, 1_000
+    assert {:ok, activation} = installation
+    assert_refused(invoke(Loopex, :activate_resume, [activation]))
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    :gen_event.notify(:erl_signal_server, :sigterm)
+    assert run_terminal(fixture, 10_000)["outcome"] in ["cancelled", "outcome_unknown"]
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert_refused(invoke(Loopex, :activate_resume, [activation]))
+  end
+
+  test "the prepared interrupt owner can abandon its capability without activating work" do
+    fixture = recovered_fixture("interrupt-abandon", :active)
+
+    assert {:ok, {:prepared, abandoned}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-abandon"
+             ])
+
+    assert :ok =
+             invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, abandoned])
+
+    assert :ok = invoke(Interrupt, :abandon_resume, [fixture.attachment, abandoned])
+    assert_refused(invoke(Loopex, :activate_resume, [abandoned]))
+    Process.sleep(100)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  test "commit unknown abort admission permanently fences prepared activation without dispatch" do
+    fixture = recovered_fixture("prepared-commit-unknown", :active)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-commit-unknown"
+             ])
+
+    assert :ok =
+             invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
+
+    :ok =
+      M1RuntimeTestStore.inject(
+        fixture.store_pid,
+        {:session_journal_commit, :after_linearization_before_result}
+      )
+
+    :gen_event.notify(:erl_signal_server, :sigterm)
+
+    assert wait_for_record(fixture, "command_admitted"),
+           "the abort did not reach its durable command admission boundary"
+
+    Process.sleep(100)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert_refused(invoke(Loopex, :activate_resume, [activation]))
+  end
+
+  test "resume omission recovers the committed cleanup period before active work resumes" do
+    fixture = recovered_fixture("cli-omission", :active)
+    parent = self()
+    stop_runtime(fixture.runtime)
+
+    fresh_runtime_options =
+      Keyword.put(fixture.runtime_options, :cleanup_grace_ms, @grace + 1)
+
+    starter = fn options ->
+      send(parent, {:runtime_start_options, options})
+
+      case Loopex.start_link(fresh_runtime_options) do
+        {:ok, runtime} = started ->
+          send(parent, {:fresh_recovery_runtime, runtime})
+          started
+
+        error ->
+          error
+      end
+    end
+
+    output =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch(
+                   [
+                     "resume",
+                     fixture.session_id,
+                     "--policy",
+                     "allow-all",
+                     "--state-root",
+                     fixture.state_root,
+                     "--workspace",
+                     fixture.workspace
+                   ],
+                   runtime_starter: starter
+                 )
+      end)
+
+    assert output =~ "prepared recovery contract"
+    assert_receive {:runtime_start_options, omitted_options}
+    refute Keyword.has_key?(omitted_options, :cleanup_grace_ms)
+    assert_receive {:fresh_recovery_runtime, fresh_runtime}
+    refute fresh_runtime == fixture.runtime
+
+    assert {:ok, %{cleanup_grace_ms: @grace}} =
+             Loopex.session_status(fresh_runtime, fixture.session_id)
+  end
+
+  test "resume and cancel cleanup mismatches abandon their prepared owner without manual release" do
+    for command <- ["resume", "cancel"] do
+      fixture = recovered_fixture("#{command}-mismatch", :active)
+
+      starter = fn options ->
+        send(self(), {:runtime_start_options, command, options})
+        {:ok, fixture.runtime}
+      end
+
+      arguments =
+        [command, fixture.session_id] ++
+          if(command == "resume", do: ["--policy", "allow-all"], else: []) ++
+          [
+            "--state-root",
+            fixture.state_root,
+            "--workspace",
+            fixture.workspace,
+            "--cleanup-grace-ms",
+            Integer.to_string(@grace + 1)
+          ]
+
+      assert {:error, conflict} = LoopexCli.dispatch(arguments, runtime_starter: starter)
+
+      assert inspect(conflict) =~ "cleanup"
+      assert_receive {:runtime_start_options, ^command, conflict_options}
+      assert Keyword.fetch!(conflict_options, :cleanup_grace_ms) == @grace + 1
+      assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+      assert Placement.live_owner(fixture.state_root) == :none
+
+      assert {:ok, {:prepared, replacement}} =
+               invoke(Loopex, :prepare_resume_known_session, [
+                 fixture.state_root,
+                 fixture.runtime,
+                 fixture.session_id,
+                 "prepare-after-#{command}-mismatch"
+               ])
+
+      assert :ok = invoke(Loopex, :abandon_resume, [replacement])
+    end
+  end
+
+  test "explicit cancel recovers the committed cleanup bound and aborts while work stays paused" do
+    fixture = recovered_fixture("explicit-cancel", :active)
+
+    starter = fn options ->
+      send(self(), {:cancel_runtime_start_options, options})
+      {:ok, fixture.runtime}
+    end
+
+    result =
+      capture_io(:stderr, fn ->
+        send(
+          self(),
+          {:explicit_cancel_result,
+           LoopexCli.dispatch(
+             [
+               "cancel",
+               fixture.session_id,
+               "--state-root",
+               fixture.state_root,
+               "--workspace",
+               fixture.workspace
+             ],
+             runtime_starter: starter
+           )}
+        )
+      end)
+
+    assert_received {:explicit_cancel_result, :ok}
+    assert result =~ "cancelled" or result =~ "outcome is unknown"
+    assert_receive {:cancel_runtime_start_options, options}
+    refute Keyword.has_key?(options, :cleanup_grace_ms)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    finished = run_terminal(fixture, 10_000)
+    assert finished["outcome"] in ["cancelled", "outcome_unknown"]
+    assert finished["cleanup_grace_ms"] == @grace
+  end
+
+  test "configured interrupt joins concurrent signals under one abort identity and bound" do
+    fixture = recovered_fixture("configured-signal", :running)
+
+    :ok =
+      M1RuntimeTestStore.hold_next_record_before_linearization(
+        fixture.store_pid,
+        "command_admitted",
+        self()
+      )
+
+    assert :ok = invoke(Interrupt, :install, [fixture.attachment, @grace])
+    assert Interrupt in :gen_event.which_handlers(:erl_signal_server)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    :gen_event.notify(:erl_signal_server, :sigterm)
+    :gen_event.notify(:erl_signal_server, {:sigterm, self()})
+    store_pid = fixture.store_pid
+
+    assert_receive {:record_held_before_linearization, waiter, ^store_pid, "command_admitted",
+                    held_transaction},
+                   5_000
+
+    held_interrupt_ids =
+      held_transaction.records
+      |> Enum.filter(fn record ->
+        payload = Map.get(record, :payload, record)
+
+        (payload[:kind] || payload["kind"]) == "command_admitted" and
+          String.starts_with?(payload["command_id"] || "", "interrupt-")
+      end)
+      |> Enum.map(fn record -> Map.get(record, :payload, record)["command_id"] end)
+
+    assert [_one_interrupt_id] = held_interrupt_ids
+
+    :gen_event.notify(:erl_signal_server, :sigterm)
+    Process.sleep(100)
+
+    refute wait_for_record(fixture, "command_admitted", 1),
+           "a concurrent signal started another admission while the first was blocked"
+
+    M1RuntimeTestStore.release(waiter)
+
+    finished = run_terminal(fixture, 10_000)
+    assert finished["outcome"] in ["cancelled", "outcome_unknown"]
+    assert finished["cleanup_grace_ms"] == @grace
+
+    interrupt_admissions =
+      fixture
+      |> records()
+      |> Enum.filter(fn record ->
+        record.payload[:kind] == "command_admitted" and
+          String.starts_with?(record.payload["command_id"] || "", "interrupt-")
+      end)
+
+    assert [admission] = interrupt_admissions
+    assert finished["command_id"] == admission.payload["command_id"]
+  end
+
+  test "a configured signal before any prompt dispatches no work and legacy install remains available" do
+    fixture = recovered_fixture("pre-prompt-signal", :idle)
+
+    assert :ok = Interrupt.install(fixture.attachment)
+    assert Interrupt in :gen_event.which_handlers(:erl_signal_server)
+    assert Interrupt.signals() == [:sigterm, :sighup, :sigquit]
+    assert Interrupt.grace_ms() == 10_000
+
+    assert :ok = invoke(Interrupt, :install, [fixture.attachment, @grace])
+    :gen_event.notify(:erl_signal_server, :sigterm)
+    Process.sleep(100)
+    assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+
+    prompt_id = "prompt-after-refused-interrupt"
+
+    assert {:accepted, ^prompt_id} =
+             Loopex.command(fixture.attachment, %{
+               type: :prompt,
+               command_id: prompt_id,
+               content: "prepared recovery contract"
+             })
+
+    drain(fixture.attachment)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  test "prepared recovery and separately prepared Local authority stay out of durable and rendered planes" do
+    fixture =
+      recovered_fixture("security-plane", :active,
+        progress_to: self(),
+        script: [
+          %{text: "", hold: self(), hold_timeout_ms: 30_000},
+          %{text: "public security-plane output", calls: []}
+        ]
+      )
+
+    local_root = Path.join(fixture.state_root, "private-local-ledger")
+
+    assert {:ok, prepared_local} =
+             invoke(Local, :prepare_placement, [local_root, "security-plane-local", @grace])
+
+    generation = local_generation_record!(local_root)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-security-plane"
+             ])
+
+    assert {:ok, fixture.session_id} == invoke(Loopex, :activate_resume, [activation])
+    activation_reuse = invoke(Loopex, :activate_resume, [activation])
+    assert {:error, _reason} = activation_reuse
+
+    terminal = run_terminal(fixture, 10_000)
+    assert terminal["outcome"] == "completed"
+    assert {:ok, status} = Loopex.session_status(fixture.runtime, fixture.session_id)
+
+    {:ok, event_attachment} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    events = collect_terminal_events(event_attachment)
+    progress = collect_security_progress()
+
+    {:ok, render_attachment} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    parent = self()
+
+    stdout =
+      capture_io(fn ->
+        stderr =
+          capture_io(:stderr, fn ->
+            assert :ok = Render.stream(render_attachment, idle_limit_ms: 1_000)
+          end)
+
+        send(parent, {:security_plane_stderr, stderr})
+      end)
+
+    assert_receive {:security_plane_stderr, stderr}
+    assert stdout =~ "public security-plane output"
+
+    planes = %{
+      durable_records: records(fixture),
+      public_events: events,
+      progress: progress,
+      diagnostic: activation_reuse,
+      terminal: terminal,
+      session_status: status,
+      printable_command_output: {stdout, stderr}
+    }
+
+    # Concept: this fixture's model is a scripted in-process double, so a
+    # provider credential set in the environment is never read and could not
+    # reach a plane. Asserting it here would refute a leak the fixture cannot
+    # produce. The genuine credential planes are proved where a credential-shaped
+    # value actually enters: the raw-provider-error cases in this file and in
+    # `provider_attempt_protocol_test.exs`.
+    forbidden_binaries = [
+      local_root,
+      generation["generation_id"],
+      generation["root_binding"]
+    ]
+
+    for {plane, projection} <- planes do
+      rendered = inspect(projection, limit: :infinity, printable_limit: :infinity)
+
+      for forbidden <- forbidden_binaries do
+        refute String.contains?(rendered, forbidden),
+               "#{plane} exposed private cancellation authority #{inspect(forbidden)}"
+      end
+
+      refute contains_exact_term?(projection, prepared_local),
+             "#{plane} exposed the prepared Local publication authority"
+
+      refute contains_exact_term?(projection, activation),
+             "#{plane} exposed the prepared recovery activation capability"
+
+      refute contains_private_runtime_term?(projection),
+             "#{plane} exposed a pid, monitor/reference, port, or function"
+
+      refute contains_private_security_key?(projection),
+             "#{plane} exposed a nonce, monitor, root binding, activation, or publication key"
+    end
+  end
+
+  test "the operator renderer emits only a generic failure for a credential shaped raw provider error" do
+    secret = "renderer-provider-secret-#{System.unique_integer([:positive])}"
+
+    fixture =
+      recovered_fixture("raw-error-renderer", :idle,
+        script: [%{raw_result: {:error, {:provider_credential, secret}}}]
+      )
+
+    assert {:accepted, "render-raw-error"} =
+             Loopex.command(fixture.attachment, %{
+               type: :prompt,
+               command_id: "render-raw-error",
+               content: "render only bounded provider failure"
+             })
+
+    parent = self()
+
+    stdout =
+      capture_io(fn ->
+        stderr =
+          capture_io(:stderr, fn ->
+            assert :ok = Render.stream(fixture.attachment, idle_limit_ms: 1_000)
+          end)
+
+        send(parent, {:raw_error_renderer_stderr, stderr})
+      end)
+
+    assert_receive {:raw_error_renderer_stderr, stderr}
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert stdout =~ "render only bounded provider failure"
+    assert stderr =~ "model_call_failed"
+    refute stdout =~ secret
+    refute stderr =~ secret
+    refute inspect(records(fixture), limit: :infinity, printable_limit: :infinity) =~ secret
+  end
+
+  defp recovered_fixture(label, phase, options \\ []) do
+    unique = System.unique_integer([:positive])
+    state_root = Path.join(System.tmp_dir!(), "loopex-a4-cli-state-#{label}-#{unique}")
+    workspace = Path.join(System.tmp_dir!(), "loopex-a4-cli-workspace-#{label}-#{unique}")
+    File.mkdir_p!(state_root)
+    File.mkdir_p!(workspace)
+
+    on_exit(fn ->
+      File.rm_rf(state_root)
+      File.rm_rf(workspace)
+    end)
+
+    {:ok, placement} = Loopex.runtime_placement_id(state_root)
+
+    default_script =
+      case phase do
+        phase when phase in [:active, :running] ->
+          [
+            %{text: "", hold: self(), hold_timeout_ms: 30_000},
+            %{text: "prepared recovery contract", calls: []}
+          ]
+
+        :idle ->
+          [%{text: "prepared recovery contract", calls: []}]
+      end
+
+    script = Keyword.get(options, :script, default_script)
+    tools = Keyword.get(options, :tools, [])
+    model = Loopex.AgentLoopTestModel.start(script)
+    executor = Loopex.AgentLoopTestExecutor.start()
+    {store_pid, store} = M1RuntimeTestStore.start_store(label: "prepared-recovery")
+
+    runtime_options =
+      [
+        runtime_id: placement,
+        store: store,
+        model: %{
+          module: Loopex.AgentLoopTestModel,
+          model: "scripted:v1",
+          options: [script: model, max_tokens: 256]
+        },
+        executor: %{
+          module: Loopex.AgentLoopTestExecutor,
+          reference: executor,
+          identity: "prepared-recovery-executor",
+          epoch: 1,
+          fencing_token: 1,
+          workspace_ref: "prepared-workspace",
+          workspace_lease: "prepared-lease"
+        },
+        tools: tools,
+        active_tools: Enum.map(tools, &Map.fetch!(&1, "tool_id")),
+        policy: Loopex.AgentLoopTestPolicy,
+        grant_decision: {:host_policy, :allow},
+        cleanup_grace_ms: @grace,
+        progress_to: Keyword.get(options, :progress_to)
+      ]
+
+    {:ok, runtime} = Loopex.start_link(runtime_options)
+
+    on_exit(fn ->
+      stop_runtime(runtime)
+      stop(executor)
+      stop(model)
+      stop(store_pid)
+    end)
+
+    {:ok, session_id} =
+      Loopex.create_session(runtime, %{"surface" => "prepared-recovery"},
+        command_id: "create-#{unique}"
+      )
+
+    {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
+
+    held_worker =
+      if phase in [:active, :running] do
+        prompt_id = "prompt-#{unique}"
+
+        assert {:accepted, ^prompt_id} =
+                 Loopex.command(attachment, %{
+                   type: :prompt,
+                   command_id: prompt_id,
+                   content: "prepared recovery contract"
+                 })
+
+        assert_receive {:holding, worker}, 5_000
+        worker
+      end
+
+    :ok = Loopex.track_session(state_root, session_id, placement)
+
+    if phase == :active do
+      coordinator = coordinator_of(runtime)
+      monitor = Process.monitor(coordinator)
+      Process.exit(coordinator, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^coordinator, _reason}, 5_000
+    end
+
+    if is_pid(held_worker) do
+      on_exit(fn -> send(held_worker, :release) end)
+    end
+
+    %{
+      runtime: runtime,
+      state_root: state_root,
+      workspace: workspace,
+      session_id: session_id,
+      attachment: attachment,
+      model: model,
+      executor: executor,
+      runtime_options: runtime_options,
+      store_pid: store_pid,
+      held_worker: held_worker
+    }
+  end
+
+  defp drain(attachment, attempts \\ 1_000)
+  defp drain(_attachment, 0), do: flunk("the preparation fixture did not finish its run")
+
+  defp drain(attachment, attempts) do
+    case Loopex.next_event(attachment) do
+      {:ok, %{kind: "run.finished"}} ->
+        :ok
+
+      {:ok, _event} ->
+        drain(attachment, attempts - 1)
+
+      _empty ->
+        Process.sleep(5)
+        drain(attachment, attempts - 1)
+    end
+  end
+
+  defp run_terminal(fixture, timeout_ms) do
+    {:ok, attachment} =
+      Loopex.attach(fixture.runtime, fixture.session_id, after_event_sequence: 0)
+
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    await_terminal(attachment, deadline)
+  end
+
+  defp await_terminal(attachment, deadline) do
+    case Loopex.next_event(attachment) do
+      {:ok, %{kind: "run.finished"} = event} ->
+        event
+
+      {:ok, _event} ->
+        await_terminal(attachment, deadline)
+
+      _empty ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          flunk("the prepared recovery fixture did not publish run.finished")
+        else
+          Process.sleep(5)
+          await_terminal(attachment, deadline)
+        end
+    end
+  end
+
+  defp records(fixture) do
+    fixture.store_pid
+    |> M1RuntimeTestStore.inspect_state()
+    |> get_in([:sessions, fixture.session_id, :records])
+  end
+
+  defp wait_for_record(fixture, kind, attempts \\ 200)
+  defp wait_for_record(_fixture, _kind, 0), do: false
+
+  defp wait_for_record(fixture, kind, attempts) do
+    if Enum.any?(records(fixture), &(&1.payload[:kind] == kind)) do
+      true
+    else
+      Process.sleep(10)
+      wait_for_record(fixture, kind, attempts - 1)
+    end
+  end
+
+  defp collect_terminal_events(attachment, acc \\ [], attempts \\ 1_000)
+
+  defp collect_terminal_events(_attachment, _acc, 0),
+    do: flunk("the security-plane inventory did not reach its durable terminal")
+
+  defp collect_terminal_events(attachment, acc, attempts) do
+    case Loopex.next_event(attachment) do
+      {:ok, %{kind: "run.finished"} = event} ->
+        Enum.reverse([event | acc])
+
+      {:ok, event} ->
+        collect_terminal_events(attachment, [event | acc], attempts - 1)
+
+      _absent ->
+        Process.sleep(5)
+        collect_terminal_events(attachment, acc, attempts - 1)
+    end
+  end
+
+  defp collect_security_progress(acc \\ []) do
+    receive do
+      {:loopex_progress, item} -> collect_security_progress([item | acc])
+      {:loopex_progress, _session_id, item} -> collect_security_progress([item | acc])
+    after
+      50 -> Enum.reverse(acc)
+    end
+  end
+
+  defp local_generation_record!(root) do
+    root
+    |> Path.join("**/*")
+    |> Path.wildcard(match_dot: true)
+    |> Enum.find_value(fn path ->
+      with {:ok, bytes} <- File.read(path),
+           record when is_map(record) <- safe_decode(bytes),
+           "local_executor_generation_v1" <- Map.get(record, :ledger_kind) do
+        record
+      else
+        _other -> nil
+      end
+    end)
+    |> case do
+      nil -> flunk("the prepared Local root has no generation authority")
+      record -> record
+    end
+  end
+
+  defp safe_decode(bytes) do
+    :erlang.binary_to_term(bytes, [:safe])
+  rescue
+    _error -> :invalid
+  end
+
+  defp contains_exact_term?(term, forbidden) when term === forbidden, do: true
+
+  defp contains_exact_term?(term, forbidden) when is_map(term) do
+    Enum.any?(term, fn {key, value} ->
+      contains_exact_term?(key, forbidden) or contains_exact_term?(value, forbidden)
+    end)
+  end
+
+  defp contains_exact_term?(term, forbidden) when is_list(term),
+    do: Enum.any?(term, &contains_exact_term?(&1, forbidden))
+
+  defp contains_exact_term?(term, forbidden) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.any?(&contains_exact_term?(&1, forbidden))
+
+  defp contains_exact_term?(_term, _forbidden), do: false
+
+  defp contains_private_runtime_term?(term)
+       when is_pid(term) or is_reference(term) or is_port(term) or is_function(term),
+       do: true
+
+  defp contains_private_runtime_term?(term) when is_map(term) do
+    Enum.any?(term, fn {key, value} ->
+      contains_private_runtime_term?(key) or contains_private_runtime_term?(value)
+    end)
+  end
+
+  defp contains_private_runtime_term?(term) when is_list(term),
+    do: Enum.any?(term, &contains_private_runtime_term?/1)
+
+  defp contains_private_runtime_term?(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.any?(&contains_private_runtime_term?/1)
+
+  defp contains_private_runtime_term?(_term), do: false
+
+  defp contains_private_security_key?(term) when is_map(term) do
+    Enum.any?(term, fn {key, value} ->
+      private_security_key?(key) or contains_private_security_key?(value)
+    end)
+  end
+
+  defp contains_private_security_key?(term) when is_list(term),
+    do: Enum.any?(term, &contains_private_security_key?/1)
+
+  defp contains_private_security_key?(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.any?(&contains_private_security_key?/1)
+
+  defp contains_private_security_key?(_term), do: false
+
+  defp private_security_key?(key) when is_atom(key),
+    do: key |> Atom.to_string() |> private_security_key?()
+
+  defp private_security_key?(key) when is_binary(key) do
+    key in [
+      "activation",
+      "activation_capability",
+      "admission_nonce",
+      "claim_nonce",
+      "generation_id",
+      "monitor",
+      "owner_monitor",
+      "prepared_authority",
+      "prepared_placement",
+      "publication_authority",
+      "root_binding",
+      "root_claim_nonce"
+    ]
+  end
+
+  defp private_security_key?(_key), do: false
+
+  defp coordinator_of(runtime) do
+    {:ok, children} = Loopex.Runtime.Supervisor.children(runtime.supervisor)
+
+    [{_id, pid, _type, _modules} | _rest] =
+      DynamicSupervisor.which_children(children.sessions)
+
+    pid
+  end
+
+  defp stop_runtime(runtime) do
+    try do
+      Loopex.stop(runtime)
+    catch
+      :exit, _reason -> :ok
+    end
+  end
+
+  defp stop(pid) when is_pid(pid) do
+    if Process.alive?(pid) do
+      try do
+        GenServer.stop(pid, :normal, 1_000)
+      catch
+        :exit, _reason -> :ok
+      end
+    end
+  end
+
+  # Concept: a refusal is only evidence if the contract entry exists to refuse.
+  # `invoke/3` reports an absent entry as an ordinary error, so a bare
+  # `{:error, _}` here would be satisfied by the boundary simply not shipping.
+  defp assert_refused(result) do
+    assert {:error, reason} = result
+
+    refute match?({:contract_entry_missing, _module, _function, _arity}, reason),
+           "the contract entry is absent, so this refusal proves nothing: #{inspect(reason)}"
+
+    reason
+  end
+
+  defp invoke(module, function, arguments) do
+    if Code.ensure_loaded?(module) and function_exported?(module, function, length(arguments)) do
+      apply(module, function, arguments)
+    else
+      {:error, {:contract_entry_missing, module, function, length(arguments)}}
+    end
+  end
+end

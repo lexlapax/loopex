@@ -773,7 +773,12 @@ Its dispatch and evidence contract is selected by kind:
 - **Model call.** Binds the exact staged canonical request, adapter/model
   compatibility identity, continuation reference, cancellation class, and
   normalized completion/error evidence. A provider retry is a new recorded
-  attempt; an incomplete stream never becomes an assistant message.
+  attempt authorized only by durable exact pre-transport proof or a
+  provider-specific reconciliation result. A recovered open attempt is not
+  redispatch authority; without either proof it is dispatched-or-unknown,
+  receives the committed policy's conservative accounting, and ends without
+  another provider call. An incomplete stream never becomes an assistant
+  message.
 - **Executor effect.** Adds executor identity/epoch, workspace lease, host
   grant, fencing token, durable deduplication, retained receipt, and the full
   reconciliation contract below. Only effect attempts become
@@ -1454,12 +1459,15 @@ supervised work. It does not own:
 - persistence or public events;
 - authorization or credentials.
 
-Provider retries are session decisions. A model request may be retried before a
-complete assistant message is committed when the adapter and policy classify it
-safe, but the attempt uses the same staged request digest. Usage, latency, and
-possible provider-side duplication remain observable. Different context or a
-repeat after a complete assistant message commits is a new explicit operation,
-not a hidden retry.
+Provider retries are session decisions. A model request may be retried only
+after durable exact proof that transport was not invoked, or a future
+provider-specific reconciliation result proving retry safe. The retry is a new
+recorded attempt against the same staged request digest. A recovered open or
+otherwise unsettled attempt is dispatched-or-unknown for accounting and is not
+redispatched merely because the same bytes remain available. Usage, latency,
+and possible provider-side duplication remain observable. Different context or
+a repeat after a complete assistant message commits is a new explicit
+operation, not a hidden retry.
 
 Capability negotiation happens before request admission. The provider
 conformance suite proves:
@@ -1551,11 +1559,14 @@ The pipeline has five stages:
    revisions, provenance/trust classes, digests, budgets, model and continuation
    bindings, and the canonical request digest.
 
-Only after that transaction commits may the adapter receive the request. On
-recovery, Loopex dispatches the same staged payload; it never silently reruns
-retrieval or selection for an already-intended model call. A provider retry is
-a new recorded attempt against the same staged bytes. Preparing different
-context creates a new explicit model operation. A receipt is always an
+Only after that transaction commits may the adapter receive the request.
+Recovery reuses the staged payload only as the operation's exact identity; it
+never silently reruns retrieval or selection, and availability of those bytes
+does not authorize redispatch of an open or otherwise unsettled attempt. Only
+durable exact proof that transport was not invoked, or a future
+provider-specific reconciliation result proving retry safe, may authorize a new
+recorded attempt against the same staged bytes. Preparing different context
+creates a new explicit model operation. A receipt is always an
 auditable provenance record and is exactly reconstructable only while its
 inline bytes or immutable referenced artifacts remain retained. Inline bytes
 and referenced artifacts are pinned through the
@@ -2683,6 +2694,14 @@ The following should become named, continuously enforced properties:
 - Progress and diagnostics never become canonical public state.
 - Exact staged context and canonical model-request digest commit with the model
   intent before dispatch; recovery cannot silently rebuild different input.
+- Every provider attempt commits before provider dispatch and requires one
+  current-owner, one-use dispatch permit. Control's direct permit send is the
+  provider-dispatch linearization; later worker consumption executes only that
+  already-linearized authorization, and staged bytes alone grant no dispatch
+  authority.
+- Recovery never redispatches an open or otherwise unsettled provider attempt;
+  only durable exact pre-transport proof or provider-specific reconciliation
+  may authorize a new recorded attempt.
 - Injected blocks carry derived lineage and provenance typing to the provider
   payload and cannot bypass tool policy or grants.
 - Client disconnect never owns session lifecycle.
@@ -2834,6 +2853,7 @@ Concept: [Risks and countermeasures](vision.md#concept-vision-risks)
 | Global state makes embedding brittle | Runtime reference in every API; instance-scoped registries/configuration; the VM-global code manager is the explicit exception because it owns a VM-global resource. |
 | Provider churn shapes core | Canonical Loopex types; direct adapter seam; fake-adapter core build; tested dependency range. |
 | Provider-native data is lost | Opaque compatibility-bound continuation sidecar with switch tests. |
+| Provider recovery duplicates a billed call | Staged bytes remain identity rather than authority; a current-owner one-use permit fences dispatch; retry requires durable exact pre-transport proof or provider-specific reconciliation; ambiguity receives conservative accounting. |
 | Event sourcing becomes infrastructure theater | Journal only facts needed for recovery; small public vocabulary; progress and diagnostics stay separate. |
 | Store timeout duplicates effects | Three-state commit result, transaction ID resolution, fencing before dispatch. |
 | Remote effect runs twice | Stable IDs, attempts, durable receipts, idempotency classes, leases, fences, current reconciliation, immutable unknown. |
@@ -2913,7 +2933,9 @@ The following are project doctrine unless deliberately revised:
 25. VM-code commands, runtime commands, session commands, and attachment
     requests have distinct identity, durability, and replay semantics.
 26. A model call dispatches only the exact canonical context committed with its
-    operation intent; recovery never silently rebuilds different input.
+    operation intent; recovery never silently rebuilds different input, and
+    availability of those bytes never authorizes redispatch of an unsettled
+    attempt.
 
 <a id="technical-vision-open-questions"></a>
 ## 27. Open questions and decision triggers
@@ -2928,6 +2950,7 @@ Concept: [Open questions and decision triggers](vision.md#concept-vision-open-qu
 | Which durable store satisfies the runtime and journal contracts, and does a directly inspectable private adapter remain useful? | Before a durable service makes operational or compatibility claims. |
 | What exact JSON Schema subset covers tools, interactions, content, and extension envelopes? | Before public protocol fixtures become release candidates. |
 | What is the retention/encryption policy for provider continuation sidecars? | Before a persisted real-provider path is accepted. |
+| Which providers expose reconciliation strong enough to prove an unsettled request retry-safe? | Before provider-specific recovery is permitted to redispatch without durable exact pre-transport proof. |
 | Which sandbox backend is the first supported isolated hand? | Before claiming an OS isolation boundary. |
 | Is an official hands container/microVM image a released artifact or documentation only? | Before publishing or supporting such an image. |
 | Which remote transport is primary for non-BEAM workers? | Before remote non-BEAM compatibility is claimed. |

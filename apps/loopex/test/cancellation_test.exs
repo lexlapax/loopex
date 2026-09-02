@@ -97,7 +97,7 @@ defmodule Loopex.CancellationTestExecutor do
         {:error, :cleanup_unavailable}
 
       # Concept: three ways a host-supplied cancellation fails to say anything,
-      # none of which is a statement that the process tree is gone.
+      # none of which is a statement that the captured process group is gone.
       #
       # Technical depth: `cancel/2` is code an implementer wrote, and code
       # raises, exits, and returns terms nobody planned for. Each of these
@@ -583,7 +583,7 @@ defmodule Loopex.CancellationTest do
            "cleanup discarded the valid executor receipt queued behind its own result"
   end
 
-  test "a run finishes cancelled only when every owned operation is validated terminal and every owned process tree is confirmed cleaned" do
+  test "confirmed executor cleanup cannot replace a missing operation terminal fact when deriving cancelled" do
     # The two outcomes are not interchangeable: one claims a clean stop and the
     # other admits it cannot. Both halves are decided here rather than accepted
     # as either, because a case that accepts either proves neither.
@@ -601,10 +601,10 @@ defmodule Loopex.CancellationTest do
     assert model_finished["reconciliation_ref"] == nil
 
     # An effect that was still running owns something the confirmation does not
-    # cover. The executor confirms the process tree is gone — and that is still
-    # not enough, because a confirmed cleanup bounds the tree and says nothing
-    # about what the effect did. With no validated terminal fact for that
-    # operation the run ends `outcome_unknown` carrying its reference.
+    # cover. The fixture reports the captured process group clean — and that is
+    # still not enough, because group cleanup says nothing about what the effect
+    # did. With no validated terminal fact for that operation the run ends
+    # `outcome_unknown` carrying its reference.
     {_effect_fixture, _effect_session, observed} = abort_during_tool(:never_answers)
     effect_finished = Enum.find(observed, &(&1.kind == "run.finished"))
 
@@ -989,6 +989,7 @@ defmodule Loopex.CancellationTest do
 
     assert_receive {:cancellation_worker_waiting, cancellation_worker}, 5_000
     cancellation_reference = Process.monitor(cancellation_worker)
+    cancellation_started_at = System.monotonic_time(:millisecond)
 
     {elapsed, status} =
       :timer.tc(fn ->
@@ -1003,6 +1004,13 @@ defmodule Loopex.CancellationTest do
 
     assert_receive {:DOWN, ^cancellation_reference, :process, ^cancellation_worker, :killed},
                    70_000
+
+    cancellation_elapsed_ms =
+      System.monotonic_time(:millisecond) - cancellation_started_at
+
+    assert cancellation_elapsed_ms >= 59_000,
+           "the retained sixty-second defensive facade killed a silent callback after " <>
+             "#{cancellation_elapsed_ms}ms"
 
     refute Process.alive?(cancellation_worker),
            "the facade stopped waiting but left the host cancellation worker alive"
@@ -1195,8 +1203,8 @@ defmodule Loopex.CancellationTest do
   end
 
   test "an abort after succession cannot report a clean stop for the predecessor's unproved effect" do
-    # Concept: a clean executor cancellation proves that the process tree is
-    # gone; it does not recover a receipt delivered to an owner that already
+    # Concept: a clean executor cancellation proves that the captured process
+    # group is gone; it does not recover a receipt delivered to an owner that already
     # died. The successor must end the inherited operation before it ends the
     # run, and both endings must say that the effect is unproved.
     #
@@ -1638,15 +1646,16 @@ defmodule Loopex.CancellationTest do
   end
 
   test "a cancellation this runtime cannot read is unproven rather than a confirmed clean stop" do
-    # Concept: `cancelled` is a claim that every owned process tree was confirmed
-    # cleaned. An executor that said nothing intelligible has not confirmed it.
+    # Concept: `cancelled` is a claim that every captured executor process group
+    # was confirmed quiescent. An executor that said nothing intelligible has not
+    # confirmed it.
     #
     # Technical depth: `Loopex.Executor.cancel/3` reads exactly two answers and
     # treats everything else as unconfirmed. That last clause was reachable by no
     # test: mutating it from `:unconfirmed` to `:cleaned` left every cancellation
     # case and the whole suite green, so a raised, exited, or malformed
     # cancellation could be committed as a clean stop -- an operator told
-    # `cancelled` about a process tree nobody established was gone, which is a
+    # `cancelled` about a captured group nobody established was gone, which is a
     # report they act on by doing nothing.
     #
     # Three modes, because the three ways an implementation can be present and

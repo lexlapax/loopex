@@ -719,6 +719,61 @@ inherited-gate enforcement decision recorded in
 [Amendment 8](../plans/M1-gate.md#amendment-8-inherited-gate-enforcement), which
 remains owed before `M2` closes.
 
+<a id="disposition-provider-recovery-proof-before-retry-2026-09-01"></a>
+### Provider recovery requires proof before retry — 2026-09-01
+
+The maintainer explicitly selected the conservative provider-recovery posture
+on 2026-09-01: exact staged request bytes identify an operation but do not
+authorize repeating an unsettled provider attempt. This is a recorded vision
+decision, not an inference from implementation work.
+
+**The principle.** A recovered open or otherwise unsettled provider attempt is
+`dispatched_or_unknown` for accounting and is not sent again. Only durable exact
+proof that transport was never invoked, or a future provider-specific
+reconciliation result proving retry safe, may authorize a new attempt. Provider
+ambiguity does not become executor `outcome_unknown`; it receives conservative
+provider accounting and the run ends under its committed provider failure,
+abort, or deadline truth.
+
+**The evidence.** The existing recovery language made stable staged bytes serve
+two different purposes: exact operation identity and permission to redispatch.
+Those bytes cannot distinguish a crash before transport from a crash after the
+provider accepted a possibly billed call, and M2 has no portable provider
+reconciliation contract. A coordinator-side send after an ownership check also
+leaves a handoff gap in which both owners can believe dispatch is theirs.
+
+**The selected M2 mechanics.** Each provider attempt commits before dispatch.
+Control validates current ownership and sends an exact one-use permit directly
+to a permit-blocked model worker inside the same serialized operation. The
+permit send is the provider-dispatch linearization point; later worker
+consumption executes that already-linearized authorization and cannot create a
+second authorization. This preserves ADR 0006's current-owner fence even if
+ownership changes after the send and before the worker is scheduled. The
+provider-attempt and recovery contract moves from the context-admission decision
+into its own ADR. Its first record version allows exactly two total attempts for
+one staged model operation: attempt one plus one retry, and attempt two is legal
+only after durable exact `not_dispatched` settlement. Succession never resets
+that allowance; changing it requires a new record version.
+
+**Compatibility and migration.** No released protocol or package is widened.
+`Loopex.LLM.complete/3` already admits term-shaped error detail. An adapter that
+cannot provide exact pre-transport proof remains conforming, but its ambiguous
+errors are non-retryable and conservatively accounted. The Control permit and
+attempt records are private unreleased machinery. Existing development journals
+do not migrate across the new record contract and fail closed if mixed.
+
+**Accepted-decision impact.** The provider-attempt ADR must name the exact
+clauses it partially supersedes in ADR 0010, ADR 0011, and ADR 0014. In
+particular, ADR 0014's successor retry after model-owner loss becomes
+non-redispatching conservative settlement unless exact `not_dispatched` proof
+already exists. ADR 0006 is not superseded: its current-owner dispatch rule is
+satisfied at Control's direct permit-send linearization point.
+
+**Scope.** This record authorizes the paired vision change and the corresponding
+ADR proposal only. It does not accept ADR 0015, ADR 0016, ADR 0017, or ADR 0018;
+does not accept or rebind M2 Amendment 4; does not close M2; and does not
+authorize integration, release, or publication.
+
 <a id="disposition-bound-reached-vision-change-2026-08-23"></a>
 ### Vision terminal algebra gains `bound_reached` — 2026-08-23
 
@@ -1105,6 +1160,88 @@ changes.
 Acceptance row to its exact proposal. It does not close `M2`, accept a closure
 candidate, authorize product integration, authorize a release, or dispose of
 any recorded limitation. The milestone remains `In review`.
+
+This record is the maintainer's disposition evidence, not the independent
+review. The administrative transition changes only the `M2` Acceptance row and
+this new disposition record; the accepted amendment sections, normative
+envelopes, locked gate, portable enforcement, register, and product bytes are
+unchanged.
+
+<a id="disposition-adrs-0015-through-0018-acceptance-2026-09-01"></a>
+### ADR 0015 through ADR 0018 acceptance — 2026-09-01
+
+The maintainer explicitly accepted the four Proposed decision pairs at exact
+candidate `acfdbeea5b3a7507c5510e03a10bb8b238481c88`, after independent review
+of that exact candidate:
+
+| Decision | Concept | Technical depth |
+| --- | --- | --- |
+| [ADR 0015](../adr/0015-artifact-object-and-use-identity.md#concept) | `sha256:71a7ae0546fee1c2eb282ca427262e7fe196329d5e122ef19b0063fd4a16d24d` | `sha256:9e4c10b05b3ef5dafb977de7036ebfa627d8124690307d1e4a678d70950ba818` |
+| [ADR 0016](../adr/0016-configured-cancellation-observation.md#concept) | `sha256:0b5c536791ad2d553fb8001e896c0004d34f5b161809b0072f9ff93e7fd31caa` | `sha256:76c20b8abf4344ccda8f45cbc2df173e174f08c6b30be21d8d09c2350edf7e5b` |
+| [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept) | `sha256:c24af4fe32cbbb47749c3359eceb29030b67191b3ab20b33976dd271b7e4fe4b` | `sha256:d092aaa6f94c508ee05aa83e261e4117265d0270582b0936a4e0eb35edbc08ae` |
+| [ADR 0018](../adr/0018-provider-attempt-authority-and-recovery.md#concept) | `sha256:c4d094e79427ab7c8403ddb3f57d992308f57b9ec44a56604a9b678ba198a67b` | `sha256:d9553fff8d05a1040c25a2b9a9c4f730cb8dec8599a508e81155d2991a49f992` |
+
+ADR 0015 separates immutable artifact-object identity from bounded per-use
+metadata. ADR 0016 derives cancellation observation, cleanup confirmation, and
+the later command backstop from the committed cleanup period. ADR 0017 adds
+separate durable context-token and Store-record admission ceilings. ADR 0018
+makes Control's one-use permit the provider-dispatch linearization, permits
+exactly one retry only after durable pretransport `not_dispatched` proof, and
+forbids redispatch of recovered unresolved attempts. Their supersession scopes
+are limited to the clauses each accepted pair names; ADR 0006 remains intact.
+
+**Scope of this record.** It accepts ADR 0015, ADR 0016, ADR 0017, and ADR 0018
+alone. It does not accept or rebind `M2` Amendment 4, change the milestone
+lifecycle, authorize dependent implementation, close `M2`, authorize product
+integration, or authorize a release.
+
+This record is the maintainer's disposition evidence, not the independent
+review. The administrative transition changes only the four ADR Concept status
+lines and governance rows, this disposition, and the ADR index that reports
+their accepted status and exact supersession scope. Every Technical depth file
+and all decision text remain byte-identical to the reviewed Proposed candidate.
+
+<a id="disposition-m2-gate-amendment-4-2026-09-01"></a>
+### M2 gate Amendment 4 acceptance — 2026-09-01
+
+The maintainer explicitly accepted
+[Amendment 4](../plans/M2-gate.md#amendment-4) to the accepted `M2` plan pair
+and locked gate as proposed at exact candidate
+`fe0c008bb815a0611c73f253b94bb950e35d169b`, after three rounds of independent adversarial
+review of the exact candidate, the last of which reported no blocking finding.
+Acceptance binds the amended normative envelopes and gate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept envelope | `sha256:d2891e3b4d24db846da01606ef64090ee3098532bd7b29540a1557de320d4a7c` |
+| Technical depth envelope | `sha256:d2c1350b56e0f63a8986b38e452d2c3adc0bab26ab760764f331dd178b7628ca` |
+| Gate | `sha256:deb5f257d6628bef3363bdd0f614c08eb1b0d2d8c1321daa593addbf67aff6f8` |
+
+Amendment 4 binds the ADR 0015 through ADR 0018 contracts — artifact object
+and use identity, configured cancellation observation, durable context
+admission budget, and provider attempt authority — to protected identities,
+raised minima, and a mandatory first-green mutation matrix. Its locked cases
+are red at this candidate because the production behavior they name does not
+yet exist; the gate is red for that declared absence and for nothing else.
+
+**Decision carried by this acceptance.** The accepted Concept envelope bounded
+the reference composition module at eighty effective lines; the delivered
+module measured one hundred sixty-four and Outcome 11's selector was red at the
+base revision. This amendment raises that ceiling to one hundred eighty, and
+accepting it is the maintainer's decision on that normative budget. The
+maintainer accepted with the caveat that the module still be reduced toward
+eighty. That reduction was attempted before this record was written: branch
+`codex/m2-composition-80` at `4025eea41210d8acba24854f4b0c881bb9eb0ce2`
+brings the module to one hundred thirty-four effective lines with every locked
+behavior intact, and records that eighty is not reachable while those
+behaviors stay locked. Whether to take that reduction, and whether to lower the
+ceiling to meet it, are product and gate decisions outside this record.
+
+**Scope of this record.** It accepts Amendment 4 alone and rebinds the `M2`
+Acceptance row to its exact proposal. It does not close `M2`, accept a closure
+candidate, authorize product integration, authorize a release, integrate the
+composition reduction, or dispose of any recorded limitation. The milestone
+remains `In review`.
 
 This record is the maintainer's disposition evidence, not the independent
 review. The administrative transition changes only the `M2` Acceptance row and

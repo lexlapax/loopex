@@ -18,15 +18,16 @@ a decision adds a new record rather than rewriting the old one.
 | 0006 | Store transaction contract and owner epoch | Accepted | [Decision](0006-store-transaction-and-owner-epoch.md#concept) | [Technical depth](0006-store-transaction-and-owner-epoch-technical.md#technical-depth) |
 | 0007 | Local executor grant, job, and receipt | Accepted | [Decision](0007-local-executor-grant-job-receipt.md#concept) | [Technical depth](0007-local-executor-grant-job-receipt-technical.md#technical-depth) |
 | 0008 | Owner succession recovery and runtime placement | Accepted | [Decision](0008-owner-succession-recovery-and-runtime-placement.md#concept) | [Technical depth](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth) |
-| 0009 | Tool, executor, and grant contracts | Accepted (partially superseded by 0012) | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
-| 0010 | Provider continuation and exact context staging | Accepted (partially superseded by 0013) | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
-| 0011 | Session input algebra and streaming progress | Accepted (partially superseded by 0012, 0013, and 0014) | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
-| 0012 | Executor cancellation capability | Accepted | [Decision](0012-executor-cancellation-capability.md#concept) | [Technical depth](0012-executor-cancellation-capability-technical.md#technical-depth) |
-| 0013 | Run-deadline commitment at first request staging | Accepted | [Decision](0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
-| 0014 | Stream closure at owner loss | Accepted | [Decision](0014-stream-closure-at-owner-loss.md#concept) | [Technical depth](0014-stream-closure-at-owner-loss-technical.md#technical-depth) |
-| 0015 | Artifact object and use identity | Proposed | [Decision](0015-artifact-object-and-use-identity.md#concept) | [Technical depth](0015-artifact-object-and-use-identity-technical.md#technical-depth) |
-| 0016 | Configured cancellation observation | Proposed | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
-| 0017 | Durable context and record admission budgets | Proposed | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
+| 0009 | Tool, executor, and grant contracts | Accepted (partially superseded by 0012, 0015, and 0016) | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
+| 0010 | Provider continuation and exact context staging | Accepted (partially superseded by 0013, 0017, and 0018) | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
+| 0011 | Session input algebra and streaming progress | Accepted (partially superseded by 0012, 0013, 0014, 0016, 0017, and 0018) | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
+| 0012 | Executor cancellation capability | Accepted (partially superseded by 0016) | [Decision](0012-executor-cancellation-capability.md#concept) | [Technical depth](0012-executor-cancellation-capability-technical.md#technical-depth) |
+| 0013 | Run-deadline commitment at first request staging | Accepted (partially superseded by 0017) | [Decision](0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
+| 0014 | Stream closure at owner loss | Accepted (partially superseded by 0018) | [Decision](0014-stream-closure-at-owner-loss.md#concept) | [Technical depth](0014-stream-closure-at-owner-loss-technical.md#technical-depth) |
+| 0015 | Artifact object and use identity | Accepted | [Decision](0015-artifact-object-and-use-identity.md#concept) | [Technical depth](0015-artifact-object-and-use-identity-technical.md#technical-depth) |
+| 0016 | Configured cancellation observation | Accepted | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
+| 0017 | Durable context and record admission budgets | Accepted | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
+| 0018 | Provider attempt authority and recovery | Accepted | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -65,14 +66,21 @@ solely where a terminal fact commits before handoff and its reply reaches the
 originating coordinator afterwards. ADR 0011's domain, sequencing,
 loss-detection, and durable-fallback rules stay in force.
 
-0015 proposes separating immutable artifact-object identity from the bounded
-metadata of each use, so content deduplication cannot erase durable provenance.
-0016 proposes deriving core cancellation observation and the later command
-backstop from the one configured cleanup period. 0017 proposes distinct durable
-provider-token and Store-record admission ceilings and, because its estimator
-is not a provider-billing guarantee, exhausting the remaining cumulative run
-budget when provider usage is incomplete. All three are closure decisions for
-unreleased `M2` surfaces; none is accepted merely by being indexed here.
+0015 separates immutable artifact-object identity from the bounded metadata of
+each use, so content deduplication cannot erase durable provenance. It narrowly
+supersedes ADR 0009's conflated object/use reference and callback shapes. 0016
+derives core cancellation observation and the later command backstop from the
+one configured cleanup period, narrowly superseding the executor-boundary and
+cleanup clauses it names in ADR 0009, ADR 0011, and ADR 0012. 0017 establishes
+distinct durable context-token and Store-record admission ceilings and narrowly
+supersedes the staging, prompt-admission, and terminal-projection clauses it
+names in ADR 0010, ADR 0011, and ADR 0013. 0018 establishes one-use
+current-owner provider dispatch, an exact two-attempt version-1 allowance, and
+conservative non-redispatching recovery, narrowly superseding the provider
+attempt and owner-loss retry clauses it names in ADR 0010, ADR 0011, and ADR
+0014. All four are accepted prerequisites for proposed `M2` Amendment 4;
+acceptance does not itself amend the M2 plan pair or gate, authorize dependent
+implementation, close M2, or authorize integration or release.
 
 0004 and 0005 are both parked. They designed correction paths for a defect
 found in an accepted plan, then the defect that prompted them turned out to be
