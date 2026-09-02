@@ -335,6 +335,7 @@ defmodule Loopex.EmbeddedApiTest do
 
     {:ok, restarted} =
       Loopex.start_link(
+        context_token_budget: 8_192,
         runtime_id: fixture.runtime_id,
         store: fixture.store,
         attachment_capacity: 1

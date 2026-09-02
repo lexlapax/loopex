@@ -498,36 +498,17 @@ defmodule Loopex.Runtime do
   @default_sampling %{"max_tokens" => 4_096}
   @uint64_max 18_446_744_073_709_551_615
 
-  # Concept: how large one exact provider request may be, decided once here.
-  #
-  # Technical depth: ADR 0017 makes this an admission policy separate from the
-  # run's cumulative `token_budget`, and deliberately outside `:bounds` so no
-  # call to `Bounds.declare/1` ever sees it. It is unsigned 64-bit so the
-  # committed value is always compactly persistable. A supplied value that is
-  # not a positive whole number in that domain is refused by its own name here,
-  # before Control starts, a session exists, or Store receives a call, so an
-  # operator is never silently given a different ceiling than the one they
-  # asked for.
-  #
-  # ADR 0017 further requires a direct Runtime caller to supply the value and
-  # refuses omission by this same name, so that a later change to a default
-  # cannot silently re-decide a ceiling an embedder never chose. That refusal
-  # is not applied here. Nine currently green test files start Runtime without
-  # the option -- runtime, session lifecycle, tool registry, cancellation,
-  # embedded API, session directory, CLI, project-resource trust, and the
-  # shared agent-loop helper -- and refusing omission in this revision makes
-  # every one of those runtimes unstartable. Closing the gap is one mechanical
-  # pass over those callers plus this clause, and it is deliberately left as a
-  # single reviewable change rather than folded in here.
-  @default_context_token_budget 8_192
-
-  defp validate_context_token_budget(nil), do: {:ok, @default_context_token_budget}
-
+  # Concept: ADR 0017 makes the context token budget a required runtime option
+  # with no default here. Omission is refused by the same name as an invalid
+  # value, so a later change to a composition default can never silently
+  # re-decide a ceiling an embedder did not choose; the reference composition
+  # is the one place that supplies 8,192 on the embedder's behalf.
   defp validate_context_token_budget(value)
        when is_integer(value) and value > 0 and value <= @uint64_max,
        do: {:ok, value}
 
-  defp validate_context_token_budget(_value), do: {:error, :invalid_context_token_budget}
+  defp validate_context_token_budget(_absent_or_invalid),
+    do: {:error, :invalid_context_token_budget}
 
   # Concept: a runtime that can run tools must name who authorises them.
   #

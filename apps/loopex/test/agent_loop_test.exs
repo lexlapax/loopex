@@ -735,6 +735,7 @@ defmodule Loopex.AgentLoopTest do
 
     {:ok, runtime} =
       Loopex.start_link(
+        context_token_budget: 8_192,
         runtime_id: "progress-runtime-#{System.unique_integer([:positive])}",
         store: store,
         progress_to: self(),
@@ -3367,6 +3368,7 @@ defmodule Loopex.AgentLoopTest do
     {:ok, runtime} =
       Loopex.start_link(
         [
+          context_token_budget: 8_192,
           runtime_id: "answering-runtime-#{System.unique_integer([:positive])}",
           store: store,
           model: %{
