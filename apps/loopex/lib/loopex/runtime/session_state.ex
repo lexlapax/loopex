@@ -690,20 +690,33 @@ defmodule Loopex.Runtime.SessionState do
       context_record_cardinality_limit: Store.max_item_cardinality()
     }
 
-    candidate =
-      case resolve_record_byte_cost(record) do
-        {:ok, fixed} -> fixed
-        {:error, _structural} -> record
-      end
-
-    case ContextAdmission.preflight_required_candidate(candidate, observations) do
-      :ok -> {:ok, candidate}
-      {:refused, refusal} -> {:refused, refusal}
-      {:error, reason} -> {:error, reason}
+    # Concept: only a structurally inadmissible candidate skips the fixed point,
+    # and it skips it to be named, not to be waved through.
+    #
+    # Technical depth: a record that breaches Store depth or cardinality has no
+    # convergent self-size, so it is handed to the admission boundary unresolved
+    # and refused there by its exact structural dimension. Every other failure --
+    # a non-convergent fixed point, or data the Store rejects outright -- is
+    # returned as it stands. ADR 0017 makes non-convergence the exact
+    # Store-unavailable reason `:context_record_preflight_unavailable` and
+    # forbids manufacturing a dimension, terminal, or dispatch from it;
+    # continuing with an unconverged record would stage a request whose receipt
+    # states a byte cost of zero.
+    with {:ok, candidate} <- record_byte_cost_candidate(record),
+         :ok <- ContextAdmission.preflight_required_candidate(candidate, observations) do
+      {:ok, candidate}
     end
   end
 
   defp admit_context_candidate(record), do: resolve_record_byte_cost(record)
+
+  defp record_byte_cost_candidate(record) do
+    case resolve_record_byte_cost(record) do
+      {:ok, fixed} -> {:ok, fixed}
+      {:error, {:item_structure_exceeded, _dimension, _observed, _limit}} -> {:ok, record}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   # Concept: the refusal keeps what an operator can act on and nothing that
   # caused it.
