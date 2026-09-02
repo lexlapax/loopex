@@ -165,10 +165,30 @@ defmodule Loopex.Runtime do
   @doc false
   @spec resume_session(t(), binary(), binary()) :: {:ok, binary()} | {:error, term()}
   def resume_session(%__MODULE__{} = runtime, session_id, command_id) do
-    control_call(runtime, {:resume_session, runtime.token, session_id, command_id}, :infinity)
+    control_call(
+      runtime,
+      {:resume_session, runtime.token, session_id, command_id, :ordinary},
+      :infinity
+    )
   end
 
   def resume_session(_runtime, _session_id, _command_id),
+    do: {:error, :runtime_reference_required}
+
+  @doc false
+  @spec prepare_resume_session(t(), binary(), binary()) ::
+          {:ok, {:prepared, Loopex.ResumeActivation.t()}}
+          | {:ok, {:replayed, binary()}}
+          | {:error, term()}
+  def prepare_resume_session(%__MODULE__{} = runtime, session_id, command_id) do
+    control_call(
+      runtime,
+      {:resume_session, runtime.token, session_id, command_id, :prepared},
+      :infinity
+    )
+  end
+
+  def prepare_resume_session(_runtime, _session_id, _command_id),
     do: {:error, :runtime_reference_required}
 
   @doc false

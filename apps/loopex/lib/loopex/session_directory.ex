@@ -305,10 +305,65 @@ defmodule Loopex.SessionDirectory do
 
   def resume(_root, _runtime, _session_id, _command_id), do: {:error, :invalid_resume_request}
 
+  @doc """
+  ## Concept
+
+  Acquires a known session's owner without letting it resume the work it
+  recovered, and hands back the one-use capability that decides whether it ever
+  does. Every placement and command-identity consequence of `resume/4` applies
+  unchanged; the only difference is that the recovered work stays paused.
+
+  ## Technical depth
+
+  ADR 0016's prepared recovery. The placement check and the resolved-command
+  cache are the same ones `resume/4` uses, so a mismatched runtime still reaches
+  no Store call and a re-presented `command_id` still returns its historical
+  result -- as `{:ok, {:replayed, session_id}}`, because the owner that answer
+  names was acquired by the earlier call and its capability, if it had one,
+  belongs to that caller. Only the session identifier is cached: the capability
+  is a transient runtime-local pair and cannot be written to the state root or
+  handed to a later process.
+  """
+  @spec prepare_resume(Path.t(), Runtime.t(), binary(), binary()) ::
+          {:ok, {:prepared, Loopex.ResumeActivation.t()}}
+          | {:ok, {:replayed, binary()}}
+          | {:error, :session_unknown | placement_mismatch() | term()}
+  def prepare_resume(root, runtime, session_id, command_id)
+      when is_binary(root) and is_binary(session_id) and is_binary(command_id) and
+             byte_size(command_id) > 0 do
+    with {:ok, entry} <- read_entry(root, session_id),
+         {:ok, requesting_id} <- runtime_configured_id(runtime),
+         :ok <- check_placement(entry, requesting_id) do
+      case Map.fetch(entry.commands, command_id) do
+        {:ok, cached_result} ->
+          {:ok, {:replayed, cached_result}}
+
+        :error ->
+          prepare_and_cache(root, runtime, session_id, command_id)
+      end
+    end
+  end
+
+  def prepare_resume(_root, _runtime, _session_id, _command_id),
+    do: {:error, :invalid_resume_request}
+
   defp resume_and_cache(root, runtime, session_id, command_id) do
     case Runtime.resume_session(runtime, session_id, command_id) do
       {:ok, resumed_id} = result ->
         case cache_command(root, session_id, command_id, resumed_id, @cache_attempts) do
+          :ok -> result
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp prepare_and_cache(root, runtime, session_id, command_id) do
+    case Runtime.prepare_resume_session(runtime, session_id, command_id) do
+      {:ok, _prepared_or_replayed} = result ->
+        case cache_command(root, session_id, command_id, session_id, @cache_attempts) do
           :ok -> result
           {:error, reason} -> {:error, reason}
         end

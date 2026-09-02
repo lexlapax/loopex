@@ -18,6 +18,7 @@ defmodule Loopex do
   """
 
   alias Loopex.Attachment
+  alias Loopex.ResumeActivation
   alias Loopex.Runtime
   alias Loopex.SessionDirectory
 
@@ -332,4 +333,88 @@ defmodule Loopex do
           {:ok, binary()} | {:error, term()}
   def resume_known_session(state_root, runtime, session_id, command_id),
     do: SessionDirectory.resume(state_root, runtime, session_id, command_id)
+
+  @doc """
+  ## Concept
+
+  Acquires a session's owner and rebuilds its history without letting the
+  recovered work start, returning the one-use capability that decides whether it
+  ever does. This is what lets an operator's terminal recover the session's own
+  committed configuration, compare it with what was asked for, and stop the
+  session instead of continuing it — with the work still exactly where the
+  previous process left it.
+
+  ## Technical depth
+
+  ADR 0016's prepared recovery. Ownership, `advance_owner`, and complete
+  private/public reconstruction happen exactly as in `resume_session/3`; only
+  the scheduling of pending work waits. The prepared owner is a current owner in
+  every other respect: it answers `session_status/2`, accepts an attachment, and
+  admits an abort, and an admitted abort permanently invalidates the capability
+  it was given. `{:ok, {:replayed, session_id}}` means this exact `command_id`
+  was already resolved and no new owner was contested, so there is nothing to
+  activate.
+  """
+  @spec prepare_resume_session(Runtime.t(), binary(), binary()) ::
+          {:ok, {:prepared, ResumeActivation.t()}}
+          | {:ok, {:replayed, binary()}}
+          | {:error, term()}
+  def prepare_resume_session(runtime, session_id, command_id)
+      when is_binary(session_id) and is_binary(command_id),
+      do: Runtime.prepare_resume_session(runtime, session_id, command_id)
+
+  def prepare_resume_session(_runtime, _session_id, _command_id),
+    do: {:error, :invalid_session_resume}
+
+  @doc """
+  ## Concept
+
+  Prepared recovery for a session the operator's state root already knows about,
+  enforcing the same ADR 0008 runtime placement that `resume_known_session/4`
+  enforces.
+
+  ## Technical depth
+
+  Delegates to `Loopex.SessionDirectory.prepare_resume/4`. A placement mismatch
+  is refused before any Store call and therefore before any owner is contested;
+  a re-presented `command_id` returns `{:ok, {:replayed, session_id}}` from the
+  state root's own record rather than acquiring a second owner.
+  """
+  @spec prepare_resume_known_session(Path.t(), Runtime.t(), binary(), binary()) ::
+          {:ok, {:prepared, ResumeActivation.t()}}
+          | {:ok, {:replayed, binary()}}
+          | {:error, term()}
+  def prepare_resume_known_session(state_root, runtime, session_id, command_id),
+    do: SessionDirectory.prepare_resume(state_root, runtime, session_id, command_id)
+
+  @doc """
+  ## Concept
+
+  Lets a prepared owner resume its recovered work, once.
+
+  ## Technical depth
+
+  Delegates to `Loopex.ResumeActivation.activate/1`. Only the process that
+  prepared the owner may present the capability, and only while it is unspent,
+  unabandoned, unfenced by an admitted abort, and still held by the runtime's
+  current owner. Every other presentation is refused by name and schedules
+  nothing.
+  """
+  @spec activate_resume(ResumeActivation.t()) :: {:ok, binary()} | {:error, term()}
+  def activate_resume(activation), do: ResumeActivation.activate(activation)
+
+  @doc """
+  ## Concept
+
+  Gives up a prepared owner's capability, leaving its recovered work paused for
+  good.
+
+  ## Technical depth
+
+  Delegates to `Loopex.ResumeActivation.abandon/1`. The owner keeps its
+  ownership and stays reachable for an abort or an operator's later decision;
+  what it can never do afterwards is start the work it recovered.
+  """
+  @spec abandon_resume(ResumeActivation.t()) :: :ok | {:error, term()}
+  def abandon_resume(activation), do: ResumeActivation.abandon(activation)
 end

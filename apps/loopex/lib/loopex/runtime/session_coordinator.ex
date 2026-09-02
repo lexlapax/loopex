@@ -178,6 +178,30 @@ defmodule Loopex.Runtime.SessionCoordinator do
       when is_pid(coordinator) and is_map(owner) and is_map(response),
       do: safe_call(coordinator, {:reconcile, owner, response}, :infinity)
 
+  # Concept: the two answers a prepared owner's capability can be given, asked
+  # by the holder itself rather than on its behalf.
+  #
+  # Technical depth: both are called from the holder's own process, so the
+  # coordinator compares the caller in `from` against the holder it was started
+  # with. Routing either through a helper process would make the holder rule
+  # unenforceable, because the coordinator would then only ever see the proxy.
+  # The bound is the status bound rather than `:infinity`: neither call proposes
+  # a Store mutation, so a deadline here cannot manufacture a durable fact, and a
+  # prepared owner that cannot answer must not strand its caller over a session
+  # that is by construction doing nothing.
+  @doc false
+  @spec activate_resume(pid(), owner(), reference()) :: {:ok, binary()} | {:error, term()}
+  def activate_resume(coordinator, owner, capability)
+      when is_pid(coordinator) and is_map(owner) and is_reference(capability),
+      do:
+        safe_call(coordinator, {:activate_resume, owner, capability}, @session_status_timeout_ms)
+
+  @doc false
+  @spec abandon_resume(pid(), owner(), reference()) :: :ok | {:error, term()}
+  def abandon_resume(coordinator, owner, capability)
+      when is_pid(coordinator) and is_map(owner) and is_reference(capability),
+      do: safe_call(coordinator, {:abandon_resume, owner, capability}, @session_status_timeout_ms)
+
   @impl GenServer
   def init(options) do
     {:ok,
@@ -233,6 +257,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
        query: nil,
        owner: nil,
        durable: nil,
+       # Concept: whether this owner is allowed to schedule the work it
+       # recovered, and who may decide that.
+       #
+       # Technical depth: `nil` is an ordinary owner, which schedules as soon as
+       # it is ready. A prepared owner carries the runtime-local reference
+       # Control minted for it, the process that asked for the preparation, and
+       # one of `:prepared`, `:spent`, `:abandoned`, or `:fenced`. Only `:spent`
+       # schedules. The reference and holder are transient BEAM values and are
+       # never proposed to the Store or returned in a refusal.
+       prepared: prepared_state(Keyword.get(options, :prepared)),
        superseded: false
      }, {:continue, :acquire_owner}}
   end
@@ -255,7 +289,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       true ->
         case Control.current_owner(state.control, state.session_id, state.owner) do
           :ok ->
-            commit_command(state, command)
+            state |> fence_prepared_resume(command) |> commit_command(command)
 
           {:error, :superseded_owner} ->
             {:reply, {:error, :superseded_owner}, %{state | superseded: true}}
@@ -284,6 +318,37 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:reply, {:ok, status}, state}
     else
       {:reply, {:error, :session_unavailable}, state}
+    end
+  end
+
+  def handle_call({:activate_resume, supplied_owner, capability}, {caller, _tag}, state) do
+    case prepared_holder(state, supplied_owner, capability, caller) do
+      {:ok, prepared} ->
+        send(self(), :advance_work)
+        {:reply, {:ok, state.session_id}, %{state | prepared: %{prepared | state: :spent}}}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:abandon_resume, supplied_owner, capability}, {caller, _tag}, state) do
+    case prepared_holder(state, supplied_owner, capability, caller) do
+      {:ok, prepared} ->
+        {:reply, :ok, %{state | prepared: %{prepared | state: :abandoned}}}
+
+      # Concept: giving up something already given up is not a failure.
+      #
+      # Technical depth: abandonment is the fail-closed direction, so repeating
+      # it changes nothing an operator could be surprised by. Spending is not
+      # idempotent in the same way and keeps its refusal, because a caller that
+      # abandons what it already activated is asking to undo work that has
+      # already become the session's own.
+      {:error, :resume_activation_abandoned} ->
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -818,7 +883,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
           durable: durable,
           transaction: nil,
           incarnation: nil,
-          recovery_records: []
+          recovery_records: [],
+          prepared: recovered_runs(state.prepared, durable)
       }
 
       GenServer.cast(state.control, {:owner_ready, self(), state.owner, durable})
@@ -1004,7 +1070,25 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # entry to scheduling, rather than inside a stage.
         case SessionState.aborting_run(state.durable) do
           nil ->
-            case SessionState.pending_work(state.durable) do
+            # Concept: a prepared owner schedules nothing until its holder says
+            # so, while an abort put to it still finishes.
+            #
+            # Technical depth: the pause sits here, at the same single entry to
+            # scheduling, so recovery, ownership, history reconstruction, status,
+            # attachment, and abort admission all keep their ordinary paths and
+            # only the dispatch of recovered work waits. It is scoped to the runs
+            # this owner actually found pending when it recovered them: work an
+            # operator admits afterwards belongs to a decision they have already
+            # made, so it dispatches normally, which is what keeps an abandoned
+            # or aborted prepared owner a usable session rather than a
+            # permanently silent one. `:spent` releases the recovered runs too;
+            # `:prepared`, `:abandoned`, and `:fenced` keep them paused, which is
+            # what makes abandonment and the abort fence permanent rather than
+            # merely current.
+            case Enum.reject(
+                   SessionState.pending_work(state.durable),
+                   &resume_paused?(state, &1)
+                 ) do
               [] -> {:noreply, state}
               [work | _rest] -> advance_run(state, work)
             end
@@ -1024,6 +1108,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp advance_work(state), do: {:noreply, state}
+
+  defp resume_paused?(%{prepared: nil}, _work), do: false
+  defp resume_paused?(%{prepared: %{state: :spent}}, _work), do: false
+
+  defp resume_paused?(%{prepared: %{recovered: recovered}}, %{run_id: run_id}),
+    do: MapSet.member?(recovered, run_id)
+
+  defp resume_paused?(_state, _work), do: false
 
   # Concept: an abort is on disk and this owner is not cleaning it up. Either it
   # already is, or it never will.
@@ -3623,6 +3715,77 @@ defmodule Loopex.Runtime.SessionCoordinator do
       supplied_owner != state.owner -> {:error, :superseded_owner}
       true -> Control.current_owner(state.control, state.session_id, state.owner)
     end
+  end
+
+  # Concept: only this owner's current holder, presenting the exact capability
+  # it was given, decides anything about paused work.
+  #
+  # Technical depth: the owner argument, the coordinator's readiness, and
+  # Control's current-owner fence are checked exactly as an ordinary command
+  # checks them, so a superseded prepared owner cannot activate a session that
+  # has moved on. The reference comparison is `===` on a runtime-local
+  # `make_ref/0`, which cannot be constructed by a caller that was not given it,
+  # and the holder comparison uses the calling process from `from` rather than
+  # anything the caller supplied. Every refusal is a bare atom: the capability
+  # and its holder never appear in a value the caller can print.
+  defp prepared_holder(state, supplied_owner, capability, caller) do
+    with :ok <- ready_current?(state, supplied_owner),
+         %{capability: ^capability} = prepared <- state.prepared,
+         :prepared <- prepared.state,
+         ^caller <- prepared.holder do
+      {:ok, prepared}
+    else
+      nil -> {:error, :resume_activation_unknown}
+      :spent -> {:error, :resume_activation_spent}
+      :abandoned -> {:error, :resume_activation_abandoned}
+      :fenced -> {:error, :resume_activation_fenced}
+      %{} -> {:error, :resume_activation_unknown}
+      {:error, reason} -> {:error, reason}
+      holder when is_pid(holder) -> {:error, :resume_activation_holder_mismatch}
+    end
+  end
+
+  # Concept: once an abort has been put to this owner, the work it recovered can
+  # never be started, whatever the abort's own admission turns out to be.
+  #
+  # Technical depth: ADR 0016 makes accepted abort admission permanently
+  # invalidate activation and forbids pending, unavailable, or commit-unknown
+  # admission from ever permitting recovered work. The fence is therefore set
+  # before the Store transaction rather than after its receipt: an admission
+  # whose result never comes back leaves this owner unable to prove either
+  # outcome, and the only answer that is true under both is that the paused work
+  # stays paused. The abort itself is unaffected -- cleanup and its terminal are
+  # exactly the ordinary path -- because the gate excludes only ordinary
+  # scheduling.
+  defp fence_prepared_resume(%{prepared: %{state: :prepared} = prepared} = state, %{type: :abort}),
+       do: %{state | prepared: %{prepared | state: :fenced}}
+
+  defp fence_prepared_resume(state, _command), do: state
+
+  defp prepared_state(%{capability: capability, holder: holder})
+       when is_reference(capability) and is_pid(holder),
+       do: %{capability: capability, holder: holder, state: :prepared, recovered: MapSet.new()}
+
+  defp prepared_state(_absent), do: nil
+
+  # Concept: exactly which work this preparation is holding back.
+  #
+  # Technical depth: fixed once, from the history this owner reconstructed,
+  # rather than recomputed as the session moves. A prepared owner that pauses
+  # whatever happens to be pending would also silence a prompt the operator
+  # admitted after deciding to abandon or abort, which is a session that has
+  # stopped answering rather than one whose recovered work is waiting.
+  defp recovered_runs(nil, _durable), do: nil
+
+  defp recovered_runs(prepared, durable) do
+    %{
+      prepared
+      | recovered:
+          durable
+          |> SessionState.pending_work()
+          |> Enum.map(&Map.fetch!(&1, :run_id))
+          |> MapSet.new()
+    }
   end
 
   defp pending_effect(state) do

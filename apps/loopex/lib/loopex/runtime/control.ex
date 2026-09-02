@@ -25,6 +25,7 @@ defmodule Loopex.Runtime.Control do
 
   use GenServer
 
+  alias Loopex.ResumeActivation
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.OwnerGroup
   alias Loopex.Runtime.SessionCoordinator
@@ -255,22 +256,22 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
-  def handle_call({:resume_session, token, session_id, command_id}, from, state) do
+  def handle_call({:resume_session, token, session_id, command_id, mode}, from, state) do
     if token == state.token and valid_identifier?(session_id) and valid_identifier?(command_id) do
       command = resume_command(state.runtime_id, session_id, command_id)
 
       case Store.runtime_command(state.store, command) do
         {:completed, %{result: ^session_id}} ->
-          {:reply, {:ok, session_id}, state}
+          {:reply, completed_resume_reply(mode, session_id), state}
 
         {:completed, _changed_result} ->
           {:reply, {:error, :runtime_command_conflict}, state}
 
         {:open, open} ->
-          start_resume_owner(state, session_id, from, Map.put(command, :open, open))
+          start_resume_owner(state, session_id, from, Map.put(command, :open, open), mode)
 
         :absent ->
-          start_resume_owner(state, session_id, from, Map.put(command, :open, nil))
+          start_resume_owner(state, session_id, from, Map.put(command, :open, nil), mode)
 
         :unavailable ->
           {:reply, {:error, :store_unavailable}, state}
@@ -379,6 +380,7 @@ defmodule Loopex.Runtime.Control do
           }
 
           next = %{state | sessions: Map.put(state.sessions, session_id, next_entry)}
+          EventDispatcher.acknowledge(state.root, session_id, positions.event_sequence)
           {:reply, :ok, next}
         else
           {:reply, {:error, :invalid_store_receipt}, state}
@@ -432,12 +434,64 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
-  defp start_resume_owner(state, session_id, from, command) do
-    case start_owner(state, session_id, command.succession_id, from, command) do
+  defp start_resume_owner(state, session_id, from, command, mode) do
+    case start_owner(state, session_id, command.succession_id, from, command, mode) do
       {:waiting, next} -> {:noreply, next}
       {:error, reason, next} -> {:reply, {:error, reason}, next}
     end
   end
+
+  # Concept: a prepared resume answers with a capability instead of a session
+  # identifier, because the owner it acquired is not yet allowed to work.
+  #
+  # Technical depth: the capability is a runtime-local reference paired with the
+  # exact process that asked for it. Neither is serializable and neither is
+  # reachable from a durable, public, progress, or diagnostic plane; the pair is
+  # created here, handed once to the coordinator that will honour it, and
+  # returned to the preparer as the only route to activation or abandonment.
+  defp prepared_capability(:prepared, {holder, _tag}) when is_pid(holder),
+    do: %{capability: make_ref(), holder: holder}
+
+  defp prepared_capability(_mode, _from), do: nil
+
+  defp completed_resume_reply(:prepared, session_id), do: {:ok, {:replayed, session_id}}
+  defp completed_resume_reply(_mode, session_id), do: {:ok, session_id}
+
+  defp owner_ready_reply(%{prepared: %{capability: capability}}, coordinator, owner, _durable),
+    do: {:ok, {:prepared, ResumeActivation.new(coordinator, owner, capability)}}
+
+  defp owner_ready_reply(_entry, _coordinator, _owner, durable), do: {:ok, durable.session_id}
+
+  defp replayed_reply(%{prepared: prepared}, session_id) when is_map(prepared),
+    do: {:ok, {:replayed, session_id}}
+
+  defp replayed_reply(_entry, session_id), do: {:ok, session_id}
+
+  # Concept: an ordinary succession takes the session away from whoever was
+  # attached to it; a prepared one hands the same session back to them.
+  #
+  # Technical depth: attachment invalidation exists so a caller attached under
+  # one owner cannot go on commanding a session that has moved to another. A
+  # prepared owner has not moved anything: it acquired ownership and rebuilt
+  # history without scheduling a single piece of the recovered work, precisely so
+  # the terminal that asked for it can decide what happens next. Dropping that
+  # terminal's attachment would leave it holding a route to a session it had just
+  # been given, and its interrupt would have nowhere to send an abort. So the
+  # prepared case carries the previous attachment forward and skips the
+  # dispatcher's invalidation; every other succession keeps invalidating exactly
+  # as before. Activation and abandonment stay fenced by the capability, which is
+  # what an attachment is not and never becomes.
+  defp carried_attachment(%{prepared: prepared}, %{attachment: attachment})
+       when is_map(prepared),
+       do: attachment
+
+  defp carried_attachment(_entry, _previous), do: nil
+
+  defp invalidate_attachments(%{prepared: prepared}, _root, _session_id) when is_map(prepared),
+    do: :ok
+
+  defp invalidate_attachments(_entry, root, session_id),
+    do: EventDispatcher.invalidate(root, session_id)
 
   @impl GenServer
   def handle_cast({:owner_ready, coordinator, owner, durable}, state) do
@@ -451,19 +505,20 @@ defmodule Loopex.Runtime.Control do
       when generation == owner.generation ->
         active =
           entry
-          |> Map.drop([:generation, :previous, :durable, :waiting])
+          |> Map.drop([:generation, :previous, :durable, :waiting, :prepared])
           |> Map.merge(%{
             status: :active,
             owner: owner,
             journal_version: durable.journal_version,
             event_sequence: durable.event_sequence,
-            attachment: nil
+            attachment: carried_attachment(entry, previous)
           })
 
         next = %{state | sessions: Map.put(state.sessions, durable.session_id, active)}
         notify_superseded(previous, owner.generation)
-        EventDispatcher.invalidate(state.root, durable.session_id)
-        reply_waiting(entry, {:ok, durable.session_id})
+        invalidate_attachments(entry, state.root, durable.session_id)
+        EventDispatcher.acknowledge(state.root, durable.session_id, durable.event_sequence)
+        reply_waiting(entry, owner_ready_reply(entry, coordinator, owner, durable))
         {:noreply, next}
 
       %{status: :active, coordinator: ^coordinator, owner: ^owner} ->
@@ -492,6 +547,7 @@ defmodule Loopex.Runtime.Control do
     case Map.fetch(state.sessions, session_id) do
       {:ok, %{status: :acquiring, coordinator: ^coordinator} = entry} ->
         reply_waiting(entry, {:error, reason})
+        EventDispatcher.release_fence(state.root, session_id)
         answered = %{entry | status: :unavailable, waiting: nil}
         {:noreply, %{state | sessions: Map.put(state.sessions, session_id, answered)}}
 
@@ -503,7 +559,8 @@ defmodule Loopex.Runtime.Control do
   def handle_cast({:owner_replayed, coordinator, session_id}, state) do
     case Map.fetch(state.sessions, session_id) do
       {:ok, %{status: :acquiring, coordinator: ^coordinator} = entry} ->
-        reply_waiting(entry, {:ok, session_id})
+        reply_waiting(entry, replayed_reply(entry, session_id))
+        EventDispatcher.release_fence(state.root, session_id)
         {:noreply, %{state | sessions: Map.delete(state.sessions, session_id)}}
 
       _other ->
@@ -523,8 +580,13 @@ defmodule Loopex.Runtime.Control do
         case Map.fetch(state.sessions, session_id) do
           {:ok, %{status: :acquiring, coordinator: ^pid} = entry} ->
             reply_waiting(entry, {:error, :owner_recovery_failed})
+            EventDispatcher.release_fence(state.root, session_id)
             unavailable = entry |> Map.put(:status, :unavailable) |> Map.put(:waiting, nil)
             {:noreply, %{state | sessions: Map.put(state.sessions, session_id, unavailable)}}
+
+          {:ok, %{status: :active, coordinator: ^pid}} ->
+            EventDispatcher.release_fence(state.root, session_id)
+            {:noreply, state}
 
           _other ->
             {:noreply, state}
@@ -540,11 +602,19 @@ defmodule Loopex.Runtime.Control do
              owner_group: ^pid,
              succession_id: succession_id,
              waiting: waiting,
-             owner_command: owner_command
+             owner_command: owner_command,
+             prepared: prepared
            }} ->
             cleared = %{state | sessions: Map.delete(state.sessions, session_id)}
 
-            case do_start_owner(cleared, session_id, succession_id, waiting, owner_command) do
+            case do_start_owner(
+                   cleared,
+                   session_id,
+                   succession_id,
+                   waiting,
+                   owner_command,
+                   prepared
+                 ) do
               {:waiting, next} ->
                 {:noreply, next}
 
@@ -554,6 +624,7 @@ defmodule Loopex.Runtime.Control do
             end
 
           {:ok, %{status: :active, owner_group: ^pid} = entry} ->
+            EventDispatcher.release_fence(state.root, session_id)
             unavailable = Map.put(entry, :status, :unavailable)
             {:noreply, %{state | sessions: Map.put(state.sessions, session_id, unavailable)}}
 
@@ -647,7 +718,16 @@ defmodule Loopex.Runtime.Control do
   defp canonical_item_bytes(item),
     do: item |> :erlang.term_to_binary([:deterministic]) |> byte_size()
 
-  defp start_owner(state, session_id, succession_id, from, owner_command \\ nil) do
+  defp start_owner(
+         state,
+         session_id,
+         succession_id,
+         from,
+         owner_command \\ nil,
+         mode \\ :ordinary
+       ) do
+    prepared = prepared_capability(mode, from)
+
     case Map.get(state.sessions, session_id) do
       %{
         status: :acquiring,
@@ -671,19 +751,20 @@ defmodule Loopex.Runtime.Control do
             |> Map.put(:status, :awaiting_owner_barrier)
             |> Map.put(:succession_id, succession_id)
             |> Map.put(:owner_command, owner_command)
+            |> Map.put(:prepared, prepared)
             |> Map.put(:waiting, [from])
 
           {:waiting, %{state | sessions: Map.put(state.sessions, session_id, waiting)}}
         else
-          do_start_owner(state, session_id, succession_id, [from], owner_command)
+          do_start_owner(state, session_id, succession_id, [from], owner_command, prepared)
         end
 
       _other ->
-        do_start_owner(state, session_id, succession_id, [from], owner_command)
+        do_start_owner(state, session_id, succession_id, [from], owner_command, prepared)
     end
   end
 
-  defp do_start_owner(state, session_id, succession_id, waiting, owner_command) do
+  defp do_start_owner(state, session_id, succession_id, waiting, owner_command, prepared) do
     with {:ok, %{sessions: session_supervisor, owner_groups: owner_groups, workers: workers}} <-
            RuntimeSupervisor.children(state.root) do
       counter = state.generation_counter + 1
@@ -728,7 +809,8 @@ defmodule Loopex.Runtime.Control do
           fault_to: state.fault_to,
           cleanup_grace_ms: state.cleanup_grace_ms,
           context_token_budget: state.context_token_budget,
-          runtime_id: state.runtime_id
+          runtime_id: state.runtime_id,
+          prepared: prepared
         ]
 
         case DynamicSupervisor.start_child(session_supervisor, {SessionCoordinator, options}) do
@@ -743,7 +825,8 @@ defmodule Loopex.Runtime.Control do
                   owner_group,
                   counter,
                   waiting,
-                  owner_command
+                  owner_command,
+                  prepared
                 )
 
               {:error, reason} ->
@@ -797,7 +880,8 @@ defmodule Loopex.Runtime.Control do
          owner_group,
          counter,
          waiting,
-         owner_command
+         owner_command,
+         prepared
        ) do
     coordinator_monitor = Process.monitor(coordinator)
     owner_group_monitor = Process.monitor(owner_group)
@@ -807,6 +891,7 @@ defmodule Loopex.Runtime.Control do
       coordinator: coordinator,
       owner_group: owner_group,
       owner_command: owner_command,
+      prepared: prepared,
       generation: generation,
       previous: Map.get(state.sessions, session_id),
       coordinator_monitor: coordinator_monitor,
