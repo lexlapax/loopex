@@ -68,7 +68,8 @@ so nothing has welded two surfaces together by shipping them in one artifact.
 ### What Each Surface Currently Consists Of
 
 **Embedded facade.** `Loopex.start_link/1`, `stop/1`, `create_session/3`,
-`resume_session/3`, `resume_known_session/4`, `attach/3`, `command/2`,
+`resume_session/3`, `resume_known_session/4`, `attach/2` and `attach/3`,
+`command/2`,
 `next_event/1`, `snapshot/1`, `attachment_status/1`, `progress/2`,
 `diagnostic/2`, `session_status/2`, `reconciliation_query/1`, `reconcile/2`,
 `prepare_resume_session/3`, `prepare_resume_known_session/4`,
@@ -177,6 +178,29 @@ measurements do not otherwise know is measured by encoding it, so an unbounded
 integer no longer measures as nothing. Both are behaviour changes for an adapter
 that compiles unchanged, and the shipped adapter already emitted complete deltas.
 
+A reply's usage map is also closed to `input_tokens` and `output_tokens`. An
+adapter that reports a third key — a cache count, a reasoning count, a provider's
+own total — now settles the attempt as `unreadable_model_answer` instead of
+having the extra number silently dropped, because a usage record Core cannot
+account for in full is one it must not charge from. Omitting either key stays
+legal and normalizes as unreported; a present but unreadable value is classified
+rather than refused. Widening that key set is the change a later milestone makes
+deliberately, and it is why the closure exists rather than a lenient filter.
+
+**Store port.** An append failure gains one pair of reasons and one changed
+consequence. The local Store holds the log *file* rather than its path: it
+records the file's device and inode at start-up and re-reads the path once its
+append handle is held, because opening in append mode creates a missing file and
+a check made only before the open would let a removal be answered with a new,
+empty, history-free log at the same name. A log removed or replaced underneath a
+live Store is `{:log_unavailable, :enoent}` or `{:log_unavailable, :replaced}`,
+commit-ambiguous exactly as any other append failure is: the caller receives
+`{:commit_unknown, tx_id}` and must re-present that exact transaction, and the
+Store process terminates for recovery rather than continuing against a file it
+cannot vouch for. An implementation that never checked its own file identity
+keeps compiling and stays conformant; a caller that read an append error as a
+non-commit was already wrong and now fails visibly instead of quietly.
+
 **Durable records.** M2's session schema includes `session_genesis_v2`,
 `owner_advanced`, `prompt_admitted_v2`, the other input-command admissions and
 `command_admission_refused_v1`, `model_request_committed`,
@@ -203,9 +227,19 @@ and `tool_version` and `tool.finished` carries `tool_id` and the outcome, so a
 terminal can name the tool rather than only an opaque call identifier. A call
 whose name resolved to no active generation carries no tool identity, because
 publishing the model-supplied string would read as a name the runtime accepted.
-Progress items and diagnostics are
-transient and are not this surface: they are not durable truth and carry no
-compatibility expectation at all.
+A `run.finished` that ends `failed` carries a `failure` projection only where a
+context refusal was actually admitted and a `reason` only where one exists, so a
+consumer reads one or the other and never a placeholder for both.
+
+Delivery is now fenced by resolution as well as by commit: an attachment is
+handed rows only up to the position the runtime has acknowledged as resolved, so
+a durably linearized row whose owner still holds an unresolved transaction is
+invisible until re-presentation settles it. Cursors, sequences, and gap
+semantics are unchanged; a consumer that already tolerated waiting sees the same
+stream a little later, and one that read the store's files directly to get ahead
+of the fence was never on this surface. Progress items and diagnostics are
+transient and are not this surface: they are not durable truth, are not fenced,
+and carry no compatibility expectation at all.
 
 **Tool definition contract.** The nine required fields, the evaluable schema
 subset, the generation triple, the reserved `loopex.` namespace, and the
@@ -233,9 +267,15 @@ facade directly instead. See
 [Runtime and embedding](runtime-and-embedding.md#technical-depth).
 
 **Operator command.** `loopex run`, `sessions`, `resume`, `cancel`, and
-`artifact`, with the flags `--policy`, `--state-root`, `--workspace`,
+`artifact`. The flags are `--policy`, `--state-root`, `--workspace`,
 `--steer`, `--follow-up`, `--cleanup-grace-ms`, and
-`--context-token-budget`. The reference command defaults a new prompt's context
+`--context-token-budget`, and each subcommand admits its own subset: `sessions`
+and `artifact` take `--state-root` alone, `resume` and `cancel` take everything
+but `--steer` and `--follow-up`, and only `run` takes those. The pairing is part
+of the surface, so admitting a flag on one more subcommand is observable and
+withdrawing one is breaking. A bare `--` ends option parsing and preserves every
+remaining word as data, which is what makes an artifact locator beginning with
+`--` retrievable at all. The reference command defaults a new prompt's context
 value to 8,192; prepared `resume` and `cancel` recover an active run's committed
 value on omission and refuse an explicit conflict before activation or abort.
 The command's cross-application interrupt entries are `install/1`,
