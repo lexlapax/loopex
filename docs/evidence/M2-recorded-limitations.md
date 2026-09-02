@@ -426,3 +426,26 @@ is not rewritten during implementation: the change corrects a fixture defect
 to the accepted ADR's stated convention and alters no claim any case makes. The
 correcting commit carries the same record in its message.
 
+<a id="required-context-budget-at-runtime-start"></a>
+## The required context token budget and the existing runtime-start corpus
+
+**Rule.** [ADR 0017](../adr/0017-durable-context-admission-budget.md#concept)
+makes `context_token_budget` a required top-level runtime option with no
+default in Core; omission is refused by the same name as an invalid value, and
+only the reference composition supplies the 8,192 default on an embedder's
+behalf.
+
+**What is true.** Nine locked test files and the shared agent-loop helper
+started a runtime without the option, because they predate the ADR: the
+agent-loop, runtime, session-lifecycle, tool-registry, cancellation, embedded
+API, session-directory, command, and project-resource-trust corpora. Refusing
+omission as the ADR requires made every one of those runtimes unstartable.
+
+**Disposition.** Maintainer, 2026-09-01: add the option at every runtime start
+in those files directly, without a gate amendment. No case name or minimum
+changes, no assertion changes meaning, and the one order-sensitive case - a
+runtime started with no options at all - keeps its general refusal because the
+runtime identity is validated before the budget. This is the second explicit
+maintainer override of the rule that locked tests are not rewritten during
+implementation; each is recorded here and in its correcting commit.
+
