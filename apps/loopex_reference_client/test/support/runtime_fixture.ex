@@ -51,7 +51,9 @@ defmodule Loopex.ReferenceClientTestModel do
          model: request.model,
          endpoint: "in-process"
        },
-       usage: %{input_tokens: nil, output_tokens: nil},
+       # ADR 0018: an attempt whose usage is not a complete reported pair is
+       # charged the whole remaining allowance; the scripted model reports.
+       usage: %{input_tokens: 1, output_tokens: 1},
        tool_calls: tool_calls,
        delta_count: deltas,
        streamed: deltas > 0,
