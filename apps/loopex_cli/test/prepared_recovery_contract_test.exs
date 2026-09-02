@@ -202,7 +202,8 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     # The abort's terminal lands only after the cleanup observation the committed
     # grace derives (ADR 0016); a literal ten seconds sat under that backstop
     # and read a slow but legitimate cleanup as a missing terminal under load.
-    terminal_bound_ms = Loopex.Executor.cancellation_bounds(@grace).cli_backstop_ms + 2_000
+    {:ok, bounds} = Loopex.Executor.cancellation_bounds(@grace)
+    terminal_bound_ms = bounds.cli_backstop_ms + 2_000
     assert run_terminal(fixture, terminal_bound_ms)["outcome"] in ["cancelled", "outcome_unknown"]
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
     assert_refused(invoke(Loopex, :activate_resume, [activation]))
