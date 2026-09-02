@@ -561,11 +561,35 @@ defmodule Loopex.Runtime.Control do
       {:ok, %{status: :acquiring, coordinator: ^coordinator} = entry} ->
         reply_waiting(entry, replayed_reply(entry, session_id))
         EventDispatcher.release_fence(state.root, session_id)
-        {:noreply, %{state | sessions: Map.delete(state.sessions, session_id)}}
+
+        {:noreply,
+         %{
+           state
+           | sessions: Map.delete(state.sessions, session_id),
+             spent_attempts: forget_spent_attempts(state.spent_attempts, session_id)
+         }}
 
       _other ->
         {:noreply, state}
     end
+  end
+
+  # Concept: an attempt identity is remembered for exactly as long as the
+  # ownership generation that spent it.
+  #
+  # Technical depth: ADR 0018 scopes the retention to "the complete ownership
+  # generation", and the same paragraph says replacing the coordinator or the
+  # worker does not clear it -- a successor must still be refused the identity
+  # its predecessor spent. So the only moment a session's identities may be
+  # dropped is the one where this Control stops holding the session at all, and
+  # that is the same line that removes its entry. Dropping them at succession
+  # would hand the successor a second call on an attempt that may already have
+  # been billed; never dropping them makes a runtime that resumes many sessions
+  # accumulate one entry per attempt of every session it has finished with.
+  defp forget_spent_attempts(spent, session_id) do
+    spent
+    |> Enum.reject(fn {binding, _bound} -> Map.get(binding, "session_id") == session_id end)
+    |> Map.new()
   end
 
   @impl GenServer
