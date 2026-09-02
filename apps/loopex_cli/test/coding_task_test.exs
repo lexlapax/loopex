@@ -326,7 +326,8 @@ defmodule LoopexCli.CodingTaskTest do
     IO.puts(
       :stderr,
       "loopex demonstration observed: turns=#{facts.turns} " <>
-        "tool_calls=#{facts.tool_calls} effects=#{facts.effects} tools=" <>
+        "tool_calls=#{facts.tool_calls} effects=#{facts.effects} " <>
+        "refusals=#{Enum.join(facts.refusal_outcomes, "+")} tools=" <>
         (~r/loopex\.[a-z]+/
          |> Regex.scan(transcript)
          |> List.flatten()
@@ -385,11 +386,16 @@ defmodule LoopexCli.CodingTaskTest do
     assert facts.tool_results == facts.tool_calls,
            "#{facts.tool_calls} calls produced #{facts.tool_results} terminal tool facts"
 
-    assert facts.denied == 1,
-           "the attended run committed #{facts.denied} denied tool results rather than one"
+    # A real model may retry the refused step despite being told not to; that
+    # is the model's behaviour, not this system's. What must hold is that every
+    # refusal is a durable pre-dispatch fact, at least one of them is the host's
+    # denial, and every call that was not refused became exactly one effect.
+    assert facts.denied >= 1,
+           "the attended run committed #{facts.denied} denied tool results rather than at least one"
 
-    assert facts.effects == facts.tool_calls - facts.denied,
-           "#{facts.tool_calls} calls with #{facts.denied} denial produced #{facts.effects} effects"
+    assert facts.effects == facts.tool_calls - facts.refused,
+           "#{facts.tool_calls} calls with #{facts.refused} refusals " <>
+             "(#{inspect(facts.refusal_outcomes)}) produced #{facts.effects} effects"
 
     assert facts.executor_receipts == facts.effects,
            "#{facts.effects} dispatched effects produced #{facts.executor_receipts} receipts"
@@ -545,6 +551,8 @@ defmodule LoopexCli.CodingTaskTest do
       tool_calls: tool_calls,
       tool_results: length(nondispatched_results) + length(executor_receipts),
       denied: Enum.count(nondispatched_results, &(&1.payload["outcome"] == "denied")),
+      refused: length(nondispatched_results),
+      refusal_outcomes: Enum.map(nondispatched_results, & &1.payload["outcome"]),
       effects: Enum.count(records, &(&1.payload.kind == "effect_intent_committed")),
       executor_receipts: length(executor_receipts)
     }
