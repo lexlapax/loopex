@@ -76,7 +76,14 @@ so nothing has welded two surfaces together by shipping them in one artifact.
 `activate_resume/1`, `abandon_resume/1`, `state_root/0`,
 `runtime_placement_id/1`, `track_session/3`, `list_sessions/1`, and `version/0`.
 Prepared resume entries return an opaque one-use activation capability; neither
-preparation nor handler installation schedules recovered work. The runtime
+preparation nor handler installation schedules recovered work. `activate_resume/1`
+and `abandon_resume/1` wait for the coordinator's answer rather than expiring on
+a bound. The message carrying either call is not withdrawn when its caller stops
+waiting, so a bounded call that expired would report the session unavailable
+while the coordinator went on to spend the very activation the caller was told it
+had not got. Neither call proposes a Store mutation, so waiting commits nothing,
+and a coordinator that has died still refuses, because its exit is the answer.
+The runtime
 start options are part of this surface, including
 `:tools`, `:active_tools`, `:policy`, `:bounds`, `:sampling`, `:progress_to`,
 `:diagnostics_to`, `:cleanup_grace_ms`, and the required positive
@@ -201,6 +208,23 @@ cannot vouch for. An implementation that never checked its own file identity
 keeps compiling and stays conformant; a caller that read an append error as a
 non-commit was already wrong and now fails visibly instead of quietly.
 
+Item admission has one refusal taxonomy, and the reason atoms moved. Building a
+transaction, preflighting through `Loopex.Store.normalize_and_measure_item/2`,
+and validating a transaction run the same normalizer and the same measurement,
+so the same bytes get the same answer whichever way a caller reaches the
+boundary. An item that is not bounded plain data is `:invalid_item` for a
+private record and `:invalid_event` for a public event, replacing
+`:not_plain_data`, `:not_plain_event_data`, `:invalid_record`, and
+`:reserved_event_field`. A depth or cardinality breach is
+`{:item_structure_exceeded, dimension, observed, limit}` and an oversized item
+is `{:item_too_large, observed, limit}`; both now survive a list's own refusal
+rather than collapsing into `:invalid_records` or `:invalid_events`, which is
+what lets a preflight and a commit agree about one item. A caller that matched
+on the old atoms must change; one that reported the reason as opaque text does
+not. The list-level `:invalid_records` and `:invalid_events` remain for an
+ordinary malformed member, because which member was malformed tells a caller
+nothing it can act on.
+
 **Durable records.** M2's session schema includes `session_genesis_v2`,
 `owner_advanced`, `prompt_admitted_v2`, the other input-command admissions and
 `command_admission_refused_v1`, `model_request_committed`,
@@ -213,7 +237,11 @@ records replace the earlier `model_result_committed`,
 `model_attempt_evidence_retained`, and `model_attempt_abandoned` vocabulary:
 opening identifies one permitted attempt, settlement atomically carries bounded
 result, accounting, conversation disposition, and next action, and only exact
-pretransport refusal permits attempt two. The payloads also carry projected
+pretransport refusal permits attempt two. A settlement naming a retry at the
+attempt limit, and one whose reply carries a termination without being
+evidence-only, are refused as invalid history rather than applied, so no owner
+installs permission for an attempt that can never open and no answer is retained
+that the run has no record of receiving. The payloads also carry projected
 conversation elements, staged request bytes and digest, tool generations,
 context and Store-admission observations, declared bounds, cleanup truth,
 denials, and terminal detail. The Local executor's generation, admission, open,
@@ -234,7 +262,12 @@ consumer reads one or the other and never a placeholder for both.
 Delivery is now fenced by resolution as well as by commit: an attachment is
 handed rows only up to the position the runtime has acknowledged as resolved, so
 a durably linearized row whose owner still holds an unresolved transaction is
-invisible until re-presentation settles it. Cursors, sequences, and gap
+invisible until re-presentation settles it. The fence binds both paths to the
+outbox. `Loopex.attach/3`'s own snapshot scan stops at that same acknowledged
+position rather than at the durable tail, so an attachment's anchor never
+reports run state derived from a row no consumer may yet read and never sets its
+cursor past rows the event plane still owes it. A session this runtime does not
+own carries no fence on either path. Cursors, sequences, and gap
 semantics are unchanged; a consumer that already tolerated waiting sees the same
 stream a little later, and one that read the store's files directly to get ahead
 of the fence was never on this surface. Progress items and diagnostics are

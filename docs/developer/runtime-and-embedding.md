@@ -173,7 +173,9 @@ start. Those are committed run/session policy, not adapter configuration, and a
 restart or recovery never substitutes its current process defaults for the
 retained values.
 
-`Loopex.snapshot/1` returns the attachment's exact durable anchor.
+`Loopex.snapshot/1` returns the attachment's exact durable anchor, taken by a
+scan that stops at the acknowledged position rather than at the durable tail, so
+the anchor never derives run state from a row delivery is still withholding.
 `Loopex.attachment_status/1` reports bounded transient queue information.
 `Loopex.progress/2` and `Loopex.diagnostic/2` are transient. None of those
 observations grants authority or substitutes for Store history.
@@ -183,13 +185,21 @@ resolved. A row that is durably linearized while its owner still holds an
 unresolved transaction is withheld until re-presentation settles it, so a
 caller never reads a fact the owner is not yet able to stand behind. Cursors and
 gap semantics are unchanged; the fence delays a read rather than reordering or
-dropping one, and it is released when this runtime stops owning the session.
+dropping one, and it is released when this runtime stops owning the session. The
+attach scan obeys the same bound, so an attachment installed under an unresolved
+transaction never anchors past what its first read may deliver.
 
 Recovery that may race an operator interrupt is deliberately two phase.
 `prepare_resume_session/3` and `prepare_resume_known_session/4` return either a
 replayed result or an opaque one-use activation capability while ordinary work
 remains paused. The caller then invokes `activate_resume/1` or
-`abandon_resume/1`. The reference command installs the interrupt owner with
+`abandon_resume/1`. Both wait for the coordinator's answer rather than expiring
+on a bound: the message carrying either call is not withdrawn when its caller
+stops waiting, so an expired call would report the session unavailable while the
+coordinator went on to spend the very activation the caller was told it had not
+got. Neither proposes a Store mutation, so waiting commits nothing, and a
+coordinator that has died refuses through its own exit.
+The reference command installs the interrupt owner with
 `LoopexCli.Interrupt.install_prepared(attachment, cleanup_ms, activation)` and
 may consume the same pair through
 `LoopexCli.Interrupt.abandon_resume(attachment, activation)`. Handler
@@ -271,7 +281,9 @@ identity, the current recovery contract, and the journaled operation, attempt,
 canonical request digest, original session and executor epochs, origin executor
 identity, and fencing token — and every one must be echoed back unchanged; a
 difference names the field that differed. Receipt evidence is then matched
-field for field against the job the coordinator journaled. A query is opened
+field for field against the job the coordinator journaled. Presence is part of
+each comparison: a field the answer or the receipt does not carry is a mismatch,
+never a match against an expected value that happens to be absent itself. A query is opened
 only where exactly one item sits at `effect_dispatched`; anything else is
 `:no_effect_recovery_pending`, and an effect still in flight is
 `:effect_in_flight`. Unsolicited evidence is refused rather than admitted.

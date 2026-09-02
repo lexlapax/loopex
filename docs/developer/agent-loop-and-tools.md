@@ -261,7 +261,15 @@ owner and worker replacement, so no timeout, lost reply, dead worker, or
 successor can mint a second call for it.
 
 A conforming adapter may report `not_dispatched` only before it invokes or
-hands bytes to provider transport. Every other error, timeout, process death,
+hands bytes to provider transport. The coordinator proves the same fact for one
+window of its own: between the attempt-open commit and the
+`Control.provider_dispatch/3` that sends the permit, it holds the open attempt,
+it has not asked for the identity to be spent, and no other process may ask for
+it — so an abort or a deadline arriving there settles `not_dispatched` and
+charges nothing. That claim needs both halves. An attempt inherited from a dead
+predecessor was never adopted here and the predecessor may have reached Control
+before it died; a request whose Control reply was lost is already past the send.
+Both stay `dispatched_or_unknown`. Every other error, timeout, process death,
 malformed answer, contradicted tag, and recovered open attempt is
 `dispatched_or_unknown`: it ends that model operation without creating an
 executor `outcome_unknown`, because a provider call is not a Loopex-controlled
@@ -278,7 +286,16 @@ validated rather than merely typed: a reply cannot be `not_dispatched`, a
 `not_dispatched` attempt may charge nothing and enter no conversation, a
 `dispatched_or_unknown` attempt may not charge nothing, `continue` requires a
 canonical reply that actually asked for tools, and `retry` exists only for the
-exact not-dispatched attempt that also carried no termination.
+exact not-dispatched attempt that also carried no termination. Two more
+combinations are refused by reading the attempt number and the reply together.
+`retry` at the attempt limit is invalid history: admitting it would install
+permission for an attempt three the attempt-open record then refuses, so the
+owner would crash on history it had accepted. A reply carrying a termination is
+admitted only as `evidence_only`, which is what the evidence plane is for — the
+answer arrived, the ending was already chosen, and the reply is retained beside
+the conversation rather than as it. A reply that carries a termination and
+claims no conversation at all is a retained answer the run has no record of
+having received, and is neither disposition the table admits.
 
 `owner_loss` is the weakest of the three terminations and is claimed only where
 neither an admitted abort nor an admitted deadline already won. A successor that
@@ -354,6 +371,18 @@ deadline is not dispatched at all: it takes a terminal `cancelled` fact whose
 cleanup is trivially confirmed, because nothing started. There is no minimum
 remaining time, since inventing a threshold would refuse work the operator's
 declared bound permits.
+
+An elapsed deadline gets its own durable row before anything settles under it,
+and an admission that did not commit settles nothing. A run whose attempt is not
+open, or whose deadline was already admitted, has no row to propose and adds
+nothing. A refusal is different: the settlement that follows reads the deadline
+from applied state, so discarding a refused admission left `model_termination`
+unset and the attempt selected a retry and a model-call failure for a run that
+had reached `bound_reached(:deadline)`. A refusal that only says ownership moved
+is the ordinary succession this coordinator already leaves, and the successor
+rereads the deadline and admits it itself. Every other refusal makes the session
+unavailable, with no settlement, accounting, conversation, or terminal invented
+behind a commit that did not happen.
 
 ### Streaming and Stream Domains
 
@@ -622,6 +651,32 @@ re-canonicalized, never trimmed. Required system, history, steer, or tool
 context overflow commits `context_admission_refused_v1` and the run's `failed`
 terminal in one transaction, opens no model attempt, and publishes exactly five
 members: `category`, `retryable: false`, `dimension`, `observed`, and `limit`.
+
+Every retained refusal is decided on and built from a required-only candidate.
+The compact record's four counts — system, session, steer, tool — have no member
+for an optional project descriptor, so a dimension no withholding can cure (the
+strict system-class ceiling, record depth, record cardinality) is re-decided over
+the required-only set before anything is retained. That is what makes the counts
+partition the exact descriptor sequence behind `ordered_descriptor_digest` and
+makes `not_evaluated_required_failure` the truth about a project whose budget
+contribution was never reached. A required-only candidate admitted at that point
+is discarded rather than staged, because its receipt still claims the project
+resolution that produced the optional block it no longer contains. Optional
+content cannot be the sole cause of a structural refusal in M2, so reaching that
+state means the invariant is broken and the session is unavailable rather than
+an operator verdict being invented; a required-only candidate whose own counts
+and sequence disagree is the same kind of broken invariant. The staged source
+list names the blocks the request actually carries rather than the ones its
+receipt's resolution would imply. The residual gap here is recorded at
+[M2 recorded limitations](../evidence/M2-recorded-limitations.md#adr-0017-step-five).
+
+The candidate record's own byte cost is a fixed point, and one that does not
+converge is Store-unavailable rather than a measurement. Continuing without it
+would stage a request whose receipt states a byte cost of zero, so the session
+becomes unavailable and no dimension, terminal, or dispatch is manufactured from
+it. A record that breaches Store depth or cardinality has no convergent
+self-size at all: it is handed to the admission boundary unresolved, which is
+where it is refused by its exact structural dimension.
 The descriptors and source references that caused the refusal reach no public
 plane. Every content-bearing prompt, steer, and follow-up also preflights its
 exact accepted record and reachable event/terminal shapes. Replay is consulted
@@ -734,10 +789,14 @@ Public events are projections of committed facts, and delivery is fenced by
 resolution as well as by commit. An attached reader is handed outbox rows only
 up to the position Runtime Control has recorded as resolved, so a row that is
 durably linearized while its owner still holds an unresolved transaction
-publishes nothing until re-presentation settles it. The watermark is pushed to
+publishes nothing until re-presentation settles it. An attaching reader's own
+snapshot scan is bounded by the same watermark, because it reaches the outbox by
+a second path: an unfenced scan would anchor on the durable tail, answer with
+truth every already-attached consumer is withheld from, and set `seen` past rows
+the event plane then never delivers. The watermark is pushed to
 the dispatcher rather than pulled from it, is applied to the read rather than to
 the queue, and is dropped when this runtime stops owning the session — a
-dormant session's history therefore reads without a fence. Progress items and
+dormant session's history therefore reads and scans without a fence. Progress items and
 diagnostics are transient, are not fenced, and are never durable truth.
 
 ### Verification Entry Points
