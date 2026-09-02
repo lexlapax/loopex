@@ -130,7 +130,11 @@ defmodule Loopex.SessionDirectoryTest do
     assert File.read!(Path.join(root, "runtime_id")) == runtime_id
 
     elixir = System.find_executable("elixir") || flunk("the accepted Elixir toolchain is absent")
-    ebin = Path.expand("../../../_build/test/lib/loopex/ebin", __DIR__)
+    # The child loads the same compiled application this suite is running from.
+    # The bound selector runner compiles into an owned build root outside the
+    # checkout, so a path derived from the source tree names a directory that
+    # need not exist there.
+    ebin = Application.app_dir(:loopex, "ebin")
 
     expression = """
     case Loopex.SessionDirectory.state_root() do
