@@ -150,6 +150,11 @@ defmodule Loopex.Executor.Local do
                             "rather than confirmed stopped and whether its effect landed is " <>
                             "unproven.]"
 
+  @cancelled_released_note "\n[loopex: this job was cancelled while its child was running. " <>
+                             "This path captures no process group, so the child was released " <>
+                             "rather than confirmed stopped and whether its effect landed is " <>
+                             "unproven.]"
+
   @lease_lost_note "\n[loopex: the workspace lease was lost before this job's receipt was " <>
                      "durably retained. Whether its effect landed in the workspace this job " <>
                      "was authorised against is unproven.]"
@@ -188,6 +193,23 @@ defmodule Loopex.Executor.Local do
 
   Duplicate job IDs return a matching retained receipt. A different digest
   under the same ID is refused and never starts a process.
+
+  The serialized owner decides *whether* this job may proceed; the caller then
+  performs the work. ADR 0016 names the effect boundary as the serialized
+  transition that reserves exact worker authority immediately before its single
+  permit, and that is exactly what crosses the GenServer here: the quarantine
+  check, the retained-receipt decision, and the in-memory reservation. Prestart
+  validation, the durable admission publication under the root claim, the effect,
+  its receipt, and the removal of this job's open authority all run in the
+  calling process.
+
+  That placement is not a detail. A serialized owner that also *ran* every effect
+  was unavailable for the whole length of the longest job it had admitted, so a
+  second job, a receipt read, and a cancellation all queued behind the work they
+  needed to talk about; and a caller blocked inside an unbounded call died with
+  the executor whenever the executor died, taking work that had nothing to do
+  with it. Ownership of the durable truth stays with the server; ownership of the
+  waiting stays with whoever chose to wait.
   """
   @impl Loopex.Executor
   @spec execute(t(), Executor.job_request(), Executor.grant(), keyword(), Executor.progress_fun()) ::
@@ -199,12 +221,27 @@ defmodule Loopex.Executor.Local do
     # Concept: the shipped shell tool reports output while it runs; a filesystem
     # tool that starts no child remains a truthful zero-progress executor.
     #
-    # Technical depth: the callback crosses the in-VM GenServer boundary with
-    # the job and is called only for bytes the process collector has admitted
-    # after removing its private process-group preamble. A duplicate job returns
-    # the retained receipt without replaying transient output.
+    # Technical depth: the callback is called only for bytes the process
+    # collector has admitted after removing its private process-group preamble. A
+    # duplicate job returns the retained receipt without replaying transient
+    # output.
     progress = progress || Executor.discard_progress()
-    GenServer.call(executor, {:execute, job, grant, options, progress}, :infinity)
+    job_id = Map.get(job, :job_id, "")
+
+    case GenServer.call(executor, {:reserve, job}) do
+      {:ok, placement} ->
+        try do
+          run_reserved(placement, job, grant, options, progress)
+        after
+          GenServer.cast(executor, {:release, job_id})
+        end
+
+      {:retained, receipt} ->
+        {:ok, receipt}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   @doc """
@@ -562,6 +599,17 @@ defmodule Loopex.Executor.Local do
       Process.put(:loopex_cleanup_grace_ms, cleanup_grace_ms)
       Process.put(:loopex_process_probe, process_probe)
 
+      # Concept: the in-flight table belongs to this executor, not to whichever
+      # caller happened to start the first job.
+      #
+      # Technical depth: `cancel/2` finds the table through this process's
+      # dictionary, so it has to be this process's table and it has to outlive any
+      # one job. It used to be created lazily by whoever ran the first effect,
+      # which was this server only because this server ran every effect. Creating
+      # it here makes that independent of where the work runs, and the table is
+      # public so a caller performing an effect can register the group it owns.
+      table = inflight_table()
+
       {:ok,
        %{
          identity: identity,
@@ -575,6 +623,8 @@ defmodule Loopex.Executor.Local do
          artifacts: artifacts,
          cleanup_grace_ms: cleanup_grace_ms,
          process_probe: process_probe,
+         inflight_table: table,
+         reserved: %{},
          dispatches: %{}
        }}
     else
@@ -618,30 +668,66 @@ defmodule Loopex.Executor.Local do
   def handle_call(:process_probe, _from, state),
     do: {:reply, state.process_probe, state}
 
-  def handle_call({:execute, job, grant, options, progress}, _from, state) do
-    if state.quarantine do
-      {:reply, {:error, state.quarantine}, state}
-    else
-      dispatch_execute(state, job, grant, options, progress)
+  # Concept: the one serialized decision, and nothing else.
+  #
+  # Technical depth: a quarantined root refuses everything; a retained receipt
+  # for this exact request is replayed and a conflicting one refuses; anything
+  # else is reserved to the caller, which then owns the waiting. The reservation
+  # records who holds the job so `stats/1` and the release below describe live
+  # work rather than work this server is performing.
+  def handle_call({:reserve, job}, {caller, _tag}, state) do
+    job_id = Map.get(job, :job_id, "")
+
+    cond do
+      state.quarantine ->
+        {:reply, {:error, state.quarantine}, state}
+
+      true ->
+        case read_receipt(state.ledger_root, job_id) do
+          {:ok, receipt} ->
+            if Map.get(receipt, :canonical_request_digest) ==
+                 Map.get(job, :canonical_request_digest),
+               do: {:reply, {:retained, receipt}, state},
+               else: {:reply, {:error, :job_id_conflict}, state}
+
+          :absent ->
+            {:reply, {:ok, placement(state)},
+             %{state | reserved: Map.put(state.reserved, job_id, caller)}}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
     end
   end
 
-  defp dispatch_execute(state, job, grant, options, progress) do
-    case read_receipt(state.ledger_root, Map.get(job, :job_id, "")) do
-      {:ok, receipt} ->
-        if Map.get(receipt, :canonical_request_digest) ==
-             Map.get(job, :canonical_request_digest) do
-          {:reply, {:ok, receipt}, state}
-        else
-          {:reply, {:error, :job_id_conflict}, state}
-        end
+  # Concept: what a caller needs to perform one reserved job, and nothing this
+  # server needs to stay the authority.
+  #
+  # Technical depth: identity, epoch, fence, leases, ledger root and authority,
+  # clock, artifact store, configured period and probe, plus the in-flight table
+  # and this server's own pid. The quarantine, the reservation map, and the
+  # dispatch counts stay here, because they are facts about the executor rather
+  # than about the job. It carries the same member names the serialized state
+  # used, so every function below reads one shape whichever process it runs in.
+  defp placement(state) do
+    state
+    |> Map.drop([:quarantine, :reserved, :dispatches])
+    |> Map.put(:executor, self())
+  end
 
-      :absent ->
-        execute_new(state, job, grant, options, progress)
+  @impl GenServer
+  def handle_cast({:release, job_id}, state),
+    do: {:noreply, %{state | reserved: Map.delete(state.reserved, job_id)}}
 
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
+  # Concept: a job is counted as dispatched once it has been durably admitted,
+  # never merely because someone asked for it.
+  #
+  # Technical depth: the count is the executor's own evidence of what it let
+  # start, so a pre-effect refusal must leave it untouched. The caller reports
+  # admission from the process that obtained it, and message order from that one
+  # caller keeps the count settled before any answer that reads it.
+  def handle_cast({:admitted, job_id}, state) do
+    {:noreply, update_in(state.dispatches, &Map.update(&1, job_id, 1, fn count -> count + 1 end))}
   end
 
   # Concept: a message that arrives after the job it belongs to is over is
@@ -741,16 +827,48 @@ defmodule Loopex.Executor.Local do
   # the monitored interval exactly the job lifetime ADR 0007 names, and every
   # blocking step inside it is a wait that carries the DOWN rather than a gap
   # between two samples of the mailbox.
-  defp execute_new(state, job, grant, options, progress) do
+  # Concept: everything a reserved job does, done where the caller can be
+  # interrupted and the executor cannot be blocked.
+  #
+  # Technical depth: the job-scoped values the cleanup sequence reads from a
+  # process dictionary are installed here for the duration of this job and
+  # removed afterwards, because that sequence now runs in the caller. They are
+  # this job's own state, reachable from every step without being threaded
+  # through the functions between them, and they are never VM-global names two
+  # executors in one VM could collide on. The effect owner stays the executor:
+  # a launch-owned guard watches the process whose authority admitted the work,
+  # so losing that authority still ends the captured group.
+  defp run_reserved(placement, job, grant, options, progress) do
+    Process.put(:loopex_cleanup_grace_ms, placement.cleanup_grace_ms)
+    Process.put(:loopex_process_probe, placement.process_probe)
+    Process.put(:loopex_inflight_table, placement.inflight_table)
+    Process.put(:loopex_effect_owner, placement.executor)
     close_cleanup_episode()
 
-    case final_prestart_validation(state, job, grant) do
-      {:ok, tool, lease_pid, workspace, arguments} ->
-        admitted_execute(state, job, tool, lease_pid, workspace, arguments, options, progress)
+    try do
+      case final_prestart_validation(placement, job, grant) do
+        {:ok, tool, lease_pid, workspace, arguments} ->
+          admitted_execute(
+            placement,
+            job,
+            tool,
+            lease_pid,
+            workspace,
+            arguments,
+            options,
+            progress
+          )
 
-      {:error, {:refused_before_effect, reason}} ->
-        publish_refusal(state, job, reason)
-        {:reply, {:error, {:refused_before_effect, reason}}, state}
+        {:error, {:refused_before_effect, reason}} ->
+          publish_refusal(placement, job, reason)
+          {:error, {:refused_before_effect, reason}}
+      end
+    after
+      close_cleanup_episode()
+      Process.delete(:loopex_cleanup_grace_ms)
+      Process.delete(:loopex_process_probe)
+      Process.delete(:loopex_inflight_table)
+      Process.delete(:loopex_effect_owner)
     end
   end
 
@@ -764,35 +882,31 @@ defmodule Loopex.Executor.Local do
   # operation. `observed_at_ms` is the wall half of the one paired sample taken
   # here and is carried to terminal construction rather than resampled, so the
   # receipt reports when the effect was admitted and not when it finished.
-  defp admitted_execute(state, job, tool, lease_pid, workspace, arguments, options, progress) do
-    case admit(state, job) do
+  defp admitted_execute(placement, job, tool, lease_pid, workspace, arguments, options, progress) do
+    case admit(placement, job) do
       {:ok, admission} ->
-        next_state =
-          update_in(state.dispatches, fn dispatches ->
-            Map.update(dispatches, job.job_id, 1, &(&1 + 1))
-          end)
-
+        GenServer.cast(placement.executor, {:admitted, job.job_id})
         lease = {Process.monitor(lease_pid), lease_pid}
         Process.put(:loopex_admission, admission)
 
         try do
           receipt =
-            run_tool(next_state, job, tool, workspace, arguments, options, lease, progress)
+            run_tool(placement, job, tool, workspace, arguments, options, lease, progress)
 
-          settle_receipt(next_state, job, receipt, lease)
+          settle_receipt(placement, job, receipt, lease)
         after
           Process.delete(:loopex_admission)
           Process.demonitor(elem(lease, 0), [:flush])
         end
 
       :join ->
-        {:reply, join_admitted_operation(state, job), state}
+        join_admitted_operation(placement, job)
 
       {:error, {:refused_before_effect, _reason} = refusal} ->
-        {:reply, {:error, refusal}, state}
+        {:error, refusal}
 
       {:error, reason} ->
-        {:reply, {:error, reason}, state}
+        {:error, reason}
     end
   end
 
@@ -804,22 +918,22 @@ defmodule Loopex.Executor.Local do
   # for a receipt whose captured-group cleanup is confirmed; an `outcome_unknown`
   # whose cleanup is unconfirmed deliberately leaves the entry, and therefore
   # quarantines the root until an operator reconciles it.
-  defp settle_receipt(state, job, receipt, lease) do
+  defp settle_receipt(placement, job, receipt, lease) do
     bound = receipt.receipt_retention_bound_ms
 
-    case retain_receipt_under_lease(state.ledger_root, receipt, lease, bound) do
+    case retain_receipt_under_lease(placement.ledger_root, receipt, lease, bound) do
       {:ok, retained} ->
         if retained.cleanup_confirmation == :confirmed do
           _ =
-            Ledger.with_claim(state.ledger, fn ->
-              Ledger.close_open(state.ledger, job.job_id)
+            Ledger.with_claim(placement.ledger, fn ->
+              Ledger.close_open(placement.ledger, job.job_id)
             end)
         end
 
-        {:reply, {:ok, retained}, state}
+        {:ok, retained}
 
       {:error, reason} ->
-        {:reply, {:error, {:receipt_not_retained, reason}}, state}
+        {:error, {:receipt_not_retained, reason}}
     end
   end
 
@@ -1176,8 +1290,20 @@ defmodule Loopex.Executor.Local do
 
     port = open_launcher("/usr/bin/env", args, demonstration_environment(), workspace)
 
+    # Concept: a cancellation must be able to reach this job too.
+    #
+    # Technical depth: this path captures no process group, so it registers the
+    # process holding the Port rather than a group identifier. That is the whole
+    # of what it can offer: `cancel/2` reaches the holder, the Port is released,
+    # and the answer is `unconfirmed`, because releasing a handle is not proof
+    # that the child stopped. Registering nothing at all was worse -- an absent
+    # entry reads as "no such job", which answers `cleaned` for work that was
+    # still running.
+    register_inflight(job.job_id, {:starting, self()})
+
     notify(options, {:executor_process_started, job.job_id, tool.id, [@search_path_name]})
     {outcome, output} = await_port(port, monitor, lease_pid, <<>>, fence)
+    forget_inflight(job.job_id)
 
     receipt(state, job, tool, outcome, output, demonstration_environment(), [], deadline, 0)
   end
@@ -1965,9 +2091,17 @@ defmodule Loopex.Executor.Local do
     # descendant in the captured process group kept running; a later cancel then
     # read the missing table as proof of cleanup. A monitored worker owns the
     # Port instead, watches the executor, and performs the same bounded group
-    # termination if that owner disappears. The executor still serializes
-    # admission and receipt retention. Its public pid remains the reference.
-    owner = self()
+    # termination if that authority disappears. The executor still serializes
+    # admission. Its public pid remains the reference.
+    #
+    # The guarded authority and the process this worker answers are deliberately
+    # two different pids now that the effect runs in the caller. The guard is the
+    # executor, because that is the authority whose reservation, ledger, and
+    # cancellation entry own the child; the answer goes to the caller, because
+    # that is who is waiting for it. Collapsing the two sent every result to a
+    # process that was not waiting for one.
+    guard = effect_owner()
+    caller = self()
     tag = make_ref()
     table = inflight_table()
     grace = cleanup_grace_ms()
@@ -1978,8 +2112,8 @@ defmodule Loopex.Executor.Local do
         Process.put(:loopex_inflight_table, table)
         Process.put(:loopex_cleanup_grace_ms, grace)
         Process.put(:loopex_process_probe, probe)
-        owner_monitor = Process.monitor(owner)
-        send(owner, {tag, :worker_ready, self()})
+        guard_monitor = Process.monitor(guard)
+        send(caller, {tag, :worker_ready, self()})
 
         receive do
           {^tag, :run} ->
@@ -1995,23 +2129,23 @@ defmodule Loopex.Executor.Local do
                 limits,
                 progress,
                 identity,
-                {owner_monitor, owner}
+                {guard_monitor, guard}
               )
 
-            send(owner, {tag, :worker_result, result, not is_nil(cleanup_episode())})
+            send(caller, {tag, :worker_result, result, not is_nil(cleanup_episode())})
 
-          {:loopex_cancel_pending, token, caller, _cancel_grace, _cancel_probe} ->
+          {:loopex_cancel_pending, token, from, _cancel_grace, _cancel_probe} ->
             forget_inflight(job.job_id)
-            send(caller, {:loopex_cancel_result, token, {:ok, :cleaned}})
+            send(from, {:loopex_cancel_result, token, {:ok, :cleaned}})
 
             send(
-              owner,
+              caller,
               {tag, :worker_result,
                {{:cancelled, "[loopex: the job was cancelled before its process began.]",
                  :complete}, 0}, false}
             )
 
-          {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+          {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
             :ok
         end
       end)
@@ -2227,6 +2361,16 @@ defmodule Loopex.Executor.Local do
   # this project hides per-runtime state in a global name. Reading another
   # process's dictionary is unusual, and it is used here precisely because it
   # reads state that process owns without waiting for it to be free.
+  # Concept: the process whose authority admitted the effect is the one a
+  # launch-owned guard watches.
+  #
+  # Technical depth: the guard exists so an operating-system child cannot outlive
+  # the authority that started it. That authority is the executor, not the caller
+  # that happened to ask: a caller may come and go while the executor's
+  # reservation, ledger, and cancellation entry are what the child is owned
+  # through. `self()` is the fallback for the one path that has no reservation.
+  defp effect_owner, do: Process.get(:loopex_effect_owner, self())
+
   defp inflight_table do
     case Process.get(:loopex_inflight_table) do
       nil ->
@@ -3479,6 +3623,19 @@ defmodule Loopex.Executor.Local do
       {:outcome_unknown, output <> @deadline_released_note}
     else
       receive do
+        # Concept: the job was cancelled while its child was running, and what
+        # this path can honestly say is that it let the child go.
+        #
+        # Technical depth: no process group was captured here, so there is
+        # nothing to signal and nothing to confirm quiescent. The Port is closed,
+        # the answer to the cancellation is `unconfirmed`, and the job's own
+        # terminal is `outcome_unknown` -- which is what stops a coordinator
+        # blindly retrying an effect that may have landed.
+        {:loopex_cancel_pending, token, from, _cancel_grace, _cancel_probe} ->
+          if Port.info(port), do: Port.close(port)
+          send(from, {:loopex_cancel_result, token, {:ok, :unconfirmed}})
+          {:outcome_unknown, output <> @cancelled_released_note}
+
         {^port, {:data, data}} ->
           combined = output <> data
 
