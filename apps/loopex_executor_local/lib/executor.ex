@@ -2065,22 +2065,50 @@ defmodule Loopex.Executor.Local do
     {outcome, bounded_truncation_marker(full, diagnostic, limit), []}
   end
 
+  # Concept: the reason an artifact was retained is the job's own identity, taken
+  # whole.
+  #
+  # Technical depth: ADR 0015 admits exactly these five labels and no others, and
+  # every one of them is read from the already validated job rather than accepted
+  # a second time from a caller. Two of them were previously omitted and the
+  # attempt was absent entirely, so a retained artifact could not say which run
+  # or which attempt of an operation produced it — the exact question a
+  # reconciliation asks. Retention goes through the Core facade, which normalizes
+  # this record and proves the store's answer before any reference can reach the
+  # receipt this executor is about to write.
   defp retain_truncated(outcome, full, diagnostic, state, job, lease, limit) do
     metadata = %{
       "role" => "tool_output",
       "media_type" => "text/plain",
       "session_id" => job.session_id,
+      "run_id" => job.run_id,
+      "operation_id" => job.operation_id,
+      "attempt" => job.attempt,
       "tool_call_id" => job.tool_call_id
     }
 
-    %{module: module, handle: handle} = state.artifacts
-
-    case retain_under_lease(module, handle, full, metadata, lease, retention_bound(job)) do
+    case retain_under_lease(state.artifacts, full, metadata, lease, retention_bound(job)) do
       {:ok, reference} ->
         {outcome, bounded_artifact_notice(full, diagnostic, limit, reference), [reference]}
 
+      # Concept: a store that refused, or answered untruthfully, cost the
+      # retrieval and nothing else.
+      #
+      # Technical depth: the tool's own bounded result is exactly what it was, so
+      # the outcome does not change. What the model must not be told is that a
+      # retrieval exists, so the notice says plainly that nothing beyond the
+      # bounded result was retained and the receipt names no artifact. It is kept
+      # short for the same reason the artifact notice is: this sentence competes
+      # with the model-facing result for a declared ceiling that may be narrow,
+      # and half a warning is not one.
       {:error, _reason} ->
-        {outcome, bounded_truncation_marker(full, diagnostic, limit), []}
+        {outcome,
+         bounded_truncation_with_extra(
+           full,
+           diagnostic,
+           limit,
+           "\n[loopex: retention unavailable; nothing beyond it was retained.]"
+         ), []}
 
       # Concept: the run's own instant ended the retention, and the result it was
       # retaining is untouched by that.
@@ -2172,8 +2200,8 @@ defmodule Loopex.Executor.Local do
   # milliseconds left spilled into a store that delayed four seconds and returned
   # after about four seconds, reporting `completed`. Both are alternatives of the
   # one wait now.
-  defp retain_under_lease(module, handle, bytes, metadata, lease, bound) do
-    case bounded_work(fn -> module.put(handle, bytes, metadata) end, bound, lease) do
+  defp retain_under_lease(store, bytes, metadata, lease, bound) do
+    case bounded_work(fn -> Loopex.ArtifactStore.put(store, bytes, metadata) end, bound, lease) do
       {:done, result} -> result
       {:stopped, reason} -> {:error, {:artifact_retention_stopped, reason}}
       {:abandoned, :workspace_lease_lost, _stopped, _late} -> :workspace_lease_lost

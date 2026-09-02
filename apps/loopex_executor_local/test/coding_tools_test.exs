@@ -7,41 +7,78 @@ defmodule Loopex.Executor.Local.CodingToolsTest.RecordingStore do
   # port, not that a particular adapter stores bytes well -- the local adapter has
   # its own conformance suite for that. Recording here is what lets the case
   # assert on the bytes the executor passed rather than on bytes a test wrote.
+  #
+  # It records the object and its immutable use separately because the port
+  # separates them: `stored/1` answers only for retained bytes, which is what
+  # these cases assert on, while the use record is what `describe/2` resolves.
 
   @behaviour Loopex.ArtifactStore
 
-  def start, do: Agent.start_link(fn -> %{} end)
-  def stored(pid), do: Agent.get(pid, & &1)
+  alias LoopexProtocol.Canonical
+
+  def start, do: Agent.start_link(fn -> %{objects: %{}, uses: %{}} end)
+  def stored(pid), do: Agent.get(pid, & &1.objects)
 
   @impl Loopex.ArtifactStore
-  def put(pid, bytes, metadata) do
-    digest = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+  def put(pid, bytes, %{media_type: media_type, role: role, metadata: metadata}) do
+    digest = Canonical.digest_bytes(bytes)
+    object = %{digest: digest, size: byte_size(bytes), locator: digest}
 
-    reference = %{
-      digest: digest,
-      media_type: Map.get(metadata, "media_type", "application/octet-stream"),
-      size: byte_size(bytes),
-      role: Map.get(metadata, "role", "tool_output"),
-      locator: digest
+    artifact_use = %{
+      canonicalization_version: Canonical.version(),
+      object_digest: object.digest,
+      object_size: object.size,
+      object_locator: object.locator,
+      media_type: media_type,
+      role: role,
+      metadata: metadata
     }
 
-    :ok = Agent.update(pid, &Map.put(&1, digest, bytes))
-    {:ok, reference}
+    use_digest = Canonical.digest(["artifact-use-v2", artifact_use])
+    use_locator = "use:" <> use_digest
+
+    :ok =
+      Agent.update(pid, fn state ->
+        %{
+          state
+          | objects: Map.put(state.objects, object.locator, bytes),
+            uses: Map.put(state.uses, use_locator, artifact_use)
+        }
+      end)
+
+    {:ok,
+     Map.merge(object, %{
+       media_type: media_type,
+       role: role,
+       use_canonicalization_version: Canonical.version(),
+       use_digest: use_digest,
+       use_locator: use_locator
+     })}
   end
 
+  def put(_pid, _bytes, _use), do: {:error, :adapter_received_unnormalized_use}
+
   @impl Loopex.ArtifactStore
-  def fetch(pid, reference) do
-    case Agent.get(pid, &Map.fetch(&1, reference.locator)) do
+  def fetch(pid, object) do
+    case Agent.get(pid, &Map.fetch(&1.objects, object.locator)) do
       {:ok, bytes} -> {:ok, bytes}
       :error -> {:error, :unknown_artifact}
     end
   end
 
   @impl Loopex.ArtifactStore
-  def stat(pid, reference) do
-    case Agent.get(pid, &Map.fetch(&1, reference.locator)) do
-      {:ok, bytes} -> {:ok, %{reference | size: byte_size(bytes)}}
+  def stat(pid, locator) do
+    case Agent.get(pid, &Map.fetch(&1.objects, locator)) do
+      {:ok, bytes} -> {:ok, %{digest: locator, size: byte_size(bytes), locator: locator}}
       :error -> {:error, :unknown_artifact}
+    end
+  end
+
+  @impl Loopex.ArtifactStore
+  def describe(pid, use_locator) do
+    case Agent.get(pid, &Map.fetch(&1.uses, use_locator)) do
+      {:ok, artifact_use} -> {:ok, artifact_use}
+      :error -> {:error, :unknown_artifact_use}
     end
   end
 end
@@ -59,28 +96,51 @@ defmodule Loopex.Executor.Local.CodingToolsTest.BlockingStore do
 
   @behaviour Loopex.ArtifactStore
 
+  alias LoopexProtocol.Canonical
+
   @impl Loopex.ArtifactStore
-  def put({owner, delay}, bytes, metadata) do
+  def put({owner, delay}, bytes, %{media_type: media_type, role: role, metadata: metadata}) do
     send(owner, :retention_started)
     Process.sleep(delay)
 
-    digest = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+    digest = Canonical.digest_bytes(bytes)
+    object = %{digest: digest, size: byte_size(bytes), locator: digest}
+
+    use_digest =
+      Canonical.digest([
+        "artifact-use-v2",
+        %{
+          canonicalization_version: Canonical.version(),
+          object_digest: object.digest,
+          object_size: object.size,
+          object_locator: object.locator,
+          media_type: media_type,
+          role: role,
+          metadata: metadata
+        }
+      ])
 
     {:ok,
-     %{
-       digest: digest,
-       media_type: Map.get(metadata, "media_type", "application/octet-stream"),
-       size: byte_size(bytes),
-       role: Map.get(metadata, "role", "tool_output"),
-       locator: digest
-     }}
+     Map.merge(object, %{
+       media_type: media_type,
+       role: role,
+       use_canonicalization_version: Canonical.version(),
+       use_digest: use_digest,
+       use_locator: "use:" <> use_digest
+     })}
   end
 
   @impl Loopex.ArtifactStore
-  def fetch(_handle, _reference), do: {:error, :unknown_artifact}
+  def fetch(_handle, _object), do: {:error, :unknown_artifact}
 
   @impl Loopex.ArtifactStore
-  def stat(_handle, _reference), do: {:error, :unknown_artifact}
+  def stat(_handle, _locator), do: {:error, :unknown_artifact}
+
+  # Every case using this store abandons the wait before publication completes,
+  # so no reference it returns is ever resolved. Answering unavailable is the
+  # truthful answer for a use this store never published.
+  @impl Loopex.ArtifactStore
+  def describe(_handle, _use_locator), do: {:error, :unknown_artifact_use}
 end
 
 defmodule Loopex.Executor.Local.CodingToolsTest.RetainedManualProbe do
