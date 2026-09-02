@@ -291,6 +291,27 @@ defmodule Loopex.CancellationObservationContractTest do
     refute changed.canonical_request_digest == job.canonical_request_digest
   end
 
+  # Concept: the shortest wait any admitted cleanup period can produce.
+  #
+  # Technical depth: the coordinator falls back to it when a committed period is
+  # unreadable, and the comment there says it spends "the shortest admitted
+  # reserve". That is a claim about this formula rather than about the
+  # coordinator: it holds because the reserve is non-decreasing in the period, so
+  # the floor of the admitted domain derives the floor of the reserve. A fallback
+  # that restated the number instead of deriving it would keep the old value
+  # silently if this formula ever moved, which is the drift this states.
+  test "the shortest admitted cleanup period derives the shortest result reserve" do
+    assert {:ok, %{execute_result_reserve_ms: shortest}} =
+             invoke(Executor, :cancellation_bounds, [1])
+
+    for grace <- [1, 2, 3, 4, 5, 5_000, 32_001, @max_uint64] do
+      assert {:ok, %{execute_result_reserve_ms: reserve}} =
+               invoke(Executor, :cancellation_bounds, [grace])
+
+      assert reserve >= shortest
+    end
+  end
+
   test "cancellation bounds follow the exact formula and invalid input never calls the executor" do
     for grace <- [1, 4, 5, 5_000, 32_001, 58_001, @max_uint64] do
       quarter = max(1, div(grace + 3, 4))

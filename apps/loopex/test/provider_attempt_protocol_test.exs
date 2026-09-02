@@ -785,6 +785,240 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     end
   end
 
+  # Concept: the two settlement combinations the record is allowed to refuse and
+  # the reducer is not allowed to have to survive.
+  #
+  # Technical depth: ADR 0018 closes its valid-combination table with "all other
+  # combinations are invalid history, including ... attempt-two retry", and
+  # combination 2 fixes a late valid reply as evidence-only. Both are properties
+  # of the twelve-key record alone, so replay is where they hold: a settlement
+  # that reached the journal is read back by every later owner, and a
+  # combination the validator admits becomes a state the reducer must then act
+  # on. Each case mutates exactly the one member the clause names and leaves the
+  # rest of a real history untouched, so a refusal here names that cell rather
+  # than an unrelated history shape.
+  # Concept: a deadline that could not be written down decides nothing.
+  #
+  # Technical depth: the settlement reads which termination won from applied
+  # state, so a `model_termination_admitted_v1` the Store refused leaves the
+  # attempt looking unterminated -- and the reply the provider then returns is
+  # taken as the canonical answer of a run that had actually reached its bound.
+  # ADR 0018 makes an unexpected refusal of a bounded record the session's
+  # unavailability and forbids inventing the settlement, accounting,
+  # conversation, or terminal that would have followed it. The owner therefore
+  # ends, and the journal holds no verdict at all rather than the wrong one.
+  test "a deadline admission the Store refuses ends the owner and fabricates no verdict" do
+    fixture =
+      start(
+        script: [
+          %{
+            text: "late reply",
+            calls: [],
+            usage: %{input_tokens: 7, output_tokens: 5},
+            hold: self(),
+            hold_timeout_ms: 30_000
+          }
+        ],
+        bounds_token_budget: 100,
+        bounds_deadline_ms: 200
+      )
+
+    :ok = M1RuntimeTestStore.refuse_next_record(fixture.store, "model_termination_admitted_v1")
+
+    {session_id, _attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "deadline refused")
+
+    assert_receive {:holding, worker}, 5_000
+
+    owner = coordinator_of(fixture.runtime)
+    reference = Process.monitor(owner)
+
+    assert_receive {:DOWN, ^reference, :process, ^owner,
+                    {:model_termination_failed, :refused_by_test_store}},
+                   15_000,
+                   "the refused deadline admission did not end the owner that could not admit it"
+
+    send(worker, :release)
+
+    records = Fixture.records(fixture, session_id)
+    assert records_of_kind(records, "model_termination_admitted_v1") == []
+    assert records_of_kind(records, "model_attempt_settled_v1") == []
+    assert records_of_kind(records, "run_terminal_committed") == []
+  end
+
+  # Concept: how long Control remembers that an attempt identity was spent.
+  #
+  # Technical depth: ADR 0018 requires the spend to outlive the coordinator and
+  # the worker for the complete ownership generation -- "replacing the
+  # coordinator or worker does not clear it" -- because a successor that could
+  # re-spend an identity could make a second provider call on an attempt that
+  # may already have been billed. So a succession is exactly the moment the map
+  # must not be pruned, and this states that. What it may not do is outlive the
+  # session's ownership itself, which is why the entry is dropped on the one
+  # line that removes the session from Control. The retained key is the exact
+  # attempt binding, which is also the value the refusal is compared against.
+  test "a spent attempt identity is the exact attempt binding and outlives the owner that spent it" do
+    fixture = start(script: [%{text: "one attempt", calls: []}])
+
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "spend one identity")
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+
+    [opened] =
+      fixture |> Fixture.records(session_id) |> records_of_kind("model_attempt_opened_v1")
+
+    binding = Map.put(attempt_identity(opened), "session_id", session_id)
+
+    assert spent_attempt_bindings(control) == [binding]
+
+    assert {:ok, ^session_id} =
+             Loopex.resume_session(fixture.runtime, session_id, command_id: "resume-once")
+
+    assert spent_attempt_bindings(control) == [binding]
+  end
+
+  # Concept: an abort that lands after the attempt opened and before anything
+  # asked Control for the permit ends an attempt that cost nothing.
+  #
+  # Technical depth: ADR 0018 puts provider dispatch at Control's permit send, so
+  # this window is a cell of its table rather than a gap in it: this owner holds
+  # the open attempt, it has not called `Control.provider_dispatch/3`, and no
+  # other process may spend that identity. Combination 4 leaves such an attempt
+  # uncharged. Charging it `estimated` remaining allowance -- what an unqualified
+  # `dispatched_or_unknown` does -- bills the run's whole remaining token budget
+  # for a call that provably never happened, and does it on the ordinary abort
+  # path rather than in some rare recovery.
+  #
+  # The window is entered by holding the attempt-open transaction in the Store:
+  # the abort reaches the coordinator's mailbox while it is blocked in that
+  # commit, and the `:advance_work` the commit sends itself is appended behind
+  # it. That is the real ordering, not a simulated one.
+  test "an abort between the attempt open and the Control permit settles uncharged with no call" do
+    fixture = start(script: [%{text: "never dispatched", calls: []}])
+
+    :ok =
+      M1RuntimeTestStore.hold_next_record_before_linearization(
+        fixture.store,
+        "model_attempt_opened_v1",
+        self()
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "abort before the permit")
+
+    assert_receive {:record_held_before_linearization, waiter, _store, "model_attempt_opened_v1",
+                    _transaction},
+                   5_000
+
+    coordinator = coordinator_of(fixture.runtime)
+
+    aborting =
+      Task.async(fn ->
+        Loopex.command(attachment, %{type: :abort, command_id: "abort-before-permit"})
+      end)
+
+    assert await_queued_command(coordinator)
+    M1RuntimeTestStore.release(waiter)
+
+    assert Task.await(aborting, 15_000) == {:accepted, "abort-before-permit"}
+    assert await_event(attachment, "run.finished")["outcome"] == "cancelled"
+    assert AgentLoopTestModel.dispatched(fixture.model) == []
+
+    records = Fixture.records(fixture, session_id)
+    assert [opened] = records_of_kind(records, "model_attempt_opened_v1")
+    assert opened["attempt"] == 1
+    assert [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+
+    assert settlement["transport"] == "not_dispatched"
+    assert settlement["accounting"] == %{"source" => "none", "basis" => "not_dispatched"}
+    assert settlement["termination"] == "abort"
+    assert settlement["conversation"] == "none"
+    assert settlement["next"] == "terminal"
+
+    assert {:ok, recovered} =
+             SessionState.recover(session_id, records, Fixture.events(fixture, session_id))
+
+    {_declared, charged} = SessionState.accounting(recovered, settlement["run_id"])
+    assert charged.tokens == 0
+    assert charged.source == nil
+  end
+
+  test "an attempt-two retry settlement is refused at replay rather than opening a third attempt" do
+    fixture =
+      start(
+        script: [
+          %{raw_result: {:error, {:not_dispatched, "model_call_failed"}}},
+          %{raw_result: {:error, {:not_dispatched, "model_call_failed"}}}
+        ]
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "refuse exactly twice")
+
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+
+    records = Fixture.records(fixture, session_id)
+    events = Fixture.events(fixture, session_id)
+
+    assert {:ok, _recovered} = SessionState.recover(session_id, records, events)
+
+    exhausted_retry = retry_at_the_attempt_limit(records)
+    open_run = Enum.reject(events, &(public_event_kind(&1) == "run.finished"))
+
+    assert SessionState.recover(session_id, exhausted_retry, open_run) ==
+             {:error, :invalid_attempt_settlement}
+  end
+
+  test "a terminated reply outside the evidence-only conversation is refused at replay" do
+    fixture =
+      start(
+        script: [
+          %{
+            text: "late reply",
+            calls: [],
+            usage: %{input_tokens: 7, output_tokens: 5},
+            hold: self(),
+            hold_timeout_ms: 30_000
+          }
+        ],
+        bounds_token_budget: 100
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "abort first")
+    assert_receive {:holding, worker}, 5_000
+
+    assert {:accepted, "abort-first"} =
+             Loopex.command(attachment, %{type: :abort, command_id: "abort-first"})
+
+    assert await_record(fixture, session_id, fn record ->
+             record_kind(record.payload) == "command_admitted" and
+               record.payload["command_type"] == "abort" and
+               record.payload["admission"] == "accepted"
+           end)
+
+    send(worker, :release)
+    assert await_event(attachment, "run.finished")["outcome"] == "cancelled"
+
+    records = Fixture.records(fixture, session_id)
+    events = Fixture.events(fixture, session_id)
+
+    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    assert settlement["termination"] == "abort"
+    assert settlement["conversation"] == "evidence_only"
+    assert settlement["result"]["kind"] == "reply"
+
+    assert {:ok, _recovered} = SessionState.recover(session_id, records, events)
+
+    silent_late_reply =
+      rewrite_settlement(records, &(&1["attempt"] == 1), fn payload ->
+        Map.put(payload, "conversation", "none")
+      end)
+
+    assert {:error, _invalid_attempt_settlement} =
+             SessionState.recover(session_id, silent_late_reply, events)
+  end
+
   test "succession preserves retry permission but never resets or reopens the two-attempt allowance" do
     between = exercise_retry_succession(:between_attempts)
     assert between.finished["outcome"] == "completed"
@@ -3049,6 +3283,63 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       {"attempt above two", attempt_three},
       {"attempt two without exact attempt-one settlement", without_proof}
     ]
+  end
+
+  # Concept: the exact history a settlement that retried at the limit would have
+  # left, and nothing else.
+  #
+  # Technical depth: the attempt-two settlement of a twice-refused operation is
+  # already `not_dispatched` with no conversation and no accounting, so `next` is
+  # the only member that separates the run's truthful terminal from the retry
+  # ADR 0018 forbids. Its paired terminal row is dropped with it, because a
+  # retry settlement is a one-record transaction: leaving that row behind would
+  # make the history refusable for its shape rather than for the cell under test.
+  defp spent_attempt_bindings(control) do
+    control |> :sys.get_state() |> Map.fetch!(:spent_attempts) |> Map.keys()
+  end
+
+  # The abort is in the coordinator's mailbox once it is queued behind the commit
+  # the coordinator is blocked in. Polling the queue is what makes the ordering a
+  # fact rather than a sleep that a loaded machine can invalidate.
+  defp await_queued_command(coordinator, attempts \\ 1_000)
+  defp await_queued_command(_coordinator, 0), do: false
+
+  defp await_queued_command(coordinator, attempts) do
+    case Process.info(coordinator, :message_queue_len) do
+      {:message_queue_len, length} when length > 0 ->
+        true
+
+      _empty ->
+        Process.sleep(5)
+        await_queued_command(coordinator, attempts - 1)
+    end
+  end
+
+  defp retry_at_the_attempt_limit(records) do
+    limit_index = record_index(records, "model_attempt_settled_v1", &(&1["attempt"] == 2))
+
+    records
+    |> Enum.take(limit_index + 1)
+    |> rewrite_settlement(&(&1["attempt"] == 2), fn payload ->
+      Map.put(payload, "next", "retry")
+    end)
+  end
+
+  defp rewrite_settlement(records, select, rewrite) do
+    {mutated, changed?} =
+      Enum.map_reduce(records, false, fn record, changed? ->
+        payload = record.payload
+
+        if not changed? and record_kind(payload) == "model_attempt_settled_v1" and
+             select.(payload) do
+          {%{record | payload: rewrite.(payload)}, true}
+        else
+          {record, changed?}
+        end
+      end)
+
+    assert changed?
+    mutated
   end
 
   defp rewrite_attempt_positions(records, run_id, replacements) do

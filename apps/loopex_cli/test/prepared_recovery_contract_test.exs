@@ -69,6 +69,59 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
              Loopex.session_status(fixture.runtime, fixture.session_id)
   end
 
+  # Concept: the answer an activation gets and what the runtime then does are the
+  # same fact, however long the coordinator took to say it.
+  #
+  # Technical depth: this is a one-use capability, and the message that carries
+  # it is not withdrawn when its caller stops waiting. Under a five-second bound
+  # a coordinator that was merely busy answered nothing in time, the caller was
+  # told `:session_unavailable`, and the coordinator then handled the queued
+  # message and spent the activation anyway -- the recovered run started under a
+  # capability its holder had been told it did not have, which is the one
+  # outcome a one-use capability may not produce. The coordinator is suspended
+  # for longer than that former bound and released by a separate process, so the
+  # wait is real rather than simulated; a coordinator that genuinely cannot
+  # answer is a dead process, and its exit still becomes a refusal.
+  test "an activation delayed past the former bound is answered by what the runtime actually did" do
+    fixture =
+      recovered_fixture("activation-delay", :admitted,
+        script: [%{text: "resumed after the wait", calls: []}]
+      )
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-delayed"
+             ])
+
+    coordinator = coordinator_of(fixture.runtime)
+    holder = self()
+
+    # Only the process that suspended a process may resume it, so the suspension
+    # and the release both belong to this one, and the holder waits on it.
+    spawn_link(fn ->
+      :erlang.suspend_process(coordinator)
+      send(holder, :suspended)
+      Process.sleep(6_000)
+      :erlang.resume_process(coordinator)
+      send(holder, :released)
+    end)
+
+    assert_receive :suspended, 5_000
+
+    assert {:ok, session_id} = invoke(Loopex, :activate_resume, [activation])
+    assert session_id == fixture.session_id
+    assert_receive :released, 10_000
+
+    # The capability was spent exactly once, by the caller that was told so.
+    assert_refused(invoke(Loopex, :activate_resume, [activation]))
+
+    # And the runtime did what the answer said: the recovered run is running.
+    assert await_dispatch(fixture.model)
+  end
+
   test "abandonment of an active prepared owner prevents activation and dispatch" do
     fixture = recovered_fixture("abandon", :active)
 
@@ -884,6 +937,18 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   end
 
   defp private_security_key?(_key), do: false
+
+  defp await_dispatch(model, attempts \\ 1_000)
+  defp await_dispatch(_model, 0), do: false
+
+  defp await_dispatch(model, attempts) do
+    if Loopex.AgentLoopTestModel.dispatched(model) == [] do
+      Process.sleep(5)
+      await_dispatch(model, attempts - 1)
+    else
+      true
+    end
+  end
 
   defp coordinator_of(runtime) do
     {:ok, children} = Loopex.Runtime.Supervisor.children(runtime.supervisor)
