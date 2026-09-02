@@ -72,11 +72,14 @@ defmodule Loopex.Runtime.SessionState do
   ]
   @receipt_optional_fields [
     :cleanup_grace_ms,
+    :cleanup_confirmation,
     :process_probe,
     :receipt_retention_bound_ms,
     :effective_deadline_ms,
     :run_deadline_ms
   ]
+  @receipt_cleanup_confirmations ["confirmed", "unconfirmed"]
+  @max_cleanup_grace_ms 18_446_744_073_709_551_615
   @receipt_outcomes [
     :completed,
     :failed,
@@ -627,12 +630,31 @@ defmodule Loopex.Runtime.SessionState do
       when is_binary(run_id) and is_map(job) and is_map(grant) do
     record = %{
       "run_id" => run_id,
-      "job" => encode_plain(job),
+      "job" => encode_plain(Map.from_struct(job)),
       "grant" => encode_plain(grant),
       kind: "effect_intent_committed"
     }
 
-    internal_proposal(state, stable_id("effect-intent", run_id, job.job_id), record)
+    # Concept: the durable record of what this runtime is about to do is measured
+    # before anything is dispatched, and one byte too many is an ordinary
+    # pre-effect refusal rather than a surprise from the Store.
+    #
+    # Technical depth: ADR 0016 requires the complete effect-intent item to be
+    # normalized and measured against the Store's fixed ceiling before its
+    # transaction. Reaching the Store first would either commit an intent whose
+    # own record cannot be retained or return a generic Store error for a
+    # condition this runtime can name exactly, and the call still owes the
+    # conversation the truthful terminal `effect_intent_record_too_large`.
+    case Store.validate_private_record(record) do
+      :ok ->
+        internal_proposal(state, stable_id("effect-intent", run_id, job.job_id), record)
+
+      {:error, :item_too_large} ->
+        {:error, :effect_intent_record_too_large}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   @doc false
@@ -1029,16 +1051,29 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: the session's cleanup period is reconstructed from the record that
+  # committed it, never supplied by whatever process happens to be recovering.
+  #
+  # Technical depth: ADR 0016 replaces ADR 0009's `session_genesis` with
+  # `session_genesis_v2`, whose outer and runtime-configuration key sets are both
+  # closed. This reducer refuses the legacy kind outright, so no decoder can
+  # upgrade old bytes by supplying a default, and refuses an unknown key, an
+  # empty configuration, or a value outside the positive unsigned 64-bit domain
+  # rather than recovering a session whose committed period nobody can name.
   defp replay_record(
          %{journal_version: 0} = state,
          %{
            journal_version: 1,
            owner_epoch: 0,
            owner_incarnation_id: nil,
-           payload: %{kind: "session_genesis"}
+           payload: %{kind: "session_genesis_v2"} = payload
          }
-       ),
-       do: {:ok, %{state | journal_version: 1}}
+       ) do
+    case genesis_cleanup_grace(payload) do
+      {:ok, grace} -> {:ok, %{state | journal_version: 1, cleanup_grace_ms: grace}}
+      :error -> {:error, :invalid_session_genesis}
+    end
+  end
 
   defp replay_record(
          state,
@@ -1133,6 +1168,22 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp replay_record(_state, _record), do: {:error, :invalid_private_history}
+
+  defp genesis_cleanup_grace(
+         %{"options" => options, "runtime_configuration" => configuration} = payload
+       )
+       when is_map(options) and is_map(configuration) do
+    with 3 <- map_size(payload),
+         1 <- map_size(configuration),
+         {:ok, grace} <- Map.fetch(configuration, "cleanup_grace_ms"),
+         true <- is_integer(grace) and grace >= 1 and grace <= @max_cleanup_grace_ms do
+      {:ok, grace}
+    else
+      _other -> :error
+    end
+  end
+
+  defp genesis_cleanup_grace(_payload), do: :error
 
   defp apply_command_record(state, record) do
     with {:ok, command_id} <- record_binary(record, "command_id"),
@@ -1578,6 +1629,10 @@ defmodule Loopex.Runtime.SessionState do
       # A refused or failed call spilled nothing, and says so with an empty list
       # rather than an absent field: a consumer reading the public plane must not
       # have to distinguish "no artifacts" from "this producer omitted the key".
+      # A call that ended without a receipt is the one case where the terminal's
+      # only explanation is the reason it carries, so the public plane carries it
+      # too: an operator reading `failed` with nothing beside it cannot tell a
+      # refused argument from a durable record that would not fit.
       event =
         %{
           "run_id" => run_id,
@@ -1585,6 +1640,7 @@ defmodule Loopex.Runtime.SessionState do
           "tool_call_id" => tool_call_id,
           "tool_id" => called_tool_id(call),
           "outcome" => outcome,
+          "reason" => reason,
           "artifacts" => [],
           event_id: stable_id("event-tool-finished", state.session_id, tool_call_id),
           kind: "tool.finished"
@@ -2321,11 +2377,26 @@ defmodule Loopex.Runtime.SessionState do
 
   defp decode_tool_calls(_calls), do: {:error, :invalid_plain_record}
 
+  # Concept: a job reconstructed from the journal is the same named value the
+  # dispatcher built, including the wall instant it was authorized under.
+  #
+  # Technical depth: `effective_job_deadline` is retained rather than recomputed.
+  # Recomputing it on recovery would silently extend a recovered job's authority
+  # past the instant its committed intent was bound to, which is exactly the
+  # refresh ADR 0016 forbids.
+  # Concept: a job reconstructed from the journal is the same named value the
+  # dispatcher built, including the wall instant it was authorized under.
+  #
+  # Technical depth: `effective_job_deadline` is retained rather than recomputed.
+  # Recomputing it on recovery would silently extend a recovered job's authority
+  # past the instant its committed intent was bound to, which is exactly the
+  # refresh ADR 0016 forbids.
   defp decode_job(encoded) do
-    decode_top(
-      encoded,
-      Loopex.Executor.job_fields() ++ [:canonical_request_bytes, :canonical_request_digest]
-    )
+    fields = Loopex.Executor.job_fields() ++ Loopex.Executor.JobRequest.derived_fields()
+
+    with {:ok, decoded} <- decode_top(encoded, fields) do
+      {:ok, struct!(Loopex.Executor.JobRequest, decoded)}
+    end
   end
 
   defp decode_grant(encoded) do
@@ -2361,8 +2432,10 @@ defmodule Loopex.Runtime.SessionState do
          false <- receipt.provider_credential_present,
          {:ok, artifacts} <- decode_artifacts(receipt.artifacts),
          optional <- decode_optional(encoded, @receipt_optional_fields),
-         :ok <- validate_optional_receipt_fields(optional) do
-      {:ok, Map.merge(optional, %{receipt | outcome: outcome, artifacts: artifacts})}
+         :ok <- validate_optional_receipt_fields(optional),
+         decoded <- Map.merge(optional, %{receipt | outcome: outcome, artifacts: artifacts}),
+         :ok <- validate_cleanup_relation(decoded) do
+      {:ok, decoded}
     else
       _other -> {:error, :invalid_plain_receipt}
     end
@@ -2401,7 +2474,8 @@ defmodule Loopex.Runtime.SessionState do
   defp validate_optional_receipt_fields(optional) do
     validators = [
       cleanup_grace_ms: &validate_non_negative_integer/1,
-      receipt_retention_bound_ms: &validate_non_negative_integer/1,
+      cleanup_confirmation: &validate_cleanup_confirmation/1,
+      receipt_retention_bound_ms: &validate_retention_bound/1,
       effective_deadline_ms: &validate_positive_integer/1,
       run_deadline_ms: &validate_positive_integer/1,
       process_probe: &validate_receipt_text/1
@@ -2423,6 +2497,36 @@ defmodule Loopex.Runtime.SessionState do
 
   defp validate_non_negative_integer(value) when is_integer(value) and value >= 0, do: :ok
   defp validate_non_negative_integer(_value), do: {:error, :invalid_plain_receipt}
+
+  # Concept: whether the job's captured process group was actually confirmed
+  # gone is a two-valued fact, and anything else is not an answer.
+  #
+  # Technical depth: ADR 0016 admits exactly `confirmed` and `unconfirmed`. A
+  # third word, a boolean, or an absent-but-present-as-nil value is a receipt
+  # this runtime cannot read, and it fails closed rather than being coerced into
+  # the safer-looking half.
+  defp validate_cleanup_confirmation(value) when value in @receipt_cleanup_confirmations, do: :ok
+  defp validate_cleanup_confirmation(_value), do: {:error, :invalid_plain_receipt}
+
+  defp validate_retention_bound(value)
+       when is_integer(value) and value >= 1 and value <= @max_cleanup_grace_ms,
+       do: :ok
+
+  defp validate_retention_bound(_value), do: {:error, :invalid_plain_receipt}
+
+  # Concept: an unproved cleanup and a settled operation cannot both be true of
+  # one job.
+  #
+  # Technical depth: ADR 0016 keeps cleanup truth independent of operation
+  # truth, with exactly one relation between them: an unconfirmed cleanup is
+  # conforming only beside `outcome_unknown`. A `completed` receipt claiming its
+  # own cleanup was never confirmed asserts a settled effect whose owned group
+  # may still be running, so it is refused rather than published.
+  defp validate_cleanup_relation(%{cleanup_confirmation: "unconfirmed", outcome: outcome}) do
+    if outcome == :outcome_unknown, do: :ok, else: {:error, :invalid_plain_receipt}
+  end
+
+  defp validate_cleanup_relation(_receipt), do: :ok
 
   defp validate_positive_integer(value) when is_integer(value) and value > 0, do: :ok
   defp validate_positive_integer(_value), do: {:error, :invalid_plain_receipt}
@@ -2492,16 +2596,42 @@ defmodule Loopex.Runtime.SessionState do
     case {Map.fetch(receipt, :outcome), Map.fetch(receipt, "outcome")} do
       {{:ok, outcome}, :error} ->
         with {:ok, outcome} <- normalize_executor_outcome(outcome) do
-          receipt |> Map.put(:outcome, outcome) |> encode_plain_unique()
+          receipt
+          |> Map.put(:outcome, outcome)
+          |> normalize_cleanup_confirmation(:cleanup_confirmation)
+          |> encode_plain_unique()
         end
 
       {:error, {:ok, outcome}} ->
         with {:ok, outcome} <- normalize_executor_outcome(outcome) do
-          receipt |> Map.put("outcome", outcome) |> encode_plain_unique()
+          receipt
+          |> Map.put("outcome", outcome)
+          |> normalize_cleanup_confirmation("cleanup_confirmation")
+          |> encode_plain_unique()
         end
 
       _missing_or_ambiguous ->
         {:error, :invalid_plain_record}
+    end
+  end
+
+  # Concept: the cleanup fact crosses the journal boundary as the same kind of
+  # word the outcome does.
+  #
+  # Technical depth: ADR 0016 states `cleanup_confirmation` as `confirmed` or
+  # `unconfirmed`, and the shipped executor returns those as atoms exactly as it
+  # returns its outcome. Plain-record encoding admits no atom, so an unnormalized
+  # atom made every real receipt carrying the field unreadable. Only the atom
+  # shape is rewritten here; whether the resulting word is one of the two the ADR
+  # admits is decided by the validator, so a third atom is refused rather than
+  # laundered into a string.
+  defp normalize_cleanup_confirmation(receipt, key) do
+    case Map.fetch(receipt, key) do
+      {:ok, value} when is_atom(value) and not is_nil(value) and not is_boolean(value) ->
+        Map.put(receipt, key, Atom.to_string(value))
+
+      _absent_or_already_plain ->
+        receipt
     end
   end
 
@@ -2744,6 +2874,10 @@ defmodule Loopex.Runtime.SessionState do
       "operation_id" => job.operation_id,
       "tool_id" => job.tool_id,
       "outcome" => outcome,
+      # A receipt is its own explanation, so this member is present and empty
+      # rather than absent: a consumer must not have to tell "no reason" from
+      # "this producer omitted the key".
+      "reason" => nil,
       "artifacts" => Enum.map(artifacts, &public_artifact/1),
       event_id: stable_id("event-tool-finished", session_id, job.tool_call_id),
       kind: "tool.finished"

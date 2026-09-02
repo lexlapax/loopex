@@ -151,11 +151,15 @@ defmodule Loopex.Runtime do
 
   @doc false
   @spec create_session(t(), binary(), map()) :: {:ok, binary()} | {:error, term()}
-  def create_session(%__MODULE__{} = runtime, command_id, genesis) do
-    control_call(runtime, {:create_session, runtime.token, command_id, genesis}, :infinity)
+  def create_session(%__MODULE__{} = runtime, command_id, session_options) do
+    control_call(
+      runtime,
+      {:create_session, runtime.token, command_id, session_options},
+      :infinity
+    )
   end
 
-  def create_session(_runtime, _command_id, _genesis),
+  def create_session(_runtime, _command_id, _session_options),
     do: {:error, :runtime_reference_required}
 
   @doc false
