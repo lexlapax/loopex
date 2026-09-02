@@ -205,6 +205,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        grant_decision: Keyword.fetch!(options, :grant_decision),
        fault_to: Keyword.fetch!(options, :fault_to),
        cleanup_grace_ms: Keyword.fetch!(options, :cleanup_grace_ms),
+       context_token_budget: Keyword.fetch!(options, :context_token_budget),
        # The runs whose model dispatch this owner staged itself. A run at
        # `model_dispatched` that is not in here was dispatched by a predecessor,
        # and its attempt is abandoned rather than re-run under the same identity.
@@ -259,6 +260,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
         journal_version: state.durable.journal_version,
         event_sequence: state.durable.event_sequence,
         active_run_id: state.durable.active_run_id,
+        active_context_token_budget:
+          SessionState.context_token_budget(state.durable, state.durable.active_run_id),
         pending_work_ids:
           Enum.map(SessionState.pending_work(state.durable), &Map.fetch!(&1, :run_id))
       }
@@ -2063,7 +2066,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # admission first, so an abort now needs nothing resolved: it is admitted, and
   # what it achieved is a separate fact committed after the cleanup that produced
   # it.
-  defp resolve_command(state, command), do: {state, resolve_bounds(state, command)}
+  # Technical depth: ADR 0017's context ceiling is resolved here beside the three
+  # declared bounds and committed into the same admission record, but it is never
+  # merged into `:bounds`: it can produce no `bound_reached`, and folding it in
+  # would make it visible to `Bounds.declare/1`.
+  defp resolve_command(state, command) do
+    resolved =
+      state
+      |> resolve_bounds(command)
+      |> Map.put(:context_token_budget, state.context_token_budget)
+
+    {state, resolved}
+  end
 
   # Concept: end what one run still owns, and say what that actually achieved.
   #

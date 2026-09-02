@@ -116,6 +116,7 @@ defmodule Loopex.Runtime.SessionState do
           pending_work: map(),
           conversation: map(),
           bounds: map(),
+          context_budgets: map(),
           deadlines: map(),
           steer: map(),
           follow_up: map() | nil,
@@ -134,6 +135,12 @@ defmodule Loopex.Runtime.SessionState do
             pending_work: %{},
             conversation: %{},
             bounds: %{},
+            # The context-admission ceiling each run committed at its own prompt
+            # admission. ADR 0017 keeps it out of `bounds` because it can never
+            # produce `bound_reached`, and keeps it per run because promotion,
+            # succession, and restart must all reuse the value the predecessor
+            # committed rather than whatever the current process now defaults to.
+            context_budgets: %{},
             deadlines: %{},
             steer: %{},
             follow_up: nil,
@@ -310,7 +317,7 @@ defmodule Loopex.Runtime.SessionState do
        session_id: session_id,
        requested_anchor: requested_anchor,
        tail: 0,
-       active_run_id: nil,
+       active_run: nil,
        anchor_projection: anchor_projection
      }}
   end
@@ -358,31 +365,15 @@ defmodule Loopex.Runtime.SessionState do
         session_id: session_id,
         requested_anchor: requested_anchor,
         tail: tail,
-        active_run_id: active_run_id,
+        active_run: active_run,
         anchor_projection: anchor_projection
       }) do
     case {requested_anchor, anchor_projection} do
       {nil, _projection} ->
-        {:ok,
-         %{
-           tail: tail,
-           snapshot: %{
-             session_id: session_id,
-             event_sequence: tail,
-             active_run_id: active_run_id
-           }
-         }}
+        {:ok, %{tail: tail, snapshot: public_snapshot(session_id, tail, active_run)}}
 
-      {anchor, {:set, anchor_active_run_id}} when anchor <= tail ->
-        {:ok,
-         %{
-           tail: tail,
-           snapshot: %{
-             session_id: session_id,
-             event_sequence: anchor,
-             active_run_id: anchor_active_run_id
-           }
-         }}
+      {anchor, {:set, anchor_active_run}} when anchor <= tail ->
+        {:ok, %{tail: tail, snapshot: public_snapshot(session_id, anchor, anchor_active_run)}}
 
       {_anchor, _projection} ->
         {:error, :cursor_expired}
@@ -390,6 +381,33 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   def finish_snapshot_scan(_scan), do: {:error, :invalid_public_history}
+
+  # Concept: the snapshot says which run is active and how far along it is.
+  #
+  # Technical depth: ADR 0017's revision 2 carries the phase beside the identity,
+  # so an operator attaching after prompt admission but before the first staged
+  # request can tell an admitted, unstaged run from a started one. The two active
+  # members are nil together or non-nil together; no phase is ever inferred from
+  # the identity alone.
+  defp public_snapshot(session_id, event_sequence, nil) do
+    %{
+      snapshot_revision: 2,
+      session_id: session_id,
+      event_sequence: event_sequence,
+      active_run_id: nil,
+      active_run_phase: nil
+    }
+  end
+
+  defp public_snapshot(session_id, event_sequence, {run_id, phase}) do
+    %{
+      snapshot_revision: 2,
+      session_id: session_id,
+      event_sequence: event_sequence,
+      active_run_id: run_id,
+      active_run_phase: phase
+    }
+  end
 
   @doc """
   ## Concept
@@ -423,6 +441,25 @@ defmodule Loopex.Runtime.SessionState do
   @spec elements(t(), binary()) :: [Conversation.element()]
   def elements(%__MODULE__{conversation: conversation}, run_id),
     do: Map.get(conversation, run_id, [])
+
+  @doc """
+  ## Concept
+
+  The context-admission ceiling one run committed at its own prompt admission.
+
+  ## Technical depth
+
+  Read back exactly as committed, never recomputed from current runtime
+  configuration. ADR 0017 makes promotion, succession, and restart all reuse
+  this value, so a default that changed between the admission and the recovery
+  cannot re-decide how large a request the run was allowed to stage. An unknown
+  run answers `nil`, which a settled session is entitled to report.
+  """
+  @spec context_token_budget(t(), binary() | nil) :: pos_integer() | nil
+  def context_token_budget(%__MODULE__{} = state, run_id) when is_binary(run_id),
+    do: Map.get(state.context_budgets, run_id)
+
+  def context_token_budget(%__MODULE__{}, _run_id), do: nil
 
   @doc """
   ## Concept
@@ -834,7 +871,8 @@ defmodule Loopex.Runtime.SessionState do
       "max_turns" => command.resolved_bounds.max_turns,
       "token_budget" => command.resolved_bounds.token_budget,
       "deadline_ms" => command.resolved_bounds.deadline_ms,
-      kind: "command_admitted"
+      "context_token_budget" => Map.fetch!(command.resolved_bounds, :context_token_budget),
+      kind: "prompt_admitted_v2"
     }
 
     events = prompt_events(state.session_id, command.command_id, run_id, command.content)
@@ -1079,11 +1117,13 @@ defmodule Loopex.Runtime.SessionState do
            journal_version: version,
            owner_epoch: owner_epoch,
            owner_incarnation_id: incarnation,
-           payload: %{kind: "command_admitted"} = record
+           payload: %{kind: kind} = record
          }
-       ) do
+       )
+       when kind in ["command_admitted", "prompt_admitted_v2"] do
     if version == state.journal_version + 1 and owner_epoch == state.owner_epoch and
-         incarnation == state.owner_incarnation_id and is_binary(incarnation) do
+         incarnation == state.owner_incarnation_id and is_binary(incarnation) and
+         admissible_command_kind?(kind, record) do
       case apply_command_record(state, record) do
         {:ok, next} -> {:ok, %{next | journal_version: version}}
         {:error, reason} -> {:error, reason}
@@ -1161,6 +1201,19 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
+  # Concept: an accepted prompt must carry the ceiling its run committed.
+  #
+  # Technical depth: ADR 0017 gives the accepted prompt its own record kind, so
+  # a history written before the context budget existed fails closed instead of
+  # replaying as though the value were merely absent and then being handed
+  # whatever the current process now defaults to. Every other admission keeps
+  # the legacy kind, so only the accepted-prompt spelling is refused there.
+  defp admissible_command_kind?("command_admitted", record),
+    do: not (record["command_type"] == "prompt" and record["admission"] == "accepted")
+
+  defp admissible_command_kind?("prompt_admitted_v2", record),
+    do: record["command_type"] == "prompt" and record["admission"] == "accepted"
+
   defp command_effect(
          %{active_run_id: nil} = state,
          record,
@@ -1170,7 +1223,8 @@ defmodule Loopex.Runtime.SessionState do
        ) do
     with {:ok, run_id} <- record_binary(record, "run_id"),
          {:ok, content} <- record_binary(record, "content"),
-         {:ok, declared} <- record_bounds(record) do
+         {:ok, declared} <- record_bounds(record),
+         {:ok, context_budget} <- record_context_token_budget(record) do
       work = %{
         type: "model",
         stage: "model_pending",
@@ -1199,7 +1253,8 @@ defmodule Loopex.Runtime.SessionState do
 
       patch = %{
         conversation: Map.put(state.conversation, run_id, [element]),
-        bounds: Map.put(state.bounds, run_id, declared)
+        bounds: Map.put(state.bounds, run_id, declared),
+        context_budgets: Map.put(state.context_budgets, run_id, context_budget)
       }
 
       {:ok, {:accepted, command_id}, run_id, Map.put(state.pending_work, run_id, work),
@@ -1401,6 +1456,8 @@ defmodule Loopex.Runtime.SessionState do
       # element here, so the record of what was said and the record of what was
       # sent cannot disagree. A steer is never recorded applied unless a
       # committed request actually carried it.
+      started = run_started_events(state.session_id, work.command_id, run_id, turn_number)
+
       {state, events} =
         case applied_steer && Map.get(state.steer, run_id) do
           %{command_id: ^applied_steer, content: content} = steer ->
@@ -1420,7 +1477,7 @@ defmodule Loopex.Runtime.SessionState do
             {state, []}
         end
 
-      {:ok, put_pending(%{state | deadlines: deadlines}, run_id, next_work), events}
+      {:ok, put_pending(%{state | deadlines: deadlines}, run_id, next_work), started ++ events}
     else
       _other -> {:error, :invalid_model_request_transition}
     end
@@ -1939,6 +1996,22 @@ defmodule Loopex.Runtime.SessionState do
   # missing one refuses the replay rather than supplying a number no authority
   # committed, which is the same rule that refuses a session configured without
   # a sampling bound at start.
+  # Concept: a committed context ceiling is read back exactly as it was written.
+  #
+  # Technical depth: ADR 0017 bounds it to positive unsigned 64-bit so the
+  # committed value is always compactly persistable. A record missing it, or
+  # carrying a value outside that domain, is unavailable history rather than an
+  # invitation to substitute a current process default.
+  defp record_context_token_budget(record) do
+    case Map.get(record, "context_token_budget") do
+      value when is_integer(value) and value > 0 and value <= 18_446_744_073_709_551_615 ->
+        {:ok, value}
+
+      _other ->
+        {:error, :invalid_context_token_budget_record}
+    end
+  end
+
   defp record_bounds(record) do
     Bounds.declare(%{
       max_turns: Map.get(record, "max_turns"),
@@ -2614,24 +2687,55 @@ defmodule Loopex.Runtime.SessionState do
   defp advance_snapshot_scan(scan, event) do
     expected = scan.tail + 1
 
-    with {:ok, active_run_id} <- advance_public_projection(scan.active_run_id, event, expected) do
+    with {:ok, active_run} <- advance_public_projection(scan.active_run, event, expected) do
       anchor_projection =
         if scan.requested_anchor == expected,
-          do: {:set, active_run_id},
+          do: {:set, active_run},
           else: scan.anchor_projection
 
       {:ok,
-       %{
-         scan
-         | tail: expected,
-           active_run_id: active_run_id,
-           anchor_projection: anchor_projection
-       }}
+       %{scan | tail: expected, active_run: active_run, anchor_projection: anchor_projection}}
     end
   end
 
+  # Concept: a run becomes publicly visible when its prompt is admitted, and
+  # publicly started only when its first request is staged.
+  #
+  # Technical depth: ADR 0017's phase machine. A user message from no active run
+  # installs `admitted_unstaged` for that event's run; a later steer message for
+  # that same run leaves the phase alone; a user message naming another run is
+  # invalid. A matching first start advances to `started`, a second start or a
+  # start for another run is invalid, and a matching finish clears both for any
+  # valid terminal category, including a context refusal, an abort, or owner
+  # loss before staging.
   defp advance_public_projection(
          nil,
+         %{
+           "run_id" => run_id,
+           event_sequence: expected,
+           event_id: event_id,
+           kind: "user.message_appended"
+         },
+         expected
+       )
+       when is_binary(run_id) and byte_size(run_id) > 0 and is_binary(event_id),
+       do: {:ok, {run_id, "admitted_unstaged"}}
+
+  defp advance_public_projection(
+         {run_id, _phase} = active,
+         %{
+           "run_id" => run_id,
+           event_sequence: expected,
+           event_id: event_id,
+           kind: "user.message_appended"
+         },
+         expected
+       )
+       when is_binary(event_id),
+       do: {:ok, active}
+
+  defp advance_public_projection(
+         {run_id, "admitted_unstaged"},
          %{
            "run_id" => run_id,
            event_sequence: expected,
@@ -2640,37 +2744,38 @@ defmodule Loopex.Runtime.SessionState do
          },
          expected
        )
-       when is_binary(run_id) and byte_size(run_id) > 0 and is_binary(event_id),
-       do: {:ok, run_id}
+       when is_binary(event_id),
+       do: {:ok, {run_id, "started"}}
 
   defp advance_public_projection(
-         active_run_id,
+         {run_id, _phase},
          %{
-           "run_id" => active_run_id,
+           "run_id" => run_id,
            event_sequence: expected,
            event_id: event_id,
            kind: "run.finished"
          },
          expected
        )
-       when is_binary(active_run_id) and is_binary(event_id),
+       when is_binary(event_id),
        do: {:ok, nil}
 
   defp advance_public_projection(
-         _active_run_id,
+         _active_run,
          %{event_sequence: expected, event_id: event_id, kind: kind},
          expected
        )
-       when kind in ["run.started", "run.finished"] and is_binary(event_id),
+       when kind in ["run.started", "run.finished", "user.message_appended"] and
+              is_binary(event_id),
        do: {:error, :invalid_public_run_transition}
 
   defp advance_public_projection(
-         active_run_id,
+         active_run,
          %{event_sequence: expected, event_id: event_id, kind: kind},
          expected
        )
        when is_binary(event_id) and is_binary(kind),
-       do: {:ok, active_run_id}
+       do: {:ok, active_run}
 
   defp advance_public_projection(_active_run_id, _event, _expected),
     do: {:error, :invalid_public_history}
@@ -2688,7 +2793,24 @@ defmodule Loopex.Runtime.SessionState do
         "content" => content,
         event_id: stable_id("event-user", session_id, command_id),
         kind: "user.message_appended"
-      },
+      }
+    ]
+  end
+
+  # Concept: a run is publicly started when its first request is actually
+  # staged, not when its prompt was admitted.
+  #
+  # Technical depth: ADR 0017 separates the two so an operator attaching between
+  # them can tell an admitted, unstaged run from a started one, and so recovery
+  # can validate a later start or a pre-staging finish without inventing an
+  # event. Only turn one emits it; later turns re-stage inside a run that is
+  # already started.
+  defp run_started_events(_session_id, _command_id, _run_id, turn_number)
+       when turn_number != 1,
+       do: []
+
+  defp run_started_events(session_id, command_id, run_id, _turn_number) do
+    [
       %{
         "command_id" => command_id,
         "run_id" => run_id,

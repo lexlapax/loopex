@@ -133,7 +133,6 @@ defmodule Loopex.ProjectResource do
   def limits,
     do: %{per_resource_bytes: @per_resource_bytes, class_total_bytes: @class_total_bytes}
 
-
   @doc """
   ## Concept
 

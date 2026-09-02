@@ -632,7 +632,8 @@ defmodule Loopex.Runtime.Control do
           sampling: state.sampling,
           grant_decision: state.grant_decision,
           fault_to: state.fault_to,
-          cleanup_grace_ms: state.cleanup_grace_ms
+          cleanup_grace_ms: state.cleanup_grace_ms,
+          context_token_budget: state.context_token_budget
         ]
 
         case DynamicSupervisor.start_child(session_supervisor, {SessionCoordinator, options}) do
