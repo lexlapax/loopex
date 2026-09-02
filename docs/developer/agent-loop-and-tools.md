@@ -270,6 +270,30 @@ closed provider-neutral identity, normalized usage, tool calls, stream facts,
 response identifier, and the exact staged digest; raw provider structures and
 reasons cross no Core, Store, public, progress, diagnostic, or fixture plane.
 
+A settlement is four closed enumerations and one result. `transport` is
+`not_dispatched` or `dispatched_or_unknown`; `termination` is absent, `abort`,
+`deadline`, or `owner_loss`; `conversation` is `canonical`, `evidence_only`, or
+`none`; and `next` is `retry`, `continue`, or `terminal`. Their combinations are
+validated rather than merely typed: a reply cannot be `not_dispatched`, a
+`not_dispatched` attempt may charge nothing and enter no conversation, a
+`dispatched_or_unknown` attempt may not charge nothing, `continue` requires a
+canonical reply that actually asked for tools, and `retry` exists only for the
+exact not-dispatched attempt that also carried no termination.
+
+`owner_loss` is the weakest of the three terminations and is claimed only where
+neither an admitted abort nor an admitted deadline already won. A successor that
+finds an attempt open on a run it did not adopt settles it that way: the staged
+bytes are recovery identity, never redispatch authority, so no second call is
+opened. The settlement is `dispatched_or_unknown`, no conversation, the whole
+remaining allowance charged, and a `failed` run terminal whose reason is the
+error category. A run's usage map is also closed to `input_tokens` and
+`output_tokens`: an adapter that reports any other key produces
+`unreadable_model_answer` rather than having an unrecognised number silently
+ignored, while omitting either key stays legal and normalizes as unreported.
+A reply Core cannot canonicalize settles under that same category and keeps the
+provider's complete reported usage, because an answer that could not be read is
+still an answer that was billed.
+
 ### Declared Bounds and the Split Deadline
 
 `Loopex.Bounds.declare/1` refuses a missing or non-positive bound rather than
@@ -580,13 +604,40 @@ a 65,536-byte project file wraps to a 65,653-byte provider message and 21,885
 estimated tokens. None of those estimates claims provider capacity, billing, or
 tokenizer equality.
 
+Admission is checked in a fixed order and the first failure decides:
+`system_class_tokens` against a strict ceiling of 1,000 — a host-owned class
+measuring exactly 1,000 refuses — then `context_tokens` against the committed
+budget, then the candidate record's `context_record_depth` (12) and
+`context_record_cardinality` (1,024), then `context_record_bytes` against the
+65,536-byte item ceiling. Those five names are the closed dimension set, and a
+refusal is exactly `dimension`, `observed`, `limit`, and `record_byte_cost`,
+which is the observation itself for the byte dimension and `nil` for the other
+four. The system-class ceiling is why adding a tool is a context decision:
+the system message plus every active model-facing projection is charged against
+it before any budget the operator named is consulted.
+
 Optional project content that alone exceeds context is withheld whole with a
-compact declined receipt. Required system, history, steer, or tool context
-overflow commits one compact non-retryable failure and opens no model attempt.
-Every content-bearing prompt, steer, and follow-up also preflights its exact
-accepted record and reachable event/terminal shapes. Replay is consulted before
-current defaults and current run state, so a retried command reproduces the
-durable answer instead of being reinterpreted under a later process configuration.
+compact declined receipt — the whole class is removed and the request
+re-canonicalized, never trimmed. Required system, history, steer, or tool
+context overflow commits `context_admission_refused_v1` and the run's `failed`
+terminal in one transaction, opens no model attempt, and publishes exactly five
+members: `category`, `retryable: false`, `dimension`, `observed`, and `limit`.
+The descriptors and source references that caused the refusal reach no public
+plane. Every content-bearing prompt, steer, and follow-up also preflights its
+exact accepted record and reachable event/terminal shapes. Replay is consulted
+before current defaults and current run state, so a retried command reproduces
+the durable answer instead of being reinterpreted under a later process
+configuration.
+
+Every descriptor carries provenance rather than position. Each one names a
+structured `source_reference` — a system identity, a tool generation triple, a
+project-resource workspace/manifest/label triple, or a steer's run and command
+— alongside a `provenance_class` of `system`, `session`, or `project_resource`
+and the trust class that class fixes:
+`host_owned_trusted_brain_content`, `session_owned_durable_truth`, and
+`untrusted_behavior_shaping_data` respectively. The receipt's totals carry all
+three provenance buckets, zero-filled, summing to the outer total, so what an
+operator was charged for is attributable by origin and not only in aggregate.
 
 ### Project Resources
 
@@ -603,12 +654,27 @@ entry not reported `contained`, enforces the ceilings of 64 KiB per resource and
 `workspace_ref`, `repository_origin`, and `revision` — into the value one trust
 decision binds. Nothing is ever truncated into context.
 
-Resolution is exhaustive and every outcome other than admission stages the class
-empty and journals a declined receipt naming its reason: `no_manifest`,
-`manifest_rejected`, `over_limit` with the observed sizes, `no_decision`, or
-`binding_changed`. A changed workspace identity, revision, resolved set, or
-content digest produces a different manifest digest, so a decision bound to the
-old one admits nothing; there is no partial match and no staleness window.
+Resolution is exhaustive, and every request's receipt names exactly one
+disposition from a closed set of nine. `staged` is the admitted one; the eight
+that stage the class empty are `no_manifest`, `manifest_rejected`,
+`over_limit` with its dimension and observed size, `no_decision`,
+`binding_changed`, `staged_empty` for a matching manifest that truthfully
+resolved no entries, `context_token_budget` and `context_record_bytes` for a
+trusted block withheld whole by a dimension it alone exceeded, and
+`not_evaluated_required_failure` where required context had already failed and
+the optional class was never reached. Each carries its own bounded detail:
+`manifest_rejected` names label and reason, `binding_changed` names the two
+digests that disagreed, `no_decision` names the manifest digest a decision would
+have had to bind, and the two budget dispositions name dimension, observation,
+and limit. `manifest_rejected` reasons are themselves closed —
+`invalid_manifest`, `too_many_entries`, `invalid_workspace`,
+`entry_not_bounded_plain_data`, `unpermitted_label`,
+`entry_not_reported_contained`, `declared_size_mismatch`, and
+`declared_digest_mismatch` — as are `binding_changed`'s `invalid_decision`,
+`digest_mismatch`, and `workspace_mismatch`. A changed workspace identity,
+revision, resolved set, or content digest produces a different manifest digest,
+so a decision bound to the old one admits nothing; there is no partial match and
+no staleness window.
 Blocks are resolved per turn from the same manifest and decision, so an edited
 resource stops being admitted at the next turn rather than at the next run.
 
@@ -664,8 +730,15 @@ facts, so a successor resumes from the journal rather than from anyone's memory:
 7. `turn_settled` — ask `Loopex.Bounds.decide/2`, and either stage the next
    request or commit the run's terminal record and one `run.finished` event.
 
-Public events are projections of committed facts. Progress items and diagnostics
-are transient and are never durable truth.
+Public events are projections of committed facts, and delivery is fenced by
+resolution as well as by commit. An attached reader is handed outbox rows only
+up to the position Runtime Control has recorded as resolved, so a row that is
+durably linearized while its owner still holds an unresolved transaction
+publishes nothing until re-presentation settles it. The watermark is pushed to
+the dispatcher rather than pulled from it, is applied to the read rather than to
+the queue, and is dropped when this runtime stops owning the session — a
+dormant session's history therefore reads without a fence. Progress items and
+diagnostics are transient, are not fenced, and are never durable truth.
 
 ### Verification Entry Points
 
