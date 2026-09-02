@@ -569,3 +569,25 @@ events per iteration across 513 iterations so the 1,024-event page limit is
 still reached, and name roots by OS pid and random bytes - directly, without a
 gate amendment. Seventh recorded override; names and minimums unchanged.
 
+<a id="recovery-corpus-fixture-states"></a>
+## Recovery corpus fixture states and host-driven reconciliation
+
+**Rule.** ADR 0018 settles a recovered attempt that was open and dispatched as
+owner loss with no second call. `next_event/1` answers an empty queue with a
+transient empty result. Receipt reconciliation is host-driven: the host
+presents a retained receipt to the solicited query and the runtime commits the
+fact; the executor callback set stays closed.
+
+**What is true.** Four locked recovery cases killed the predecessor mid-dispatched
+attempt and expected the activated successor to continue the run, which the
+locked ADR 0018 case with the same fixture shape forbids; they now lose the
+owner at the durable prompt admission, before any attempt opens. The
+configured-recovery helper treated the transient empty read as a failure, and
+both its cases expected activation or cancellation to reconcile a retained
+receipt on their own; they now reconcile through the attached host, and the
+scripted reference model reports usage so an admitted turn is not charged the
+whole remaining allowance.
+
+**Disposition.** Maintainer, 2026-09-02: apply directly, without a gate
+amendment. Eighth recorded override; names and minimums unchanged.
+

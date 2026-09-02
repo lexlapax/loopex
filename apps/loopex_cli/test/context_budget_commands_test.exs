@@ -235,7 +235,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
 
     assert inspect(cleanup_conflict) =~ "cleanup"
     refute inspect(cleanup_conflict) =~ "context_token_budget"
-    assert length(AgentLoopTestModel.dispatched(both.model)) == 1
+    assert length(AgentLoopTestModel.dispatched(both.model)) == 0
     refute abort_admitted?(both)
   end
 
@@ -273,7 +273,7 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
 
     assert inspect(cleanup_conflict) =~ "cleanup"
     refute inspect(cleanup_conflict) =~ "context_token_budget"
-    assert length(AgentLoopTestModel.dispatched(both.model)) == 1
+    assert length(AgentLoopTestModel.dispatched(both.model)) == 0
     refute abort_admitted?(both)
   end
 
@@ -457,28 +457,34 @@ defmodule LoopexCli.ContextBudgetCommandsTest do
     )
   end
 
+  # ADR 0018: an attempt inherited open and dispatched settles as owner loss, so
+  # the active run loses its owner at the durable prompt admission, before any
+  # attempt opens, and the recovered run continues from there.
   defp active_fixture(label) do
-    fixture =
-      start_fixture(label, [
-        %{text: "", hold: self(), hold_timeout_ms: 30_000},
-        %{text: "context resume completed"}
-      ])
-
+    fixture = start_fixture(label, [%{text: "context resume completed"}])
     command_id = "active-#{label}"
+    :ok = M1RuntimeTestStore.delay_after_record(fixture.store_pid, "prompt_admitted_v2", self())
 
-    assert {:accepted, ^command_id} =
-             Loopex.command(fixture.attachment, %{
-               type: :prompt,
-               command_id: command_id,
-               content: "retain an active context budget"
-             })
+    prompt =
+      Task.async(fn ->
+        Loopex.command(fixture.attachment, %{
+          type: :prompt,
+          command_id: command_id,
+          content: "retain an active context budget"
+        })
+      end)
 
-    assert_receive {:holding, _model_worker}, 5_000
+    assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v2", _transition,
+                    {:committed, _tx_id, _receipt}},
+                   5_000
+
     :ok = Loopex.track_session(fixture.state_root, fixture.session_id, fixture.placement)
     coordinator = coordinator_of(fixture.runtime)
     monitor = Process.monitor(coordinator)
     Process.exit(coordinator, :kill)
     assert_receive {:DOWN, ^monitor, :process, ^coordinator, :killed}, 5_000
+    M1RuntimeTestStore.release(waiter)
+    _ = Task.yield(prompt, 5_000) || Task.shutdown(prompt, :brutal_kill)
     fixture
   end
 

@@ -7,6 +7,7 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
 
   alias Loopex.Executor.Local
   alias Loopex.ReferenceClient
+  alias Loopex.ReferenceClient.Recovery
   alias Loopex.ReferenceClientRuntimeFixture, as: Fixture
 
   test "a non-default cleanup value crosses real Local receipt restart prepared resume and cancel recovery" do
@@ -119,6 +120,13 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
     assert Local.stats(restarted.executor).dispatches == %{}
     assert File.read!(effect_path) == content
 
+    # Reconciliation is host-driven: the host presents the retained receipt to
+    # the solicited query before it cancels, so the abort settles the run over a
+    # committed effect fact rather than over an unproved one.
+    host = %{restarted.client | attachment: attachment}
+    assert {:ok, query} = ReferenceClient.reconciliation_query(host)
+    assert :ok = ReferenceClient.reconcile(host, Recovery.receipt(query, retained))
+
     cancel_id = "cancel-#{label}"
 
     assert {:accepted, ^cancel_id} =
@@ -206,13 +214,21 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
     assert {:ok, ^session_id} = invoke_additive(Loopex, :activate_resume, [activation])
     assert_refused(invoke_additive(Loopex, :activate_resume, [activation]))
 
+    # Reconciliation is host-driven: the host presents the retained receipt to
+    # the solicited query, and the runtime validates and commits the fact.
+    host = %{restarted.client | attachment: attachment}
+    assert {:ok, query} = ReferenceClient.reconciliation_query(host)
+    assert :ok = ReferenceClient.reconcile(host, Recovery.receipt(query, retained))
+
     terminal = await_run_finished(attachment, 10_000)
     assert terminal["outcome"] == "completed"
     assert terminal["cleanup_grace_ms"] == cleanup_grace_ms
     assert retained.cleanup_grace_ms == cleanup_grace_ms
     assert {:ok, ^retained} = Local.receipt(restarted.executor, retained.job_id)
 
-    refute_receive {:model_request, _request}, 200
+    # Completing the turn after the reconciled tool result takes one further
+    # model call; the effect itself is proved not re-run below.
+    assert_receive {:model_request, _request}, 3_000
     assert Local.stats(restarted.executor).dispatches == %{}
     assert File.read!(effect_path) == content
   end
@@ -253,7 +269,7 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
       {:disconnected, cursor} ->
         flunk("prepared recovery attachment disconnected at cursor #{cursor}")
 
-      {:error, reason} ->
+      {:error, reason} when reason != :empty ->
         flunk("prepared recovery event read failed: #{inspect(reason)}")
 
       _empty ->

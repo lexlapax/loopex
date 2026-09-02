@@ -1792,19 +1792,30 @@ defmodule Loopex.ContextAdmissionTest do
 
     {session_id, attachment} = create_attached_session(fixture)
 
-    assert {:accepted, "prepared-context"} =
-             Loopex.command(attachment, %{
-               type: :prompt,
-               command_id: "prepared-context",
-               content: "hold"
-             })
+    :ok = M1RuntimeTestStore.delay_after_record(fixture.store, "prompt_admitted_v2", self())
 
-    assert_receive {:context_model_holding, _model_worker}, 5_000
+    prepared_prompt =
+      Task.async(fn ->
+        Loopex.command(attachment, %{
+          type: :prompt,
+          command_id: "prepared-context",
+          content: "hold"
+        })
+      end)
+
+    # ADR 0018: an attempt inherited open and dispatched settles as owner loss,
+    # so the first owner dies at the durable prompt admission, before any attempt
+    # opens; the activated successor is the one that opens and holds.
+    assert_receive {:record_linearized, admission_waiter, _store, "prompt_admitted_v2",
+                    _transition, {:committed, _tx_id, _receipt}},
+                   5_000
 
     coordinator = coordinator_of(fixture.runtime)
     reference = Process.monitor(coordinator)
     Process.exit(coordinator, :kill)
     assert_receive {:DOWN, ^reference, :process, ^coordinator, :killed}, 5_000
+    M1RuntimeTestStore.release(admission_waiter)
+    _ = Task.yield(prepared_prompt, 5_000) || Task.shutdown(prepared_prompt, :brutal_kill)
 
     assert {:ok, {:prepared, activation}} =
              dynamic_apply(Loopex, :prepare_resume_session, [
@@ -1817,6 +1828,7 @@ defmodule Loopex.ContextAdmissionTest do
              Loopex.session_status(fixture.runtime, session_id)
 
     assert {:ok, ^session_id} = dynamic_apply(Loopex, :activate_resume, [activation])
+    assert_receive {:context_model_holding, _model_worker}, 5_000
 
     successor = coordinator_of(fixture.runtime)
     successor_reference = Process.monitor(successor)

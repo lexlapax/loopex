@@ -28,9 +28,8 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
   test "an active recovered run stays paused until one-use activation and propagates cleanup" do
     fixture =
-      recovered_fixture("activation", :active,
+      recovered_fixture("activation", :admitted,
         script: [
-          %{text: "", hold: self(), hold_timeout_ms: 30_000},
           %{
             text: "",
             calls: [
@@ -42,7 +41,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
         tools: [Loopex.AgentLoopFixture.tool_definition()]
       )
 
-    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 0
     assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
 
     assert {:ok, {:prepared, activation}} =
@@ -54,7 +53,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
              ])
 
     Process.sleep(100)
-    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 0
     assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
 
     assert {:ok, fixture.session_id} == invoke(Loopex, :activate_resume, [activation])
@@ -416,10 +415,9 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
   test "prepared recovery and separately prepared Local authority stay out of durable and rendered planes" do
     fixture =
-      recovered_fixture("security-plane", :active,
+      recovered_fixture("security-plane", :admitted,
         progress_to: self(),
         script: [
-          %{text: "", hold: self(), hold_timeout_ms: 30_000},
           %{text: "public security-plane output", calls: []}
         ]
       )
@@ -567,7 +565,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     default_script =
       case phase do
-        phase when phase in [:active, :running] ->
+        phase when phase in [:active, :running, :admitted] ->
           [
             %{text: "", hold: self(), hold_timeout_ms: 30_000},
             %{text: "prepared recovery contract", calls: []}
@@ -626,29 +624,64 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     {:ok, attachment} = Loopex.attach(runtime, session_id, after_event_sequence: 0)
 
+    # ADR 0018: a recovered attempt that was open and dispatched settles as
+    # owner loss with no second call, so an active run that must continue after
+    # activation loses its owner at the durable prompt admission, before any
+    # attempt opens. The active and running phases hold mid-attempt; active also
+    # loses its owner there, the state ADR 0018 settles as owner loss.
     held_worker =
-      if phase in [:active, :running] do
-        prompt_id = "prompt-#{unique}"
+      case phase do
+        phase when phase in [:active, :running] ->
+          prompt_id = "prompt-#{unique}"
 
-        assert {:accepted, ^prompt_id} =
-                 Loopex.command(attachment, %{
-                   type: :prompt,
-                   command_id: prompt_id,
-                   content: "prepared recovery contract"
-                 })
+          assert {:accepted, ^prompt_id} =
+                   Loopex.command(attachment, %{
+                     type: :prompt,
+                     command_id: prompt_id,
+                     content: "prepared recovery contract"
+                   })
 
-        assert_receive {:holding, worker}, 5_000
-        worker
+          assert_receive {:holding, worker}, 5_000
+
+          if phase == :active do
+            coordinator = coordinator_of(runtime)
+            monitor = Process.monitor(coordinator)
+            Process.exit(coordinator, :kill)
+            assert_receive {:DOWN, ^monitor, :process, ^coordinator, _reason}, 5_000
+          end
+
+          worker
+
+        :admitted ->
+          prompt_id = "prompt-#{unique}"
+          :ok = M1RuntimeTestStore.delay_after_record(store_pid, "prompt_admitted_v2", self())
+
+          prompt =
+            Task.async(fn ->
+              Loopex.command(attachment, %{
+                type: :prompt,
+                command_id: prompt_id,
+                content: "prepared recovery contract"
+              })
+            end)
+
+          assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v2", _transition,
+                          {:committed, _tx_id, _receipt}},
+                         5_000
+
+          coordinator = coordinator_of(runtime)
+          monitor = Process.monitor(coordinator)
+          Process.exit(coordinator, :kill)
+          assert_receive {:DOWN, ^monitor, :process, ^coordinator, _reason}, 5_000
+          M1RuntimeTestStore.release(waiter)
+          _ = Task.yield(prompt, 5_000) || Task.shutdown(prompt, :brutal_kill)
+          nil
+
+        _idle ->
+          nil
       end
 
     :ok = Loopex.track_session(state_root, session_id, placement)
-
-    if phase == :active do
-      coordinator = coordinator_of(runtime)
-      monitor = Process.monitor(coordinator)
-      Process.exit(coordinator, :kill)
-      assert_receive {:DOWN, ^monitor, :process, ^coordinator, _reason}, 5_000
-    end
 
     if is_pid(held_worker) do
       on_exit(fn -> send(held_worker, :release) end)
