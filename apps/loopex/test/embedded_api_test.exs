@@ -335,6 +335,7 @@ defmodule Loopex.EmbeddedApiTest do
 
     {:ok, restarted} =
       Loopex.start_link(
+        context_token_budget: 8_192,
         runtime_id: fixture.runtime_id,
         store: fixture.store,
         attachment_capacity: 1
@@ -374,6 +375,7 @@ defmodule Loopex.EmbeddedApiTest do
       options
       |> Keyword.put(:runtime_id, runtime_id)
       |> Keyword.put(:store, store)
+      |> Keyword.put_new(:context_token_budget, 8_192)
 
     {:ok, runtime} = Loopex.start_link(runtime_options)
 

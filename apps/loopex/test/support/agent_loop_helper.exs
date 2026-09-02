@@ -341,6 +341,7 @@ defmodule Loopex.AgentLoopFixture do
 
     {:ok, runtime} =
       Loopex.start_link(
+        context_token_budget: 8_192,
         runtime_id: Keyword.get(options, :runtime_id, "agent-loop-runtime"),
         store: store,
         progress_to: Keyword.get(options, :progress_to),

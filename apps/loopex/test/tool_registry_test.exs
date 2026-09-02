@@ -43,7 +43,12 @@ defmodule Loopex.ToolRegistryTest do
     # it is only the precondition for having tools at all.
     {:ok, runtime} =
       Loopex.start_link(
-        [runtime_id: label, store: store, policy: Loopex.AgentLoopTestPolicy] ++ options
+        [
+          context_token_budget: 8_192,
+          runtime_id: label,
+          store: store,
+          policy: Loopex.AgentLoopTestPolicy
+        ] ++ options
       )
 
     on_exit(fn ->

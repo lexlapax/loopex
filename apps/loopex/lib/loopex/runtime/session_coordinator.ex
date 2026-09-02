@@ -148,6 +148,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # reintroduce the defect those two commits removed.
   @session_status_timeout_ms 5_000
 
+  # Concept: the version of the encoding a retained descriptor was measured and
+  # digested under, carried so a later encoder cannot be assumed.
+  #
+  # Technical depth: an unknown canonicalization version is unavailable history
+  # rather than something to decode with the current encoder and hope.
+  @descriptor_canonicalization_version "loopex.canonical.v1"
+  @descriptor_digest_domain "loopex.context.descriptors.v1"
+  @uint64_max 18_446_744_073_709_551_615
+
   @doc false
   @spec session_status(pid(), owner()) :: {:ok, map()} | {:error, term()}
   def session_status(coordinator, owner) when is_pid(coordinator) and is_map(owner) do
@@ -205,6 +214,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        grant_decision: Keyword.fetch!(options, :grant_decision),
        fault_to: Keyword.fetch!(options, :fault_to),
        cleanup_grace_ms: Keyword.fetch!(options, :cleanup_grace_ms),
+       context_token_budget: Keyword.fetch!(options, :context_token_budget),
        # The runs whose model dispatch this owner staged itself. A run at
        # `model_dispatched` that is not in here was dispatched by a predecessor,
        # and its attempt is abandoned rather than re-run under the same identity.
@@ -260,6 +270,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
         event_sequence: state.durable.event_sequence,
         active_run_id: state.durable.active_run_id,
         cleanup_grace_ms: state.durable.cleanup_grace_ms,
+        active_context_token_budget:
+          SessionState.context_token_budget(state.durable, state.durable.active_run_id),
         pending_work_ids:
           Enum.map(SessionState.pending_work(state.durable), &Map.fetch!(&1, :run_id))
       }
@@ -1039,36 +1051,122 @@ defmodule Loopex.Runtime.SessionCoordinator do
     # against a request the run never sent.
     steer = SessionState.pending_steer(state.durable, run_id)
 
-    with {:ok, max_tokens} <- declared_max_tokens(state),
-         {blocks, project_receipt} = project_blocks(state),
-         system = system_block(state),
-         session_entries = Conversation.session_entries(elements),
-         messages =
-           Conversation.project(elements, system: system, project_blocks: blocks),
-         messages = messages ++ steer_message(steer),
-         deadline = run_deadline(declared),
-         {:ok, request} <-
-           Model.request(state.model.model, messages,
-             tools: state.active_tools,
-             sampling: %{"max_tokens" => max_tokens},
-             deadline: deadline
-           ),
-         {:ok, receipt} <-
-           context_receipt(
-             request,
-             context_sources(project_receipt, session_entries, steer, run_id),
-             project_receipt
-           ),
-         {:ok, proposal} <-
-           SessionState.propose_model_request(state.durable, run_id, request,
-             applied_steer: steer && steer.command_id,
-             context_receipt: receipt
-           ),
+    {blocks, project_receipt} = project_blocks(state)
+
+    staging = %{run_id: run_id, elements: elements, steer: steer}
+
+    with {:ok, deadline} <- run_deadline(declared),
+         staging = Map.put(staging, :deadline, deadline),
+         {:ok, max_tokens} <- declared_max_tokens(state),
+         staging = Map.put(staging, :max_tokens, max_tokens),
+         {:ok, proposal} <- stage_candidate(state, staging, blocks, project_receipt),
          {:ok, next} <- commit_internal(state, proposal) do
       send(self(), :advance_work)
       {:noreply, adopt_run(next, run_id)}
     else
+      # Concept: a request that cannot be admitted ends its run, and calls
+      # nobody.
+      #
+      # Technical depth: ADR 0017 commits the compact refusal, the failed
+      # terminal, and its public event in one transaction, and dispatches
+      # nothing. The run is over: a retained terminal is final and the same run
+      # never re-enters staging, so changing context, configuration, or policy
+      # requires a newly admitted run.
+      {:refused, refusal} -> commit_context_refusal(state, run_id, refusal)
+      {:deadline_unrepresentable, category} -> commit_deadline_failure(state, run_id, category)
       {:error, reason} -> {:stop, {:model_request_failed, reason}, state}
+    end
+  end
+
+  # Concept: optional project content is withheld whole, and only after the
+  # required request has been proved admissible without it.
+  #
+  # Technical depth: ADR 0017 permits withholding exactly one class and never
+  # trimming. If the optional-inclusive candidate exceeds the committed token
+  # total or the Store record ceiling, the whole project class is removed, the
+  # request is canonicalized again, and the record cost is resolved to its own
+  # fixed point. The declined receipt names the dimension, the optional-inclusive
+  # observation, and the limit, so an operator can see what was withheld and
+  # why, and the task continues. A required-only candidate that still fails has
+  # nothing optional left to remove and becomes the compact refusal.
+  defp stage_candidate(state, staging, [], project_receipt),
+    do: staged_proposal(state, staging, [], project_receipt)
+
+  defp stage_candidate(state, staging, blocks, project_receipt) do
+    case staged_proposal(state, staging, blocks, project_receipt) do
+      {:refused, %{"dimension" => dimension} = refusal}
+      when dimension in ["context_tokens", "context_record_bytes"] ->
+        staged_proposal(state, staging, [], withheld_project_receipt(dimension, refusal))
+
+      other ->
+        other
+    end
+  end
+
+  defp withheld_project_receipt(dimension, refusal) do
+    disposition =
+      case dimension do
+        "context_tokens" -> :context_token_budget
+        "context_record_bytes" -> :context_record_bytes
+      end
+
+    ProjectResource.receipt(disposition, %{
+      "dimension" => dimension,
+      "observed" => Map.fetch!(refusal, "observed"),
+      "limit" => Map.fetch!(refusal, "limit")
+    })
+  end
+
+  defp staged_proposal(state, staging, blocks, project_receipt) do
+    messages =
+      Conversation.project(staging.elements, system: system_block(state), project_blocks: blocks)
+
+    with {:ok, request} <-
+           Model.request(state.model.model, messages ++ steer_message(staging.steer),
+             tools: state.active_tools,
+             sampling: %{"max_tokens" => staging.max_tokens},
+             deadline: staging.deadline
+           ),
+         {:ok, receipt} <-
+           context_receipt(
+             request,
+             context_sources(
+               project_receipt,
+               Conversation.session_entries(staging.elements),
+               staging.steer,
+               staging.run_id
+             ),
+             project_receipt,
+             state.context_token_budget
+           ) do
+      SessionState.propose_model_request(state.durable, staging.run_id, request,
+        applied_steer: staging.steer && staging.steer.command_id,
+        context_receipt: receipt
+      )
+    end
+  end
+
+  defp commit_deadline_failure(state, run_id, category) do
+    state = disarm_deadline(state, run_id)
+
+    with {:ok, proposal} <- SessionState.propose_deadline_failure(state.durable, run_id, category),
+         {:ok, next} <- commit_internal(state, proposal) do
+      send(self(), :advance_work)
+      {:noreply, %{next | adopted: MapSet.delete(next.adopted, run_id)}}
+    else
+      {:error, reason} -> {:stop, {:deadline_staging_failed, reason}, state}
+    end
+  end
+
+  defp commit_context_refusal(state, run_id, refusal) do
+    state = disarm_deadline(state, run_id)
+
+    with {:ok, proposal} <- SessionState.propose_context_refusal(state.durable, run_id, refusal),
+         {:ok, next} <- commit_internal(state, proposal) do
+      send(self(), :advance_work)
+      {:noreply, %{next | adopted: MapSet.delete(next.adopted, run_id)}}
+    else
+      {:error, reason} -> {:stop, {:context_refusal_failed, reason}, state}
     end
   end
 
@@ -1139,7 +1237,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp reconciliation_ref(state, run_id),
     do: stable_id("reconciliation", state.session_id, run_id)
 
-  defp declared_limit(declared, :deadline), do: run_deadline(declared)
+  # Technical depth: a run can only reach its deadline bound after it staged a
+  # request, and staging is what commits the absolute instant, so the declared
+  # value is always the committed one here rather than a fresh checked addition.
+  defp declared_limit(declared, :deadline), do: committed_deadline(declared)
   defp declared_limit(declared, bound), do: Map.fetch!(declared, bound)
 
   # Concept: project context is admitted, never assumed.
@@ -1164,7 +1265,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # that identity without migrating the descriptor algebra. Project-resource
   # admission remains nested so a declined class keeps its exact reason even
   # though it contributes no block.
-  defp context_receipt(request, message_sources, project_receipt) do
+  defp context_receipt(request, message_sources, project_receipt, context_token_budget) do
     # Technical depth: `Enum.zip/2` truncates silently. A projection/source
     # disagreement is therefore refused before commit instead of producing a
     # receipt that simply omits the tail of the request it claims to describe.
@@ -1176,39 +1277,88 @@ defmodule Loopex.Runtime.SessionCoordinator do
           context_descriptor(source, Canonical.encode(message))
         end)
 
-      tool_blocks = Enum.map(request.tools, &tool_descriptor/1)
-      blocks = message_blocks ++ tool_blocks
+      blocks = message_blocks ++ Enum.map(request.tools, &tool_descriptor/1)
+      totals = context_totals(blocks)
 
       {:ok,
        %{
          "provider_identity" => "loopex.context.reference",
-         "provider_revision" => 1,
+         "provider_revision" => 2,
+         "transformer_identity" => nil,
+         "transformer_revision" => nil,
+         "selector_identity" => nil,
+         "selector_revision" => nil,
          "token_estimator" => Bounds.estimator(),
+         "descriptor_canonicalization_version" => @descriptor_canonicalization_version,
          "blocks" => blocks,
-         "totals" => context_totals(blocks),
-         "project_resource" => project_receipt
+         "totals" => totals,
+         "project_resource" => project_receipt,
+         "context_token_budget" => context_token_budget,
+         "provider_estimated_tokens" => totals["token_cost"],
+         "context_record_byte_ceiling" => Store.max_item_bytes(),
+         "record_byte_cost" => 0,
+         "ordered_descriptor_digest" => ordered_descriptor_digest(blocks)
        }}
     else
       {:error, :context_receipt_source_mismatch}
     end
   end
 
+  # Concept: the ordered descriptor list is bound by one digest rather than
+  # re-listed anywhere it has to be referred to.
+  #
+  # Technical depth: the preimage is the exact ASCII domain, one zero byte, and
+  # then each descriptor's eight-byte unsigned big-endian canonical length
+  # followed by its canonical bytes. Length framing is what stops two different
+  # descriptor sequences sharing a preimage. Hashing incrementally means no
+  # aggregate encoding of the whole list is ever allocated, which matters because
+  # the compact refusal has to carry this digest without carrying the list.
+  defp ordered_descriptor_digest(blocks) do
+    blocks
+    |> Enum.reduce(
+      :crypto.hash_update(
+        :crypto.hash_init(:sha256),
+        @descriptor_digest_domain <> <<0>>
+      ),
+      fn block, context ->
+        bytes = Canonical.encode(block)
+
+        context
+        |> :crypto.hash_update(<<byte_size(bytes)::unsigned-big-integer-size(64)>>)
+        |> :crypto.hash_update(bytes)
+      end
+    )
+    |> :crypto.hash_final()
+    |> Base.encode16(case: :lower)
+  end
+
   defp context_sources(project_receipt, session_entries, steer, run_id) do
-    [source("loopex.system.v1", "system")] ++
+    [source(%{"kind" => "system", "identity" => "loopex.system.v1"}, "system")] ++
       project_sources(project_receipt) ++
       Enum.map(session_entries, fn {source_reference, _message} ->
         source(source_reference, "session")
       end) ++ steer_sources(steer, run_id)
   end
 
+  # Concept: a tool is charged for what the model is actually shown.
+  #
+  # Technical depth: ADR 0017 charges the model-facing projection for content
+  # digest, byte cost, and token cost, while the source reference keeps the whole
+  # generation triple and the full definition digest. Changing storage-only tool
+  # metadata therefore changes retained source identity and record bytes without
+  # misreporting a provider-context cost that did not change.
   defp tool_descriptor(tool) do
-    definition_digest = ToolDefinition.definition_digest(tool)
+    source_reference = %{
+      "kind" => "tool_definition",
+      "tool_id" => Map.fetch!(tool, "tool_id"),
+      "tool_version" => Map.fetch!(tool, "tool_version"),
+      "definition_digest" => ToolDefinition.definition_digest(tool)
+    }
 
-    source_reference =
-      "tool_definition:#{Map.fetch!(tool, "tool_id")}:#{Map.fetch!(tool, "tool_version")}:" <>
-        definition_digest
-
-    context_descriptor(source(source_reference, "system"), ToolDefinition.canonical_bytes(tool))
+    context_descriptor(
+      source(source_reference, "system"),
+      Canonical.encode(ToolDefinition.model_facing(tool))
+    )
   end
 
   defp project_sources(%{
@@ -1220,12 +1370,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
          }
        }) do
     Enum.map(entries, fn entry ->
-      source_reference =
-        "project:#{workspace_ref}:#{manifest_digest}:#{entry["relative_label"]}"
-
-      source(source_reference, "project_resource")
-      |> Map.put("source_content_digest", entry["content_digest"])
-      |> Map.put("source_byte_size", entry["byte_size"])
+      source(
+        %{
+          "kind" => "project_resource",
+          "workspace_ref" => workspace_ref,
+          "manifest_digest" => manifest_digest,
+          "relative_label" => entry["relative_label"]
+        },
+        "project_resource"
+      )
     end)
   end
 
@@ -1234,8 +1387,21 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp steer_sources(nil, _run_id), do: []
 
   defp steer_sources(%{command_id: command_id}, run_id),
-    do: [source("session:#{run_id}:steer:#{command_id}", "session")]
+    do: [
+      source(
+        %{"kind" => "session_steer", "run_id" => run_id, "command_id" => command_id},
+        "session"
+      )
+    ]
 
+  # Concept: a source reference is structured data, not a delimiter-joined
+  # string.
+  #
+  # Technical depth: ADR 0017 fixes seven exact key sets. Identifiers keep the
+  # bound of the durable record that supplied them and no formatter has to
+  # reparse one string to recover a member, so an identifier containing a
+  # delimiter stays distinguishable instead of colliding with a different
+  # reference that happens to concatenate the same way.
   defp source(source_reference, provenance_class) do
     trust_class =
       case provenance_class do
@@ -1259,11 +1425,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
     })
   end
 
+  # Technical depth: all three provenance buckets are always present, using zero
+  # costs for a class with no block, so a consumer reads the same shape whether
+  # or not a class contributed and the three buckets always sum back to both
+  # outer totals.
   defp context_totals(blocks) do
     by_provenance =
-      blocks
-      |> Enum.group_by(& &1["provenance_class"])
-      |> Map.new(fn {provenance, descriptors} -> {provenance, sum_costs(descriptors)} end)
+      Map.new(~w(system session project_resource), fn provenance ->
+        {provenance, sum_costs(Enum.filter(blocks, &(&1["provenance_class"] == provenance)))}
+      end)
 
     Map.put(sum_costs(blocks), "by_provenance", by_provenance)
   end
@@ -1307,10 +1477,39 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # unchanged for every later turn. Only turn one converts the declared duration
   # into an instant, which is why a recovering owner resumes the deadline the run
   # actually had rather than granting it the downtime it slept through.
-  defp run_deadline(%{deadline: deadline}) when is_integer(deadline), do: deadline
+  # Concept: the instant this run was actually bound by, once staging committed
+  # one.
+  #
+  # Technical depth: a run only reaches its deadline bound after a request was
+  # staged, and staging is what converts the declared duration into an absolute
+  # instant, so every reader after that point uses the committed value rather
+  # than performing a fresh checked addition against its own clock.
+  defp committed_deadline(%{deadline: deadline}) when is_integer(deadline), do: deadline
 
-  defp run_deadline(%{deadline_ms: deadline_ms}),
-    do: System.system_time(:millisecond) + deadline_ms
+  defp run_deadline(%{deadline: deadline}) when is_integer(deadline), do: {:ok, deadline}
+
+  # Concept: an absolute deadline is arithmetic that has to be checked, not
+  # assumed.
+  #
+  # Technical depth: ADR 0017 requires the clock reading to be a non-negative
+  # unsigned 64-bit integer and the checked addition of the committed duration
+  # to stay inside that domain. Arithmetic never wraps, and a failure of either
+  # is a compact durable fact rather than a giant instant staged into a request
+  # or a provider call made against a deadline nothing can represent.
+  defp run_deadline(%{deadline_ms: deadline_ms}) do
+    now = System.system_time(:millisecond)
+
+    cond do
+      not (is_integer(now) and now >= 0 and now <= @uint64_max) ->
+        {:deadline_unrepresentable, "clock_out_of_domain"}
+
+      now + deadline_ms > @uint64_max ->
+        {:deadline_unrepresentable, "deadline_addition_overflow"}
+
+      true ->
+        {:ok, now + deadline_ms}
+    end
+  end
 
   defp declared_max_tokens(state) do
     configured =
@@ -1429,7 +1628,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     detail = %{
       bound: "deadline",
       observed: System.system_time(:millisecond),
-      declared_limit: run_deadline(declared),
+      declared_limit: committed_deadline(declared),
       accounting_source: charged.source && Atom.to_string(charged.source)
     }
 
@@ -1958,7 +2157,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       in_flight?(state, :policy, work.run_id) ->
         {:noreply, state}
 
-      System.system_time(:millisecond) >= run_deadline(declared) ->
+      System.system_time(:millisecond) >= committed_deadline(declared) ->
         commit_tool_terminal(
           state,
           work,
@@ -2063,7 +2262,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # admission first, so an abort now needs nothing resolved: it is admitted, and
   # what it achieved is a separate fact committed after the cleanup that produced
   # it.
-  defp resolve_command(state, command), do: {state, resolve_bounds(state, command)}
+  # Technical depth: ADR 0017's context ceiling is resolved here beside the three
+  # declared bounds and committed into the same admission record, but it is never
+  # merged into `:bounds`: it can produce no `bound_reached`, and folding it in
+  # would make it visible to `Bounds.declare/1`.
+  defp resolve_command(state, command) do
+    resolved =
+      state
+      |> resolve_bounds(command)
+      |> Map.put(:context_token_budget, state.context_token_budget)
+
+    {state, resolved}
+  end
 
   # Concept: end what one run still owns, and say what that actually achieved.
   #

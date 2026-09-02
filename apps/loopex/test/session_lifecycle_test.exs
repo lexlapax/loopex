@@ -734,7 +734,10 @@ defmodule Loopex.SessionLifecycleTest do
 
   defp start_fixture(runtime_id) do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: runtime_id)
-    {:ok, runtime} = Loopex.start_link(runtime_id: runtime_id, store: store)
+
+    {:ok, runtime} =
+      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+
     %{runtime: runtime, runtime_id: runtime_id, store: store, store_pid: store_pid}
   end
 

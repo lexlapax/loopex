@@ -168,6 +168,7 @@ defmodule Loopex.Runtime.Control do
        grant_decision: Keyword.fetch!(options, :grant_decision),
        fault_to: Keyword.fetch!(options, :fault_to),
        cleanup_grace_ms: Keyword.fetch!(options, :cleanup_grace_ms),
+       context_token_budget: Keyword.fetch!(options, :context_token_budget),
        progress_to: Keyword.get(options, :progress_to),
        diagnostics_to: Keyword.get(options, :diagnostics_to),
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
@@ -205,7 +206,9 @@ defmodule Loopex.Runtime.Control do
         runtime_id: state.runtime_id,
         attachment_capacity: state.attachment_capacity,
         model_configured: is_map(state.model),
-        executor_identity: if(is_map(state.executor), do: state.executor.identity, else: nil)
+        executor_identity: if(is_map(state.executor), do: state.executor.identity, else: nil),
+        bounds: state.bounds,
+        context_token_budget: state.context_token_budget
       }
 
       {:reply, {:ok, configuration}, state}
@@ -666,7 +669,8 @@ defmodule Loopex.Runtime.Control do
           sampling: state.sampling,
           grant_decision: state.grant_decision,
           fault_to: state.fault_to,
-          cleanup_grace_ms: state.cleanup_grace_ms
+          cleanup_grace_ms: state.cleanup_grace_ms,
+          context_token_budget: state.context_token_budget
         ]
 
         case DynamicSupervisor.start_child(session_supervisor, {SessionCoordinator, options}) do

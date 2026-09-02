@@ -37,7 +37,10 @@ defmodule Loopex.SessionDirectoryTest do
     assert state_root == root
 
     {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
-    {:ok, runtime} = Loopex.start_link(runtime_id: runtime_id, store: store)
+
+    {:ok, runtime} =
+      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+
     on_exit(fn -> stop_runtime(runtime) end)
 
     {:ok, session_a} = Loopex.create_session(runtime, %{}, command_id: "create-a")
@@ -93,7 +96,9 @@ defmodule Loopex.SessionDirectoryTest do
 
     {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
 
-    {:ok, creating_runtime} = Loopex.start_link(runtime_id: runtime_id, store: store)
+    {:ok, creating_runtime} =
+      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+
     {:ok, session_id} = Loopex.create_session(creating_runtime, %{}, command_id: "create")
     :ok = SessionDirectory.record_session(state_root, session_id, runtime_id)
     :ok = Loopex.stop(creating_runtime)
@@ -108,7 +113,9 @@ defmodule Loopex.SessionDirectoryTest do
     {:ok, resumed_runtime_id} = SessionDirectory.runtime_id(resumed_state_root)
     assert resumed_runtime_id == runtime_id
 
-    {:ok, resuming_runtime} = Loopex.start_link(runtime_id: resumed_runtime_id, store: store)
+    {:ok, resuming_runtime} =
+      Loopex.start_link(context_token_budget: 8_192, runtime_id: resumed_runtime_id, store: store)
+
     on_exit(fn -> stop_runtime(resuming_runtime) end)
 
     assert {:ok, ^session_id} =
@@ -225,13 +232,21 @@ defmodule Loopex.SessionDirectoryTest do
     {:ok, state_root} = SessionDirectory.state_root()
     assert state_root == root
 
-    {:ok, creator_runtime} = Loopex.start_link(runtime_id: "runtime-original", store: store)
+    {:ok, creator_runtime} =
+      Loopex.start_link(context_token_budget: 8_192, runtime_id: "runtime-original", store: store)
+
     on_exit(fn -> stop_runtime(creator_runtime) end)
 
     {:ok, session_id} = Loopex.create_session(creator_runtime, %{}, command_id: "create")
     :ok = SessionDirectory.record_session(state_root, session_id, "runtime-original")
 
-    {:ok, other_runtime} = Loopex.start_link(runtime_id: "runtime-different", store: store)
+    {:ok, other_runtime} =
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        runtime_id: "runtime-different",
+        store: store
+      )
+
     on_exit(fn -> stop_runtime(other_runtime) end)
 
     before_epoch = session_owner_epoch(store_pid, session_id)
@@ -256,7 +271,10 @@ defmodule Loopex.SessionDirectoryTest do
     assert state_root == root
 
     {:ok, runtime_id} = SessionDirectory.runtime_id(state_root)
-    {:ok, runtime} = Loopex.start_link(runtime_id: runtime_id, store: store)
+
+    {:ok, runtime} =
+      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+
     on_exit(fn -> stop_runtime(runtime) end)
 
     {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create")
@@ -286,7 +304,10 @@ defmodule Loopex.SessionDirectoryTest do
     on_exit(fn -> stop_store(store_pid) end)
 
     {:ok, runtime_id} = SessionDirectory.runtime_id(root)
-    {:ok, runtime} = Loopex.start_link(runtime_id: runtime_id, store: store)
+
+    {:ok, runtime} =
+      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+
     on_exit(fn -> stop_runtime(runtime) end)
 
     {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-replay")
@@ -308,7 +329,10 @@ defmodule Loopex.SessionDirectoryTest do
     on_exit(fn -> stop_store(store_pid) end)
 
     {:ok, runtime_id} = SessionDirectory.runtime_id(root)
-    {:ok, runtime} = Loopex.start_link(runtime_id: runtime_id, store: store)
+
+    {:ok, runtime} =
+      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+
     on_exit(fn -> stop_runtime(runtime) end)
 
     {:ok, session_id} = Loopex.create_session(runtime, %{}, command_id: "create-convergence")
@@ -341,7 +365,10 @@ defmodule Loopex.SessionDirectoryTest do
     on_exit(fn -> stop_store(store_pid) end)
 
     {:ok, runtime_id} = SessionDirectory.runtime_id(root)
-    {:ok, runtime} = Loopex.start_link(runtime_id: runtime_id, store: store)
+
+    {:ok, runtime} =
+      Loopex.start_link(context_token_budget: 8_192, runtime_id: runtime_id, store: store)
+
     on_exit(fn -> stop_runtime(runtime) end)
 
     {:ok, session_a} = Loopex.create_session(runtime, %{}, command_id: "create-a-conflict")

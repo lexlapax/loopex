@@ -464,6 +464,243 @@ defmodule Loopex.Store do
   @doc """
   ## Concept
 
+  Reports the fixed maximum encoded byte size of one durable Store item.
+
+  ## Technical depth
+
+  The ceiling is core-owned and identical for private records and public
+  events. An adapter cannot widen or narrow it, and a caller reads it here
+  rather than duplicating the literal in its own preflight.
+  """
+  @spec max_item_bytes() :: pos_integer()
+  def max_item_bytes, do: @max_item_bytes
+
+  @doc """
+  ## Concept
+
+  Reports the fixed maximum nesting depth of one durable Store item.
+
+  ## Technical depth
+
+  The item root is depth zero and every child increments depth by one, so a
+  leaf at this depth is admitted while its child is not.
+  """
+  @spec max_item_depth() :: pos_integer()
+  def max_item_depth, do: @max_depth
+
+  @doc """
+  ## Concept
+
+  Reports the fixed maximum member count of one collection inside a durable
+  Store item.
+
+  ## Technical depth
+
+  The limit applies to a map's complete member count and to a list's length, so
+  the first rejected witness is always exactly one above this value.
+  """
+  @spec max_item_cardinality() :: pos_integer()
+  def max_item_cardinality, do: @max_items
+
+  @doc """
+  ## Concept
+
+  Normalizes one candidate durable item and reports its exact encoded byte cost
+  without committing anything.
+
+  A caller that must know whether the record or event it is about to build can
+  be retained asks here first. The answer is the normalized item plus its exact
+  size, or the first structural dimension the item exceeds.
+
+  ## Technical depth
+
+  Traversal is deterministic depth-first pre-order. Each node classifies its own
+  form, then checks depth, then checks collection cardinality, and only then
+  normalizes keys and visits children in unsigned bytewise order of their
+  normalized binary key spellings. Maps use `map_size/1` and lists count at most
+  `max_item_cardinality() + 1` successive cons cells, so an enormous untrusted
+  collection is refused without allocating a key list or walking its tail.
+
+  A structural refusal reports the first exact dimension under that order: the
+  rejected node depth, or the first rejected collection witness. Structs,
+  invalid keys, key-normalization collisions, and other non-plain data keep the
+  ordinary invalid-data result and are never relabelled structural overages.
+
+  The returned item is the exact shape a transaction retains: every caller key
+  becomes a bounded binary, and the required `kind` and `event_id` members are
+  restored as atom keys. The reported cost is that item's own deterministic
+  external-term size, so a caller can hand the returned item straight to
+  `transact/2` and know what it will be measured as.
+
+  In `:event` mode the atom and binary spellings of `event_sequence`,
+  `owner_epoch`, and `owner_incarnation_id` are reserved at every map.
+
+  Two transaction protections stay outside this helper because it holds neither
+  the sibling events nor the expected owner identity: outbox event-ID
+  uniqueness, and rejection of the current owner-incarnation capability inside a
+  public event. An item may normalize and measure here and still be refused by
+  `transact/2`.
+  """
+  @spec normalize_and_measure_item(:record | :event, term()) ::
+          {:ok, map(), non_neg_integer()}
+          | {:error,
+             {:item_structure_exceeded, :depth | :cardinality, pos_integer(), pos_integer()}}
+          | {:error, :invalid_item | :invalid_event}
+  def normalize_and_measure_item(plane, item) when plane in [:record, :event] do
+    with {:ok, normalized} <- normalize_measured_root(plane, item) do
+      {:ok, normalized, byte_size(:erlang.term_to_binary(normalized, [:deterministic]))}
+    end
+  end
+
+  # Concept: the root carries required members no other node has.
+  #
+  # Technical depth: raw root cardinality is counted before `kind` and, for an
+  # event, `event_id` are extracted, and restoring those same members cannot
+  # raise the admitted count. There is therefore no second or synthetic
+  # post-normalization overage. They are restored as atom keys, which is the
+  # shape every other Store path already retains, so a caller can hand the
+  # returned item straight to a transaction. Their logical spellings `"kind"`
+  # and `"event_id"` order them among their siblings; both carry validated
+  # binaries, so no traversal outcome depends on where in that order they sit.
+  defp normalize_measured_root(plane, item) when is_map(item) and not is_struct(item) do
+    with :ok <- measured_cardinality(map_size(item)),
+         {:ok, kind, without_kind} <- take_required(item, :kind, "kind"),
+         {:ok, normalized_kind} <- normalize_kind(kind),
+         {:ok, required, rest} <- take_measured_event_id(plane, without_kind),
+         {:ok, normalized_rest} <- measured_map_members(plane, rest, 0) do
+      {:ok, normalized_rest |> Map.merge(required) |> Map.put(:kind, normalized_kind)}
+    else
+      {:error, {:item_structure_exceeded, _dimension, _observed, _limit}} = structural ->
+        structural
+
+      _other ->
+        {:error, invalid_item_reason(plane)}
+    end
+  end
+
+  defp normalize_measured_root(plane, _item), do: {:error, invalid_item_reason(plane)}
+
+  defp invalid_item_reason(:record), do: :invalid_item
+  defp invalid_item_reason(:event), do: :invalid_event
+
+  defp take_measured_event_id(:record, rest), do: {:ok, %{}, rest}
+
+  defp take_measured_event_id(:event, item) do
+    with {:ok, event_id, rest} <- take_required(item, :event_id, "event_id"),
+         {:ok, validated} <- validate_identifier(event_id) do
+      {:ok, %{event_id: validated}, rest}
+    end
+  end
+
+  # Concept: one node, classified before it is measured.
+  #
+  # Technical depth: form comes first, so a struct or other non-plain term is
+  # ordinary invalid data whatever its depth. Depth comes next, then bounded
+  # cardinality, then key validity, then children. That order is what lets an
+  # untrusted collection be refused before anything about it is allocated.
+  defp measured_value(_plane, _value, depth) when depth > @max_depth,
+    do: {:error, {:item_structure_exceeded, :depth, depth, @max_depth}}
+
+  defp measured_value(_plane, value, _depth)
+       when is_binary(value) or is_integer(value) or is_float(value),
+       do: {:ok, value}
+
+  defp measured_value(_plane, value, _depth) when value in [nil, true, false], do: {:ok, value}
+
+  defp measured_value(_plane, [], _depth), do: {:ok, []}
+
+  defp measured_value(plane, [_head | _tail] = value, depth) do
+    with :ok <- measured_list_cardinality(value, 0) do
+      measured_list_members(plane, value, depth, [])
+    end
+  end
+
+  defp measured_value(plane, value, depth) when is_map(value) and not is_struct(value) do
+    with :ok <- measured_cardinality(map_size(value)) do
+      measured_map_members(plane, value, depth)
+    end
+  end
+
+  defp measured_value(plane, _value, _depth), do: {:error, invalid_item_reason(plane)}
+
+  # Concept: count cons cells, never the list.
+  #
+  # Technical depth: `is_list/1` and `length/1` both walk the whole spine, so an
+  # enormous or improper untrusted list would be traversed just to learn it is
+  # too long. Matching one cons cell at a time stops at the first rejected
+  # witness and never inspects the tail beyond it. A tail reached inside the
+  # admitted range must be exactly `[]`; anything else is ordinary invalid data.
+  defp measured_list_cardinality(_value, counted) when counted > @max_items,
+    do: {:error, {:item_structure_exceeded, :cardinality, @max_items + 1, @max_items}}
+
+  defp measured_list_cardinality([_head | tail], counted),
+    do: measured_list_cardinality(tail, counted + 1)
+
+  defp measured_list_cardinality([], _counted), do: :ok
+  defp measured_list_cardinality(_improper_tail, _counted), do: {:error, :not_plain_data}
+
+  defp measured_list_members(_plane, [], _depth, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp measured_list_members(plane, [head | tail], depth, acc) do
+    case measured_value(plane, head, depth + 1) do
+      {:ok, normalized} -> measured_list_members(plane, tail, depth, [normalized | acc])
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp measured_cardinality(size) when size > @max_items,
+    do: {:error, {:item_structure_exceeded, :cardinality, @max_items + 1, @max_items}}
+
+  defp measured_cardinality(_size), do: :ok
+
+  # Concept: normalize this map's keys, then visit its children in one fixed
+  # order.
+  #
+  # Technical depth: keys are normalized and collision-checked before any child
+  # is visited, and children are then visited in unsigned bytewise order of
+  # those normalized spellings. A deeper structural failure therefore names the
+  # same node whichever order the caller happened to build the map in.
+  defp measured_map_members(plane, map, depth) do
+    with {:ok, keyed} <- measured_keys(plane, map) do
+      keyed
+      |> Enum.sort_by(fn {key, _value} -> key end, :asc)
+      |> measured_children(plane, depth, %{})
+    end
+  end
+
+  defp measured_keys(plane, map) do
+    Enum.reduce_while(map, {:ok, []}, fn {key, value}, {:ok, keyed} ->
+      with {:ok, normalized_key} <- normalize_user_key(key),
+           :ok <- measured_reserved_key(plane, normalized_key),
+           false <- List.keymember?(keyed, normalized_key, 0) do
+        {:cont, {:ok, [{normalized_key, value} | keyed]}}
+      else
+        _other -> {:halt, {:error, invalid_item_reason(plane)}}
+      end
+    end)
+  end
+
+  defp measured_reserved_key(:record, _key), do: :ok
+
+  defp measured_reserved_key(:event, key) do
+    if key in @reserved_event_binary_fields, do: {:error, :reserved_event_field}, else: :ok
+  end
+
+  defp measured_children([], _plane, _depth, normalized), do: {:ok, normalized}
+
+  defp measured_children([{key, value} | rest], plane, depth, normalized) do
+    case measured_value(plane, value, depth + 1) do
+      {:ok, normalized_value} ->
+        measured_children(rest, plane, depth, Map.put(normalized, key, normalized_value))
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @doc """
+  ## Concept
+
   Builds the atomic runtime-control transaction that allocates one session and
   commits its command mapping and genesis together.
 
@@ -1287,14 +1524,21 @@ defmodule Loopex.Store do
 
   defp contains_reserved_event_field?(_value), do: false
 
+  # Concept: an item that is too large says how large it was.
+  #
+  # Technical depth: the caller preflighting through
+  # `normalize_and_measure_item/2` compares the same count against the same
+  # ceiling, so reporting the observation and the limit here lets a refusal be
+  # reconciled with that preflight instead of leaving an operator to rediscover
+  # the number that was already measured.
   defp validate_plain_map(map) when is_map(map) and not is_struct(map) do
     case plain?(map, 0) do
       true ->
-        encoded = :erlang.term_to_binary(map, [:deterministic])
+        observed = byte_size(:erlang.term_to_binary(map, [:deterministic]))
 
-        if byte_size(encoded) <= @max_item_bytes,
+        if observed <= @max_item_bytes,
           do: :ok,
-          else: {:error, :item_too_large}
+          else: {:error, {:item_too_large, observed, @max_item_bytes}}
 
       false ->
         {:error, :not_plain_data}

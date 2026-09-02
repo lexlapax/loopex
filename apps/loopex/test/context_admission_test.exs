@@ -2303,10 +2303,10 @@ defmodule Loopex.ContextAdmissionTest do
     end
   end
 
-  defp independent_record_size(%{kind: kind} = record) do
+  # Maintainer override, 2026-09-01: measure the record as committed, with its
+  # restored atom `:kind`, exactly as ADR 0017 defines `encoded_bytes`.
+  defp independent_record_size(%{kind: _kind} = record) do
     record
-    |> Map.delete(:kind)
-    |> Map.put("kind", kind)
     |> :erlang.term_to_binary([:deterministic])
     |> byte_size()
   end

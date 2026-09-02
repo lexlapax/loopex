@@ -403,9 +403,12 @@ defmodule Loopex.Runtime do
              project_decision: nil,
              grant_decision: nil,
              fault_to: nil,
-             cleanup_grace_ms: nil
+             cleanup_grace_ms: nil,
+             context_token_budget: nil
            ),
          {:ok, runtime_id} <- fetch_identifier(validated, :runtime_id),
+         {:ok, context_token_budget} <-
+           validate_context_token_budget(validated[:context_token_budget]),
          {:ok, %Store{} = store} <- Keyword.fetch(validated, :store),
          {:ok, attachment_capacity} <- validate_capacity(validated[:attachment_capacity]),
          {:ok, progress_to} <- validate_sink(validated[:progress_to]),
@@ -449,9 +452,11 @@ defmodule Loopex.Runtime do
          project_decision: validated[:project_decision],
          grant_decision: grant_decision,
          fault_to: fault_to,
-         cleanup_grace_ms: cleanup_grace_ms
+         cleanup_grace_ms: cleanup_grace_ms,
+         context_token_budget: context_token_budget
        ]}
     else
+      {:error, :invalid_context_token_budget} -> {:error, :invalid_context_token_budget}
       # Concept: a missing host policy says so, rather than reading as a typo.
       #
       # Technical depth: every other validation failure collapses to one reason
@@ -495,6 +500,19 @@ defmodule Loopex.Runtime do
   # instant to extend or expire.
   @default_bounds %{max_turns: 16, token_budget: 1_000_000, deadline_ms: 600_000}
   @default_sampling %{"max_tokens" => 4_096}
+  @uint64_max 18_446_744_073_709_551_615
+
+  # Concept: ADR 0017 makes the context token budget a required runtime option
+  # with no default here. Omission is refused by the same name as an invalid
+  # value, so a later change to a composition default can never silently
+  # re-decide a ceiling an embedder did not choose; the reference composition
+  # is the one place that supplies 8,192 on the embedder's behalf.
+  defp validate_context_token_budget(value)
+       when is_integer(value) and value > 0 and value <= @uint64_max,
+       do: {:ok, value}
+
+  defp validate_context_token_budget(_absent_or_invalid),
+    do: {:error, :invalid_context_token_budget}
 
   # Concept: a runtime that can run tools must name who authorises them.
   #

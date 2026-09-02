@@ -230,9 +230,15 @@ defmodule Loopex.Bounds do
   Retained so a reviewer can tell which measurement produced a number, and so
   the prompt-budget measurement and the token accounting are visibly the same
   estimator rather than two that happen to agree today.
+
+  ADR 0017 renames the identity to `loopex.context_bytes.v1`. The
+  one-token-per-three-canonical-bytes algorithm is unchanged; the new name is
+  what stops a retained measurement inheriting the superseded claim that this
+  estimate never undercounts every provider tokenizer. It is deterministic
+  admission policy, not a guarantee about a selected model.
   """
   @spec estimator() :: binary()
-  def estimator, do: "loopex.conservative_bytes.v1"
+  def estimator, do: "loopex.context_bytes.v1"
 
   @doc """
   ## Concept

@@ -239,12 +239,14 @@ defmodule Loopex.Conversation do
     Enum.flat_map(elements, fn
       %{kind: :user_message, run_id: run_id, command_id: command_id, content: content} ->
         [
-          {"session:#{run_id}:command:#{command_id}", %{"role" => "user", "content" => content}}
+          {%{"kind" => "session_command", "run_id" => run_id, "command_id" => command_id},
+           %{"role" => "user", "content" => content}}
         ]
 
       %{kind: :assistant_message, run_id: run_id, turn_number: turn_number} = assistant ->
         [
-          {"session:#{run_id}:turn:#{turn_number}:assistant", assistant_message(assistant)}
+          {%{"kind" => "session_assistant", "run_id" => run_id, "turn" => turn_number},
+           assistant_message(assistant)}
           | turn_result_entries(elements, assistant)
         ]
 
@@ -308,7 +310,12 @@ defmodule Loopex.Conversation do
         {:ok, result} ->
           [
             {
-              "session:#{result.run_id}:turn:#{result.turn_number}:tool:#{tool_call_id}",
+              %{
+                "kind" => "session_tool_result",
+                "run_id" => result.run_id,
+                "turn" => result.turn_number,
+                "call_id" => tool_call_id
+              },
               %{
                 "role" => "tool",
                 "tool_call_id" => tool_call_id,

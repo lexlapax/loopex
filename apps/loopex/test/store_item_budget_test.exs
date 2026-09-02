@@ -225,10 +225,10 @@ defmodule Loopex.StoreItemBudgetTest do
   defp dynamic_apply(module, function, arguments), do: apply(module, function, arguments)
 
   defp sized_record(target) do
-    empty = %{"body" => "", "kind" => "byte-boundary"}
+    empty = %{"body" => "", kind: "byte-boundary"}
     body_size = target - independent_size(empty)
     body = String.duplicate("x", body_size)
-    normalized = %{"body" => body, "kind" => "byte-boundary"}
+    normalized = %{"body" => body, kind: "byte-boundary"}
 
     assert independent_size(normalized) == target
     {body, %{"body" => body, kind: "byte-boundary"}}
@@ -238,11 +238,11 @@ defmodule Loopex.StoreItemBudgetTest do
   defp sized_item(:event, target), do: sized_event(target)
 
   defp sized_event(target) do
-    empty = %{"body" => "", "event_id" => "byte-boundary", "kind" => "byte-boundary"}
+    empty = %{"body" => "", event_id: "byte-boundary", kind: "byte-boundary"}
     body_size = target - independent_size(empty)
     body = String.duplicate("x", body_size)
     event = %{"body" => body, event_id: "byte-boundary", kind: "byte-boundary"}
-    normalized = %{"body" => body, "event_id" => "byte-boundary", "kind" => "byte-boundary"}
+    normalized = %{"body" => body, event_id: "byte-boundary", kind: "byte-boundary"}
 
     assert independent_size(normalized) == target
     {body, event}
