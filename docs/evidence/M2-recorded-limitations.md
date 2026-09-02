@@ -591,3 +591,19 @@ whole remaining allowance.
 **Disposition.** Maintainer, 2026-09-02: apply directly, without a gate
 amendment. Eighth recorded override; names and minimums unchanged.
 
+<a id="commit-title-baseline"></a>
+## Commit-title enforcement baseline on the M2 branch
+
+**Rule.** Commit titles are at most seventy-two characters; the repository check
+enforces it from a fixed baseline over every reachable commit.
+
+**What is true.** Nine commits on the milestone branch - seven integration
+merges and two implementation commits - carry longer titles. Every one is an
+ancestor of Amendment 5's bound candidate, so rewriting them would change that
+candidate's identity and invalidate the acceptance record that names it.
+
+**Disposition.** Maintainer, 2026-09-02: advance the check's baseline to
+`e0354862fedde5939d7797c2adbf338d987ff538` so enforcement resumes from the
+next commit, rather than rewrite bound history. Ninth recorded override; a
+waiver of portable enforcement for exactly those nine commits.
+
