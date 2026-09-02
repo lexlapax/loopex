@@ -3,9 +3,11 @@ defmodule Loopex.Store.Local.Artifacts do
   ## Concept
 
   The local filesystem artifact store: digest-addressed immutable objects under
-  a resolved root. Writing the same bytes twice costs one object and yields one
-  reference; reading back returns exactly what was written or says plainly that
-  it cannot.
+  a resolved root, each with the immutable record of why it was retained beside
+  it. Writing the same bytes twice costs one object and yields one reference;
+  writing them under a second reason keeps the one object and adds a second
+  record; reading back returns exactly what was written or says plainly that it
+  cannot.
 
   ## Technical depth
 
@@ -13,7 +15,23 @@ defmodule Loopex.Store.Local.Artifacts do
   content-addressed and `put/3` is idempotent by construction rather than by a
   check that could race. Two writers storing identical bytes converge on one
   file; two writers storing different bytes cannot collide, because different
-  bytes have different digests.
+  bytes have different digests. The object locator *is* that digest, which is
+  what makes it permanently bound to one digest/size pair: there is no naming
+  step that could later hand the same locator to different bytes.
+
+  A use record lives under `uses/` and is named by its own digest for the same
+  reason. Its file holds exactly the canonical bytes the use digest covers, so a
+  reader recomputes rather than trusts. The object is published first and the use
+  second; success is returned only once both are durable. A crash between the two
+  leaves an object nothing references, which costs disk and misleads nobody,
+  while a reference to a use that was never published would be a durable claim
+  about provenance that cannot be resolved.
+
+  Use publication never overwrites. An existing sidecar with identical bytes is
+  the same immutable fact and is accepted after its durability is reconfirmed;
+  an existing different, partial, or unreadable one is unavailable and is left
+  exactly as it is. Concurrent identical writers therefore converge on one
+  byte-identical record instead of racing to be last.
 
   Writes go to a temporary name in the same directory, sync the complete file,
   rename it into place, and sync the containing directory where the platform
@@ -36,8 +54,11 @@ defmodule Loopex.Store.Local.Artifacts do
   alias LoopexProtocol.Canonical
 
   @max_bytes 64 * 1024 * 1024
-  @default_media_type "application/octet-stream"
   @temporary_attempts 8
+  @use_tag "artifact-use-v2"
+  @use_locator_prefix "use:"
+  @use_directory "uses"
+  @digest_shape ~r/^[0-9a-f]{64}$/
 
   @typedoc """
   ## Concept
@@ -49,8 +70,13 @@ defmodule Loopex.Store.Local.Artifacts do
   Never journaled, published, or transported. It is a path on the machine that
   holds the store, and a path is exactly the kind of thing a durable record must
   not carry across a boundary.
+
+  `fault_probe` is private test seam state and is absent in production. Where a
+  conformance case supplies one, use publication announces each semantic phase to
+  it and waits for permission to continue, which is how "no reference was
+  returned before this phase completed" is proved without racing a filesystem.
   """
-  @type handle :: %{root: binary()}
+  @type handle :: %{required(:root) => binary(), optional(:fault_probe) => pid()}
 
   @doc """
   ## Concept
@@ -85,20 +111,10 @@ defmodule Loopex.Store.Local.Artifacts do
   def max_bytes, do: @max_bytes
 
   @impl Loopex.ArtifactStore
-  @spec put(handle(), binary(), map()) ::
+  @spec put(handle(), binary(), ArtifactStore.normalized_use()) ::
           {:ok, ArtifactStore.artifact_reference()} | {:error, term()}
-  def put(%{root: root}, bytes, metadata) when is_binary(bytes) and is_map(metadata) do
-    role = Map.get(metadata, "role", "tool_output")
-    media_type = Map.get(metadata, "media_type", @default_media_type)
-
-    metadata_probe = %{
-      digest: String.duplicate("0", 64),
-      media_type: media_type,
-      size: 0,
-      role: role,
-      locator: "metadata-probe"
-    }
-
+  def put(%{root: root} = handle, bytes, %{media_type: media_type, role: role, metadata: metadata})
+      when is_binary(bytes) and is_binary(media_type) and is_binary(role) and is_map(metadata) do
     cond do
       byte_size(bytes) > @max_bytes ->
         # Fails closed with the truth rather than storing part of it: a truncated
@@ -108,42 +124,26 @@ defmodule Loopex.Store.Local.Artifacts do
       role not in ArtifactStore.roles() ->
         {:error, {:unknown_artifact_role, role}}
 
-      not ArtifactStore.valid_reference?(metadata_probe) ->
-        {:error, :invalid_artifact_metadata}
-
       true ->
         digest = Canonical.digest_bytes(bytes)
+        object = %{digest: digest, size: byte_size(bytes), locator: digest}
         path = object_path(root, digest)
 
-        reference = %{
-          digest: digest,
-          media_type: media_type,
-          size: byte_size(bytes),
-          role: role,
-          locator: digest
-        }
-
-        with true <- ArtifactStore.valid_reference?(reference),
-             :ok <- ensure_object_directory(root, Path.dirname(path)),
+        with :ok <- ensure_directory(root, Path.dirname(path)),
              :ok <- write_once(path, bytes, digest) do
-          {:ok, reference}
-        else
-          false -> {:error, :invalid_artifact_metadata}
-          {:error, reason} -> {:error, reason}
+          retain_use(handle, object, media_type, role, metadata)
         end
     end
   end
 
-  def put(_handle, _bytes, _metadata), do: {:error, :invalid_artifact}
+  def put(_handle, _bytes, _use), do: {:error, :adapter_received_unnormalized_use}
 
   @impl Loopex.ArtifactStore
-  @spec fetch(handle(), ArtifactStore.artifact_reference()) :: {:ok, binary()} | {:error, term()}
-  def fetch(%{root: root}, reference) do
-    if ArtifactStore.valid_reference?(reference) and mine?(reference.locator) do
-      path = object_path(root, reference.locator)
-
-      case File.read(path) do
-        {:ok, bytes} -> verify(bytes, reference.digest, reference.size)
+  @spec fetch(handle(), ArtifactStore.artifact_object()) :: {:ok, binary()} | {:error, term()}
+  def fetch(%{root: root}, object) do
+    if ArtifactStore.valid_object?(object) and mine?(object.locator) do
+      case File.read(object_path(root, object.locator)) do
+        {:ok, bytes} -> verify(bytes, object.digest, object.size)
         {:error, :enoent} -> {:error, :unknown_artifact}
         {:error, reason} -> {:error, {:artifact_unreadable, reason}}
       end
@@ -153,25 +153,17 @@ defmodule Loopex.Store.Local.Artifacts do
   end
 
   @impl Loopex.ArtifactStore
-  @spec stat(handle(), ArtifactStore.artifact_reference()) ::
-          {:ok, ArtifactStore.artifact_reference()} | {:error, term()}
-  def stat(%{root: root}, reference) do
-    if ArtifactStore.valid_reference?(reference) and mine?(reference.locator) do
-      path = object_path(root, reference.locator)
-
-      case File.read(path) do
+  @spec stat(handle(), binary()) ::
+          {:ok, ArtifactStore.artifact_object()} | {:error, term()}
+  def stat(%{root: root}, locator) when is_binary(locator) do
+    if mine?(locator) do
+      case File.read(object_path(root, locator)) do
         {:ok, bytes} ->
-          # `stat/2` is the port's locator resolver. This adapter issued a
-          # digest-addressed locator, so it derives the canonical digest from its
-          # own locator rather than treating a caller's lookup-probe digest as a
-          # statement that locator and digest are universally the same thing.
-          with {:ok, _bytes} <- verify(bytes, reference.locator) do
-            {:ok,
-             %{
-               reference
-               | digest: reference.locator,
-                 size: byte_size(bytes)
-             }}
+          # This adapter issued a digest-addressed locator, so the locator itself
+          # is the digest the stored bytes must produce. Nothing about the caller
+          # is consulted: a locator names bytes or it names nothing.
+          with {:ok, _bytes} <- verify(bytes, locator) do
+            {:ok, %{digest: locator, size: byte_size(bytes), locator: locator}}
           end
 
         {:error, :enoent} ->
@@ -184,6 +176,209 @@ defmodule Loopex.Store.Local.Artifacts do
       {:error, :unknown_artifact}
     end
   end
+
+  def stat(_handle, _locator), do: {:error, :unknown_artifact}
+
+  @impl Loopex.ArtifactStore
+  @spec describe(handle(), binary()) :: {:ok, ArtifactStore.artifact_use()} | {:error, term()}
+  def describe(%{root: root}, @use_locator_prefix <> use_digest) when is_binary(use_digest) do
+    if mine?(use_digest) do
+      case File.read(use_path(root, use_digest)) do
+        {:ok, bytes} -> decode_use(bytes)
+        {:error, :enoent} -> {:error, :unknown_artifact_use}
+        {:error, reason} -> {:error, {:artifact_unreadable, reason}}
+      end
+    else
+      {:error, :unknown_artifact_use}
+    end
+  end
+
+  def describe(_handle, _use_locator), do: {:error, :unknown_artifact_use}
+
+  # Concept: the object is durable before its reason is written, and the
+  # reference exists only once both are.
+  #
+  # Technical depth: the use record binds the complete object triple, so it
+  # cannot be built until the object identity is settled. Ordering it after
+  # publication means a crash in between orphans an object rather than leaving a
+  # returned reference pointing at a use nobody wrote. The exact encoded ceiling
+  # is applied here rather than before, because the object locator is one of the
+  # bytes being measured.
+  defp retain_use(%{root: root} = handle, object, media_type, role, metadata) do
+    artifact_use = %{
+      canonicalization_version: Canonical.version(),
+      object_digest: object.digest,
+      object_size: object.size,
+      object_locator: object.locator,
+      media_type: media_type,
+      role: role,
+      metadata: metadata
+    }
+
+    use_bytes = Canonical.encode([@use_tag, artifact_use])
+
+    if byte_size(use_bytes) > ArtifactStore.max_use_bytes() do
+      {:error, :artifact_use_too_large}
+    else
+      use_digest = Canonical.digest_bytes(use_bytes)
+      path = use_path(root, use_digest)
+
+      with :ok <- ensure_directory(root, Path.dirname(path)),
+           :ok <- publish_use(handle, path, use_bytes) do
+        {:ok,
+         Map.merge(object, %{
+           media_type: media_type,
+           role: role,
+           use_canonicalization_version: Canonical.version(),
+           use_digest: use_digest,
+           use_locator: @use_locator_prefix <> use_digest
+         })}
+      end
+    end
+  end
+
+  # Concept: an immutable record is written once and afterwards only confirmed.
+  #
+  # Technical depth: the file is named by the digest of its own contents, so a
+  # value already there is either the same fact or evidence that something else
+  # holds this name. Identical bytes are reconfirmed durable and accepted;
+  # anything else — different, half-written, or not a readable file at all — is
+  # unavailable and left untouched. Overwriting instead would make the last
+  # concurrent writer authoritative over a record the first one already returned
+  # a reference for.
+  defp publish_use(handle, path, use_bytes) do
+    case File.read(path) do
+      {:ok, existing} ->
+        with :ok <- fault_point(handle, :existing_value_compare) do
+          if existing == use_bytes,
+            do: sync_existing(path),
+            else: {:error, {:artifact_use_unavailable, :conflicting_use}}
+        end
+
+      {:error, :enoent} ->
+        with :ok <- fault_point(handle, :staging_write),
+             do: stage_use(handle, path, use_bytes, 0)
+
+      {:error, reason} ->
+        {:error, {:artifact_use_unavailable, reason}}
+    end
+  end
+
+  defp stage_use(_handle, _path, _use_bytes, @temporary_attempts),
+    do: {:error, {:artifact_use_unavailable, :temporary_name_collision}}
+
+  defp stage_use(handle, path, use_bytes, attempt) do
+    temporary = temporary_path(path, attempt)
+
+    case :file.open(String.to_charlist(temporary), [:write, :binary, :raw, :exclusive]) do
+      {:ok, io_device} ->
+        case write_synced_use(handle, io_device, use_bytes) do
+          :ok -> publish_use_staging(handle, temporary, path)
+          {:error, reason} -> discard_staging(temporary, reason)
+        end
+
+      # The name belongs to another writer or to a prior crashed process. It must
+      # not be removed by this writer; use another exclusive name.
+      {:error, :eexist} ->
+        stage_use(handle, path, use_bytes, attempt + 1)
+
+      {:error, reason} ->
+        {:error, {:artifact_use_unavailable, reason}}
+    end
+  end
+
+  defp write_synced_use(handle, io_device, use_bytes) do
+    result =
+      with :ok <- use_result(:file.write(io_device, use_bytes)),
+           :ok <- fault_point(handle, :file_sync),
+           :ok <- use_result(:file.sync(io_device)) do
+        :ok
+      end
+
+    close_result = use_result(:file.close(io_device))
+
+    case {result, close_result} do
+      {:ok, :ok} -> :ok
+      {:ok, {:error, reason}} -> {:error, reason}
+      {{:error, reason}, _close} -> {:error, reason}
+    end
+  end
+
+  defp publish_use_staging(handle, temporary, path) do
+    with :ok <- fault_point(handle, :atomic_publication),
+         :ok <- use_result(File.rename(temporary, path)),
+         :ok <- fault_point(handle, :parent_directory_sync),
+         :ok <- use_result(sync_directory(Path.dirname(path))) do
+      :ok
+    else
+      {:error, reason} -> discard_staging(temporary, reason)
+    end
+  end
+
+  defp discard_staging(temporary, reason) do
+    _ = File.rm(temporary)
+    {:error, reason}
+  end
+
+  defp use_result(:ok), do: :ok
+  defp use_result({:error, reason}), do: {:error, {:artifact_use_unavailable, reason}}
+
+  # Concept: a conformance case needs to stop publication at an exact semantic
+  # phase, and production must not pay for that.
+  #
+  # Technical depth: the seam is one private handle member. Absent — which is
+  # every composed handle — this is a compile-time-shaped no-op clause. Present,
+  # each phase announces itself and blocks until the probe answers, so a case can
+  # assert that no reference had been returned while the phase was still
+  # outstanding. A correlation reference distinguishes this call's answer from
+  # any other's rather than trusting message order.
+  defp fault_point(%{fault_probe: probe}, phase) when is_pid(probe) do
+    correlation = make_ref()
+
+    send(
+      probe,
+      {:loopex_artifact_fault_point, self(), correlation, {:artifact_use_publication, phase}}
+    )
+
+    receive do
+      {:loopex_artifact_fault_action, ^correlation, :continue} ->
+        :ok
+
+      {:loopex_artifact_fault_action, ^correlation, :return_error} ->
+        {:error, {:artifact_use_unavailable, phase}}
+    end
+  end
+
+  defp fault_point(_handle, _phase), do: :ok
+
+  # Concept: a stored use is trusted only after the bytes reproduce it exactly.
+  #
+  # Technical depth: `Canonical.encode/1` projects maps to key-sorted pairs, so
+  # decoding reverses that projection and then re-encodes. The comparison against
+  # the bytes on disk is what makes the file's own name a verified digest rather
+  # than a label. `:safe` refuses a term carrying a pid, port, reference,
+  # function, or an atom this VM does not already know, and a truncated or
+  # foreign file raises rather than decoding into a plausible record.
+  defp decode_use(bytes) do
+    with [@use_tag, ordered] <- :erlang.binary_to_term(bytes, [:safe]),
+         artifact_use when is_map(artifact_use) <- unorder(ordered),
+         ^bytes <- Canonical.encode([@use_tag, artifact_use]) do
+      {:ok, artifact_use}
+    else
+      _mismatch -> {:error, :artifact_integrity_failed}
+    end
+  rescue
+    ArgumentError -> {:error, :artifact_integrity_failed}
+  end
+
+  defp unorder({:loopex_map, pairs}) when is_list(pairs) do
+    if Enum.all?(pairs, &match?({_key, _value}, &1)),
+      do: Map.new(pairs, fn {key, value} -> {unorder(key), unorder(value)} end),
+      else: :invalid_artifact_use
+  end
+
+  defp unorder(term) when is_list(term), do: Enum.map(term, &unorder/1)
+  defp unorder(term), do: term
 
   # Concept: an object already present must be the object it claims to be.
   #
@@ -341,7 +536,7 @@ defmodule Loopex.Store.Local.Artifacts do
     end
   end
 
-  defp ensure_object_directory(root, directory) do
+  defp ensure_directory(root, directory) do
     with :ok <- File.mkdir_p(directory),
          :ok <- sync_directory(root) do
       :ok
@@ -426,7 +621,7 @@ defmodule Loopex.Store.Local.Artifacts do
   # out of `binary_part/3` during retrieval or recovery instead of failing with a
   # value. A locator this store did not issue is simply an artifact it does not
   # hold.
-  defp mine?(locator), do: String.match?(locator, ~r/^[0-9a-f]{64}$/)
+  defp mine?(locator), do: String.match?(locator, @digest_shape)
 
   # Concept: two levels of fan-out, so a directory does not grow without bound.
   #
@@ -435,5 +630,16 @@ defmodule Loopex.Store.Local.Artifacts do
   # filesystems whose directory lookup degrades with size.
   defp object_path(root, digest) do
     Path.join([root, binary_part(digest, 0, 2), digest])
+  end
+
+  # Concept: use records live in their own namespace, named by their own digest.
+  #
+  # Technical depth: the extra `uses` component keeps them out of the object
+  # fan-out, whose top-level names are exactly two hex characters and so can
+  # never collide with it. Naming a sidecar by the digest of its contents is what
+  # makes concurrent identical writers converge on one file, and what makes the
+  # public use locator derivable rather than chosen.
+  defp use_path(root, use_digest) do
+    Path.join([root, @use_directory, binary_part(use_digest, 0, 2), use_digest])
   end
 end

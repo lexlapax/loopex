@@ -1218,9 +1218,18 @@ defmodule LoopexCliTest do
     # The case retains an artifact through the port it was composed with, for the
     # same reason the command reads it through one: naming the implementation
     # here would prove retrieval works for the implementation this test happened
-    # to pick.
-    %{module: module, handle: handle} = store
-    {:ok, reference} = module.put(handle, "the whole output", %{"role" => "tool_output"})
+    # to pick. Retention is the Core facade rather than the adapter callback,
+    # because ADR 0015 gives no caller a direct adapter call and the closed
+    # provenance record is normalized there.
+    {:ok, reference} =
+      Loopex.ArtifactStore.put(store, "the whole output", %{
+        "role" => "tool_output",
+        "session_id" => "artifact-command-session",
+        "run_id" => "artifact-command-run",
+        "operation_id" => "artifact-command-operation",
+        "attempt" => 1,
+        "tool_call_id" => "artifact-command-call"
+      })
 
     output =
       capture_io(fn ->

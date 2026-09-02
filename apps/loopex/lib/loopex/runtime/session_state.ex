@@ -2750,13 +2750,24 @@ defmodule Loopex.Runtime.SessionState do
     }
   end
 
+  # Concept: the public projection is the whole compact reference and none of the
+  # private reason behind it.
+  #
+  # Technical depth: the three use members are the bounded, digest-derived half
+  # of the artifact identity. Omitting them would leave an operator holding a
+  # reference that `describe/2` cannot resolve, while inlining the use record
+  # itself would put a session, run, operation, and tool-call identifier on the
+  # public plane. Every member here is already validated plain data.
   defp public_artifact(reference) do
     %{
       "digest" => reference.digest,
       "media_type" => reference.media_type,
       "size" => reference.size,
       "role" => reference.role,
-      "locator" => reference.locator
+      "locator" => reference.locator,
+      "use_canonicalization_version" => reference.use_canonicalization_version,
+      "use_digest" => reference.use_digest,
+      "use_locator" => reference.use_locator
     }
   end
 
