@@ -155,10 +155,23 @@ defmodule LoopexComposition do
         [runtime_id: runtime_id, store: store, policy: policy, executor: executor, tools: tools] ++
           [model: %{module: ReqLLM, model: ReqLLM.default_model(), options: []}] ++
           [active_tools: Enum.map(tools, & &1["tool_id"])] ++
+          context_token_budget(options) ++
           Keyword.take(options, @host_supplied)
       )
     end
   end
+
+  # Concept: the reference stack ships a working context-admission ceiling, and
+  # an operator who names their own value gets exactly that value.
+  #
+  # Technical depth: ADR 0017 inserts 8,192 estimated tokens only when the host
+  # omits the option. This is a bounded reference policy, not a claim about
+  # Store safety or a selected model's context window, and it is a top-level
+  # Runtime option that never enters `:bounds`. An explicitly supplied
+  # malformed, non-positive, or above-uint64 value is refused by Runtime under
+  # its own name rather than silently replaced by this default.
+  defp context_token_budget(options),
+    do: [context_token_budget: Keyword.get(options, :context_token_budget, 8_192)]
 
   defp start_applications do
     Enum.find_value([:loopex, :loopex_store_local, :loopex_executor_local], :ok, fn app ->

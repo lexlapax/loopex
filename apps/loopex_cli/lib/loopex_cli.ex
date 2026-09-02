@@ -86,10 +86,11 @@ defmodule LoopexCli do
     do: {:error, "unknown command #{unknown}\n\n" <> usage()}
 
   @command_flags %{
-    "run" => ~w(policy state-root workspace steer follow-up cleanup-grace-ms),
+    "run" =>
+      ~w(policy state-root workspace steer follow-up cleanup-grace-ms context-token-budget),
     "sessions" => ~w(state-root),
-    "resume" => ~w(policy state-root workspace cleanup-grace-ms),
-    "cancel" => ~w(policy state-root workspace cleanup-grace-ms),
+    "resume" => ~w(policy state-root workspace cleanup-grace-ms context-token-budget),
+    "cancel" => ~w(policy state-root workspace cleanup-grace-ms context-token-budget),
     "artifact" => ~w(state-root)
   }
 
@@ -232,7 +233,10 @@ defmodule LoopexCli do
   # it, and by what route a terminal Ctrl-C becomes one of them, is
   # `LoopexCli.Interrupt`.
   defp run({flags, words}, options) do
-    with :ok <- one_input(flags),
+    # A ceiling the operator got wrong is refused before the prompt is even
+    # read, so the answer names the flag rather than the missing words.
+    with {:ok, _context} <- context_token_budget(flags),
+         :ok <- one_input(flags),
          {:ok, policy} <- policy(Map.get(flags, "policy")),
          {:ok, prompt} <- prompt_of(words),
          {:ok, runtime} <- start_runtime(flags, policy, options),
@@ -551,6 +555,7 @@ defmodule LoopexCli do
     with {:ok, workspace} <- workspace(flags),
          {:ok, root} <- state_root(flags),
          {:ok, cleanup} <- cleanup_grace(flags),
+         {:ok, context} <- context_token_budget(flags),
          :ok <- own_placement(root) do
       {:ok, placement} = Loopex.runtime_placement_id(root)
 
@@ -577,7 +582,7 @@ defmodule LoopexCli do
           project_manifest: manifest,
           project_decision: decision,
           progress_to: self()
-        ] ++ cleanup
+        ] ++ cleanup ++ context
       )
     end
   end
@@ -615,6 +620,42 @@ defmodule LoopexCli do
       # what the operator has to do about it is the same.
       _bare_switch ->
         {:error, @cleanup_grace_refusal}
+    end
+  end
+
+  @context_budget_refusal "--context-token-budget takes a positive whole number of estimated tokens no greater than 18446744073709551615"
+  @uint64_max 18_446_744_073_709_551_615
+
+  # Concept: the operator can say how large one provider request may be.
+  #
+  # Technical depth: ADR 0017 makes this a top-level runtime option separate
+  # from the run's cumulative token budget, and it never enters `:bounds`. The
+  # flag is absent by default rather than defaulted here, so an operator who
+  # names nothing gets the one reference value the composition inserts rather
+  # than a second one this command invented -- which is also what lets a
+  # prepared owner's already committed budget be recovered instead of compared
+  # against a process default. A value that is not a positive whole number
+  # inside the unsigned 64-bit domain is refused before a runtime, store, or
+  # executor starts, because a ceiling an operator got wrong should cost
+  # nothing to reject.
+  defp context_token_budget(flags) do
+    case Map.get(flags, "context-token-budget") do
+      nil ->
+        {:ok, []}
+
+      value when is_binary(value) ->
+        case Integer.parse(value) do
+          {tokens, ""} when tokens > 0 and tokens <= @uint64_max ->
+            {:ok, [context_token_budget: tokens]}
+
+          _other ->
+            {:error, @context_budget_refusal}
+        end
+
+      # A bare `--context-token-budget` parses as a switch rather than a value,
+      # and a switch is not a ceiling.
+      _bare_switch ->
+        {:error, @context_budget_refusal}
     end
   end
 

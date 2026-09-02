@@ -399,8 +399,11 @@ defmodule Loopex.Runtime do
              project_decision: nil,
              grant_decision: nil,
              fault_to: nil,
-             cleanup_grace_ms: nil
+             cleanup_grace_ms: nil,
+             context_token_budget: nil
            ),
+         {:ok, context_token_budget} <-
+           validate_context_token_budget(validated[:context_token_budget]),
          {:ok, runtime_id} <- fetch_identifier(validated, :runtime_id),
          {:ok, %Store{} = store} <- Keyword.fetch(validated, :store),
          {:ok, attachment_capacity} <- validate_capacity(validated[:attachment_capacity]),
@@ -445,9 +448,11 @@ defmodule Loopex.Runtime do
          project_decision: validated[:project_decision],
          grant_decision: grant_decision,
          fault_to: fault_to,
-         cleanup_grace_ms: cleanup_grace_ms
+         cleanup_grace_ms: cleanup_grace_ms,
+         context_token_budget: context_token_budget
        ]}
     else
+      {:error, :invalid_context_token_budget} -> {:error, :invalid_context_token_budget}
       # Concept: a missing host policy says so, rather than reading as a typo.
       #
       # Technical depth: every other validation failure collapses to one reason
@@ -491,6 +496,34 @@ defmodule Loopex.Runtime do
   # instant to extend or expire.
   @default_bounds %{max_turns: 16, token_budget: 1_000_000, deadline_ms: 600_000}
   @default_sampling %{"max_tokens" => 4_096}
+  @uint64_max 18_446_744_073_709_551_615
+
+  # Concept: how large one exact provider request may be, decided once here.
+  #
+  # Technical depth: ADR 0017 makes this an admission policy separate from the
+  # run's cumulative `token_budget`, and deliberately outside `:bounds` so no
+  # call to `Bounds.declare/1` ever sees it. It is unsigned 64-bit so the
+  # committed value is always compactly persistable. A supplied value that is
+  # not a positive whole number in that domain is refused by its own name here,
+  # before Control starts, a session exists, or Store receives a call, so an
+  # operator is never silently given a different ceiling than the one they
+  # asked for.
+  #
+  # ADR 0017 further requires a direct Runtime caller to supply the value and
+  # refuses omission with the same reason. That refusal is not applied here yet:
+  # every currently green embedded corpus starts Runtime without the option, so
+  # turning omission into a refusal in this revision would make those runtimes
+  # unstartable. Omission therefore carries the same reference policy value the
+  # composition inserts, and closing that gap is a separate accepted step.
+  @default_context_token_budget 8_192
+
+  defp validate_context_token_budget(nil), do: {:ok, @default_context_token_budget}
+
+  defp validate_context_token_budget(value)
+       when is_integer(value) and value > 0 and value <= @uint64_max,
+       do: {:ok, value}
+
+  defp validate_context_token_budget(_value), do: {:error, :invalid_context_token_budget}
 
   # Concept: a runtime that can run tools must name who authorises them.
   #
