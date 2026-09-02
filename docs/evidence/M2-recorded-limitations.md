@@ -449,3 +449,33 @@ runtime identity is validated before the budget. This is the second explicit
 maintainer override of the rule that locked tests are not rewritten during
 implementation; each is recorded here and in its correcting commit.
 
+<a id="adr-0015-0016-corpus-corrections"></a>
+## Locked corpus corrections forced by ADR 0015 and ADR 0016
+
+**Rule.** ADR 0015 closes the artifact port at four callbacks, and ADR 0016
+commits the cleanup period on every job, publishes admission under a root-wide
+claim before any effect, moves the effect into the caller's process, retains
+receipts under the committed quarter reserve, keeps `cancel/3`'s sixty-second
+bound for direct callers only, and bounds the open-index snapshot at 4,194,304
+bytes. Several locked cases asserted the earlier shapes.
+
+**What is true.** Each correction preserves every case name and minimum and
+asserts what the accepted ADR now requires: test doubles implementing the
+superseded three-callback artifact port gained `describe/2` (`coding_tools_test`,
+`cli_test`, `local_authority_contract_test`); a cancellation-observation double
+captured `self/0` inside an Agent callback, naming the Agent as its worker; a
+shell fixture wrote `onen` where it meant `one` with a newline; five
+coding-tools cases expected the executor's startup period on receipts, the
+generic prestart refusal for an expired job, a ledger holding nothing but
+receipts, and a retention bound of at least the period; one expected the caller
+to die with the executor rather than return an unknown outcome with the group
+confirmed cleaned; and the sixty-second host-cancellation case drove production
+abort, which ADR 0016 routes through `cancel/4`. Reaching the 4,194,304-byte
+snapshot ceiling with at most 1,024 entries also required the executor port's
+opaque identifier bound to rise from 1,024 to 8,192 bytes.
+
+**Disposition.** Maintainer, 2026-09-01: apply every correction directly, and
+raise the identifier bound, without a gate amendment. This is the third explicit
+maintainer override of the rule that locked tests are not rewritten during
+implementation; the correcting commits name each file and clause.
+

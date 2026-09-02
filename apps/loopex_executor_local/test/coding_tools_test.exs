@@ -1449,7 +1449,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         }
       )
 
-    assert {:error, {:refused_before_effect, :executor_prestart_mismatch}} = answer
+    assert {:error, {:refused_before_effect, :effective_deadline_reached}} = answer
 
     refute_receive {:executor_process_started, _job_id, "loopex.bash", _environment}, 100
     refute File.exists?(file_marker), "an already expired job reached its workspace effect"
@@ -2159,7 +2159,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     # Nothing half-written is left in the ledger.
     assert {:ok, entries} = File.ls(ledger)
-    assert Enum.all?(entries, &String.ends_with?(&1, ".receipt")), inspect(entries)
+    refute Enum.any?(entries, &String.contains?(&1, ".tmp-")), inspect(entries)
   end
 
   test "a process group is confirmed clean only by a ps that answered" do
@@ -2630,21 +2630,38 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     {executor, lease_id, _lease, ledger} = executor_lease_and_ledger(root)
 
-    # The ledger stays readable so the duplicate-job lookup still answers
-    # `:absent`; only the write is refused, which is the failure a full or
-    # read-only ledger presents.
+    # ADR 0016 admits the effect under a root-wide claim before it runs, and that
+    # claim needs the same directory write bit retention does, so a ledger made
+    # read-only up front now fails at admission. The case isolates retention by
+    # withdrawing the write bit only once the tool is observably running.
+    observer = self()
+
+    task =
+      Task.async(fn ->
+        run(root, "loopex.bash", %{"command" => "sleep 1"}, %{
+          executor: executor,
+          lease_id: lease_id,
+          execute_options: [notify: observer]
+        })
+      end)
+
+    assert_receive {:executor_process_started, _job_id, "loopex.bash", _environment}, 5_000
     File.chmod!(ledger, 0o500)
     on_exit(fn -> File.chmod(ledger, 0o700) end)
 
-    assert {:error, {:receipt_not_retained, :eacces}} =
-             run(root, "loopex.read", %{"path" => "notes.txt"}, %{
-               executor: executor,
-               lease_id: lease_id
-             })
+    assert {:error, {:receipt_not_retained, :eacces}} = Task.await(task, 10_000)
 
-    # Nothing was left behind in the ledger either, so a later reader cannot find
-    # a partial receipt where this executor reported none.
-    assert {:ok, []} = File.ls(ledger)
+    # Nothing was left behind in the ledger either: no receipt and no staging
+    # file, so a later reader cannot find a partial receipt where this executor
+    # reported none. The root's own structure - generation, markers, open index -
+    # is not a receipt.
+    {:ok, entries} = File.ls(ledger)
+
+    refute Enum.any?(
+             entries,
+             &(String.ends_with?(&1, ".receipt") or String.contains?(&1, ".tmp-"))
+           ),
+           inspect(entries)
   end
 
   test "receipt publication syncs its file and parent directory before reporting durability" do
@@ -2875,7 +2892,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         assert {:ok, receipt} =
                  run(root, tool_id, arguments, %{
                    executor: executor,
-                   lease_id: lease_id
+                   lease_id: lease_id,
+                   cleanup_grace_ms: 750
                  })
 
         assert receipt.cleanup_grace_ms == 750,
@@ -2933,17 +2951,18 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     reserve = div(grace, 4)
 
     {executor, lease_id} = executor_with_grace(root, grace)
-    where = %{executor: executor, lease_id: lease_id}
+    where = %{executor: executor, lease_id: lease_id, cleanup_grace_ms: grace}
 
     assert {:ok, quiet} =
              run(root, "loopex.write", %{"path" => "quiet.txt", "content" => "x"}, where)
 
     assert quiet.cleanup_grace_ms == grace
 
-    # A job that needed no cleanup never opened an episode and still owns its own
-    # instant, so it carries more than the period rather than the reserve.
-    assert quiet.receipt_retention_bound_ms >= grace,
-           "a job that needed no cleanup was charged against an episode it never opened: " <>
+    # ADR 0016 fixes the receipt retention bound at the committed quarter reserve,
+    # max(1, ceil(grace / 4)), whether or not the job opened a cleanup episode; the
+    # period itself governs cleanup, not retention.
+    assert quiet.receipt_retention_bound_ms == max(1, div(grace + 3, 4)),
+           "a job that needed no cleanup did not retain under the committed quarter reserve: " <>
              "#{quiet.receipt_retention_bound_ms}ms"
 
     # A group that refuses `TERM` requires the process-cleanup sequence. The
@@ -3344,7 +3363,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     Process.exit(executor, :kill)
 
     assert Local.cancel(executor, job_id) == {:ok, :unconfirmed}
-    assert_receive {:owner_death_execute_answer, {:executor_exit, _reason}}, 5_000
+    assert_receive {:owner_death_execute_answer, {:ok, %{outcome: :outcome_unknown}}}, 5_000
     assert_receive {:DOWN, ^caller_monitor, :process, _caller, :normal}, 5_000
 
     Process.sleep(1_200)

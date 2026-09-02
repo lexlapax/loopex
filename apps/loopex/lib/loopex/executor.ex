@@ -733,7 +733,10 @@ defmodule Loopex.Executor do
 
   defp digest(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
 
-  defp bounded_binary?(value), do: is_binary(value) and byte_size(value) in 1..1_024
+  # Technical depth: identifiers are opaque and bounded, never parsed. The bound
+  # is eight kibibytes so a full 1,024-entry open index can reach ADR 0016's
+  # 4,194,304-byte snapshot ceiling; below that no conforming root could.
+  defp bounded_binary?(value), do: is_binary(value) and byte_size(value) in 1..8_192
 
   defp plain?(value)
        when is_binary(value) or is_integer(value) or is_float(value) or is_boolean(value) or

@@ -5,7 +5,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest.ArtifactStore do
 
   alias LoopexProtocol.Canonical
 
-  def start(mode), do: Agent.start_link(fn -> %{mode: mode, retained: []} end)
+  def start(mode), do: Agent.start_link(fn -> %{mode: mode, retained: [], uses: %{}} end)
   def retained(pid), do: Agent.get(pid, &Enum.reverse(&1.retained))
 
   @impl Loopex.ArtifactStore
@@ -36,6 +36,9 @@ defmodule Loopex.Executor.LocalAuthorityContractTest.ArtifactStore do
 
         use_digest = Canonical.digest(["artifact-use-v2", artifact_use])
 
+        :ok =
+          Agent.update(pid, &%{&1 | uses: Map.put(&1.uses, "use:" <> use_digest, artifact_use)})
+
         {:ok,
          %{
            digest: digest,
@@ -55,6 +58,17 @@ defmodule Loopex.Executor.LocalAuthorityContractTest.ArtifactStore do
 
   @impl Loopex.ArtifactStore
   def stat(_pid, _reference), do: {:error, :not_used}
+
+  # ADR 0015 closes the callback set with describe/2: Core resolves the use it
+  # just retained before it returns a reference, so a double that cannot answer
+  # never yields one. Only the truthful mode retains a describable use.
+  @impl Loopex.ArtifactStore
+  def describe(pid, use_locator) do
+    case Agent.get(pid, &Map.fetch(&1.uses, use_locator)) do
+      {:ok, artifact_use} -> {:ok, artifact_use}
+      :error -> {:error, :unknown_artifact_use}
+    end
+  end
 end
 
 defmodule Loopex.Executor.LocalAuthorityContractTest do
@@ -249,7 +263,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
       stop(second)
     end)
 
-    job = job(fixture, "shared-job", %{"command" => "printf one\\n >> effect.log"})
+    job = job(fixture, "shared-job", %{"command" => "printf 'one\\n' >> effect.log"})
     grant = grant(job)
     parent = self()
 

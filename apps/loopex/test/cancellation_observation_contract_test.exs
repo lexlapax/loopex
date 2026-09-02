@@ -82,12 +82,14 @@ defmodule Loopex.CancellationObservationContractTest.ExecutorFixture do
   def execute(pid, job, _grant, _options, progress) do
     _progress = progress || Loopex.Executor.discard_progress()
 
+    worker = self()
+
     state =
       Agent.get_and_update(pid, fn state ->
         next = %{
           state
           | jobs: [job | state.jobs],
-            workers: Map.put(state.workers, job.job_id, self())
+            workers: Map.put(state.workers, job.job_id, worker)
         }
 
         {state, next}
