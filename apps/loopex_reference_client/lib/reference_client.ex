@@ -31,11 +31,21 @@ defmodule Loopex.ReferenceClient do
 
   ## Technical depth
 
-  Configuration passes unchanged to `Loopex.start_link/1`; the client neither
-  discovers defaults nor rewrites host authority.
+  Configuration passes to `Loopex.start_link/1` unchanged but for one option.
+  ADR 0017 makes `:context_token_budget` a required runtime option with no
+  kernel default, so a host that names none is refused rather than handed a
+  ceiling the kernel invented. This client is such a host, and it answers with
+  the same number the reference composition answers with, so an embedder reading
+  this stack finds one reference ceiling rather than two. A caller that names its
+  own is passed through untouched, and nothing else about host authority is
+  discovered or rewritten here.
   """
+  @reference_context_token_budget 8_192
+
   @spec start(keyword()) :: {:ok, t()} | {:error, term()}
   def start(options) when is_list(options) do
+    options = Keyword.put_new(options, :context_token_budget, @reference_context_token_budget)
+
     case Loopex.start_link(options) do
       {:ok, runtime} -> {:ok, %__MODULE__{runtime: runtime}}
       {:error, reason} -> {:error, reason}
