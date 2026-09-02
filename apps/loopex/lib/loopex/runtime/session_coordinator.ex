@@ -2000,10 +2000,25 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     case retain_terminal_operation_fact(state, proposal) do
       {:ok, next} ->
+        # Technical depth: this owner was current when the Store fixed the
+        # verdict, but `close_current_model_stream/3` reaches Control afterwards
+        # and a handoff that began in between refuses it. That refusal sets
+        # `superseded` inside the state pipeline and nothing else re-reads it,
+        # so the stop predicate has to be evaluated here rather than assumed
+        # false. `continue_after_owner_loss/1` is that predicate -- superseded
+        # with no in-flight work, pending cleanup, open stream, or pending fault
+        # stops `:normal` -- and this attempt's settlement, closure, and cleanup
+        # are exactly what empties it. Without this the coordinator holds the
+        # session's last generation alive forever, which its `temporary` child
+        # spec says never happens. A still-current owner sees `superseded` false
+        # and gets the same `{:noreply, state}` it always did.
         next = close_settled_model_stream(next, run_id, settlement)
         report_evidence_only_settlement(next, run_id, settlement)
         send(self(), :advance_work)
-        {:noreply, clear_model_cleanup(next, run_id)}
+
+        next
+        |> clear_model_cleanup(run_id)
+        |> continue_after_owner_loss()
 
       {:retained, next} ->
         # The Store fixed this attempt's verdict before Control moved to the
