@@ -85,6 +85,15 @@ defmodule Loopex.EmbeddedApiTest do
     stored = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id].events
     assert Enum.map(stored, & &1.event_sequence) == [1]
 
+    # ADR 0017: a model-less prompt commits one event. The abort's terminal is
+    # the second, committed after the attachment buffered the first, so the
+    # identity of a delivered event is proved across a history read.
+    assert {:accepted, "delivery-abort"} =
+             Loopex.command(command_attachment, %{type: :abort, command_id: "delivery-abort"})
+
+    eventually(fn -> committed_event_count(fixture, session_id) == 2 end)
+    stored = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id].events
+
     :ok = M1RuntimeTestStore.block_next_event_read(fixture.store_pid, self())
 
     first_delivery = Task.async(fn -> Loopex.next_event(attachment) end)
@@ -145,21 +154,21 @@ defmodule Loopex.EmbeddedApiTest do
     # still to come when `command/2` returns. Draining immediately reads an empty
     # queue about a third of the time, which is a race in this case rather than
     # in the runtime.
-    eventually(fn -> committed_event_count(fixture, session_id) == 3 end)
+    eventually(fn -> committed_event_count(fixture, session_id) == 2 end)
 
-    assert [%{event_sequence: 3, kind: "run.finished"}] = drain_events(original)
+    assert [%{event_sequence: 2, kind: "run.finished"}] = drain_events(original)
     :ok = M1RuntimeTestStore.block_next_event_read(fixture.store_pid, self())
 
     attaching =
       Task.async(fn ->
         Loopex.attach(fixture.runtime, session_id,
           request_id: "snapshot-race",
-          after_event_sequence: 3
+          after_event_sequence: 2
         )
       end)
 
     assert_receive {:event_history_read, waiter, _store, ^session_id, scanned_at_three}
-    assert Enum.map(scanned_at_three, & &1.event_sequence) == [1, 2, 3]
+    assert Enum.map(scanned_at_three, & &1.event_sequence) == [1, 2]
 
     assert {:accepted, "during-snapshot"} =
              Loopex.command(original, %{
@@ -171,17 +180,17 @@ defmodule Loopex.EmbeddedApiTest do
     M1RuntimeTestStore.release(waiter)
     assert {:ok, replacement} = Task.await(attaching)
 
-    assert %{session_id: ^session_id, event_sequence: 3, active_run_id: nil} =
+    assert %{session_id: ^session_id, event_sequence: 2, active_run_id: nil} =
              Loopex.snapshot(replacement)
 
     streamed = drain_events(replacement)
-    assert Enum.map(streamed, & &1.event_sequence) == [4, 5]
-    assert Enum.map(streamed, & &1.kind) == ["user.message_appended", "run.started"]
+    assert Enum.map(streamed, & &1.event_sequence) == [3]
+    assert Enum.map(streamed, & &1.kind) == ["user.message_appended"]
 
     assert {:error, :stale_attachment} = Loopex.next_event(original)
 
     stored = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id].events
-    assert Enum.map(stored, & &1.event_sequence) == [1, 2, 3, 4, 5]
+    assert Enum.map(stored, & &1.event_sequence) == [1, 2, 3]
     assert scanned_at_three ++ streamed == stored
 
     paged = start_fixture("paged-snapshot-runtime")
@@ -202,7 +211,7 @@ defmodule Loopex.EmbeddedApiTest do
       # That is not a flake in the loop -- it is what two-phase cancellation means
       # for any caller, and it is why each iteration waits for its own ending
       # here rather than being retried until it passes.
-      Enum.each(1..342, fn index ->
+      Enum.each(1..513, fn index ->
         prompt_id = "paged-prompt-#{index}"
         abort_id = "paged-abort-#{index}"
 
@@ -219,7 +228,7 @@ defmodule Loopex.EmbeddedApiTest do
                    command_id: abort_id
                  })
 
-        eventually(fn -> committed_event_count(paged, paged_session) == index * 3 end)
+        eventually(fn -> committed_event_count(paged, paged_session) == index * 2 end)
       end)
 
       paged_events =
@@ -284,8 +293,8 @@ defmodule Loopex.EmbeddedApiTest do
     # ADR 0017: an accepted prompt publishes one event and stages nothing in a
     # model-less runtime, so the second event that overflows a capacity of one
     # is the terminal an abort commits.
-    assert {:accepted, "overflow-abort"} =
-             Loopex.command(first, %{type: :abort, command_id: "overflow-abort"})
+    assert {:accepted, "overflow-first-abort"} =
+             Loopex.command(first, %{type: :abort, command_id: "overflow-first-abort"})
 
     eventually(fn ->
       match?(
@@ -306,13 +315,15 @@ defmodule Loopex.EmbeddedApiTest do
     {:ok, live} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
     assert Enum.map(drain_events(live), & &1.event_sequence) == [1, 2]
 
-    assert {:accepted, "overflow-abort"} =
-             Loopex.command(live, %{type: :abort, command_id: "overflow-abort"})
+    # The reconnected attachment's own event source: a prompt admitted on the
+    # settled session publishes its user message as the third event.
+    assert {:accepted, "reconnect-prompt"} =
+             Loopex.command(live, %{
+               type: :prompt,
+               command_id: "reconnect-prompt",
+               content: "after reconnect"
+             })
 
-    # The abort's acceptance says it was admitted, not that the run has ended.
-    # ADR 0009 orders the admission before the cleanup, so the ending is a second
-    # transaction that lands once the cleanup answers -- which is what this waits
-    # for rather than assuming it has already happened.
     ended =
       Enum.reduce_while(1..400, [], fn _attempt, acc ->
         case acc ++ drain_events(live) do
@@ -322,6 +333,13 @@ defmodule Loopex.EmbeddedApiTest do
       end)
 
     assert [%{event_sequence: 3}] = ended
+
+    # The abort's acceptance says it was admitted, not that the run has ended;
+    # its terminal is the fourth event and lands once the cleanup answers.
+    assert {:accepted, "reconnect-abort"} =
+             Loopex.command(live, %{type: :abort, command_id: "reconnect-abort"})
+
+    eventually(fn -> committed_event_count(fixture, session_id) == 4 end)
 
     assert {:accepted, "second-prompt"} =
              Loopex.command(live, %{

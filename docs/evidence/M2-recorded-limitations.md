@@ -547,3 +547,25 @@ scripted model double reports usage by default, as a real provider does.
 without a gate amendment. Sixth recorded override; minimums are unchanged and
 the two production defects are fixed before any corrected case is counted.
 
+<a id="embedded-api-and-command-fixture-structure"></a>
+## Embedded-API case structure and command-corpus state roots
+
+**Rule.** Under ADR 0017 a prompt admitted in a model-less runtime commits one
+public event; every later event needs its own admitted command. State roots a
+test creates must be unique across VM runs, or a directory a dying store
+re-created after cleanup replays into an unrelated case.
+
+**What is true.** Three embedded-API cases were built on a prompt producing two
+events: one proved delivery identity over a single event, one paged its
+snapshot scan at three events per iteration, and one used an abort whose
+command identifier the same case re-issued later, so the second issue replayed
+and committed nothing. The command corpus named its roots by a per-VM counter,
+which produced the same paths run after run and a headless-journal flake the
+store correctly refused.
+
+**Disposition.** Maintainer, 2026-09-01: restructure the three cases with
+fresh command identifiers and a reconnect-side event source, page at two
+events per iteration across 513 iterations so the 1,024-event page limit is
+still reached, and name roots by OS pid and random bytes - directly, without a
+gate amendment. Seventh recorded override; names and minimums unchanged.
+

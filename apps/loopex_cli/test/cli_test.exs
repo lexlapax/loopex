@@ -43,7 +43,14 @@ defmodule LoopexCliTest do
   end
 
   defp roots do
-    unique = System.unique_integer([:positive])
+    # The unique integer restarts with every VM, so a bare counter names the
+    # same directories run after run; a directory a dying store re-created after
+    # cleanup then replays as a headless journal into an unrelated case. The
+    # OS pid and random bytes make each root unique across runs.
+    unique =
+      "#{System.pid()}-#{System.unique_integer([:positive])}-" <>
+        Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
+
     state_root = Path.join(System.tmp_dir!(), "loopex-cli-#{unique}")
     workspace = Path.join(System.tmp_dir!(), "loopex-cli-ws-#{unique}")
     File.mkdir_p!(state_root)
