@@ -585,6 +585,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     runtime_options =
       [
+        context_token_budget: 8_192,
         runtime_id: placement,
         store: store,
         model: %{
