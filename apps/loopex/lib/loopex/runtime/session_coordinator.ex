@@ -1879,7 +1879,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
     # host-supplied `cancel/2` blocks would otherwise leave this coordinator
     # unable to answer an operator's interrupt for as long as it blocked, which
     # is the defect an abort had and this shares by construction.
-    {:noreply, begin_cleanup(state, run_id, {:deadline, detail})}
+    case begin_cleanup(state, run_id, {:deadline, detail}) do
+      {:ok, next} -> {:noreply, next}
+      {:error, reason} -> refuse_model_termination(state, reason)
+    end
   end
 
   # Concept: an attempt this owner opened is dispatched under one permit it must
@@ -1970,10 +1973,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:noreply, discard_provider_worker(state, run_id, task)}
 
       {:error, :deadline_elapsed} ->
-        state
-        |> discard_provider_worker(run_id, task)
-        |> admit_model_deadline(run_id)
-        |> settle_model_attempt(run_id, :not_dispatched)
+        state = discard_provider_worker(state, run_id, task)
+
+        case admit_model_deadline(state, run_id) do
+          {:ok, next} -> settle_model_attempt(next, run_id, :not_dispatched)
+          {:error, reason} -> refuse_model_termination(state, reason)
+        end
 
       {:error, _refused_before_send} ->
         # Control refused before sending while this owner remained
@@ -2170,28 +2175,46 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp clear_model_cleanup(state, run_id),
     do: %{state | pending_cleanup: Map.delete(state.pending_cleanup, run_id)}
 
-  # Concept: the elapsed deadline is on disk before anything settles under it.
+  # Concept: the elapsed deadline is on disk before anything settles under it,
+  # and an admission that did not commit settles nothing at all.
   #
   # Technical depth: ADR 0018 classifies an attempt by the journal order of
   # abort, deadline, and settlement, so the deadline needs a row of its own. A
   # run whose attempt is not open, or whose deadline was already admitted, adds
-  # nothing.
+  # nothing: there is no row to propose and nothing to refuse.
+  #
+  # A refused or unknown commit is different, and it used to be discarded. The
+  # settlement that follows reads the deadline from applied state, so a dropped
+  # admission left `model_termination` unset and the attempt selected retry and
+  # a model-call failure where the run had actually reached
+  # `bound_reached(:deadline)` -- a verdict fabricated out of a commit that did
+  # not happen. ADR 0018 makes an unexpected refusal of a bounded record the
+  # session's unavailability and forbids inventing the settlement, accounting,
+  # conversation, or terminal that would have followed it.
   defp admit_model_deadline(state, run_id) do
     case SessionState.propose_model_termination(
            state.durable,
            run_id,
            System.system_time(:millisecond)
          ) do
-      {:ok, proposal} ->
-        case commit_internal(state, proposal) do
-          {:ok, next} -> next
-          {:error, _reason} -> state
-        end
-
-      {:error, _reason} ->
-        state
+      {:ok, proposal} -> commit_internal(state, proposal)
+      {:error, _nothing_to_admit} -> {:ok, state}
     end
   end
+
+  # Concept: a refused admission ends the owner rather than the run.
+  #
+  # Technical depth: a refusal that only says ownership moved is the ordinary
+  # succession this coordinator already knows how to leave -- the successor
+  # rereads the deadline and admits it itself. Every other refusal is the
+  # unexpected one, and the session becomes unavailable with no fabricated
+  # verdict behind it.
+  defp refuse_model_termination(state, reason)
+       when reason in [:stale_owner_epoch, :stale_owner_incarnation_id, :superseded_owner],
+       do: continue_after_owner_loss(%{state | superseded: true})
+
+  defp refuse_model_termination(state, reason),
+    do: {:stop, {:model_termination_failed, reason}, state}
 
   defp adopt_run(state, run_id),
     do: %{state | adopted: MapSet.put(state.adopted, run_id)}
@@ -2720,8 +2743,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # cleanup, which is what Outcome 8 requires of it.
   defp begin_admitted_cleanup({:reply, reply, state}) do
     case SessionState.aborting_run(state.durable) do
-      nil -> {:reply, reply, state}
-      run_id -> {:reply, reply, begin_cleanup(state, run_id, :abort)}
+      nil ->
+        {:reply, reply, state}
+
+      run_id ->
+        case begin_cleanup(state, run_id, :abort) do
+          {:ok, next} -> {:reply, reply, next}
+          {:error, reason} -> {:stop, {:model_termination_failed, reason}, reply, state}
+        end
     end
   end
 
@@ -2745,13 +2774,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp begin_cleanup(state, run_id, purpose) do
     cond do
       Map.has_key?(state.pending_cleanup, run_id) ->
-        state
+        {:ok, state}
 
       match?(%{stage: "model_attempt_open"}, Map.get(state.durable.pending_work, run_id)) ->
         begin_model_termination(state, run_id, purpose)
 
       true ->
-        begin_effect_cleanup(state, run_id, purpose)
+        {:ok, begin_effect_cleanup(state, run_id, purpose)}
     end
   end
 
@@ -2773,27 +2802,29 @@ defmodule Loopex.Runtime.SessionCoordinator do
       |> disarm_deadline(run_id)
       |> cancel_policy_consultation(run_id)
 
-    state =
-      if match?({:deadline, _detail}, purpose),
-        do: admit_model_deadline(state, run_id),
-        else: state
+    with {:ok, state} <- admitted_termination(state, run_id, purpose) do
+      state = %{
+        state
+        | pending_cleanup: Map.put(state.pending_cleanup, run_id, %{purpose: purpose, model: nil})
+      }
 
-    state = %{
-      state
-      | pending_cleanup: Map.put(state.pending_cleanup, run_id, %{purpose: purpose, model: nil})
-    }
+      case in_flight_of(state, :model, run_id) do
+        nil ->
+          {:noreply, next} =
+            settle_model_attempt(state, run_id, unstarted_attempt_outcome(state, run_id))
 
-    case in_flight_of(state, :model, run_id) do
-      nil ->
-        {:noreply, next} =
-          settle_model_attempt(state, run_id, unstarted_attempt_outcome(state, run_id))
+          {:ok, next}
 
-        next
-
-      {_reference, _pid} ->
-        arm_model_reserve(state, run_id)
+        {_reference, _pid} ->
+          {:ok, arm_model_reserve(state, run_id)}
+      end
     end
   end
+
+  defp admitted_termination(state, run_id, {:deadline, _detail}),
+    do: admit_model_deadline(state, run_id)
+
+  defp admitted_termination(state, _run_id, _abort), do: {:ok, state}
 
   # Concept: an attempt this owner opened and never carried to Control cost
   # nothing, and is settled as the refusal it is.
@@ -3137,11 +3168,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp execute_result_reserve_ms(state) do
     case Executor.cancellation_bounds(state.durable.cleanup_grace_ms) do
-      {:ok, %{execute_result_reserve_ms: reserve}} -> reserve
+      {:ok, %{execute_result_reserve_ms: reserve}} ->
+        reserve
+
       # An unreadable committed period is not permission to wait forever, and it
       # is not a verdict either: the shortest admitted reserve is spent and the
       # operation is reported unproved.
-      {:error, _reason} -> 2_001
+      {:error, _reason} ->
+        2_001
     end
   end
 
