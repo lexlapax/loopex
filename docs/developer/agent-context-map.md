@@ -1200,3 +1200,51 @@ review. The administrative transition changes only the four ADR Concept status
 lines and governance rows, this disposition, and the ADR index that reports
 their accepted status and exact supersession scope. Every Technical depth file
 and all decision text remain byte-identical to the reviewed Proposed candidate.
+
+<a id="disposition-m2-gate-amendment-4-2026-09-01"></a>
+### M2 gate Amendment 4 acceptance — 2026-09-01
+
+The maintainer explicitly accepted
+[Amendment 4](../plans/M2-gate.md#amendment-4) to the accepted `M2` plan pair
+and locked gate as proposed at exact candidate
+`fe0c008bb815a0611c73f253b94bb950e35d169b`, after three rounds of independent adversarial
+review of the exact candidate, the last of which reported no blocking finding.
+Acceptance binds the amended normative envelopes and gate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept envelope | `sha256:d2891e3b4d24db846da01606ef64090ee3098532bd7b29540a1557de320d4a7c` |
+| Technical depth envelope | `sha256:d2c1350b56e0f63a8986b38e452d2c3adc0bab26ab760764f331dd178b7628ca` |
+| Gate | `sha256:deb5f257d6628bef3363bdd0f614c08eb1b0d2d8c1321daa593addbf67aff6f8` |
+
+Amendment 4 binds the ADR 0015 through ADR 0018 contracts — artifact object
+and use identity, configured cancellation observation, durable context
+admission budget, and provider attempt authority — to protected identities,
+raised minima, and a mandatory first-green mutation matrix. Its locked cases
+are red at this candidate because the production behavior they name does not
+yet exist; the gate is red for that declared absence and for nothing else.
+
+**Decision carried by this acceptance.** The accepted Concept envelope bounded
+the reference composition module at eighty effective lines; the delivered
+module measured one hundred sixty-four and Outcome 11's selector was red at the
+base revision. This amendment raises that ceiling to one hundred eighty, and
+accepting it is the maintainer's decision on that normative budget. The
+maintainer accepted with the caveat that the module still be reduced toward
+eighty. That reduction was attempted before this record was written: branch
+`codex/m2-composition-80` at `4025eea41210d8acba24854f4b0c881bb9eb0ce2`
+brings the module to one hundred thirty-four effective lines with every locked
+behavior intact, and records that eighty is not reachable while those
+behaviors stay locked. Whether to take that reduction, and whether to lower the
+ceiling to meet it, are product and gate decisions outside this record.
+
+**Scope of this record.** It accepts Amendment 4 alone and rebinds the `M2`
+Acceptance row to its exact proposal. It does not close `M2`, accept a closure
+candidate, authorize product integration, authorize a release, integrate the
+composition reduction, or dispose of any recorded limitation. The milestone
+remains `In review`.
+
+This record is the maintainer's disposition evidence, not the independent
+review. The administrative transition changes only the `M2` Acceptance row and
+this new disposition record; the accepted amendment sections, normative
+envelopes, locked gate, portable enforcement, register, and product bytes are
+unchanged.
