@@ -103,6 +103,13 @@ the exact document set its milestone must update.
   usage, and classification; incomplete usage charges the committed remaining
   allowance, post-effect uncertainty stops the run, and recovery never invents
   a second billable attempt or a clean answer from silence.
+- Public event delivery is fenced by resolution as well as by commit. An
+  attached reader is handed rows only up to the position the runtime has
+  acknowledged as resolved, so a durably linearized row whose owner still holds
+  an unresolved transaction stays invisible until re-presentation settles it.
+  Cursors and gap semantics are unchanged; the fence delays a read rather than
+  reordering or dropping one, and it lifts when the runtime stops owning the
+  session.
 - `loopex_composition`, a shipped reference stack an embedder depends on rather
   than copies: one module under a one-hundred-eighty-effective-line ceiling that starts the
   application tree and a runtime, names the concrete Store, Model, Executor, and
@@ -176,6 +183,30 @@ the exact document set its milestone must update.
 
 ### Fixed
 
+- The durable store followed a path rather than holding a file. A log deleted
+  underneath a live session was answered by opening a new, empty one at the same
+  name, and the session went on writing into a history that had lost everything
+  before it; a removal that raced the open slipped through a check made only
+  beforehand. The store now records the log's device and inode at start-up and
+  re-reads the path once its append handle is held, creates nothing on the
+  append path, and reports a log that was removed or replaced as an ambiguous
+  commit — which stops the store for recovery and leaves the caller to
+  re-present its exact transaction.
+- A store that could not be opened or replayed refused in no words. One refusal
+  reached an operator as the runtime tuple `{:invalid_history, 0,
+  :frame_does_not_match_transition}` — an internal replay audit addressed to
+  nobody who could act on it, carrying durable bytes into a terminal on the way.
+  Reconciliation now names the session and the class of the failure: its history
+  could not be replayed, its store could not be opened or read, or another
+  process is already writing that state root. Refusals that already arrived in
+  words keep them.
+- A failed run reached the terminal as the bare word `failed`. One category was
+  projected and every other dropped, so the one ending where the reason is the
+  only thing that tells an operator what to do next told them nothing. The
+  ending now names the category and whether it is retryable, plus the dimension,
+  observation, and limit where a declared ceiling decided it. The projection is
+  a fixed whitelist rather than the failure map, so private descriptors and
+  provider text still reach no terminal.
 - Every provider call was bounded by an undeclared thirty-second transport
   timeout the streaming client applies when a caller supplies none, instead of
   by the run's own committed absolute deadline. Under concurrent load it fired
