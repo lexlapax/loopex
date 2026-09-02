@@ -43,7 +43,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderTest do
         assert is_binary(reply.text)
         assert String.trim(reply.text) != "", "the provider returned no assistant text"
 
-      {:error, {:credential_unset, variable}} ->
+      {:error, {:not_dispatched, "model_call_failed"}} ->
         # Concept: a missing credential is unavailable evidence, and unavailable
         # evidence fails. Skipping would report a pass for a lane that never ran.
         flunk("""

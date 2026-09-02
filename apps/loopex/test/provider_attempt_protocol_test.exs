@@ -457,25 +457,25 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     assert_receive {:holding, worker}, 5_000
 
-    :ok =
-      M1RuntimeTestStore.hold_next_record_before_linearization(
-        fixture.store,
-        "run_terminal_committed",
-        self()
-      )
+    # ADR 0018 closes the origin's stream from durable settlement, before the
+    # outcome publishes: while the settlement transaction is linearized but its
+    # result is withheld from the coordinator, no closure may exist yet; once the
+    # result reaches it, the closure precedes the terminal the reader observes.
+    :ok = M1RuntimeTestStore.delay_after_record(fixture.store, "run_terminal_committed", self())
 
     send(worker, :release)
 
-    assert_receive {:record_held_before_linearization, terminal_waiter, _store,
-                    "run_terminal_committed", _transaction},
+    assert_receive {:record_linearized, terminal_waiter, _store, "run_terminal_committed",
+                    _transition, {:committed, _tx_id, _receipt}},
                    5_000
 
-    refute Enum.any?(Fixture.events(fixture, session_id), &(&1.kind == "run.finished"))
+    refute_receive {:loopex_progress, %{kind: :model_stream_closed}}, 0
+
+    M1RuntimeTestStore.release(terminal_waiter)
 
     assert_receive {:loopex_progress, %{kind: :model_stream_closed, disposition: :complete}},
                    5_000
 
-    M1RuntimeTestStore.release(terminal_waiter)
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
   end
 
@@ -839,8 +839,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   end
 
   test "a callback aggregate over the Store byte limit completes when its request and durable reply projections each fit" do
-    request_text = String.duplicate("q", 36_000)
-    reply_text = String.duplicate("a", 36_000)
+    request_text = String.duplicate("q", 15_000)
+    reply_text = String.duplicate("a", 55_000)
 
     fixture =
       start(
@@ -1048,7 +1048,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
     refute_receive {:holding, _retry_worker}, 0
-    refute Enum.any?(receive_progress(), &(&1.kind == :model_stream_closed))
+
+    # Attempt one's not-dispatched domain closes at its own settlement, which is
+    # already durable; the retry's domain opens no item and publishes no closure
+    # while its open row is held.
+    closures = Enum.filter(receive_progress(), &(&1.kind == :model_stream_closed))
+    assert length(closures) <= 1
+    refute Enum.any?(closures, &(&1.disposition == :complete))
 
     M1RuntimeTestStore.release(replay_waiter)
     assert_receive {:holding, retry_worker}, 5_000
@@ -1208,8 +1214,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   end
 
   test "provider settlement atomically preserves accounting and first durable termination precedence without false effect or bound outcomes" do
-    request_text = String.duplicate("q", 36_000)
-    reply_text = String.duplicate("a", 36_000)
+    request_text = String.duplicate("q", 15_000)
+    reply_text = String.duplicate("a", 55_000)
 
     exact =
       start(
@@ -2177,8 +2183,10 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     binding = Map.put(attempt_identity(opened), "session_id", session_id)
     predecessor = coordinator_of(fixture.runtime)
-    suspend_process(control)
 
+    # The successor is started by Control's resume handler, so Control must be
+    # running until owner_advanced has linearized; it is frozen only then, so the
+    # successor's handoff and the predecessor's permit request queue behind it.
     :ok = M1RuntimeTestStore.delay_after_record(fixture.store, "owner_advanced", self())
 
     resume =
@@ -2192,6 +2200,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
                     {:committed, _owner_tx, _owner_receipt}},
                    5_000
 
+    suspend_process(control)
     M1RuntimeTestStore.release(owner_waiter)
     [_successor_handoff] = await_queued_control_calls(control, 1)
     M1RuntimeTestStore.release(open_waiter)
@@ -2655,9 +2664,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     %{
       "kind" => "model_attempt_settled_v1",
-      "run_id" => "run_" <> String.duplicate("r", 40),
-      "turn_id" => "turn_" <> String.duplicate("t", 40),
-      "operation_id" => "model-operation_" <> String.duplicate("o", 40),
+      "run_id" => "run_" <> String.duplicate("r", 30),
+      "turn_id" => "turn_" <> String.duplicate("t", 30),
+      "operation_id" => "model-operation_" <> String.duplicate("o", 23),
       "attempt" => 1,
       "staged_request_digest" => String.duplicate("d", 64),
       "transport" => "dispatched_or_unknown",

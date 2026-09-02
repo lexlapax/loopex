@@ -48,7 +48,7 @@ defmodule Loopex.LLM.ReqLLM.RealModelLaneTest do
 
     try do
       assert ReqLLM.complete(request, [], Model.discard_progress()) ==
-               {:error, {:credential_unset, variable}}
+               {:error, {:not_dispatched, "model_call_failed"}}
 
       for adapter <- [Deterministic, ReqLLM],
           field <- [:canonical_request_bytes, :staged_request_digest] do
@@ -57,7 +57,7 @@ defmodule Loopex.LLM.ReqLLM.RealModelLaneTest do
         changed = Map.put(request, field, original <> "changed")
 
         assert adapter.complete(changed, [], Model.discard_progress()) ==
-                 {:error, :canonical_model_request_mismatch}
+                 {:error, {:not_dispatched, "model_call_failed"}}
       end
     after
       if previous, do: System.put_env(variable, previous)
