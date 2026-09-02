@@ -1278,3 +1278,32 @@ Acceptance row to its exact proposal. It does not close `M2`, accept a closure
 candidate, authorize product integration, authorize a release, or dispose of
 any recorded limitation. The milestone remains `In review`.
 
+<a id="disposition-m2-gate-amendment-6-2026-09-02"></a>
+### M2 gate Amendment 6 acceptance — 2026-09-02
+
+The maintainer explicitly accepted
+[Amendment 6](../plans/M2-gate.md#amendment-6) to the accepted `M2` plan pair
+and locked gate as proposed at exact candidate
+`fe422f569bee1be0811d626ed2ba809cc24ea8d2`, **without the independent exact-SHA review the
+ordinary amendment transaction requires**, as a recorded maintainer override.
+Acceptance binds the amended normative envelopes and gate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept envelope | `sha256:d2891e3b4d24db846da01606ef64090ee3098532bd7b29540a1557de320d4a7c` |
+| Technical depth envelope | `sha256:d2c1350b56e0f63a8986b38e452d2c3adc0bab26ab760764f331dd178b7628ca` |
+| Gate | `sha256:bef34d6a5e5093534cd0b12ccc61c5dcd000d8e98d4ec7ec7d64f244206e46c9` |
+
+Amendment 6 changes one value in the gate's own opening probe: its in-process
+harness model reports usage as the raw token pair ADR 0018 admits at the
+adapter boundary, rather than the reducer's normalized shape it had returned,
+which the closed usage key set refuses. Both plan envelopes are unchanged. The
+override rests on the change being one harness value whose correctness the
+probe's own observation proves; it is the eleventh recorded override of this
+milestone and the second applied to the gate runner.
+
+**Scope of this record.** It accepts Amendment 6 alone and rebinds the `M2`
+Acceptance row to its exact proposal. It does not close `M2`, accept a closure
+candidate, authorize product integration, authorize a release, or dispose of
+any recorded limitation. The milestone remains `In review`.
+
