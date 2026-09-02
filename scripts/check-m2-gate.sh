@@ -956,7 +956,6 @@ require_feature \
   apps/loopex/test/project_resource_trust_test.exs \
   "discovery resolves one canonical resource under declared path and size limits and retains the future shape total" \
   "the operator is shown every resolved path its provenance and the manifest digest" \
-  "the real operator decision path displays resolved path provenance trust and both digests" \
   "an explicit trust decision binds workspace revision manifest and digests" \
   "a changed workspace revision manifest or content invalidates the decision" \
   "a headless run without a matching positive decision stages no project block journals a declined receipt and still runs" \
@@ -1823,10 +1822,9 @@ run_selector 6b apps/loopex_reference_client/test/allow_all_policy_test.exs defa
   "passed=the shipped allow all policy allows every decision it is asked" \
   "passed=the shipped allow all policy emits exactly one permissive authority notice"
 
-run_selector 7 apps/loopex/test/project_resource_trust_test.exs default 9 zero \
+run_selector 7 apps/loopex/test/project_resource_trust_test.exs default 8 zero \
   "passed=discovery resolves one canonical resource under declared path and size limits and retains the future shape total" \
   "passed=the operator is shown every resolved path its provenance and the manifest digest" \
-  "passed=the real operator decision path displays resolved path provenance trust and both digests" \
   "passed=an explicit trust decision binds workspace revision manifest and digests" \
   "passed=a changed workspace revision manifest or content invalidates the decision" \
   "passed=a headless run without a matching positive decision stages no project block journals a declined receipt and still runs" \
@@ -1873,7 +1871,7 @@ run_selector 9 apps/loopex/test/session_directory_test.exs default 7 zero \
   "passed=a repeated resume command identity returns its historical result while a fresh identity acquires ownership" \
   "passed=Store replay of a resume command survives a missing directory cache"
 
-run_selector 10 apps/loopex_cli/test/cli_test.exs default 21 zero \
+run_selector 10 apps/loopex_cli/test/cli_test.exs default 22 zero \
   "passed=loopex run submits a prompt and streams the answer with its tool calls and results" \
   "passed=the operator steers a running task and queues a follow-up from the same terminal" \
   "passed=prompt steer follow up and abort have distinct explicit affordances and input naming neither is refused" \
@@ -1894,7 +1892,8 @@ run_selector 10 apps/loopex_cli/test/cli_test.exs default 21 zero \
   "passed=a dropped stream closure leaves the terminal falling back to the durable record without inferring abandonment or starting a timer" \
   "passed=the runtime measures exact staged system and tool bytes while the provider facing base stays under one thousand tokens" \
   "passed=argument parsing and terminal output use only the standard library" \
-  "passed=the operator declares how long a stopped run may spend stopping and a bad value is refused"
+  "passed=the operator declares how long a stopped run may spend stopping and a bad value is refused" \
+  "passed=the real operator decision path displays resolved path provenance trust and both digests"
 
 run_selector 11 apps/loopex_composition/test/kernel_composition_test.exs default 9 zero \
   "passed=one page of shipped code starts the application tree a runtime a session a prompt and its events" \

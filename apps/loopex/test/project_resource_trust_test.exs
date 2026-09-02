@@ -575,48 +575,6 @@ defmodule Loopex.ProjectResourceTrustTest do
     assert {:ok, ^digest, _ordered} = ProjectResource.digest(manifest())
   end
 
-  test "the real operator decision path displays resolved path provenance trust and both digests" do
-    workspace =
-      Path.join(System.tmp_dir!(), "loopex-project-display-#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(workspace)
-    File.write!(Path.join(workspace, "AGENTS.md"), @content)
-    on_exit(fn -> File.rm_rf(workspace) end)
-
-    discovered = LoopexCli.ProjectResources.discover(workspace)
-    assert %{entries: [entry]} = discovered
-    assert Path.type(entry.resolved_path) == :absolute
-    assert String.ends_with?(entry.resolved_path, "/AGENTS.md")
-
-    parent = self()
-
-    stdout =
-      capture_io("y\n", fn ->
-        stderr =
-          capture_io(:stderr, fn ->
-            send(
-              parent,
-              {:decision, LoopexCli.ProjectResources.decide(discovered, workspace, true)}
-            )
-          end)
-
-        send(parent, {:stderr, stderr})
-      end)
-
-    assert stdout == ""
-    assert_received {:decision, decision}
-    assert_received {:stderr, displayed}
-    runtime_manifest = LoopexCli.ProjectResources.runtime_manifest(discovered)
-    assert {:ok, digest, _ordered} = ProjectResource.digest(runtime_manifest)
-    assert decision.manifest_digest == digest
-    assert decision.decision_source == "interactive_operator"
-    assert displayed =~ entry.resolved_path
-    assert displayed =~ "provenance workspace_root"
-    assert displayed =~ "trust class project_resource"
-    assert displayed =~ entry.content_digest
-    assert displayed =~ "manifest digest #{decision.manifest_digest}"
-  end
-
   test "content that forges the block delimiters gains nothing by escaping them" do
     # Concept: the typed delimiters are input structure, not an authority
     # boundary, so escaping them is not an escalation.

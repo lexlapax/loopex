@@ -2490,6 +2490,51 @@ defmodule LoopexCliTest do
     _ = :gen_event.add_handler(:erl_signal_server, :erl_signal_handler, [])
     :ok
   end
+
+  # This case moved from the core project-resource-trust suite: the operator
+  # display it proves is command behaviour, and a core selector VM cannot load
+  # a sibling application (M2 gate Amendment 7).
+  test "the real operator decision path displays resolved path provenance trust and both digests" do
+    workspace =
+      Path.join(System.tmp_dir!(), "loopex-project-display-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(workspace)
+    File.write!(Path.join(workspace, "AGENTS.md"), "# Project rules\nAlways run the formatter.\n")
+    on_exit(fn -> File.rm_rf(workspace) end)
+
+    discovered = LoopexCli.ProjectResources.discover(workspace)
+    assert %{entries: [entry]} = discovered
+    assert Path.type(entry.resolved_path) == :absolute
+    assert String.ends_with?(entry.resolved_path, "/AGENTS.md")
+
+    parent = self()
+
+    stdout =
+      capture_io("y\n", fn ->
+        stderr =
+          capture_io(:stderr, fn ->
+            send(
+              parent,
+              {:decision, LoopexCli.ProjectResources.decide(discovered, workspace, true)}
+            )
+          end)
+
+        send(parent, {:stderr, stderr})
+      end)
+
+    assert stdout == ""
+    assert_received {:decision, decision}
+    assert_received {:stderr, displayed}
+    runtime_manifest = LoopexCli.ProjectResources.runtime_manifest(discovered)
+    assert {:ok, digest, _ordered} = Loopex.ProjectResource.digest(runtime_manifest)
+    assert decision.manifest_digest == digest
+    assert decision.decision_source == "interactive_operator"
+    assert displayed =~ entry.resolved_path
+    assert displayed =~ "provenance workspace_root"
+    assert displayed =~ "trust class project_resource"
+    assert displayed =~ entry.content_digest
+    assert displayed =~ "manifest digest #{decision.manifest_digest}"
+  end
 end
 
 defmodule LoopexCliTest.DenyingPolicy do
