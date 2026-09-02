@@ -83,7 +83,7 @@ defmodule Loopex.EmbeddedApiTest do
 
     {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
     stored = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id].events
-    assert Enum.map(stored, & &1.event_sequence) == [1, 2]
+    assert Enum.map(stored, & &1.event_sequence) == [1]
 
     :ok = M1RuntimeTestStore.block_next_event_read(fixture.store_pid, self())
 
@@ -135,7 +135,7 @@ defmodule Loopex.EmbeddedApiTest do
                content: "before"
              })
 
-    assert Enum.map(drain_events(original), & &1.event_sequence) == [1, 2]
+    assert Enum.map(drain_events(original), & &1.event_sequence) == [1]
 
     assert {:accepted, "finish-before-snapshot"} =
              Loopex.command(original, %{type: :abort, command_id: "finish-before-snapshot"})
@@ -280,6 +280,12 @@ defmodule Loopex.EmbeddedApiTest do
                command_id: "overflow-prompt",
                content: "two events"
              })
+
+    # ADR 0017: an accepted prompt publishes one event and stages nothing in a
+    # model-less runtime, so the second event that overflows a capacity of one
+    # is the terminal an abort commits.
+    assert {:accepted, "overflow-abort"} =
+             Loopex.command(first, %{type: :abort, command_id: "overflow-abort"})
 
     eventually(fn ->
       match?(

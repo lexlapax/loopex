@@ -568,7 +568,7 @@ defmodule Loopex.ContextAdmissionTest do
     refute Enum.any?(refusals, &Map.has_key?(&1.payload, "content"))
 
     refute Enum.any?(events(fixture, session_id), fn event ->
-             event.payload["command_id"] in [
+             event["command_id"] in [
                "future-terminal-too-large",
                "oversized-steer",
                "oversized-follow-up"
@@ -807,7 +807,7 @@ defmodule Loopex.ContextAdmissionTest do
       assert Loopex.ContextAdmissionTestModel.requests(fixture.model) == requests_before
 
       refute Enum.any?(events(fixture, session_id), fn event ->
-               event.payload["command_id"] == command.command_id
+               event["command_id"] == command.command_id
              end)
 
       if held_worker, do: send(held_worker, :release)
@@ -1346,7 +1346,7 @@ defmodule Loopex.ContextAdmissionTest do
 
     fixture =
       start_fixture(
-        context_token_budget: 900,
+        context_token_budget: 700,
         tools: [tool],
         script: [
           %{
@@ -1446,7 +1446,7 @@ defmodule Loopex.ContextAdmissionTest do
              record_kind(record) in ["follow_up_promoted", "steer_resolved"]
            end)
 
-    assert {:ok, %{active_context_token_budget: 900}} =
+    assert {:ok, %{active_context_token_budget: 700}} =
              Loopex.session_status(fixture.runtime, session_id)
 
     :ok = Loopex.stop(fixture.runtime)
@@ -1459,7 +1459,7 @@ defmodule Loopex.ContextAdmissionTest do
                "recover-promoted-context-budget"
              ])
 
-    assert {:ok, %{active_context_token_budget: 900}} =
+    assert {:ok, %{active_context_token_budget: 700}} =
              Loopex.session_status(replacement, session_id)
 
     assert :ok = dynamic_apply(Loopex, :abandon_resume, [recovered_activation])
@@ -2378,7 +2378,7 @@ defmodule Loopex.ContextAdmissionTest do
     events =
       Enum.map(events, fn event ->
         if record_kind(event) == "run.finished" do
-          %{event | payload: Map.put(event.payload, "failure", failure)}
+          Map.put(event, "failure", failure)
         else
           event
         end
@@ -2419,7 +2419,7 @@ defmodule Loopex.ContextAdmissionTest do
     events =
       Enum.map(events, fn event ->
         if record_kind(event) == "run.finished" do
-          %{event | payload: Map.put(event.payload, "failure", failure)}
+          Map.put(event, "failure", failure)
         else
           event
         end

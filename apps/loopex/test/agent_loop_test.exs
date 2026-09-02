@@ -1593,7 +1593,7 @@ defmodule Loopex.AgentLoopTest do
     :ok =
       M1RuntimeTestStore.delay_after_record(
         fixture.store,
-        "command_admitted",
+        "prompt_admitted_v2",
         self()
       )
 
@@ -1609,7 +1609,7 @@ defmodule Loopex.AgentLoopTest do
         send(parent, {:prompt_caller_finished, self(), result})
       end)
 
-    assert_receive {:record_linearized, waiter, _store, "command_admitted",
+    assert_receive {:record_linearized, waiter, _store, "prompt_admitted_v2",
                     :session_journal_commit, {:committed, "prompt-1", _receipt}},
                    5_000
 
@@ -1646,7 +1646,7 @@ defmodule Loopex.AgentLoopTest do
     assert request.deadline <= System.system_time(:millisecond) + duration_ms
 
     records = Fixture.records(fixture, session_id)
-    admitted = Enum.find(records, &(&1.payload[:kind] == "command_admitted"))
+    admitted = Enum.find(records, &(&1.payload[:kind] == "prompt_admitted_v2"))
     staged = Enum.find(records, &(&1.payload[:kind] == "model_request_committed"))
 
     assert admitted.payload["deadline_ms"] == duration_ms

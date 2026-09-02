@@ -179,7 +179,7 @@ defmodule Loopex.SessionLifecycleTest do
     assert genesis.journal_version == 1
     assert genesis.owner_epoch == 0
     assert genesis.owner_incarnation_id == nil
-    assert genesis.payload.kind == "session_genesis"
+    assert genesis.payload.kind == "session_genesis_v2"
     assert genesis.payload["options"] == %{"workspace" => "one"}
     assert owner.journal_version == 2
     assert owner.payload.kind == "owner_advanced"
@@ -228,7 +228,7 @@ defmodule Loopex.SessionLifecycleTest do
       |> Map.fetch!("s_test_1")
 
     assert Enum.map(initial_session.records, & &1.payload.kind) == [
-             "session_genesis",
+             "session_genesis_v2",
              "owner_advanced"
            ]
 
@@ -296,7 +296,7 @@ defmodule Loopex.SessionLifecycleTest do
       |> Map.fetch!(:records)
 
     assert Enum.map(records, & &1.payload.kind) == [
-             "session_genesis",
+             "session_genesis_v2",
              "owner_advanced",
              "owner_advanced",
              "command_admitted"
@@ -338,7 +338,7 @@ defmodule Loopex.SessionLifecycleTest do
     current = current_entry(fixture.runtime, session_id)
     assert current.coordinator != old.coordinator
     assert current.owner.owner_epoch == old.owner.owner_epoch + 1
-    assert current.event_sequence == 2
+    assert current.event_sequence == 1
 
     eventually(fn -> Loopex.next_event(old_attachment) == {:error, :stale_attachment} end)
 
@@ -456,7 +456,7 @@ defmodule Loopex.SessionLifecycleTest do
              })
 
     session = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id]
-    assert Enum.count(session.events, &(&1.kind == "run.started")) == 1
+    assert Enum.count(session.events, &(&1.kind == "run.started")) == 0
     assert Enum.count(session.events, &(&1.kind == "run.finished")) == 1
     assert Enum.count(session.records, &(&1.payload.kind == "command_admitted")) == 3
   end

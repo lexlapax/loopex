@@ -167,7 +167,7 @@ defmodule Loopex.ProjectResourceTrustTest do
                manifest(%{entries: [entry(@content, %{byte_size: byte_size(@content) + 1})]})
              )
 
-    assert size_reason =~ "byte size"
+    assert size_reason == "declared_size_mismatch"
 
     assert {:error, :manifest_rejected, %{"reason" => digest_reason}} =
              ProjectResource.digest(
@@ -176,7 +176,7 @@ defmodule Loopex.ProjectResourceTrustTest do
                })
              )
 
-    assert digest_reason =~ "content digest"
+    assert digest_reason == "declared_digest_mismatch"
 
     assert {:error, :manifest_rejected, %{"reason" => "duplicate resource label"}} =
              ProjectResource.digest(manifest(%{entries: [entry(), entry()]}))
@@ -184,7 +184,7 @@ defmodule Loopex.ProjectResourceTrustTest do
     # A host-only resolved path is stripped before this boundary. Core rejects
     # it rather than silently retaining a filesystem path it has no authority
     # to interpret.
-    assert {:error, :manifest_rejected, %{"reason" => "entry is not bounded plain data"}} =
+    assert {:error, :manifest_rejected, %{"reason" => "entry_not_bounded_plain_data"}} =
              ProjectResource.digest(
                manifest(%{entries: [Map.put(entry(), :resolved_path, "/workspace/AGENTS.md")]})
              )
@@ -198,13 +198,19 @@ defmodule Loopex.ProjectResourceTrustTest do
     assert {:error, :manifest_rejected, %{"reason" => reason}} =
              ProjectResource.digest(manifest(%{entries: [entry("x", %{contained: false})]}))
 
-    assert reason =~ "contained"
+    assert reason == "entry_not_reported_contained"
 
     # Over a ceiling it fails closed with the observed size and is never
     # truncated into context.
     oversized = String.duplicate("x", 65_537)
 
-    assert {:error, :over_limit, %{"observed_bytes" => 65_537, "limit_bytes" => 65_536}} =
+    assert {:error, :over_limit,
+            %{
+              "dimension" => "project_resource_bytes",
+              "observed" => 65_537,
+              "limit" => 65_536,
+              "label" => "AGENTS.md"
+            }} =
              ProjectResource.digest(manifest(%{entries: [entry(oversized)]}))
   end
 
@@ -232,7 +238,7 @@ defmodule Loopex.ProjectResourceTrustTest do
 
     retained = receipt(fixture, session_id)
     assert retained["provider_identity"] == "loopex.context.reference"
-    assert retained["provider_revision"] == 1
+    assert retained["provider_revision"] == 2
     assert retained["token_estimator"] == Bounds.estimator()
     assert retained["project_resource"]["disposition"] == "staged"
     assert retained["project_resource"]["detail"] == detail
@@ -302,7 +308,7 @@ defmodule Loopex.ProjectResourceTrustTest do
   end
 
   test "project manifest and trust labels are closed bounded safe text before retention" do
-    assert {:error, :manifest_rejected, %{"reason" => "workspace is not bounded plain data"}} =
+    assert {:error, :manifest_rejected, %{"reason" => "invalid_workspace", "label" => nil}} =
              ProjectResource.digest(
                manifest(%{workspace: Map.put(manifest().workspace, :resolved_path, "/workspace")})
              )
@@ -317,7 +323,7 @@ defmodule Loopex.ProjectResourceTrustTest do
       fn override ->
         workspace = Map.merge(manifest().workspace, override)
 
-        assert {:error, :manifest_rejected, %{"reason" => "workspace is not bounded plain data"}} =
+        assert {:error, :manifest_rejected, %{"reason" => "invalid_workspace", "label" => nil}} =
                  ProjectResource.digest(manifest(%{workspace: workspace}))
       end
     )
@@ -343,10 +349,10 @@ defmodule Loopex.ProjectResourceTrustTest do
     refute inspect(ProjectResource.resolve(given, Map.put(decision, :manifest_digest, hostile))) =~
              hostile
 
-    assert {:declined, :decision_expired, %{"reason" => "invalid expiry"}} =
+    assert {:declined, :binding_changed, %{"reason" => "invalid_decision"}} =
              ProjectResource.resolve(given, Map.put(decision, :expires_at, hostile))
 
-    assert {:declined, :decision_revoked, %{"reason" => "invalid revocation state"}} =
+    assert {:declined, :binding_changed, %{"reason" => "invalid_decision"}} =
              ProjectResource.resolve(given, Map.put(decision, :revocation_state, hostile))
 
     refute inspect(ProjectResource.resolve(given, Map.put(decision, :expires_at, hostile))) =~
@@ -397,13 +403,28 @@ defmodule Loopex.ProjectResourceTrustTest do
     [_first_receipt, second_receipt] = receipts(fixture, session_id)
 
     assert Enum.map(second_receipt["blocks"], & &1["source_reference"]) == [
-             "loopex.system.v1",
-             "project:workspace-1:#{decision.manifest_digest}:AGENTS.md",
-             "session:#{run_id}:command:p1",
-             "session:#{run_id}:turn:1:assistant",
-             "session:#{run_id}:turn:1:tool:c1",
-             "session:#{run_id}:steer:s1",
-             "tool_definition:#{hd(second_request.tools)["tool_id"]}:#{hd(second_request.tools)["tool_version"]}:#{ToolDefinition.definition_digest(hd(second_request.tools))}"
+             %{"kind" => "system", "identity" => "loopex.system.v1"},
+             %{
+               "kind" => "project_resource",
+               "workspace_ref" => "workspace-1",
+               "manifest_digest" => decision.manifest_digest,
+               "relative_label" => "AGENTS.md"
+             },
+             %{"kind" => "session_command", "run_id" => run_id, "command_id" => "p1"},
+             %{"kind" => "session_assistant", "run_id" => run_id, "turn" => 1},
+             %{
+               "kind" => "session_tool_result",
+               "run_id" => run_id,
+               "turn" => 1,
+               "call_id" => "c1"
+             },
+             %{"kind" => "session_steer", "run_id" => run_id, "command_id" => "s1"},
+             %{
+               "kind" => "tool_definition",
+               "tool_id" => hd(second_request.tools)["tool_id"],
+               "tool_version" => hd(second_request.tools)["tool_version"],
+               "definition_digest" => ToolDefinition.definition_digest(hd(second_request.tools))
+             }
            ]
 
     second_request.messages
@@ -439,14 +460,14 @@ defmodule Loopex.ProjectResourceTrustTest do
 
     assert {:staged, _blocks, _detail} = ProjectResource.resolve(given, decision)
 
-    assert {:declined, :decision_revoked, detail} =
+    assert {:declined, :binding_changed, detail} =
              ProjectResource.resolve(given, Map.put(decision, :revocation_state, "revoked"))
 
-    assert detail["state"] =~ "revoked"
+    assert detail["reason"] == "invalid_decision"
 
     # An unrecognised state is not admission either: only an explicit `active`
     # in the exact decision record is.
-    assert {:declined, :decision_revoked, _unknown} =
+    assert {:declined, :binding_changed, _unknown} =
              ProjectResource.resolve(given, Map.put(decision, :revocation_state, "pending"))
 
     assert {:staged, _active_blocks, _active_detail} =
@@ -454,21 +475,21 @@ defmodule Loopex.ProjectResourceTrustTest do
 
     past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.to_iso8601()
 
-    assert {:declined, :decision_expired, expired} =
+    assert {:declined, :binding_changed, expired} =
              ProjectResource.resolve(given, Map.put(decision, :expires_at, past))
 
-    assert expired["expires_at"] == past
+    assert expired["reason"] == "invalid_decision"
 
     # A bound this code cannot read is a bound it must not discard.
-    assert {:declined, :decision_expired, _unparseable} =
+    assert {:declined, :binding_changed, _unparseable} =
              ProjectResource.resolve(given, Map.put(decision, :expires_at, "soon"))
 
-    assert {:declined, :decision_expired, _wrong_type} =
+    assert {:declined, :binding_changed, _wrong_type} =
              ProjectResource.resolve(given, Map.put(decision, :expires_at, 1))
 
     future = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.to_iso8601()
 
-    assert {:staged, _future_blocks, _future_detail} =
+    assert {:declined, :binding_changed, %{"reason" => "invalid_decision"}} =
              ProjectResource.resolve(given, Map.put(decision, :expires_at, future))
   end
 
@@ -513,7 +534,7 @@ defmodule Loopex.ProjectResourceTrustTest do
     retained = receipt(fixture, session_id)
     assert retained["project_resource"]["disposition"] == "no_decision"
     assert retained["provider_identity"] == "loopex.context.reference"
-    assert retained["provider_revision"] == 1
+    assert retained["provider_revision"] == 2
     assert retained["token_estimator"] == Bounds.estimator()
     refute Enum.any?(retained["blocks"], &(&1["provenance_class"] == "project_resource"))
     assert Enum.any?(retained["blocks"], &(&1["provenance_class"] == "system"))
