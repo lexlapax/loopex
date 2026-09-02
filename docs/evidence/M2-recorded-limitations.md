@@ -689,3 +689,45 @@ the reducer today binds as equal, and that semantic decision belongs to the
 milestone that implements it together with the generated cardinality
 property. Thirteenth recorded override.
 
+<a id="spent-attempt-retention"></a>
+## Spent provider-attempt identities are retained for the ownership generation
+
+**Rule.** ADR 0018: Control retains a spent attempt identity and its bound
+worker for the complete ownership generation, so a successor coordinator can
+never re-spend an attempt whose call may already have been billed.
+
+**What is true.** Control's spent-attempt map grows by one bounded entry per
+provider attempt for as long as Control holds the session, and is pruned only
+when Control stops holding it. An independent audit flagged the growth for a
+long-lived host. The growth is proportional to the session table Control
+already retains, and a test now states the retention across succession so a
+future prune turns red.
+
+**Disposition.** Maintainer, 2026-09-02: accept as ADR-scoped. The successor
+fence is worth the memory; a journal-derived bound would need an ADR-level
+definition of a settled-past attempt and belongs to a later milestone.
+
+<a id="dispatcher-store-io"></a>
+## The event dispatcher reads the Store inside its own call handler
+
+**Rule.** AGENTS.md, one serial session owner and distinct truth planes: one
+session's work must not make an unrelated session's control traffic
+unavailable.
+
+**What is true.** The dispatcher answers `next_event` and attachment status by
+reading the Store synchronously, under the Store's thirty-second call bound,
+and Control acknowledges the publication watermark through an unbounded call
+into that same process. When a host runs several sessions on one root and one
+of them holds the single serial local Store in a large transaction, every
+session's Control traffic can stall for up to that bound, and command routing's
+five-second validation can report a merely busy session as unavailable. No
+durable truth is lost or reordered; both are availability failures. The
+shipped command runs one session per terminal and does not reach the trigger.
+
+**Disposition.** Maintainer, 2026-09-02: record as an approved M2 limitation.
+The root repair moves all Store reads out of the dispatcher process onto read
+workers and redesigns queue, overflow, and invalidation ordering in the module
+that owns publication; it changes a documented durability invariant and is
+scheduled for the milestone that adds multi-session hosts, with the fence
+cases extended to deferred reads.
+
