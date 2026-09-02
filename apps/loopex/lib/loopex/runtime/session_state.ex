@@ -873,7 +873,7 @@ defmodule Loopex.Runtime.SessionState do
       :ok ->
         internal_proposal(state, stable_id("effect-intent", run_id, job.job_id), record)
 
-      {:error, :item_too_large} ->
+      {:error, {:item_too_large, _observed, _limit}} ->
         {:error, :effect_intent_record_too_large}
 
       {:error, reason} ->
