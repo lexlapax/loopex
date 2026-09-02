@@ -128,14 +128,31 @@ cleanup. Every conforming executor supplies cancellation; a legacy integration
 that omits it, or an executor that reports an error or unconfirmed cleanup, ends
 the run `outcome_unknown` rather than letting absence stand for a clean stop.
 
-**Ctrl-C is not one of the signals the command can handle.** The Erlang emulator
+**Ctrl-C works through `bin/loopex`, and only through it.** The Erlang emulator
 reserves `SIGINT` for its own break handler and refuses to hand it to a program,
-so a terminal Ctrl-C ends the `loopex` process without cleanup. The session
-survives it — the durable record is in the state root, not in that process — and
-`loopex cancel <session>` reconciles it. Signals the command does handle are
+so the launcher catches the interrupt outside the emulator and forwards a
+`SIGTERM` the command does handle; Ctrl-C then means what this page says
+stopping means. Run the escript directly and a terminal Ctrl-C ends that process
+without cleanup instead. The session survives either way — the durable record is
+in the state root, not in that process — and `loopex cancel <session>`
+reconciles it. Signals the command does handle are
 `SIGTERM`, `SIGHUP`, and `SIGQUIT`; each becomes the same public abort and lets
-the run report before the process goes, with a ten-second backstop so an
-interrupted terminal always exits.
+the run report before the process goes, behind a backstop sized from the
+session's own cleanup period so an interrupted terminal always exits.
+
+A run that ends `failed` says why rather than printing the bare word. Where a
+declared ceiling decided it, the ending names the category, whether it is
+retryable, the dimension, what was observed, and the limit; where the reason is
+a bare category — a provider call whose outcome nobody can state, for instance —
+it names that:
+
+```text
+loopex: failed context_budget_exceeded (retryable false; context_tokens 9014 against 8192)
+loopex: failed model_call_failed
+```
+
+Only those members reach your terminal. The private context, descriptors, and
+provider text behind a failure never do.
 
 <a id="operator-sessions-cancel"></a>
 ## `loopex cancel` Is Narrow
@@ -173,6 +190,29 @@ loopex resume <session> --policy allow-all
 back to `resume` and `cancel`. A session resumes under the durable runtime
 placement identity that created it; resuming through a different runtime identity
 is refused with an explicit reason rather than silently taking ownership.
+
+**A resumed session keeps the numbers it was started with.** Omit
+`--cleanup-grace-ms` and `--context-token-budget` and `resume` and `cancel`
+recover the values the session committed, rather than applying whatever this
+process would default to today. Name one and it must agree with what the session
+committed; a value that disagrees is refused before anything the session left
+behind is scheduled, and the command says which one:
+
+```text
+loopex: :cleanup_grace_ms_configuration_conflict
+```
+
+Cleanup is compared first, then the context budget, so a command that got both
+wrong is told about the one it has to fix first. A session that has already
+settled reports no active context ceiling and therefore compares none: an
+explicit ceiling there governs the next run rather than one that already ended.
+A refusal gives the prepared owner up and releases this command's placement lock
+before it reports, so the next attempt is not blocked by the failed one.
+
+Nothing recovered runs until that check passes. Both commands take ownership and
+rebuild the session's history first; `resume` then lets the recovered work go,
+and `cancel` never does — it reconciles while that work stays paused, which is
+what keeps a command asked to end a run from starting it.
 
 <a id="operator-sessions-project-trust"></a>
 ## Project Resources Are Your Decision
@@ -234,26 +274,37 @@ loopex run --policy <name> [--state-root DIR] [--workspace DIR]
 loopex run --policy <name> --steer "<text>" "<prompt>"
 loopex run --policy <name> --follow-up "<text>" "<prompt>"
 loopex sessions [--state-root DIR]
-loopex resume <session> --policy <name> [--state-root DIR]
+loopex resume <session> --policy <name> [--state-root DIR] [--workspace DIR]
               [--cleanup-grace-ms MS] [--context-token-budget TOKENS]
-loopex cancel <session> [--policy <name>] [--state-root DIR]
+loopex cancel <session> [--policy <name>] [--state-root DIR] [--workspace DIR]
               [--cleanup-grace-ms MS] [--context-token-budget TOKENS]
 loopex artifact <reference> [--state-root DIR]
 ```
 
-Recognised flags are exactly `--policy`, `--state-root`, `--workspace`,
-`--steer`, `--follow-up`, `--cleanup-grace-ms`, and
-`--context-token-budget`. Any other flag is refused by name, and both numeric
-options are refused before a runtime starts unless they are positive whole
-numbers within the unsigned 64-bit domain. The parser
-accepts `--flag value`, `--flag=value`, and bare positional words, and uses the
-standard library only: a dependency here would land in an operator's install for
-the sake of flag parsing.
+Each subcommand names its own flags, and a flag is refused by name wherever the
+subcommand does not offer it — `loopex sessions --policy allow-all` is refused
+rather than quietly ignored:
+
+| Subcommand | Flags |
+| --- | --- |
+| `run` | `--policy`, `--state-root`, `--workspace`, `--steer`, `--follow-up`, `--cleanup-grace-ms`, `--context-token-budget` |
+| `sessions` | `--state-root` |
+| `resume` | `--policy`, `--state-root`, `--workspace`, `--cleanup-grace-ms`, `--context-token-budget` |
+| `cancel` | `--policy`, `--state-root`, `--workspace`, `--cleanup-grace-ms`, `--context-token-budget` |
+| `artifact` | `--state-root` |
+
+Naming the same flag twice is refused, and both numeric options are refused
+before a runtime starts unless they are positive whole numbers within the
+unsigned 64-bit domain. The parser accepts `--flag value`, `--flag=value`, and
+bare positional words, and uses the standard library only: a dependency here
+would land in an operator's install for the sake of flag parsing. A bare `--`
+ends option parsing and keeps every remaining word as data, which is how an
+artifact locator that begins with `--` is retrievable at all.
 
 Exit status is `0` for success and `1` for a refusal or failure, with the reason
 on standard error prefixed `loopex:`. An unrecognised subcommand, or no arguments
-at all, prints the usage text and exits `0` — it is a request for help rather
-than a failed run.
+at all, prints the usage text there and exits `1`, so a script wrapping the
+command can tell a run from a mistyped one.
 
 ### Where State Lives
 
@@ -268,6 +319,26 @@ than a failed run.
 
 The state root resolves from `LOOPEX_HOME` and never from Elixir application
 environment, so the directory an operator's shell names is the directory used.
+
+**Leave `store.log` alone while a command is running.** The store holds that
+exact file, not the path: it records the file's identity at start-up and checks
+it again while it holds the write handle. A log removed or replaced underneath a
+live session is a write whose outcome cannot be stated, so the store stops
+rather than answering with a new, empty, history-free log at the same name.
+
+`loopex cancel` names the session and the class of the problem rather than
+showing you the runtime term behind it:
+
+```text
+loopex: session s-4f21 could not be reconciled: its state store could not be opened or read
+```
+
+The other two classes are `its recorded history could not be replayed` and
+`another process is already writing this state root's store`. The same care
+applies to copies: a partial copy, a restored snapshot, or an edited log is a
+history Loopex cannot prove, and it refuses rather than pretends. One log grows
+to at most 256 MiB; past that it accepts no further append and does not reopen,
+so a long-lived state root is one to retire rather than to prune by hand.
 
 ### Streaming, and What an Absent Stream Means
 
@@ -322,9 +393,16 @@ cleanup verdict. If it expires, it halts the process with status `130` while
 watching the terminal that installed it, so a terminal that already reported
 and exited is never halted after the fact.
 
-`SIGINT` is absent because `os:set_signal/2` refuses the name: the emulator
-reserves it for the break handler. No amount of handler installation changes
-that, and this documentation does not imply otherwise.
+`SIGINT` is absent from that set because `os:set_signal/2` refuses the name: the
+emulator reserves it for the break handler. No amount of handler installation
+changes that. The launcher supplies the missing half from outside the emulator:
+it traps `INT`, `TERM`, `HUP`, and `QUIT`, forwards `SIGTERM` to the escript it
+started as its own child, and reports the child's real exit status. It starts
+the escript asynchronously rather than replacing itself with it, because a
+process it had become could no longer be signalled on its behalf — and it saves
+the incoming standard input first, since a shell would otherwise hand an
+asynchronous child `/dev/null` and silently disable the project-resource prompt
+and every piped invocation.
 
 Stopping a tool is one budget, not a sequence of them. When a run ends while a
 `bash` command is still going, the executor gives the command's process group a
