@@ -156,7 +156,7 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `97792284e71dae4d8d24c8d1cb209c0aada1692bac4f8582dd31c57fe5d6d252` | `scripts/check-m2-gate.sh` |
+| `110ad320c252f1edf2661ebf2eeeb49f98faf47421470f371101ade99bd350f2` | `scripts/check-m2-gate.sh` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -1874,3 +1874,33 @@ that follows records that override as its disposition.
 | Generation | Artifact | Rebound SHA-256 |
 | --- | --- | --- |
 | 8 | `scripts/check-m2-gate.sh` | `97792284e71dae4d8d24c8d1cb209c0aada1692bac4f8582dd31c57fe5d6d252` |
+
+<a id="amendment-9"></a>
+## Amendment 9 — Read the Register's Code-Formatted Milestone Name
+
+**Acceptance: OUTSTANDING.** This section advances the generation and rebinds the amended artifact named below. The prior Acceptance row and `In review` lifecycle state remain at this proposal. Its immediate one-parent child must rebind Acceptance to this exact revision and add one new amendment-9-specific disposition anchor without changing any other byte.
+
+The evidence lifecycle validator Amendment 4 introduced reads the milestone
+register to prove the plan's lifecycle state at the evidence child and at the
+closure transition. Its row pattern expected a bare `M2` name, while the
+register writes every milestone name code-formatted and the repository status
+check refuses any other spelling. The validator runs only at an evidence
+child, so the mismatch surfaced at the first such revision: it refused every
+evidence child as "register row absent". Dropping the backticks from the
+register is not an option, because portable enforcement mandates them.
+
+This amendment widens that one pattern to accept the code-formatted name and
+changes nothing else. Extracted and dry-run against a throwaway evidence child
+on the current candidate, the validator answered `M2 evidence lifecycle OK`
+with the widened pattern and the refusal without it.
+
+**Maintainer disposition.** The maintainer, on 2026-09-03, authorized this
+amendment to bypass the exact-SHA independent review the ordinary transaction
+requires, as a recorded override: the change is one character class in a
+pattern whose intended target the status check already fixes, and the review
+cost exceeded the change. The rebind that follows records that override as its
+disposition.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 9 | `scripts/check-m2-gate.sh` | `110ad320c252f1edf2661ebf2eeeb49f98faf47421470f371101ade99bd350f2` |

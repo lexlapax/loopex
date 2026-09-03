@@ -2883,7 +2883,7 @@ defmodule Loopex.M2EvidenceLifecycle do
 
   defp state_is(revision, expected) do
     with {:ok, index} <- revision_file(revision, @plans_index),
-         [_, state] <- Regex.run(~r/^\| M2 \| ([^|]+?) \|/m, index),
+         [_, state] <- Regex.run(~r/^\| `?M2`? \| ([^|]+?) \|/m, index),
          true <- String.trim(state) == expected || {:error, "M2 is not #{expected} at #{revision}"} do
       :ok
     else
