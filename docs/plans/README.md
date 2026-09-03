@@ -471,8 +471,8 @@ selector. Do not add an evidence sidecar beside plans: every flat
 `docs/plans/*.md` file is interpreted as a Concept plan, Technical depth plan,
 gate, or this index. Architecture decisions
 live flat and numbered in [docs/adr/](../adr/); the living implementation design
-belongs in the paired `docs/architecture.md` and
-`docs/architecture-technical.md` when they exist.
+belongs in the paired `docs/developer/architecture.md` and
+`docs/developer/architecture-technical.md`.
 
 Every active and future gate includes this exact ordered documentation table.
 The disposition cell names one or more exact canonical repository-relative

@@ -238,10 +238,10 @@ sequenceDiagram
     participant X as Executor
 
     H->>S: prompt command with its canonical bytes
-    S->>ST: command_admitted plus run.started
+    S->>ST: prompt_admitted_v2 plus user.message_appended
     ST-->>S: committed
     S->>S: project conversation, then ContextAdmission.evaluate
-    S->>ST: model_request_committed plus model_attempt_opened_v1
+    S->>ST: model_request_committed plus model_attempt_opened_v1, and run.started on turn one
     ST-->>S: committed
     S->>W: start worker blocked on its permit reference
     S->>C: provider_dispatch with binding and authority

@@ -168,15 +168,19 @@ ending a run that ran its course.
 **Cleanup grace is one period, and every observation window a stop uses is
 derived from it.** For a period `g`: the receipt write reserves a quarter of it,
 rounded up and never less than a millisecond; the cooperative window a tool
-child gets before it is signalled is at most half of it; the executor is watched
-for its answer for `max(10000, g + 2000)` ms; and the terminal's own backstop
-covers the sum of those windows, so a session configured to spend a long time
-stopping is not halted while its executor is still inside the period it was
-promised. No window is derived from another one's already-spent clock.
+child gets to react to the termination signal is at most half of it; the
+executor is watched for its answer for `max(10000, g + 2000)` ms; and the
+terminal's own backstop is the executor's watch window plus the result reserve
+plus the terminal reserve, which outlasts every window above it, so a session
+configured to spend a long time stopping is not halted while its executor is
+still inside the period it was promised. No window is derived from another
+one's already-spent clock.
 
-Stopping a tool child is one budget covering the whole sequence: a cooperative
-window, then a termination signal sent to the child's *process group* rather than
-its leader, then confirmation that the group is gone. Confirmation means running
+Stopping a tool child is one budget covering the whole sequence: a termination
+signal sent to the child's *process group* rather than its leader, then the
+cooperative window in which the child may finish a write and exit on its own,
+then a kill signal to the group if it is still there, then confirmation that the
+group is gone. Confirmation means running
 a program — `/bin/ps` by default — and an image where that program is elsewhere
 can confirm nothing, so every command is reported `outcome_unknown`. Each receipt
 records which program was asked, the period it ran under as `cleanup_grace_ms`,

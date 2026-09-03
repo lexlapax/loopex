@@ -1440,6 +1440,25 @@ defmodule Loopex.ContextAdmissionTest do
 
       assert {:error, _reason} = SessionState.recover(session_id, malformed, event_prefix),
              "#{label} self-consistent request substitution replayed with a stale receipt"
+
+      # Technical depth: replay folds every refusal on this path into one
+      # transition reason, so naming the reason cannot tell the receipt relation
+      # from a guard ahead of it, and this loop has twice passed on such a guard.
+      # The positive control is what isolates the relation: the identical
+      # restaged request, carrying a receipt rebuilt to match its substituted
+      # member the way replay itself recomputes it, must replay cleanly; if
+      # anything ahead of the receipt were refusing the mutant, this replay
+      # would refuse too.
+      matching =
+        mutate_model_request(record_prefix, fn payload ->
+          payload
+          |> Map.put("request", encode_plain_for_record(mutated_request))
+          |> Map.put("staged_request_digest", mutated_request.staged_request_digest)
+          |> update_in(["context_receipt"], &receipt_matching(&1, mutated_request))
+        end)
+
+      assert {:ok, _matching} = SessionState.recover(session_id, matching, event_prefix),
+             "#{label} substitution with a matching receipt was refused ahead of the relation"
     end
 
     source_substitution =
@@ -2802,6 +2821,62 @@ defmodule Loopex.ContextAdmissionTest do
         {:error, _reason} -> nil
       end
     end) || flunk("no public-event prefix matches the staged-request record prefix")
+  end
+
+  # Rebuilds a committed receipt for a request whose members were substituted:
+  # block order and sources are unchanged, so every content-derived member of
+  # each block, a substituted tool's definition digest in its source reference,
+  # the totals, the provider estimate, and the ordered descriptor digest are
+  # recomputed from the request the receipt now sits beside, exactly as replay
+  # recomputes them.
+  defp receipt_matching(receipt, request) do
+    tools = Enum.map(request.tools, &ToolDefinition.model_facing/1)
+    members = request.messages ++ tools
+    tool_digests = Enum.map(request.tools, &ToolDefinition.definition_digest/1)
+    definition_digests = List.duplicate(nil, length(request.messages)) ++ tool_digests
+
+    blocks =
+      receipt["blocks"]
+      |> Enum.zip(Enum.zip(members, definition_digests))
+      |> Enum.map(fn {block, {member, definition_digest}} ->
+        bytes = Canonical.encode(member)
+
+        block
+        |> Map.merge(%{
+          "content_digest" => Canonical.digest_bytes(bytes),
+          "byte_cost" => byte_size(bytes),
+          "token_cost" => Bounds.estimate(bytes)
+        })
+        |> then(fn block ->
+          if definition_digest,
+            do: put_in(block, ["source_reference", "definition_digest"], definition_digest),
+            else: block
+        end)
+      end)
+
+    by_provenance =
+      Map.new(~w(system session project_resource), fn provenance ->
+        {provenance, sum_costs(Enum.filter(blocks, &(&1["provenance_class"] == provenance)))}
+      end)
+
+    totals = Map.put(sum_costs(blocks), "by_provenance", by_provenance)
+
+    receipt
+    |> Map.merge(%{
+      "blocks" => blocks,
+      "totals" => totals,
+      "provider_estimated_tokens" => totals["token_cost"],
+      "ordered_descriptor_digest" => descriptor_digest(blocks)
+    })
+  end
+
+  defp sum_costs(blocks) do
+    Enum.reduce(blocks, %{"byte_cost" => 0, "token_cost" => 0}, fn block, totals ->
+      %{
+        "byte_cost" => totals["byte_cost"] + block["byte_cost"],
+        "token_cost" => totals["token_cost"] + block["token_cost"]
+      }
+    end)
   end
 
   defp restage_request(request) do

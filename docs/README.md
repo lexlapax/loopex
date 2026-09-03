@@ -77,6 +77,10 @@ whose path or explicit fragment does not resolve.
   Technical depth plan, and executable gate.
 - [Development setup](../DEVELOPMENT.md) — local prerequisites and validation
   commands.
+- [How a run works](operator/how-a-run-works.md#concept) — the flow of one run
+  from the prompt to the answer with its diagram, the components and where each
+  runs, what is durable at every step, and what a crash at each stage leaves
+  behind.
 - [Coding sessions](operator/coding-sessions.md#concept) — running, streaming,
   steering, resuming, and stopping a coding task with the `loopex` command, the
   project-resource trust decision, the configuration a resumed session recovers,
