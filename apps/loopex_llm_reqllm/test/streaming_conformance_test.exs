@@ -544,8 +544,10 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
       end)
 
     # The first delta must arrive before the call returns. If deltas were only
-    # flushed at completion this receive would time out.
-    assert_receive {:observed, %{kind: :text_delta, text: "a"}}, 1_000
+    # flushed at completion this receive would time out. The bound is a liveness
+    # wait, not the verdict: the verdict is that the call has not returned when
+    # the delta is observed, so the wait is generous enough for a cold VM.
+    assert_receive {:observed, %{kind: :text_delta, text: "a"}}, 10_000
 
     {:ok, reply} = Task.await(task)
     assert reply.text == "abc"
@@ -564,7 +566,10 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
         )
       end)
 
-    assert_receive {:observed, %{kind: :text_delta, text: "a"}}, 1_000
+    # When this case runs first in a fresh VM the shipped adapter's HTTP client
+    # starts cold, which alone can exceed a one-second bound under the bound
+    # selector runner; the fact under test is the refute that follows.
+    assert_receive {:observed, %{kind: :text_delta, text: "a"}}, 10_000
     refute Task.yield(shipped, 0)
 
     send(shipped.pid, {:release, release})

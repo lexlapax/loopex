@@ -1024,8 +1024,11 @@ defmodule Loopex.Store.Local.ArtifactStoreConformanceTest do
 
       task = Task.async(fn -> put_local(faulting_handle, bytes, metadata) end)
 
+      # A liveness wait, not the verdict: the verdict is that the task has not
+      # returned while the probe holds it. A cold VM under the bound selector
+      # runner can take longer than a second to reach the first probe.
       assert_receive {:artifact_fault_reached, ^probe, ^pair},
-                     1_000,
+                     10_000,
                      "the local adapter ignored or returned before #{phase}"
 
       assert Task.yield(task, 0) == nil,
