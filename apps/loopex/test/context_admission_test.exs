@@ -845,12 +845,14 @@ defmodule Loopex.ContextAdmissionTest do
     provider_bytes =
       provider_members
       |> Enum.map(&Canonical.encode/1)
-      |> Enum.sum_by(&byte_size/1)
+      |> Enum.map(&byte_size/1)
+      |> Enum.sum()
 
     provider_tokens =
       provider_members
       |> Enum.map(&Canonical.encode/1)
-      |> Enum.sum_by(&Bounds.estimate/1)
+      |> Enum.map(&Bounds.estimate/1)
+      |> Enum.sum()
 
     assert provider_bytes == 2_393
     assert provider_tokens == 799
@@ -861,8 +863,8 @@ defmodule Loopex.ContextAdmissionTest do
         | Enum.map(definitions, &ToolDefinition.canonical_bytes/1)
       ]
 
-    assert Enum.sum_by(retained_components, &byte_size/1) == 4_382
-    assert Enum.sum_by(retained_components, &Bounds.estimate/1) == 1_462
+    assert Enum.sum(Enum.map(retained_components, &byte_size/1)) == 4_382
+    assert Enum.sum(Enum.map(retained_components, &Bounds.estimate/1)) == 1_462
 
     project_message = %{
       "role" => "user",
@@ -1250,12 +1252,14 @@ defmodule Loopex.ContextAdmissionTest do
     system_bytes =
       system_members
       |> Enum.map(&Canonical.encode/1)
-      |> Enum.sum_by(&byte_size/1)
+      |> Enum.map(&byte_size/1)
+      |> Enum.sum()
 
     system_tokens =
       system_members
       |> Enum.map(&Canonical.encode/1)
-      |> Enum.sum_by(&Bounds.estimate/1)
+      |> Enum.map(&Bounds.estimate/1)
+      |> Enum.sum()
 
     assert totals["by_provenance"]["system"] == %{
              "byte_cost" => system_bytes,
@@ -1265,7 +1269,8 @@ defmodule Loopex.ContextAdmissionTest do
     assert receipt["provider_estimated_tokens"] ==
              provider_members
              |> Enum.map(&Canonical.encode/1)
-             |> Enum.sum_by(&Bounds.estimate/1)
+             |> Enum.map(&Bounds.estimate/1)
+             |> Enum.sum()
 
     base_records = records(fixture, session_id)
     base_events = events(fixture, session_id)
