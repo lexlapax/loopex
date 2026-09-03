@@ -1365,3 +1365,31 @@ Acceptance row to its exact proposal. It does not close `M2`, accept a closure
 candidate, authorize product integration, authorize a release, or dispose of
 any recorded limitation. The milestone remains `In review`.
 
+<a id="disposition-m2-gate-amendment-9-2026-09-03"></a>
+### M2 gate Amendment 9 acceptance — 2026-09-03
+
+The maintainer explicitly accepted
+[Amendment 9](../plans/M2-gate.md#amendment-9) to the accepted `M2` plan pair
+and locked gate as proposed at exact candidate
+`05ec516e399a6c1ef3c539f53cfee72d38342e34`, **without the independent exact-SHA review the
+ordinary amendment transaction requires**, as a recorded maintainer override.
+Acceptance binds the amended normative envelopes and gate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept envelope | `sha256:d2891e3b4d24db846da01606ef64090ee3098532bd7b29540a1557de320d4a7c` |
+| Technical depth envelope | `sha256:d2c1350b56e0f63a8986b38e452d2c3adc0bab26ab760764f331dd178b7628ca` |
+| Gate | `sha256:bd168781cc7aea2c971f4685416524ef002bfc2ef390275f749ae2c1397361ae` |
+
+Amendment 9 widens one pattern in the gate's evidence lifecycle validator so it
+reads the register's code-formatted milestone name, which the status check
+mandates; the validator had refused every evidence child as "register row
+absent". Both plan envelopes are unchanged. The override rests on the change
+being one character class whose intended target portable enforcement already
+fixes; it is the seventeenth recorded override of this milestone.
+
+**Scope of this record.** It accepts Amendment 9 alone and rebinds the `M2`
+Acceptance row to its exact proposal. It does not close `M2`, accept a closure
+candidate, authorize product integration, authorize a release, or dispose of
+any recorded limitation. The milestone remains `In review`.
+
