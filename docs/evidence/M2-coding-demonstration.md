@@ -94,11 +94,11 @@ so a reviewer reads what the run did rather than inferring it from a pass. The
 gate's selector runner suppresses the test formatter, and without this a failed
 assertion reaches an operator as "the selector failed" and nothing else.
 
-Observed at the captured product source candidate `a1775d0`, the attended run
+Observed at the captured product source candidate `f17beef`, the attended run
 reported:
 
 ```text
-loopex demonstration observed: turns=7 tool_calls=6 effects=4 refusals=denied+denied tools=loopex.read,loopex.edit,loopex.write,loopex.bash files=.git,notes.md,summary.txt ending=done
+loopex demonstration observed: turns=7 tool_calls=6 effects=5 refusals=denied tools=loopex.read,loopex.edit,loopex.write,loopex.bash files=.git,notes.md,summary.txt ending=done
 ```
 
 All four coding tools ran across seven real provider calls, every committed
@@ -110,7 +110,9 @@ is dispatched with `--policy shell-allowlist`, and the task's fifth step asks fo
 `rm summary.txt`, which that stance refuses; the case asserts the refusal
 reached the transcript, that `summary.txt` survives, and that the run ended after
 the refusal rather than on it. The observed line shows the surviving
-`summary.txt` because the removal was denied. The deterministic `Da` case
+`summary.txt` because the removal was denied. The line records exactly one denial, the refused fifth step, and five effects
+across six calls: three filesystem tools and the permitted fourth-step `cat`
+ran as real effects, and the shell tool's other call was the refused one. The deterministic `Da` case
 `a denied tool call inside a multi tool task is reported and the task continues
 truthfully` remains as supporting coverage and is not what proves this claim --
 crediting it instead was the substitution this record replaced.

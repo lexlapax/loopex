@@ -60,15 +60,15 @@ runner validates against.
 
 <!-- loopex:m2-attestations:start -->
 ```json
-{"role":"demonstration_db","selector":"apps/loopex_cli/test/coding_task_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":8,"response_id_form":"req_:16-64","provider_response_ids":"req_011Cefhwwd5zPiPPLR4ejDry+req_011Cefhx2XGTGygCR5JpVAw5+req_011Cefhx9NmXuUBbWE3J2jD7+req_011CefhxEMQjkkGHbnRJrLi1+req_011CefhxK4vZJq3hkQhCAPiP+req_011CefhxQHi2WDSFoDLreaAG+req_011CefhxUrJ873Z5ABU2qJb6+req_011CefhxXy4oq4PGNBRrEZUs","input_tokens":10237,"output_tokens":542,"candidate":"a1775d028e164bf9a09566d5a739de7b574934e5","recorded":"2026-09-03T04:27:54Z"}
+{"role":"demonstration_db","selector":"apps/loopex_cli/test/coding_task_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":8,"response_id_form":"req_:16-64","provider_response_ids":"req_011CegojiTgkSsL46QN3SUVF+req_011CegojomvCW9DZMRujAxX1+req_011Cegojvi8kQTKfnyvyW2Hh+req_011Cegok2XP2ecJiA5YUywDX+req_011Cegok7qcoL5deWYe2zdYg+req_011CegokFLKCcGVLwevMs3pH+req_011CegokLbpQvVXvVW35obbb+req_011CegokQA8dCgSUsCYart5L","input_tokens":10394,"output_tokens":603,"candidate":"f17beef1b62116fa411b3fa496f3e8964b3af81c","recorded":"2026-09-03T16:19:29Z"}
 ```
 
 ```json
-{"role":"inherited_5c","selector":"apps/loopex_reference_client/test/real_model_session_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"req_:16-64","provider_response_ids":"req_011CefhxhUp6BLL1JzVVZutU+req_011Cefhxm5Msfj57gFydxujs","input_tokens":1463,"output_tokens":112,"candidate":"a1775d028e164bf9a09566d5a739de7b574934e5","recorded":"2026-09-03T04:27:54Z"}
+{"role":"inherited_5c","selector":"apps/loopex_reference_client/test/real_model_session_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"req_:16-64","provider_response_ids":"req_011CegomZN3v6ZrEQCTb1Rh5+req_011CegomfZN7pesDN2g2X6yj","input_tokens":1475,"output_tokens":124,"candidate":"f17beef1b62116fa411b3fa496f3e8964b3af81c","recorded":"2026-09-03T16:19:29Z"}
 ```
 
 ```json
-{"role":"inherited_8b","selector":"apps/loopex_reference_client/test/end_to_end_recovery_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"req_:16-64","provider_response_ids":"req_011CefhxzqayQTB7dqo3QXyF+req_011CefhyCfjZgF1dJ5Q14a1z","input_tokens":1463,"output_tokens":112,"candidate":"a1775d028e164bf9a09566d5a739de7b574934e5","recorded":"2026-09-03T04:27:54Z"}
+{"role":"inherited_8b","selector":"apps/loopex_reference_client/test/end_to_end_recovery_test.exs","provider":"anthropic","model":"claude-haiku-4-5-20251001","endpoint":"https://api.anthropic.com","adapter_build":"loopex_llm_reqllm@0.0.0","calls":2,"response_id_form":"req_:16-64","provider_response_ids":"req_011CegomuqbvhJNkrbazZSj1+req_011Cegon8HToG7UrSnXk9bXk","input_tokens":1463,"output_tokens":112,"candidate":"f17beef1b62116fa411b3fa496f3e8964b3af81c","recorded":"2026-09-03T16:19:29Z"}
 ```
 <!-- loopex:m2-attestations:end -->
 
@@ -76,7 +76,8 @@ Each record above carries the identifiers its role actually observed, at the
 candidate it names, in runs made for this record and not copied from an earlier
 one. `demonstration_db` carries eight because that role is two cases: the
 attended coding task, which took seven turns, and the single attestation call
-beside it. The task's own count is what the demonstration record reports; this
+beside it; the retained observation line in the demonstration record and the
+audit below both count the same eight. The task's own count is what the demonstration record reports; this
 record counts the role, so the two numbers differ by design and neither is the
 other's correction. The identifiers appear grouped by case rather than in the
 order the two cases happened to be scheduled, which the seed decides.
@@ -90,6 +91,19 @@ loopex attestation <role>: calls=<n> ids=<id>+<id>… input_tokens=<n> output_to
 
 so an attended run hands them over directly. No case writes this file: a case
 that wrote its own evidence would be attesting to itself.
+
+## Provider-account audit
+
+Audited on 2026-09-03 at 09:18 PDT against the authenticated Claude Platform
+Logs page for the workspace that owns the credential. All twelve identifiers
+retained above were present across the first two pages, each on model
+`claude-haiku-4-5-20251001`, type Streaming, service tier Standard, recorded
+one to two minutes before the audit. Per-call usage in the account sums to
+each record's own totals: the attended demonstration's eight calls to 10,394
+input and 603 output tokens, `inherited_5c`'s two calls to 1,475 and 124, and
+`inherited_8b`'s two calls to 1,463 and 112. The two inherited roles run the
+same fixture prompt; their totals differ this time because the model's replies
+differed, and each matches its own two calls.
 
 ## Related
 

@@ -233,10 +233,11 @@ Every digest above matches the candidate beside it.
 ## Retained at the captured candidate
 
 All thirteen records were validated by the gate runner at source candidate
-`a1775d028e164bf9a09566d5a739de7b574934e5` on each of the three capture lanes
+`f17beef1b62116fa411b3fa496f3e8964b3af81c` on each of the three capture lanes
 (`darwin-floor`, `darwin-current`, `linux-current`) recorded in the
 [toolchain matrix](M2-toolchain-matrix.md). The candidates the records name,
-`2a8d752` for the first eight and `5bef363` for the five Amendment 4 added,
+`2a8d752` for the first eight, `5bef363` for four of the five Amendment 4
+added, and `824ebc5` for the thirteenth as re-taken under Amendment 8,
 remain reachable from that candidate, and each `restored_sha256` equals the
 named candidate's bytes for its artifact.
 
