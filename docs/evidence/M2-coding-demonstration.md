@@ -87,18 +87,18 @@ Each run reports what it observed on the diagnostic stream, beside its
 attestation identifiers, in the form
 
 ```text
-loopex demonstration observed: tools=<comma-separated tool ids> files=<comma-separated> ending=<done|not-done>
+loopex demonstration observed: turns=<count> tool_calls=<count> effects=<count> refusals=<plus-separated outcomes> tools=<comma-separated tool ids> files=<comma-separated> ending=<done|not-done>
 ```
 
 so a reviewer reads what the run did rather than inferring it from a pass. The
 gate's selector runner suppresses the test formatter, and without this a failed
 assertion reaches an operator as "the selector failed" and nothing else.
 
-Observed at the captured product source candidate `2c6b3a1`, the attended run
+Observed at the captured product source candidate `a1775d0`, the attended run
 reported:
 
 ```text
-loopex demonstration observed: tools=loopex.read,loopex.edit,loopex.write,loopex.bash files=.git,notes.md,summary.txt ending=done
+loopex demonstration observed: turns=7 tool_calls=6 effects=4 refusals=denied+denied tools=loopex.read,loopex.edit,loopex.write,loopex.bash files=.git,notes.md,summary.txt ending=done
 ```
 
 All four coding tools ran across seven real provider calls, every committed
@@ -153,6 +153,6 @@ supplied the policy directly.
 ## Related
 
 - [Real-call attestations](M2-real-call-attestations.md) — the retained provider response identifiers a reviewer looks up.
-- [Negative demonstrations](M2-negative-demonstrations.md) — eight safeguards disabled one at a time.
+- [Negative demonstrations](M2-negative-demonstrations.md) — thirteen safeguards disabled one at a time.
 - [Toolchain matrix](M2-toolchain-matrix.md) — the three lanes the gate captures.
 - [Evidence index](README.md).
