@@ -1336,3 +1336,32 @@ Acceptance row to its exact proposal. It does not close `M2`, accept a closure
 candidate, authorize product integration, authorize a release, or dispose of
 any recorded limitation. The milestone remains `In review`.
 
+<a id="disposition-m2-gate-amendment-8-2026-09-02"></a>
+### M2 gate Amendment 8 acceptance — 2026-09-02
+
+The maintainer explicitly accepted
+[Amendment 8](../plans/M2-gate.md#amendment-8) to the accepted `M2` plan pair
+and locked gate as proposed at exact candidate
+`d16b9703fbd39697bb7727eba8914c29823f3bc6`, **without the independent exact-SHA review the
+ordinary amendment transaction requires**, as a recorded maintainer override.
+Acceptance binds the amended normative envelopes and gate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept envelope | `sha256:d2891e3b4d24db846da01606ef64090ee3098532bd7b29540a1557de320d4a7c` |
+| Technical depth envelope | `sha256:d2c1350b56e0f63a8986b38e452d2c3adc0bab26ab760764f331dd178b7628ca` |
+| Gate | `sha256:71bdfe69420b2798043cd5360df09ff8d53a4375086e3128278df34aae44e6c4` |
+
+Amendment 8 adds one locked case to the provider-attempt role that drives a
+duplicate permit request as the coordinator itself and asserts the exact
+one-use refusal, because closure review found the existing duplicate request
+refused on ownership before the spent-identity check ran. The role's minimum
+rises to twenty-five. Both plan envelopes are unchanged. The override rests on
+the case being the one the review specified; it is the sixteenth recorded
+override of this milestone.
+
+**Scope of this record.** It accepts Amendment 8 alone and rebinds the `M2`
+Acceptance row to its exact proposal. It does not close `M2`, accept a closure
+candidate, authorize product integration, authorize a release, or dispose of
+any recorded limitation. The milestone remains `In review`.
+
