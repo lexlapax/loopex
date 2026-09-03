@@ -731,3 +731,27 @@ that owns publication; it changes a documented durability invariant and is
 scheduled for the milestone that adds multi-session hosts, with the fence
 cases extended to deferred reads.
 
+<a id="closure-review-repairs"></a>
+## Corpus repairs after the first closure review
+
+**Rule.** Locked test names and minimum counts are immutable; assertion content
+follows the accepted contract it proves.
+
+**What is true.** The first independent exact-SHA closure review found that the
+locked duplicate-permit assertion was refused on ownership before the one-use
+check ran, and a follow-on sweep of the locked selectors for the same shape
+found three more: no mutant reached the refusal-to-terminal indivisibility
+guard, one context-receipt mutant was refused by the request digest rather
+than the receipt relation, and one executor deadline case accepted a
+pre-effect refusal as a mid-effect stop. Amendment 8 locked a new
+duplicate-permit case; the other three were repaired inside their existing
+cases with decisive mutants, and the receipt-relation repair also restaged the
+four sibling mutants that the same digest had been refusing. One production
+gap surfaced with the first: the indivisibility guard was applied to internal
+rows only, and now also refuses a validly stamped command row inside a
+refusal pair. Names and counts are unchanged.
+
+**Disposition.** Maintainer, 2026-09-03: approved as the closure-review repair
+set. Eighteenth recorded override; each repair carries its decisiveness
+evidence in the worker report retained with the milestone's evidence.
+

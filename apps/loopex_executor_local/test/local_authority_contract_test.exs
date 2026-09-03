@@ -411,7 +411,28 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     result = Local.execute(local, request, grant(request), [], nil)
 
-    refute match?({:ok, %{outcome: :completed}}, result)
+    # Concept: only an effect that actually started can show that a later
+    # transition reused the deadline the handoff fixed.
+    #
+    # Technical depth: `refute match?({:ok, %{outcome: :completed}}, result)` is
+    # equally satisfied by `{:error, {:refused_before_effect,
+    # :effective_deadline_reached}}`, which is what a setup slower than this
+    # job's 100 ms window produces -- the job never starts, the second clock
+    # reading is never taken, and the case says nothing about refreshing. The
+    # shape that carries the claim is the post-start stop: an outcome that is
+    # unproven or failed, on a receipt whose note names a deadline that passed
+    # while this tool was already running.
+    refute match?({:error, {:refused_before_effect, _reason}}, result),
+           "the job never started, so nothing observed the later reading: #{inspect(result)}"
+
+    assert {:ok, %{outcome: outcome, output: output}} = result
+
+    assert outcome in [:outcome_unknown, :failed],
+           "a job stopped at its deadline cannot report a proven outcome"
+
+    assert output =~ "deadline passed while this tool was running",
+           "the receipt does not name a stop that happened after the tool started"
+
     refute File.exists?(Path.join(fixture.workspace, "clock-no-refresh.txt"))
   end
 

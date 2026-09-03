@@ -693,12 +693,34 @@ defmodule Loopex.ContextAdmissionTest do
           {:mismatched_run,
            List.update_at(all_records, terminal_index, fn row ->
              put_in(row, [:payload, "run_id"], "r_other")
-           end)}
+           end)},
+          {:validly_stamped_intervening, insert_renumbered(all_records, terminal_index, failure)}
         ] do
       assert {:error, _reason} =
                SessionState.recover(session_id, malformed, events(overflow, session_id)),
              "#{label} deadline pair replayed"
     end
+
+    # Concept: the only thing left to refuse the row above is where it sits.
+    #
+    # Technical depth: every other mutant here is refused before the tail guard
+    # is reached -- `:intervening` by the kind allowlist, `:duplicate_first` by
+    # the owner stamp, `:mismatched_run` by the terminal's own relations -- so
+    # replacing the guard body with `true` left this loop green.
+    # `:validly_stamped_intervening` carries the same admitted
+    # `deadline_staging_failed_v1` payload, renumbered so it takes the terminal's
+    # journal version and every later row moves up with it, which leaves nothing
+    # but its position to object to. Removing that one row from the same
+    # renumbered corpus must replay, or the renumbering would be the refusal.
+    assert {:ok, _renumbered} =
+             SessionState.recover(
+               session_id,
+               all_records
+               |> insert_renumbered(terminal_index, failure)
+               |> drop_renumbered(terminal_index),
+               events(overflow, session_id)
+             ),
+           "renumbering alone refused the deadline pair"
   end
 
   test "prompt steer and follow-up refusal commit-unknown re-present one exact command binding" do
@@ -1313,12 +1335,6 @@ defmodule Loopex.ContextAdmissionTest do
                ["context_receipt", "descriptor_canonicalization_version"],
                "loopex.canonical.unknown"
              )
-           end},
-          {:message_substitution,
-           fn payload ->
-             update_in(payload, ["request", "messages"], fn [first | rest] ->
-               [Map.put(first, "content", "substituted") | rest]
-             end)
            end}
         ] do
       malformed = mutate_model_request(base_records, mutate)
@@ -1389,15 +1405,37 @@ defmodule Loopex.ContextAdmissionTest do
          [first | rest] = staged.tools
          changed = Map.update!(first, "description", &same_size_substitution/1)
          %{staged | tools: [changed | rest]}
+       end},
+      # Technical depth: this substitution used to be written straight into the
+      # committed `request` payload beside the receipt mutants, where
+      # `Loopex.Model.validate_request/1` refused it for a canonical request
+      # digest mismatch before `validate_context_receipt/5` ran at all -- the
+      # refusal it asserted was never the receipt's. Restaged here it carries a
+      # digest that matches its own bytes, and unlike its same-size neighbours it
+      # also moves the block's byte and token costs, so the receipt is left to
+      # answer for the whole of it.
+      {:message_substitution,
+       fn staged ->
+         [first | rest] = staged.messages
+         %{staged | messages: [Map.put(first, "content", "substituted") | rest]}
        end}
     ]
 
+    # Technical depth: the record carries the staged-request digest twice, once
+    # at the top of the payload and once inside the encoded request, and replay
+    # compares the two before it reads the receipt. Restaging only the inner
+    # copy left every mutant below refused by that comparison, so the receipt
+    # relation this case is named for was never reached. Carrying the restaged
+    # digest to both places is what leaves the receipt as the only remaining
+    # objection to a request that is entirely self-consistent.
     for {label, mutate} <- request_mutations do
       mutated_request = restage_request(mutate.(request))
 
       malformed =
         mutate_model_request(record_prefix, fn payload ->
-          Map.put(payload, "request", encode_plain_for_record(mutated_request))
+          payload
+          |> Map.put("request", encode_plain_for_record(mutated_request))
+          |> Map.put("staged_request_digest", mutated_request.staged_request_digest)
         end)
 
       assert {:error, _reason} = SessionState.recover(session_id, malformed, event_prefix),
@@ -1757,7 +1795,12 @@ defmodule Loopex.ContextAdmissionTest do
       {:unknown_member,
        List.update_at(base_records, refusal_index, fn record ->
          put_in(record, [:payload, "unexpected"], true)
-       end), base_events}
+       end), base_events},
+      {:validly_stamped_intervening, insert_renumbered(base_records, terminal_index, refusal),
+       base_events},
+      {:intervening_command,
+       insert_renumbered(base_records, terminal_index, intervening_command_row(refusal)),
+       base_events}
     ]
 
     for {label, malformed_records, malformed_events} <- malformed do
@@ -1765,6 +1808,41 @@ defmodule Loopex.ContextAdmissionTest do
                SessionState.recover(session_id, malformed_records, malformed_events),
              "#{label} context pair replayed"
     end
+
+    # Concept: an indivisible pair is one the journal cannot interleave with any
+    # row at all, not merely with the rows some other check happens to catch.
+    #
+    # Technical depth: the mutants above this pair are each refused before the
+    # tail guard runs, so replacing its body with `true` left them green.
+    # `:validly_stamped_intervening` re-presents the admitted
+    # `context_admission_refused_v1` payload and `:intervening_command` a
+    # no-effect `command_admission_refused_v1` row; both are correctly stamped,
+    # both apply cleanly on their own, and the corpus is renumbered around them,
+    # so position is the only objection left. These two controls prove that:
+    # dropping the intervening row from the same renumbered corpus replays, and
+    # the identical command row placed past the terminal -- where no marker is
+    # pending -- replays as ordinary history.
+    assert {:ok, _renumbered} =
+             SessionState.recover(
+               session_id,
+               base_records
+               |> insert_renumbered(terminal_index, refusal)
+               |> drop_renumbered(terminal_index),
+               base_events
+             ),
+           "renumbering alone refused the context pair"
+
+    assert {:ok, _after_terminal} =
+             SessionState.recover(
+               session_id,
+               insert_renumbered(
+                 base_records,
+                 terminal_index + 1,
+                 intervening_command_row(refusal)
+               ),
+               base_events
+             ),
+           "the same command row is inadmissible even clear of the pair"
   end
 
   test "revision two phase and cross version replay fail closed in both directions" do
@@ -2401,6 +2479,62 @@ defmodule Loopex.ContextAdmissionTest do
 
   defp record_kind(%{payload: payload}), do: record_kind(payload)
   defp record_kind(item) when is_map(item), do: Map.get(item, :kind) || Map.get(item, "kind")
+
+  # Concept: a row inserted into durable history has to look like history.
+  #
+  # Technical depth: the owner stamps consecutive journal versions, so an
+  # inserted row that keeps its donor's version is refused by the stamp long
+  # before anything reads what it says. Renumbering the insertion point and
+  # everything after it is what strips that easy refusal away and leaves the row
+  # arguing only from its position.
+  defp insert_renumbered(records, index, row) do
+    previous = Enum.at(records, index - 1)
+    stamped = %{row | journal_version: previous.journal_version + 1}
+
+    records
+    |> List.insert_at(index, stamped)
+    |> renumber_from(index + 1, 1)
+  end
+
+  defp drop_renumbered(records, index) do
+    records
+    |> List.delete_at(index)
+    |> renumber_from(index, -1)
+  end
+
+  defp renumber_from(records, index, delta) do
+    records
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {record, position} when position >= index ->
+        %{record | journal_version: record.journal_version + delta}
+
+      {record, _position} ->
+        record
+    end)
+  end
+
+  # Technical depth: an oversized command admission is the one command row that
+  # installs no run, resolves no queue, and emits no public event, so it applies
+  # cleanly wherever it is placed. That is exactly what a positional invariant
+  # needs to be attacked with: any other command kind would be refused for its
+  # own reasons and prove nothing about where it sat.
+  defp intervening_command_row(donor) do
+    %{
+      donor
+      | payload: %{
+          :kind => "command_admission_refused_v1",
+          "command_id" => "c_intervening",
+          "command_digest" => "d_intervening",
+          "command_type" => "steer",
+          "admission" => "rejected_durable_candidate_bytes",
+          "dimension" => "command_record_bytes",
+          "candidate" => "steer_record",
+          "observed" => @record_limit + 1,
+          "limit" => @record_limit
+        }
+    }
+  end
 
   defp assert_revision_two_snapshot(snapshot, session_id, event_sequence, phase) do
     assert Enum.sort(Map.keys(snapshot)) ==
