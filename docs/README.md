@@ -13,7 +13,7 @@ order. This file is the index of what exists.
 | Directory | Contents |
 | --- | --- |
 | [operator/](operator/README.md) | How a run works with its flow and component diagrams; coding-session, tool, policy, runtime, shutdown, and recovery runbooks. |
-| [developer/](developer/README.md) | Development method, routing, and retained client evidence. |
+| [developer/](developer/README.md) | System architecture with its diagrams, development method, routing, and retained client evidence. |
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
 | [evidence/](evidence/README.md) | Retained gate run evidence. |
@@ -35,6 +35,7 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | --- | --- | --- | --- |
 | Product vision | [Vision](vision.md#concept) | [Vision technical depth](vision-technical.md#technical-depth) | Founding authority; the pair is one source. |
 | Capability guidance | [Roadmap](roadmap.md#concept) | [Roadmap technical depth](roadmap-technical.md#technical-depth) | Non-normative projection; accepted plans authorize work. |
+| System architecture | [Architecture](developer/architecture.md#concept) | [Architecture technical depth](developer/architecture-technical.md#technical-depth) | Descriptive: applications, ports, truth planes, and invariants as implemented; accepted ADRs remain the deciding authority. |
 | Development method | [Development charter](developer/development-charter.md#concept) | [Charter technical depth](developer/development-charter-technical.md#technical-depth) | Shared development form and review expectations. |
 
 ## Decisions
