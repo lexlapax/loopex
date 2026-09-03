@@ -13,9 +13,18 @@ cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
 command -v mix >/dev/null 2>&1 || exit 0
 [ -f mix.exs ] || exit 0
 
-if ! mix loopex.deps_budget "$@" >/dev/null 2>&1; then
-  mix loopex.deps_budget "$@" >&2 || true
-  echo "Blocked: the dependency budget rejects this change (ADR 0001)." >&2
-  exit 2
+# Run once and reuse what it said. Running it twice -- silently to decide, then
+# again to report -- let the two runs disagree: a build left mid-write by a
+# killed process failed the first and recompiled successfully on the second, so
+# the hook blocked while printing "dependency budget and direction hold". A
+# block whose own evidence contradicts it is a block nobody believes.
+# The capture sits in the condition because `set -e` would otherwise abort on a
+# failing assignment before the status could be read -- which would exit with
+# the command's own code and no explanation at all.
+if output="$(mix loopex.deps_budget "$@" 2>&1)"; then
+  exit 0
 fi
-exit 0
+
+printf '%s\n' "$output" >&2
+echo "Blocked: the dependency budget rejects this change (ADR 0001)." >&2
+exit 2

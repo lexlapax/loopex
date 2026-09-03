@@ -23,6 +23,12 @@ defmodule Loopex.Store.Local do
   stored frame to equal the transition it should have produced, so replay audits
   commit-time fencing instead of granting stale write authority.
 
+  Startup establishes the log file itself, not merely its path, and every append
+  is fenced against that identity. A log unlinked or replaced underneath a live
+  Store therefore ends the process commit-ambiguously instead of being recreated
+  around the frame in flight, which would leave a headless history that recovery
+  must refuse.
+
   Before startup exposes replayed state, the recovered file and parent
   directory are synced again. Thus complete bytes left readable after an
   interrupted write cannot become an acknowledged retained outcome until a
@@ -95,6 +101,11 @@ defmodule Loopex.Store.Local do
   end
 
   @impl Store
+  def runtime_command(reference, command) do
+    GenServer.call(reference, {:runtime_command, command}, @call_timeout)
+  end
+
+  @impl Store
   def ownership_head(reference, session_id, mutation_domain) do
     GenServer.call(reference, {:ownership_head, session_id, mutation_domain}, @call_timeout)
   end
@@ -112,7 +123,7 @@ defmodule Loopex.Store.Local do
   @impl GenServer
   def init(options) do
     with {:ok, path} <- fetch_path(options),
-         :ok <- Log.prepare_path(path),
+         {:ok, log_identity} <- Log.prepare_path(path),
          {:ok, writer_lock} <-
            WriterLock.acquire(path, Keyword.get(options, :recover_stale_writer, false)),
          {:ok, frames, tail} <- Log.read(path),
@@ -122,6 +133,7 @@ defmodule Loopex.Store.Local do
       {:ok,
        %{
          path: path,
+         log_identity: log_identity,
          store: state,
          fault_probe: Keyword.get(options, :fault_probe),
          writer_lock: writer_lock
@@ -151,6 +163,10 @@ defmodule Loopex.Store.Local do
         state
       ) do
     {:reply, State.transaction_status(state.store, session_id, mutation_domain, tx_id), state}
+  end
+
+  def handle_call({:runtime_command, command}, _from, state) do
+    {:reply, State.runtime_command(state.store, command), state}
   end
 
   def handle_call({:ownership_head, session_id, _mutation_domain}, _from, state) do
@@ -187,7 +203,7 @@ defmodule Loopex.Store.Local do
   defp commit_new(state, transaction, next_store, frame, outcome) do
     with {:ok, transition} <- Transitions.id(transaction),
          :continue <- checkpoint(state.fault_probe, transition, :before_linearization),
-         :ok <- Log.append(state.path, frame) do
+         :ok <- Log.append(state.path, frame, state.log_identity) do
       committed = %{state | store: next_store}
 
       case checkpoint(

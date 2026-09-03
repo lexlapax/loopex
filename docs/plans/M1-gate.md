@@ -148,14 +148,14 @@ and can print neither `CAPTURE` nor `M1 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `5bf3fc51a129a94d4eb1aeda315de501c1d0ca30d429c8d8378c6bed1d39a0e3` | `scripts/check-m1-gate.sh` |
+| `f9be16dd686fe0dc24847d3628bda890437728d154a4935d84cf397c6d166756` | `scripts/check-m1-gate.sh` |
 | `4bba03d218eee656991444a3c22c8753bfef1ab86f688036a4440048752f48bd` | `scripts/m1-gate-launcher.escript` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
-| `360ed080598e757d03fc33ac003f24cc2bb787de423f8df4bc62d1d77221572c` | `scripts/m1-evidence-verifier.exs` |
-| `1b9d41d083ace5f39ac9af0c289065d9eb52aea129d04c174b1acc63d33b6861` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
-| `b3789f57e8c57216f48d62a9bec38156d18d1a42ccffe009d0567ede7ab11453` | `apps/loopex/test/m1_gate_evidence_test.exs` |
+| `3e742f052f72aaea952cb8173692a3fd10f998a79c1dc35e1072d9e46657786c` | `scripts/m1-evidence-verifier.exs` |
+| `56d8e71b90af183d02e7e46d3bf10aae48129e3466e19325b40a81ea8abf31e9` | `apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` |
+| `f97927194c5ab97d0ae20fc9a6586a53b838cea6998307e3c88d96fe8ec9773c` | `apps/loopex/test/m1_gate_evidence_test.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
-| `36d86e989d39507b971c3be6726d300373ceebc2c80b2574a21fd2d32604d750` | `apps/loopex/test/deps_budget_test.exs` |
+| `9705bcd08f7d0b4b4e2d36c745f4fbf732d751a48fdc369aacb6ca99e8f598ac` | `apps/loopex/test/deps_budget_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 
 These are the complete M1-specific verdict machinery and its adversarial
@@ -415,7 +415,7 @@ reported passed by the authoritative channel.
 - `fake stdout at_exit and early halt cannot manufacture one authoritative result`
 - `only the declared internal dependency closure is reachable and startup never receives the provider key`
 
-`apps/loopex/test/deps_budget_test.exs`, minimum 25:
+`apps/loopex/test/deps_budget_test.exs`, minimum 28:
 
 - `the repository satisfies the dependency budget and direction`
 - `a forbidden core dependency is rejected`
@@ -494,11 +494,13 @@ m0 lane=current candidate=<C> gate_sha256=<M0 digest> command=bash:scripts/check
 ```
 
 The self-contained bound verifier checks exact grammar/cardinality, pair and
-command identity, numeric fields, all seven M1 metadata digests against both `C`
-and the current bytes, all three capture rows' exact OS/toolchain and
+command identity, numeric fields, all seven M1 metadata digests against `C`,
+all three capture rows' exact OS/toolchain and
 runtime-bound real-path identities, independently valid architecture and limits,
 identity equality across lanes except for observation time, the immutable M0
-gate digest against `C` and current bytes, and the two exact M0 lane rows.
+gate digest against `C`, and the two exact M0 lane rows. Amendment 8 supersedes
+the current-bytes half of both digest requirements in this paragraph: the seven
+M1 metadata digests and the M0 gate digest are each checked against `C` alone.
 Retained audit tokens are printable ASCII, so Unicode lookalikes or direction
 controls cannot change what a reviewer sees. The verifier does not import
 generic Matrix or status parsers. No-argument `mix loopex.matrix` remains the
@@ -546,8 +548,9 @@ The exact key order is:
 ```
 
 The verifier rejects any other skeleton, JSON encoding, key order/set,
-mechanism/selector pairing, unsafe path, unreachable candidate, or digest. The
-candidate blob and current tracked ordinary artifact bytes must both equal the
+mechanism/selector pairing, unsafe path, unreachable candidate, or digest.
+Amendment 8 supersedes the current-bytes half of the following clause: the
+candidate blob alone must equal the
 recorded restored digest. The shell separately requires the whole tree clean
 before and after. Machines prove structure and restoration identity; review
 proves one clean-baseline mechanism was disabled and caused the named failure.
@@ -930,3 +933,226 @@ directly and retain safe decoding. After independent exact-SHA review and
 explicit maintainer acceptance, immediate child `R` adds one new disposition
 anchor and rebinds Acceptance to `A`; no product, selector, gate, envelope, or
 other byte may change in `R`. Fresh source-candidate captures remain required.
+
+<a id="amendment-transaction-v2"></a>
+<a id="amendment-7"></a>
+
+## Amendment 7 — Admit the M2 Application Inventory and Composition Role
+
+**Acceptance: OUTSTANDING.** This section declares generation 7 and rebinds the
+two artifacts that carry `M1`'s planned application inventory and role rules.
+`M1` is `Closed`, so its Acceptance and Closure rows bind the same gate digest
+and the `amendment-transaction-v1` rebind cannot reach it: rebinding Acceptance
+alone would leave Closure naming bytes that no longer exist. This amendment
+therefore uses the additive transaction marked `amendment-transaction-v2`. Both
+authority rows stay byte-immutable and neither is made retroactively false; the
+plan gains one append-only `## Gate Generations` table instead.
+
+`M2` ships an operator command and the wiring application that command depends
+on, which the accepted `M2` plan pair names as its first disposed decision. Two
+artifacts and no third carry that change:
+
+`apps/loopex/lib/mix/tasks/loopex.deps_budget.ex` froze the repository at exactly
+six applications with the reference client as the only `:client`, and its role
+set contained no `:composition` at all. The eight-application inventory now
+admits `apps/loopex_composition` with role `:composition` and `apps/loopex_cli`
+with role `:client`. A `:composition` declares a production dependency on
+`:loopex`, may also depend on `:loopex_protocol`, declares production
+dependencies on the in-umbrella `:edge` applications it composes, may declare no
+external dependency in any environment, and may depend on no `:client` and on no
+other `:composition`. A `:client` may now declare a production dependency on at
+most one `:composition`, still declares no external dependency, still may
+compose `:edge` applications only in tests, and still may not depend on another
+`:client`. `:extension` is untouched and survives the edit.
+
+`apps/loopex/test/deps_budget_test.exs` is that source's adversarial corpus. Its
+minimum rises from 25 to 28 because the new role is a separate claim from the
+client rule that consumes it: a corpus proving only the client side would leave a
+composition free to declare an external dependency or to depend on a client. The
+three added cases prove the exact eight-application inventory in both directions,
+the composition role's own permitted and forbidden edges, and the client rule
+that admits one composition and no second client.
+
+This amendment adds no scope, changes no outcome, and reopens no lifecycle state.
+It alters no product behaviour, no persistence, no public contract, no protected
+selector identity outside the one minimum stated above, no provider path, no
+fault point, no evidence class, no toolchain lane, no closure document, and no
+transition shape, and it removes or weakens no protected assertion.
+
+At proposal `A` the generation row below carries its gate digest and no
+candidate, because a commit cannot name its own hash. The row is therefore
+pending, which means the current gate binds bytes no authority has accepted, so
+binding validation, bootstrap, and every inherited gate that invokes them are red
+at `A` exactly as they are at a `v1` proposal. Binding-independent checks and the
+amended corpus must pass directly at `A`. After independent exact-SHA review and
+explicit maintainer acceptance, the immediate child `R` completes that row's
+authority, disposition, and the candidate it binds, which is exact `A`, and adds
+one new amendment-specific disposition anchor to an existing durable document. No
+product, selector, gate, envelope, or other byte may change in `R`.
+
+<a id="amendment-8"></a>
+
+## Amendment 8 — Let This Gate Be Run Again
+
+**Acceptance: OUTSTANDING.** This section declares generation 8 and rebinds the
+three artifacts that carry it. `M1` is `Closed`, so this uses the additive
+transaction marked `amendment-transaction-v2` for the reasons Amendment 7
+states: both authority rows stay byte-immutable and the plan's append-only
+`## Gate Generations` table gains one row.
+
+`scripts/m1-evidence-verifier.exs` asserted retained evidence against the
+working tree as well as against the revision that evidence names. Retained
+evidence describes the revision it ran at; asserting anything about a later
+reader's tree turns a record of the past into a claim on the future. The
+working-tree assertions are removed in all three places they appeared — the
+seven matrix metadata digests, the negative records' artifacts, and the closed
+`M0` gate document — and every check against the candidate a record names stays.
+The two earlier paragraphs of this gate that stated the current-bytes rule are
+marked superseded where they stand, covering all three requirements.
+
+Two of the three had fired. Each has an exact onset revision.
+
+The retained toolchain matrix binds seven artifacts, one being
+`docs/plans/M1-gate.md` itself, and amending the gate is precisely what a
+generation does. **Matrix source candidate `C`, `53b40187`, already carried
+Amendments 1 through 6**, so the matrix digest `bfc61ad1` covers them and none of
+those six ever caused a mismatch. The gate document first diverged at `cd19347`,
+the generation 7 proposal — the first amendment taken after closure — and no
+revision from there through this amendment's parent `54e6510` could verify. `C` is the matrix's source candidate and
+not the revision Closure binds; Closure binds evidence commit `E`, `72586569`, as
+this gate's own `C`→`E`→`T` description sets out.
+
+A negative demonstration's artifact was required to still hold its restored
+bytes today. `restored` means the experimenter reverted the mutation before
+committing, which the candidate check proves; the working-tree check instead
+froze ordinary product code. `apps/loopex_executor_local/lib/executor.ex` is one
+such artifact, and it first diverged from its recorded digest at `e1fcac3`,
+where `M2` gave the runtime a real turn machine.
+
+The third, the closed `M0` gate document, **never fired**: that document has not
+changed. It is corrected preventively, for the same reason, rather than left as
+the next one to go off.
+
+Current-ness is still enforced, in the place equipped to do it: the repository
+status check validates each bound artifact against the latest accepted
+generation, which `apps/loopex/test/history_anchoring_test.exs` proves for
+matching, mismatched, and missing artifacts. This verifier is generation-blind
+and cannot, which is exactly why it was the wrong place to assert it.
+
+`apps/loopex/test/m1_gate_evidence_test.exs` is that source's adversarial corpus
+and is rebound with it, for two reasons.
+
+Two of its cases asserted the removed behaviour and would otherwise fail at `A`.
+Each now proves the boundary that replaced it across all seven bound artifacts,
+the closed `M0` gate document, and all five negative records, so an
+implementation keeping the removed rule for a single path cannot pass. No case
+name, count, or minimum changes.
+
+The second reason is a set of gaps that predate this amendment, each found by
+deleting a production comparison and watching this corpus stay green.
+
+The mutation loop over a negative record altered grammar, mechanism, selector,
+candidate, encoding, and section structure, and never altered
+`restored_sha256`, so the comparison giving that field its meaning was
+unprotected. The substitution now runs over each of the five records, because an
+implementation skipping one mechanism while applying the rest would otherwise
+pass.
+
+The seven capture-digest cases mutated the matrix in the working tree and
+asserted only that something was refused. That broke a different rule first —
+the evidence child `E` must be a direct child of `C` whose committed matrix
+equals the one being read — so the verifier answered on lifecycle shape and the
+candidate comparison was never reached; deleting all seven comparisons left the
+corpus green. Each case now rebuilds `E` on the mutated matrix so the comparison
+is what answers, and asserts the candidate diagnostic so it cannot drift back to
+passing for the wrong reason.
+
+The inherited `M0` proof had no case at all for its candidate comparison. Both
+`M0` rows carry the same digest and are checked against each other before either
+is checked against the repository, so changing both together satisfies grammar
+and row agreement; only the candidate comparison stands between a false
+inherited proof and acceptance. A case now falsifies both rows together and
+requires that comparison to answer.
+
+`scripts/check-m1-gate.sh` carries its own inline copies of digests this
+document's Bound Artifacts table also names. Amendment 7 rebound two table rows
+and not the script's copies of the same two, so from that revision the gate also
+refused its own accepted bytes. All eight inline digests were checked against
+disk and against their table rows rather than assumed.
+
+A further cause was fixed outside this transaction in a preceding commit,
+because a locked selector is not a bound artifact.
+`apps/loopex_reference_client/test/end_to_end_recovery_test.exs` had a comment
+and a timeout tag inserted between its `@tag :real_provider` and the locked test,
+and this gate reads that tag positionally, so the case was silently untagged.
+
+<a id="amendment-8-inherited-gate-enforcement"></a>
+
+### Decision owed: no entrypoint enforces that existing gates stay green
+
+This amendment restores the ability to run this gate. It does **not** close the
+reason nobody noticed it was failing, and accepting this generation disposes of
+nothing about that: a generation adds no scope. The decision is stated here in
+full rather than left as alternatives for the maintainer to triage.
+
+**The constraint.** `AGENTS.md` requires that existing gates stay green outside
+the bounded lookahead. No repository entrypoint enforces it.
+`scripts/check-m2-gate.sh` opens with component checks and re-proves the closed
+`M0` gate through two retained matrix rows; it never invokes this gate. An `M1`
+evidence, environment-preflight, or orchestration check can therefore go red
+while `M1`'s bound artifacts and inherited selectors all still pass, and neither
+the status check nor `M2`'s gate will say so. That is how a whole milestone was
+delivered against a gate that could not pass.
+
+| Option | Stability | Modularity | Extensibility | Repercussions |
+| --- | --- | --- | --- | --- |
+| **A.** Amend `M2`'s gate to invoke the complete `M1` gate | Highest: one command added to a sequence that already runs gates | Poor: each milestone must remember its predecessor | Poor: `M3` repeats the decision | An `amendment-transaction-v1` on an Accepted plan — proposal, exact-SHA review, acceptance, rebind — plus re-taking every real-provider evidence record, since the gate's own bytes change |
+| **B.** A governed closed-gate aggregate, with its invocation itself enforced | Moderate: new machinery, and a closed gate that cannot pass then blocks every successor | Best: one entrypoint owns the rule | Best, **but only if invocation is structurally verified** — see below | New scope `M2` did not plan; needs its own acceptance, and lands novel enforcement during closure |
+| **C.** Explicit maintainer waiver, retaining exact-SHA evidence of this gate green | Highest: no artifact changes | None: the rule stays unenforced | None: the next milestone meets it again | Non-delegable under `AGENTS.md`; leaves a known unenforced requirement, and its protection is one retained run rather than a check |
+
+Option A is the option that changes the constraining artifact, and it is
+enumerated even though `M2`'s gate is locked and Accepted; its transaction cost
+is stated above rather than treated as a reason not to ask.
+
+**B does not work as stated unless its invocation is itself enforced.** An
+aggregate that each successor gate is merely expected to call reproduces this
+exact blind spot one level up: `M3` introduces it, `M4` omits the call, and the
+aggregate exists while never running. Whichever form B takes must therefore
+either put invocation in a repository entrypoint that owns it rather than in
+each gate, or make one mandatory call per successor gate structurally verified —
+a check that fails when a milestone gate does not invoke it. Without that, B is
+Option C with more machinery.
+
+**Recommendation: C for `M2`, with B planned into `M3` as accepted scope.** `M2`
+neither planned nor budgeted this enforcement, and adding it mid-closure is the
+kind of unplanned scope a gate exists to refuse. The evidence a waiver would
+retain is producible for the first time only because this generation makes the
+gate runnable at all. B is the durable answer and belongs in a milestone that
+plans for it, where a closed gate blocking its successors is a designed
+consequence rather than a surprise. A is available if the enforcement must be
+executable before `M2` closes and `M3` is too far off; its evidence re-take is
+the price.
+
+This decision is owed before `M2` closes and is the maintainer's.
+
+This amendment adds no scope, changes no outcome, and reopens no lifecycle state.
+It alters no product behaviour, no persistence, no public contract, no protected
+selector identity, no minimum, no provider path, no fault point, no toolchain
+lane, no closure document, and no transition shape. It changes one evidence
+claim and says so plainly: retained evidence now proves what the revision it
+names carried, and no longer asserts that those bytes were never touched again.
+Every digest it writes names bytes this repository already carries.
+
+None of the three rebound artifacts is bound by any other gate, so this rebind
+involves no artifact another holder also binds and no transaction but this one.
+
+At proposal `A` the generation row below carries its gate digest and no
+candidate, because a commit cannot name its own hash. The row is therefore
+pending, which means the current gate binds bytes no authority has accepted, so
+binding validation, bootstrap, and every inherited gate that invokes them are red
+at `A` exactly as they are at a `v1` proposal. Binding-independent checks and the
+amended corpus must pass directly at `A`. After independent exact-SHA review and
+explicit maintainer acceptance, the immediate child `R` completes that row's
+authority, disposition, and the candidate it binds, which is exact `A`, and adds
+one new amendment-specific disposition anchor to an existing durable document. No
+product, selector, gate, envelope, or other byte may change in `R`.

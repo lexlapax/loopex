@@ -18,7 +18,9 @@ defmodule Loopex do
   """
 
   alias Loopex.Attachment
+  alias Loopex.ResumeActivation
   alias Loopex.Runtime
+  alias Loopex.SessionDirectory
 
   @version Mix.Project.config()[:version]
 
@@ -68,17 +70,21 @@ defmodule Loopex do
 
   ## Technical depth
 
-  Session options become the genesis payload of the Store's atomic
-  runtime-control transaction. Acknowledgement waits for both that commit and a
-  fresh session-owner succession. Exact command re-presentation returns the
-  retained session ID; changed canonical genesis conflicts.
+  Session options become the `options` member of the `session_genesis_v2`
+  payload of the Store's atomic runtime-control transaction; the runtime's
+  committed cleanup period becomes its `runtime_configuration`. The complete
+  canonical item is measured before the transaction, so an oversized
+  configuration is `session_configuration_too_large` rather than an incidental
+  Store error after session authority was acquired. Acknowledgement waits for
+  both that commit and a fresh session-owner succession. Exact command
+  re-presentation returns the retained session ID; changed canonical genesis
+  conflicts.
   """
   @spec create_session(Runtime.t(), map(), keyword()) :: {:ok, binary()} | {:error, term()}
   def create_session(runtime, session_options, options)
       when is_map(session_options) and is_list(options) do
     with {:ok, command_id} <- Keyword.fetch(options, :command_id) do
-      genesis = %{"options" => session_options, kind: "session_genesis"}
-      Runtime.create_session(runtime, command_id, genesis)
+      Runtime.create_session(runtime, command_id, session_options)
     else
       :error -> {:error, :command_id_required}
     end
@@ -247,4 +253,168 @@ defmodule Loopex do
   """
   @spec reconcile(Attachment.t(), map()) :: :ok | {:error, term()}
   def reconcile(attachment, response), do: Runtime.reconcile(attachment, response)
+
+  @doc """
+  ## Concept
+
+  Resolves this host's session-directory state root, the anchor an operator
+  needs to find and continue earlier work.
+
+  ## Technical depth
+
+  Delegates to `Loopex.SessionDirectory.state_root/0`, which reads only the
+  `LOOPEX_HOME` process environment variable and never application environment.
+  """
+  @spec state_root() :: {:ok, Path.t()} | {:error, :loopex_home_required}
+  def state_root, do: SessionDirectory.state_root()
+
+  @doc """
+  ## Concept
+
+  This host's durable runtime placement identity for a resolved state root,
+  generating and persisting one on first use.
+
+  ## Technical depth
+
+  Delegates to `Loopex.SessionDirectory.runtime_id/1`. A later call against the
+  same state root, including one from a fresh operating-system process,
+  re-presents the same value rather than generating a new one.
+  """
+  @spec runtime_placement_id(Path.t()) :: {:ok, binary()} | {:error, term()}
+  def runtime_placement_id(state_root), do: SessionDirectory.runtime_id(state_root)
+
+  @doc """
+  ## Concept
+
+  Records a session as known to the operator's session directory, bound to the
+  runtime placement identity that created it.
+
+  ## Technical depth
+
+  Delegates to `Loopex.SessionDirectory.record_session/3`. A host calls this
+  after `create_session/3` commits, so a later `list_sessions/1` or
+  `resume_known_session/4` can find it.
+  """
+  @spec track_session(Path.t(), binary(), binary()) :: :ok | {:error, term()}
+  def track_session(state_root, session_id, runtime_id),
+    do: SessionDirectory.record_session(state_root, session_id, runtime_id)
+
+  @doc """
+  ## Concept
+
+  Lists the sessions an operator's state root knows about.
+
+  ## Technical depth
+
+  Delegates to `Loopex.SessionDirectory.list_sessions/1` and reads only the
+  resolved state root's files, so a fresh operating-system process with no
+  runtime started yet sees the same sessions a live host would.
+  """
+  @spec list_sessions(Path.t()) :: {:ok, [SessionDirectory.entry()]} | {:error, term()}
+  def list_sessions(state_root), do: SessionDirectory.list_sessions(state_root)
+
+  @doc """
+  ## Concept
+
+  Resumes a session the operator's state root already knows about, enforcing
+  ADR 0008 runtime placement: the supplied runtime must carry the exact
+  `runtime_id` that created the session, and re-presenting a `command_id`
+  already resolved here returns its historical result instead of contesting
+  ownership again.
+
+  ## Technical depth
+
+  Delegates to `Loopex.SessionDirectory.resume/4`. A placement mismatch is
+  refused before any Store call, as `{:error, {:runtime_placement_mismatch,
+  reason}}` naming the runtime_id the session requires; only a fresh
+  `command_id` acquires a genuine replacement owner.
+  """
+  @spec resume_known_session(Path.t(), Runtime.t(), binary(), binary()) ::
+          {:ok, binary()} | {:error, term()}
+  def resume_known_session(state_root, runtime, session_id, command_id),
+    do: SessionDirectory.resume(state_root, runtime, session_id, command_id)
+
+  @doc """
+  ## Concept
+
+  Acquires a session's owner and rebuilds its history without letting the
+  recovered work start, returning the one-use capability that decides whether it
+  ever does. This is what lets an operator's terminal recover the session's own
+  committed configuration, compare it with what was asked for, and stop the
+  session instead of continuing it — with the work still exactly where the
+  previous process left it.
+
+  ## Technical depth
+
+  ADR 0016's prepared recovery. Ownership, `advance_owner`, and complete
+  private/public reconstruction happen exactly as in `resume_session/3`; only
+  the scheduling of pending work waits. The prepared owner is a current owner in
+  every other respect: it answers `session_status/2`, accepts an attachment, and
+  admits an abort, and an admitted abort permanently invalidates the capability
+  it was given. `{:ok, {:replayed, session_id}}` means this exact `command_id`
+  was already resolved and no new owner was contested, so there is nothing to
+  activate.
+  """
+  @spec prepare_resume_session(Runtime.t(), binary(), binary()) ::
+          {:ok, {:prepared, ResumeActivation.t()}}
+          | {:ok, {:replayed, binary()}}
+          | {:error, term()}
+  def prepare_resume_session(runtime, session_id, command_id)
+      when is_binary(session_id) and is_binary(command_id),
+      do: Runtime.prepare_resume_session(runtime, session_id, command_id)
+
+  def prepare_resume_session(_runtime, _session_id, _command_id),
+    do: {:error, :invalid_session_resume}
+
+  @doc """
+  ## Concept
+
+  Prepared recovery for a session the operator's state root already knows about,
+  enforcing the same ADR 0008 runtime placement that `resume_known_session/4`
+  enforces.
+
+  ## Technical depth
+
+  Delegates to `Loopex.SessionDirectory.prepare_resume/4`. A placement mismatch
+  is refused before any Store call and therefore before any owner is contested;
+  a re-presented `command_id` returns `{:ok, {:replayed, session_id}}` from the
+  state root's own record rather than acquiring a second owner.
+  """
+  @spec prepare_resume_known_session(Path.t(), Runtime.t(), binary(), binary()) ::
+          {:ok, {:prepared, ResumeActivation.t()}}
+          | {:ok, {:replayed, binary()}}
+          | {:error, term()}
+  def prepare_resume_known_session(state_root, runtime, session_id, command_id),
+    do: SessionDirectory.prepare_resume(state_root, runtime, session_id, command_id)
+
+  @doc """
+  ## Concept
+
+  Lets a prepared owner resume its recovered work, once.
+
+  ## Technical depth
+
+  Delegates to `Loopex.ResumeActivation.activate/1`. Only the process that
+  prepared the owner may present the capability, and only while it is unspent,
+  unabandoned, unfenced by an admitted abort, and still held by the runtime's
+  current owner. Every other presentation is refused by name and schedules
+  nothing.
+  """
+  @spec activate_resume(ResumeActivation.t()) :: {:ok, binary()} | {:error, term()}
+  def activate_resume(activation), do: ResumeActivation.activate(activation)
+
+  @doc """
+  ## Concept
+
+  Gives up a prepared owner's capability, leaving its recovered work paused for
+  good.
+
+  ## Technical depth
+
+  Delegates to `Loopex.ResumeActivation.abandon/1`. The owner keeps its
+  ownership and stays reachable for an abort or an operator's later decision;
+  what it can never do afterwards is start the work it recovered.
+  """
+  @spec abandon_resume(ResumeActivation.t()) :: :ok | {:error, term()}
+  def abandon_resume(activation), do: ResumeActivation.abandon(activation)
 end

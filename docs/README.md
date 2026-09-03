@@ -12,7 +12,7 @@ order. This file is the index of what exists.
 
 | Directory | Contents |
 | --- | --- |
-| [operator/](operator/README.md) | Runtime operation, shutdown, and recovery runbooks. |
+| [operator/](operator/README.md) | Coding-session, tool, policy, runtime, shutdown, and recovery runbooks. |
 | [developer/](developer/README.md) | Development method, routing, and retained client evidence. |
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
@@ -52,6 +52,13 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0009 — tool, executor, and grant contracts | [Decision](adr/0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](adr/0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
 | 0010 — provider continuation and exact context staging | [Decision](adr/0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](adr/0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
 | 0011 — session input algebra and streaming progress | [Decision](adr/0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](adr/0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
+| 0012 — executor cancellation capability | [Decision](adr/0012-executor-cancellation-capability.md#concept) | [Technical depth](adr/0012-executor-cancellation-capability-technical.md#technical-depth) |
+| 0013 — run-deadline commitment at first request staging | [Decision](adr/0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](adr/0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
+| 0014 — stream closure at owner loss | [Decision](adr/0014-stream-closure-at-owner-loss.md#concept) | [Technical depth](adr/0014-stream-closure-at-owner-loss-technical.md#technical-depth) |
+| 0015 — artifact object and use identity | [Decision](adr/0015-artifact-object-and-use-identity.md#concept) | [Technical depth](adr/0015-artifact-object-and-use-identity-technical.md#technical-depth) |
+| 0016 — configured cancellation observation | [Decision](adr/0016-configured-cancellation-observation.md#concept) | [Technical depth](adr/0016-configured-cancellation-observation-technical.md#technical-depth) |
+| 0017 — durable context and record admission budgets | [Decision](adr/0017-durable-context-admission-budget.md#concept) | [Technical depth](adr/0017-durable-context-admission-budget-technical.md#technical-depth) |
+| 0018 — provider attempt authority and recovery | [Decision](adr/0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](adr/0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
@@ -69,11 +76,25 @@ whose path or explicit fragment does not resolve.
   Technical depth plan, and executable gate.
 - [Development setup](../DEVELOPMENT.md) — local prerequisites and validation
   commands.
+- [Coding sessions](operator/coding-sessions.md#concept) — running, streaming,
+  steering, resuming, and stopping a coding task with the `loopex` command, the
+  project-resource trust decision, the configuration a resumed session recovers,
+  and what stopping does and does not promise.
+- [Tools and policy](operator/tools-and-policy.md#concept) — the four coding
+  tools, what local execution reaches, host authority, artifacts and how to read
+  one back, and what the local store keeps on disk.
 - [Runtime operations and first run](operator/runtime.md#concept) — current
   source-tree features, exact working-loop demonstrations, credentials, events,
   shutdown, and recovery.
-- [Runtime and embedding](developer/runtime-and-embedding.md#concept) — M1
-  composition, commit ordering, embedded API, and recovery mechanics.
+- [Agent loop and tools](developer/agent-loop-and-tools.md#concept) — the
+  multi-turn loop, tool contract and registry, bounds, stream domains, host
+  authority, artifacts, and project resources.
+- [Compatibility surfaces](developer/compatibility-surfaces.md#concept) — every
+  surface M2 touches, all unstable, none labelled or frozen, and what that means
+  for an embedder.
+- [Runtime and embedding](developer/runtime-and-embedding.md#concept) —
+  application shape, ports, composition, commit ordering, embedded API, and
+  recovery mechanics.
 - [Context map](developer/agent-context-map.md) — task-oriented routing into
   Concept first and exact Technical depth second.
 - [Adapter smoke evidence](developer/agent-adapter-smoke.md) — retained

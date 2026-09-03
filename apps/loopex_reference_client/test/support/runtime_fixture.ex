@@ -2,12 +2,19 @@ defmodule Loopex.ReferenceClientTestModel do
   @behaviour Loopex.Model
 
   @impl Loopex.Model
-  def complete(request, options) do
+  def complete(request, options, progress \\ nil) do
     if observer = Keyword.get(options, :observer), do: send(observer, {:model_request, request})
 
+    progress = progress || Loopex.Model.discard_progress()
+
+    # The deterministic adapter asks for its tool once and then stops, so the
+    # loop terminates on the model's own decision rather than on a turn counter.
+    already_called? =
+      Enum.any?(request.messages, &(Map.get(&1, "role") == "tool"))
+
     tool_calls =
-      case request.tools do
-        [%{"name" => name}] ->
+      case {already_called?, request.tools} do
+        {false, [%{"name" => name} | _rest]} ->
           [
             %{
               id: "deterministic-tool-call",
@@ -19,22 +26,39 @@ defmodule Loopex.ReferenceClientTestModel do
             }
           ]
 
-        [] ->
+        _otherwise ->
           []
+      end
+
+    text = if tool_calls == [], do: "terminal", else: "using controlled tool"
+
+    deltas =
+      if Keyword.get(options, :stream, false) do
+        for chunk <- String.split(text, " "), reduce: 0 do
+          count ->
+            progress.(%{kind: :text_delta, content_index: 0, text: chunk})
+            count + 1
+        end
+      else
+        0
       end
 
     {:ok,
      %{
-       text: if(tool_calls == [], do: "terminal", else: "using controlled tool"),
+       text: text,
        identity: %{
          provider: "deterministic",
          model: request.model,
          endpoint: "in-process"
        },
-       usage: %{input_tokens: nil, output_tokens: nil},
+       # ADR 0018: an attempt whose usage is not a complete reported pair is
+       # charged the whole remaining allowance; the scripted model reports.
+       usage: %{input_tokens: 1, output_tokens: 1},
        tool_calls: tool_calls,
+       delta_count: deltas,
+       streamed: deltas > 0,
        canonical_request_bytes: request.canonical_request_bytes,
-       canonical_request_digest: request.canonical_request_digest
+       staged_request_digest: request.staged_request_digest
      }}
   end
 end
@@ -83,33 +107,42 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
         ledger_root: ledger
       )
 
+    # The demonstration tool is an ordinary registered generation now. It keeps
+    # M1's exact identity and version so the inherited executor and recovery
+    # cases still resolve it, and it reaches the model only because this test
+    # composition selects it; nothing in the reference distribution does.
     tool = %{
-      "name" => "loopex_demo_write",
-      "description" => "Write the fixed demonstration bytes beneath the leased workspace.",
-      "input_schema" => %{
-        "type" => "object",
-        "properties" => %{
-          "relative_path" => %{
-            "type" => "string",
-            "const" => Keyword.get(model_options, :relative_path, "trace.txt")
-          },
-          "content" => %{
-            "type" => "string",
-            "const" => Keyword.get(model_options, :content, "loopex-effect")
-          }
-        },
-        "required" => ["relative_path", "content"],
-        "additionalProperties" => false
-      },
       "tool_id" => "loopex.demo.write",
       "tool_version" => "1.0.0",
-      "effect_class" => "workspace_write"
+      "name" => "loopex_demo_write",
+      "description" => "Write the fixed demonstration bytes beneath the leased workspace.",
+      "parameter_schema" => %{
+        "type" => "object",
+        "properties" => %{
+          "relative_path" => %{"type" => "string"},
+          "content" => %{"type" => "string"}
+        },
+        "required" => ["relative_path", "content"]
+      },
+      "result_shape" => %{"content_type" => "text", "description" => "What was written."},
+      "effect_class" => "workspace_write",
+      "idempotency_class" => "reconcile_then_retry",
+      "budgets" => %{
+        "wall_time_ms" => 30_000,
+        "output_bytes" => 1_048_576,
+        "artifact_bytes" => 1_048_576
+      }
     }
 
     runtime_options = [
+      context_token_budget: 8_192,
       runtime_id: "runtime-#{label}",
       store: store,
-      model: %{module: model_module, model: model_spec(model_module), options: model_options},
+      model: %{
+        module: model_module,
+        model: model_spec(model_module),
+        options: Keyword.put_new(model_options, :max_tokens, 256)
+      },
       executor: %{
         module: Local,
         reference: executor,
@@ -119,7 +152,10 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
         workspace_ref: "workspace-#{label}",
         workspace_lease: lease_id
       },
-      tool: tool,
+      tool: nil,
+      tools: [tool],
+      active_tools: ["loopex.demo.write"],
+      policy: Loopex.ReferenceClient.Policy.AllowAll,
       grant_decision: {:host_policy, :allow},
       fault_to: Keyword.get(options, :fault_to)
     ]

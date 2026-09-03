@@ -11,8 +11,11 @@ defmodule Loopex.RuntimeTest do
     {store_a_pid, store_a} = M1RuntimeTestStore.start_store(label: "store-a")
     {store_b_pid, store_b} = M1RuntimeTestStore.start_store(label: "store-b")
 
-    {:ok, runtime_a} = Loopex.start_link(runtime_id: "runtime-a", store: store_a)
-    {:ok, runtime_b} = Loopex.start_link(runtime_id: "runtime-b", store: store_b)
+    {:ok, runtime_a} =
+      Loopex.start_link(context_token_budget: 8_192, runtime_id: "runtime-a", store: store_a)
+
+    {:ok, runtime_b} =
+      Loopex.start_link(context_token_budget: 8_192, runtime_id: "runtime-b", store: store_b)
 
     on_exit(fn -> stop_runtime(runtime_a) end)
     on_exit(fn -> stop_runtime(runtime_b) end)
@@ -66,7 +69,9 @@ defmodule Loopex.RuntimeTest do
 
   test "a runtime reference is required rather than inferred" do
     {store_pid, store} = M1RuntimeTestStore.start_store()
-    {:ok, runtime} = Loopex.start_link(runtime_id: "explicit-runtime", store: store)
+
+    {:ok, runtime} =
+      Loopex.start_link(context_token_budget: 8_192, runtime_id: "explicit-runtime", store: store)
 
     on_exit(fn -> Application.delete_env(:loopex, :runtime) end)
     on_exit(fn -> stop_runtime(runtime) end)
@@ -106,11 +111,34 @@ defmodule Loopex.RuntimeTest do
     on_exit(fn -> stop_store(store_pid) end)
 
     assert {:error, :invalid_runtime_options} = Loopex.start_link([])
-    assert {:error, :invalid_runtime_options} = Loopex.start_link(runtime_id: "r")
+
+    assert {:error, :invalid_runtime_options} =
+             Loopex.start_link(context_token_budget: 8_192, runtime_id: "r")
+
     assert {:error, :invalid_runtime_options} = Loopex.start_link(store: store)
+
+    # Concept: a declared session value is validated where it is declared.
+    #
+    # Technical depth: ADR 0009 makes the cleanup period a session configuration
+    # value with a default, and a period of nothing is not a cooperative window,
+    # it is a kill. A host that means that should ask for the smallest period it
+    # actually wants to wait, so every non-positive and non-integer value is
+    # refused at start rather than becoming a grace an operator cannot observe
+    # until something has already gone wrong.
+    for refused <- [0, -1, "5000", 1.5, :never] do
+      assert {:error, :invalid_runtime_options} =
+               Loopex.start_link(
+                 context_token_budget: 8_192,
+                 runtime_id: "bad-grace-#{System.unique_integer([:positive])}",
+                 store: store,
+                 cleanup_grace_ms: refused
+               ),
+             "cleanup_grace_ms: #{inspect(refused)} started a runtime"
+    end
 
     {:ok, runtime} =
       Loopex.start_link(
+        context_token_budget: 8_192,
         runtime_id: "supervised-runtime",
         store: store,
         attachment_capacity: 7,

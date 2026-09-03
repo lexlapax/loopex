@@ -26,7 +26,11 @@ defmodule Loopex.ReferenceClientTraceChild do
         "real-recovery",
         Loopex.LLM.ReqLLM,
         [
-          max_tokens: 128,
+          # M1's two-turn loop never needed more. M2's loop sends the whole
+          # conversation and lets the model answer until the task is done, and a
+          # reply truncated by a tight ceiling reads to the next turn as work
+          # still to do -- which is a repeated tool call, not a bound.
+          max_tokens: 512,
           relative_path: "real-recovery.txt",
           content: "loopex-real-recovery"
         ],
@@ -39,7 +43,19 @@ defmodule Loopex.ReferenceClientTraceChild do
       ReferenceClient.prompt(
         fixture.client,
         "prompt-real-recovery",
-        "Use the registered tool, then confirm completion."
+        # Concept: the prompt names the effect it wants.
+        #
+        # Technical depth: M1 ran a fixed two-turn loop with forced tool
+        # selection, so a vague instruction still produced one determinate call.
+        # M2 replaced that with a real loop in which the model chooses its own
+        # arguments, and a case that asserts an exact external effect must
+        # therefore ask for that exact effect. Nothing about the recovery claim
+        # changes: what is under test is the kill, the reconciliation, and the
+        # credential-free child, never whether a model can guess a filename.
+        "Use the registered tool once to write the file real-recovery.txt " <>
+          "with the exact content loopex-real-recovery. When the tool reports it " <>
+          "wrote the file, confirm completion in one sentence and make no further " <>
+          "tool calls."
       )
 
     receive do
@@ -47,8 +63,8 @@ defmodule Loopex.ReferenceClientTraceChild do
         records = Fixture.records(fixture, fixture.client.session_id)
         events = Fixture.events(fixture, fixture.client.session_id)
         first_result = model_results(records) |> List.first()
-        identity = first_result.payload["reply"]["identity"]
-        tool_calls = first_result.payload["reply"]["tool_calls"]
+        identity = first_result.payload["result"]["reply"]["identity"]
+        tool_calls = first_result.payload["result"]["reply"]["tool_calls"]
 
         true = length(model_results(records)) == 1
         true = length(tool_calls) == 1
@@ -86,7 +102,11 @@ defmodule Loopex.ReferenceClientTraceChild do
         "real-recovery",
         Loopex.LLM.ReqLLM,
         [
-          max_tokens: 128,
+          # M1's two-turn loop never needed more. M2's loop sends the whole
+          # conversation and lets the model answer until the task is done, and a
+          # reply truncated by a tight ceiling reads to the next turn as work
+          # still to do -- which is a repeated tool call, not a bound.
+          max_tokens: 512,
           relative_path: "real-recovery.txt",
           content: "loopex-real-recovery"
         ],
@@ -108,24 +128,61 @@ defmodule Loopex.ReferenceClientTraceChild do
     records = Fixture.records(fixture, session_id)
     events = Fixture.events(fixture, session_id)
     results = model_results(records)
-    identity = List.last(results).payload["reply"]["identity"]
+    identity = List.last(results).payload["result"]["reply"]["identity"]
 
-    true = length(results) == 2
-    true = Local.stats(fixture.executor).dispatches == %{}
-    true = Enum.count(events, &(&1.kind == "tool.started")) == 1
-    true = Enum.count(events, &(&1.kind == "tool.finished")) == 1
+    projected =
+      records
+      |> Enum.filter(&(&1.payload.kind == "model_request_committed"))
+      |> List.last()
+      |> then(& &1.payload["request"]["messages"])
+      |> Enum.map(fn message ->
+        {message["role"], String.slice(to_string(message["content"] || ""), 0, 80),
+         length(message["tool_calls"] || [])}
+      end)
+
+    dispatches = Local.stats(fixture.executor).dispatches
+
+    # M2's loop runs as many turns as the task needs, so the floor is what the
+    # claim states -- a second real call after reconciliation -- rather than
+    # M1's fixed count.
+    true = length(results) >= 2
+
+    # Concept: the reconciled effect is never dispatched again.
+    #
+    # Technical depth: M1's fixed two-turn loop meant no later call could exist,
+    # so "no dispatch at all after the restart" and "this effect was not
+    # redispatched" were the same statement. Under M2's real loop they are not:
+    # a model that decides to run another tool creates a different effect with
+    # its own operation identity, which is ordinary progress rather than a
+    # redispatch. The protection is stated as what it always was -- this job_id
+    # is never dispatched by the recovered runtime -- so a genuine redispatch
+    # still fails here.
+    true = Map.get(dispatches, job_id, 0) == 0
+    true = Enum.count(events, &(&1.kind == "tool.started")) >= 1
+    true = Enum.count(events, &(&1.kind == "tool.finished")) >= 1
     true = List.last(events).kind == "run.finished"
-    true = List.last(events)["outcome"] == "completed"
+
+    check!(
+      List.last(events)["outcome"] == "completed",
+      "the recovered run finished #{inspect(List.last(events))} after #{length(results)} " <>
+        "results; the last request projected #{inspect(projected, limit: :infinity)}"
+    )
+
     true = File.read!(Path.join(fixture.workspace, "real-recovery.txt")) == "loopex-real-recovery"
     true = receipt.child_environment_names == ["PATH"]
     false = receipt.provider_credential_present
 
     evidence = %{
       phase: 2,
+      projected_messages: projected,
       provider_identity: identity,
       event_ids: Enum.map(events, & &1.event_id),
-      dispatches_after_restart: 0,
+      dispatches_after_restart: Map.get(dispatches, job_id, 0),
+      dispatch_map: dispatches,
       model_results: length(results),
+      provider_response_ids:
+        Enum.map(results, & &1.payload["result"]["reply"]["provider_response_id"]),
+      usage: Enum.map(results, & &1.payload["result"]["reply"]["usage"]),
       tool_started: Enum.count(events, &(&1.kind == "tool.started")),
       tool_finished: Enum.count(events, &(&1.kind == "tool.finished")),
       terminal_outcome: List.last(events)["outcome"],
@@ -137,12 +194,27 @@ defmodule Loopex.ReferenceClientTraceChild do
     emit(evidence)
   end
 
+  # Concept: a failed expectation says what it saw.
+  #
+  # Technical depth: this child reports through a marker on standard output, so a
+  # bare match failure reaches the parent as `false` and nothing else. The parent
+  # then reports that its child exited, which is the one fact already known.
+  defp check!(true, _message), do: :ok
+  defp check!(_false, message), do: raise("real trace expectation failed: " <> message)
+
   defp ensure_started! do
     {:ok, _started} = Application.ensure_all_started(:loopex_reference_client)
   end
 
-  defp model_results(records),
-    do: Enum.filter(records, &(&1.payload.kind == "model_result_committed"))
+  # ADR 0018: a turn's reply is retained on the attempt settlement whose
+  # conversation is canonical, as the eight-key projection under `result`.
+  defp model_results(records) do
+    Enum.filter(
+      records,
+      &(&1.payload.kind == "model_attempt_settled_v1" and
+          &1.payload["conversation"] == "canonical")
+    )
+  end
 
   defp read_credential! do
     <<size::unsigned-big-32>> = read_exact!(4)

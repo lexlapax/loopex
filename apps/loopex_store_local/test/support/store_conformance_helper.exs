@@ -100,6 +100,11 @@ defmodule LoopexStoreLocalTest.Memory do
   end
 
   @impl Store
+  def runtime_command(reference, command) do
+    GenServer.call(reference, {:runtime_command, command})
+  end
+
+  @impl Store
   def load_records(reference, session_id, after_version, limit) do
     GenServer.call(reference, {:load_records, session_id, after_version, limit})
   end
@@ -170,6 +175,10 @@ defmodule LoopexStoreLocalTest.Memory do
 
   def handle_call({:ownership_head, session_id, _mutation_domain}, _from, state) do
     {:reply, State.ownership_head(state.store, session_id), state}
+  end
+
+  def handle_call({:runtime_command, command}, _from, state) do
+    {:reply, State.runtime_command(state.store, command), state}
   end
 
   def handle_call({:load_records, session_id, after_version, limit}, _from, state) do
@@ -465,6 +474,21 @@ defmodule LoopexStoreLocalTest.Conformance do
              })
 
     assert normalized.genesis == %{dynamic_name => "plain", kind: dynamic_name}
+
+    assert {:ok, number_transaction} =
+             Store.session_commit(
+               "session",
+               @domain,
+               "plain-json-number",
+               0,
+               "owner",
+               0,
+               [%{kind: :fact, threshold: 0.5}],
+               [%{event_id: "number-event", kind: :fact_committed, threshold: 0.5}]
+             )
+
+    assert [%{"threshold" => 0.5}] = number_transaction.records
+    assert [%{"threshold" => 0.5}] = number_transaction.outbox
 
     for reserved <- [
           :event_sequence,
@@ -1294,6 +1318,8 @@ defmodule LoopexStoreLocalTest.Conformance do
       assert {:committed, _tx, create_receipt} = Store.transact(context.store, create)
       assert {:committed, _tx, _receipt} = Store.transact(context.store, create)
 
+      command = owner_command("runtime-#{label}", "resume-#{label}", create_receipt.session_id)
+
       {:ok, advance} =
         Store.advance_owner(
           create_receipt.session_id,
@@ -1301,8 +1327,20 @@ defmodule LoopexStoreLocalTest.Conformance do
           "advance-#{label}",
           0,
           1,
-          "owner-#{label}"
+          "owner-#{label}",
+          Map.put(command, :attempt_generation, 1)
         )
+
+      {:ok, stage} =
+        Store.stage_owner_attempt(
+          Map.put(command, :attempt_generation, 1),
+          0,
+          "stage-#{label}",
+          advance
+        )
+
+      assert {:committed, _tx, _receipt} = Store.transact(context.store, stage)
+      assert {:committed, _tx, _receipt} = Store.transact(context.store, stage)
 
       assert {:committed, _tx, advance_receipt} = Store.transact(context.store, advance)
       assert {:committed, _tx, _receipt} = Store.transact(context.store, advance)
@@ -1409,6 +1447,34 @@ defmodule LoopexStoreLocalTest.Conformance do
     transaction
   end
 
+  defp fault_target(context, :runtime_control_stage_owner_attempt, label) do
+    runtime_id = "runtime-#{label}"
+    {:ok, create} = Store.create_session(runtime_id, "create-#{label}", genesis(label))
+    assert {:committed, _tx_id, receipt} = Store.transact(context.store, create)
+    command = owner_command(runtime_id, "resume-#{label}", receipt.session_id)
+
+    {:ok, candidate} =
+      Store.advance_owner(
+        receipt.session_id,
+        @domain,
+        "advance-#{label}",
+        0,
+        1,
+        "owner-#{label}",
+        Map.put(command, :attempt_generation, 1)
+      )
+
+    {:ok, stage} =
+      Store.stage_owner_attempt(
+        Map.put(command, :attempt_generation, 1),
+        0,
+        "stage-#{label}",
+        candidate
+      )
+
+    stage
+  end
+
   defp fault_target(context, :session_journal_advance_owner, label) do
     {:ok, create} = Store.create_session("runtime-#{label}", "create-#{label}", genesis(label))
     assert {:committed, _tx_id, receipt} = Store.transact(context.store, create)
@@ -1426,6 +1492,33 @@ defmodule LoopexStoreLocalTest.Conformance do
 
   defp transaction_tx_id(%{type: :create_session, command_id: command_id}), do: command_id
   defp transaction_tx_id(%{tx_id: tx_id}), do: tx_id
+
+  defp owner_command(runtime_id, command_id, session_id) do
+    canonical =
+      :erlang.term_to_binary(
+        ["loopex_runtime_command_v1", runtime_id, command_id, :resume, session_id, @domain],
+        [:deterministic]
+      )
+
+    succession_bytes =
+      :erlang.term_to_binary(
+        ["loopex_owner_operation_v1", runtime_id, "resume", session_id, command_id],
+        [:deterministic]
+      )
+
+    encoded = :crypto.hash(:sha256, succession_bytes) |> Base.encode16(case: :lower)
+
+    %{
+      runtime_id: runtime_id,
+      command_id: command_id,
+      command_kind: :resume,
+      session_id: session_id,
+      mutation_domain: @domain,
+      succession_id: "succession_" <> binary_part(encoded, 0, 40),
+      canonical_command_bytes: canonical,
+      canonical_command_digest: :crypto.hash(:sha256, canonical)
+    }
+  end
 
   defp assert_binding_conflicts(context, transaction) do
     changed = [

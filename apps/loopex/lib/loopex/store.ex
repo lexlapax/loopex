@@ -42,15 +42,13 @@ defmodule Loopex.Store do
   @max_items 1_024
   @max_depth 12
   @canonical_field_names [:canonical_record_bytes, :canonical_mutation_digest]
+  # Concept: the stamps the Store owns and a caller may never supply.
+  #
+  # Technical depth: only the binary spellings are listed because every key
+  # reaches the reserved check already normalized. An atom key is rewritten to
+  # its binary spelling before it is compared, so the atom forms need no
+  # separate list and cannot slip past one that has drifted from the other.
   @reserved_event_binary_fields ["event_sequence", "owner_epoch", "owner_incarnation_id"]
-  @reserved_event_fields [
-    :event_sequence,
-    :owner_epoch,
-    :owner_incarnation_id,
-    "event_sequence",
-    "owner_epoch",
-    "owner_incarnation_id"
-  ]
 
   @typedoc """
   ## Concept
@@ -172,6 +170,36 @@ defmodule Loopex.Store do
   @typedoc """
   ## Concept
 
+  The durable identity of one candidate owner attempt beneath a logical resume
+  command.
+
+  ## Technical depth
+
+  Staging binds the complete command and candidate bytes before succession is
+  submitted. The expected generation is zero for explicit absence or the
+  observed open generation for replacement after candidate resolution.
+  """
+  @type stage_owner_attempt_transaction :: %{
+          required(:type) => :stage_owner_attempt,
+          required(:runtime_id) => id(),
+          required(:command_id) => id(),
+          required(:command_kind) => :resume,
+          required(:session_id) => id(),
+          required(:mutation_domain) => mutation_domain(),
+          required(:succession_id) => id(),
+          required(:canonical_command_bytes) => binary(),
+          required(:canonical_command_digest) => digest(),
+          required(:attempt_generation) => pos_integer(),
+          required(:expected_generation) => non_neg_integer(),
+          required(:tx_id) => id(),
+          required(:candidate) => advance_owner_transaction(),
+          required(:canonical_record_bytes) => binary(),
+          required(:canonical_mutation_digest) => digest()
+        }
+
+  @typedoc """
+  ## Concept
+
   One atomic private-record and public-outbox commit by the current owner.
 
   ## Technical depth
@@ -201,10 +229,14 @@ defmodule Loopex.Store do
   ## Technical depth
 
   The union is closed to session creation, owner succession, and ordinary
-  session commit; the transition catalogue derives from the same shapes.
+  owner-attempt staging, and session commit; the transition catalogue derives
+  from the same shapes.
   """
   @type transaction ::
-          create_session_transaction() | advance_owner_transaction() | session_transaction()
+          create_session_transaction()
+          | stage_owner_attempt_transaction()
+          | advance_owner_transaction()
+          | session_transaction()
 
   @typedoc """
   ## Concept
@@ -334,6 +366,25 @@ defmodule Loopex.Store do
   @doc """
   ## Concept
 
+  Observes the durable historical result or current owner candidate for one
+  runtime command identity.
+
+  ## Technical depth
+
+  The projection omits canonical command and candidate bytes, digests, and all
+  owner-incarnation capability. `:absent` is authoritative only for the exact
+  runtime and command key; adapter loss is `:unavailable`.
+  """
+  @callback runtime_command(reference :: term(), command :: map()) ::
+              :absent
+              | :unavailable
+              | {:error, :runtime_command_conflict}
+              | {:open, map()}
+              | {:completed, map()}
+
+  @doc """
+  ## Concept
+
   Reads the current durable compare head for owner recovery.
 
   ## Technical depth
@@ -411,6 +462,243 @@ defmodule Loopex.Store do
   @doc """
   ## Concept
 
+  Reports the fixed maximum encoded byte size of one durable Store item.
+
+  ## Technical depth
+
+  The ceiling is core-owned and identical for private records and public
+  events. An adapter cannot widen or narrow it, and a caller reads it here
+  rather than duplicating the literal in its own preflight.
+  """
+  @spec max_item_bytes() :: pos_integer()
+  def max_item_bytes, do: @max_item_bytes
+
+  @doc """
+  ## Concept
+
+  Reports the fixed maximum nesting depth of one durable Store item.
+
+  ## Technical depth
+
+  The item root is depth zero and every child increments depth by one, so a
+  leaf at this depth is admitted while its child is not.
+  """
+  @spec max_item_depth() :: pos_integer()
+  def max_item_depth, do: @max_depth
+
+  @doc """
+  ## Concept
+
+  Reports the fixed maximum member count of one collection inside a durable
+  Store item.
+
+  ## Technical depth
+
+  The limit applies to a map's complete member count and to a list's length, so
+  the first rejected witness is always exactly one above this value.
+  """
+  @spec max_item_cardinality() :: pos_integer()
+  def max_item_cardinality, do: @max_items
+
+  @doc """
+  ## Concept
+
+  Normalizes one candidate durable item and reports its exact encoded byte cost
+  without committing anything.
+
+  A caller that must know whether the record or event it is about to build can
+  be retained asks here first. The answer is the normalized item plus its exact
+  size, or the first structural dimension the item exceeds.
+
+  ## Technical depth
+
+  Traversal is deterministic depth-first pre-order. Each node classifies its own
+  form, then checks depth, then checks collection cardinality, and only then
+  normalizes keys and visits children in unsigned bytewise order of their
+  normalized binary key spellings. Maps use `map_size/1` and lists count at most
+  `max_item_cardinality() + 1` successive cons cells, so an enormous untrusted
+  collection is refused without allocating a key list or walking its tail.
+
+  A structural refusal reports the first exact dimension under that order: the
+  rejected node depth, or the first rejected collection witness. Structs,
+  invalid keys, key-normalization collisions, and other non-plain data keep the
+  ordinary invalid-data result and are never relabelled structural overages.
+
+  The returned item is the exact shape a transaction retains: every caller key
+  becomes a bounded binary, and the required `kind` and `event_id` members are
+  restored as atom keys. The reported cost is that item's own deterministic
+  external-term size, so a caller can hand the returned item straight to
+  `transact/2` and know what it will be measured as.
+
+  In `:event` mode the atom and binary spellings of `event_sequence`,
+  `owner_epoch`, and `owner_incarnation_id` are reserved at every map.
+
+  Two transaction protections stay outside this helper because it holds neither
+  the sibling events nor the expected owner identity: outbox event-ID
+  uniqueness, and rejection of the current owner-incarnation capability inside a
+  public event. An item may normalize and measure here and still be refused by
+  `transact/2`.
+  """
+  @spec normalize_and_measure_item(:record | :event, term()) ::
+          {:ok, map(), non_neg_integer()}
+          | {:error,
+             {:item_structure_exceeded, :depth | :cardinality, pos_integer(), pos_integer()}}
+          | {:error, :invalid_item | :invalid_event}
+  def normalize_and_measure_item(plane, item) when plane in [:record, :event] do
+    with {:ok, normalized} <- normalize_measured_root(plane, item) do
+      {:ok, normalized, byte_size(:erlang.term_to_binary(normalized, [:deterministic]))}
+    end
+  end
+
+  # Concept: the root carries required members no other node has.
+  #
+  # Technical depth: raw root cardinality is counted before `kind` and, for an
+  # event, `event_id` are extracted, and restoring those same members cannot
+  # raise the admitted count. There is therefore no second or synthetic
+  # post-normalization overage. They are restored as atom keys, which is the
+  # shape every other Store path already retains, so a caller can hand the
+  # returned item straight to a transaction. Their logical spellings `"kind"`
+  # and `"event_id"` order them among their siblings; both carry validated
+  # binaries, so no traversal outcome depends on where in that order they sit.
+  defp normalize_measured_root(plane, item) when is_map(item) and not is_struct(item) do
+    with :ok <- measured_cardinality(map_size(item)),
+         {:ok, kind, without_kind} <- take_required(item, :kind, "kind"),
+         {:ok, normalized_kind} <- normalize_kind(kind),
+         {:ok, required, rest} <- take_measured_event_id(plane, without_kind),
+         {:ok, normalized_rest} <- measured_map_members(plane, rest, 0) do
+      {:ok, normalized_rest |> Map.merge(required) |> Map.put(:kind, normalized_kind)}
+    else
+      {:error, {:item_structure_exceeded, _dimension, _observed, _limit}} = structural ->
+        structural
+
+      _other ->
+        {:error, invalid_item_reason(plane)}
+    end
+  end
+
+  defp normalize_measured_root(plane, _item), do: {:error, invalid_item_reason(plane)}
+
+  defp invalid_item_reason(:record), do: :invalid_item
+  defp invalid_item_reason(:event), do: :invalid_event
+
+  defp take_measured_event_id(:record, rest), do: {:ok, %{}, rest}
+
+  defp take_measured_event_id(:event, item) do
+    with {:ok, event_id, rest} <- take_required(item, :event_id, "event_id"),
+         {:ok, validated} <- validate_identifier(event_id) do
+      {:ok, %{event_id: validated}, rest}
+    end
+  end
+
+  # Concept: one node, classified before it is measured.
+  #
+  # Technical depth: form comes first, so a struct or other non-plain term is
+  # ordinary invalid data whatever its depth. Depth comes next, then bounded
+  # cardinality, then key validity, then children. That order is what lets an
+  # untrusted collection be refused before anything about it is allocated.
+  defp measured_value(_plane, _value, depth) when depth > @max_depth,
+    do: {:error, {:item_structure_exceeded, :depth, depth, @max_depth}}
+
+  defp measured_value(_plane, value, _depth)
+       when is_binary(value) or is_integer(value) or is_float(value),
+       do: {:ok, value}
+
+  defp measured_value(_plane, value, _depth) when value in [nil, true, false], do: {:ok, value}
+
+  defp measured_value(_plane, [], _depth), do: {:ok, []}
+
+  defp measured_value(plane, [_head | _tail] = value, depth) do
+    with :ok <- measured_list_cardinality(value, 0) do
+      measured_list_members(plane, value, depth, [])
+    end
+  end
+
+  defp measured_value(plane, value, depth) when is_map(value) and not is_struct(value) do
+    with :ok <- measured_cardinality(map_size(value)) do
+      measured_map_members(plane, value, depth)
+    end
+  end
+
+  defp measured_value(plane, _value, _depth), do: {:error, invalid_item_reason(plane)}
+
+  # Concept: count cons cells, never the list.
+  #
+  # Technical depth: `is_list/1` and `length/1` both walk the whole spine, so an
+  # enormous or improper untrusted list would be traversed just to learn it is
+  # too long. Matching one cons cell at a time stops at the first rejected
+  # witness and never inspects the tail beyond it. A tail reached inside the
+  # admitted range must be exactly `[]`; anything else is ordinary invalid data.
+  defp measured_list_cardinality(_value, counted) when counted > @max_items,
+    do: {:error, {:item_structure_exceeded, :cardinality, @max_items + 1, @max_items}}
+
+  defp measured_list_cardinality([_head | tail], counted),
+    do: measured_list_cardinality(tail, counted + 1)
+
+  defp measured_list_cardinality([], _counted), do: :ok
+  defp measured_list_cardinality(_improper_tail, _counted), do: {:error, :not_plain_data}
+
+  defp measured_list_members(_plane, [], _depth, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp measured_list_members(plane, [head | tail], depth, acc) do
+    case measured_value(plane, head, depth + 1) do
+      {:ok, normalized} -> measured_list_members(plane, tail, depth, [normalized | acc])
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp measured_cardinality(size) when size > @max_items,
+    do: {:error, {:item_structure_exceeded, :cardinality, @max_items + 1, @max_items}}
+
+  defp measured_cardinality(_size), do: :ok
+
+  # Concept: normalize this map's keys, then visit its children in one fixed
+  # order.
+  #
+  # Technical depth: keys are normalized and collision-checked before any child
+  # is visited, and children are then visited in unsigned bytewise order of
+  # those normalized spellings. A deeper structural failure therefore names the
+  # same node whichever order the caller happened to build the map in.
+  defp measured_map_members(plane, map, depth) do
+    with {:ok, keyed} <- measured_keys(plane, map) do
+      keyed
+      |> Enum.sort_by(fn {key, _value} -> key end, :asc)
+      |> measured_children(plane, depth, %{})
+    end
+  end
+
+  defp measured_keys(plane, map) do
+    Enum.reduce_while(map, {:ok, []}, fn {key, value}, {:ok, keyed} ->
+      with {:ok, normalized_key} <- normalize_user_key(key),
+           :ok <- measured_reserved_key(plane, normalized_key),
+           false <- List.keymember?(keyed, normalized_key, 0) do
+        {:cont, {:ok, [{normalized_key, value} | keyed]}}
+      else
+        _other -> {:halt, {:error, invalid_item_reason(plane)}}
+      end
+    end)
+  end
+
+  defp measured_reserved_key(:record, _key), do: :ok
+
+  defp measured_reserved_key(:event, key) do
+    if key in @reserved_event_binary_fields, do: {:error, :reserved_event_field}, else: :ok
+  end
+
+  defp measured_children([], _plane, _depth, normalized), do: {:ok, normalized}
+
+  defp measured_children([{key, value} | rest], plane, depth, normalized) do
+    case measured_value(plane, value, depth + 1) do
+      {:ok, normalized_value} ->
+        measured_children(rest, plane, depth, Map.put(normalized, key, normalized_value))
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @doc """
+  ## Concept
+
   Builds the atomic runtime-control transaction that allocates one session and
   commits its command mapping and genesis together.
 
@@ -472,6 +760,59 @@ defmodule Loopex.Store do
       expected_owner_epoch: expected_owner_epoch,
       expected_journal_version: expected_journal_version,
       proposed_owner_incarnation_id: proposed_owner_incarnation_id
+    ]
+
+    build_transaction(fields)
+  end
+
+  @doc false
+  def advance_owner(
+        session_id,
+        mutation_domain,
+        tx_id,
+        expected_owner_epoch,
+        expected_journal_version,
+        proposed_owner_incarnation_id,
+        owner_command
+      )
+      when is_map(owner_command) do
+    fields = [
+      type: :advance_owner,
+      session_id: session_id,
+      mutation_domain: mutation_domain,
+      tx_id: tx_id,
+      expected_owner_epoch: expected_owner_epoch,
+      expected_journal_version: expected_journal_version,
+      proposed_owner_incarnation_id: proposed_owner_incarnation_id,
+      runtime_id: Map.get(owner_command, :runtime_id),
+      command_id: Map.get(owner_command, :command_id),
+      command_kind: :resume,
+      succession_id: Map.get(owner_command, :succession_id),
+      canonical_command_bytes: Map.get(owner_command, :canonical_command_bytes),
+      canonical_command_digest: Map.get(owner_command, :canonical_command_digest),
+      attempt_generation: Map.get(owner_command, :attempt_generation)
+    ]
+
+    build_transaction(fields)
+  end
+
+  @doc false
+  def stage_owner_attempt(owner_command, expected_generation, stage_tx_id, candidate)
+      when is_map(owner_command) and is_map(candidate) do
+    fields = [
+      type: :stage_owner_attempt,
+      runtime_id: Map.get(owner_command, :runtime_id),
+      command_id: Map.get(owner_command, :command_id),
+      command_kind: :resume,
+      session_id: Map.get(owner_command, :session_id),
+      mutation_domain: Map.get(owner_command, :mutation_domain),
+      succession_id: Map.get(owner_command, :succession_id),
+      canonical_command_bytes: Map.get(owner_command, :canonical_command_bytes),
+      canonical_command_digest: Map.get(owner_command, :canonical_command_digest),
+      attempt_generation: Map.get(owner_command, :attempt_generation),
+      expected_generation: expected_generation,
+      tx_id: stage_tx_id,
+      candidate: candidate
     ]
 
     build_transaction(fields)
@@ -584,6 +925,21 @@ defmodule Loopex.Store do
     end
   end
 
+  @doc false
+  def runtime_command(%__MODULE__{adapter: adapter, reference: reference}, command)
+      when is_map(command) do
+    with :ok <- validate_runtime_command_binding(command) do
+      adapter_call(
+        fn -> adapter.runtime_command(reference, command) end,
+        :unavailable
+      )
+    else
+      _invalid -> {:error, :runtime_command_conflict}
+    end
+  end
+
+  def runtime_command(%__MODULE__{}, _command), do: {:error, :runtime_command_conflict}
+
   @doc """
   ## Concept
 
@@ -679,6 +1035,14 @@ defmodule Loopex.Store do
   end
 
   @doc false
+  @spec validate_private_record(term()) :: :ok | {:error, term()}
+  def validate_private_record(record) do
+    with {:ok, normalized} <- normalize_record(record) do
+      validate_item(:record, normalized)
+    end
+  end
+
+  @doc false
   @spec immutable_binding(map()) :: {:ok, map()} | {:error, term()}
   def immutable_binding(transaction) when is_map(transaction) do
     with {:ok, fields} <- semantic_fields(transaction),
@@ -716,8 +1080,26 @@ defmodule Loopex.Store do
     fetch_fields(transaction, [:type, :runtime_id, :command_id, :genesis])
   end
 
-  defp semantic_fields(%{type: :advance_owner} = transaction) do
+  defp semantic_fields(%{type: :stage_owner_attempt} = transaction) do
     fetch_fields(transaction, [
+      :type,
+      :runtime_id,
+      :command_id,
+      :command_kind,
+      :session_id,
+      :mutation_domain,
+      :succession_id,
+      :canonical_command_bytes,
+      :canonical_command_digest,
+      :attempt_generation,
+      :expected_generation,
+      :tx_id,
+      :candidate
+    ])
+  end
+
+  defp semantic_fields(%{type: :advance_owner} = transaction) do
+    fields = [
       :type,
       :session_id,
       :mutation_domain,
@@ -725,7 +1107,25 @@ defmodule Loopex.Store do
       :expected_owner_epoch,
       :expected_journal_version,
       :proposed_owner_incarnation_id
-    ])
+    ]
+
+    fields =
+      if Map.has_key?(transaction, :runtime_id) do
+        fields ++
+          [
+            :runtime_id,
+            :command_id,
+            :command_kind,
+            :succession_id,
+            :canonical_command_bytes,
+            :canonical_command_digest,
+            :attempt_generation
+          ]
+      else
+        fields
+      end
+
+    fetch_fields(transaction, fields)
   end
 
   defp semantic_fields(%{type: :session_commit} = transaction) do
@@ -785,6 +1185,17 @@ defmodule Loopex.Store do
     end
   end
 
+  defp validate_common(:runtime_control_stage_owner_attempt, transaction) do
+    with {:ok, _runtime_id} <- fetch_identifier(transaction, :runtime_id),
+         {:ok, _command_id} <- fetch_identifier(transaction, :command_id),
+         {:ok, _session_id} <- fetch_identifier(transaction, :session_id),
+         {:ok, _domain} <- fetch_identifier(transaction, :mutation_domain),
+         {:ok, _succession_id} <- fetch_identifier(transaction, :succession_id),
+         {:ok, _tx_id} <- fetch_identifier(transaction, :tx_id) do
+      :ok
+    end
+  end
+
   defp validate_common(_transition, transaction) do
     with {:ok, _session_id} <- fetch_identifier(transaction, :session_id),
          {:ok, _domain} <- fetch_identifier(transaction, :mutation_domain),
@@ -794,14 +1205,31 @@ defmodule Loopex.Store do
   end
 
   defp validate_shape(:runtime_control_create_session, transaction) do
-    validate_record(Map.get(transaction, :genesis))
+    validate_item(:record, Map.get(transaction, :genesis))
+  end
+
+  defp validate_shape(:runtime_control_stage_owner_attempt, transaction) do
+    with true <- transaction.command_kind == :resume,
+         true <- is_binary(transaction.canonical_command_bytes),
+         true <- byte_size(transaction.canonical_command_digest) == 32,
+         true <-
+           transaction.canonical_command_digest == digest(transaction.canonical_command_bytes),
+         true <- positive_integer?(transaction.attempt_generation),
+         :ok <- non_negative(transaction, :expected_generation),
+         true <- is_map(transaction.candidate),
+         :ok <- validate_transaction(transaction.candidate) do
+      :ok
+    else
+      _other -> {:error, :invalid_owner_attempt}
+    end
   end
 
   defp validate_shape(:session_journal_advance_owner, transaction) do
     with :ok <- non_negative(transaction, :expected_owner_epoch),
          :ok <- non_negative(transaction, :expected_journal_version),
          {:ok, _incarnation} <-
-           fetch_identifier(transaction, :proposed_owner_incarnation_id) do
+           fetch_identifier(transaction, :proposed_owner_incarnation_id),
+         :ok <- validate_owner_command_fields(transaction) do
       :ok
     end
   end
@@ -822,6 +1250,53 @@ defmodule Loopex.Store do
     end
   end
 
+  defp validate_owner_command_fields(%{runtime_id: runtime_id} = transaction) do
+    with {:ok, _runtime_id} <- validate_identifier(runtime_id),
+         {:ok, _command_id} <- fetch_identifier(transaction, :command_id),
+         true <- transaction.command_kind == :resume,
+         {:ok, _succession_id} <- fetch_identifier(transaction, :succession_id),
+         true <- is_binary(transaction.canonical_command_bytes),
+         true <- byte_size(transaction.canonical_command_digest) == 32,
+         true <-
+           transaction.canonical_command_digest == digest(transaction.canonical_command_bytes),
+         true <- is_integer(transaction.attempt_generation) and transaction.attempt_generation > 0 do
+      :ok
+    else
+      _other -> {:error, :invalid_owner_command}
+    end
+  end
+
+  defp validate_owner_command_fields(_transaction), do: :ok
+
+  defp validate_runtime_command_binding(command) do
+    expected =
+      MapSet.new([
+        :runtime_id,
+        :command_id,
+        :command_kind,
+        :session_id,
+        :mutation_domain,
+        :succession_id,
+        :canonical_command_bytes,
+        :canonical_command_digest
+      ])
+
+    with true <- Map.keys(command) |> MapSet.new() |> MapSet.equal?(expected),
+         {:ok, _runtime_id} <- fetch_identifier(command, :runtime_id),
+         {:ok, _command_id} <- fetch_identifier(command, :command_id),
+         true <- command.command_kind == :resume,
+         {:ok, _session_id} <- fetch_identifier(command, :session_id),
+         {:ok, _mutation_domain} <- fetch_identifier(command, :mutation_domain),
+         {:ok, _succession_id} <- fetch_identifier(command, :succession_id),
+         true <- is_binary(command.canonical_command_bytes),
+         true <- byte_size(command.canonical_command_digest) == 32,
+         true <- command.canonical_command_digest == digest(command.canonical_command_bytes) do
+      :ok
+    else
+      _other -> {:error, :invalid_runtime_command_binding}
+    end
+  end
+
   defp normalize_records(records)
        when is_list(records) and records != [] and
               length(records) <= @max_items do
@@ -836,7 +1311,8 @@ defmodule Loopex.Store do
          true <- length(ids) == MapSet.size(MapSet.new(ids)) do
       {:ok, normalized}
     else
-      _other -> {:error, :invalid_events}
+      false -> {:error, :invalid_events}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -846,7 +1322,7 @@ defmodule Loopex.Store do
     Enum.reduce_while(values, {:ok, []}, fn value, {:ok, normalized} ->
       case fun.(value) do
         {:ok, item} -> {:cont, {:ok, [item | normalized]}}
-        {:error, _reason} -> {:halt, {:error, error}}
+        {:error, reason} -> {:halt, {:error, item_refusal(reason, error)}}
       end
     end)
     |> case do
@@ -855,67 +1331,33 @@ defmodule Loopex.Store do
     end
   end
 
-  defp normalize_record(record) when is_map(record) and not is_struct(record) do
-    with {:ok, kind, rest} <- take_required(record, :kind, "kind"),
-         {:ok, normalized_kind} <- normalize_kind(kind),
-         {:ok, normalized_rest} <- normalize_user_map(rest, 0) do
-      {:ok, Map.put(normalized_rest, :kind, normalized_kind)}
-    else
-      _other -> {:error, :invalid_record}
-    end
-  end
+  # Concept: a member's structural refusal is the list's refusal.
+  #
+  # Technical depth: an ordinary invalid member collapses into the list's own
+  # result, because which member was malformed tells a caller nothing it can
+  # act on. A structural or size refusal is different: it already names its
+  # dimension, the observation, and the limit, and it is the exact tuple a
+  # caller preflighting through `normalize_and_measure_item/2` holds. Collapsing
+  # it would leave the preflight and the builder disagreeing about one item.
+  defp item_refusal({:item_structure_exceeded, _dimension, _observed, _limit} = refusal, _error),
+    do: refusal
 
-  defp normalize_record(_record), do: {:error, :invalid_record}
+  defp item_refusal({:item_too_large, _observed, _limit} = refusal, _error), do: refusal
+  defp item_refusal(_reason, error), do: error
 
-  defp normalize_event(event) when is_map(event) and not is_struct(event) do
-    with false <- Enum.any?(@reserved_event_fields, &Map.has_key?(event, &1)),
-         {:ok, event_id, without_id} <- take_required(event, :event_id, "event_id"),
-         {:ok, _event_id} <- validate_identifier(event_id),
-         {:ok, kind, rest} <- take_required(without_id, :kind, "kind"),
-         {:ok, normalized_kind} <- normalize_kind(kind),
-         {:ok, normalized_rest} <- normalize_event_map(rest, 0) do
-      {:ok,
-       normalized_rest
-       |> Map.put(:event_id, event_id)
-       |> Map.put(:kind, normalized_kind)}
-    else
-      _other -> {:error, :invalid_event}
-    end
-  end
+  # Concept: the builders normalize through the same normalizer the preflight
+  # and the transaction validator use.
+  #
+  # Technical depth: ADR 0017 requires one implementation and one refusal
+  # taxonomy for every path that admits an item. A second builder-local
+  # traversal is not a duplicate that merely costs bytes: it checked depth only
+  # where it happened to recurse into a map, so a scalar the shared normalizer
+  # rejects at depth 13 was admitted here, and it asked `length/1` of an
+  # untrusted list, which walks a spine the shared counter refuses to walk.
+  # Delegating leaves exactly one answer to "may this item be stored".
+  defp normalize_record(record), do: normalize_measured_root(:record, record)
 
-  defp normalize_event(_event), do: {:error, :invalid_event}
-
-  defp normalize_event_map(map, depth)
-       when is_map(map) and not is_struct(map) and map_size(map) <= @max_items and
-              depth <= @max_depth do
-    Enum.reduce_while(map, {:ok, %{}}, fn {key, value}, {:ok, normalized} ->
-      with {:ok, normalized_key} <- normalize_user_key(key),
-           false <- normalized_key in @reserved_event_binary_fields,
-           false <- Map.has_key?(normalized, normalized_key),
-           {:ok, normalized_value} <- normalize_event_value(value, depth + 1) do
-        {:cont, {:ok, Map.put(normalized, normalized_key, normalized_value)}}
-      else
-        _other -> {:halt, {:error, :not_plain_event_data}}
-      end
-    end)
-  end
-
-  defp normalize_event_map(_map, _depth), do: {:error, :not_plain_event_data}
-
-  defp normalize_event_value(value, _depth) when is_binary(value) or is_integer(value),
-    do: {:ok, value}
-
-  defp normalize_event_value(value, _depth) when value in [nil, true, false], do: {:ok, value}
-
-  defp normalize_event_value(value, depth)
-       when is_list(value) and length(value) <= @max_items and depth <= @max_depth do
-    normalize_list(value, &normalize_event_value(&1, depth + 1), :not_plain_event_data)
-  end
-
-  defp normalize_event_value(value, depth) when is_map(value) and not is_struct(value),
-    do: normalize_event_map(value, depth)
-
-  defp normalize_event_value(_value, _depth), do: {:error, :not_plain_event_data}
+  defp normalize_event(event), do: normalize_measured_root(:event, event)
 
   defp reject_owner_capability(events, owner_incarnation_id) do
     if Enum.any?(events, &contains_value?(&1, owner_incarnation_id)) do
@@ -955,22 +1397,6 @@ defmodule Loopex.Store do
 
   defp normalize_kind(_kind), do: {:error, :invalid_kind}
 
-  defp normalize_user_map(map, depth)
-       when is_map(map) and not is_struct(map) and map_size(map) <= @max_items and
-              depth <= @max_depth do
-    Enum.reduce_while(map, {:ok, %{}}, fn {key, value}, {:ok, normalized} ->
-      with {:ok, normalized_key} <- normalize_user_key(key),
-           false <- Map.has_key?(normalized, normalized_key),
-           {:ok, normalized_value} <- normalize_user_value(value, depth + 1) do
-        {:cont, {:ok, Map.put(normalized, normalized_key, normalized_value)}}
-      else
-        _other -> {:halt, {:error, :not_plain_data}}
-      end
-    end)
-  end
-
-  defp normalize_user_map(_map, _depth), do: {:error, :not_plain_data}
-
   defp normalize_user_key(key) when is_atom(key), do: normalize_user_key(Atom.to_string(key))
 
   defp normalize_user_key(key)
@@ -979,87 +1405,63 @@ defmodule Loopex.Store do
 
   defp normalize_user_key(_key), do: {:error, :not_plain_data}
 
-  defp normalize_user_value(value, _depth) when is_binary(value) or is_integer(value),
-    do: {:ok, value}
-
-  defp normalize_user_value(value, _depth) when value in [nil, true, false], do: {:ok, value}
-
-  defp normalize_user_value(value, depth)
-       when is_list(value) and length(value) <= @max_items and depth <= @max_depth do
-    normalize_list(value, &normalize_user_value(&1, depth + 1), :not_plain_data)
-  end
-
-  defp normalize_user_value(value, depth) when is_map(value) and not is_struct(value),
-    do: normalize_user_map(value, depth)
-
-  defp normalize_user_value(_value, _depth), do: {:error, :not_plain_data}
-
   defp validate_records(records) when is_list(records) and records != [] do
-    case length(records) <= @max_items and Enum.all?(records, &(validate_record(&1) == :ok)) do
-      true -> :ok
-      false -> {:error, :invalid_records}
-    end
+    if length(records) <= @max_items,
+      do: validate_items(:record, records, :invalid_records),
+      else: {:error, :invalid_records}
   end
 
   defp validate_records(_records), do: {:error, :invalid_records}
 
   defp validate_events(events) when is_list(events) and length(events) <= @max_items do
-    with true <- Enum.all?(events, &(validate_event(&1) == :ok)),
+    with :ok <- validate_items(:event, events, :invalid_events),
          ids = Enum.map(events, &Map.fetch!(&1, :event_id)),
          true <- length(ids) == MapSet.size(MapSet.new(ids)) do
       :ok
     else
-      _other -> {:error, :invalid_events}
+      false -> {:error, :invalid_events}
+      {:error, reason} -> {:error, reason}
     end
   end
 
   defp validate_events(_events), do: {:error, :invalid_events}
 
-  defp validate_record(%{kind: kind} = record) when is_binary(kind) do
-    validate_plain_map(record)
-  end
-
-  defp validate_record(_record), do: {:error, :invalid_record}
-
-  defp validate_event(%{event_id: event_id, kind: kind} = event) when is_binary(kind) do
-    with {:ok, _event_id} <- validate_identifier(event_id),
-         false <- contains_reserved_event_field?(event),
-         :ok <- validate_plain_map(event) do
-      :ok
-    else
-      true -> {:error, :reserved_event_field}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp validate_event(_event), do: {:error, :invalid_event}
-
-  defp contains_reserved_event_field?(value) when is_list(value),
-    do: Enum.any?(value, &contains_reserved_event_field?/1)
-
-  defp contains_reserved_event_field?(value) when is_map(value) do
-    Enum.any?(value, fn {key, item} ->
-      key in @reserved_event_fields or contains_reserved_event_field?(item)
+  defp validate_items(plane, items, error) do
+    Enum.reduce_while(items, :ok, fn item, :ok ->
+      case validate_item(plane, item) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, item_refusal(reason, error)}}
+      end
     end)
   end
 
-  defp contains_reserved_event_field?(_value), do: false
+  # Concept: an item is valid when the shared normalizer returns it unchanged
+  # and within the byte ceiling.
+  #
+  # Technical depth: this is the transaction side of ADR 0017's one-normalizer
+  # rule. A second structural predicate here would be a second answer to the
+  # same question, and the two drifted: the predicate walked untrusted lists
+  # with `length/1` and admitted a nested atom key that the normalizer rewrites.
+  # Comparing against the normalizer's own output settles both at once -- an
+  # item that is not already exactly what the normalizer produces is not
+  # canonical, whatever else is true of it -- and the measured size is the same
+  # count the preflight reported, so an oversized item still says how large it
+  # was rather than making an operator rediscover the number.
+  defp validate_item(plane, item) do
+    case normalize_and_measure_item(plane, item) do
+      {:ok, ^item, observed} when observed <= @max_item_bytes ->
+        :ok
 
-  defp validate_plain_map(map) when is_map(map) and not is_struct(map) do
-    case plain?(map, 0) do
-      true ->
-        encoded = :erlang.term_to_binary(map, [:deterministic])
+      {:ok, ^item, observed} ->
+        {:error, {:item_too_large, observed, @max_item_bytes}}
 
-        if byte_size(encoded) <= @max_item_bytes,
-          do: :ok,
-          else: {:error, :item_too_large}
+      {:ok, _normalized, _observed} ->
+        {:error, invalid_item_reason(plane)}
 
-      false ->
-        {:error, :not_plain_data}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
-
-  defp validate_plain_map(_map), do: {:error, :not_plain_data}
 
   defp validate_encoded_items(transaction) do
     fields =
@@ -1244,20 +1646,5 @@ defmodule Loopex.Store do
     _kind, _reason -> fallback
   end
 
-  defp plain?(_value, depth) when depth > @max_depth, do: false
-  defp plain?(value, _depth) when is_binary(value) or is_integer(value), do: true
-  defp plain?(value, _depth) when value in [nil, true, false], do: true
-
-  defp plain?(value, depth) when is_list(value) do
-    length(value) <= @max_items and Enum.all?(value, &plain?(&1, depth + 1))
-  end
-
-  defp plain?(value, depth) when is_map(value) and not is_struct(value) do
-    map_size(value) <= @max_items and
-      Enum.all?(value, fn {key, item} ->
-        (key in [:event_id, :kind] or is_binary(key)) and plain?(item, depth + 1)
-      end)
-  end
-
-  defp plain?(_value, _depth), do: false
+  defp positive_integer?(value), do: is_integer(value) and value > 0
 end

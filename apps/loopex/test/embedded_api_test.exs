@@ -83,7 +83,18 @@ defmodule Loopex.EmbeddedApiTest do
 
     {:ok, attachment} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
     stored = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id].events
-    assert Enum.map(stored, & &1.event_sequence) == [1, 2]
+    assert Enum.map(stored, & &1.event_sequence) == [1]
+
+    # ADR 0017: a model-less prompt commits one event. The abort's terminal is
+    # the second, committed after the attachment buffered the first, so the
+    # identity of a delivered event is proved across a history read.
+    # ADR 0006: Control admits commands from the one current attachment, which the
+    # attach above became, so the abort is issued through it rather than the superseded one.
+    assert {:accepted, "delivery-abort"} =
+             Loopex.command(attachment, %{type: :abort, command_id: "delivery-abort"})
+
+    eventually(fn -> committed_event_count(fixture, session_id) == 2 end)
+    stored = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id].events
 
     :ok = M1RuntimeTestStore.block_next_event_read(fixture.store_pid, self())
 
@@ -135,24 +146,29 @@ defmodule Loopex.EmbeddedApiTest do
                content: "before"
              })
 
-    assert Enum.map(drain_events(original), & &1.event_sequence) == [1, 2]
+    assert Enum.map(drain_events(original), & &1.event_sequence) == [1]
 
     assert {:accepted, "finish-before-snapshot"} =
              Loopex.command(original, %{type: :abort, command_id: "finish-before-snapshot"})
 
-    assert [%{event_sequence: 3, kind: "run.finished"}] = drain_events(original)
+    # An accepted abort is an admission, not an ending: ADR 0009 orders the
+    # admission, then the cleanup, then the run's terminal, so the ending is
+    # still to come when `command/2` returns. And ADR 0018 fences delivery on
+    # the publication watermark, so the durable count is not the delivery
+    # signal either: the terminal is polled off the attachment itself.
+    assert [%{event_sequence: 2, kind: "run.finished"}] = await_delivered(original, 1)
     :ok = M1RuntimeTestStore.block_next_event_read(fixture.store_pid, self())
 
     attaching =
       Task.async(fn ->
         Loopex.attach(fixture.runtime, session_id,
           request_id: "snapshot-race",
-          after_event_sequence: 3
+          after_event_sequence: 2
         )
       end)
 
     assert_receive {:event_history_read, waiter, _store, ^session_id, scanned_at_three}
-    assert Enum.map(scanned_at_three, & &1.event_sequence) == [1, 2, 3]
+    assert Enum.map(scanned_at_three, & &1.event_sequence) == [1, 2]
 
     assert {:accepted, "during-snapshot"} =
              Loopex.command(original, %{
@@ -164,17 +180,17 @@ defmodule Loopex.EmbeddedApiTest do
     M1RuntimeTestStore.release(waiter)
     assert {:ok, replacement} = Task.await(attaching)
 
-    assert %{session_id: ^session_id, event_sequence: 3, active_run_id: nil} =
+    assert %{session_id: ^session_id, event_sequence: 2, active_run_id: nil} =
              Loopex.snapshot(replacement)
 
     streamed = drain_events(replacement)
-    assert Enum.map(streamed, & &1.event_sequence) == [4, 5]
-    assert Enum.map(streamed, & &1.kind) == ["user.message_appended", "run.started"]
+    assert Enum.map(streamed, & &1.event_sequence) == [3]
+    assert Enum.map(streamed, & &1.kind) == ["user.message_appended"]
 
     assert {:error, :stale_attachment} = Loopex.next_event(original)
 
     stored = M1RuntimeTestStore.inspect_state(fixture.store_pid).sessions[session_id].events
-    assert Enum.map(stored, & &1.event_sequence) == [1, 2, 3, 4, 5]
+    assert Enum.map(stored, & &1.event_sequence) == [1, 2, 3]
     assert scanned_at_three ++ streamed == stored
 
     paged = start_fixture("paged-snapshot-runtime")
@@ -183,7 +199,19 @@ defmodule Loopex.EmbeddedApiTest do
       paged_session = create_session!(paged, "create-paged-snapshot")
       {:ok, command_attachment} = Loopex.attach(paged.runtime, paged_session)
 
-      Enum.each(1..342, fn index ->
+      # Concept: an accepted abort is an admission, not an ending.
+      #
+      # Technical depth: ADR 0009 orders the abort admitted and committed, then
+      # the cleanup, then the run's terminal. `command/2` returns once the
+      # admission commits, so the run is still active for as long as its cleanup
+      # takes. A loop that submits the next prompt immediately therefore races
+      # its own predecessor's ending: the prompt lands on a still-active run and
+      # is queued as a follow-up instead of starting one, and the count this case
+      # reads a moment later is short by exactly the endings that had not landed.
+      # That is not a flake in the loop -- it is what two-phase cancellation means
+      # for any caller, and it is why each iteration waits for its own ending
+      # here rather than being retried until it passes.
+      Enum.each(1..513, fn index ->
         prompt_id = "paged-prompt-#{index}"
         abort_id = "paged-abort-#{index}"
 
@@ -199,6 +227,8 @@ defmodule Loopex.EmbeddedApiTest do
                    type: :abort,
                    command_id: abort_id
                  })
+
+        eventually(fn -> committed_event_count(paged, paged_session) == index * 2 end)
       end)
 
       paged_events =
@@ -260,6 +290,12 @@ defmodule Loopex.EmbeddedApiTest do
                content: "two events"
              })
 
+    # ADR 0017: an accepted prompt publishes one event and stages nothing in a
+    # model-less runtime, so the second event that overflows a capacity of one
+    # is the terminal an abort commits.
+    assert {:accepted, "overflow-first-abort"} =
+             Loopex.command(first, %{type: :abort, command_id: "overflow-first-abort"})
+
     eventually(fn ->
       match?(
         {:ok,
@@ -279,10 +315,31 @@ defmodule Loopex.EmbeddedApiTest do
     {:ok, live} = Loopex.attach(fixture.runtime, session_id, after_event_sequence: 0)
     assert Enum.map(drain_events(live), & &1.event_sequence) == [1, 2]
 
-    assert {:accepted, "overflow-abort"} =
-             Loopex.command(live, %{type: :abort, command_id: "overflow-abort"})
+    # The reconnected attachment's own event source: a prompt admitted on the
+    # settled session publishes its user message as the third event.
+    assert {:accepted, "reconnect-prompt"} =
+             Loopex.command(live, %{
+               type: :prompt,
+               command_id: "reconnect-prompt",
+               content: "after reconnect"
+             })
 
-    assert [%{event_sequence: 3}] = drain_events(live)
+    ended =
+      Enum.reduce_while(1..400, [], fn _attempt, acc ->
+        case acc ++ drain_events(live) do
+          [] -> Process.sleep(5) && {:cont, []}
+          drained -> {:halt, drained}
+        end
+      end)
+
+    assert [%{event_sequence: 3}] = ended
+
+    # The abort's acceptance says it was admitted, not that the run has ended;
+    # its terminal is the fourth event and lands once the cleanup answers.
+    assert {:accepted, "reconnect-abort"} =
+             Loopex.command(live, %{type: :abort, command_id: "reconnect-abort"})
+
+    eventually(fn -> committed_event_count(fixture, session_id) == 4 end)
 
     assert {:accepted, "second-prompt"} =
              Loopex.command(live, %{
@@ -302,6 +359,7 @@ defmodule Loopex.EmbeddedApiTest do
 
     {:ok, restarted} =
       Loopex.start_link(
+        context_token_budget: 8_192,
         runtime_id: fixture.runtime_id,
         store: fixture.store,
         attachment_capacity: 1
@@ -341,6 +399,7 @@ defmodule Loopex.EmbeddedApiTest do
       options
       |> Keyword.put(:runtime_id, runtime_id)
       |> Keyword.put(:store, store)
+      |> Keyword.put_new(:context_token_budget, 8_192)
 
     {:ok, runtime} = Loopex.start_link(runtime_options)
 
@@ -376,6 +435,33 @@ defmodule Loopex.EmbeddedApiTest do
       {:ok, event} -> drain_events(attachment, [event | accumulated])
       {:error, :empty} -> Enum.reverse(accumulated)
     end
+  end
+
+  # Drains the attachment until at least `count` events have been delivered,
+  # because delivery follows the publication fence rather than the commit.
+  defp await_delivered(attachment, count, accumulated \\ [], attempts \\ 400)
+
+  defp await_delivered(attachment, count, accumulated, attempts) when attempts > 0 do
+    delivered = accumulated ++ drain_events(attachment)
+
+    if length(delivered) >= count do
+      delivered
+    else
+      Process.sleep(5)
+      await_delivered(attachment, count, delivered, attempts - 1)
+    end
+  end
+
+  defp await_delivered(_attachment, count, accumulated, 0),
+    do: flunk("expected #{count} delivered events, saw #{length(accumulated)}")
+
+  defp committed_event_count(fixture, session_id) do
+    fixture.store_pid
+    |> M1RuntimeTestStore.inspect_state()
+    |> Map.fetch!(:sessions)
+    |> Map.fetch!(session_id)
+    |> Map.fetch!(:events)
+    |> length()
   end
 
   defp eventually(assertion, attempts \\ 400)

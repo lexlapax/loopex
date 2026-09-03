@@ -27,13 +27,18 @@ load only the sections a task needs rather than reading it end to end.
 | Document | Purpose |
 | --- | --- |
 | [Development charter](development-charter.md#concept) · [technical](development-charter-technical.md#technical-depth) | Clarity before mechanism, traceable depth, proportional documentation, capability routing. |
-| [Runtime and embedding](runtime-and-embedding.md#concept) | M1 application shape, explicit runtime composition, commit ordering, embedded API, recovery, and verification entrypoints. |
+| [Runtime and embedding](runtime-and-embedding.md#concept) | Application shape, explicit runtime composition, commit ordering, embedded API, the shipped reference composition, recovery, and verification entrypoints. |
+| [Agent loop and tools](agent-loop-and-tools.md#concept) | The M2 turn machine: the tool contract and registry, canonical encoding, conversation projection, request digests, provider attempts and their settlement, bounds, streaming, policy, artifacts, context and record admission, project resources, and commit ordering. |
+| [Compatibility surfaces](compatibility-surfaces.md#concept) | Every surface M2 touches, why none is labelled or frozen, and what that means for an embedder. |
 | [Agent context map](agent-context-map.md) | Task-oriented routing into Concept first and exact Technical depth second; current client-ecosystem facts. |
 | [Adapter smoke evidence](agent-adapter-smoke.md) | Retained proof that development clients load the canonical contract and skills. |
 
 The charter is a Concept and Technical depth pair and is changed and reviewed as
 one authority. The context map and smoke evidence are routing and evidence
-records; they are deliberately unpaired and may link both depths.
+records; they are deliberately unpaired and may link both depths. Runtime and
+embedding, agent loop and tools, and compatibility surfaces are subsystem
+references that carry both depths in one file, each opening with its `Concept`
+section and reaching its `Technical depth` section below it.
 
 ## Related
 

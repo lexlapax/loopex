@@ -32,14 +32,16 @@ defmodule Loopex.Checks.DepsBudget do
 
   @contract_app :loopex_protocol
   @runtime_app :loopex
-  @roles [:contract, :core, :edge, :client, :extension]
+  @roles [:contract, :core, :edge, :composition, :client, :extension]
   @m1_planned_roles %{
     loopex_protocol: :contract,
     loopex: :core,
     loopex_store_local: :edge,
     loopex_llm_reqllm: :edge,
     loopex_executor_local: :edge,
-    loopex_reference_client: :client
+    loopex_composition: :composition,
+    loopex_reference_client: :client,
+    loopex_cli: :client
   }
   @reqllm_requirement "~> 1.17.1"
   @floor_elixir_version Version.parse!("1.17.0")
@@ -1605,6 +1607,10 @@ defmodule Loopex.Checks.DepsBudget do
 
   defp record_reasons(%{role: :edge} = record, roles), do: edge_reasons(record, roles)
   defp record_reasons(%{role: :extension} = record, roles), do: extension_reasons(record, roles)
+
+  defp record_reasons(%{role: :composition} = record, roles),
+    do: composition_reasons(record, roles)
+
   defp record_reasons(%{role: :client} = record, roles), do: client_reasons(record, roles)
 
   defp record_reasons(record, _roles),
@@ -1671,10 +1677,56 @@ defmodule Loopex.Checks.DepsBudget do
     end
   end
 
-  defp client_reasons(record, roles) do
+  # Concept: a composition wires the reference stack and nothing else.
+  #
+  # Technical depth: it is the one production role permitted to declare a
+  # dependency on the concrete edges it composes, which is exactly what an
+  # `:edge` may not do and exactly what a `:client` may not be depended on for.
+  # Inventing the role keeps both of those rules closed; widening either would
+  # have applied to every application in that role forever rather than to the one
+  # case that needs it. It carries no external dependency in any environment, and
+  # depends on no client and on no other composition.
+  defp composition_reasons(record, roles) do
     {known, unknown} = split_internal(record.dependencies, roles)
     core = Enum.filter(known, &(elem(&1, 0) == @runtime_app))
     other = known -- core
+
+    external =
+      Enum.reject(record.dependencies, fn {name, _requirement, options} ->
+        Map.has_key?(roles, name) or in_umbrella?(options)
+      end)
+
+    cond do
+      unknown != [] ->
+        unknown_reasons(record, unknown)
+
+      external != [] ->
+        ["#{record.path}: composition applications may not carry external dependencies"]
+
+      not match?([{@runtime_app, nil, _options}], core) ->
+        ["#{record.path}: composition applications require one production loopex dependency"]
+
+      not Enum.all?(other, fn {name, _requirement, options} ->
+        target_role(roles, name) in [:edge, :contract] and production_internal?(options)
+      end) ->
+        [
+          "#{record.path}: compositions may depend only on core, protocol, and the edges they compose"
+        ]
+
+      true ->
+        []
+    end
+  end
+
+  defp client_reasons(record, roles) do
+    {known, unknown} = split_internal(record.dependencies, roles)
+    core = Enum.filter(known, &(elem(&1, 0) == @runtime_app))
+    compositions = Enum.filter(known, &(target_role(roles, elem(&1, 0)) == :composition))
+    # The grouping is load-bearing. `--` is right-associative in Elixir, so
+    # `known -- core -- compositions` reads as `known -- (core -- compositions)`
+    # and leaves the composition in `other`, where the edge-only rule below then
+    # rejects the very dependency this role exists to permit.
+    other = (known -- core) -- compositions
 
     external =
       Enum.reject(record.dependencies, fn {name, _requirement, options} ->
@@ -1693,6 +1745,14 @@ defmodule Loopex.Checks.DepsBudget do
             production_internal?(options)
           end) ->
         ["#{record.path}: client applications require one production loopex dependency"]
+
+      length(compositions) > 1 ->
+        ["#{record.path}: clients may depend on at most one composition"]
+
+      not Enum.all?(compositions, fn {_name, _requirement, options} ->
+        production_internal?(options)
+      end) ->
+        ["#{record.path}: a client's composition dependency must be production and in-umbrella"]
 
       not Enum.all?(other, fn {name, _requirement, options} ->
         target_role(roles, name) == :edge and test_only_internal?(options)

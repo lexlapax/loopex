@@ -21,6 +21,9 @@ defmodule Loopex.ReferenceClient do
           }
   defstruct [:runtime, :session_id, :attachment]
 
+  @prompt_bound_keys [:max_turns, :token_budget, :deadline_ms]
+  @prompt_bounds %{max_turns: 8, token_budget: 1_000_000, deadline_ms: 300_000}
+
   @doc """
   ## Concept
 
@@ -28,11 +31,21 @@ defmodule Loopex.ReferenceClient do
 
   ## Technical depth
 
-  Configuration passes unchanged to `Loopex.start_link/1`; the client neither
-  discovers defaults nor rewrites host authority.
+  Configuration passes to `Loopex.start_link/1` unchanged but for one option.
+  ADR 0017 makes `:context_token_budget` a required runtime option with no
+  kernel default, so a host that names none is refused rather than handed a
+  ceiling the kernel invented. This client is such a host, and it answers with
+  the same number the reference composition answers with, so an embedder reading
+  this stack finds one reference ceiling rather than two. A caller that names its
+  own is passed through untouched, and nothing else about host authority is
+  discovered or rewritten here.
   """
+  @reference_context_token_budget 8_192
+
   @spec start(keyword()) :: {:ok, t()} | {:error, term()}
   def start(options) when is_list(options) do
+    options = Keyword.put_new(options, :context_token_budget, @reference_context_token_budget)
+
     case Loopex.start_link(options) do
       {:ok, runtime} -> {:ok, %__MODULE__{runtime: runtime}}
       {:error, reason} -> {:error, reason}
@@ -88,10 +101,45 @@ defmodule Loopex.ReferenceClient do
   This is one direct embedded command; model and tool continuation occurs inside
   the runtime, not in this client.
   """
-  @spec prompt(t(), binary(), binary()) :: {:accepted, binary()} | {:error, term()}
-  def prompt(%__MODULE__{attachment: attachment}, command_id, content)
-      when is_binary(command_id) and is_binary(content) do
-    Loopex.command(attachment, %{type: :prompt, command_id: command_id, content: content})
+  @spec prompt(t(), binary(), binary(), keyword()) :: {:accepted, binary()} | {:error, term()}
+  def prompt(%__MODULE__{attachment: attachment}, command_id, content, options \\ [])
+      when is_binary(command_id) and is_binary(content) and is_list(options) do
+    # Concept: a run declares its bounds when it starts.
+    #
+    # Technical depth: there is no default for any of the three, so this client
+    # names them explicitly on the caller's behalf. A host embedding Loopex
+    # decides its own; these are the reference client's, not the kernel's.
+    with {:ok, bounds} <- prompt_bounds(options) do
+      Loopex.command(attachment, %{
+        type: :prompt,
+        command_id: command_id,
+        content: content,
+        bounds: bounds
+      })
+    end
+  end
+
+  # Concept: the reference client names one visible five-minute allowance and
+  # refuses to reinterpret misspelled caller input as a runtime default.
+  #
+  # Technical depth: `deadline_ms` is the accepted duration key. The runtime
+  # converts it to an absolute instant when the first request is staged. An
+  # unknown key is refused here before a command can become durable; otherwise a
+  # misspelling survives `Map.merge/2` beside the runtime's ten-minute default
+  # and the operator silently receives a different bound than the one supplied.
+  defp prompt_bounds(options) do
+    case Keyword.fetch(options, :bounds) do
+      :error ->
+        {:ok, @prompt_bounds}
+
+      {:ok, bounds} when is_map(bounds) and not is_struct(bounds) ->
+        if Map.keys(bounds) -- @prompt_bound_keys == [],
+          do: {:ok, bounds},
+          else: {:error, :invalid_declared_bounds}
+
+      {:ok, _invalid} ->
+        {:error, :invalid_declared_bounds}
+    end
   end
 
   @doc """

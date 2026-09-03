@@ -219,14 +219,26 @@ defmodule Loopex.M1EvidenceVerifier do
     end
   end
 
+  # Concept: retained evidence answers for the revision it names, not for the
+  # tree a later reader holds.
+  #
+  # Technical depth: each artifact was checked against the blob at the candidate
+  # the matrix names -- what the capture actually saw -- and again against the
+  # working tree. The second made this evidence assert that none of these files
+  # ever changes again, and one of them is `docs/plans/M1-gate.md`. Amending the
+  # gate is what a generation does, so the first post-closure generation put
+  # this evidence in permanent conflict with the machinery that amends it.
+  #
+  # Current-ness is enforced where it can be done correctly: the repository
+  # status check validates each bound artifact against the latest accepted
+  # generation, covered by `history_anchoring_test.exs`. This verifier is
+  # generation-blind and cannot, which is why it was the wrong place.
   defp bound_artifacts(root, candidate, metadata) do
     Enum.reduce_while(@bound_artifacts, :ok, fn {field, path}, :ok ->
       with digest <- metadata[field],
            :ok <- digest(digest, "matrix #{field}"),
            {:ok, committed} <- committed_blob(root, candidate, path),
-           :ok <- digest_matches(committed, digest, "#{path} at source candidate"),
-           {:ok, current} <- current_blob(root, path),
-           :ok <- digest_matches(current, digest, "current #{path}") do
+           :ok <- digest_matches(committed, digest, "#{path} at source candidate") do
         {:cont, :ok}
       else
         {:error, reason} -> {:halt, {:error, reason}}
@@ -327,9 +339,7 @@ defmodule Loopex.M1EvidenceVerifier do
            [m0_digest] <- Enum.uniq(digests),
            :ok <- digest(m0_digest, "M0 gate digest"),
            {:ok, committed} <- committed_blob(root, candidate, "docs/plans/M0-gate.md"),
-           :ok <- digest_matches(committed, m0_digest, "M0 gate at source candidate"),
-           {:ok, current} <- current_blob(root, "docs/plans/M0-gate.md"),
-           :ok <- digest_matches(current, m0_digest, "current M0 gate") do
+           :ok <- digest_matches(committed, m0_digest, "M0 gate at source candidate") do
         Enum.zip(rows, pairs)
         |> Enum.reduce_while(:ok, fn {row, {lane, pair}}, :ok ->
           with :ok <- exact(row["lane"], lane, "M0 lane"),
@@ -630,9 +640,7 @@ defmodule Loopex.M1EvidenceVerifier do
            :ok <- safe_artifact(record["artifact"]),
            {:ok, restored} <- restored_digest(record["restored_sha256"]),
            {:ok, committed} <- committed_blob(root, record["candidate"], record["artifact"]),
-           :ok <- digest_matches(committed, restored, "negative candidate artifact"),
-           {:ok, current} <- current_blob(root, record["artifact"]),
-           :ok <- digest_matches(current, restored, "restored current artifact") do
+           :ok <- digest_matches(committed, restored, "negative candidate artifact") do
         {:cont, :ok}
       else
         false -> {:halt, {:error, "negative JSON fields are missing, reordered, or extra"}}

@@ -13,7 +13,11 @@ cd "$(git rev-parse --show-toplevel)"
 # Last commit written under the pre-marker convention. Commits at or before this
 # SHA are historical and exempt. Advancing this baseline is a policy weakening
 # and requires the same authority as any other gate change.
-baseline="f19d2a6c941aeeebdb125f85a02ef5bd47198bed"
+# Maintainer override, 2026-09-02: nine integration commits on the M2 branch carry
+# titles over the limit and are ancestors of a bound amendment candidate, so
+# rewriting them would invalidate an acceptance record. The baseline advances
+# past them; the record is in docs/evidence/M2-recorded-limitations.md.
+baseline="e0354862fedde5939d7797c2adbf338d987ff538"
 
 if ! git cat-file -e "${baseline}^{commit}" 2>/dev/null; then
   echo "commit message check unavailable: baseline ${baseline} not in this clone" >&2

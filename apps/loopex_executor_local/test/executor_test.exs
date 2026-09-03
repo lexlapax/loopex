@@ -27,11 +27,16 @@ defmodule Loopex.Executor.LocalTest do
     on_exit(fn -> stop_fixture(fixture) end)
     {job, grant} = job_and_grant(fixture, "negative", "loopex.demo.write")
 
+    # The refusal wears the tag that says it preceded the effect. That is the
+    # half of this case's name a bare reason cannot carry: `refused before
+    # process start` is a claim about a workspace, and the only party that can
+    # make it is the executor that did or did not start something. A caller
+    # reading these bare would be inferring it.
     for field <- Executor.required_grant_bindings() do
-      assert {:error, {:missing_binding, ^field}} =
+      assert {:error, {:refused_before_effect, {:missing_binding, ^field}}} =
                Local.execute(fixture.executor, job, Map.delete(grant, field))
 
-      assert {:error, {:binding_mismatch, ^field}} =
+      assert {:error, {:refused_before_effect, {:binding_mismatch, ^field}}} =
                Local.execute(fixture.executor, job, Map.put(grant, field, wrong(field, grant)))
     end
 
@@ -53,7 +58,7 @@ defmodule Loopex.Executor.LocalTest do
 
     widened_job = %{job | tool_id: "loopex.demo.wait_write"}
 
-    assert {:error, :canonical_job_request_mismatch} =
+    assert {:error, {:refused_before_effect, :canonical_job_request_mismatch}} =
              Local.execute(fixture.executor, widened_job, grant)
 
     assert grant.issued_by == :host_policy_allow
@@ -68,7 +73,7 @@ defmodule Loopex.Executor.LocalTest do
 
     altered = %{job | canonical_request_digest: job.canonical_request_digest <> "00"}
 
-    assert {:error, :canonical_job_request_mismatch} =
+    assert {:error, {:refused_before_effect, :canonical_job_request_mismatch}} =
              Local.execute(fixture.executor, altered, grant)
 
     assert %{dispatches: %{}} = Local.stats(fixture.executor)
@@ -110,6 +115,32 @@ defmodule Loopex.Executor.LocalTest do
     assert receipt.provider_credential_present == false
     assert {:ok, ^receipt} = Local.receipt(fixture.executor, job.job_id)
     refute File.exists?(Path.join(fixture.workspace, "lease-loss.txt"))
+  end
+
+  test "a starting job whose cancellation does not answer becomes unconfirmed" do
+    table = :ets.new(:starting_cancel_test, [:set, :public])
+    parent = self()
+
+    worker =
+      spawn(fn ->
+        Process.put(:loopex_inflight_table, table)
+        Process.put(:loopex_cleanup_grace_ms, 5)
+        send(parent, {:starting_worker, self()})
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    assert_receive {:starting_worker, ^worker}, 1_000
+    true = :ets.insert(table, {"starting-job", {:starting, worker}})
+
+    assert Local.cancel(worker, "starting-job") == {:ok, :unconfirmed}
+
+    monitor = Process.monitor(worker)
+    send(worker, :stop)
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+    :ets.delete(table)
   end
 
   test "the executor starts one credential-free OS tool that writes the expected workspace bytes and retains its receipt" do
@@ -203,7 +234,7 @@ defmodule Loopex.Executor.LocalTest do
       validated_arguments: arguments,
       workspace_ref: "workspace-#{label}",
       workspace_lease: fixture.lease_id,
-      deadline: now + 60_000,
+      run_deadline: now + 60_000,
       resource_budgets: %{"max_output_bytes" => 1_048_576},
       idempotency_class: "effectful",
       fencing_token: fixture.fence,

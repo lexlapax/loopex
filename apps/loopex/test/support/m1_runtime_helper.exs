@@ -24,6 +24,28 @@ defmodule Loopex.M1RuntimeTestStore do
   def delay_after_commit(pid, transition, observer) when is_pid(observer),
     do: GenServer.call(pid, {:delay_after_commit, transition, observer})
 
+  # Concept: pause the caller after one transaction carrying a named record has
+  # become durable.
+  #
+  # Technical depth: several session semantics are distinguished by records
+  # inside the common `session_journal_commit` transaction shape. Delaying by
+  # record kind lets a test crash the owner at that exact durable boundary
+  # without inventing a product hook or accidentally stopping an earlier commit
+  # that uses the same Store transition.
+  def delay_after_record(pid, kind, observer) when is_binary(kind) and is_pid(observer),
+    do: GenServer.call(pid, {:delay_after_record, kind, observer})
+
+  # Concept: hold one named transaction before the Store decides it, while the
+  # Store remains available to a successor.
+  #
+  # Technical depth: a stale-owner refusal is meaningful only when ownership
+  # moves before the old transaction linearizes. Keeping the original caller
+  # pending outside the GenServer lets an `advance_owner` transaction establish
+  # that order without fabricating a refusal or blocking the serialized Store.
+  def hold_next_record_before_linearization(pid, kind, observer)
+      when is_binary(kind) and is_pid(observer),
+      do: GenServer.call(pid, {:hold_next_record_before_linearization, kind, observer})
+
   def block_next_event_read(pid, observer) when is_pid(observer),
     do: GenServer.call(pid, {:block_next_event_read, observer})
 
@@ -33,6 +55,17 @@ defmodule Loopex.M1RuntimeTestStore do
   def observed(pid), do: GenServer.call(pid, :observed)
   def injected(pid), do: GenServer.call(pid, :injected)
   def fail_reads(pid, enabled), do: GenServer.call(pid, {:fail_reads, enabled})
+
+  # Concept: refuse one named kind of record, once.
+  #
+  # Technical depth: a Store may answer `not_committed` to any transaction, and a
+  # coordinator that treats one particular refusal as a tidy fallback rather than
+  # as a failure is what lets a run commit its ending with the operation it owns
+  # unsettled. Refusing by record kind rather than by transition identity is what
+  # lets a case name the transaction it means without knowing the identity a
+  # given run happened to derive for it.
+  def refuse_next_record(pid, kind) when is_binary(kind),
+    do: GenServer.call(pid, {:refuse_next_record, kind})
 
   @impl Store
   def transact(pid, transaction), do: GenServer.call(pid, {:transact, transaction}, :infinity)
@@ -44,6 +77,10 @@ defmodule Loopex.M1RuntimeTestStore do
   @impl Store
   def ownership_head(pid, session_id, _domain),
     do: GenServer.call(pid, {:ownership_head, session_id})
+
+  @impl Store
+  def runtime_command(pid, command),
+    do: GenServer.call(pid, {:runtime_command, command})
 
   @impl Store
   def load_records(pid, session_id, after_version, limit),
@@ -69,8 +106,12 @@ defmodule Loopex.M1RuntimeTestStore do
        faults: %{},
        recovery_setup: MapSet.new(),
        delayed: %{},
+       delayed_records: %{},
+       held_before_records: %{},
+       pending_transactions: %{},
        event_read_block: nil,
-       fail_reads: false
+       fail_reads: false,
+       refuse_records: MapSet.new()
      }}
   end
 
@@ -94,6 +135,15 @@ defmodule Loopex.M1RuntimeTestStore do
     {:reply, :ok, %{state | delayed: Map.put(state.delayed, transition, observer)}}
   end
 
+  def handle_call({:delay_after_record, kind, observer}, _from, state) do
+    {:reply, :ok, %{state | delayed_records: Map.put(state.delayed_records, kind, observer)}}
+  end
+
+  def handle_call({:hold_next_record_before_linearization, kind, observer}, _from, state) do
+    {:reply, :ok,
+     %{state | held_before_records: Map.put(state.held_before_records, kind, observer)}}
+  end
+
   def handle_call({:block_next_event_read, observer}, _from, state) do
     {:reply, :ok, %{state | event_read_block: observer}}
   end
@@ -102,31 +152,31 @@ defmodule Loopex.M1RuntimeTestStore do
     {:reply, :ok, %{state | fail_reads: enabled == true}}
   end
 
+  def handle_call({:refuse_next_record, kind}, _from, state) do
+    {:reply, :ok, %{state | refuse_records: MapSet.put(state.refuse_records, kind)}}
+  end
+
   def handle_call(:observed, _from, state), do: {:reply, state.observed, state}
   def handle_call(:injected, _from, state), do: {:reply, state.injected, state}
 
   def handle_call(:inspect_state, _from, state) do
-    visible = Map.drop(state, [:faults, :delayed, :event_read_block])
+    visible =
+      Map.drop(state, [
+        :faults,
+        :delayed,
+        :delayed_records,
+        :held_before_records,
+        :pending_transactions,
+        :event_read_block
+      ])
+
     {:reply, visible, state}
   end
 
   def handle_call({:transact, transaction}, from, state) do
-    with :ok <- Store.validate_transaction(transaction),
-         {:ok, transition} <- Transitions.id(transaction),
-         {:ok, binding} <- Store.immutable_binding(transaction) do
-      case retained(state, transaction) do
-        {:ok, %{binding: ^binding, outcome: outcome}} ->
-          {checkpoint, state} = checkpoint(state, transition, :recovery_representation)
-          reply_checkpoint(checkpoint, from, state, transaction, outcome)
-
-        {:ok, _other_binding} ->
-          {:reply, {:not_committed, :tx_id_conflict}, state}
-
-        :absent ->
-          transact_new(state, from, transition, transaction, binding)
-      end
-    else
-      _other -> {:reply, {:not_committed, :invalid_transaction}, state}
+    case held_before_record(state, transaction) do
+      {kind, observer} -> hold_before_linearization(state, from, transaction, kind, observer)
+      nil -> transact(state, from, transaction)
     end
   end
 
@@ -157,6 +207,28 @@ defmodule Loopex.M1RuntimeTestStore do
              owner_epoch: session.owner_epoch,
              journal_version: session.journal_version
            }}
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call({:runtime_command, command}, _from, state) do
+    result =
+      case Map.get(state.runtime_commands, {command.runtime_id, command.command_id}) do
+        nil ->
+          :absent
+
+        %{command: ^command, status: status, generation: generation, candidate: candidate} =
+            entry ->
+          details = %{attempt_generation: generation, candidate_tx_id: candidate.tx_id}
+
+          case status do
+            :open -> {:open, details}
+            :completed -> {:completed, Map.put(details, :result, entry.result)}
+          end
+
+        _changed_binding ->
+          {:error, :runtime_command_conflict}
       end
 
     {:reply, result, state}
@@ -217,6 +289,103 @@ defmodule Loopex.M1RuntimeTestStore do
     end
   end
 
+  @impl GenServer
+  def handle_info({:release_before_linearization, token}, state) do
+    case Map.pop(state.pending_transactions, token) do
+      {nil, _pending} ->
+        {:noreply, state}
+
+      {{from, transaction}, pending} ->
+        state = %{state | pending_transactions: pending}
+
+        case transact(state, from, transaction) do
+          {:reply, reply, next} ->
+            GenServer.reply(from, reply)
+            {:noreply, next}
+
+          {:noreply, next} ->
+            {:noreply, next}
+        end
+    end
+  end
+
+  defp transact(state, from, transaction) do
+    case refused_kind(state, transaction) do
+      nil ->
+        admit(state, from, transaction)
+
+      kind ->
+        {:reply, {:not_committed, :refused_by_test_store},
+         %{state | refuse_records: MapSet.delete(state.refuse_records, kind)}}
+    end
+  end
+
+  defp held_before_record(%{held_before_records: held}, transaction) do
+    transaction
+    |> Map.get(:records, [])
+    |> Enum.find_value(fn record ->
+      kind = record_kind(record)
+
+      case Map.fetch(held, kind) do
+        {:ok, observer} -> {kind, observer}
+        :error -> nil
+      end
+    end)
+  end
+
+  defp hold_before_linearization(state, from, transaction, kind, observer) do
+    token = make_ref()
+    server = self()
+
+    waiter =
+      spawn(fn ->
+        receive do
+          :release -> send(server, {:release_before_linearization, token})
+        end
+      end)
+
+    send(observer, {:record_held_before_linearization, waiter, self(), kind, transaction})
+
+    {:noreply,
+     %{
+       state
+       | held_before_records: Map.delete(state.held_before_records, kind),
+         pending_transactions: Map.put(state.pending_transactions, token, {from, transaction})
+     }}
+  end
+
+  defp refused_kind(%{refuse_records: refused} = _state, transaction) do
+    transaction
+    |> Map.get(:records, [])
+    |> Enum.map(&record_kind/1)
+    |> Enum.find(&MapSet.member?(refused, &1))
+  end
+
+  defp record_kind(record) when is_map(record),
+    do: Map.get(record, :kind) || Map.get(record, "kind")
+
+  defp record_kind(_record), do: nil
+
+  defp admit(state, from, transaction) do
+    with :ok <- Store.validate_transaction(transaction),
+         {:ok, transition} <- Transitions.id(transaction),
+         {:ok, binding} <- Store.immutable_binding(transaction) do
+      case retained(state, transaction) do
+        {:ok, %{binding: ^binding, outcome: outcome}} ->
+          {checkpoint, state} = checkpoint(state, transition, :recovery_representation)
+          reply_checkpoint(checkpoint, from, state, transaction, outcome)
+
+        {:ok, _other_binding} ->
+          {:reply, {:not_committed, :tx_id_conflict}, state}
+
+        :absent ->
+          transact_new(state, from, transition, transaction, binding)
+      end
+    else
+      _other -> {:reply, {:not_committed, :invalid_transaction}, state}
+    end
+  end
+
   defp transact_new(state, from, transition, transaction, binding) do
     {before, state} = checkpoint(state, transition, :before_linearization)
 
@@ -230,24 +399,64 @@ defmodule Loopex.M1RuntimeTestStore do
         {after_checkpoint, state} =
           checkpoint(state, transition, :after_linearization_before_result)
 
-        cond do
-          Map.has_key?(state.delayed, transition) ->
-            {observer, delayed} = Map.pop(state.delayed, transition)
+        case delayed_record(state, transaction) do
+          {kind, observer} ->
             waiter = delayed_reply(from, outcome)
-            send(observer, {:transaction_linearized, waiter, self(), transition, outcome})
-            {:noreply, %{state | delayed: delayed}}
+            send(observer, {:record_linearized, waiter, self(), kind, transition, outcome})
 
-          MapSet.member?(state.recovery_setup, transition) ->
-            {:reply, unknown(transaction),
-             %{state | recovery_setup: MapSet.delete(state.recovery_setup, transition)}}
+            {:noreply, %{state | delayed_records: Map.delete(state.delayed_records, kind)}}
 
-          after_checkpoint == :unknown ->
-            {:reply, unknown(transaction), state}
-
-          true ->
-            {:reply, outcome, state}
+          nil ->
+            reply_after_linearization(
+              state,
+              from,
+              transition,
+              transaction,
+              outcome,
+              after_checkpoint
+            )
         end
     end
+  end
+
+  defp reply_after_linearization(
+         state,
+         from,
+         transition,
+         transaction,
+         outcome,
+         after_checkpoint
+       ) do
+    cond do
+      Map.has_key?(state.delayed, transition) ->
+        {observer, delayed} = Map.pop(state.delayed, transition)
+        waiter = delayed_reply(from, outcome)
+        send(observer, {:transaction_linearized, waiter, self(), transition, outcome})
+        {:noreply, %{state | delayed: delayed}}
+
+      MapSet.member?(state.recovery_setup, transition) ->
+        {:reply, unknown(transaction),
+         %{state | recovery_setup: MapSet.delete(state.recovery_setup, transition)}}
+
+      after_checkpoint == :unknown ->
+        {:reply, unknown(transaction), state}
+
+      true ->
+        {:reply, outcome, state}
+    end
+  end
+
+  defp delayed_record(%{delayed_records: delayed}, transaction) do
+    transaction
+    |> Map.get(:records, [])
+    |> Enum.find_value(fn record ->
+      kind = record_kind(record)
+
+      case Map.fetch(delayed, kind) do
+        {:ok, observer} -> {kind, observer}
+        :error -> nil
+      end
+    end)
   end
 
   defp reply_checkpoint(:unknown, _from, state, transaction, _outcome),
@@ -292,6 +501,7 @@ defmodule Loopex.M1RuntimeTestStore do
     command_key = {transaction.runtime_id, transaction.command_id}
 
     session = %{
+      runtime_id: transaction.runtime_id,
       owner_epoch: 0,
       owner_incarnation_id: nil,
       journal_version: 1,
@@ -311,6 +521,65 @@ defmodule Loopex.M1RuntimeTestStore do
     {next, outcome}
   end
 
+  defp linearize(state, %{type: :stage_owner_attempt} = transaction, binding) do
+    command = owner_command_binding(transaction)
+
+    session = Map.get(state.sessions, transaction.session_id)
+
+    reason =
+      cond do
+        is_nil(session) ->
+          :session_not_found
+
+        session.runtime_id != transaction.runtime_id ->
+          :runtime_placement_mismatch
+
+        unresolved_other_owner_command?(state, transaction) ->
+          :owner_attempt_in_progress
+
+        true ->
+          case Map.get(state.runtime_commands, {transaction.runtime_id, transaction.command_id}) do
+            nil ->
+              if transaction.expected_generation == 0,
+                do: nil,
+                else: :stale_attempt_generation
+
+            %{command: ^command, status: :open, generation: generation}
+            when generation == transaction.expected_generation ->
+              nil
+
+            %{command: ^command, status: :completed} ->
+              :command_completed
+
+            _changed_binding ->
+              :runtime_command_conflict
+          end
+      end
+
+    if reason do
+      retain_noncommit(state, transaction, binding, reason)
+    else
+      outcome = {:committed, transaction.tx_id, %{type: :stage_owner_attempt}}
+
+      staged = %{
+        command: command,
+        status: :open,
+        generation: transaction.attempt_generation,
+        candidate: transaction.candidate,
+        result: nil
+      }
+
+      next =
+        state
+        |> put_resolution(transaction, binding, outcome)
+        |> Map.update!(:runtime_commands, fn commands ->
+          Map.put(commands, {transaction.runtime_id, transaction.command_id}, staged)
+        end)
+
+      {next, outcome}
+    end
+  end
+
   defp linearize(state, %{type: :advance_owner} = transaction, binding) do
     case Map.get(state.sessions, transaction.session_id) do
       nil ->
@@ -318,6 +587,14 @@ defmodule Loopex.M1RuntimeTestStore do
 
       session ->
         cond do
+          owner_command_refusal(state, transaction) != nil ->
+            retain_noncommit(
+              state,
+              transaction,
+              binding,
+              owner_command_refusal(state, transaction)
+            )
+
           transaction.expected_owner_epoch != session.owner_epoch ->
             retain_noncommit(state, transaction, binding, :stale_owner_epoch)
 
@@ -364,6 +641,8 @@ defmodule Loopex.M1RuntimeTestStore do
               state
               |> put_session(transaction.session_id, updated)
               |> put_resolution(transaction, binding, outcome)
+
+            next = complete_runtime_command(next, transaction)
 
             {next, outcome}
         end
@@ -468,6 +747,76 @@ defmodule Loopex.M1RuntimeTestStore do
   defp put_session(state, session_id, session),
     do: %{state | sessions: Map.put(state.sessions, session_id, session)}
 
+  defp complete_runtime_command(state, %{runtime_id: runtime_id} = transaction) do
+    key = {runtime_id, transaction.command_id}
+
+    completed =
+      state.runtime_commands
+      |> Map.fetch!(key)
+      |> Map.merge(%{status: :completed, result: transaction.session_id})
+
+    %{state | runtime_commands: Map.put(state.runtime_commands, key, completed)}
+  end
+
+  defp complete_runtime_command(state, _transaction), do: state
+
+  defp owner_command_refusal(state, %{runtime_id: runtime_id} = transaction) do
+    command = owner_command_binding(transaction)
+
+    case Map.get(state.runtime_commands, {runtime_id, transaction.command_id}) do
+      %{command: ^command, status: :open, generation: generation, candidate: candidate}
+      when generation == transaction.attempt_generation ->
+        case {Store.immutable_binding(candidate), Store.immutable_binding(transaction)} do
+          {{:ok, binding}, {:ok, binding}} -> nil
+          _mismatch -> :owner_candidate_conflict
+        end
+
+      %{command: ^command, status: :completed} ->
+        :command_completed
+
+      _other ->
+        :runtime_command_conflict
+    end
+  end
+
+  defp owner_command_refusal(_state, _transaction), do: nil
+
+  defp unresolved_other_owner_command?(state, transaction) do
+    Enum.any?(state.runtime_commands, fn
+      {{runtime_id, command_id},
+       %{
+         command: %{session_id: session_id, mutation_domain: mutation_domain},
+         status: :open,
+         candidate: candidate
+       }} ->
+        same_command =
+          runtime_id == transaction.runtime_id and command_id == transaction.command_id
+
+        key = {session_id, mutation_domain, candidate.tx_id}
+
+        same_session_domain =
+          session_id == transaction.session_id and mutation_domain == transaction.mutation_domain
+
+        same_session_domain and not same_command and not Map.has_key?(state.resolutions, key)
+
+      _other ->
+        false
+    end)
+  end
+
+  defp owner_command_binding(transaction) do
+    %{
+      runtime_id: transaction.runtime_id,
+      command_id: transaction.command_id,
+      command_kind: transaction.command_kind,
+      session_id: transaction.session_id,
+      mutation_domain: transaction.mutation_domain,
+      succession_id: transaction.succession_id,
+      canonical_command_bytes: transaction.canonical_command_bytes,
+      canonical_command_digest: transaction.canonical_command_digest
+    }
+  end
+
   defp session_commit_refusal(session, transaction) do
     cond do
       transaction.expected_owner_epoch != session.owner_epoch ->
@@ -502,6 +851,7 @@ defmodule Loopex.M1RuntimeTestStore do
 
   defp empty_session do
     %{
+      runtime_id: nil,
       owner_epoch: 0,
       owner_incarnation_id: nil,
       journal_version: 0,

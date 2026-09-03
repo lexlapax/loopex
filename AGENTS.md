@@ -180,6 +180,18 @@ a recommendation. An incidental finding is not a report: resolve it within the
 current scope, fold it into a decision packet, or leave it out. Never hand over
 an unresolved observation for the maintainer to triage.
 
+Naming a constraint is not raising it. Where a constraint degrades required
+evidence, blocks a check, hides a defect, or would leave a future failure
+undiagnosable, present it as a decision packet: the options, what each costs in
+stability, modularity, and extensibility, the repercussions of each including
+any amendment or re-review it forces, and a recommendation. Enumerate the option
+that changes the constraining artifact even where that artifact is locked,
+bound, or closed, and state its transaction cost rather than treating locked as
+unaskable. Writing that something "is the maintainer's call", recording it as a
+known limitation, or deferring it to a later milestone without that packet is
+handing over an unresolved observation, whichever section the sentence appears
+in.
+
 ## Milestones and Gates
 
 **Vocabulary.** A *capability rung* is one of the non-normative questions in the
@@ -295,10 +307,19 @@ register and plan index.
   or begin the next amendment before `R` settles this one. At `R`, binding
   validation, bootstrap, and every inherited required gate must pass, while the
   amended milestone gate must reproduce the same truthful product state proved at
-  `A`. Evidence names the revision where it ran: an `R` result is never
-  back-projected onto `A` and does not replace later same-source product-candidate
-  evidence. The exact `A` to `R` review also proves that only the allowed
-  transition bytes changed. Only `R` is eligible for integration.
+  `A`. Binding validation at `R` is judged over the amending milestone's own
+  bindings. An artifact that more than one gate binds is settled by each holder's
+  own transaction, run in sequence, and a holder that has not yet run its own is
+  a stale binding that transaction is on its way to fixing rather than a failure
+  of this one. Without that scope the machinery deadlocks: each holder's `R`
+  would require every other holder already rebound while overlap stays
+  forbidden, so an artifact bound twice could never be changed again. Every
+  holder must still be rebound before the last of those transactions is complete,
+  and until then no such `R` is a closure candidate. Evidence names the revision
+  where it ran: an `R` result is never back-projected onto `A` and does not
+  replace later same-source product-candidate evidence. The exact `A` to `R`
+  review also proves that only the allowed transition bytes changed. Only `R` is
+  eligible for integration.
   A Closed plan cannot use that transaction, because its Closure row binds the
   same gate digest its Acceptance row binds, and rebinding only Acceptance leaves
   Closure naming bytes that no longer exist. Amending a Closed milestone's gate

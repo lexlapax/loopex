@@ -1,11 +1,10 @@
 # Development
 
-Loopex has closed its M0 feasibility milestone and has implemented the M1
-working-loop closure candidate on the designated milestone branch. M1 remains
-unclosed until its retained multi-toolchain evidence, exact gate, independent
-review, and maintainer closure disposition are complete. This document describes
-how to validate and work on the repository, and it owns the commands, not the
-milestone state. There is no installable package and no public product surface.
+Loopex development is milestone-governed. This document describes how to
+validate and work on the repository, and it owns the commands, not the milestone
+state. A milestone remains unclosed until its retained evidence, exact gate,
+independent review, and maintainer closure disposition are complete. There is no
+installable package and no public product surface.
 
 The canonical status for the checked-out revision, including currently
 authorized work and the next maintainer decision, is in
@@ -193,13 +192,13 @@ documentation should clarify rather than paraphrase syntax.
 Read [AGENTS.md](AGENTS.md), then the
 [plans status register](docs/plans/README.md), and use the
 [agent context map](docs/developer/agent-context-map.md) only to load relevant
-Concept sections and their exact Technical depth. `M0` is closed. `M1` is the
-current delivery milestone; consult the marked register capsule for its exact
-lifecycle state and currently authorized work. An accepted governance checkpoint
-may be present on `main`, but M1 product work stays on its designated milestone
-branch until closure. If the register also names one Open successor, that branch
-is planning/gate-only: it cannot be accepted or implemented until M1 closes and
-the candidate is refreshed and reviewed on the integrated closed base.
+Concept sections and their exact Technical depth. Consult the marked register
+capsule for the exact lifecycle state and currently authorized work. An accepted
+governance checkpoint may be present on `main`, but product work stays on its
+designated milestone branch until closure. If the register also names one Open
+successor, that branch is planning/gate-only: it cannot be accepted or
+implemented until its predecessor closes and the candidate is refreshed and
+reviewed on the integrated closed base.
 
 Tests use a temporary `LOOPEX_HOME` and temporary workspaces, and the helpers fail
 before touching real user state. Never point development or test commands at a
@@ -253,6 +252,37 @@ Darwin floor     mise exec erlang@26.0 elixir@1.17.0-otp-26 -- /bin/bash -p scri
 Darwin current   /bin/bash -p scripts/check-m1-gate.sh --capture current
 Linux current    /bin/bash -p scripts/check-m1-gate.sh --capture linux-current
 ```
+
+### The M2 gate and its retained evidence
+
+`M2`'s gate validates in one command and captures in three lanes. The credential
+reaches it only through a bounded stdin frame, and the gate refuses to start if
+`LOOPEX_PROVIDER_API_KEY` is set in the environment it inherits:
+
+```text
+printf 'LOOPEX_M2_PROVIDER_V1\0%s\0' "$KEY" | bash scripts/check-m2-gate.sh
+```
+
+The three capture lanes vary one variable at a time from `darwin-current`:
+`darwin-floor` isolates the toolchain, `linux-current` isolates the operating
+system.
+
+```text
+darwin-floor     mise exec erlang@26.0 elixir@1.17.0-otp-26 -- bash scripts/check-m2-gate.sh --capture darwin-floor
+darwin-current   bash scripts/check-m2-gate.sh --capture darwin-current
+linux-current    bash scripts/check-m2-gate.sh --capture linux-current
+```
+
+Two `m0` re-proofs accompany them, the closed `M0` gate run once under each
+toolchain pair at the same candidate. `check-m0-gate.sh` sets no build root and
+compiles in the checkout's own `_build`, and OTP 26 cannot read a beam written by
+OTP 29, so clear `_build` when switching between the pairs. A stale tree makes
+that gate report a formatter-coverage failure whose real cause is
+`Protocol.extract_from_beam/2`.
+
+`M1`'s gate takes its credential on a `LOOPEX_M1_PROVIDER_V1` frame and the
+closed `M0` gate reads `LOOPEX_PROVIDER_API_KEY` from the environment directly;
+running either without its credential produces a red that means nothing.
 
 Each capture uses a fresh, disjoint task root, runs every M1 command except
 validation of the matrix it will populate, prints `CAPTURE` rather than GREEN,

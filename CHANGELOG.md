@@ -3,10 +3,10 @@
 All notable changes to Loopex are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 semantic versioning under the
-[0.x compatibility policy](docs/vision.md#concept-vision-compatibility) — every
-public surface is labeled stable, release-candidate, or
-experimental, and experimental surfaces may break in a minor release with
-migration notes.
+[0.x compatibility policy](docs/vision.md#concept-vision-compatibility). That
+policy labels public surfaces stable, release-candidate, or experimental once
+there are public surfaces to label. Nothing is labelled yet — see
+[compatibility surfaces](docs/developer/compatibility-surfaces.md#concept).
 
 Nothing is released or installable yet. Entries below the first release record
 repository, planning, and milestone implementation work, and carry no
@@ -20,6 +20,105 @@ the exact document set its milestone must update.
 ## [Unreleased]
 
 ### Added
+
+- `loopex`, a command an operator runs from their own terminal. `run` submits a
+  prompt into a durable session and prints the answer as the model writes it;
+  `--steer` joins the run already going and `--follow-up` queues the next one;
+  `sessions` lists the sessions in a state root and `resume` continues one;
+  `cancel` reconciles a session a dead process left behind; `artifact` reads back
+  a spilled tool output. Argument parsing and terminal output use the standard
+  library only, and the command drives only the public facade: it owns no loop,
+  no durable session truth, no cursor truth, no store access, and no authority
+  decision.
+- A real agent loop. A prompt runs until the model stops asking for tools rather
+  than for a fixed number of turns, every request carries the committed
+  conversation including the original prompt and the real result of every tool
+  that ran, and three declared bounds — maximum turns, cumulative token budget,
+  and a committed absolute deadline — end a run truthfully rather than silently.
+- Streaming, as transient progress rather than durable truth. The shipped model
+  adapter emits an answer as the provider produces it and the terminal prints it
+  as it arrives, while the committed assistant message is built from the
+  adapter's return value and never assembled from what was displayed. Model and
+  executor progress are separate gapless sequences within one stream domain,
+  each closed by its own content-free item carrying its total, so a coalesced,
+  dropped, or truncated tail is detectable rather than silent — and a missing
+  closure sends a consumer to the durable record instead of a timer. A closure
+  is emitted only while its process-local owner can state it truthfully: abrupt
+  owner death and executor owner loss without a retained terminal fact end that
+  plane without inventing abandonment, and recovery uses the durable operation
+  record. An adapter that does not stream is equally conformant and says so.
+- Four coding tools against a real workspace: `read`, `write`, `edit`, and
+  `bash`, sharing one conformance suite for bounded output, workspace-root
+  resolution, symlink and traversal containment, exact edit preconditions, and
+  ownership and termination of the child process group a job's captured kill
+  identity names.
+- A `Loopex.Policy` port that replaces M1's literal allow term. Every
+  executor-backed tool call including a read-only one requires a host decision;
+  a denial issues no grant, starts no process, and commits a truthful denied
+  outcome the operator reads; failure, timeout, and a malformed response fail
+  closed into denial. Omitting the `:policy` start option refuses runtime start,
+  and each shipped permissive policy says out loud what it is. `--policy`
+  selects between `allow-all`, which permits everything and says so, and
+  `shell-allowlist`, which permits the filesystem tools and only the shell
+  commands it names, refusing the rest while the run carries on. The second is
+  scope and not a sandbox: it matches a command's leading word, a compound
+  command reaches past it, and it says that in its own notice.
+- An `ArtifactStore` port and local adapter. Tool output beyond a declared bound
+  spills rather than poisoning the conversation: Core derives an immutable
+  object identity from the exact bytes and a separate immutable use identity
+  from the closed retention provenance, the adapter durably publishes object
+  then use before reporting success, and the compact eight-member reference
+  carries both identities without exposing that private provenance. The
+  model-facing result stays bounded and says what was truncated; the operator
+  retrieves byte-exact content by opaque object locator through validated
+  `stat` and `fetch`, while authorized runtime code resolves the use through
+  `describe`.
+- Cancellation that reports what happened. One positive cleanup period is
+  committed with the session and drives executor observation, receipt
+  retention, terminal reserve, command liveness, and prepared recovery without
+  substituting a later process default. An interrupt uses the public facade and
+  a prepared attachment whose one-use activation capability remains paused
+  until configuration is reconciled. `cancelled` commits only where every owned
+  operation reached a validated terminal fact and every captured executor
+  process group associated with those operations was confirmed quiescent;
+  anything less ends `outcome_unknown` carrying its
+  reconciliation reference. The local executor admits effects under one
+  prepared, fenced ledger generation and quarantines unresolved authority
+  across restart; its trusted-root and host-rollback limits are recorded rather
+  than presented as exactly-once behavior outside that boundary.
+- A session directory. A fresh operating-system process lists the sessions in a
+  state root resolved from `LOOPEX_HOME`, resumes one under the durable runtime
+  placement identity that created it, and refuses a resume through a different
+  identity with an explicit reason.
+- Behaviour-shaping project resources enter the model's context only by an
+  operator's explicit decision, and a run without one fails closed toward
+  withholding the content rather than toward refusing the runtime.
+- Context admission measures the exact final provider-visible messages and
+  active model-facing tool projections separately from the exact normalized
+  Store record. The direct runtime host commits a positive context-token budget;
+  the reference composition and command resolve their documented default, and
+  recovery reuses retained truth rather than the current process default.
+- Provider attempts consume one durable permit before dispatch. Every admitted
+  terminal answer settles that permit with bounded provider-neutral identity,
+  usage, and classification; incomplete usage charges the committed remaining
+  allowance, post-effect uncertainty stops the run, and recovery never invents
+  a second billable attempt or a clean answer from silence.
+- Public event delivery is fenced by resolution as well as by commit. An
+  attached reader is handed rows only up to the position the runtime has
+  acknowledged as resolved, so a durably linearized row whose owner still holds
+  an unresolved transaction stays invisible until re-presentation settles it.
+  Cursors and gap semantics are unchanged; the fence delays a read rather than
+  reordering or dropping one, and it lifts when the runtime stops owning the
+  session.
+- `loopex_composition`, a shipped reference stack an embedder depends on rather
+  than copies: one module under a one-hundred-eighty-effective-line ceiling that starts the
+  application tree and a runtime, names the concrete Store, Model, Executor, and
+  ArtifactStore, resolves its state root explicitly, and refuses to start unless
+  the host supplies the policy that governs the run.
+- Operator and developer documentation for the command, the tools and the
+  authority in front of them, the loop and its contracts, and every surface M2
+  touches — all unstable, none labelled or frozen. An M1-era session data root is
+  not readable by M2.
 
 - The M1 single-machine working loop: explicit supervised runtime references,
   Store-backed session creation and owner succession, one serial active run,
@@ -84,6 +183,40 @@ the exact document set its milestone must update.
 
 ### Fixed
 
+- The durable store followed a path rather than holding a file. A log deleted
+  underneath a live session was answered by opening a new, empty one at the same
+  name, and the session went on writing into a history that had lost everything
+  before it; a removal that raced the open slipped through a check made only
+  beforehand. The store now records the log's device and inode at start-up and
+  re-reads the path once its append handle is held, creates nothing on the
+  append path, and reports a log that was removed or replaced as an ambiguous
+  commit — which stops the store for recovery and leaves the caller to
+  re-present its exact transaction.
+- A store that could not be opened or replayed refused in no words. One refusal
+  reached an operator as the runtime tuple `{:invalid_history, 0,
+  :frame_does_not_match_transition}` — an internal replay audit addressed to
+  nobody who could act on it, carrying durable bytes into a terminal on the way.
+  Reconciliation now names the session and the class of the failure: its history
+  could not be replayed, its store could not be opened or read, or another
+  process is already writing that state root. Refusals that already arrived in
+  words keep them.
+- A failed run reached the terminal as the bare word `failed`. One category was
+  projected and every other dropped, so the one ending where the reason is the
+  only thing that tells an operator what to do next told them nothing. The
+  ending now names the category and whether it is retryable, plus the dimension,
+  observation, and limit where a declared ceiling decided it. The projection is
+  a fixed whitelist rather than the failure map, so private descriptors and
+  provider text still reach no terminal.
+- Every provider call was bounded by an undeclared thirty-second transport
+  timeout the streaming client applies when a caller supplies none, instead of
+  by the run's own committed absolute deadline. Under concurrent load it fired
+  with minutes of the declared deadline remaining, and a second occurrence
+  exhausted the retry allowance and stopped the run's owner — roughly one run in
+  twelve, while runs in isolation were clean. The transport now receives the
+  remaining time on the committed deadline, so there is one bound and it is the
+  one the run declared. It became visible only because an interrupted stream is
+  now an error rather than the partial text already emitted; the same timeout
+  previously produced a truncated answer indistinguishable from a short one.
 - The core-only lane measured the ambient VM, which made outcomes 7 and 9 appear
   mutually exclusive: at an umbrella root every compiled child is on the load
   path, so any adapter failed the check by existing. That was an instance of the
@@ -411,8 +544,233 @@ the exact document set its milestone must update.
   `DEVELOPMENT.md` owns the commands they run.
 - This changelog.
 
+- The ReqLLM adapter sent only the most recent user message rather than the
+  committed conversation. Every test passed, because fixtures read
+  `request.messages` directly, while the real path had the model seeing its
+  original instruction again on every turn.
+
+- A provider library that crashed inside the streaming call left its error
+  uncaught, and the argument list of the frame it crashed on carried the
+  credential, so the VM's own crash report could print it. Every raise, throw,
+  and exit under that call is now caught and reported as the same bounded
+  classification the ordinary failure branches produce. An interrupted stream is
+  likewise an error for all three endings rather than only for a raise, so a
+  progress function or a lazy stream that threw or exited no longer escapes the
+  byte bound, the credential substitution, and the declared return. Reading a
+  reply from a stream opened elsewhere now scrubs against the credential this
+  adapter would itself call with instead of against nothing, which is what makes
+  the scrubbed errors that path documents true for a caller that has one set.
+- A model attempt settlement could carry combinations the attempt contract
+  excludes, and the run then crashed on history it had accepted rather than
+  refusing history it cannot accept. Choosing a retry at the attempt limit is
+  refused, so no owner installs permission for an attempt that can never open.
+  A reply that carries a termination is admitted only as evidence-only, so a
+  late answer is either the conversation or evidence retained beside it and
+  never a retained answer the run has no record of having received.
+- An abort or a deadline that arrived after this owner opened a model attempt
+  and before it asked for the permit that dispatches one settled the attempt as
+  possibly dispatched, charging the run's whole remaining token allowance for a
+  call nothing could have made. That window settles `not_dispatched` and charges
+  nothing. It is claimed only where this owner opened the attempt itself and has
+  not yet reached the permit request: an attempt inherited from a dead
+  predecessor, and one whose permit request lost its reply, both stay ambiguous
+  for the reason they always did.
+- Spent provider-attempt identities are released at the one moment a runtime
+  stops holding a session, so a host that resumes and finishes many sessions no
+  longer keeps one entry per attempt of every session it has finished with.
+  Replacing a coordinator or a worker still releases nothing, because a
+  successor must go on being refused the identity its predecessor spent. The
+  retention that remains is recorded at
+  [M2 recorded limitations](docs/evidence/M2-recorded-limitations.md#spent-attempt-retention).
+- `Loopex.activate_resume/1` and `Loopex.abandon_resume/1` wait for the
+  coordinator's answer rather than expiring after five seconds. The message
+  carrying either call is not withdrawn when its caller stops waiting, so an
+  expired call could report the session unavailable while the coordinator went
+  on to spend the very activation the caller was told it had not got — and a
+  prepared owner spends it by starting the recovered run. Neither call proposes
+  a durable mutation, so waiting commits nothing, and a coordinator that has
+  died still refuses, because its exit is the true answer.
+- A deadline admission whose commit was refused or left unknown was discarded,
+  and the settlement that followed read an unset termination — selecting a retry
+  and a model-call failure for a run that had actually reached its declared
+  deadline. A refusal that only says ownership moved now leaves the owner to its
+  successor, which rereads the deadline and admits it. Every other refusal makes
+  the session unavailable rather than manufacturing the settlement, accounting,
+  conversation, or terminal that a commit which did not happen would have
+  produced.
+- The wait a coordinator spends on an executor result when the committed cleanup
+  period cannot be read is derived from the one formula that derives every other
+  cleanup bound, applied to the shortest period that formula admits. It was a
+  restated literal, so a change to the formula would have moved every production
+  wait except that one and nothing would have said so.
+- A context refusal on a dimension that withholding optional content cannot cure
+  — the strict system-class ceiling, record depth, record cardinality — was
+  built from the descriptor set that still included optional project content
+  while the four counts it publishes described only the required one, and its
+  project disposition claimed the project had never been evaluated. Such a
+  refusal is now decided on and built from a required-only candidate before
+  anything is retained, so the counts partition the exact sequence behind the
+  receipt's ordered descriptor digest and the disposition is true. A staged
+  request's source list likewise names the blocks the request actually carries
+  rather than the ones its resolution would imply, so a required-only candidate
+  measured under an eligible project resolution no longer describes a message it
+  does not contain. The residual gap this leaves is recorded at
+  [M2 recorded limitations](docs/evidence/M2-recorded-limitations.md#adr-0017-step-five).
+- A durable record whose own byte size did not converge to a fixed point
+  continued as though it had, staging a request whose receipt stated a byte cost
+  of zero. Non-convergence is now the Store-unavailable reason it is, and the
+  session becomes unavailable rather than reporting a dimension, terminal, or
+  dispatch behind a measurement that was never taken. A record that breaches the
+  Store's depth or cardinality still reaches the admission boundary unresolved,
+  because that is where it is refused by its exact structural dimension.
+- An attaching caller's snapshot scan is fenced by resolution the way delivery
+  already was. The scan ran to the durable tail, so an attachment installed
+  while an owner held an unresolved transaction anchored on rows no consumer
+  could yet read and set its cursor past them — and those rows were then never
+  delivered on the event plane. The scan stops at the same acknowledged position
+  the delivery pump stops at, and a session this runtime does not own carries no
+  fence and scans to the end, exactly as its delivery does.
+- A durable command record naming a refusal this version does not know is
+  refused as invalid history instead of ending recovery with an error. The token
+  was converted to an existing atom with no rescue, so whether replay raised
+  depended on which atoms the VM happened to have loaded and one durable history
+  could replay on a warm node and abort on a colder one.
+- Reconciliation and receipt matching require a field to be present before it
+  can match. An absent key read as nothing satisfied any expected value that was
+  legitimately nothing — a job with no tool call or no tool version, among
+  others — so an answer that simply omitted every such field was admitted as
+  though it had stated them. Only a field the responder actually carries can
+  match.
+- The Local executor decides its quarantine when it reserves a job, inside the
+  same root-wide claim that reads the root's retained terminal truth, rather
+  than once at start-up. A ledger root is shared, so a verdict frozen at
+  start-up was wrong in both directions: a peer instance that stranded an open
+  entry never stopped an already running executor, and a root an operator had
+  reconciled could not admit again without restarting the executor. The request
+  being decided and the jobs this instance holds reserved are live entries
+  rather than abandoned ones, so a root carrying two concurrent jobs stays
+  usable and the second instance of a joined operation still joins. A claim a
+  peer holds for the length of its own admission is ordinary contention: it is
+  waited for out of the requester's own remaining allowance, never past it, and
+  never past the ceiling one contended root is worth.
+- The reserve the lease-lost path gives a receipt write comes from the one
+  formula that fixes receipt retention, which rounds up and never yields less
+  than a millisecond. A second local derivation by integer division disagreed
+  with it below four milliseconds, so a committed cleanup period of three
+  declared one millisecond of retention in every receipt and reserved none for
+  writing it.
+- A refusal the Local executor writes no longer renames over an admission marker
+  another instance published for the same job — "no effect began" written across
+  the exact record proving one had. An admission found at the marker path is
+  reported as `{:ledger_conflict, :admission_marker_present}` and left exactly
+  as it is; an absent marker and an existing refusal both still admit the write,
+  because neither of them claims an effect began.
+- A `loopex` placement lock record this version cannot decode is probed for
+  liveness rather than reclaimed outright. A lock written by a newer record
+  version is undecodable and names a live process, so reclaiming it put two
+  runtime controls on one placement key — the outcome the lock exists to
+  prevent, reached by the one input an operator running two Loopex versions is
+  most likely to produce. The process identifier is salvaged from the record's
+  bytes and probed: an absent process is the stale lock the reclaim path was
+  written for, a live one refuses and names the process holding it, and bytes
+  naming no process at all refuse as unattributable. Both refusals are
+  recoverable by hand, and reclaiming a live owner is not.
+
 ### Changed
 
+- The Store answers one refusal taxonomy for every path that admits an item.
+  Building a transaction, preflighting a record through
+  `Loopex.Store.normalize_and_measure_item/2`, and validating a transaction all
+  run the same normalizer and the same measurement, so the same bytes get the
+  same answer whichever way a caller reaches the boundary. An item that is not
+  bounded plain data refuses as `:invalid_item` for a private record and
+  `:invalid_event` for a public event, in place of `:not_plain_data`,
+  `:not_plain_event_data`, `:invalid_record`, and `:reserved_event_field`. A
+  depth or cardinality breach refuses as
+  `{:item_structure_exceeded, dimension, observed, limit}` and an oversized item
+  as `{:item_too_large, observed, limit}`, and both now survive a list's own
+  refusal instead of collapsing into `:invalid_records` or `:invalid_events`, so
+  a preflight and a commit can no longer disagree about one item. The builder's
+  separate traversal is gone along with the disagreements it carried: a scalar
+  at depth thirteen was admitted where the shared normalizer refuses it, an
+  atom key nested inside an event was admitted where the normalizer rewrites it,
+  and an untrusted list's length was taken by walking a spine the shared counter
+  refuses to walk.
+- An executor that refused a job before its effect started now says so in the
+  answer, by returning `{:error, {:refused_before_effect, reason}}`. The runtime
+  commits that as an ordinary terminal `failed` carrying `reason`; every other
+  `{:error, _}` is read as unproven and ends the run `outcome_unknown` with a
+  reconciliation reference. It previously recognised a list of error *names*
+  copied from the shipped local executor and applied to every implementation, so
+  a conforming executor that lost its lease halfway through a write and returned
+  `{:error, :workspace_lease_lost}` had that effect committed as `failed` and the
+  loop carried on past an effect nobody could account for. An executor that
+  adopts nothing keeps compiling and stays conforming, and sees errors that used
+  to end a call `failed` now end the run `outcome_unknown` — failing closed, and
+  a behaviour change rather than an addition.
+- Stopping a tool draws grace, forced termination and confirmation from one
+  declared period rather than from a fresh allowance at each step, and every
+  instant in that period is measured with `System.monotonic_time/1` so a clock
+  adjustment cannot lengthen a grace mid-termination. Writing the receipt is
+  bounded by a declared share of the period instead of by whatever the earlier
+  steps left, which was nothing after a forcibly killed process group — so the
+  job whose durable record matters most produced none. Each receipt records the
+  period it ran under and the bound its own write ran under.
+- The program the local executor asks whether a process group still has members
+  is a start option, `process_probe`, defaulting to `/bin/ps` and recorded on
+  every receipt. An image that ships `ps` elsewhere previously had every command
+  reported `outcome_unknown` with nothing to say which program was missing.
+- Cancelling a job through the shipped local executor now spends the period its
+  host configured. `cancel/2` runs in its caller so it is not queued behind the
+  job it is ending, and it read the period from a process dictionary the caller
+  does not have, so it spent the compiled-in default instead.
+- The cleanup period is a declared session configuration value with a default,
+  as ADR 0009 requires. `Loopex.start_link(cleanup_grace_ms: …)` declares it,
+  `loopex run --cleanup-grace-ms …` is the operator's way to name it, and
+  `LoopexComposition.start/1` hands the same number to the session and to the
+  executor so the ending cannot report a period the cleanup did not run under.
+  Every run terminal and every `run.finished` reports it, from the session's own
+  declaration rather than from whatever receipt happened to arrive — a run that
+  dispatched no tool, an abort admitted before any executor answered, and every
+  recovery previously reported nothing at all. The one default lives on the port
+  as `Loopex.Executor.default_cleanup_grace_ms/0`, because the session and the
+  hand both need the same number. The program that confirms a process group
+  remains executor configuration, recorded at
+  [M2 recorded limitations](docs/evidence/M2-recorded-limitations.md#process-probe-not-session-visible).
+- A tool's declared wall-time budget is carried on the job it is dispatched
+  with, as `resource_budgets["max_wall_time_ms"]`, beside the output ceiling
+  that was already declared there. The local executor bounds a job by the
+  smallest of the run's committed instant, that declared budget, and the budget
+  its own copy of the definition names, so a caller can neither widen a tool's
+  budget nor outlast the run. The budget was previously read only from the
+  executor's own registry, which made the bound a fact about the hand rather
+  than about the dispatch and left nothing durable naming it.
+- An abort accepted through `Loopex.command/2` is an *admission*, not an ending.
+  The run stays active until its cleanup commits a terminal, which is ADR 0009's
+  order and is a real consequence for callers: a prompt submitted between the
+  two is queued as a follow-up on the still-active run rather than starting a
+  new one. A caller that needs the run over waits for its `run.finished`.
+- Every item of a stream domain that receives a closing item is emitted by one
+  process that ends when it closes. ADR 0011 requires a closure to be the last
+  item of its domain, and a producer and a closer in two processes order nothing
+  between them: a producer preempted between taking a sequence and emitting it
+  could put a delta on the plane after its own closure. A delta handed to a
+  closed domain now reaches a process that no longer exists. ADR 0014 separately
+  governs owner loss, where the transient plane may end without a closure rather
+  than letting another owner fabricate one.
+- A closure states what ADR 0011 assigns it: a complete domain states its
+  producer's own `delta_count` or `progress_count`, and an abandoned one states
+  the count this runtime published. An earlier revision of this milestone
+  substituted the published count on both, which erased the only live evidence a
+  refusal leaves — the refusal record is durable and private, so a consumer
+  comparing the stated total against what reached it is the only way a refused
+  item is visible at all.
+- A canonical model delta must carry exactly the fields its kind declares.
+  Carrying a name nobody declared was already refused; omitting one everybody
+  declares now is too, so a `text_delta` with no text and a `tool_call_delta`
+  naming no call are no longer sequenced, published, and counted. The payload
+  ceiling measures every field, including ones whose type the measurement does
+  not otherwise know: an unbounded integer previously measured as nothing.
 - Accepted milestone governance may integrate to `main` after exact review and
   explicit protected-branch approval while product implementation remains on
   the milestone branch until closure. Once that governance checkpoint is
@@ -598,6 +956,17 @@ the exact document set its milestone must update.
 - Portable enforcement and toolchain coverage now live in repository-owned
   local commands; hosted CI may mirror them but remains supplementary for
   development and cannot become the project's only evidence path.
+
+- The model reply carries the provider's own identifier for the response. It is
+  the one field a deterministic adapter cannot invent, and it is what a person
+  looks up in the provider account when confirming that a real call happened.
+- A tool that completed and produced no output now says so rather than
+  committing an empty result. An empty result is indistinguishable to a model
+  from a call that failed silently, and a real provider answered it by making the
+  same call again.
+- The public tool events carry the tool's generation alongside the call
+  identifier, so a terminal reading the public plane can name what is running and
+  what was refused.
 
 ### Removed
 

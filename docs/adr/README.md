@@ -18,9 +18,16 @@ a decision adds a new record rather than rewriting the old one.
 | 0006 | Store transaction contract and owner epoch | Accepted | [Decision](0006-store-transaction-and-owner-epoch.md#concept) | [Technical depth](0006-store-transaction-and-owner-epoch-technical.md#technical-depth) |
 | 0007 | Local executor grant, job, and receipt | Accepted | [Decision](0007-local-executor-grant-job-receipt.md#concept) | [Technical depth](0007-local-executor-grant-job-receipt-technical.md#technical-depth) |
 | 0008 | Owner succession recovery and runtime placement | Accepted | [Decision](0008-owner-succession-recovery-and-runtime-placement.md#concept) | [Technical depth](0008-owner-succession-recovery-and-runtime-placement-technical.md#technical-depth) |
-| 0009 | Tool, executor, and grant contracts | Accepted | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
-| 0010 | Provider continuation and exact context staging | Accepted | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
-| 0011 | Session input algebra and streaming progress | Accepted | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
+| 0009 | Tool, executor, and grant contracts | Accepted (partially superseded by 0012, 0015, and 0016) | [Decision](0009-tool-executor-and-grant-contracts.md#concept) | [Technical depth](0009-tool-executor-and-grant-contracts-technical.md#technical-depth) |
+| 0010 | Provider continuation and exact context staging | Accepted (partially superseded by 0013, 0017, and 0018) | [Decision](0010-provider-continuation-and-context-staging.md#concept) | [Technical depth](0010-provider-continuation-and-context-staging-technical.md#technical-depth) |
+| 0011 | Session input algebra and streaming progress | Accepted (partially superseded by 0012, 0013, 0014, 0016, 0017, and 0018) | [Decision](0011-session-input-algebra-and-streaming.md#concept) | [Technical depth](0011-session-input-algebra-and-streaming-technical.md#technical-depth) |
+| 0012 | Executor cancellation capability | Accepted (partially superseded by 0016) | [Decision](0012-executor-cancellation-capability.md#concept) | [Technical depth](0012-executor-cancellation-capability-technical.md#technical-depth) |
+| 0013 | Run-deadline commitment at first request staging | Accepted (partially superseded by 0017) | [Decision](0013-run-deadline-commitment-at-first-request-staging.md#concept) | [Technical depth](0013-run-deadline-commitment-at-first-request-staging-technical.md#technical-depth) |
+| 0014 | Stream closure at owner loss | Accepted (partially superseded by 0018) | [Decision](0014-stream-closure-at-owner-loss.md#concept) | [Technical depth](0014-stream-closure-at-owner-loss-technical.md#technical-depth) |
+| 0015 | Artifact object and use identity | Accepted | [Decision](0015-artifact-object-and-use-identity.md#concept) | [Technical depth](0015-artifact-object-and-use-identity-technical.md#technical-depth) |
+| 0016 | Configured cancellation observation | Accepted | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
+| 0017 | Durable context and record admission budgets | Accepted | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
+| 0018 | Provider attempt authority and recovery | Accepted | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -46,6 +53,34 @@ admits, how steering and queued follow-up work are ordered and journaled, and
 how a turn streams without letting transient progress become durable truth. All
 three must be dispositioned before `M2` is accepted, not merely before the loop
 they govern is implemented.
+
+0012 supersedes only ADR 0009's `execute/4` exclusivity and ADR 0011's claim
+that `execute/5` was the whole executor-boundary change; the remaining decisions
+in both ADRs stay in force. 0013 supersedes only ADR 0010's and ADR 0011's
+absolute-deadline-at-admission or promotion clauses; their remaining provider,
+staging, input, and streaming decisions stay in force. 0014 supersedes only ADR
+0011's universal stream-closure obligation where the transient plane's owner
+dies or loses authority before it can state a truthful disposition and count,
+and its rule that every closure precedes the attempt outcome's publication,
+solely where a terminal fact commits before handoff and its reply reaches the
+originating coordinator afterwards. ADR 0011's domain, sequencing,
+loss-detection, and durable-fallback rules stay in force.
+
+0015 separates immutable artifact-object identity from the bounded metadata of
+each use, so content deduplication cannot erase durable provenance. It narrowly
+supersedes ADR 0009's conflated object/use reference and callback shapes. 0016
+derives core cancellation observation and the later command backstop from the
+one configured cleanup period, narrowly superseding the executor-boundary and
+cleanup clauses it names in ADR 0009, ADR 0011, and ADR 0012. 0017 establishes
+distinct durable context-token and Store-record admission ceilings and narrowly
+supersedes the staging, prompt-admission, and terminal-projection clauses it
+names in ADR 0010, ADR 0011, and ADR 0013. 0018 establishes one-use
+current-owner provider dispatch, an exact two-attempt version-1 allowance, and
+conservative non-redispatching recovery, narrowly superseding the provider
+attempt and owner-loss retry clauses it names in ADR 0010, ADR 0011, and ADR
+0014. All four are accepted prerequisites for proposed `M2` Amendment 4;
+acceptance does not itself amend the M2 plan pair or gate, authorize dependent
+implementation, close M2, or authorize integration or release.
 
 0004 and 0005 are both parked. They designed correction paths for a defect
 found in an accepted plan, then the defect that prompted them turned out to be

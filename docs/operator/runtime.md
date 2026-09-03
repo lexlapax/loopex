@@ -52,7 +52,8 @@ This starts an isolated runtime and durable local Store, submits a prompt
 through the reference client, receives a deterministic model tool call,
 executes the controlled workspace-write tool in a child OS process, consumes
 the durable event sequence through `run.finished`, checks the resulting file,
-and removes its temporary state. Success ends with `2 passed`.
+and removes its temporary state. Success ends with every case in that file
+passing and none excluded.
 
 To exercise the same session-integrated path through the real ReqLLM adapter,
 place the provider key in `LOOPEX_PROVIDER_API_KEY` using the host's secret
@@ -137,7 +138,10 @@ After a normal stop or an ungraceful VM or OS-process death:
 A receipt is admitted only when the current query, operation, attempt, canonical
 request digest, session and executor epochs, executor identity, and fencing
 token all match the journaled intent. Stale, unsolicited, incomplete, or
-mismatched recovery evidence is refused.
+mismatched recovery evidence is refused. A field the answer does not carry is a
+mismatch rather than a match, so an omitted field never satisfies an expected
+value that happens to be absent itself, and only what the responder actually
+states can be admitted.
 
 <a id="operator-runtime-failures"></a>
 ## Failure Interpretation
@@ -154,6 +158,12 @@ mismatched recovery evidence is refused.
 - Store corruption, a torn record that cannot be safely repaired, or a writer
   marker whose prior owner may still be alive is a stop condition, not a reason
   to guess or recreate state.
+- A log removed or replaced beneath a live Store is the same kind of stop
+  condition. The Store holds that exact file, not its path, so it reports the
+  write as ambiguous and terminates rather than continuing into a new, empty
+  log at the same name. Recover it the way any `commit_unknown` is recovered:
+  establish the prior tree is gone, reopen, and re-present the exact
+  transaction. Do not restore a partial copy of a state root.
 
 The exact developer and gate commands live in [DEVELOPMENT.md](../../DEVELOPMENT.md).
 The M1 evidence records are indexed under [docs/evidence](../evidence/README.md).
