@@ -1625,9 +1625,15 @@ defmodule Loopex.Runtime.SessionState do
          }
        )
        when kind in ["command_admitted", "prompt_admitted_v2", "command_admission_refused_v1"] do
+    # Technical depth: a pending refusal marker admits exactly one next row, and
+    # a command row is not it. The tail guard was applied only to the internal
+    # clause below, so a validly stamped command row landing between a refusal
+    # and its terminal replayed, splitting the pair ADR 0017 makes indivisible.
+    # The two clauses partition every replayable kind, so the guard has to hold
+    # in both for the invariant to be about the journal rather than one clause.
     if version == state.journal_version + 1 and owner_epoch == state.owner_epoch and
          incarnation == state.owner_incarnation_id and is_binary(incarnation) and
-         admissible_command_kind?(kind, record) do
+         admissible_command_kind?(kind, record) and context_refusal_tail?(state, kind) do
       case apply_command_record(state, record) do
         {:ok, next} -> {:ok, %{next | journal_version: version}}
         {:error, reason} -> {:error, reason}
@@ -1704,7 +1710,9 @@ defmodule Loopex.Runtime.SessionState do
   # next journal version must be the matching terminal. An intervening,
   # duplicated, or reordered row is invalid history, which is what makes the
   # pair one semantic unit across a pagination boundary as well as within a
-  # single page.
+  # single page. Both replayable record classes consult this, because a row that
+  # is otherwise valid history -- correctly stamped, of an admitted kind, and
+  # applying cleanly on its own -- is exactly the row no other check can refuse.
   defp context_refusal_tail?(%{context_refusal: nil}, _kind), do: true
   defp context_refusal_tail?(_state, "run_terminal_committed"), do: true
   defp context_refusal_tail?(_state, _kind), do: false
