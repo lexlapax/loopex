@@ -44,9 +44,12 @@ can compile against the contract without acquiring the runtime. `loopex` depends
 on `loopex_protocol` and on no external package, so the kernel builds and runs
 with no adapter present. Every edge and client depends on `loopex`; nothing
 depends outward from it. `loopex_composition` is the one production application
-permitted to name concrete implementations, which is exactly what makes the
-direction checkable — a second place that named a Store would be a second place
-to audit. This layout is fixed by
+that names concrete Store, Model, Executor, and ArtifactStore implementations,
+which is exactly what makes the direction checkable — a second place that named
+a Store would be a second place to audit. The one boundary it deliberately does
+not compose is host policy: the composition ships no permissive policy an
+embedder would inherit, so the `loopex` command names its own policy modules and
+every host makes that decision for itself. This layout is fixed by
 [ADR 0001](../adr/0001-repository-and-application-layout.md#concept).
 
 ```mermaid

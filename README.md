@@ -30,7 +30,7 @@ while the session lives; a session "brain" can coordinate local or remote
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
 
-M1 is closed and integrated. It delivered the durability kernel: an explicit
+M1 and M2 are closed and integrated. M1 delivered the durability kernel: an explicit
 embedded runtime, durable local Store, canonical model boundary, trusted-local
 executor, thin reference client, durable events, and receipt reconciliation
 across a real runtime-process crash. What it deliberately did not deliver is a
@@ -38,16 +38,15 @@ usable coding loop — that loop ran a fixed two turns, carried no conversation
 history, and exposed two demonstration tools, so the only way to drive it was a
 test selector.
 
-M2 makes that loop a command:
+M2 made that loop a command:
 `loopex` submits a prompt into a durable session, the answer streams as it is
 produced, the loop runs as many turns as the task needs while the model sees the
 whole conversation and the real output of every tool it ran, four coding tools
 act on a real workspace under a host policy that can refuse, a repository's own
 behaviour-shaping files reach the model only by an explicit decision taken at
-the terminal, and yesterday's session can be found and continued. The marked
-status capsule above and the
-canonical plan register state whether those bytes are still a milestone
-candidate or part of the closed product baseline.
+the terminal, and yesterday's session can be found and continued. Those bytes
+are part of the closed product baseline; the marked status capsule above and
+the canonical plan register carry the milestone state.
 
 Loopex remains source-tree milestone work, not
 an installable package, release, or frozen public API. Start with the
@@ -128,7 +127,8 @@ without entering the kernel.
   quiescent generations with tested migration and exact rollback — code
   evolves, session history survives.
 - **A seven-tool coding surface** (`read write edit bash grep find ls`)
-  inside a system prompt budgeted under 1,000 tokens.
+  inside a system prompt budgeted under 1,000 tokens; M2 ships the first four
+  and measures them, and the rest follow the measurement.
 
 ## Honest Posture
 

@@ -187,12 +187,17 @@ production coordination never selects it.
 
 ### Record and Event Shapes by Name
 
-Private recovery records the reducer builds and admits:
+Private recovery records the reducer builds and admits, the complete set of
+kinds its replay filter accepts:
 
 | Kind | What it fixes |
 | --- | --- |
 | `owner_advanced` | The succession that made this coordinator the current owner. |
-| `command_admitted` | One admitted command; `command_type` is `prompt`, `steer`, `follow_up`, or `abort`. |
+| `prompt_admitted_v2` | One accepted prompt: its content, bounds, cleanup grace, and context ceiling, before any request stages. |
+| `command_admitted` | One admitted `steer`, `follow_up`, or `abort`, or a prompt the session refused at admission with its reason. |
+| `command_admission_refused_v1` | A command refused before admission because its own bytes exceed the Store's item ceiling. |
+| `context_admission_refused_v1` | A request refused at context admission: the dimension, the observed value, the limit, and the descriptor counts behind the digest. |
+| `deadline_staging_failed_v1` | A request whose derived deadline could not be staged: the clock domain or the overflow that refused it. |
 | `model_request_committed` | The exact staged request bytes, its `staged_request_digest`, the applied steer, and the context receipt. |
 | `model_attempt_opened_v1` | `run_id`, `turn_id`, `operation_id`, `attempt`, `staged_request_digest`. |
 | `model_attempt_settled_v1` | Those five plus `transport`, `termination`, `conversation`, `next`, `result`, `accounting`. |
@@ -349,7 +354,7 @@ Concept: [Five replaceable boundaries](architecture.md#concept-arch-ports).
 
 | Port | Callbacks |
 | --- | --- |
-| `Loopex.Store` | `transact/2`, `transaction_status/3`, `runtime_command/2`, `ownership_head/2`, `load_records/3`, `load_events/3` |
+| `Loopex.Store` | `transact/2`, `transaction_status/4`, `runtime_command/2`, `ownership_head/3`, `load_records/4`, `load_events/4` |
 | `Loopex.Model` | `complete/3` |
 | `Loopex.Executor` | `execute/5`, `cancel/2` |
 | `Loopex.ArtifactStore` | `put/3`, `fetch/2`, `stat/2`, `describe/2` |
