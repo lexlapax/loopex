@@ -118,13 +118,19 @@ reason, which comes from the diagnostic companion.
 ## Provider attempt authority: one-use permit
 
 ```json
-{"mechanism_disabled":"provider_attempt_one_use_permit","selector":"apps/loopex/test/provider_attempt_protocol_test.exs","observed_failure":"the provider_dispatch permit send no longer recorded the attempt binding in Control's spent_attempts, so the identity it had just permitted stayed unspent and a second permit request for that exact session run turn operation attempt and staged request digest would be granted; the diagnostic run reported 28/29 passed and 1 failed: a spent attempt identity is the exact attempt binding and outlives the owner that spent it, where the retained spent bindings read as the empty list instead of the single binding of the attempt that had already invoked the provider","candidate":"5bef36369f605e6366f363e49c1d60d8d37c1e54","artifact":"apps/loopex/lib/loopex/runtime/control.ex","restored_sha256":"sha256:6fdd591e5f381f384a9283616279023579f052c0eddd2f10b8217a2f62a1fe40"}
+{"mechanism_disabled":"provider_attempt_one_use_permit","selector":"apps/loopex/test/provider_attempt_protocol_test.exs","observed_failure":"provider_attempt_unspent/2 answered :ok for every binding, so Control granted a second permit for an attempt identity it had already spent; the locked case a second permit request for a spent attempt identity from its own coordinator is refused as already permitted received {:ok, :dispatched} where it asserts {:error, :provider_attempt_already_permitted}, and the bound selector runner refused the selector (SELECTOR_EXIT=1); the spent_attempts bookkeeping was left intact so nothing but the refusal was disabled","candidate":"824ebc52eb4f6eb21665abb75ea2ca39b4b06b80","artifact":"apps/loopex/lib/loopex/runtime/control.ex","restored_sha256":"sha256:6fdd591e5f381f384a9283616279023579f052c0eddd2f10b8217a2f62a1fe40"}
 ```
 
-The bound selector refused this mutation: `SELECTOR_EXIT=1`,
-`M1 selector runner refused: selector failed`, and no authoritative
-`LOOPEX_EXUNIT_REPORT` line. The record's `observed_failure` names the
-reason, which comes from the diagnostic companion.
+Re-taken after independent closure review found the first take had disabled the
+bookkeeping write rather than the refusal: the earlier mutation stopped Control
+recording a spent identity, which the retention case observed through Control's
+own state, while `provider_attempt_unspent/2` was never touched and no locked
+case drove a duplicate request past the ownership guard. Amendment 8 added the
+case named above, which issues the duplicate as the coordinator itself so only
+the spent-identity check can refuse, and this record mutates exactly that
+check. Diagnostic companion: 29 of 30 passed, the named case failing at its
+exact-reason assertion; bound runner: `SELECTOR_EXIT=1`, `M1 selector runner
+refused: selector failed`, no `LOOPEX_EXUNIT_REPORT` marker.
 
 ## How these were produced
 
