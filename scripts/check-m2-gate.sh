@@ -1979,7 +1979,7 @@ run_selector command-context apps/loopex_cli/test/context_budget_commands_test.e
   "passed=resume and cancel report context conflict owner unconfirmed before activation or abort" \
   "passed=a settled prepared owner with no active context accepts omission or an explicit future default"
 
-run_selector provider-attempt apps/loopex/test/provider_attempt_protocol_test.exs default 24 zero \
+run_selector provider-attempt apps/loopex/test/provider_attempt_protocol_test.exs default 25 zero \
   "passed=the request and first attempt open atomically before one direct one-use Control permit can invoke the provider" \
   "passed=a reply whose stream evidence or digest contradicts itself is refused not repaired" \
   "passed=the durable reply retains every adapter value byte for byte and replay rebuilds none" \
@@ -2003,7 +2003,8 @@ run_selector provider-attempt apps/loopex/test/provider_attempt_protocol_test.ex
   "passed=continue-settlement commit-unknown re-presents identical accounting and conversation bytes before tool or next-turn dispatch" \
   "passed=terminal-settlement commit-unknown re-presents identical accounting conversation and terminal bytes before closure or publication" \
   "passed=provider settlement atomically preserves accounting and first durable termination precedence without false effect or bound outcomes" \
-  "passed=recovery settles an unresolved open without redispatch and never reuses or closes the dead predecessor stream"
+  "passed=recovery settles an unresolved open without redispatch and never reuses or closes the dead predecessor stream" \
+  "passed=a second permit request for a spent attempt identity from its own coordinator is refused as already permitted"
 
 run_selector provider-adapter apps/loopex_llm_reqllm/test/provider_attempt_adapter_contract_test.exs default 1 zero \
   "passed=the shipped adapter declares not_dispatched only before its transport canary and ambiguity after it"

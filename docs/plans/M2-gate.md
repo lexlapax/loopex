@@ -156,7 +156,7 @@ print neither `capture` nor `M2 gate GREEN`.
 
 | SHA-256 | Path |
 | --- | --- |
-| `e1fef012bf7d66e57435a1dd1ff5b8a475fc5a05b09c561cdfd68d6baf58101a` | `scripts/check-m2-gate.sh` |
+| `97792284e71dae4d8d24c8d1cb209c0aada1692bac4f8582dd31c57fe5d6d252` | `scripts/check-m2-gate.sh` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -500,10 +500,11 @@ one-use permits, the sole authorized retry, atomic settlement and accounting,
 and recovery without redispatch. The adapter role protects the transport
 canary boundary that makes `not_dispatched` meaningful.
 
-`apps/loopex/test/provider_attempt_protocol_test.exs` / default, minimum 24,
+`apps/loopex/test/provider_attempt_protocol_test.exs` / default, minimum 25,
 all passed:
 
 - `the request and first attempt open atomically before one direct one-use Control permit can invoke the provider`
+- `a second permit request for a spent attempt identity from its own coordinator is refused as already permitted`
 - `a reply whose stream evidence or digest contradicts itself is refused not repaired`
 - `the durable reply retains every adapter value byte for byte and replay rebuilds none`
 - `a crash after a page-size-one request row recovers its consecutive open without dispatching either page`
@@ -1841,3 +1842,35 @@ disposition.
 | Generation | Artifact | Rebound SHA-256 |
 | --- | --- | --- |
 | 7 | `scripts/check-m2-gate.sh` | `e1fef012bf7d66e57435a1dd1ff5b8a475fc5a05b09c561cdfd68d6baf58101a` |
+
+<a id="amendment-8"></a>
+## Amendment 8 — Lock the One-Use Permit's Refusal
+
+**Acceptance: OUTSTANDING.** This section advances the generation and rebinds the amended artifact named below. The prior Acceptance row and `In review` lifecycle state remain at this proposal. Its immediate one-parent child must rebind Acceptance to this exact revision and add one new amendment-8-specific disposition anchor without changing any other byte.
+
+Independent closure review of the evidence candidate found that ADR 0018's
+one-use permit refusal had no locked detector. The locked case that issues a
+duplicate permit request does so from the test process, which Control refuses
+as a non-owner before the spent-identity check runs, and its wildcard
+assertion cannot distinguish the two refusals; deleting the refusal leaves the
+whole provider-attempt role green, and the thirteenth negative demonstration
+had mutated the bookkeeping write rather than the refusal.
+
+This amendment adds one locked case to the provider-attempt role,
+`a second permit request for a spent attempt identity from its own coordinator is refused as already permitted`,
+which carries the coordinator's own pid as the duplicate's caller so ownership,
+position, worker, and deadline all pass and only the spent-identity check can
+refuse, and asserts the exact reason `provider_attempt_already_permitted`
+through a reply alias this process owns. The role's minimum rises from
+twenty-four to twenty-five. The thirteenth negative demonstration is re-taken
+against the refusal itself. No product byte changes.
+
+**Maintainer disposition.** The maintainer, on 2026-09-02, authorized this
+amendment to bypass the exact-SHA independent review the ordinary transaction
+requires, as a recorded override: the change adds one case whose failure the
+review itself specified, and the review cost exceeded the change. The rebind
+that follows records that override as its disposition.
+
+| Generation | Artifact | Rebound SHA-256 |
+| --- | --- | --- |
+| 8 | `scripts/check-m2-gate.sh` | `97792284e71dae4d8d24c8d1cb209c0aada1692bac4f8582dd31c57fe5d6d252` |

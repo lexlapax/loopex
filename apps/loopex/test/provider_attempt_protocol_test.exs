@@ -154,6 +154,69 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :erlang.trace(control, false, [:all])
   end
 
+  test "a second permit request for a spent attempt identity from its own coordinator is refused as already permitted" do
+    # Concept: one attempt identity earns one permit, and the refusal of a
+    # second request is the one-use linearization itself, not a side effect of
+    # ownership.
+    #
+    # Technical depth: the sibling case above issues its duplicate from the test
+    # process, which Control refuses as a non-owner before the one-use check
+    # runs, so deleting that check leaves it green. Here the duplicate carries
+    # the coordinator's own pid as caller, so ownership, position, worker, and
+    # deadline all pass and only the spent-identity check can refuse. The reply
+    # is routed to an alias this process owns, so the coordinator never sees a
+    # stray message and the exact refusal reason is asserted by name.
+    fixture = start(script: [%{text: "done", calls: [], hold: self()}], progress_to: self())
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    :erlang.trace(control, true, [:send, :receive])
+
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "open once")
+    assert_receive {:holding, worker}, 5_000
+    assert_receive {:trace, ^control, :send, permit, ^worker}, 5_000
+
+    records = Fixture.records(fixture, session_id)
+    [opened] = Enum.filter(records, &(&1.payload[:kind] == "model_attempt_opened_v1"))
+    expected_binding = Map.put(attempt_identity(opened.payload), "session_id", session_id)
+    assert coherent_attempt_binding!(permit, expected_binding) == expected_binding
+
+    {caller, request} = await_control_request_binding(control, worker, expected_binding)
+    assert caller == coordinator_of(fixture.runtime)
+
+    [permit_reference] =
+      request
+      |> references()
+      |> MapSet.intersection(references(permit))
+      |> MapSet.to_list()
+
+    observer = self()
+
+    fresh_worker =
+      spawn(fn ->
+        receive do
+          message -> send(observer, {:fresh_permit_received, self(), message})
+        after
+          5_000 -> :ok
+        end
+      end)
+
+    duplicate_request =
+      request
+      |> replace_exact(worker, fresh_worker)
+      |> replace_exact(permit_reference, make_ref())
+
+    reply_alias = :erlang.alias([:reply])
+    send(control, {:"$gen_call", {caller, [:alias | reply_alias]}, duplicate_request})
+
+    assert_receive {[:alias | ^reply_alias], {:error, :provider_attempt_already_permitted}}, 5_000
+    refute_receive {:fresh_permit_received, ^fresh_worker, _message}, 0
+    refute_receive {:trace, ^control, :send, _second_permit, ^worker}, 0
+
+    send(worker, :release)
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+    :erlang.trace(control, false, [:all])
+  end
+
   test "a crash after a page-size-one request row recovers its consecutive open without dispatching either page" do
     fixture =
       start(
