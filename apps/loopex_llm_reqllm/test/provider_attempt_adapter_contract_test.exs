@@ -138,7 +138,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
   defp server_port_for(:closed_port, port), do: port
 
   defp server_port_for(mode, _closed_port)
-       when mode in [:raise, :throw, :exit, :malformed_return, :tagged_not_dispatched], do: 1
+       when mode in [:raise, :throw, :exit, :malformed_return, :tagged_not_dispatched] do
+    1
+  end
 
   defp server_port_for(mode, _closed_port) do
     {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])

@@ -78,9 +78,11 @@ defmodule LoopexComposition do
          do: {:ok, %{module: Artifacts, handle: handle}}
   end
 
+  @required_options [:state_root, :workspace, :runtime_id]
+
   defp validate(options) do
     with {:ok, policy} <- policy(Keyword.get(options, :policy)),
-         {:ok, [root, workspace, id]} <- required(options, [:state_root, :workspace, :runtime_id]),
+         {:ok, [root, workspace, id]} <- required(options, @required_options),
          do: {:ok, {options, root, workspace, id, policy}}
   end
 

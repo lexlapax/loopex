@@ -1390,7 +1390,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp commit_deadline_failure(state, run_id, category) do
     state = disarm_deadline(state, run_id)
 
-    with {:ok, proposal} <- SessionState.propose_deadline_failure(state.durable, run_id, category),
+    proposal = SessionState.propose_deadline_failure(state.durable, run_id, category)
+
+    with {:ok, proposal} <- proposal,
          {:ok, next} <- commit_internal(state, proposal) do
       send(self(), :advance_work)
       {:noreply, %{next | adopted: MapSet.delete(next.adopted, run_id)}}
@@ -3924,8 +3926,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # stays paused. The abort itself is unaffected -- cleanup and its terminal are
   # exactly the ordinary path -- because the gate excludes only ordinary
   # scheduling.
-  defp fence_prepared_resume(%{prepared: %{state: :prepared} = prepared} = state, %{type: :abort}),
-       do: %{state | prepared: %{prepared | state: :fenced}}
+  defp fence_prepared_resume(%{prepared: %{state: :prepared} = prepared} = state, %{type: :abort}) do
+    %{state | prepared: %{prepared | state: :fenced}}
+  end
 
   defp fence_prepared_resume(state, _command), do: state
 

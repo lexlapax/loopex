@@ -580,9 +580,7 @@ defmodule Loopex.ContextAdmissionTest do
     token_fixture = start_fixture(context_token_budget: 8_192, script: [%{text: "unreachable"}])
     {_token_session, token_attachment} = create_attached_session(token_fixture)
 
-    assert {:error,
-            {:command_admission_too_large, "future_bound_record_bytes",
-             "token_budget_private_terminal", token_observed, @record_limit}} =
+    assert {:error, token_refusal} =
              Loopex.command(token_attachment, %{
                type: :prompt,
                command_id: "future-token-terminal-too-large",
@@ -593,6 +591,11 @@ defmodule Loopex.ContextAdmissionTest do
                  deadline_ms: 60_000
                }
              })
+
+    {:command_admission_too_large, name, dimension, token_observed, limit} = token_refusal
+    assert name == "future_bound_record_bytes"
+    assert dimension == "token_budget_private_terminal"
+    assert limit == @record_limit
 
     assert token_observed > @record_limit
     assert Loopex.ContextAdmissionTestModel.requests(token_fixture.model) == []

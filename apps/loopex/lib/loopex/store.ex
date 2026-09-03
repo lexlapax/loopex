@@ -1214,7 +1214,7 @@ defmodule Loopex.Store do
          true <- byte_size(transaction.canonical_command_digest) == 32,
          true <-
            transaction.canonical_command_digest == digest(transaction.canonical_command_bytes),
-         true <- is_integer(transaction.attempt_generation) and transaction.attempt_generation > 0,
+         true <- positive_integer?(transaction.attempt_generation),
          :ok <- non_negative(transaction, :expected_generation),
          true <- is_map(transaction.candidate),
          :ok <- validate_transaction(transaction.candidate) do
@@ -1645,4 +1645,6 @@ defmodule Loopex.Store do
   catch
     _kind, _reason -> fallback
   end
+
+  defp positive_integer?(value), do: is_integer(value) and value > 0
 end
