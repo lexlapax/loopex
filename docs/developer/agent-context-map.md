@@ -1393,3 +1393,52 @@ Acceptance row to its exact proposal. It does not close `M2`, accept a closure
 candidate, authorize product integration, authorize a release, or dispose of
 any recorded limitation. The milestone remains `In review`.
 
+
+<a id="disposition-m2-closure-2026-09-03"></a>
+### M2 closure — 2026-09-03
+
+The maintainer explicitly closed milestone `M2` at evidence child
+`2fee09ff01283758695bfc40834e4b715a6f578b`, the unique one-parent child of source
+candidate `f17beef1b62116fa411b3fa496f3e8964b3af81c` that retains the toolchain
+matrix, the real-call attestations, the attended demonstration, and the
+thirteen negative demonstrations. Closure binds the accepted envelopes and gate:
+
+| Artifact | Digest |
+| --- | --- |
+| Concept envelope | `sha256:d2891e3b4d24db846da01606ef64090ee3098532bd7b29540a1557de320d4a7c` |
+| Technical depth envelope | `sha256:d2c1350b56e0f63a8986b38e452d2c3adc0bab26ab760764f331dd178b7628ca` |
+| Gate | `sha256:bd168781cc7aea2c971f4685416524ef002bfc2ef390275f749ae2c1397361ae` |
+
+The M2 gate is GREEN at that child on the current pair, and every lane the
+gate requires was captured at the source candidate: three capture lanes at one
+sealed identity with 493 protected cases each, the M0 gate under both locked
+pairs, and the M1 gate under the current pair. Two independent exact-SHA
+reviews preceded closure; the first rejected the previous candidate on a
+missing one-use-permit detector and a stale progress table, both repaired
+under Amendments 8 and 9 and the recorded closure-review repair set, and the
+second confirmed those repairs and rejected the previous evidence child on
+record misdescriptions, repaired by re-taking the attended demonstration at
+the same candidate.
+
+**Dispositions recorded with closure.**
+
+- The composition-ceiling caveat from Amendment 4's acceptance is withdrawn:
+  the module measures 173 effective lines under the locked 180-line ceiling,
+  and the 134-line reduction branch is not taken.
+- The technical envelope's statement that the composition module measured
+  164 effective lines is stale and immutable; the executable ceiling in the
+  bound corpus is what binds.
+- Erratum: row 1 of the plan's progress table names capture candidate
+  `a1775d02`; every retained lane names `f17beef1`. The first commit after
+  this transition corrects that cell.
+- The technical envelope's rollback section describes reverting product bytes
+  on the milestone branch but not reverting the integration merge; reverting
+  that merge uses `git revert -m 1` and a later re-landing requires reverting
+  the revert. Recorded here rather than edited into the immutable envelope.
+- Eighteen recorded maintainer overrides and three approved limitations
+  (ADR 0017 step 5, spent-attempt retention, dispatcher Store I/O) stand as
+  recorded in the milestone's evidence.
+
+**Scope of this record.** It closes `M2` and authorizes integration of the
+milestone branch to `main` by merge, preserving every bound candidate. It
+authorizes no release, tag, or publication.

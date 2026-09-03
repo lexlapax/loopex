@@ -25,7 +25,7 @@ while the session lives; a session "brain" can coordinate local or remote
 <!-- loopex:readme-status:start -->
 ## Where Things Stand
 
-**Revision status:** Closed milestone product baseline; active milestone `M2` is in review; no next candidate is recorded.
+**Revision status:** Closed milestone product baseline; no milestone is active; no next candidate is recorded.
 
 [Canonical milestone status and plan records](docs/plans/)
 <!-- loopex:readme-status:end -->
