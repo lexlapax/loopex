@@ -12,7 +12,7 @@ order. This file is the index of what exists.
 
 | Directory | Contents |
 | --- | --- |
-| [operator/](operator/README.md) | Coding-session, tool, policy, runtime, shutdown, and recovery runbooks. |
+| [operator/](operator/README.md) | How a run works with its flow and component diagrams; coding-session, tool, policy, runtime, shutdown, and recovery runbooks. |
 | [developer/](developer/README.md) | Development method, routing, and retained client evidence. |
 | [adr/](adr/README.md) | Numbered architecture decisions and their governance records. |
 | [plans/](plans/README.md) | Milestone register, lifecycle, plan templates, and current status. |
