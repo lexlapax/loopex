@@ -199,6 +199,21 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
 
     :gen_event.notify(:erl_signal_server, :sigterm)
+
+    # Concept: the abort must be admitted before this case attaches to read the
+    # terminal.
+    #
+    # Technical depth: a session has one current attachment and a new attach
+    # replaces it, so a command put through the earlier one is refused as
+    # unavailable. The handler submits the abort from its own process through
+    # the attachment it was installed with, and `run_terminal/2` attaches anew;
+    # on a cold virtual machine the attach won the race about one run in four,
+    # the abort was refused, and the case read the missing terminal as the
+    # handler's failure. Waiting for the admission keeps the ordering the
+    # command itself has, where one attachment serves both.
+    assert await_interrupt_admission(fixture),
+           "the signal's abort did not reach its durable admission"
+
     # The abort's terminal lands only after the cleanup observation the committed
     # grace derives (ADR 0016); a literal ten seconds sat under that backstop
     # and read a slow but legitimate cleanup as a missing terminal under load.
