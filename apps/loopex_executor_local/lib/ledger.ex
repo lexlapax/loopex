@@ -208,7 +208,10 @@ defmodule Loopex.Executor.Local.Ledger do
   `{:ledger_unavailable, {:root_claim_not_released, reason}}`. The body's
   decision was real, but it was reached on a root this call has just stranded,
   and every later claim on it answers `root_claim_held` until an operator clears
-  the claim directory.
+  the claim directory. Where the body raised or exited and the release then
+  failed, the same fact travels with the exception instead: the original kind and
+  stacktrace are preserved and the reason becomes
+  `{:root_claim_not_released, reason, original_reason}`.
   """
   @spec with_claim(prepared(), (-> term()), non_neg_integer()) :: term() | {:error, term()}
   def with_claim(prepared, work, wait_ms \\ 0)
@@ -226,9 +229,37 @@ defmodule Loopex.Executor.Local.Ledger do
               {:error, reason} -> {:error, reason}
             end
           catch
+            # Concept: the release is part of taking the claim on this path too,
+            # so a release that did not happen travels with the exception rather
+            # than being dropped behind it.
+            #
+            # Technical depth: the result was discarded here while the normal path
+            # replaced the body's answer, so a body that raised on a root this
+            # call then stranded reported only the raise, and the root refused
+            # every later claim with nothing having said why. There is no result
+            # to replace on this path, because the caller receives an exception
+            # whatever happens. Converting that exception into
+            # `{:ledger_unavailable, {:root_claim_not_released, reason}}` would
+            # surface the strand and lose the fault: a body that raised because of
+            # a defect would be reported as a ledger problem, and the stacktrace
+            # naming the defect would be gone. The original kind and stacktrace
+            # are therefore preserved and the reason carries both facts in one
+            # plain bounded tuple -- what could not be released, and what the body
+            # did. A release that succeeds re-raises exactly what was caught, so
+            # the ordinary exceptional path is unchanged. No retry is attempted
+            # and no claim is reaped, for the reason the normal path gives.
             kind, reason ->
-              _released = File.rmdir(path)
-              :erlang.raise(kind, reason, __STACKTRACE__)
+              case File.rmdir(path) do
+                :ok ->
+                  :erlang.raise(kind, reason, __STACKTRACE__)
+
+                {:error, release} ->
+                  :erlang.raise(
+                    kind,
+                    {:root_claim_not_released, release, reason},
+                    __STACKTRACE__
+                  )
+              end
           end
 
         # Concept: giving the claim back is part of taking it, so a release that
