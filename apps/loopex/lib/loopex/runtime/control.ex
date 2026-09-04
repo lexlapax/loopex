@@ -38,6 +38,14 @@ defmodule Loopex.Runtime.Control do
 
   @max_identifier_bytes 256
 
+  # Technical depth: the bound Control is willing to spend waiting for the one
+  # single-row page that rebuilds a provider attempt binding. It is a local
+  # store read of one record, so a second is already generous, while every
+  # committed run deadline this could be authorizing against is far larger --
+  # the bound can therefore expire only when the store is not answering, and it
+  # never becomes the reason an attempt inside its own authority is refused.
+  @position_read_timeout_ms 1_000
+
   @doc """
   ## Concept
 
@@ -352,6 +360,20 @@ defmodule Loopex.Runtime.Control do
   # before the send or entirely after it. A refusal here is ephemeral: it is the
   # coordinator's to retain durably, and only while that coordinator is still
   # authoritative.
+  #
+  # The deadline is checked twice on purpose. The first check refuses an already
+  # expired attempt before Control spends a Store read on it. The second is the
+  # one dispatch linearization depends on: ADR 0018 requires every member of the
+  # authorization to equal its registered state *at the instant of the send*, and
+  # only the last check before the spend can say that about the clock. With the
+  # deadline established once, before the read, an attempt with ten milliseconds
+  # of authority left and a read that took longer than that was still handed a
+  # permit, and the worker -- which deliberately carries no bound of its own --
+  # called the provider after the authority it was dispatched under had expired.
+  # Every other member is immutable for the duration of this serialized handler,
+  # so only time has to be re-established; a refusal here is the same ephemeral
+  # `:deadline_elapsed` the first check gives, and nothing has been sent, so the
+  # coordinator settles it as ADR 0018's exact pre-transport `not_dispatched`.
   def handle_call({:provider_dispatch, binding, authority}, {caller, _tag}, state) do
     with {:ok, session_id} <- provider_binding_session(binding),
          {:ok, entry} <- provider_current_owner(state, session_id, authority, caller),
@@ -359,7 +381,8 @@ defmodule Loopex.Runtime.Control do
          :ok <- provider_worker_ready(authority),
          :ok <- provider_before_deadline(authority),
          :ok <- provider_position_binding(state, session_id, authority, binding),
-         :ok <- provider_attempt_unspent(state, binding) do
+         :ok <- provider_attempt_unspent(state, binding),
+         :ok <- provider_before_deadline(authority) do
       %{worker: worker, permit_reference: reference} = authority
       spent = Map.put(state.spent_attempts, binding, {worker, reference})
 
@@ -1228,15 +1251,16 @@ defmodule Loopex.Runtime.Control do
   # unreadable registers no identity, so it refuses; treating it as a pass is
   # the defect itself. Nothing has been sent at this point, so the coordinator
   # settles the refusal as ADR 0018's exact pre-transport `not_dispatched`. The
-  # read costs one bounded single-row Store page inside Control's serialized
-  # handler, which is the price of comparing against durable truth rather than
-  # against the argument being checked. An exact re-presentation still reaches
+  # read costs one single-row Store page, bounded in both senses by
+  # `bounded_position_read/3`, inside Control's serialized handler, which is the
+  # price of comparing against durable truth rather than against the argument
+  # being checked. An exact re-presentation still reaches
   # `provider_attempt_unspent/2` so it keeps reporting that refusal by its own
   # name.
   defp provider_position_binding(state, session_id, %{journal_version: version}, binding)
        when is_integer(version) and version > 0 do
     with {:ok, [%{journal_version: ^version, payload: payload}]} <-
-           Store.load_records(state.store, session_id, version - 1, 1),
+           bounded_position_read(state.store, session_id, version),
          {:ok, ^binding} <- ProviderAttempt.binding_from_opened(session_id, payload) do
       :ok
     else
@@ -1246,6 +1270,58 @@ defmodule Loopex.Runtime.Control do
 
   defp provider_position_binding(_state, _session_id, _authority, _binding),
     do: {:error, :invalid_provider_attempt_binding}
+
+  # Concept: Control waits a bounded moment for that row, and a store that does
+  # not answer inside it registers no identity.
+  #
+  # Technical depth: `Store.load_records/4` invokes the adapter in the calling
+  # process, and the shipped local store answers through its own serialized
+  # GenServer under a thirty-second call timeout. Read directly, that timeout
+  # became Control's: one slow page could hold the runtime-wide ownership
+  # serialization point, and burn a provider attempt's whole remaining
+  # authority, before the deadline was re-established. The read therefore runs in
+  # a monitored throwaway process and is awaited for `@position_read_timeout_ms`.
+  # An exhausted bound is not a verdict about the row -- it is the absence of
+  # one -- so it refuses exactly as an unreadable row does. The reader is killed
+  # and its death awaited before returning, because signals from one process
+  # arrive in order: once the `DOWN` is in hand, either the answer is already in
+  # this mailbox and is flushed here, or it can never arrive, and no late page
+  # can surface as an unmatched message in a later Control handler. An adapter
+  # that raises or exits is contained the same way instead of taking the whole
+  # runtime's Control down with it.
+  defp bounded_position_read(store, session_id, version) do
+    parent = self()
+    tag = make_ref()
+
+    {reader, monitor} =
+      spawn_monitor(fn ->
+        send(parent, {tag, Store.load_records(store, session_id, version - 1, 1)})
+      end)
+
+    receive do
+      {^tag, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^reader, _reason} ->
+        :unavailable
+    after
+      @position_read_timeout_ms ->
+        Process.exit(reader, :kill)
+
+        receive do
+          {:DOWN, ^monitor, :process, ^reader, _reason} -> :ok
+        end
+
+        receive do
+          {^tag, _late} -> :ok
+        after
+          0 -> :ok
+        end
+
+        :unavailable
+    end
+  end
 
   defp provider_attempt_unspent(state, binding) do
     if Map.has_key?(state.spent_attempts, binding),
