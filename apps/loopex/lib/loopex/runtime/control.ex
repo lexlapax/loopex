@@ -791,6 +791,19 @@ defmodule Loopex.Runtime.Control do
   end
 
   @genesis_item_bytes 65_536
+  @uint64_max 18_446_744_073_709_551_615
+
+  # Technical depth: the period is checked again on the way into the genesis,
+  # because this is the last clause before `Store.create_session/3` and therefore
+  # the last place a value outside ADR 0016's `1..2^64-1` can be stopped from
+  # becoming durable. Replay enforces the same domain, so a record naming a
+  # larger period is a session that exists and can never be owned. The refusal is
+  # this path's own `invalid_session_creation`: the create is what is refused,
+  # and no new reason enters the public reply shape.
+  defp session_genesis(_session_options, cleanup_grace_ms)
+       when not (is_integer(cleanup_grace_ms) and cleanup_grace_ms > 0 and
+                   cleanup_grace_ms <= @uint64_max),
+       do: {:error, :invalid_session_creation}
 
   defp session_genesis(session_options, cleanup_grace_ms) when is_map(session_options) do
     genesis = %{

@@ -640,9 +640,19 @@ defmodule Loopex.Runtime do
   # along with everything else non-positive: a period of nothing is not a
   # cooperative window, it is a kill, and a host that means that should say so by
   # asking for the smallest period it actually wants to wait.
+  #
+  # Technical depth: the ceiling is ADR 0016's admitted domain, `1..2^64-1`, and
+  # it is enforced here rather than only where a session record is read back. A
+  # larger value used to start a runtime, be written into `session_genesis_v2`,
+  # and then fail replay's own uint64 check, which left the session listed, its
+  # genesis committed, and every owner acquisition answering
+  # `owner_recovery_failed` — durable state no code path could recover. Refusing
+  # at the option is refusing before any durable mutation.
   defp validate_cleanup_grace(nil), do: {:ok, Executor.default_cleanup_grace_ms()}
 
-  defp validate_cleanup_grace(value) when is_integer(value) and value > 0, do: {:ok, value}
+  defp validate_cleanup_grace(value)
+       when is_integer(value) and value > 0 and value <= @uint64_max,
+       do: {:ok, value}
 
   defp validate_cleanup_grace(_value), do: {:error, :invalid_cleanup_grace_ms}
 
