@@ -280,6 +280,33 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
     assert {:error, :no_effect_recovery_pending} = ReferenceClient.reconciliation_query(host)
   end
 
+  # Concept: an effect whose open entry the dead process never disposed of ends
+  # the recovered run `outcome_unknown`, and the root stays quarantined.
+  #
+  # Technical depth: the origin's settlement is made to fail its open-entry
+  # removal through the executor's `open_authority_close` seam, so the receipt
+  # it retains is the quarantined form and the entry stands. The restarted
+  # executor then answers `effect_settling` for that job, and activation ends
+  # the run `outcome_unknown` rather than waiting on a disposition nobody will
+  # finish; the next admission on that root is still refused, which is the
+  # quarantine doing its job.
+  test "prepared activation over a quarantined root ends outcome_unknown and keeps the quarantine" do
+    {restarted, attachment, retained} =
+      restart_prepared("activation-quarantined",
+        origin_executor_options: [open_authority_close: fn _ledger, _job_id -> {:error, :eio} end]
+      )
+
+    assert retained.outcome == :outcome_unknown
+    assert {:error, :effect_settling} = Local.receipt(restarted.executor, retained.job_id)
+
+    terminal = await_run_finished(attachment, 10_000)
+    assert terminal["outcome"] == "outcome_unknown"
+    assert Local.stats(restarted.executor).dispatches == %{}
+
+    host = %{restarted.client | attachment: attachment}
+    assert {:error, :no_effect_recovery_pending} = ReferenceClient.reconciliation_query(host)
+  end
+
   # Concept: an executor that cannot say leaves the reconciliation to the host,
   # exactly as before.
   #
@@ -312,7 +339,11 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
         label,
         Loopex.ReferenceClientTestModel,
         [relative_path: relative_path, content: content, observer: self()],
-        fault_to: self()
+        [fault_to: self()] ++
+          Keyword.take(
+            Keyword.get(options, :origin_executor_options, []) |> then(&[executor_options: &1]),
+            [:executor_options]
+          )
       )
       |> Fixture.create(label)
 

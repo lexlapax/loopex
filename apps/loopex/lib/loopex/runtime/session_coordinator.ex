@@ -4320,6 +4320,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp activation_reconciliation_response(query, :absent),
     do: {:ok, Map.put(query, :evidence, "outcome_unknown")}
 
+  # Concept: an effect no live instance is settling will never settle itself.
+  #
+  # Technical depth: activating a prepared resume is the host's statement that
+  # the process which dispatched this effect is gone. An open entry that no
+  # instance holds (`effect_unresolved`) or a receipt whose entry still stands
+  # because its origin's disposition never finished (`effect_settling`) can then
+  # only be resolved by an operator reconciling the root; the run is owed a
+  # terminal now, and the only truthful one is `outcome_unknown` carrying the
+  # reconciliation reference, exactly as `:absent` ends it. Neither is a blind
+  # retry: nothing is dispatched, and the root's quarantine stands until an
+  # operator clears it. A job this executor itself still holds
+  # (`effect_in_flight`) is different -- its result is still coming -- and is
+  # left to the executor, so that answer still declines below.
+  defp activation_reconciliation_response(query, {:error, reason})
+       when reason in [:effect_unresolved, :effect_settling],
+       do: {:ok, Map.put(query, :evidence, "outcome_unknown")}
+
   defp activation_reconciliation_response(_query, {:error, reason}), do: {:error, reason}
   defp activation_reconciliation_response(_query, _other), do: {:error, :invalid_receipt_answer}
 

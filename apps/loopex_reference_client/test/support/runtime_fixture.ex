@@ -100,11 +100,13 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
 
     {:ok, executor} =
       Local.start_link(
-        identity: "executor-local",
-        epoch: 11,
-        fencing_token: fence,
-        workspace_leases: %{lease_id => lease},
-        ledger_root: ledger
+        [
+          identity: "executor-local",
+          epoch: 11,
+          fencing_token: fence,
+          workspace_leases: %{lease_id => lease},
+          ledger_root: ledger
+        ] ++ Keyword.get(options, :executor_options, [])
       )
 
     # The demonstration tool is an ordinary registered generation now. It keeps

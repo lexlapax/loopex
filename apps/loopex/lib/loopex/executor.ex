@@ -223,7 +223,13 @@ defmodule Loopex.Executor do
   `:absent` says no receipt exists and none is coming from this executor;
   `{:error, reason}` says the executor could not answer, and a job the executor
   still holds in flight answers `{:error, :effect_in_flight}` rather than
-  `:absent`, because absence there would read live work as lost. The session
+  `:absent`, because absence there would read live work as lost. An executor
+  whose durable authority shows an admitted effect that no live instance is
+  settling answers `{:error, :effect_unresolved}`, and one whose receipt is
+  retained but whose open entry still stands answers `{:error, :effect_settling}`;
+  the coordinator ends a recovered run `outcome_unknown` on either, since the
+  process that could have finished them is gone by the time a prepared resume is
+  activated. The session
   coordinator asks this once, at the activation of a prepared resume whose
   pending work is a dispatched effect, and validates the answer exactly as it
   validates a receipt a host presents through `Loopex.reconcile/2`; an executor
