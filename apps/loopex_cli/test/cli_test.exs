@@ -1086,6 +1086,61 @@ defmodule LoopexCliTest do
   # rather than off the handler, so what is asserted is the name the journal
   # holds. The refutation is the decisive half: `interrupt-` followed by a bare
   # counter is exactly what a second virtual machine used to repeat.
+  # Concept: the backstop that ends a `run` is sized by the period the session
+  # committed, not by a number the command chose.
+  #
+  # Technical depth: `run` used to install a fixed ten-second backstop while
+  # `resume` derived its own from the committed cleanup period. At any period
+  # above that fixed number the process halted before the executor could reach
+  # its own kill, so `cancelled` was unreachable and every interrupt ended in
+  # the backstop. The handler state is read from the signal server itself,
+  # because that is the number the process will act on.
+  test "run sizes its interrupt backstop from the session's committed cleanup period" do
+    parent = self()
+    {state_root, workspace} = roots()
+    committed_grace_ms = 20_000
+
+    held =
+      fixture(
+        script: [%{text: "", hold: parent}, %{text: "unreached"}],
+        cleanup_grace_ms: committed_grace_ms
+      )
+
+    on_exit(fn -> restore_signal_handlers() end)
+
+    task =
+      Task.async(fn ->
+        LoopexCli.dispatch(
+          [
+            "run",
+            "--policy",
+            "allow-all",
+            "--state-root",
+            state_root,
+            "--workspace",
+            workspace,
+            "do the thing"
+          ],
+          runtime_starter: fn _options -> {:ok, held.runtime} end
+        )
+      end)
+
+    assert_receive {:holding, model}, 2_000
+
+    {:ok, %{cli_backstop_ms: expected}} = Loopex.Executor.cancellation_bounds(committed_grace_ms)
+    assert expected != Interrupt.grace_ms()
+
+    installed =
+      for {Interrupt, _id, %{grace_ms: grace_ms}} <- :sys.get_state(:erl_signal_server),
+          do: grace_ms
+
+    assert installed == [expected]
+
+    send(model, :release)
+    assert :ok = Task.await(task, 10_000)
+    assert :ok = LoopexCli.release_placement()
+  end
+
   test "an interrupt names its abort with an identifier no second virtual machine repeats" do
     fixture = fixture(script: [%{text: "", hold: self()}, %{text: "unreached"}])
     {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "do the thing")

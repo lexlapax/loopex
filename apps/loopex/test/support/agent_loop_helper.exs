@@ -348,6 +348,7 @@ defmodule Loopex.AgentLoopFixture do
         context_token_budget: 8_192,
         runtime_id: Keyword.get(options, :runtime_id, "agent-loop-runtime"),
         store: store,
+        cleanup_grace_ms: Keyword.get(options, :cleanup_grace_ms),
         progress_to: Keyword.get(options, :progress_to),
         diagnostics_to: Keyword.get(options, :diagnostics_to),
         model: %{
