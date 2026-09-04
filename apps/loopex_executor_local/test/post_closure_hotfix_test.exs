@@ -111,6 +111,11 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     try do
       assert wait_for_file(ready), "the owning instance never started its command"
 
+      # The two instances answer a receipt lookup differently for the same job:
+      # the owner holds it, the peer sees only an entry no receipt has settled.
+      assert {:error, :effect_in_flight} = Local.receipt(owner, job_id)
+      assert {:error, :effect_unresolved} = Local.receipt(peer, job_id)
+
       assert Local.cancel(peer, job_id) == {:ok, :unconfirmed},
              "an instance with no local record of a job open on its own root reported it cleaned"
 

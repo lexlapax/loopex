@@ -120,6 +120,7 @@ defmodule Loopex.Executor.Local do
   @join_unresolved [
     :absent,
     {:error, :effect_in_flight},
+    {:error, :effect_unresolved},
     {:error, :effect_settling},
     {:error, {:ledger_unavailable, :root_claim_held}}
   ]
@@ -999,7 +1000,7 @@ defmodule Loopex.Executor.Local do
       :absent ->
         :reserve
 
-      {:error, :effect_in_flight} ->
+      {:error, unresolved} when unresolved in [:effect_in_flight, :effect_unresolved] ->
         :reserve
 
       {:error, reason} ->
@@ -4419,16 +4420,22 @@ defmodule Loopex.Executor.Local do
   # `effect_settling` -- unresolved, and deliberately never `:absent`, because
   # `:absent` is what ends a recovered run `outcome_unknown` and would admit
   # unrelated effects on a root whose effect never reached a durable terminal. An
-  # entry with no receipt is an effect still in flight on some instance. Only
-  # neither present is the one true absence, and only a receipt whose entry is
-  # gone is final.
+  # entry with no receipt is an effect this instance is not settling; whether it
+  # is in flight here is decided by the caller that holds the reservation table.
+  # Only neither present is the one true absence, and only a receipt whose entry
+  # is gone is final.
   defp final_receipt(ledger, root, job_id) do
     case read_receipt(root, job_id) do
       {:ok, receipt} ->
         if Ledger.open?(ledger, job_id), do: {:error, :effect_settling}, else: {:ok, receipt}
 
+      # An entry with no receipt on an instance that does not hold the job is an
+      # effect no live instance is settling: unresolved, which is different from
+      # `effect_in_flight`, the answer this server gives for a job it holds. A
+      # coordinator activating a prepared resume ends the run `outcome_unknown`
+      # on the former and leaves the latter to its executor.
       :absent ->
-        if Ledger.open?(ledger, job_id), do: {:error, :effect_in_flight}, else: :absent
+        if Ledger.open?(ledger, job_id), do: {:error, :effect_unresolved}, else: :absent
 
       {:error, reason} ->
         {:error, reason}
