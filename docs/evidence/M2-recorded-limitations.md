@@ -786,3 +786,26 @@ not hold is refuted with the code path rather than patched, and each confirmed
 one carries its own red-then-green test. The successor milestone inherits the
 obligation to lock those tests in its gate. Nineteenth recorded override.
 
+
+<a id="second-audit-hotfix"></a>
+## Second audit: fourteen further product findings repaired on main
+
+**What is true.** A second independent audit of `main` after the first hotfix
+set, reviewed at `8f5309f8f26cffdc85218f2cf0313226ba44db66`, found six
+blocking false-greens and eight high-severity defects while confirming the
+common operator path, the suite, the provider gate, and the real-process
+workflows sound. Three of the first review's fixes were judged complete, one
+not fixed, and eight partially fixed at a boundary the first repair did not
+reach. Each finding was verified against the code before repair.
+
+**Disposition.** Maintainer, 2026-09-04: repair every product finding on
+`main` under the same override as the nineteenth, with the same rules — a
+finding is verified against the code first, one that does not hold is refuted
+with the code path, and each confirmed one carries a red-then-green test. Three
+decisions taken the same day: implement the acknowledged prepared-capability
+transfer ADR 0016 requires rather than amend the decision; raise Mint to
+1.10.0 for the two published HTTP/1 advisories and retake the real-provider
+evidence; carry the digest-bound gate-isolation fixture collision to the
+successor milestone rather than open a gate generation now. The successor
+inherits the obligation to lock every test this override added. Twentieth
+recorded override.
