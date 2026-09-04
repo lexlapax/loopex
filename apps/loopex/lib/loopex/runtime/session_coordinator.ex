@@ -580,25 +580,21 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # stopped and the attempt settles conservatively. Whatever the worker had
   # already produced is drained first, because a reply that landed inside the
   # reserve is the attempt's own evidence and its usage is exact.
-  def handle_info({:model_reserve, run_id}, state) do
-    state = %{state | model_reserves: Map.delete(state.model_reserves, run_id)}
+  def handle_info({:model_reserve, run_id, until}, state) do
+    {timer, remaining} = Map.pop(state.model_reserves, run_id)
+    state = %{state | model_reserves: remaining}
 
-    case in_flight_of(state, :model, run_id) do
-      nil ->
+    cond do
+      # A reserve this coordinator has already cancelled settles nothing; only a
+      # slice of a reserve it still holds may.
+      is_nil(timer) ->
         {:noreply, state}
 
-      {reference, pid} ->
-        _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
-        answer = take_worker_result(reference)
-        state = %{state | in_flight: Map.delete(state.in_flight, reference)}
+      System.monotonic_time(:millisecond) < until ->
+        {:noreply, arm_model_reserve_slice(state, run_id, until)}
 
-        case answer do
-          {:ok, reply} when is_map(reply) ->
-            settle_model_attempt(state, run_id, {:reply, reply})
-
-          _unproved ->
-            settle_model_attempt(state, run_id, :dispatched_or_unknown)
-        end
+      true ->
+        expire_model_reserve(state, run_id)
     end
   end
 
@@ -2990,10 +2986,43 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Technical depth: `execute_result_reserve_ms/1` derives from the committed
+  # cleanup period, which ADR 0016 admits over `1..2^64-1`, so the maximum
+  # admitted period derives a reserve around 4.6e18 milliseconds. Handing that to
+  # `Process.send_after/3` raised `:timeout_value` and killed the coordinator
+  # while it was terminating a provider attempt. The reserve is one monotonic
+  # instant spent in slices; `arm_slice/2` states why.
   defp arm_model_reserve(state, run_id) do
     state = cancel_model_reserve(state, run_id)
-    timer = Process.send_after(self(), {:model_reserve, run_id}, execute_result_reserve_ms(state))
+    until = System.monotonic_time(:millisecond) + execute_result_reserve_ms(state)
+    arm_model_reserve_slice(state, run_id, until)
+  end
+
+  defp arm_model_reserve_slice(state, run_id, until) do
+    timer =
+      arm_slice({:model_reserve, run_id, until}, until - System.monotonic_time(:millisecond))
+
     %{state | model_reserves: Map.put(state.model_reserves, run_id, timer)}
+  end
+
+  defp expire_model_reserve(state, run_id) do
+    case in_flight_of(state, :model, run_id) do
+      nil ->
+        {:noreply, state}
+
+      {reference, pid} ->
+        _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
+        answer = take_worker_result(reference)
+        state = %{state | in_flight: Map.delete(state.in_flight, reference)}
+
+        case answer do
+          {:ok, reply} when is_map(reply) ->
+            settle_model_attempt(state, run_id, {:reply, reply})
+
+          _unproved ->
+            settle_model_attempt(state, run_id, :dispatched_or_unknown)
+        end
+    end
   end
 
   defp cancel_model_reserve(state, run_id) do
