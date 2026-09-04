@@ -751,17 +751,62 @@ defmodule Loopex.Executor.Local.Ledger do
   # the file sync is the order the retained evidence checks: reversing it makes
   # the directory entry durable before the bytes it names.
   # Concept: a directory this ledger created is not durable until the directory
-  # that names it is.
+  # that names it is, and that is true of every level it created.
   #
-  # Technical depth: `File.mkdir_p/1` returns once the kernel holds the entry, so
-  # a crash before the parent's own metadata reached the disk could leave the
-  # root, the open index, or the marker directory absent while a record synced
-  # into one of them was not. Every publication already syncs the directory its
-  # record lands in; this closes the level above, which is the only one that was
-  # created without it.
+  # Technical depth: ADR 0016 clause 6 spends one monotonic deadline on durable
+  # settlement work, and this module's own promise is that "each directory this
+  # creates is synced into the directory that names it, so a crash cannot leave a
+  # record durable inside a directory that is not". `File.mkdir_p/1` creates as
+  # many components as are missing and returns once the kernel holds the entries,
+  # and only the deepest parent was synced afterwards -- so for an absent
+  # `a/b/receipts` neither `a` nor `b` was ever synced into the directory naming
+  # it, and a crash could lose the whole subtree with the generation record
+  # durable inside it. Each missing component is therefore created and its own
+  # parent synced before the next one is considered, which is what the artifact
+  # store's `ensure_directory/2` does for the same reason. An existing component
+  # reconfirms its parent, so a retry cannot inherit an earlier unproved
+  # publication, and a component that exists but is not a directory is
+  # unavailability rather than something to create over.
   defp mkdir_synced(path) do
-    with :ok <- File.mkdir_p(path) do
-      sync_parent(Path.dirname(path))
+    parent = Path.dirname(path)
+
+    case File.stat(path) do
+      {:ok, %File.Stat{type: :directory}} ->
+        if parent == path, do: :ok, else: sync_parent(parent)
+
+      {:ok, _other} ->
+        {:error, {:ledger_unavailable, :root_not_a_directory}}
+
+      {:error, :enoent} ->
+        if parent == path do
+          {:error, {:ledger_unavailable, :enoent}}
+        else
+          with :ok <- mkdir_synced(parent), do: create_synced(path, parent)
+        end
+
+      {:error, reason} ->
+        {:error, {:ledger_unavailable, reason}}
+    end
+  end
+
+  # A racing creator is accepted only after the resulting path is confirmed to be
+  # a directory, and its parent is synced either way: this call cannot tell
+  # whether the winner's own sync completed, and re-syncing a durable directory
+  # costs nothing.
+  defp create_synced(path, parent) do
+    case File.mkdir(path) do
+      :ok ->
+        sync_parent(parent)
+
+      {:error, :eexist} ->
+        case File.stat(path) do
+          {:ok, %File.Stat{type: :directory}} -> sync_parent(parent)
+          {:ok, _other} -> {:error, {:ledger_unavailable, :root_not_a_directory}}
+          {:error, reason} -> {:error, {:ledger_unavailable, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, {:ledger_unavailable, reason}}
     end
   end
 
