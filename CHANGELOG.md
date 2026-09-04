@@ -190,21 +190,30 @@ the exact document set its milestone must update.
   (`loopex_store_writer_v2`), and a recovery request is honoured only once the
   operating system says that holder is gone: a live holder is refused whoever
   asks, so a fresh command can no longer evict an embedded runtime that never
-  held the command's placement lock; a marker carrying no identity, including
-  one written by an earlier version, is never recovered automatically. The store
-  also releases the marker on an orderly stop. `resume` installs its interrupt
+  held the command's placement lock. Only the probe's exact "no such process"
+  answer counts as absence; a probe that fails, prints a diagnostic, or does
+  not answer within five seconds, an unreadable marker, and a marker carrying
+  no identity, including one written by an earlier version, are all refused as
+  unverifiable with the path and reason, never recovered automatically, and the
+  placement lock applies the same rule. A store that cannot record its own
+  identity refuses to open rather than leave a marker nothing could recover.
+  The store also releases the marker on an orderly stop. `resume` installs its interrupt
   owner before it spends the activation, so a signal landing in that window
   submits the ordinary abort instead of stopping the process with recovered
   work live.
 - Prepared recovery kept its one-use capability with the process that prepared
   the owner, so the acknowledged holder transfer ADR 0016 requires did not
   exist and a preparer's death left nothing any process could present. The
-  interrupt handler's own process is now the capability's acknowledged holder
-  from installation: activation and abandonment go through it
-  (`activate_prepared/1`, `abandon_prepared/1`; `abandon_resume/2` is removed),
-  a signal's abort and the command's activation serialize inside one process,
-  and a preparer that dies after the acknowledgement leaves a live holder. The
-  facade gains `transfer_resume/2`, which only the current holder may call.
+  handler now hands the capability, at installation, to a holder process it
+  owns: activation and abandonment go through that holder
+  (`activate_prepared/1`, `abandon_prepared/1`; `abandon_resume/2` is removed)
+  and wait for the owner without a bound, `install_prepared/3` returns the
+  owner's acknowledgement or refusal, a refused activation is given up through
+  the holder before the command reports, and a preparer that dies after the
+  acknowledgement leaves a live holder. The holder is deliberately not the
+  signal server, so a signal is handled, an abort submitted, and the backstop
+  armed while an activation waits. The facade gains `transfer_resume/2`, which
+  only the current holder may call.
 - The coordinator waited for a cancelled job's own answer inside its own
   message loop, so a status read or a command queued behind that reserve for up
   to the whole derived window. The reserve is now a timer the coordinator
@@ -215,7 +224,13 @@ the exact document set its milestone must update.
   now the same positive unsigned 64-bit range as the cleanup period, refused at
   declaration and at admission before anything durable is written, and an
   over-domain cleanup period is refused at runtime start and at session
-  creation rather than committed into a genesis no owner can recover.
+  creation rather than committed into a genesis no owner can recover. A
+  provider permit re-establishes the committed deadline immediately before it
+  is sent, after the bounded one-second read that rebuilds its binding, so a
+  slow store can cost an attempt but never sends a permit after authority
+  expired. A superseded coordinator closes as abandoned every cleanup whose
+  model worker it terminated and cancels that worker's reserve, so it is reaped
+  instead of leaking; its reserve timers no longer act once it is superseded.
 - Command identifiers were a per-process counter, so a second `loopex` process
   against the same state root replayed the first one's identifiers and was
   refused as a conflict. They are now random.
@@ -236,29 +251,34 @@ the exact document set its milestone must update.
   absence is now decided from the shared root and answers `unconfirmed`, and so
   does an identity the root has never admitted. Every cleanup window derives
   from the period the job committed rather than the executor's start default.
-  The open entry's disposition is now decided under the root claim before the
-  receipt is published, so no reader ever sees a confirmed receipt that later
-  reverses to `outcome_unknown`; a removal that fails or runs past the
-  settlement allowance publishes the quarantined form instead. Open-entry
-  removal shares the settlement allowance with every other retention phase; a
-  root claim the ledger could not release is reported to the caller rather than
-  swallowed; every level of a ledger directory is synced into its own parent;
-  the open record is published before the marker so an interrupted admission
-  fails closed; and every executor wait derived from an admitted period is
-  sliced below the VM's timer ceiling. One residual is stated rather than
-  hidden: a removal that succeeds followed by a receipt that cannot be retained
-  leaves the root without its standing quarantine; the caller receives
-  `{:receipt_not_retained, reason}` and a later reader gets `:absent`.
+  A receipt is final only once its open entry is gone, and every reader honours
+  that: the settlement takes one root claim, retains the receipt, removes the
+  entry, and only where the removal fails replaces the receipt with the
+  quarantined `outcome_unknown` form, so no reader ever consumes a confirmed
+  receipt that later reverses, and a retention that fails leaves the entry so
+  the root's quarantine stands. Readers see a receipt whose entry still stands
+  as `effect_settling`, an entry with no receipt as `effect_unresolved` unless
+  this executor holds the job, and `effect_in_flight` only for a job it holds.
+  Open-entry removal shares the settlement allowance with every other retention
+  phase; a root claim the ledger could not release is reported to the caller,
+  including after a body that raised, rather than swallowed; every level of a
+  ledger directory is synced into its own parent; the open record is published
+  before the marker so an interrupted admission fails closed; and every executor
+  wait derived from an admitted period is sliced below the VM's timer ceiling.
+  A truly absent cancellation target answers `unconfirmed`, as ADR 0016 says.
 - Mint 1.9.3 carried two published HTTP/1 advisories (an unbounded status-line
   and chunk-extension buffer, and a quadratic chunk-size parser) reachable
   through the shipped provider chain; it is raised to 1.10.0.
 - A completed create replayed into a restarted runtime started a new owner
   generation; a replay now answers from the durable result and starts nothing.
   Store items are measured without encoding them first, so an oversized binary
-  is refused without an allocated copy. Adapter replies are admitted against
-  plain-data, depth, member, and byte ceilings before any projection, so a reply
-  with a million tool calls, a thousand calls each carrying a megabyte, or a
-  ten-thousand-level nesting is refused as unreadable in bounded time. The
+  is refused without an allocated copy. Adapter replies are admitted by the
+  Store's own item admission (`Store.admit_bounded/1`: form, depth, member
+  count, key length, and exact external size) before any projection, so a reply
+  with a million tool calls, a thousand calls each carrying a megabyte, a
+  ten-thousand-level nesting, or legal containers whose framing alone exceeds
+  the ceiling is refused as unreadable in bounded time; a usage member an
+  adapter fills with an atom is classified as unreadable rather than absent. The
   one-use provider permit is authorized only where the binding equals the one
   rebuilt from the committed attempt-open row at that journal position, so a
   fabricated first binding is refused rather than recorded. Settlement validation

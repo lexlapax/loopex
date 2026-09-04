@@ -203,20 +203,25 @@ coordinator went on to spend the very activation the caller was told it had not
 got. Neither proposes a Store mutation, so waiting commits nothing, and a
 coordinator that has died refuses through its own exit.
 `LoopexCli.Interrupt.install_prepared(attachment, cleanup_ms, activation)`
-installs an interrupt owner and, in the same step, makes that handler's own
-process the capability's acknowledged holder.
+installs an interrupt owner and, in the same step, hands the capability to a
+holder process started for that one purpose; it returns the owner's
+acknowledgement, `:ok`, or the owner's refusal, and a caller that continues
+past a refusal as though the capability had moved has a defect of its own.
 `LoopexCli.Interrupt.activate_prepared(activation)` and
-`LoopexCli.Interrupt.abandon_prepared(activation)` are how the capability is
-spent or given up from then on: both are answered by the handler's process, so
-a signal's abort and the command's activation cannot interleave. A preparer
-that dies after the acknowledgement leaves the handler able to activate,
-abandon, or abort; one that dies before it leaves a capability no live process
-can present. A durable abort admitted first defeats later activation. The
-shipped `resume` command routes through that prepared installation: the
-handler is installed carrying the activation, the capability is handed to it,
-and the command then asks the handler to start the work, so recovered work is
-never running while the runtime's default signal handler is still the one
-installed and no two processes can each decide the paused work's fate.
+`LoopexCli.Interrupt.abandon_prepared(activation)` present the capability from
+that holder and wait for the owner's answer without a bound, as the facade
+entries do; a holder that dies without answering is reported by its own name,
+never as a refusal. The holder is deliberately not the signal server: a
+blocked signal server could handle no signal, so the holder blocks instead and
+the handler keeps submitting the abort and arming the backstop. A signal's
+abort and an activation still cannot both win, because the owner fences the
+capability on an admitted abort and refuses a later activation as fenced. A
+preparer that dies after the acknowledgement leaves a live holder; one that
+dies before it leaves a capability no live process can present; removing the
+handler stops its holder, and the owner then pauses the recovered work for
+good rather than strand a capability nobody can present. The shipped `resume`
+command routes through that installation and, where the owner refuses the
+activation, gives the capability up through the handler before it reports.
 
 ### Reference Composition
 
@@ -277,9 +282,15 @@ store honours only after asking the operating system whether the marker's
 recorded holder is still alive. The marker (`loopex_store_writer_v2`) carries
 the holder's operating-system pid, its start identity as `/bin/ps` reports it,
 its BEAM pid, and a nonce: a live holder is refused as `store_writer_active`
-whoever asks, a holder that is gone or whose start identity no longer matches
-its pid is recovered, and a marker carrying no identity, such as one written by
-an earlier version, is never recovered automatically. The host then starts a
+whoever asks; a holder that is gone or whose start identity no longer matches
+its pid is recovered; and a marker the store cannot verify — unreadable bytes,
+a record from an earlier version, or a probe that failed, printed a diagnostic,
+or did not answer within five seconds — is refused as
+`store_writer_unverifiable` naming the path and the reason, which is a human
+decision rather than an automatic one. Only the exact "no such process" answer
+counts as absence. A store that cannot record its own identity refuses to open
+at all (`store_writer_identity_unavailable`), because a marker without one
+could never be recovered afterwards. The host then starts a
 replacement runtime with the same placement identity and calls
 `Loopex.resume_session/3`. The new coordinator
 discovers unresolved succession state, resolves the exact prior transaction,
@@ -301,10 +312,15 @@ coordinator and the executor's retained receipt is the only truth left. The
 coordinator therefore solicits its own query at activation, asks the executor
 through the optional `Loopex.Executor.retained_receipt/2` callback, and validates the
 answer exactly as it validates a host's: a retained receipt commits the receipt
-fact and the run continues, `:absent` commits `outcome_unknown`, and an executor
-that does not export the callback, answers `{:error, :effect_in_flight}` or any
-other error, or returns a receipt that does not bind to the journaled job leaves
-the work pending for the host, which then solicits a fresh query. The lookup is
+fact and the run continues; `:absent`, `{:error, :effect_unresolved}` (an
+admitted effect no live instance is settling), and `{:error, :effect_settling}`
+(a receipt whose open entry still stands) each commit `outcome_unknown`, since
+the process that could have finished them is gone once a prepared resume is
+activated, and the root's quarantine stands until an operator clears it; an
+executor that does not export the callback, answers `{:error, :effect_in_flight}`
+for a job it still holds or any other error, or returns a receipt that does not
+bind to the journaled job leaves the work pending for the host, which then
+solicits a fresh query. The lookup is
 asked once per activation, runs in a worker under a bound, and never reads
 silence as absence. `loopex resume` relies on this: before it, a session whose
 process died mid-command resumed into a run nothing would ever settle.

@@ -399,15 +399,16 @@ uses `install(attachment, cleanup_ms)` for an ordinary active run, and
 `install_prepared(attachment, cleanup_ms, activation)` for recovered work that
 must remain paused until the interrupt owner decides whether to activate it.
 `loopex resume` uses the prepared entry: it installs the handler carrying the
-activation and hands the capability to the handler's own process in the same
-step, so there is no interval in which recovered work is running and the
-runtime's default handler is still the one installed, and no instant in which
-two processes could each decide the paused work's fate. The command then asks
-that handler to start the work. A signal arriving first submits the ordinary
-abort, which permanently invalidates the activation, and the command reports
-the refusal rather than continuing a run it no longer owns.
-`abandon_prepared(activation)` gives the same capability up, from the same
-process, without scheduling recovered work. Installation sets `SIGTERM`, `SIGHUP`, and
+activation and, in the same step, hands the capability to a holder process the
+handler owns, so there is no interval in which recovered work is running and
+the runtime's default handler is still the one installed. The command then asks
+that holder to start the work and waits for the answer without a bound. The
+signal server itself is never blocked by that wait, so a signal arriving
+meanwhile still submits the ordinary abort and arms the backstop; the abort
+fences the activation at the runtime, and the command reports the refusal
+rather than continuing a run it no longer owns, giving the capability up
+through the same holder first. `abandon_prepared(activation)` gives it up from
+that holder without scheduling recovered work. Installation sets `SIGTERM`, `SIGHUP`, and
 `SIGQUIT` to `handle`, removes the runtime's own `:erl_signal_handler`, and
 installs the command's handler on `:erl_signal_server`.
 

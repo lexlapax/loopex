@@ -123,12 +123,16 @@ After a normal stop or an ungraceful VM or OS-process death:
    request, not a removal. The store reads the marker the previous holder wrote
    (`loopex_store_writer_v2`, carrying that process's operating-system pid and
    start identity) and asks the operating system whether that process is still
-   alive: a live holder is refused as `store_writer_active` no matter who asks,
+   alive: a live holder is refused as `store_writer_active` no matter who asks;
    a holder that is gone or whose identity no longer matches its pid is
-   recovered, and a marker carrying no identity, including one written by an
-   earlier version, is never recovered automatically and must be removed by
-   hand once its writer is known dead. Concurrent recovery is refused rather
-   than attempted.
+   recovered; and a marker the store cannot verify — no identity in it, including
+   one written by an earlier version, unreadable bytes, or a process probe that
+   failed or did not answer within five seconds — is refused as
+   `store_writer_unverifiable` and must be removed by hand once its writer is
+   known dead. Only the exact "no such process" answer from the probe counts as
+   absence. A store that cannot record its own identity refuses to open, so
+   check that `/bin/ps` runs where Loopex does. Concurrent recovery is refused
+   rather than attempted.
 2. Start a replacement runtime with the same `runtime_id`, Store namespace,
    workspace, executor identity, receipt ledger, and tool contract.
 3. Resume the session under a fresh command identity. Resume commits a new owner

@@ -105,8 +105,13 @@ it does not restore conformance to an implementation that omits the callback.
 The port also declares an optional `retained_receipt/2`, which reads the terminal receipt
 an executor retained for one job: `{:ok, receipt}`, `:absent`, or
 `{:error, term()}`, with `{:error, :effect_in_flight}` reserved for a job the
-executor still holds. The session coordinator consults it once when a prepared
-resume is activated over a dispatched effect; `Loopex.Executor.retained_receipt/3` bounds
+executor still holds; the shipped local executor also answers
+`{:error, :effect_unresolved}` for an admitted effect no live instance is
+settling and `{:error, :effect_settling}` for a receipt whose open entry still
+stands, and a receipt is final only once its entry is gone. The session
+coordinator consults it once when a prepared resume is activated over a
+dispatched effect, ending the run `outcome_unknown` on absence, an unresolved
+entry, or a settling one; `Loopex.Executor.retained_receipt/3` bounds
 the call and reports an absent callback, a raise, a malformed answer, or the
 bound elapsing as distinct errors that leave reconciliation host-driven. Omitting
 it is conformant. An implementation of any port is written against bytes that
@@ -319,13 +324,15 @@ remaining word as data, which is what makes an artifact locator beginning with
 value to 8,192; prepared `resume` and `cancel` recover an active run's committed
 value on omission and refuse an explicit conflict before activation or abort.
 The command's cross-application interrupt entries are `install/1`,
-`install/2`, `install_prepared(attachment, cleanup_ms, activation)`,
-`activate_prepared(activation)`, and `abandon_prepared(activation)`. Prepared
-installation binds the handler to the attachment and the exact one-use
-capability and makes the handler's own process that capability's acknowledged
-holder; activation and abandonment are both answered by that process, and
-abandonment schedules no recovered work. `abandon_resume(attachment, activation)`
-was removed with that change.
+`install/2`, `install_prepared(attachment, cleanup_ms, activation)`, which
+returns `:ok` or the owner's `{:error, reason}`, `activate_prepared(activation)`,
+and `abandon_prepared(activation)`. Prepared installation binds the handler to
+the attachment and the exact one-use capability and makes a holder process the
+handler owns that capability's acknowledged holder; activation and abandonment
+are presented from that holder and wait without a bound, a holder that dies
+without answering is reported as `:prepared_holder_down`, and abandonment
+schedules no recovered work. `abandon_resume(attachment, activation)` was
+removed with that change.
 An unrecognised flag is refused rather than
 ignored, which means adding a flag is observable and removing one is breaking.
 `loopex artifact` reads objects through the `Loopex.ArtifactStore` port, so the

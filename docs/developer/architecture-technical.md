@@ -113,8 +113,12 @@ position carrying the open row is current, the worker is the one the coordinator
 started, the deadline has not elapsed, and the full attempt identity has never
 been permitted, and the binding itself equals the one rebuilt from the committed
 attempt-open row at that journal position, so the caller's map is compared and
-never trusted — and then spends and sends together, so a succession linearizes
-entirely before or entirely after the send. The binding is
+never trusted — re-establishes the deadline after that read and immediately
+before the send, since the read is a Store call that takes time the deadline
+does not stop for, and then spends and sends together, so a succession
+linearizes entirely before or entirely after the send. The read is bounded at
+one second; a read that does not answer refuses the permit rather than holding
+Control, so a slow store costs one attempt, never the runtime. The binding is
 `session_id`, `run_id`, `turn_id`, `operation_id`, `attempt`, and
 `staged_request_digest`. Spent identities are dropped only when control stops
 holding the session at all; dropping them at succession would hand a successor a
