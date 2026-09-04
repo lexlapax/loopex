@@ -556,9 +556,25 @@ defmodule Loopex.Store do
           | {:error, :invalid_item | :invalid_event}
   def normalize_and_measure_item(plane, item) when plane in [:record, :event] do
     with {:ok, normalized} <- normalize_measured_root(plane, item) do
-      {:ok, normalized, byte_size(:erlang.term_to_binary(normalized, [:deterministic]))}
+      {:ok, normalized, deterministic_external_size(normalized)}
     end
   end
+
+  # Concept: the item is counted, not copied.
+  #
+  # Technical depth: ADR 0017 requires a structurally valid item to be "measured
+  # with a deterministic external-term size calculator without first allocating
+  # the encoded byte string", and to return the exact count even above
+  # `max_item_bytes/0`. Encoding it to measure it broke the first half: the
+  # bounded walk admits a binary of any size as an ordinary scalar, so an item
+  # carrying one huge payload was fully encoded before the ceiling refused it,
+  # which is the allocation the structural bounds exist to prevent.
+  # `external_size/2` walks the same term and adds each part's encoded width
+  # without building any of it, and under `:deterministic` it counts exactly the
+  # bytes `term_to_binary/2` writes under the same option -- the equality the
+  # ceiling and every reported byte cost depend on, and which the item-budget
+  # suite pins across the admitted scalar, collection, and depth domain.
+  defp deterministic_external_size(item), do: :erlang.external_size(item, [:deterministic])
 
   # Concept: the root carries required members no other node has.
   #
