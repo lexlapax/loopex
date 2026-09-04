@@ -70,18 +70,29 @@ exec 3<&-
 wait "$child"
 status=$?
 
+# Concept: this launcher leaves when the run leaves, and not before.
+#
 # Technical depth: a `wait` interrupted by a caught signal returns above 128
 # while the child is still running, so the child's real status has not been read
-# yet and waiting once more reads it. A child that genuinely exited above 128 --
-# the interrupt backstop halts 130 -- has already been reaped, so the second
-# wait reports no such job and the first answer stands.
-if [ "$status" -gt 128 ]; then
+# yet and waiting once more reads it. Waiting once more was not enough. An
+# operator who interrupts a second time -- which is what an operator does when
+# the first interrupt has printed nothing yet -- interrupts that second `wait`
+# too, and taking 143 as the answer returned the prompt while the run was still
+# stopping: the escript was left running with no parent watching it, and the
+# command processes it went on to abandon had nobody's name on them either.
+#
+# So what is asked between waits is whether the child is still there, not how
+# many waits have been spent. `kill -0` sends no signal and answers exactly that.
+# A child that genuinely exited above 128 -- the interrupt backstop halts 130 --
+# was reaped by the `wait` that reported it, so it is already gone by this test
+# and that answer stands.
+while [ "$status" -gt 128 ] && kill -0 "$child" 2>/dev/null; do
   wait "$child" 2>/dev/null
   reaped=$?
   if [ "$reaped" -ne 127 ]; then
     status=$reaped
   fi
-fi
+done
 
 trap - INT TERM HUP QUIT
 exit "$status"

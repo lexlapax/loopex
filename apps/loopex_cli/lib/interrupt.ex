@@ -68,6 +68,18 @@ defmodule LoopexCli.Interrupt do
   # terminal rather than a daemon.
   @grace_ms 10_000
 
+  # Concept: what a second interrupt is told, and what the process says when the
+  # stop ran out of time.
+  #
+  # Technical depth: both lines are facts about this process, not claims about
+  # the session. Neither names a terminal outcome: the durable answer is in the
+  # state root, and `loopex cancel <session>` is what settles it.
+  @still_stopping "loopex: still stopping; this run exits when it has reported " <>
+                    "or the stop period ends"
+
+  @backstop_note "loopex: stopping did not finish in time; this run's own command " <>
+                   "processes were killed"
+
   @doc """
   ## Concept
 
@@ -263,9 +275,18 @@ defmodule LoopexCli.Interrupt do
   # admission nor takes a second identity. The backstop is armed here, before the
   # possibly blocking admission call rather than after it, because an admission
   # that never returns is exactly the case the backstop exists for.
+  #
+  # A further signal is answered rather than absorbed in silence. An operator who
+  # interrupts a second time has been told nothing by the first, and silence is
+  # what makes them keep signalling a process that is already stopping. The
+  # notice is written from a separate process because this callback runs inside
+  # the signal server: a write to a stderr nobody is draining would otherwise
+  # stall delivery of every later signal, which is the same reason the admission
+  # itself is not performed here.
   @impl :gen_event
   def handle_event(signal, state) when signal in @signals do
     if joining?(state) do
+      _ = spawn(fn -> IO.puts(:stderr, @still_stopping) end)
       {:ok, state}
     else
       {:ok, submit_abort(state)}
@@ -392,7 +413,7 @@ defmodule LoopexCli.Interrupt do
     remaining = deadline - System.monotonic_time(:millisecond)
 
     if remaining <= 0 do
-      System.halt(130)
+      halt_owning_nothing()
     else
       receive do
         {:DOWN, ^reference, :process, _pid, _reason} ->
@@ -411,5 +432,91 @@ defmodule LoopexCli.Interrupt do
         min(remaining, @slice_ms) -> wait_out(reference, deadline, extended)
       end
     end
+  end
+
+  # Concept: the backstop ends this process, and it must not end it standing on
+  # top of the work it was asked to stop.
+  #
+  # Technical depth: `System.halt/1` ends the emulator through `:erlang.halt`,
+  # which closes no port and runs nothing afterwards, so every operating-system
+  # process the emulator started outlives it — reparented to the init process
+  # with nobody's name on it. The backstop only fires where cleanup did not
+  # finish, which is exactly when such a process is still there, so halting alone
+  # turned a stop that ran out of time into an abandoned child. Closing the ports
+  # first would not do it either: that reaches the direct child and not the
+  # descendants it forked, which is the whole reason the executor signals a group
+  # rather than a leader.
+  #
+  # The emulator gives each spawned port its child's identifier, and that child
+  # is the leader of a process group of its own — the same ownership the local
+  # executor's own termination rests on — so the negated identifier names the
+  # group and ends the descendants with it. `KILL`, because the cooperative
+  # period is precisely what has just run out. This claims nothing about the
+  # session: the run reported no terminal, and the note says so rather than
+  # calling it a cancellation.
+  #
+  # How long the killed groups are waited on before halting anyway, and how often
+  # they are looked at, are `@release_ms` and `@release_poll_ms` below.
+  @release_ms 500
+  @release_poll_ms 25
+
+  defp halt_owning_nothing do
+    groups = owned_groups()
+    Enum.each(groups, &kill_group/1)
+    await_release(groups, System.monotonic_time(:millisecond) + @release_ms)
+    IO.puts(:stderr, @backstop_note)
+    System.halt(130)
+  end
+
+  # Concept: halt once the children are actually gone, not the instant they were
+  # signalled.
+  #
+  # Technical depth: the emulator learns that a spawned child has ended through
+  # its own helper process, and halting in the middle of that hand-off leaves the
+  # helper writing to a pipe nobody reads any more, which it reports on the
+  # operator's terminal in place of the answer this backstop is trying to give.
+  # A port whose child is gone stops being listed, so the groups just killed are
+  # waited out until none of them is a port child. Bounded, because a child that
+  # will not die is not a reason to keep alive a process that has already run out
+  # of time.
+  defp await_release(groups, deadline) do
+    still = Enum.filter(groups, &(&1 in owned_groups()))
+
+    if still == [] or System.monotonic_time(:millisecond) >= deadline do
+      :ok
+    else
+      Process.sleep(@release_poll_ms)
+      await_release(still, deadline)
+    end
+  end
+
+  defp owned_groups do
+    for port <- Port.list(),
+        {:os_pid, os_pid} <- [Port.info(port, :os_pid)],
+        is_integer(os_pid) and os_pid > 1,
+        do: os_pid
+  end
+
+  # A signal this process cannot send is not a reason to keep running: the note
+  # and the status still have to reach the operator, so a missing or refusing
+  # `kill` leaves the halt itself intact.
+  @kill_ms 2_000
+
+  defp kill_group(group) do
+    port =
+      Port.open({:spawn_executable, "/bin/kill"}, [
+        :binary,
+        :exit_status,
+        :hide,
+        args: ["-KILL", "--", "-#{group}"]
+      ])
+
+    receive do
+      {^port, {:exit_status, _status}} -> :ok
+    after
+      @kill_ms -> :ok
+    end
+  rescue
+    _no_kill_program -> :ok
   end
 end
