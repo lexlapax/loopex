@@ -199,12 +199,14 @@ stops waiting, so an expired call would report the session unavailable while the
 coordinator went on to spend the very activation the caller was told it had not
 got. Neither proposes a Store mutation, so waiting commits nothing, and a
 coordinator that has died refuses through its own exit.
-The reference command installs the interrupt owner with
-`LoopexCli.Interrupt.install_prepared(attachment, cleanup_ms, activation)` and
-may consume the same pair through
-`LoopexCli.Interrupt.abandon_resume(attachment, activation)`. Handler
-installation alone never schedules recovered work, and a durable abort admitted
-first defeats later activation.
+`LoopexCli.Interrupt.install_prepared(attachment, cleanup_ms, activation)`
+installs an interrupt owner that holds the activation, and
+`LoopexCli.Interrupt.abandon_resume(attachment, activation)` consumes the same
+pair without scheduling recovered work; a durable abort admitted first defeats
+later activation. The shipped `resume` command activates recovered work and
+then installs the ordinary handler rather than routing through that prepared
+installation, so the paused-until-decided path is available to an embedder but
+is not what the command exercises today.
 
 ### Reference Composition
 

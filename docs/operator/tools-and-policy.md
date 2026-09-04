@@ -212,7 +212,10 @@ rule rather than an oversight.
 A tool whose output exceeds its declared bound does not get truncated into the
 conversation and does not silently lose the rest. The full bytes spill to an
 artifact store under your state root, and the durable event carries the content
-digest, media type, size, logical role, and an opaque retrieval reference. Your
+digest, media type, size, logical role, and an opaque retrieval reference. The
+spill itself has a ceiling: each shipped tool collects at most 8 MiB of output,
+and a command that prints more than that has the remainder dropped rather than
+retained, which the result says. Your
 terminal prints the reference beside the tool's outcome, already written as the
 command that reads it back:
 

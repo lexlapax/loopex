@@ -44,10 +44,11 @@ not the one the task occupies. At an umbrella root every compiled child sits on
 the load path, so an ambient check would fail on any adapter that merely exists.
 The lane proves two things: core builds and runs with no adapter application
 resolved or started, and core reads no per-runtime state from application
-environment. Per-runtime placement identity is read through `System.fetch_env/1`
-in `Loopex.SessionDirectory`, never `Application.get_env` or a compile-time
-default, because two runtimes in one virtual machine must not collide on a shared
-value.
+environment. The state root is read through `System.fetch_env/1` in
+`Loopex.SessionDirectory`, never `Application.get_env` or a compile-time
+default, because two runtimes in one virtual machine must not collide on a
+shared value; the runtime's placement identity itself is generated once and
+persisted under that root, and a later process re-presents it from disk.
 
 Every application reads the root `VERSION` file at compile time, so the umbrella
 is one version train by construction; `mix loopex.version_train` covers the case

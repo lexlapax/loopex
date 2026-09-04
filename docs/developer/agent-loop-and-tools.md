@@ -540,8 +540,9 @@ malformed legacy five-member reference fails closed. Public `retrieve/2` accepts
 only the opaque object locator, calls validated `stat` then `fetch`, and neither
 reconstructs nor accepts private provenance.
 
-`Loopex.Executor.Local` bounds its own output through `CodingTools.bound_output/2`
-and hands the whole of it to the Core facade its host composed, with the exact
+`Loopex.Executor.Local` bounds its own output through `CodingTools.bound_output/2`,
+collects at most the tool's declared 8 MiB artifact ceiling and drops the rest,
+and hands what it collected to the Core facade its host composed, with the exact
 validated session, run, operation, attempt, and tool-call identities. A
 truncated result carries `ArtifactStore.truncation_notice/3` naming the compact
 reference, and the receipt carries that reference in `artifacts`. The reference

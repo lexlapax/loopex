@@ -42,9 +42,11 @@ disagree about what the model said.
 
 Concept: [One run, from prompt to answer](how-a-run-works.md#concept-run-flow).
 
-Every message on your screen is preceded by the record that authorizes it, and
-the record and its public event are written in one transaction. Nothing on this
-table is published from a mutation reply.
+Every durable message on your screen is preceded by the record that authorizes
+it, and the record and its public event are written in one transaction. The one
+exception is the streamed answer text, which the table marks transient: it
+reaches the screen as the model produces it and is committed only when the
+turn's reply settles. Nothing on this table is published from a mutation reply.
 
 | Step | Committed first | Then published |
 | --- | --- | --- |

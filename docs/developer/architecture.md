@@ -138,7 +138,9 @@ present at the boundary. Fixed by
 
 **ArtifactStore** is where a tool's output goes when there is more of it than the
 model should be shown. The model receives a bounded result that says what was
-truncated, and the whole of it is retained where an operator can read it back. An
+truncated, and the whole of it is retained where an operator can read it back,
+up to the per-tool collection ceiling of 8 MiB beyond which the executor drops
+output rather than retaining it. An
 artifact has two identities: the *object* is the stored bytes, so identical bytes
 are one object however often they are retained, and the *use* is why one caller
 retained them. Fixed by
@@ -171,9 +173,12 @@ by design.
 | Administrative diagnostics | Operational observation; not session history and not an input to behavior. | The runtime, and nothing durable. |
 
 Two rules connect them. A fact is committed before it is published, and an
-effect's intent is committed before the effect is dispatched — so a caller that
-received nothing knows nothing was published, and an intent without an outcome is
-a fence rather than a retry. Public delivery reads the Store outbox as truth and
+effect's intent is committed before the effect is dispatched — so a published
+event always has its committed fact behind it, and an intent without an outcome
+is a fence rather than a retry. The converse does not hold: publication reads
+the committed outbox on its own schedule, so a caller whose mutation reply was
+lost learns what happened from the durable record, never from the absence of a
+reply. Public delivery reads the Store outbox as truth and
 never rides on a mutation reply, because a reply is exactly what a lost message
 does not deliver.
 
@@ -250,10 +255,12 @@ Technical depth: [Succession, the post-commit fence, and the invariants](archite
 
 The runtime is the brain: it coordinates sessions, orders commits, and decides
 what happens next. Hands own workspaces and operating-system effects, and they
-sit behind the Executor port in their own process — the local executor builds a
-child environment from nothing, launches a fixed code-owned tool with validated
-bounded arguments, holds a monitored workspace lease for the job's whole
-lifetime, and durably retains its receipt before replying.
+sit behind the Executor port — the local executor validates bounded arguments
+against a fixed code-owned tool, holds a monitored workspace lease for the job's
+whole lifetime, and durably retains its receipt before replying. Only the shell
+tool starts an operating-system child, in its own process group and with an
+environment built from nothing; the read, write, and edit tools run inside the
+runtime against the leased workspace.
 
 The host keeps everything Loopex deliberately does not own: identity, policy,
 credentials, tenancy, quotas, placement, retention, and presentation. Authority

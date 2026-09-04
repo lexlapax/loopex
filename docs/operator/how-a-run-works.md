@@ -63,7 +63,7 @@ flowchart TD
     POLICY{"host policy decides<br/>each tool call"}
     DENY["denied, and the denial is committed<br/>no process starts"]
     GRANT["effect intent and the grant are committed"]
-    RUNTOOL["the executor runs the tool in the workspace,<br/>in its own process group"]
+    RUNTOOL["the executor runs the tool in the workspace<br/>(bash in its own process group; read, write, edit inside the runtime)"]
     RECEIPT["the receipt is committed, then the result goes back to the model"]
     BOUNDS{"max turns, token budget,<br/>deadline still clear?"}
     DONE["run.finished — 'loopex: done'"]

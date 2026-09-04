@@ -133,12 +133,15 @@ defmodule Loopex do
   @doc """
   ## Concept
 
-  Admits a prompt or abort through the session reached by this attachment.
+  Admits a prompt, steer, follow-up, or abort through the session reached by
+  this attachment.
 
   ## Technical depth
 
-  Prompt maps carry `:type`, `:command_id`, and bounded binary `:content`; abort
-  maps carry `:type` and `:command_id`. Durable command identity, active-run
+  Prompt, steer, and follow-up maps carry `:type`, `:command_id`, and bounded
+  binary `:content`; abort maps carry `:type` and `:command_id`. A steer is
+  applied to the active run's next request and a follow-up is queued behind
+  the active run; at most one of each is held unapplied. Durable command identity, active-run
   exclusion, and post-commit ownership fencing are enforced below the facade.
   """
   @spec command(Attachment.t(), map()) :: {:accepted, binary()} | {:error, term()}
