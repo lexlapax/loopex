@@ -479,22 +479,39 @@ defmodule LoopexCli do
   # the command invented.
   #
   # Activation is then asked of that handler rather than of the owner directly,
-  # because the handler's process is now the capability's holder. Both decisions
-  # about the paused work -- this command's to continue it and a signal's to stop
-  # it -- are therefore taken one at a time in one process, and this command can
-  # no longer be told its activation failed while the work it activated starts.
+  # because the handler's holder is now the capability's holder. The two
+  # decisions about the paused work -- this command's to continue it and a
+  # signal's to stop it -- reach the owner independently and the owner settles
+  # which of them happened, so this command is never told its activation failed
+  # while the work it activated starts.
+  #
+  # The handoff's answer is acted on rather than discarded. A capability that did
+  # not move is one this command cannot spend, so the refusal is reported in the
+  # owner's own words and the capability is given up first -- from this process,
+  # which a refused transfer leaves as the holder. Continuing past it would have
+  # this command present a capability it does not hold and then read the owner's
+  # holder refusal as though the session had gone wrong.
+  #
+  # A session with nothing prepared has no capability to hand over and takes the
+  # ordinary configured handler: its recovered work was replayed rather than
+  # paused, so there is nothing for a signal to arrive before.
   #
   # `cancel` spends nothing: it admits the ordinary public abort while the
   # recovered work is still paused, which is what keeps a reconciling command
   # from starting the very run it was asked to end. A session with no active run
   # has nothing to abort, so `cancel` reports its settled history instead of
   # refusing over an abort the session cannot accept.
-  defp continue_attached(:resume, attachment, status, activation) do
-    Interrupt.install_prepared(attachment, Map.fetch!(status, :cleanup_grace_ms), activation)
+  defp continue_attached(:resume, attachment, status, nil) do
+    Interrupt.install(attachment, Map.fetch!(status, :cleanup_grace_ms))
+    Render.stream(attachment)
+  end
 
-    case activate(activation) do
-      {:ok, _session_id} -> Render.stream(attachment)
-      {:error, reason} -> {:error, reason}
+  defp continue_attached(:resume, attachment, status, activation) do
+    grace_ms = Map.fetch!(status, :cleanup_grace_ms)
+
+    case Interrupt.install_prepared(attachment, grace_ms, activation) do
+      :ok -> start_recovered_work(attachment, activation)
+      {:error, reason} -> refuse_handoff(reason, activation)
     end
   end
 
@@ -508,9 +525,50 @@ defmodule LoopexCli do
     end
   end
 
+  # Concept: a refused activation leaves nothing paused behind it.
+  #
+  # Technical depth: not every refusal settles the capability. An abort that
+  # fenced it and a second presentation that found it spent are already the
+  # owner's final word, but a refusal the owner gave for a reason of its own --
+  # a session it could not answer for, an owner still acquiring, an ownership it
+  # has since lost -- leaves the capability `:prepared`, and a command that
+  # returned there would leave the session paused with its recovered work
+  # startable by nobody. Abandonment is idempotent and irreversible, so asking
+  # for it after any refusal costs nothing where the owner has already settled
+  # and is the whole answer where it has not. It is asked of the handler, not of
+  # the owner, because the handoff moved the holder and only the holder is
+  # admitted; its own answer is not this command's to report, since the refusal
+  # the operator needs is the one the activation gave.
+  defp start_recovered_work(attachment, activation) do
+    case activate(activation) do
+      {:ok, _session_id} ->
+        Render.stream(attachment)
+
+      {:error, reason} ->
+        _ = facade(Interrupt, :abandon_prepared, [activation])
+        {:error, reason}
+    end
+  end
+
+  defp refuse_handoff(reason, activation) do
+    _ = give_up(activation)
+    {:error, reason}
+  end
+
   defp activate(nil), do: {:ok, :replayed}
   defp activate(activation), do: facade(Interrupt, :activate_prepared, [activation])
 
+  # Concept: giving the capability up from the process that prepared it.
+  #
+  # Technical depth: the owner admits abandonment only from the process it
+  # currently records as the holder, and that is this one exactly until an
+  # acknowledged handoff moves it. Every caller here is therefore before
+  # `install_prepared/3` has succeeded: the two configuration refusals and the
+  # unreadable-status refusal are decided before installation is attempted, and
+  # `refuse_handoff/2` runs only where the transfer was refused and so left this
+  # process holding. After an acknowledged handoff this would be refused as a
+  # holder mismatch, which is why `start_recovered_work/2` asks the handler
+  # instead.
   defp give_up(nil), do: :ok
   defp give_up(activation), do: facade(Loopex, :abandon_resume, [activation])
 
