@@ -56,13 +56,11 @@ defmodule LoopexComposition do
   data lives is the host's decision.
 
   `:recover_stale_writer` defaults to `false` and is forwarded unchanged to the
-  durable store. Passing `true` asserts that the caller controls this state root
-  and has already established that the process tree which left the store's writer
-  marker is gone — the shipped command asserts it only while holding the
-  placement lock, whose acquisition probes the recorded owner's liveness and
-  refuses a live one. An embedder that cannot establish the same fact leaves it
-  absent and is refused by a marker it did not write, which is the pre-existing
-  behaviour and stays the default.
+  durable store. Passing `true` asks for a writer marker left behind by a dead
+  holder to be broken; the store establishes that holder's liveness itself and
+  refuses a live one whoever asked, so the option cannot evict another live
+  runtime on the same state root. Leaving it absent is refused by any marker,
+  live holder or not, which is the pre-existing behaviour and stays the default.
   """
   @spec start(keyword()) :: {:ok, Loopex.Runtime.t()} | {:error, term()}
   def start(options) when is_list(options) do
@@ -181,8 +179,8 @@ defmodule LoopexComposition do
     end
   end
 
-  # Concept: whether a stale writer marker may be broken is the caller's
-  # assertion to make, so it is forwarded rather than decided here.
+  # Concept: whether a stale writer marker may be broken is asked for here and
+  # decided by the store, so the option is forwarded rather than acted on.
   defp store_options(root, options),
     do: [
       path: Path.join(root, "store.log"),

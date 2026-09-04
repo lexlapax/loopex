@@ -784,14 +784,15 @@ defmodule LoopexCli do
       # Technical depth: the store's writer marker is physical exclusion and
       # survives its holder's death by design, because nothing portable can
       # compare-and-delete it. An `escript` halts the emulator, so the marker
-      # outlives every completed run, and a later `resume` or `cancel` used to be
-      # refused with `{:store_writer_active, path}` by a process that had already
-      # proved nobody was there. `own_placement/1` above is that proof: the
-      # placement lock is only granted after the recorded owner's process
-      # incarnation is probed and found absent, and a live owner is refused
-      # instead. Asserting the recovery here, after that succeeded and nowhere
-      # else, is the trusted-local operation `WriterLock` describes; the option
-      # stays absent for an embedder that has established nothing.
+      # outlives every completed run, and a later `resume` or `cancel` was
+      # refused by a marker whose holder had already gone. Asking for the
+      # recovery here is what gets past that, and it is only a request: the
+      # store reads the marker's recorded holder and refuses this command
+      # unchanged if that holder is still alive. `own_placement/1` above stays
+      # an additional precondition rather than the proof, because the placement
+      # lock is this command's own and an embedded runtime writing the same
+      # store never takes one -- so holding it says nothing at all about who is
+      # writing that store.
       runtime_starter.(
         [
           runtime_id: placement,
@@ -804,8 +805,25 @@ defmodule LoopexCli do
           recover_stale_writer: true
         ] ++ cleanup ++ context
       )
+      |> started()
     end
   end
+
+  @store_writer_refusal "another process is already writing this state root's store; " <>
+                          "stop it, or pass --state-root to work somewhere else"
+
+  # Concept: an operator whose state root is being written by something else is
+  # told so in words, and told what to do about it.
+  #
+  # Technical depth: this refusal now reaches a command that asked for recovery
+  # and was told the marker's holder is alive -- a second `loopex` the placement
+  # lock did not catch first, or an embedded runtime that takes no such lock at
+  # all. It arrived at `halt/1` as `{:store_writer_active, path}` and was
+  # inspected into the terminal, which is the one thing that function's own
+  # contract says never happens. Every other start-up refusal is left exactly as
+  # it was written.
+  defp started({:error, {:store_writer_active, _path}}), do: {:error, @store_writer_refusal}
+  defp started(result), do: result
 
   @cleanup_grace_refusal "--cleanup-grace-ms takes a positive whole number of milliseconds"
 

@@ -39,7 +39,8 @@ defmodule Loopex.Store.Local do
   marker at startup and gives it back on an orderly stop, so an embedder who
   stops a Store can open the same path again without recovering anything. A
   marker outliving an untrappable kill or a dead VM is broken only by the
-  `:recover_stale_writer` option, which its caller must have earned.
+  `:recover_stale_writer` option, and only where the marker's own recorded
+  holder is established to be gone.
 
   OTP status formatting removes the last transaction message, Store state,
   termination reason, and debug log before inspection or abnormal-termination
@@ -74,11 +75,11 @@ defmodule Loopex.Store.Local do
   `:path` is required. `:fault_probe` is optional runtime-local test evidence
   and is never encoded or exposed through the Store port.
 
-  `:recover_stale_writer` defaults to `false` and belongs to a trusted-local
-  caller that already controls the runtime root and has established that the
-  process tree which left the writer marker is gone. It is never a default and
-  never speculative: an opener that has not established that fact leaves it
-  absent and is refused by a marker it did not write.
+  `:recover_stale_writer` defaults to `false` and asks for a marker left by a
+  dead holder to be broken. It is a request rather than a decision: the marker
+  records its holder, and one whose holder is still alive refuses this opener
+  with `{:store_writer_active, path}` however the option was set. A caller that
+  never sets it is refused by any marker it did not write.
   """
   @type option ::
           {:path, Path.t()} | {:fault_probe, pid()} | {:recover_stale_writer, boolean()}
