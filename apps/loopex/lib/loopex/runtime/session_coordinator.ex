@@ -279,6 +279,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
        permit_requested: MapSet.new(),
        in_flight: %{},
        pending_cleanup: %{},
+       # Concept: the runs whose cleanup has asked the executor's own call for a
+       # receipt and is waiting out its reserve.
+       #
+       # Technical depth: each entry holds the worker the reserve is waiting on,
+       # the one monotonic instant the reserve ends at, the current slice timer,
+       # and the cleanup answers already known — the purpose, the model
+       # attempt's disposition, and the host cancellation's. A run is in here for
+       # exactly as long as its cleanup is unfinished, which is why it fences new
+       # cleanups and new work in the same places `pending_cleanup` does.
+       executor_reserves: %{},
        streams: %{},
        deadline_timers: %{},
        policy_timers: %{},
@@ -551,6 +561,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
         Process.demonitor(reference, [:flush])
         dispatch_result(%{state | in_flight: remaining}, :executor, run_id, result)
 
+      # The receipt this run's cleanup is holding its reserve open for. It is the
+      # operation's own terminal fact and is admitted, exactly as it was when the
+      # reserve was a `receive` inside the reduction.
+      {{:executor_reserve, run_id, _pid}, remaining} ->
+        Process.demonitor(reference, [:flush])
+        close_execute_result_reserve(%{state | in_flight: remaining}, run_id, result)
+
       {{:reconciliation, run_id, _pid}, remaining} ->
         Process.demonitor(reference, [:flush])
         settle_activation_reconciliation(%{state | in_flight: remaining}, run_id, result)
@@ -598,6 +615,31 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: the executor's reserve expired without a receipt.
+  #
+  # Technical depth: the same two branches the `receive ... after` had, reached
+  # from the loop instead of from inside it. The worker is stopped first and its
+  # result then drained, because `terminate_child/2` answers from the supervisor
+  # while the result is sent by the task: only the task's own `DOWN` proves no
+  # answer can still arrive, and a receipt that was already sent is still the
+  # operation's terminal fact.
+  def handle_info({:execute_result_reserve, run_id, until}, state) do
+    case Map.get(state.executor_reserves, run_id) do
+      nil ->
+        {:noreply, state}
+
+      %{reference: reference, pid: pid} ->
+        if System.monotonic_time(:millisecond) < until do
+          {:noreply, arm_execute_result_slice(state, run_id, until)}
+        else
+          _ = Task.Supervisor.terminate_child(state.workers, pid)
+          answer = take_worker_result(reference)
+          state = %{state | in_flight: Map.delete(state.in_flight, reference)}
+          close_execute_result_reserve(state, run_id, answer)
+        end
+    end
+  end
+
   def handle_info({:DOWN, reference, :process, _pid, reason}, state) do
     case Map.pop(state.in_flight, reference) do
       {nil, _remaining} ->
@@ -626,6 +668,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
         |> cancel_policy_timeout(reference)
         |> disarm_deadline(run_id)
         |> complete_policy_consultation(run_id, {:deny, :policy_unavailable})
+
+      # An executor worker that died inside the reserve produced no receipt, and
+      # `DOWN` proves none can still arrive. The operation is unproved, which is
+      # what the reserve's own `:none` branch always made of it.
+      {{:executor_reserve, run_id, _pid}, remaining} ->
+        close_execute_result_reserve(%{state | in_flight: remaining}, run_id, :none)
 
       # A receipt lookup that died answered nothing; the work stays pending for
       # the host rather than being settled on silence.
@@ -1250,7 +1298,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # `tool.started` and nothing after it, and the run's outcome was a second,
   # independent statement of the same unknown rather than a consequence of it.
   defp resume_aborting_run(state, run_id) do
-    if Map.has_key?(state.pending_cleanup, run_id) do
+    if cleaning_up?(state, run_id) do
       {:noreply, state}
     else
       case commit_owned_operation_unknown(state, run_id) do
@@ -2034,7 +2082,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       in_flight?(state, :model, work.run_id) ->
         {:noreply, state}
 
-      Map.has_key?(state.pending_cleanup, work.run_id) ->
+      cleaning_up?(state, work.run_id) ->
         {:noreply, state}
 
       not MapSet.member?(state.adopted, work.run_id) ->
@@ -2908,7 +2956,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # committed until it answers.
   defp begin_cleanup(state, run_id, purpose) do
     cond do
-      Map.has_key?(state.pending_cleanup, run_id) ->
+      cleaning_up?(state, run_id) ->
         {:ok, state}
 
       match?(%{stage: "model_attempt_open"}, Map.get(state.durable.pending_work, run_id)) ->
@@ -3036,8 +3084,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
+  # Concept: a run whose cleanup has started is being cleaned up until it has an
+  # ending, whichever half of the cleanup it is currently in.
+  #
+  # Technical depth: the cleanup used to be one reduction, so `pending_cleanup`
+  # alone answered this. It is now two, and between them the entry has been
+  # popped while the run is still unsettled — so a second interrupt, a deadline,
+  # or a scheduling pass reading only that map would start a second cleanup or
+  # dispatch new work against a run that is stopping. Both maps are read, and a
+  # run leaves the second only when its terminal is committed.
+  defp cleaning_up?(state, run_id),
+    do:
+      Map.has_key?(state.pending_cleanup, run_id) or
+        Map.has_key?(state.executor_reserves, run_id)
+
   defp begin_effect_cleanup(state, run_id, purpose) do
-    if Map.has_key?(state.pending_cleanup, run_id) do
+    if cleaning_up?(state, run_id) do
       state
     else
       state = disarm_deadline(state, run_id)
@@ -3115,16 +3177,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # this runtime published, and its fact committed -- which is what keeps a
         # validated terminal fact that landed before the abort from being thrown
         # away by the abort.
-        {state, effect} = settle_executor_work(state, run_id)
-        disposition = weakest(model, weakest(host, effect))
+        case settle_executor_work(state, run_id) do
+          {:settled, state, effect} ->
+            finish_settled_cleanup(state, run_id, purpose, weakest(model, weakest(host, effect)))
 
-        case settle_owned_operation(state, run_id, disposition) do
-          {:ok, settled} ->
-            finish_cleanup(settled, run_id, purpose, disposition)
-
-          {:error, reason} ->
-            {:stop, {:tool_result_failed, reason}, state}
+          {:reserved, state} ->
+            {:noreply, remember_reserve(state, run_id, purpose, model, host)}
         end
+    end
+  end
+
+  defp finish_settled_cleanup(state, run_id, purpose, disposition) do
+    case settle_owned_operation(state, run_id, disposition) do
+      {:ok, settled} ->
+        finish_cleanup(settled, run_id, purpose, disposition)
+
+      {:error, reason} ->
+        {:stop, {:tool_result_failed, reason}, state}
     end
   end
 
@@ -3277,62 +3346,103 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # operation fact below is the authoritative ending.
         case Map.get(state.durable.pending_work, run_id) do
           %{stage: "effect_dispatched"} ->
-            {close_current_tool_stream(state, run_id, :abandoned), :unconfirmed}
+            {:settled, close_current_tool_stream(state, run_id, :abandoned), :unconfirmed}
 
           _nothing_dispatched ->
-            {state, :cleaned}
+            {:settled, state, :cleaned}
         end
 
       {reference, pid} ->
-        state = %{state | in_flight: Map.delete(state.in_flight, reference)}
-
-        case await_execute_result(state, reference, pid) do
-          {:ok, receipt} when is_map(receipt) ->
-            case retain_executor_fact(state, run_id, receipt) do
-              {:ok, next} -> {next, :cleaned}
-              {:invalid, next, _reason} -> {next, :unconfirmed}
-              {:error, next, _reason} -> {next, :unconfirmed}
-              {:superseded, next} -> {next, :unconfirmed}
-            end
-
-          _unproved ->
-            {close_current_tool_stream(state, run_id, :abandoned), :unconfirmed}
-        end
+        {:reserved, open_execute_result_reserve(state, run_id, reference, pid)}
     end
   end
 
   # Concept: the cancellation answer and the original call's own answer are two
-  # different boundaries, and the second gets a reserve of its own.
+  # different boundaries, and the second gets a reserve of its own -- spent by
+  # the loop rather than inside one reduction of it.
   #
   # Technical depth: ADR 0016 gives the in-flight `execute/5` caller
   # `execute_result_reserve_ms` after the cancellation answer, derived from the
-  # committed cleanup period. A receipt released inside that reserve is the
+  # committed cleanup period. This used to be a `receive ... after` inside
+  # `complete_cleanup/3`, which spent that reserve with the coordinator's own
+  # mailbox stopped: `session_status/2` bounds itself at five seconds while a
+  # twenty-second grace derives a seven-second reserve, so an ordinary read was
+  # refused by a wait that had nothing to do with it, and a second interrupt or a
+  # reconciliation waited out the whole reserve. The wait is now state: the
+  # worker stays in `in_flight` under its own tag, a sliced timer is armed
+  # against one instant, and the run settles on whichever arrives first. The
+  # outcome rules are unchanged. A receipt released inside the reserve is the
   # operation's own terminal fact and is admitted, so a job that stopped cleanly
   # ends `cancelled` rather than being discarded because this coordinator stopped
-  # listening first. Expiry proves only that the reserve elapsed: the worker is
+  # listening. Expiry proves only that the reserve elapsed: the worker is
   # terminated and the operation is unproved, which is `outcome_unknown` carrying
   # a reconciliation reference, never a clean verdict. Nothing that arrives after
   # that changes state, because the worker that would have produced it is gone.
-  defp await_execute_result(state, reference, pid) do
-    reserve = execute_result_reserve_ms(state)
+  defp open_execute_result_reserve(state, run_id, reference, pid) do
+    until = System.monotonic_time(:millisecond) + execute_result_reserve_ms(state)
 
-    receive do
-      {^reference, {:ok, value}} ->
-        Process.demonitor(reference, [:flush])
-        {:ok, value}
+    state
+    |> Map.update!(:in_flight, &Map.put(&1, reference, {:executor_reserve, run_id, pid}))
+    |> Map.update!(
+      :executor_reserves,
+      &Map.put(&1, run_id, %{reference: reference, pid: pid, until: until, timer: nil})
+    )
+    |> arm_execute_result_slice(run_id, until)
+  end
 
-      {^reference, other} ->
-        Process.demonitor(reference, [:flush])
-        {:answered, other}
+  defp arm_execute_result_slice(state, run_id, until) do
+    timer =
+      arm_slice(
+        {:execute_result_reserve, run_id, until},
+        until - System.monotonic_time(:millisecond)
+      )
 
-      {:DOWN, ^reference, :process, _pid, _reason} ->
-        :none
-    after
-      reserve ->
-        _ = Task.Supervisor.terminate_child(state.workers, pid)
-        take_worker_result(reference)
+    Map.update!(state, :executor_reserves, &put_in(&1, [run_id, :timer], timer))
+  end
+
+  # The cleanup's own answer is held beside the reserve, because the disposition
+  # this run commits is the weakest of all three and the other two are already
+  # known when the wait opens.
+  defp remember_reserve(state, run_id, purpose, model, host) do
+    Map.update!(
+      state,
+      :executor_reserves,
+      &Map.update!(&1, run_id, fn reserve ->
+        Map.merge(reserve, %{purpose: purpose, model: model, host: host})
+      end)
+    )
+  end
+
+  # Concept: whichever of the two arrives first ends the wait, and both end it
+  # the same way it always ended.
+  defp close_execute_result_reserve(state, run_id, answer) do
+    {reserve, remaining} = Map.pop(state.executor_reserves, run_id)
+    state = %{state | executor_reserves: remaining}
+
+    case reserve do
+      %{timer: timer, purpose: purpose, model: model, host: host} ->
+        _ = Process.cancel_timer(timer)
+        {state, effect} = retain_execute_result(state, run_id, answer)
+        finish_settled_cleanup(state, run_id, purpose, weakest(model, weakest(host, effect)))
+
+      # No cleanup is waiting on this reserve, so there is no disposition to
+      # settle and nothing here may commit one.
+      _absent ->
+        {:noreply, state}
     end
   end
+
+  defp retain_execute_result(state, run_id, {:ok, receipt}) when is_map(receipt) do
+    case retain_executor_fact(state, run_id, receipt) do
+      {:ok, next} -> {next, :cleaned}
+      {:invalid, next, _reason} -> {next, :unconfirmed}
+      {:error, next, _reason} -> {next, :unconfirmed}
+      {:superseded, next} -> {next, :unconfirmed}
+    end
+  end
+
+  defp retain_execute_result(state, run_id, _unproved),
+    do: {close_current_tool_stream(state, run_id, :abandoned), :unconfirmed}
 
   defp execute_result_reserve_ms(state) do
     case Executor.cancellation_bounds(state.durable.cleanup_grace_ms) do
