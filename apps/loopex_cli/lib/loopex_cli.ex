@@ -830,7 +830,39 @@ defmodule LoopexCli do
   # contract says never happens. Every other start-up refusal is left exactly as
   # it was written.
   defp started({:error, {:store_writer_active, _path}}), do: {:error, @store_writer_refusal}
+
+  # Concept: a marker the store could not verify is not a live writer, and the
+  # operator is told the difference and the remedy.
+  #
+  # Technical depth: unreadable bytes, a record from an earlier version, and a
+  # process probe that failed or timed out all used to surface as "another
+  # process is already writing", an assertion the code had not established.
+  # The remedy for an unverifiable marker is a human decision — remove the file
+  # once its writer is known gone — so the sentence names the file and the
+  # reason and nothing else.
+  defp started({:error, {:store_writer_unverifiable, path, reason}}) do
+    {:error,
+     "this state root's store marker could not be verified (#{probe_reason(reason)}); " <>
+       "if the process that wrote #{path} is known to be gone, remove that file and try again"}
+  end
+
+  defp started({:error, {:store_writer_identity_unavailable, reason}}) do
+    {:error,
+     "this command could not record its own process identity (#{probe_reason(reason)}), " <>
+       "and a store it could not later recover is refused; check that /bin/ps runs here"}
+  end
+
   defp started(result), do: result
+
+  defp probe_reason(:undecodable_marker), do: "the marker is not a record this version reads"
+  defp probe_reason({:unreadable_marker, posix}), do: "the marker could not be read: #{posix}"
+  defp probe_reason(:process_probe_timeout), do: "the process probe did not answer in time"
+  defp probe_reason(:empty_process_identity), do: "the process probe reported no identity"
+
+  defp probe_reason({:process_probe_failed, {:exit_status, status}}),
+    do: "the process probe exited with status #{status}"
+
+  defp probe_reason(_other), do: "the process probe failed"
 
   @cleanup_grace_refusal "--cleanup-grace-ms takes a positive whole number of milliseconds"
 

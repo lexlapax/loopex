@@ -82,7 +82,10 @@ defmodule Loopex.Store.Local do
   never sets it is refused by any marker it did not write.
   """
   @type option ::
-          {:path, Path.t()} | {:fault_probe, pid()} | {:recover_stale_writer, boolean()}
+          {:path, Path.t()}
+          | {:fault_probe, pid()}
+          | {:recover_stale_writer, boolean()}
+          | {:process_probe, Path.t()}
 
   @doc """
   ## Concept
@@ -149,7 +152,11 @@ defmodule Loopex.Store.Local do
     with {:ok, path} <- fetch_path(options),
          {:ok, log_identity} <- Log.prepare_path(path),
          {:ok, writer_lock} <-
-           WriterLock.acquire(path, Keyword.get(options, :recover_stale_writer, false)) do
+           WriterLock.acquire(
+             path,
+             Keyword.get(options, :recover_stale_writer, false),
+             Keyword.get(options, :process_probe, "/bin/ps")
+           ) do
       recover(options, path, log_identity, writer_lock)
     else
       {:error, reason} -> {:stop, reason}
@@ -305,7 +312,7 @@ defmodule Loopex.Store.Local do
   end
 
   defp fetch_path(options) do
-    allowed = [:fault_probe, :path, :recover_stale_writer]
+    allowed = [:fault_probe, :path, :process_probe, :recover_stale_writer]
 
     cond do
       not Keyword.keyword?(options) ->

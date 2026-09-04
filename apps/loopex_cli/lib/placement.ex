@@ -514,9 +514,11 @@ defmodule LoopexCli.Placement do
     end
   end
 
-  defp process_incarnation(pid) when is_binary(pid) do
+  @doc false
+  @spec process_incarnation(binary(), Path.t()) :: {:ok, binary()} | {:error, term()}
+  def process_incarnation(pid, probe \\ "/bin/ps") when is_binary(pid) and is_binary(probe) do
     try do
-      case System.cmd("/bin/ps", ["-o", "lstart=", "-p", pid],
+      case System.cmd(probe, ["-o", "lstart=", "-p", pid],
              stderr_to_stdout: true,
              env: [{"LC_ALL", "C"}]
            ) do
@@ -526,8 +528,16 @@ defmodule LoopexCli.Placement do
             incarnation -> {:ok, incarnation}
           end
 
-        {_output, _status} ->
+        # Technical depth: `ps -p` exits 1 with no output when no process
+        # matches; every other answer is a diagnostic about the helper, not a
+        # fact about the owner, and a lock reclaimed on it would let two
+        # commands run one root. It is reported as a failed probe, which the
+        # owner-status readers treat as a live owner they cannot examine.
+        {output, 1} when output == "" or output == "\n" ->
           {:error, :process_absent}
+
+        {_output, status} ->
+          {:error, {:process_probe_failed, {:exit_status, status}}}
       end
     rescue
       ErlangError -> {:error, :process_probe_failed}

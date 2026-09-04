@@ -44,7 +44,7 @@ defmodule LoopexComposition.StaleWriterRecoveryTest do
 
     # The v1 marker names no holder, so nothing can establish that holder is
     # gone and the request is refused rather than granted.
-    assert {:error, {:store_writer_active, ^marker}} =
+    assert {:error, {:store_writer_unverifiable, ^marker, :undecodable_marker}} =
              LoopexComposition.start(options ++ [recover_stale_writer: true])
 
     assert File.read!(marker) == bytes

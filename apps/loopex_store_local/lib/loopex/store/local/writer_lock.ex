@@ -61,27 +61,37 @@ defmodule Loopex.Store.Local.WriterLock do
   The probe is `/bin/ps` asked for a process's start identity, the same
   portable mechanism the local executor uses to ask whether an operating-system
   process is still there. Where it cannot answer while a marker is being
-  written, the marker records no start identity and is therefore never
-  recovered automatically — the safe direction for a record whose holder can no
-  longer be checked.
+  written, the open is refused (`store_writer_identity_unavailable`): a marker
+  that recorded no identity could never be recovered automatically, and a store
+  that cannot be recovered after its holder dies is worse than one that refuses
+  to start until the probe works. The probe is bounded, so a helper that hangs
+  cannot hang the open. A recovery request against a marker the store cannot
+  verify — unreadable bytes, an undecodable or earlier-version record, a probe
+  that failed or timed out — is refused as `store_writer_unverifiable`, which
+  names the marker's path and the reason, and is different from
+  `store_writer_active`, which is only ever said of a holder the probe found
+  alive.
   """
 
   alias Loopex.Store.Local.Log
 
   @version "loopex_store_writer_v2"
   @probe "/bin/ps"
+  # A helper that has not answered inside this bound is treated as unable to
+  # answer; the open must not wait on it, and the answer is never absence.
+  @probe_bound_ms 5_000
 
   @typedoc false
   @type t :: %{path: Path.t(), marker: binary()}
 
   @doc false
   @spec acquire(Path.t(), boolean()) :: {:ok, t()} | {:error, term()}
-  def acquire(store_path, recover_stale_writer)
-      when is_binary(store_path) and is_boolean(recover_stale_writer) do
+  def acquire(store_path, recover_stale_writer, probe \\ @probe)
+      when is_binary(store_path) and is_boolean(recover_stale_writer) and is_binary(probe) do
     path = store_path <> ".writer"
 
-    with :ok <- maybe_recover(path, recover_stale_writer),
-         {:ok, marker} <- create_marker(path) do
+    with :ok <- maybe_recover(path, recover_stale_writer, probe),
+         {:ok, marker} <- create_marker(path, probe) do
       {:ok, %{path: path, marker: marker}}
     end
   end
@@ -100,16 +110,17 @@ defmodule Loopex.Store.Local.WriterLock do
     end
   end
 
-  defp maybe_recover(_path, false), do: :ok
+  defp maybe_recover(_path, false, _probe), do: :ok
 
   # A holder that is still there, or one this version cannot establish is gone,
   # keeps its marker. `create_marker/1` then refuses this opener with the same
   # sentence an ordinary second opener already gets, so an assertion that turned
   # out not to hold costs nothing beyond the refusal it should have had.
-  defp maybe_recover(path, true) do
-    case holder(path) do
+  defp maybe_recover(path, true, probe) do
+    case holder(path, probe) do
       :gone -> remove_marker(path)
       :held -> :ok
+      {:unverifiable, reason} -> {:error, {:store_writer_unverifiable, path, reason}}
     end
   end
 
@@ -121,27 +132,27 @@ defmodule Loopex.Store.Local.WriterLock do
     end
   end
 
-  defp holder(path) do
+  defp holder(path, probe) do
     case File.read(path) do
-      {:ok, bytes} -> holder_status(bytes)
+      {:ok, bytes} -> holder_status(bytes, probe)
       {:error, :enoent} -> :gone
-      {:error, _unreadable} -> :held
+      {:error, reason} -> {:unverifiable, {:unreadable_marker, reason}}
     end
   end
 
-  defp holder_status(bytes) do
+  defp holder_status(bytes, probe) do
     case decode(bytes) do
-      {:ok, holder} -> liveness(holder)
-      :error -> :held
+      {:ok, holder} -> liveness(holder, probe)
+      :error -> {:unverifiable, :undecodable_marker}
     end
   end
 
-  defp liveness(%{os_pid: os_pid, incarnation: incarnation, process: process}) do
-    case process_incarnation(os_pid) do
+  defp liveness(%{os_pid: os_pid, incarnation: incarnation, process: process}, probe) do
+    case process_incarnation(os_pid, probe) do
       {:ok, ^incarnation} -> same_process_liveness(os_pid, process)
       {:ok, _reused_identifier} -> :gone
       {:error, :process_absent} -> :gone
-      {:error, _unavailable} -> :held
+      {:error, unavailable} -> {:unverifiable, unavailable}
     end
   end
 
@@ -175,9 +186,14 @@ defmodule Loopex.Store.Local.WriterLock do
     end
   end
 
-  defp create_marker(path) do
-    marker = marker_bytes()
+  defp create_marker(path, probe) do
+    case marker_bytes(probe) do
+      {:ok, marker} -> write_marker(path, marker)
+      {:error, reason} -> {:error, {:store_writer_identity_unavailable, reason}}
+    end
+  end
 
+  defp write_marker(path, marker) do
     case :file.open(String.to_charlist(path), [:raw, :write, :binary, :exclusive]) do
       {:ok, io} ->
         result =
@@ -213,23 +229,22 @@ defmodule Loopex.Store.Local.WriterLock do
     end
   end
 
-  defp marker_bytes do
-    encoded =
-      case process_incarnation(System.pid()) do
-        {:ok, incarnation} -> Base.url_encode64(incarnation, padding: false)
-        {:error, _unavailable} -> ""
-      end
+  defp marker_bytes(probe) do
+    with {:ok, incarnation} <- process_incarnation(System.pid(), probe) do
+      encoded = Base.url_encode64(incarnation, padding: false)
 
-    Enum.join(
-      [
-        @version,
-        System.pid(),
-        encoded,
-        List.to_string(:erlang.pid_to_list(self())),
-        Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)
-      ],
-      "\n"
-    ) <> "\n"
+      {:ok,
+       Enum.join(
+         [
+           @version,
+           System.pid(),
+           encoded,
+           List.to_string(:erlang.pid_to_list(self())),
+           Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)
+         ],
+         "\n"
+       ) <> "\n"}
+    end
   end
 
   # Concept: ask the operating system whether a process is still there, and
@@ -250,23 +265,28 @@ defmodule Loopex.Store.Local.WriterLock do
   # `{:EXIT, port, :normal}` message nothing asked for, which its `handle_info/2`
   # then reports as an unexpected message on every single open. A process that
   # does not trap discards that signal by existing.
-  defp process_incarnation(os_pid) do
+  defp process_incarnation(os_pid, probe) do
     parent = self()
     reference = make_ref()
-    {probe, monitor} = spawn_monitor(fn -> send(parent, {reference, ask(os_pid)}) end)
+    {asker, monitor} = spawn_monitor(fn -> send(parent, {reference, ask(os_pid, probe)}) end)
 
     receive do
       {^reference, answer} ->
         Process.demonitor(monitor, [:flush])
         answer
 
-      {:DOWN, ^monitor, :process, ^probe, reason} ->
+      {:DOWN, ^monitor, :process, ^asker, reason} ->
         {:error, {:process_probe_failed, reason}}
+    after
+      @probe_bound_ms ->
+        Process.demonitor(monitor, [:flush])
+        Process.exit(asker, :kill)
+        {:error, :process_probe_timeout}
     end
   end
 
-  defp ask(os_pid) do
-    case System.cmd(@probe, ["-o", "lstart=", "-p", os_pid],
+  defp ask(os_pid, probe) do
+    case System.cmd(probe, ["-o", "lstart=", "-p", os_pid],
            stderr_to_stdout: true,
            env: [{"LC_ALL", "C"}]
          ) do
@@ -276,8 +296,21 @@ defmodule Loopex.Store.Local.WriterLock do
           incarnation -> {:ok, incarnation}
         end
 
-      {_output, _status} ->
+      # Concept: only the answer that says "no such process" is absence; a
+      # helper that could not inspect has said nothing about the holder.
+      #
+      # Technical depth: `ps -p` exits 1 with no output when no process
+      # matches. Any other status, or a status 1 that still printed something,
+      # is a diagnostic — a helper that cannot see the process table, a
+      # permission refusal, a malformed argument — and used to be read as
+      # absence, so a second opener deleted a live holder's marker and two
+      # writers shared one log. That reading contradicted the fail-closed rule
+      # this module states for itself; the marker now stays held.
+      {output, 1} when output == "" or output == "\n" ->
         {:error, :process_absent}
+
+      {_output, status} ->
+        {:error, {:process_probe_failed, {:exit_status, status}}}
     end
   rescue
     ErlangError -> {:error, :process_probe_failed}

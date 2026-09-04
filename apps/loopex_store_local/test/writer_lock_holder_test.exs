@@ -97,7 +97,7 @@ defmodule Loopex.Store.Local.WriterLockHolderTest do
 
     assert {:error, {:store_writer_active, ^marker}} = Local.start_link(path: path)
 
-    assert {:error, {:store_writer_active, ^marker}} =
+    assert {:error, {:store_writer_unverifiable, ^marker, :undecodable_marker}} =
              Local.start_link(path: path, recover_stale_writer: true)
 
     assert File.read!(marker) == bytes, "a marker with no identity was recovered anyway"
@@ -120,6 +120,103 @@ defmodule Loopex.Store.Local.WriterLockHolderTest do
 
     assert {:ok, successor} = Local.start_link(path: path, recover_stale_writer: true)
     stop(successor)
+  end
+
+  # Concept: a helper that could not inspect the holder has said nothing, and
+  # nothing is not absence.
+  #
+  # Technical depth: `ps -p` exits 1 with no output for a process that does not
+  # exist; every other answer is a diagnostic about the helper. Both locks used
+  # to read any nonzero status as absence, so a helper that failed to inspect a
+  # live holder let a second opener delete its marker and share its log. Each
+  # stand-in below is a real program the store runs; only the exact "no such
+  # process" answer recovers.
+  test "a probe that cannot inspect the holder keeps the marker held" do
+    path = store_path()
+    {port, os_pid} = hold_store(path)
+
+    refused = probe_script(answering_own_pid_then("exit 2"))
+    diagnostic = probe_script(answering_own_pid_then("echo 'ps: cannot see it' >&2; exit 1"))
+    absent = probe_script(answering_own_pid_then("exit 1"))
+
+    for probe <- [refused, diagnostic] do
+      assert {:error, {:store_writer_unverifiable, _marker, {:process_probe_failed, _}}} =
+               start_recovering(path, probe),
+             "a probe answering #{File.read!(probe) |> String.trim()} recovered a live holder"
+    end
+
+    # The store also refuses to open under a probe that cannot record its own
+    # identity, because such a marker could never be recovered afterwards.
+    assert {:error, {:store_writer_identity_unavailable, _}} =
+             Loopex.Store.Local.start_link(
+               path: store_path(),
+               process_probe: probe_script("exit 2")
+             )
+
+    assert :answered = ping(port)
+    kill(port, os_pid)
+    assert {:ok, recovered} = start_recovering(path, absent)
+    stop(recovered)
+  end
+
+  # Concept: a probe that never answers does not hang the open, and its silence
+  # is not absence.
+  #
+  # Technical depth: the stand-in answers `/bin/ps` for this VM's own pid, so
+  # the marker can be written, and sleeps for any other pid, which is what a
+  # wedged process table looks like to the store.
+  test "a probe that never answers is bounded and leaves the marker held" do
+    path = store_path()
+    marker = path <> ".writer"
+
+    File.write!(
+      marker,
+      Enum.join(
+        [
+          "loopex_store_writer_v2",
+          "1",
+          Base.url_encode64("long ago"),
+          "<0.1.0>",
+          String.duplicate("a", 64)
+        ],
+        "\n"
+      ) <> "\n"
+    )
+
+    hanging =
+      probe_script("case \"$4\" in #{System.pid()}) exec /bin/ps \"$@\" ;; *) sleep 30 ;; esac")
+
+    started = System.monotonic_time(:millisecond)
+
+    assert {:error, {:store_writer_unverifiable, ^marker, :process_probe_timeout}} =
+             start_recovering(path, hanging)
+
+    assert System.monotonic_time(:millisecond) - started < 15_000
+    assert File.exists?(marker)
+  end
+
+  defp start_recovering(path, probe) do
+    case Loopex.Store.Local.start_link(
+           path: path,
+           recover_stale_writer: true,
+           process_probe: probe
+         ) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # The stand-in answers `/bin/ps` for this VM's own pid, so a marker can be
+  # written, and behaves as told for every other pid.
+  defp answering_own_pid_then(body),
+    do: "case \"$4\" in #{System.pid()}) exec /bin/ps \"$@\" ;; *) #{body} ;; esac"
+
+  defp probe_script(body) do
+    file = Path.join(System.tmp_dir!(), "loopex-probe-#{System.unique_integer([:positive])}.sh")
+    File.write!(file, "#!/bin/sh\n#{body}\n")
+    File.chmod!(file, 0o755)
+    on_exit(fn -> File.rm(file) end)
+    file
   end
 
   defp stop(pid) do

@@ -326,7 +326,7 @@ defmodule Loopex.TimerDomainTest do
         }
       )
 
-    {session_id, attachment} = attached(fixture)
+    {_session_id, attachment} = attached(fixture)
     coordinator = coordinator_of(fixture.runtime)
 
     assert {:accepted, "p1"} =
@@ -388,7 +388,7 @@ defmodule Loopex.TimerDomainTest do
   # The reserve is far longer than the case, so the ending is the one the
   # executor's own answer produces.
   test "the maximum admitted cleanup period cancels a tool call without a timer_value crash" do
-    {fixture, session_id, attachment} =
+    {fixture, _session_id, attachment} =
       dispatched_tool(
         script: [%{text: "run it", calls: [call("c1")]}],
         cleanup_grace_ms: @uint64_max
@@ -422,7 +422,7 @@ defmodule Loopex.TimerDomainTest do
         cleanup_grace_ms: @uint64_max
       )
 
-    {session_id, attachment} = attached(fixture)
+    {_session_id, attachment} = attached(fixture)
     coordinator = coordinator_of(fixture.runtime)
 
     assert {:accepted, "p1"} =
