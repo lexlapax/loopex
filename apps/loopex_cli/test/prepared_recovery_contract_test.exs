@@ -162,6 +162,18 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert_receive {:DOWN, ^monitor, :process, ^preparer, :normal}, 1_000
     assert {:ok, {:prepared, activation}} = preparation
     assert_refused(invoke(Loopex, :activate_resume, [activation]))
+
+    # Nor can the handoff rescue it. Installation asks for the transfer from the
+    # process that installs, and that process is not the holder either, so the
+    # owner refuses to move the capability and the handler is left holding one it
+    # will never be answered for. This is the half of ADR 0016 that death before
+    # the acknowledgement decides, and it is unchanged by the acknowledgement
+    # existing.
+    assert :ok = invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
+
+    assert assert_refused(invoke(Interrupt, :activate_prepared, [activation])) ==
+             :resume_activation_holder_mismatch
+
     Process.sleep(100)
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
   end
@@ -195,7 +207,14 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert_receive {:prepared_interrupt_installed, installation}, 5_000
     assert_receive {:DOWN, ^monitor, :process, ^preparer, :normal}, 1_000
     assert {:ok, activation} = installation
-    assert_refused(invoke(Loopex, :activate_resume, [activation]))
+
+    # The capability moved. This process never held it, and the owner names that
+    # rather than spending it -- which is also what proves the handoff happened
+    # at all, because before it the preparer held it and this refusal would have
+    # been the same either way.
+    assert assert_refused(invoke(Loopex, :activate_resume, [activation])) ==
+             :resume_activation_holder_mismatch
+
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
 
     :gen_event.notify(:erl_signal_server, :sigterm)
@@ -214,6 +233,15 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert await_interrupt_admission(fixture),
            "the signal's abort did not reach its durable admission"
 
+    # Preparer death did not take the capability with it: the handler is still
+    # the holder, and what refuses this presentation is the abort rather than a
+    # missing one. `:resume_activation_holder_mismatch` here would mean the
+    # capability died with the process that prepared it, which is the divergence
+    # from ADR 0016 this case exists to refute; `:prepared_activation_not_
+    # installed` would mean it never crossed the boundary at all.
+    assert assert_refused(invoke(Interrupt, :activate_prepared, [activation])) ==
+             :resume_activation_fenced
+
     # The abort's terminal lands only after the cleanup observation the committed
     # grace derives (ADR 0016); a literal ten seconds sat under that backstop
     # and read a slow but legitimate cleanup as a missing terminal under load.
@@ -221,7 +249,166 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     terminal_bound_ms = bounds.cli_backstop_ms + 2_000
     assert run_terminal(fixture, terminal_bound_ms)["outcome"] in ["cancelled", "outcome_unknown"]
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    assert_refused(invoke(Interrupt, :activate_prepared, [activation]))
     assert_refused(invoke(Loopex, :activate_resume, [activation]))
+  end
+
+  # Concept: the other half of the same handoff -- the capability the preparer's
+  # death did not invalidate is genuinely spendable, not merely un-refusable for
+  # a different reason.
+  #
+  # Technical depth: the case above proves an abort wins when one has begun. This
+  # one proves the capability survived at all, which a refusal alone can never
+  # show: no signal is delivered, the preparer is gone, and the handler starts
+  # the recovered work on the command's behalf. Under the implementation ADR 0016
+  # diverged from, the capability stayed with the preparer and this activation
+  # was impossible.
+  test "a transferred capability activates through the handler after the preparer dies" do
+    fixture =
+      recovered_fixture("transfer-activates", :admitted,
+        script: [%{text: "recovered by the handler", calls: []}]
+      )
+
+    parent = self()
+    assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+
+    {preparer, monitor} =
+      spawn_monitor(fn ->
+        result =
+          with {:ok, {:prepared, activation}} <-
+                 invoke(Loopex, :prepare_resume_known_session, [
+                   fixture.state_root,
+                   fixture.runtime,
+                   fixture.session_id,
+                   "prepare-transfer-activates"
+                 ]),
+               :ok <-
+                 invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation]) do
+            {:ok, activation}
+          end
+
+        send(parent, {:prepared_transfer_installed, result})
+      end)
+
+    assert_receive {:prepared_transfer_installed, installation}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, ^preparer, :normal}, 1_000
+    assert {:ok, activation} = installation
+
+    assert assert_refused(invoke(Loopex, :activate_resume, [activation])) ==
+             :resume_activation_holder_mismatch
+
+    assert {:ok, session_id} = invoke(Interrupt, :activate_prepared, [activation])
+    assert session_id == fixture.session_id
+    assert await_dispatch_count(fixture.model, 1)
+    assert run_terminal(fixture, 10_000)["outcome"] == "completed"
+
+    # Exactly once: the owner records the capability as spent, and it stays spent
+    # by every route.
+    assert_refused(invoke(Interrupt, :activate_prepared, [activation]))
+
+    assert assert_refused(invoke(Loopex, :activate_resume, [activation])) ==
+             :resume_activation_spent
+
+    Process.sleep(200)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  # Concept: only the holder may say who holds the capability next.
+  #
+  # Technical depth: the handoff is an authority move, so a process that never
+  # held the capability must not be able to name a new holder -- otherwise any
+  # process reaching the struct could route activation to itself. The refusal is
+  # by name, and the capability is untouched afterwards: the true holder still
+  # spends it, which is what separates a refused transfer from one that half
+  # happened.
+  test "a holder transfer asked for by a process that is not the holder is refused" do
+    fixture = recovered_fixture("transfer-non-holder", :active)
+    parent = self()
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-non-holder-transfer"
+             ])
+
+    {stranger, monitor} =
+      spawn_monitor(fn ->
+        send(
+          parent,
+          {:stranger_transfer, invoke(Loopex, :transfer_resume, [activation, self()])}
+        )
+      end)
+
+    assert_receive {:stranger_transfer, refusal}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, ^stranger, :normal}, 1_000
+    assert assert_refused(refusal) == :resume_activation_holder_mismatch
+
+    # Nothing moved: this process is still the holder and can still spend it.
+    assert {:ok, session_id} = invoke(Loopex, :activate_resume, [activation])
+    assert session_id == fixture.session_id
+  end
+
+  # Concept: a signal and this command's own activation can arrive at the same
+  # instant, and exactly one of them decides what the session did.
+  #
+  # Technical depth: both now travel through the process that holds the
+  # capability, so they cannot interleave there; whichever reaches the owner
+  # first settles the capability, and the other is answered by what the first
+  # did. The assertion is that invariant rather than a fixed winner, because the
+  # race is genuine. What makes it decisive is that the answer the caller was
+  # given and the state the owner actually reached are checked against each
+  # other: a caller told `:ok` must find the capability spent, and one told it
+  # was fenced must find it fenced and find that nothing ran. An implementation
+  # that answered one thing and did the other -- the failure a one-use capability
+  # may never produce -- fails here whichever way the race went.
+  test "an interrupt and a handler activation race to exactly one winner" do
+    fixture = recovered_fixture("transfer-race", :active)
+    before = length(Loopex.AgentLoopTestModel.dispatched(fixture.model))
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-race"
+             ])
+
+    assert :ok = invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
+
+    _racer = spawn(fn -> :gen_event.notify(:erl_signal_server, :sigterm) end)
+    result = invoke(Interrupt, :activate_prepared, [activation])
+
+    assert await_interrupt_admission(fixture),
+           "the signal's abort did not reach its durable admission"
+
+    # What the owner records now, asked of it directly, is the fact the caller's
+    # answer has to agree with.
+    settled = assert_refused(invoke(Loopex, :activate_resume, [activation]))
+
+    case result do
+      {:ok, session_id} ->
+        assert session_id == fixture.session_id
+        assert settled == :resume_activation_spent
+
+      other ->
+        assert assert_refused(other) == :resume_activation_fenced
+        assert settled == :resume_activation_fenced
+    end
+
+    # The run reaches a truthful ending either way. A recovered attempt that was
+    # already open settles as owner loss under ADR 0018 rather than making a
+    # second model call, so `failed` is this fixture's ending where the
+    # activation won and the abort's own ending where it did not.
+    {:ok, bounds} = Loopex.Executor.cancellation_bounds(@grace)
+    terminal = run_terminal(fixture, bounds.cli_backstop_ms + 2_000)
+    assert terminal["outcome"] in ["cancelled", "outcome_unknown", "failed"]
+
+    # Whichever won, the capability is settled and the work started at most once.
+    assert_refused(invoke(Interrupt, :activate_prepared, [activation]))
+    Process.sleep(200)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) <= before + 1
   end
 
   test "the prepared interrupt owner can abandon its capability without activating work" do
@@ -238,8 +425,15 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert :ok =
              invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, abandoned])
 
-    assert :ok = invoke(Interrupt, :abandon_resume, [fixture.attachment, abandoned])
-    assert_refused(invoke(Loopex, :activate_resume, [abandoned]))
+    assert :ok = invoke(Interrupt, :abandon_prepared, [abandoned])
+
+    # The owner gave it up, rather than the handler merely forgetting it: a
+    # holder mismatch here would mean the abandonment never reached the owner and
+    # the recovered work was still activatable by whoever did hold it.
+    assert assert_refused(invoke(Loopex, :activate_resume, [abandoned])) ==
+             :resume_activation_abandoned
+
+    assert_refused(invoke(Interrupt, :activate_prepared, [abandoned]))
     Process.sleep(100)
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
   end
@@ -271,7 +465,12 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     Process.sleep(100)
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
-    assert_refused(invoke(Loopex, :activate_resume, [activation]))
+
+    # Presented by the holder, so the refusal names the fence rather than the
+    # holder. A commit-unknown admission is exactly the case where the abort's
+    # own outcome is unproved, and the capability is invalidated anyway.
+    assert assert_refused(invoke(Interrupt, :activate_prepared, [activation])) ==
+             :resume_activation_fenced
   end
 
   # Concept: nothing `loopex resume` restarts is ever running while no handler
@@ -284,11 +483,17 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   # still the one installed. A signal landing there ended the operating-system
   # process where it stood, with a run it had just restarted continuing to no
   # terminal and no abort submitted. This case stands in that interval: the
-  # command's own facade seam holds `activate_resume` at the instant the command
-  # reaches it, asserts whose handler is installed, and delivers the signal from
-  # there. The handler assertion comes before the signal deliberately -- with the
+  # command's own facade seam holds activation at the instant the command reaches
+  # it, asserts whose handler is installed, and delivers the signal from there.
+  # The handler assertion comes before the signal deliberately -- with the
   # ordering wrong the emulator's handler is still installed and delivering a
   # `sigterm` would stop this suite rather than fail this case.
+  #
+  # The seam it holds is `Interrupt.activate_prepared/1` rather than
+  # `Loopex.activate_resume/1`, and that is itself part of what this case proves:
+  # the handoff made the handler's own process the capability's holder, so the
+  # command asks the handler to start the work rather than presenting a
+  # capability it no longer holds.
   test "resume installs its interrupt handler before it spends the activation" do
     fixture = recovered_fixture("resume-signal-window", :active)
     before = length(Loopex.AgentLoopTestModel.dispatched(fixture.model))
@@ -296,7 +501,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     starter = fn _options -> {:ok, fixture.runtime} end
 
     observer = fn
-      Loopex, :activate_resume, [activation] ->
+      Interrupt, :activate_prepared, [activation] ->
         handlers = :gen_event.which_handlers(:erl_signal_server)
 
         assert Interrupt in handlers,
@@ -311,7 +516,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
         assert await_interrupt_admission(fixture),
                "the signal's abort did not reach its durable admission"
 
-        apply(Loopex, :activate_resume, [activation])
+        apply(Interrupt, :activate_prepared, [activation])
 
       module, function, arguments ->
         apply(module, function, arguments)
@@ -348,13 +553,16 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert_receive {:resume_result, result}, 5_000
 
     # The terminal says it did not continue the session, rather than streaming a
-    # run it no longer owns.
-    assert_refused(result)
+    # run it no longer owns, and it says so in the abort's own words rather than
+    # in words about who was holding what.
+    assert assert_refused(result) == :resume_activation_fenced
     refute output =~ "prepared recovery contract"
 
     # And the work the activation would have started never started.
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == before
-    assert_refused(invoke(Loopex, :activate_resume, [activation]))
+
+    assert assert_refused(invoke(Loopex, :activate_resume, [activation])) ==
+             :resume_activation_fenced
 
     {:ok, bounds} = Loopex.Executor.cancellation_bounds(@grace)
     finished = run_terminal(fixture, bounds.cli_backstop_ms + 2_000)
@@ -1118,6 +1326,21 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       await_dispatch(model, attempts - 1)
     else
       true
+    end
+  end
+
+  # A recovered run that continues dispatches in addition to the calls the
+  # session already made before recovery, so the count rather than emptiness is
+  # what says the activation started something.
+  defp await_dispatch_count(model, count, attempts \\ 1_000)
+  defp await_dispatch_count(_model, _count, 0), do: false
+
+  defp await_dispatch_count(model, count, attempts) do
+    if length(Loopex.AgentLoopTestModel.dispatched(model)) >= count do
+      true
+    else
+      Process.sleep(5)
+      await_dispatch_count(model, count, attempts - 1)
     end
   end
 
