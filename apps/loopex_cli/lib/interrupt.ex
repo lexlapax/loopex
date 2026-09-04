@@ -326,7 +326,14 @@ defmodule LoopexCli.Interrupt do
   defp joining?(_state), do: false
 
   defp submit_abort(%{attachment: attachment, terminal: terminal, grace_ms: grace_ms} = state) do
-    command_id = "interrupt-" <> Integer.to_string(System.unique_integer([:positive]))
+    # An interrupt identifier is the durable name of one abort, and
+    # `System.unique_integer/1` restarts with the virtual machine, so a second
+    # terminal reissued `interrupt-1` for a different abort against the same
+    # session. One hundred twenty-eight random bits name it across processes,
+    # as `unique_id/0` in `LoopexCli` does for every other command. It is drawn
+    # once per abort and then carried in state, which is what lets the reply
+    # this manager matches name the command it actually submitted.
+    command_id = "interrupt-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
     backstop = state.backstop || spawn(fn -> backstop(terminal, grace_ms) end)
     manager = self()
 

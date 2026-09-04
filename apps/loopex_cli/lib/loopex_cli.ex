@@ -885,7 +885,24 @@ defmodule LoopexCli do
   defp positional(_words, expected),
     do: {:error, "this command takes exactly one #{expected}"}
 
-  defp unique_id, do: "cli-" <> Integer.to_string(System.unique_integer([:positive]))
+  # Concept: two `loopex` processes running at different times against one state
+  # root must never present the journal with the same command identifier for
+  # different commands.
+  #
+  # Technical depth: `System.unique_integer/1` counts from the start of each
+  # virtual machine, so a fresh process reissued `cli-1`, and the Store -- which
+  # scopes a runtime command to the runtime identifier and the command
+  # identifier -- correctly refused the second one as
+  # `:runtime_command_conflict`. A completed session could then be neither
+  # resumed nor cancelled from a new terminal. One hundred twenty-eight random
+  # bits name one command across processes and time with no coordinator and
+  # nothing carried between calls, so each call site can keep asking for an
+  # identifier at the moment it builds its command. Idempotent replay is
+  # untouched: a command that must be re-presented carries the identifier it was
+  # already given rather than asking for a second one. The prefix stays visible
+  # for transcripts, and the result is thirty-six bounded ASCII bytes, well
+  # inside the Store's 256-byte identifier ceiling.
+  defp unique_id, do: "cli-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
 
   # Concept: every facade call this command makes goes through one seam, so a
   # case can watch the real command decide, in order, without a second command
