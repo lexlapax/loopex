@@ -212,17 +212,24 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     # Technical depth: ADR 0016 clause 7 requires every terminal-plus-open
     # decision to acquire the root-wide claim, read one complete bounded snapshot
     # while mutation is excluded, and fix its answer before releasing it. The
-    # settlement instead retained the confirmed receipt first and only then took
-    # the claim to remove the entry, so between the two a peer's
-    # `handle_call({:receipt, job_id})` returned `completed`/`confirmed` for an
-    # operation whose durable terminal truth was about to become
-    # `outcome_unknown`/`unconfirmed`. One operation reported completed before it
-    # reversed is exactly what a coordinator must never be handed. This case
-    # holds the root claim so the settlement is certain to end quarantined, and
-    # polls a peer instance across the whole window.
+    # settlement retains the confirmed receipt and removes the entry under one
+    # claim, and a removal that fails replaces those bytes with the quarantined
+    # form under that same claim. This case forces the removal to fail through the
+    # unlink seam -- the claim itself stays available, so the settlement really
+    # does publish a confirmed receipt and really does replace it -- and polls a
+    # peer instance across the whole window. The peer holds no claim of its own
+    # over those bytes, so what protects it is the reader rule rather than the
+    # writer: while this job's open entry stands, a retained receipt is
+    # `effect_settling` and never a terminal answer, so no reader could have
+    # consumed the confirmed form as final and the replacement reverses nothing.
     root = workspace()
     ledger = ledger_root()
-    {owner, owner_lease} = executor_on(root, ledger, cleanup_grace_ms: 8_000)
+
+    refuse_removal = fn _prepared, _job_id -> {:error, :removal_refused_by_case} end
+
+    {owner, owner_lease} =
+      executor_on(root, ledger, cleanup_grace_ms: 8_000, open_authority_close: refuse_removal)
+
     {peer, _peer_lease} = executor_on(root, ledger, cleanup_grace_ms: 8_000)
 
     ready = Path.join(root, "publication-ready")
@@ -240,10 +247,6 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
 
     assert wait_for_file(ready), "the command never started"
 
-    claim = Path.join(ledger, "claim")
-    on_exit(fn -> File.rmdir(claim) end)
-    assert :ok = File.mkdir(claim)
-
     polling = Task.async(fn -> poll_receipt(peer, job_id, []) end)
 
     assert {:ok, receipt} = Task.await(running, 30_000)
@@ -254,19 +257,25 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     assert receipt.outcome == :outcome_unknown
 
     assert File.regular?(Path.join([ledger, "open", digest(job_id)])),
-           "the open entry was removed while the root claim was held"
+           "the open entry was removed although the removal failed"
 
     # The poller's last read happens after the settlement returned, so the
     # retained receipt is on the root by then: an empty list would mean this case
     # watched nothing.
     assert observations != [],
-           "the peer never read this job's receipt at all, so nothing was observed"
+           "the peer never answered this job's lookup at all, so nothing was observed"
 
-    assert List.last(observations) == {:outcome_unknown, :unconfirmed}
+    assert List.last(observations) == {:error, :effect_settling},
+           "after a settlement that ended quarantined the peer answered " <>
+             "#{inspect(List.last(observations))} rather than an unresolved effect"
 
     reversed =
-      Enum.filter(observations, fn {outcome, confirmation} ->
-        outcome == :completed or confirmation == :confirmed
+      Enum.filter(observations, fn
+        {outcome, confirmation} when is_atom(outcome) and is_atom(confirmation) ->
+          outcome == :completed or confirmation == :confirmed
+
+        _unresolved ->
+          false
       end)
 
     assert reversed == [],
@@ -283,10 +292,18 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     # Technical depth: ADR 0016 removes an open entry only under exact authority
     # proof and quarantines the root while one is unresolved. Discarding the
     # removal's result hands a caller success while every later effect on that
-    # root is refused for reconciliation.
+    # root is refused for reconciliation. The removal is failed here through the
+    # unlink seam rather than by holding the claim, so the receipt is genuinely
+    # written first and genuinely replaced: what this proves is the replacement,
+    # not the refusal to start.
     root = workspace()
     ledger = ledger_root()
-    {executor, lease_id} = executor_on(root, ledger, cleanup_grace_ms: 2_000)
+
+    refuse_removal = fn _prepared, _job_id -> {:error, :removal_refused_by_case} end
+
+    {executor, lease_id} =
+      executor_on(root, ledger, cleanup_grace_ms: 2_000, open_authority_close: refuse_removal)
+
     ready = Path.join(root, "settlement-ready")
     job_id = "settlement-#{System.unique_integer([:positive])}"
 
@@ -302,23 +319,20 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
 
     assert wait_for_file(ready), "the command never started"
 
-    claim = Path.join(ledger, "claim")
-    on_exit(fn -> File.rmdir(claim) end)
-    assert :ok = File.mkdir(claim)
-
     assert {:ok, receipt} = Task.await(running, 30_000)
 
     assert File.regular?(Path.join([ledger, "open", digest(job_id)])),
-           "the open entry was removed while the root claim was held"
+           "the open entry was removed although the removal failed"
 
     assert receipt.cleanup_confirmation == :unconfirmed,
            "the receipt claims confirmed cleanup while this job's open authority remains"
 
     assert receipt.outcome == :outcome_unknown
 
-    assert {:ok, retained} = Local.receipt(executor, job_id)
-    assert retained.cleanup_confirmation == :unconfirmed
-    assert retained.outcome == :outcome_unknown
+    # The durable bytes are the quarantined ones, and they are not final while the
+    # entry they belong to is still there: a reader is told the effect is
+    # unresolved rather than handed a terminal it could act on.
+    assert Local.receipt(executor, job_id) == {:error, :effect_settling}
   end
 
   # H4
@@ -330,18 +344,132 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     # Technical depth: ADR 0016 clause 6 gives receipt preparation, artifact
     # retention, publication, lease-loss handoff, sync recovery and open-entry
     # removal one monotonic deadline that no phase refreshes. The removal had no
-    # bound of any kind: it took the root claim with a zero wait, so a peer's
-    # claim quarantined the root instead of being waited out, and the `File.rm/1`
-    # and parent sync inside the claim could block for as long as the filesystem
-    # liked with no allowance to answer to. This case holds the claim past the
-    # allowance: the settlement must spend the allowance waiting for it and then
-    # end, so the elapsed time is neither the zero of no allowance carried nor
-    # the unbounded wait of no bound at all.
+    # bound of any kind: the unlink and parent sync inside the claim could block
+    # for as long as the filesystem liked with no allowance to answer to. No
+    # filesystem call can be made slow on demand, so the unlink is driven through
+    # the seam and blocks for five seconds against a two-second allowance whose
+    # removal share is one second. The settlement must abandon it at that share
+    # and still write the quarantined receipt out of what is left, so removing the
+    # outer bound turns this case red rather than merely slow.
+    root = workspace()
+    ledger = ledger_root()
+
+    blocked_removal = fn _prepared, _job_id ->
+      Process.sleep(5_000)
+      :ok
+    end
+
+    {executor, lease_id} =
+      executor_on(root, ledger, cleanup_grace_ms: 8_000, open_authority_close: blocked_removal)
+
+    ready = Path.join(root, "bounded-removal-ready")
+    job_id = "bounded-removal-#{System.unique_integer([:positive])}"
+
+    {ms, settled} =
+      elapsed(fn ->
+        run(root, "loopex.bash", %{"command" => "printf ready > #{ready}; sleep 1"}, %{
+          executor: executor,
+          lease_id: lease_id,
+          job_id: job_id,
+          cleanup_grace_ms: 8_000
+        })
+      end)
+
+    assert {:ok, receipt} = settled
+
+    # The committed period's quarter is the whole settlement's allowance, and the
+    # removal takes a share of what is left of it so that the phase writing down
+    # what happened is never starved by the phase clearing the root.
+    assert receipt.receipt_retention_bound_ms == 2_000
+
+    assert receipt.cleanup_confirmation == :unconfirmed
+    assert receipt.outcome == :outcome_unknown
+
+    assert File.regular?(Path.join([ledger, "open", digest(job_id)])),
+           "the open entry was reported removed by an unlink that never answered"
+
+    assert ms >= 1_600,
+           "the job slept a second and its settlement returned after #{ms}ms, so the removal " <>
+             "spent none of the allowance waiting for the unlink"
+
+    assert ms < 5_000,
+           "the settlement took #{ms}ms against a #{receipt.receipt_retention_bound_ms}ms " <>
+             "allowance and a five-second unlink, so the unlink was not bounded by it"
+  end
+
+  # B3
+  test "a settlement whose receipt cannot be retained leaves this job's open authority" do
+    # Concept: the warning to the next executor on this root is the open entry,
+    # and a settlement that could not write down what happened must not remove it.
+    #
+    # Technical depth: the removal used to run before the receipt was retained, so
+    # a removal that succeeded followed by a write, rename, or sync that failed
+    # left the root holding neither an open entry nor a receipt. Nothing then
+    # said the effect was unresolved: a later reader got `:absent`, and the next
+    # admission on that root was accepted rather than refused, which is exactly
+    # ADR 0016 clause 6 and 7's quarantine being lost. The receipt is now written
+    # first and the entry removed second, so a failed retention leaves the entry
+    # where it is. The rename is failed by putting a directory where the receipt
+    # belongs, after admission so that the reservation still reads a clean root.
+    root = workspace()
+    ledger = ledger_root()
+    {executor, lease_id} = executor_on(root, ledger, cleanup_grace_ms: 2_000)
+    ready = Path.join(root, "retention-failure-ready")
+    job_id = "retention-failure-#{System.unique_integer([:positive])}"
+
+    running =
+      Task.async(fn ->
+        run(root, "loopex.bash", %{"command" => "printf ready > #{ready}; sleep 1"}, %{
+          executor: executor,
+          lease_id: lease_id,
+          job_id: job_id,
+          cleanup_grace_ms: 2_000
+        })
+      end)
+
+    assert wait_for_file(ready), "the command never started"
+
+    obstruction = Path.join(ledger, digest(job_id) <> ".receipt")
+    on_exit(fn -> File.rm_rf(obstruction) end)
+    assert :ok = File.mkdir_p(obstruction)
+
+    assert {:error, {:receipt_not_retained, _reason}} = Task.await(running, 30_000),
+           "a settlement that could not write its receipt reported a receipt"
+
+    assert File.regular?(Path.join([ledger, "open", digest(job_id)])),
+           "the open entry was removed by a settlement that never wrote a receipt, so this " <>
+             "root carries neither a terminal nor a warning about the effect that ran on it"
+
+    # The standing warning is what the next executor on this root has to see: an
+    # unresolved entry refuses new effects rather than admitting them beside an
+    # effect nothing resolved.
+    assert {:error, {:reconciliation_required, 1}} =
+             run(root, "loopex.read", %{"path" => "."}, %{
+               executor: executor,
+               lease_id: lease_id,
+               job_id: "after-#{System.unique_integer([:positive])}",
+               cleanup_grace_ms: 2_000
+             })
+  end
+
+  # B3
+  test "a settlement that cannot take the root claim leaves the open entry and reports it" do
+    # Concept: the claim is how this settlement excludes every other writer and
+    # reader from the pair of facts it is about to change, so a settlement that
+    # cannot take it publishes nothing at all.
+    #
+    # Technical depth: the claim is taken once for the whole settlement and waited
+    # for out of the same allowance the writes spend, capped at a share of it so
+    # that taking the claim can never consume what writing under it needs. A claim
+    # that never arrives is a failed retention, which is the safe direction: the
+    # open entry stays, the root stays quarantined, and the caller is told
+    # `{:receipt_not_retained, {:ledger_unavailable, :root_claim_held}}` rather
+    # than being handed a terminal decided outside the claim.
     root = workspace()
     ledger = ledger_root()
     {executor, lease_id} = executor_on(root, ledger, cleanup_grace_ms: 8_000)
-    ready = Path.join(root, "bounded-removal-ready")
-    job_id = "bounded-removal-#{System.unique_integer([:positive])}"
+    ready = Path.join(root, "claim-held-ready")
+    job_id = "claim-held-#{System.unique_integer([:positive])}"
 
     running =
       Task.async(fn ->
@@ -363,26 +491,129 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     on_exit(fn -> File.rmdir(claim) end)
     assert :ok = File.mkdir(claim)
 
-    assert {ms, {:ok, receipt}} = Task.await(running, 30_000)
+    assert {ms, settled} = Task.await(running, 30_000)
 
-    # The committed period's quarter is the whole settlement's allowance, and the
-    # removal takes a share of what is left of it so that the phase writing down
-    # what happened is never starved by the phase clearing the root.
-    assert receipt.receipt_retention_bound_ms == 2_000
-
-    assert receipt.cleanup_confirmation == :unconfirmed
-    assert receipt.outcome == :outcome_unknown
+    assert settled == {:error, {:receipt_not_retained, {:ledger_unavailable, :root_claim_held}}}
 
     assert File.regular?(Path.join([ledger, "open", digest(job_id)])),
            "the open entry was removed while the root claim was held"
 
     assert ms >= 1_600,
-           "the job slept a second and its settlement returned after #{ms}ms, so the removal " <>
-             "spent none of the allowance waiting for the claim it could not take"
+           "the job slept a second and its settlement returned after #{ms}ms, so it spent " <>
+             "none of the allowance waiting for the claim it could not take"
 
     assert ms < 5_000,
-           "the settlement took #{ms}ms against a #{receipt.receipt_retention_bound_ms}ms " <>
-             "allowance, so the removal was not bounded by it"
+           "the settlement took #{ms}ms against a 2000ms allowance, so waiting for the claim " <>
+             "was not bounded by it"
+  end
+
+  # B3
+  test "a settlement that removes its open entry ends with a final receipt and no entry" do
+    # Concept: the ordinary end of a settlement is one final terminal on a root
+    # with nothing left open on it.
+    #
+    # Technical depth: the reader rule that makes a receipt final only once its
+    # open entry is gone has to leave the ordinary path exactly where it was, or
+    # every recovering coordinator would be told `effect_settling` forever. The
+    # settlement retains the receipt and removes the entry under one claim, so
+    # when it returns both halves of the answer are already true: the entry is
+    # gone, the bytes are the confirmed ones, and a later lookup is the final
+    # `{:ok, receipt}` rather than an unresolved effect. The root is clean enough
+    # to admit the next job, which is the other half of the quarantine claim.
+    root = workspace()
+    ledger = ledger_root()
+    {executor, lease_id} = executor_on(root, ledger, cleanup_grace_ms: 2_000)
+    job_id = "settled-#{System.unique_integer([:positive])}"
+
+    assert {:ok, receipt} =
+             run(root, "loopex.bash", %{"command" => "printf done"}, %{
+               executor: executor,
+               lease_id: lease_id,
+               job_id: job_id,
+               cleanup_grace_ms: 2_000
+             })
+
+    assert receipt.cleanup_confirmation == :confirmed
+
+    refute File.exists?(Path.join([ledger, "open", digest(job_id)])),
+           "a settled job left its open authority on the root"
+
+    assert {:ok, retained} = Local.receipt(executor, job_id)
+    assert retained.job_id == job_id
+    assert retained.cleanup_confirmation == :confirmed
+
+    assert {:ok, _next} =
+             run(root, "loopex.bash", %{"command" => "printf again"}, %{
+               executor: executor,
+               lease_id: lease_id,
+               job_id: "after-#{System.unique_integer([:positive])}",
+               cleanup_grace_ms: 2_000
+             })
+  end
+
+  # H5
+  test "a root claim that cannot be released after a raising body reaches the caller" do
+    # Concept: giving the claim back is part of taking it on the exceptional path
+    # too, so a release that did not happen travels with the exception.
+    #
+    # Technical depth: the normal path replaces the body's result with
+    # `{:ledger_unavailable, {:root_claim_not_released, reason}}`; the exceptional
+    # path discarded the release result entirely, so a body that raised on a root
+    # it then stranded reported only the raise and every later claim answered
+    # `root_claim_held` with nothing having said why. Converting the exception
+    # into that error instead would surface the strand and lose the fault, so the
+    # original kind and stacktrace are kept and the reason carries both facts.
+    ledger = ledger_root()
+    assert {:ok, prepared} = Local.prepare_placement(ledger, "executor-local", 2_000)
+
+    claim = Path.join(ledger, "claim")
+    stray = Path.join(claim, "late-writer")
+    on_exit(fn -> File.rm(stray) end)
+
+    raised =
+      try do
+        Ledger.with_claim(prepared, fn ->
+          File.write!(stray, "a byte a late writer left inside the claim")
+          raise "the body failed on a root it also stranded"
+        end)
+      rescue
+        error -> error
+      end
+
+    assert %ErlangError{original: {:root_claim_not_released, _release, original}} = raised,
+           "a body that raised on a stranded root reported only the raise"
+
+    assert %RuntimeError{message: "the body failed on a root it also stranded"} = original,
+           "the fault the body raised was replaced rather than carried"
+
+    # Stranded, and honestly so: the reason above is the only warning anyone gets
+    # that this root now refuses every claim until an operator clears it.
+    assert File.dir?(claim), "the claim was reported unreleasable but is gone"
+
+    assert Ledger.with_claim(prepared, fn -> :ok end) ==
+             {:error, {:ledger_unavailable, :root_claim_held}}
+  end
+
+  # H5
+  test "a claim released after a raising body re-raises exactly what the body raised" do
+    # Concept: the ordinary exceptional path is unchanged, so a body that fails on
+    # a healthy root fails the way it always did.
+    #
+    # Technical depth: only a release that fails changes what the caller sees.
+    # Where the claim comes back, the original kind, reason, and stacktrace are
+    # re-raised untouched, which is what keeps a defect in a body diagnosable
+    # rather than reported as a ledger fault.
+    ledger = ledger_root()
+    assert {:ok, prepared} = Local.prepare_placement(ledger, "executor-local", 2_000)
+
+    assert_raise RuntimeError, "an ordinary body failure", fn ->
+      Ledger.with_claim(prepared, fn -> raise "an ordinary body failure" end)
+    end
+
+    refute File.dir?(Path.join(ledger, "claim")),
+           "a body that raised on a healthy root left the claim behind"
+
+    assert Ledger.with_claim(prepared, fn -> :ok end) == :ok
   end
 
   # F6
@@ -745,23 +976,26 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
 
   defp digest(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
 
-  # Every reading this peer could have taken, in order, with the last one taken
+  # Every answer this peer could have taken, in order, with the last one taken
   # after the settlement returned so that the retained receipt is certain to be
-  # in the list.
+  # in the list. Unresolved answers are recorded too: while the settlement holds
+  # the claim, and afterwards while this job's open entry stands, they are the
+  # only answers there are, and a list that dropped them could not tell watching
+  # nothing apart from watching correctly.
   defp poll_receipt(peer, job_id, seen) do
     seen = record_receipt(peer, job_id, seen)
 
     receive do
       :stop -> Enum.reverse(record_receipt(peer, job_id, seen))
     after
-      0 -> poll_receipt(peer, job_id, seen)
+      10 -> poll_receipt(peer, job_id, seen)
     end
   end
 
   defp record_receipt(peer, job_id, seen) do
     case Local.receipt(peer, job_id) do
       {:ok, retained} -> [{retained.outcome, retained.cleanup_confirmation} | seen]
-      _no_receipt_yet -> seen
+      other -> [other | seen]
     end
   end
 

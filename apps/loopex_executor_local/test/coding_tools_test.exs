@@ -2649,7 +2649,14 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     File.chmod!(ledger, 0o500)
     on_exit(fn -> File.chmod(ledger, 0o700) end)
 
-    assert {:error, {:receipt_not_retained, :eacces}} = Task.await(task, 10_000)
+    # The settlement takes the root claim before it writes, so a ledger whose
+    # write bit is gone refuses the claim rather than the rename, and the same
+    # `:eacces` arrives inside the bounded ledger-unavailability that a claim
+    # this settlement could not take always is. The fact the case asserts is
+    # unchanged: no receipt reached the ledger and the reply says so rather than
+    # answering with one.
+    assert {:error, {:receipt_not_retained, {:ledger_unavailable, :eacces}}} =
+             Task.await(task, 10_000)
 
     # Nothing was left behind in the ledger either: no receipt and no staging
     # file, so a later reader cannot find a partial receipt where this executor
