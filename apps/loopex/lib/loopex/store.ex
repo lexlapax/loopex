@@ -560,6 +560,52 @@ defmodule Loopex.Store do
     end
   end
 
+  @doc """
+  ## Concept
+
+  Admits one candidate plain-data term against the exact limits a durable item
+  must satisfy, and reports what retaining it would cost.
+
+  A caller holding an untrusted term it is about to read, project, or copy into
+  a record asks here first. The answer is that term's exact encoded byte cost,
+  or the first limit it breaks.
+
+  ## Technical depth
+
+  This is `normalize_and_measure_item/2`'s own traversal applied to a term that
+  is not itself a root item: the same `:record`-plane walk, the same depth,
+  cardinality, key, and plain-data rules, the same deterministic external-term
+  measurement, and then `max_item_bytes/0` applied to the result. The term's
+  root is depth zero exactly as an item root is, so a term admitted here still
+  fits the depth budget when it is carried inside an item.
+
+  Refusals are the Store's own and are never translated: the first
+  `{:item_structure_exceeded, dimension, observed, limit}` under the traversal
+  order, `{:item_too_large, observed, limit}` for a structurally legal term
+  above the ceiling, and `:invalid_item` for anything that is not plain data.
+  The point of exposing this is that no caller needs a parallel approximation of
+  these rules; an approximation that drifts admits what the Store then refuses.
+
+  Nothing is encoded to measure it and the walk returns at the first structural
+  violation, so refusing an enormous untrusted collection costs the admitted
+  prefix rather than the whole claim. The byte ceiling is necessarily the last
+  question, because a term's exact cost is known only once its structure is legal.
+  """
+  @spec admit_bounded(term()) ::
+          {:ok, non_neg_integer()}
+          | {:error,
+             {:item_structure_exceeded, :depth | :cardinality, pos_integer(), pos_integer()}
+             | {:item_too_large, pos_integer(), pos_integer()}
+             | :invalid_item}
+  def admit_bounded(term) do
+    with {:ok, normalized} <- measured_value(:record, term, 0) do
+      case deterministic_external_size(normalized) do
+        observed when observed <= @max_item_bytes -> {:ok, observed}
+        observed -> {:error, {:item_too_large, observed, @max_item_bytes}}
+      end
+    end
+  end
+
   # Concept: the item is counted, not copied.
   #
   # Technical depth: ADR 0017 requires a structurally valid item to be "measured
