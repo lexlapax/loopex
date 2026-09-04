@@ -536,10 +536,40 @@ defmodule Loopex.Store.Local.Artifacts do
     end
   end
 
+  # Concept: every directory this store creates is durable, not only the one the
+  # published file sits in.
+  #
+  # Technical depth: `mkdir_p/1` creates as many components as are missing, while
+  # syncing the root alone proves only the entry directly beneath it. A use
+  # sidecar lives two levels down at `uses/<xx>`, so the entry naming its fan-out
+  # directory was never synced: a crash after a successful `put` could lose that
+  # whole subtree although the sidecar and its own directory were synced, leaving
+  # a returned reference to a use nobody can read -- exactly what publishing the
+  # use before returning exists to prevent. Each component below the root is
+  # therefore created and its parent synced before the next one is considered,
+  # and an existing component reconfirms that entry so a retry cannot inherit an
+  # earlier unproved publication. The root itself is `open/1`'s obligation and is
+  # never created here: a store whose root has gone is unavailable, not something
+  # a write quietly re-establishes unsynced.
   defp ensure_directory(root, directory) do
-    with :ok <- File.mkdir_p(directory),
-         :ok <- sync_directory(root) do
-      :ok
+    parent = Path.dirname(directory)
+
+    cond do
+      Path.split(directory) == Path.split(root) ->
+        :ok
+
+      parent == directory ->
+        {:error, :enoent}
+
+      true ->
+        with :ok <- ensure_directory(root, parent) do
+          case File.stat(directory) do
+            {:ok, %File.Stat{type: :directory}} -> sync_directory(parent)
+            {:ok, _other} -> {:error, :enotdir}
+            {:error, :enoent} -> create_and_sync_directory(directory, parent)
+            {:error, reason} -> {:error, reason}
+          end
+        end
     end
   end
 
