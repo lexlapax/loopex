@@ -755,3 +755,31 @@ refusal pair. Names and counts are unchanged.
 set. Eighteenth recorded override; each repair carries its decisiveness
 evidence in the worker report retained with the milestone's evidence.
 
+<a id="post-closure-hotfix"></a>
+## Post-closure hotfix on main outside an accepted plan
+
+**Rule.** Product implementation belongs to a milestone: an accepted plan pair,
+a red gate before implementation, and closure. A closed milestone's records are
+frozen and its product baseline changes only through a successor.
+
+**What is true.** An independent post-closure review of `main` at `86f1ccf`
+found three shipped operator workflows failing in live use, each reproduced by
+the integrator: a completed run cannot be resumed or cancelled from a fresh
+process because the local Store's writer marker deliberately survives process
+exit and the shipped composition never recovers it; the command's durable
+command identifiers derive from a per-VM counter, so two fresh processes can
+present the same identifier against one journal; and a second interrupt
+delivered while the first is still joining exits the launcher and orphans a
+signal-ignoring tool child under the init process with no terminal recorded.
+Every gate, the full suite, and the retained evidence were green throughout,
+because no locked case exercises a fresh operating-system process against a
+completed run, a second VM against one journal, or a second interrupt against
+a child that outlives the first.
+
+**Disposition.** Maintainer, 2026-09-03: repair the three defects on `main` as a
+hotfix ahead of the successor milestone, as a recorded override of the
+plan-first rule, because each defect denies an operator a shipped workflow.
+Each repair carries its own test, and the successor milestone inherits the
+obligation to lock those tests in its gate. Nineteenth recorded override. The
+review's remaining product findings are carried to the successor unchanged.
+
