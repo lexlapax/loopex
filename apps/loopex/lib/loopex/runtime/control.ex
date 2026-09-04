@@ -682,17 +682,21 @@ defmodule Loopex.Runtime.Control do
   defp create_session(state, command_id, session_options, from) do
     with true <- valid_identifier?(command_id),
          {:ok, genesis} <- session_genesis(session_options, state.cleanup_grace_ms),
+         {:ok, fresh?} <- create_command_absent?(state, command_id),
          {:ok, transaction} <- Store.create_session(state.runtime_id, command_id, genesis) do
       {outcome, lane} = resolve_transaction(state.lane, transaction)
       state = %{state | lane: lane}
 
       case outcome do
         {:committed, ^command_id, %{type: :create_session, session_id: session_id}} ->
-          case Map.fetch(state.sessions, session_id) do
-            {:ok, %{status: :active}} ->
+          cond do
+            match?({:ok, %{status: :active}}, Map.fetch(state.sessions, session_id)) ->
               {:reply, {:ok, session_id}, state}
 
-            _other ->
+            not fresh? ->
+              {:reply, {:ok, session_id}, state}
+
+            true ->
               case start_owner(
                      state,
                      session_id,
@@ -717,9 +721,55 @@ defmodule Loopex.Runtime.Control do
       {:error, :session_configuration_too_large} ->
         {:reply, {:error, :session_configuration_too_large}, state}
 
+      {:error, :store_unavailable} ->
+        {:reply, {:error, :store_unavailable}, state}
+
       _other ->
         {:reply, {:error, :invalid_session_creation}, state}
     end
+  end
+
+  # Concept: only a create whose command key the Store proves was absent an
+  # instant ago may take ownership of the session it creates.
+  #
+  # Technical depth: ADR 0008 makes a completed create replay historical only --
+  # it "returns its original result without advancing the epoch" and "does not
+  # recreate a dead coordinator" -- and reserves ownership acquisition for the
+  # staged resume paths. `Store.transact/2` cannot carry that distinction: an
+  # exact re-presentation returns the retained receipt byte-for-byte, so a
+  # runtime that lost its process-local session table read its own replay as a
+  # first commit and advanced the epoch through the create path's unstaged
+  # succession. The runtime-command read is the one API keyed by exactly
+  # `runtime_id + command_id`, and `:absent` is the only answer that proves this
+  # transaction is the one committing now. Every other answer -- a retained
+  # entry, an open candidate, or a binding an adapter cannot project -- means
+  # the freshness cannot be proved, so the command is answered from its durable
+  # result and starts nothing. `:unavailable` decides nothing at all and commits
+  # nothing.
+  defp create_command_absent?(state, command_id) do
+    case Store.runtime_command(state.store, create_command(state.runtime_id, command_id)) do
+      :absent -> {:ok, true}
+      :unavailable -> {:error, :store_unavailable}
+      _retained -> {:ok, false}
+    end
+  end
+
+  defp create_command(runtime_id, command_id) do
+    canonical =
+      :erlang.term_to_binary(
+        ["loopex_runtime_command_v1", runtime_id, command_id, :create, "session"],
+        [:deterministic]
+      )
+
+    %{
+      runtime_id: runtime_id,
+      command_id: command_id,
+      command_kind: :create,
+      mutation_domain: "session",
+      succession_id: succession_id(runtime_id, "create", "", command_id),
+      canonical_command_bytes: canonical,
+      canonical_command_digest: :crypto.hash(:sha256, canonical)
+    }
   end
 
   @genesis_item_bytes 65_536

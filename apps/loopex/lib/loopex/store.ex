@@ -40,6 +40,16 @@ defmodule Loopex.Store do
   @max_item_bytes 65_536
   @max_mutation_bytes 1_048_576
   @max_items 1_024
+
+  @create_command_keys [
+    :runtime_id,
+    :command_id,
+    :command_kind,
+    :mutation_domain,
+    :succession_id,
+    :canonical_command_bytes,
+    :canonical_command_digest
+  ]
   @max_depth 12
   @canonical_field_names [:canonical_record_bytes, :canonical_mutation_digest]
   # Concept: the stamps the Store owns and a caller may never supply.
@@ -1268,26 +1278,34 @@ defmodule Loopex.Store do
 
   defp validate_owner_command_fields(_transaction), do: :ok
 
-  defp validate_runtime_command_binding(command) do
-    expected =
-      MapSet.new([
-        :runtime_id,
-        :command_id,
-        :command_kind,
-        :session_id,
-        :mutation_domain,
-        :succession_id,
-        :canonical_command_bytes,
-        :canonical_command_digest
-      ])
+  # Concept: a create command names no session, because the session is what it
+  # is asking for.
+  #
+  # Technical depth: ADR 0008 keys the attempt index on `runtime_id +
+  # command_id` and makes "exact re-presentation of a completed create or
+  # resume" answerable through this read, so the read admits both kinds. A
+  # resume already knows its session and binds it; a create is presented before
+  # any session exists and therefore binds every other member of the same
+  # identity and no `session_id`. Widening the read grants no authority: the
+  # projection still carries no candidate bytes, digest, or incarnation
+  # capability.
+  defp validate_runtime_command_binding(%{command_kind: :create} = command),
+    do: validate_runtime_command_members(command, @create_command_keys)
 
-    with true <- Map.keys(command) |> MapSet.new() |> MapSet.equal?(expected),
-         {:ok, _runtime_id} <- fetch_identifier(command, :runtime_id),
-         {:ok, _command_id} <- fetch_identifier(command, :command_id),
-         true <- command.command_kind == :resume,
-         {:ok, _session_id} <- fetch_identifier(command, :session_id),
-         {:ok, _mutation_domain} <- fetch_identifier(command, :mutation_domain),
-         {:ok, _succession_id} <- fetch_identifier(command, :succession_id),
+  defp validate_runtime_command_binding(%{command_kind: :resume} = command),
+    do: validate_runtime_command_members(command, [:session_id | @create_command_keys])
+
+  defp validate_runtime_command_binding(_command), do: {:error, :invalid_runtime_command_binding}
+
+  defp validate_runtime_command_members(command, keys) do
+    identifiers =
+      Enum.reject(
+        keys,
+        &(&1 in [:command_kind, :canonical_command_bytes, :canonical_command_digest])
+      )
+
+    with true <- Map.keys(command) |> MapSet.new() |> MapSet.equal?(MapSet.new(keys)),
+         true <- Enum.all?(identifiers, &match?({:ok, _value}, fetch_identifier(command, &1))),
          true <- is_binary(command.canonical_command_bytes),
          true <- byte_size(command.canonical_command_digest) == 32,
          true <- command.canonical_command_digest == digest(command.canonical_command_bytes) do
