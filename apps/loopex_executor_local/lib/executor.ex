@@ -106,6 +106,24 @@ defmodule Loopex.Executor.Local do
   # permission: only the holder releases the claim.
   @claim_wait_ms 5_000
 
+  # The longest a receipt lookup waits for another instance's root claim. It is a
+  # fraction of the admission ceiling because `receipt/2` is a `GenServer.call`
+  # answered by this server: a wait as long as the ceiling would expire the call
+  # it is serving and block every other caller behind it, and a lookup that cannot
+  # be ordered against a live settlement is bounded unavailability rather than a
+  # verdict about the effect.
+  @receipt_claim_wait_ms 1_000
+
+  # The three answers a join treats as "not yet", plus the claim it could not take
+  # to find out. None of them is a terminal fact about the effect, and the join
+  # loop is already bounded by the job's own immutable deadline.
+  @join_unresolved [
+    :absent,
+    {:error, :effect_in_flight},
+    {:error, :effect_settling},
+    {:error, {:ledger_unavailable, :root_claim_held}}
+  ]
+
   # The share of what remains that a signalled group gets to exit on its own
   # before it is killed. It is a share rather than a number so that it cannot
   # drift away from the declared period the way fifty milliseconds had, and half
@@ -757,12 +775,24 @@ defmodule Loopex.Executor.Local do
     # seam and enters no job, ledger record, receipt, event, or public API.
     clock_provider = Keyword.get(options, :clock_provider, &paired_now/0)
 
+    # Concept: the one call that removes an open entry, from a place a case can
+    # substitute.
+    #
+    # Technical depth: the settlement bounds the unlink and its parent sync, and
+    # the filesystem offers no way to make either of them slow on demand, so
+    # without this seam no case can prove that bound exists rather than merely
+    # passing when the unlink is fast. It is the same kind of reversible edge seam
+    # the paired clock is, defaults to `Ledger.close_open/2`, and enters no job,
+    # ledger record, receipt, event, or public API.
+    open_authority_close = Keyword.get(options, :open_authority_close, &Ledger.close_open/2)
+
     valid =
       is_binary(identity) and byte_size(identity) > 0 and is_integer(epoch) and epoch >= 0 and
         is_integer(fencing_token) and fencing_token >= 0 and is_map(leases) and
         is_integer(cleanup_grace_ms) and cleanup_grace_ms >= 0 and
         is_binary(process_probe) and String.starts_with?(process_probe, "/") and
         not String.contains?(process_probe, <<0>>) and is_function(clock_provider, 0) and
+        is_function(open_authority_close, 2) and
         Enum.all?(leases, fn {id, pid} -> is_binary(id) and is_pid(pid) end)
 
     with true <- valid,
@@ -802,6 +832,7 @@ defmodule Loopex.Executor.Local do
          ledger_root: ledger_root,
          ledger: ledger,
          clock: clock_provider,
+         open_authority_close: open_authority_close,
          artifacts: artifacts,
          cleanup_grace_ms: cleanup_grace_ms,
          process_probe: process_probe,
@@ -860,17 +891,31 @@ defmodule Loopex.Executor.Local do
     do: {System.system_time(:millisecond), System.monotonic_time(:millisecond)}
 
   @impl GenServer
-  # Concept: a job this instance is still running has no receipt yet, and
-  # saying so is different from saying there is none.
+  # Concept: a job this instance is still running has no receipt yet, and saying
+  # so is different from saying there is none -- and a receipt whose open
+  # authority is still on the root is not this job's final answer either.
   #
   # Technical depth: `:absent` is what ends a recovered run `outcome_unknown`,
   # so a lookup that arrives while the job is reserved here answers
   # `effect_in_flight` instead. The reservation table is this server's own
-  # state, read without waiting on the job, which runs in its caller.
+  # state, read without waiting on the job, which runs in its caller. Every other
+  # answer joins a terminal to an open entry, which ADR 0016 clause 7 decides
+  # under the root claim from one bounded snapshot, so a peer's settlement cannot
+  # publish or remove anything between the two reads this answer combines.
   def handle_call({:receipt, job_id}, _from, state) do
-    if Map.has_key?(state.reserved, job_id),
-      do: {:reply, {:error, :effect_in_flight}, state},
-      else: {:reply, read_receipt(state.ledger_root, job_id), state}
+    if Map.has_key?(state.reserved, job_id) do
+      {:reply, {:error, :effect_in_flight}, state}
+    else
+      answer =
+        final_receipt_under_claim(
+          state.ledger,
+          state.ledger_root,
+          job_id,
+          @receipt_claim_wait_ms
+        )
+
+      {:reply, answer, state}
+    end
   end
 
   def handle_call(:stats, _from, state),
@@ -932,8 +977,19 @@ defmodule Loopex.Executor.Local do
   defp resolved_jobs(state, job_id),
     do: MapSet.new([job_id | Map.keys(state.reserved)])
 
+  # Concept: this request replays a terminal only where that terminal is final,
+  # and joins the one operation where it is not.
+  #
+  # Technical depth: the caller already holds the root claim, so the receipt and
+  # this job's open entry are read as one snapshot. A receipt whose entry is still
+  # there is `effect_settling`: its bytes may yet be replaced by the quarantined
+  # form, and handing them back as a replay would report a completion that is
+  # about to reverse. An entry with no receipt is this exact request already
+  # admitted somewhere, which ADR 0016 requires to be joined rather than refused,
+  # so the caller is reserved and `admit/2` resolves it from the marker into a
+  # join. Only the true absence starts a new effect.
   defp settled_or_reserved(state, job, job_id) do
-    case read_receipt(state.ledger_root, job_id) do
+    case final_receipt(state.ledger, state.ledger_root, job_id) do
       {:ok, receipt} ->
         if Map.get(receipt, :canonical_request_digest) ==
              Map.get(job, :canonical_request_digest),
@@ -941,6 +997,9 @@ defmodule Loopex.Executor.Local do
            else: {:error, :job_id_conflict}
 
       :absent ->
+        :reserve
+
+      {:error, :effect_in_flight} ->
         :reserve
 
       {:error, reason} ->
@@ -1194,80 +1253,113 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # Concept: the receipt, its retention, and the removal of this job's open
-  # authority spend one allowance, and no phase refreshes it.
+  # Concept: publishing this job's terminal truth and disposing of its open
+  # authority are one decision, taken under one claim and spending one allowance.
   #
   # Technical depth: the allowance is the committed cleanup period's own quarter,
   # which is also the value the receipt reports, and it is opened by the first
   # retention phase this settlement performs rather than here -- an artifact
   # spill is a phase of the same settlement and draws on the same instant, so the
   # sequence is bounded by that one value rather than by the sum of its parts.
-  # What reaches this phase is therefore what the earlier ones left. Open
-  # authority is removed only
-  # for a receipt whose captured-group cleanup is confirmed; an `outcome_unknown`
-  # whose cleanup is unconfirmed deliberately leaves the entry, and therefore
-  # quarantines the root until an operator reconciles it.
+  # What reaches this phase is therefore what the earlier ones left, and the wait
+  # for the claim is a share of it, so that taking the claim can never spend what
+  # writing under it still needs. Open authority is removed only for a receipt
+  # whose captured-group cleanup is confirmed; an `outcome_unknown` whose cleanup
+  # is unconfirmed deliberately leaves the entry, and therefore quarantines the
+  # root until an operator reconciles it.
   #
-  # The disposition of that entry is decided *before* the receipt is published,
-  # and the receipt published is the one that decision produced. This used to run
-  # the other way round: the confirmed receipt was retained, the claim was taken
-  # afterwards, and a failed removal replaced the durable bytes with the
-  # quarantined form. ADR 0016 clause 7 requires a terminal-plus-open decision to
-  # be fixed under the root claim before it is released, and the reversal was
-  # observable -- between the two writes, a peer instance's `receipt/2` returned
-  # `completed`/`confirmed` for an operation whose durable truth was about to
-  # become `outcome_unknown`/`unconfirmed`, which is exactly the reported
-  # completion a coordinator must never be handed. A reader cannot be excluded
-  # from the receipt path by a claim it does not take, so the only shape that
-  # holds is to publish nothing until the answer is final.
+  # Under that one claim the order is: retain the receipt, remove the open entry,
+  # and -- only where the removal failed -- replace the receipt with the
+  # quarantined `outcome_unknown` form. That order is safe because
+  # `final_receipt/3` makes a receipt final only once its open entry is gone and
+  # every reader honours it, so what a peer can observe is:
   #
-  # The cost of that order is one narrower case: a removal that succeeded
-  # followed by a retention that failed leaves the root unquarantined with no
-  # receipt on it. The caller is told exactly that with
-  # `{:receipt_not_retained, reason}`, and a later reader gets `:absent`, which
-  # already ends a recovered run `outcome_unknown`. What is lost is the standing
-  # warning to the next executor on that root, and that is strictly less than
-  # what the old order lost, which was the correctness of an answer already
-  # given.
+  #   * before this settlement takes the claim, or while it holds it: an open
+  #     entry with no receipt, which is `effect_in_flight`, or a claim the reader
+  #     cannot take, which is bounded ledger-unavailability. Neither is terminal.
+  #   * after the receipt lands and before the entry is gone: receipt and entry
+  #     both present, which is `effect_settling`. The confirmed bytes are on the
+  #     root but no reader may take them as final, so replacing them reverses
+  #     nothing anyone was allowed to act on.
+  #   * after the entry is gone: receipt present, entry absent, which is the one
+  #     final answer -- and by then no writer will touch those bytes again.
+  #
+  # Both earlier orders lost something this one does not. Retaining first and
+  # taking the claim only to remove let a peer read `completed`/`confirmed` and
+  # then watch it become `outcome_unknown`/`unconfirmed`, because the reader
+  # ignored the open entry. Removing first and retaining afterwards left a root
+  # carrying neither an open entry nor a receipt whenever the write, rename, or
+  # sync failed: nothing warned the next executor, and unrelated effects were
+  # admitted on a root whose effect never reached a durable terminal. Here a
+  # failed retention -- including a claim this settlement could not take -- leaves
+  # the open entry exactly where it is, so the quarantine stands and the caller is
+  # told `{:receipt_not_retained, reason}`.
   defp settle_receipt(placement, job, receipt, lease) do
-    settled = settled_receipt(placement, job, receipt, lease)
-    bound = retention_remaining()
-
-    case retain_receipt_under_lease(placement.ledger_root, settled, lease, bound) do
+    case Ledger.with_claim(
+           placement.ledger,
+           fn -> publish_settlement(placement, job, receipt, lease) end,
+           claim_bound()
+         ) do
       {:ok, retained} -> {:ok, retained}
       {:error, reason} -> {:error, {:receipt_not_retained, reason}}
     end
   end
 
-  # Concept: removing this job's open authority is part of settling it, so a
-  # removal that did not happen is part of the receipt.
+  # Concept: the receipt is written first, because no reader can mistake it for
+  # this job's final answer while the entry it was written under is still there.
   #
-  # Technical depth: the removal's result was once discarded entirely. A claim
-  # this instance could not take, an unreadable root, or a failed unlink returned
-  # a receipt asserting confirmed cleanup while the entry it names quarantines
-  # every later effect on that root -- success to this caller and reconciliation
-  # required for everyone else. ADR 0016 removes an entry only under exact
-  # authority proof and otherwise leaves the root quarantined, so the truthful
-  # receipt for a job whose authority is still open reports an unconfirmed
-  # cleanup beside `outcome_unknown`. That is the one pairing the ADR admits, it
-  # is what stops a coordinator retrying an effectful job blindly, and it is what
-  # tells an operator there is something on this root to reconcile.
+  # Technical depth: this runs with the root claim held, so no peer publishes or
+  # removes anything on this root while it runs. Retention is again the first
+  # phase of the settlement to wait on the workspace lease, which is where the
+  # lease-loss fact belongs: ADR 0007 holds the lease until the receipt exists,
+  # and a monitor delivers its `:DOWN` exactly once, so the phase that waits first
+  # is the only one that can see it. What this returns is therefore the truthful
+  # receipt -- unproven where the lease was lost -- and the disposition below is
+  # decided about that receipt rather than about the one the settlement began
+  # with.
+  defp publish_settlement(placement, job, receipt, lease) do
+    bound = retention_remaining()
+
+    case retain_receipt_under_lease(placement.ledger_root, receipt, lease, bound) do
+      {:ok, retained} -> dispose_open_authority(placement, job, retained, lease)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Concept: an entry is removed only under proof, and a removal that did not
+  # happen changes the receipt rather than being discarded.
   #
-  # The removal now runs before the receipt is written, and it waits on the same
-  # lease the retention after it waits on. A lease's `:DOWN` is delivered once, so
-  # whichever phase waits first is the only one that can see it: the removal
-  # therefore reports whether the lease survived it, and a lease lost here makes
-  # the receipt unproven exactly as losing it during retention does. Without that
-  # the reordering silently swallowed the lease-lost fact -- the phase that used
-  # to notice it no longer ran first, and a job whose workspace claim had gone
-  # would have been written down as though nothing about it were in doubt.
-  defp settled_receipt(placement, job, receipt, lease) do
-    if receipt.cleanup_confirmation == :confirmed do
-      {removal, workspace_lease} = remove_open_authority(placement, job, lease)
-      settled = if workspace_lease == :lost, do: unproven_receipt(receipt), else: receipt
-      if removal == :ok, do: settled, else: quarantined_receipt(settled)
+  # Technical depth: ADR 0016 removes an open entry only under exact authority
+  # proof -- here a confirmed captured-group cleanup receipt -- and otherwise
+  # leaves the root quarantined. The truthful receipt for a job whose authority is
+  # still open reports an unconfirmed cleanup beside `outcome_unknown`: that is
+  # the one pairing the ADR admits, it is what stops a coordinator retrying an
+  # effectful job blindly, and it is what tells an operator there is something on
+  # this root to reconcile. The replacement is written under the same claim as the
+  # bytes it replaces, so no reader saw the confirmed form as final and no reader
+  # can see a half-published pair.
+  #
+  # A replacement that cannot be written is reported rather than swallowed. The
+  # confirmed bytes then stay on a root whose open entry also stays, which every
+  # reader answers `effect_settling` -- unresolved, never a completion -- so the
+  # quarantine still holds and what is lost is the operator's note of why.
+  defp dispose_open_authority(placement, job, retained, lease) do
+    if retained.cleanup_confirmation == :confirmed do
+      case remove_open_authority(placement, job, lease) do
+        :ok -> {:ok, retained}
+        {:error, _reason} -> quarantine_open_authority(placement, retained, lease)
+      end
     else
-      receipt
+      {:ok, retained}
+    end
+  end
+
+  defp quarantine_open_authority(placement, retained, lease) do
+    quarantined = quarantined_receipt(retained)
+
+    case retain_now(placement.ledger_root, quarantined, lease) do
+      {:ok, receipt} -> {:ok, receipt}
+      {:error, reason} -> {:error, {:open_authority_quarantine_not_retained, reason}}
     end
   end
 
@@ -1278,60 +1370,57 @@ defmodule Loopex.Executor.Local do
   # Technical depth: ADR 0016 clause 6 gives receipt preparation, artifact
   # retention, publication, lease-loss handoff, sync recovery and open-entry
   # removal one monotonic deadline that no phase refreshes, and this phase was
-  # outside it in both directions. It took the root claim with a zero wait, so a
-  # peer holding the claim for one admission quarantined a root that a moment of
-  # waiting would have cleared; and `File.rm/1` and the parent sync inside the
-  # claim ran inline with no bound at all, so a ledger that never answers held
-  # the job for as long as it liked while the receipt already declared the bound
-  # its whole settlement received. The allowance is now carried into both: it is
-  # the claim's wait, and it is the hard stop on the work done under the claim.
+  # once outside it in both directions: it took a root claim of its own with a
+  # zero wait, so a peer holding the claim for one admission quarantined a root
+  # that a moment of waiting would have cleared, and the unlink and parent sync
+  # inside that claim ran inline with no bound at all, so a ledger that never
+  # answers held the job for as long as it liked while the receipt already
+  # declared the bound its whole settlement received. The claim is now taken once
+  # for the settlement and waited for out of the same allowance, and what remains
+  # of that allowance is the hard stop on the work done under it.
   #
   # An exhausted allowance is the same answer as a failed unlink, because it is
-  # the same fact -- this executor did not prove the entry gone. A worker killed
-  # at the bound while it held the claim leaves that claim behind, which is
-  # bounded unavailability the ADR already admits and which the quarantined
-  # receipt is exactly the warning about; reaping it would turn a timeout into
-  # permission.
+  # the same fact -- this executor did not prove the entry gone -- and the
+  # quarantined receipt is exactly the warning about it. A worker killed at the
+  # bound while the settlement holds the claim leaves that claim behind, which is
+  # bounded unavailability the ADR already admits; reaping it would turn a timeout
+  # into permission.
   #
-  # The second member of the answer is whether the workspace lease was still held
-  # when this phase ended. It is reported rather than kept because this phase is
-  # now the first of the settlement to wait on that lease, and a monitor delivers
-  # its `:DOWN` exactly once: the caller cannot re-observe here what this wait has
-  # already consumed.
+  # The workspace lease is not reported from here any more. Retention runs first
+  # again and is therefore the phase that waits on the `:DOWN`, so a lease lost
+  # before the receipt exists is already in the receipt this decides about; a
+  # lease lost after those bytes land is past the end of the lifetime ADR 0007
+  # names, and the removal it interrupts is answered as any other unfinished
+  # removal is.
+  #
+  # `open_authority_close` is the unlink itself rather than a direct call, for
+  # the reason the paired clock is a provider: the outer bound around the unlink
+  # and its parent sync is a claim about calls the filesystem offers no way to
+  # delay, so without a seam no case can prove the bound is there. It is a
+  # reversible edge seam, defaults to `Ledger.close_open/2`, and enters no job,
+  # ledger record, receipt, event, or public API.
   defp remove_open_authority(placement, job, lease) do
     bound = removal_bound()
 
     removal =
       bounded_work(
-        fn ->
-          Ledger.with_claim(
-            placement.ledger,
-            fn -> Ledger.close_open(placement.ledger, job.job_id) end,
-            bound
-          )
-        end,
+        fn -> placement.open_authority_close.(placement.ledger, job.job_id) end,
         bound,
         lease
       )
 
     case removal do
       {:done, result} ->
-        {result, :held}
-
-      {:abandoned, :workspace_lease_lost, _stopped, {:late, :ok}} ->
-        {:ok, :lost}
-
-      {:abandoned, :workspace_lease_lost, _stopped, _unfinished} ->
-        {{:error, {:ledger_unavailable, :workspace_lease_lost}}, :lost}
+        result
 
       {:abandoned, _cause, _stopped, {:late, :ok}} ->
-        {:ok, :held}
+        :ok
 
       {:stopped, reason} ->
-        {{:error, {:ledger_unavailable, {:open_authority_removal_stopped, reason}}}, :held}
+        {:error, {:ledger_unavailable, {:open_authority_removal_stopped, reason}}}
 
       {:abandoned, cause, _stopped, _unfinished} ->
-        {{:error, {:ledger_unavailable, cause}}, :held}
+        {:error, {:ledger_unavailable, cause}}
     end
   end
 
@@ -1340,21 +1429,38 @@ defmodule Loopex.Executor.Local do
   #
   # Technical depth: this is the reason `@retention_spill_share` exists for the
   # artifact phase, arriving at the phase after it. Handing the removal the whole
-  # remainder makes a held claim spend every millisecond the receipt still needed:
-  # the quarantined replacement would then be written against an allowance of
-  # zero and abandoned, and exactly the job whose durable record matters most --
-  # one whose root nothing has resolved -- would produce none. A share is not a
-  # number for the same reason the cooperative one is not: it cannot drift away
-  # from the declared period.
+  # remainder makes an unlink that never answers spend every millisecond the
+  # quarantined replacement still needs: that receipt would then be written
+  # against an allowance of zero and abandoned, and exactly the job whose durable
+  # record matters most -- one whose root nothing has resolved -- would produce
+  # none. A share is not a number for the same reason the cooperative one is not:
+  # it cannot drift away from the declared period.
   @removal_share 2
 
   defp removal_bound, do: div(retention_remaining(), @removal_share)
 
+  # Concept: waiting for the claim is a phase of the settlement too, and it may
+  # not spend what the phases after it need.
+  #
+  # Technical depth: the settlement takes one claim for both of its durable
+  # writes, and a peer holding that claim for its own admission is ordinary
+  # contention rather than unavailability -- refusing to wait at all would
+  # quarantine a root that a moment of waiting would have cleared. Waiting for the
+  # whole allowance is the opposite mistake: the claim would arrive with nothing
+  # left to write under it, and this settlement would have spent its receipt to
+  # buy a lock. Half is the share the removal then takes of what is left after it,
+  # and it is a share for the same reason.
+  @claim_share 2
+
+  defp claim_bound, do: div(retention_remaining(), @claim_share)
+
   # The quarantined form names no ledger reason. Which claim, path, or errno
   # refused is this executor's private root authority, and a receipt is one of
   # the planes ADR 0016 keeps it out of; what the reader needs is that this root
-  # holds work nothing has resolved. It is a pure transformation because it is
-  # applied before anything is published: there is no earlier receipt to replace.
+  # holds work nothing has resolved. It is a pure transformation because the
+  # bytes it replaces were never final: the open entry this settlement failed to
+  # remove is still there, so every reader answers `effect_settling` for them and
+  # none could have consumed them as a completion.
   defp quarantined_receipt(receipt) do
     %{
       receipt
@@ -1482,16 +1588,23 @@ defmodule Loopex.Executor.Local do
   # Technical depth: the wait polls because the operation belongs to another
   # process, possibly in another VM, and there is no message to wait on. It is
   # bounded by the job's own immutable wall deadline, and reaching that bound is
-  # an unresolved join rather than a verdict about the effect.
+  # an unresolved join rather than a verdict about the effect. The receipt is read
+  # the way every other terminal-plus-open decision reads one, so a join cannot
+  # return the confirmed form of a settlement that is still deciding whether to
+  # replace it with the quarantined one. Each poll takes the claim without
+  # waiting, because this loop already owns the waiting: a claim held by the
+  # settlement being joined, an entry still open, and a receipt not yet final are
+  # the same fact here, and all three mean poll again until the job's own deadline
+  # says otherwise.
   defp join_admitted_operation(state, job) do
     if System.system_time(:millisecond) >= job.effective_job_deadline do
       {:error, :effect_join_unresolved}
     else
-      case read_receipt(state.ledger_root, job.job_id) do
+      case final_receipt_under_claim(state.ledger, state.ledger_root, job.job_id, 0) do
         {:ok, receipt} ->
           {:ok, receipt}
 
-        :absent ->
+        unresolved when unresolved in @join_unresolved ->
           Process.sleep(@join_poll_ms)
           join_admitted_operation(state, job)
 
@@ -4292,6 +4405,49 @@ defmodule Loopex.Executor.Local do
       {:error, reason} ->
         {:error, {:receipt_directory_unavailable, reason}}
     end
+  end
+
+  # Concept: a receipt is this job's final answer only once the open authority it
+  # was written under is gone, so the two are read as one snapshot.
+  #
+  # Technical depth: ADR 0016 clause 7 requires every terminal-plus-open decision
+  # to read one complete bounded snapshot while mutation is excluded and to fix
+  # its answer before the claim is released, and this is that decision. The caller
+  # must already hold the root claim. A receipt whose entry is still on the root
+  # belongs to a settlement that has not finished disposing of that entry: those
+  # bytes may still be replaced by the quarantined form, so the answer is
+  # `effect_settling` -- unresolved, and deliberately never `:absent`, because
+  # `:absent` is what ends a recovered run `outcome_unknown` and would admit
+  # unrelated effects on a root whose effect never reached a durable terminal. An
+  # entry with no receipt is an effect still in flight on some instance. Only
+  # neither present is the one true absence, and only a receipt whose entry is
+  # gone is final.
+  defp final_receipt(ledger, root, job_id) do
+    case read_receipt(root, job_id) do
+      {:ok, receipt} ->
+        if Ledger.open?(ledger, job_id), do: {:error, :effect_settling}, else: {:ok, receipt}
+
+      :absent ->
+        if Ledger.open?(ledger, job_id), do: {:error, :effect_in_flight}, else: :absent
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Concept: a reader that does not already hold the claim takes it, and waits for
+  # it the way a reservation does.
+  #
+  # Technical depth: a claim this reader cannot take is bounded
+  # ledger-unavailability and never permission, exactly as clause 7 requires; the
+  # wait is the caller's own allowance rather than a fresh one. An empty job id
+  # names no state on this root and is answered without taking anything, because
+  # a directory creation is not free and a lookup with nothing to look up must not
+  # order itself against real admissions.
+  defp final_receipt_under_claim(_ledger, _root, "", _wait), do: :absent
+
+  defp final_receipt_under_claim(ledger, root, job_id, wait) do
+    Ledger.with_claim(ledger, fn -> final_receipt(ledger, root, job_id) end, wait)
   end
 
   defp read_receipt(_root, ""), do: :absent
