@@ -155,9 +155,9 @@ defmodule Loopex.Executor.Local do
                              "unproven.]"
 
   @open_authority_note "\n[loopex: this job's open authority could not be removed after its " <>
-                         "receipt was retained, so this executor's state root stays quarantined " <>
-                         "until an operator reconciles it and this job's cleanup is reported " <>
-                         "unconfirmed.]"
+                         "receipt was retained, so this executor's state root stays " <>
+                         "quarantined until an operator reconciles it, and this job's " <>
+                         "cleanup is reported unconfirmed.]"
 
   @lease_lost_note "\n[loopex: the workspace lease was lost before this job's receipt was " <>
                      "durably retained. Whether its effect landed in the workspace this job " <>
@@ -286,7 +286,10 @@ defmodule Loopex.Executor.Local do
           else: {:ok, :unconfirmed}
 
       {:starting, worker, default, probe, ledger} ->
-        cancel_starting_job(worker, committed_grace(ledger, job_id, default), probe)
+        cancel_starting_job(
+          worker,
+          cancellation_episode(committed_grace(ledger, job_id, default), probe)
+        )
 
       {:absent, ledger} ->
         absent_job_answer(ledger, job_id)
@@ -365,11 +368,25 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp cancel_starting_job(worker, grace, probe) do
+  # Concept: waiting out an admitted period is one wait spent in slices, not one
+  # timer the VM refuses to arm.
+  #
+  # Technical depth: ADR 0016 admits `1..2^64-1` and states that timer
+  # implementation limits do not silently cap it. A `receive ... after` above
+  # 2^32-1 raises `:timeout_value` instead of waiting, so the accepted maximum
+  # crashed whoever called `cancel/2` rather than bounding this wait. The wait is
+  # measured against the cancellation episode's one absolute instant in slices no
+  # larger than `@timer_slice_ms`, which changes how the wait is implemented and
+  # not how long it is. The episode is created by the caller so that both
+  # branches of one cancellation open exactly one instant between them.
+  defp cancel_starting_job(worker, {until, grace, probe}) do
     token = make_ref()
     monitor = Process.monitor(worker)
     send(worker, {:loopex_cancel_pending, token, self(), grace, probe})
+    await_cancel_result(worker, monitor, token, until)
+  end
 
+  defp await_cancel_result(worker, monitor, token, until) do
     receive do
       {:loopex_cancel_result, ^token, result} ->
         Process.demonitor(monitor, [:flush])
@@ -378,9 +395,13 @@ defmodule Loopex.Executor.Local do
       {:DOWN, ^monitor, :process, ^worker, _reason} ->
         {:ok, :unconfirmed}
     after
-      grace ->
-        Process.demonitor(monitor, [:flush])
-        {:ok, :unconfirmed}
+      min(cleanup_remaining(until), @timer_slice_ms) ->
+        if cleanup_remaining(until) == 0 do
+          Process.demonitor(monitor, [:flush])
+          {:ok, :unconfirmed}
+        else
+          await_cancel_result(worker, monitor, token, until)
+        end
     end
   end
 
@@ -3653,7 +3674,15 @@ defmodule Loopex.Executor.Local do
         {^port, {:exit_status, status}} ->
           {acc, status}
       after
-        remaining -> abandon_helper(port, os_pid)
+        # One allowance, spent in slices, refreshed by nothing -- the rule
+        # `await_bounded_work/6` follows and for the same reason. An admitted
+        # cleanup period spans the whole positive unsigned 64-bit range and this
+        # wait is derived from it, so an unsliced `after` raised `:timeout_value`
+        # and this function reported `:no_answer` for a program that had not been
+        # asked anything yet: every confirmation under a large period failed and
+        # the helper's own child was left running. The instant above is what the
+        # wait ends against; a slice only decides how often it is looked at.
+        min(remaining, @timer_slice_ms) -> collect_answer(port, os_pid, acc, stop)
       end
     end
   end
