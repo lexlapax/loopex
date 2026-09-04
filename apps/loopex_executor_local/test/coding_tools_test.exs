@@ -3001,6 +3001,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # only difference is the configured period, and it is visible twice: the
     # longer budget takes measurably longer, and neither takes longer than the
     # budget it was given.
+    #
+    # ADR 0016 makes the period a job spends the one its own request committed,
+    # so each run commits the period its executor was composed with, exactly as
+    # the shipped composition does. Leaving the request at the port default made
+    # both runs spend the same period and the comparison below hold only by
+    # jitter.
     root = workspace()
 
     {small_executor, small_lease} = executor_with_grace(root, 600)
@@ -3010,7 +3016,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       elapsed(fn ->
         run(root, "loopex.bash", %{"command" => stubborn_group_command()}, %{
           executor: small_executor,
-          lease_id: small_lease
+          lease_id: small_lease,
+          cleanup_grace_ms: 600
         })
       end)
 
@@ -3018,7 +3025,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       elapsed(fn ->
         run(root, "loopex.bash", %{"command" => stubborn_group_command()}, %{
           executor: large_executor,
-          lease_id: large_lease
+          lease_id: large_lease,
+          cleanup_grace_ms: 3_000
         })
       end)
 
@@ -3066,7 +3074,10 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     instants = Regex.scan(~r/cleanup_now_ms\(\) \+/, source)
 
-    assert length(instants) == 3,
+    # Four since ADR 0016's shared retention deadline: the job's cleanup episode,
+    # a cancellation's own episode, the cooperative share inside both, and the
+    # one retention allowance every phase of a settlement draws on.
+    assert length(instants) == 4,
            "the cleanup domain now opens #{length(instants)} instants against its own base; each " <>
              "one has to take that base, so a new one means this case needs to have been told " <>
              "about it"
@@ -3105,6 +3116,10 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # anything, and an operator would be told a process group in their workspace
     # was gone when this executor never established that.
     #
+    # ADR 0016 then made the committed request value the period a cancellation
+    # spends, and the executor start option the default for a request that names
+    # none, so each job here commits the period its executor was composed with.
+    #
     # The two halves are one configured period apart. A workable period signals
     # the group, the group goes, `ps` finds nothing and the answer is `:cleaned`.
     # A period of zero leaves nothing for the signal or for the `ps` that would
@@ -3126,7 +3141,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         run(root, "loopex.bash", %{"command" => command}, %{
           executor: executor,
           lease_id: lease_id,
-          job_id: job_id
+          job_id: job_id,
+          cleanup_grace_ms: 3_000
         })
       end)
 
@@ -3157,7 +3173,11 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         run(root, "loopex.bash", %{"command" => tight_command}, %{
           executor: tight,
           lease_id: tight_lease,
-          job_id: tight_job
+          job_id: tight_job,
+          # ADR 0016 makes the committed request value the period a cancellation
+          # spends, and the admitted domain starts at one, so the shortest
+          # period a job can commit is what stands in for the executor's zero.
+          cleanup_grace_ms: 1
         })
       end)
 
@@ -3207,7 +3227,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         run(root, "loopex.bash", %{"command" => blind_command}, %{
           executor: blind,
           lease_id: blind_lease,
-          job_id: blind_job
+          job_id: blind_job,
+          cleanup_grace_ms: 3_000
         })
       end)
 
@@ -3246,7 +3267,8 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
         run(root, "loopex.bash", %{"command" => stubborn_command}, %{
           executor: slow,
           lease_id: slow_lease,
-          job_id: stubborn_job
+          job_id: stubborn_job,
+          cleanup_grace_ms: 3_000
         })
       end)
 

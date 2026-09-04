@@ -270,9 +270,17 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     assert Path.dirname(generation_path) in synced_paths,
            "the generation parent was not synced after publication"
 
-    assert Enum.find_index(synced_paths, &(&1 == generation_path)) <
-             Enum.find_index(synced_paths, &(&1 == Path.dirname(generation_path))),
-           "the generation parent was synced before the generation bytes"
+    # The root is also synced into its own parent when it is created, so the
+    # first sync of this directory is no longer the publication's. What the
+    # ordering claim is about is unchanged: a sync of the parent that follows the
+    # generation bytes, so the entry naming them is never durable first.
+    published = Enum.find_index(synced_paths, &(&1 == generation_path))
+
+    assert Enum.find_index(
+             Enum.drop(synced_paths, published + 1),
+             &(&1 == Path.dirname(generation_path))
+           ),
+           "the generation parent was synced before the generation bytes and not after them"
 
     assert generation_record!(root)["executor_identity"] == @identity
   end
