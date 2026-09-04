@@ -298,6 +298,114 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :erlang.trace(control, false, [:all])
   end
 
+  # Concept: Control authorizes the attempt the journal committed, never the
+  # attempt the caller described.
+  #
+  # Technical depth: the binding check only compared a request against a binding
+  # already permitted at the same journal position, so the FIRST request at any
+  # position was compared with nothing and the caller's own map became the
+  # permitted identity. A request carrying a genuine runtime, owner,
+  # coordinator, live worker, unexpired deadline and the session's genuine
+  # current journal version -- but an invented run, turn, operation, attempt and
+  # digest -- was replied `{:ok, :dispatched}` and handed the permit, with no
+  # `model_attempt_opened_v1` row registering any of it. ADR 0018 requires that
+  # "every identity equals its registered state" before the spend, and the
+  # registered state is the committed attempt-open row at that position, so both
+  # arms below probe positions where no such row stands: a session that has
+  # never staged a model operation, and a settled session whose current row is
+  # its run terminal.
+  test "a first provider permit is refused unless a committed attempt-open row registers its binding" do
+    fixture = start(script: [%{text: "done", calls: []}])
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+
+    {:ok, fresh_session_id} =
+      Loopex.create_session(fixture.runtime, %{"tenant" => "t"}, command_id: "create-fabricated")
+
+    fresh_records = Fixture.records(fixture, fresh_session_id)
+    assert records_of_kind(fresh_records, "model_attempt_opened_v1") == []
+
+    assert refuse_fabricated_permit(fixture, control, fresh_session_id) ==
+             {:error, :invalid_provider_attempt_binding}
+
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "settle one run")
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+
+    [genuine] =
+      fixture
+      |> Fixture.records(session_id)
+      |> records_of_kind("model_attempt_opened_v1")
+      |> Enum.map(&Map.put(attempt_identity(&1), "session_id", session_id))
+
+    assert spent_attempt_bindings(control) == [genuine]
+
+    assert refuse_fabricated_permit(fixture, control, session_id) ==
+             {:error, :invalid_provider_attempt_binding}
+
+    assert spent_attempt_bindings(control) == [genuine]
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  # The exact probe: everything Control can check against its own registered
+  # state is genuine, and only the six-member binding is invented.
+  defp refuse_fabricated_permit(fixture, control, session_id) do
+    entry = control |> :sys.get_state() |> Map.fetch!(:sessions) |> Map.fetch!(session_id)
+    assert entry.status == :active
+
+    current =
+      fixture
+      |> Fixture.records(session_id)
+      |> Enum.find(&(&1.journal_version == entry.journal_version)) ||
+        flunk("the session's current journal position holds no retained row")
+
+    refute record_kind(current.payload) == "model_attempt_opened_v1"
+
+    fabricated = %{
+      "session_id" => session_id,
+      "run_id" => "run_" <> String.duplicate("f", 32),
+      "turn_id" => "turn_" <> String.duplicate("f", 32),
+      "operation_id" => "model-operation_" <> String.duplicate("f", 40),
+      "attempt" => 1,
+      "staged_request_digest" => String.duplicate("a", 64)
+    }
+
+    assert ProviderAttempt.validate_binding(fabricated) == :ok
+
+    observer = self()
+
+    worker =
+      spawn(fn ->
+        receive do
+          message -> send(observer, {:fabricated_permit_received, self(), message})
+        after
+          5_000 -> :ok
+        end
+      end)
+
+    authority = %{
+      runtime_id: fixture.runtime_id,
+      owner: entry.owner,
+      coordinator: entry.coordinator,
+      worker: worker,
+      permit_reference: make_ref(),
+      journal_version: entry.journal_version,
+      deadline: System.system_time(:millisecond) + 60_000
+    }
+
+    reply_alias = :erlang.alias([:reply])
+
+    send(
+      control,
+      {:"$gen_call", {entry.coordinator, [:alias | reply_alias]},
+       {:provider_dispatch, fabricated, authority}}
+    )
+
+    assert_receive {[:alias | ^reply_alias], reply}, 5_000
+    refute_receive {:fabricated_permit_received, ^worker, _message}, 100
+    refute Map.has_key?(control |> :sys.get_state() |> Map.fetch!(:spent_attempts), fabricated)
+
+    reply
+  end
+
   test "a crash after a page-size-one request row recovers its consecutive open without dispatching either page" do
     fixture =
       start(
@@ -3158,6 +3266,72 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              ProviderAttempt.canonical_reply(adapter_reply(request, [call]), request)
 
     assert projected["tool_calls"] == [call]
+  end
+
+  # Concept: the byte and depth ceilings decide an adapter answer before it is
+  # read, exactly as the cardinality ceiling already did.
+  #
+  # Technical depth: cardinality was applied to the raw collections, but bytes
+  # and depth were not applied until `attempt_result/3` measured the settlement,
+  # which is after `canonical_reply/2` has normalised keys, projected identity
+  # and usage, and walked and rebuilt every tool call. So an answer carrying the
+  # full 1,024 admitted tool calls with a megabyte of argument text each, or an
+  # arguments map nested ten thousand levels deep, was projected in full and
+  # only then failed to fit -- both of them answers no durable item could ever
+  # hold, decided by ADR 0017's own 65,536-byte and depth-12 ceilings. M2's
+  # row-one obligation fixes the opposite order: the raw candidate satisfies
+  # plain-data, depth, item and byte ceilings first, and only then is projected.
+  # Each arm asserts the refusal comes from the projection's own entry point,
+  # under a generous wall clock and without bulk allocation, so a fix that
+  # merely moved the measurement later would fail here.
+  test "an adapter reply above the item byte or depth ceiling is refused before it is projected" do
+    request = %{
+      canonical_request_bytes: "canonical-request-bytes",
+      staged_request_digest: String.duplicate("d", 64)
+    }
+
+    megabyte = String.duplicate("x", 1024 * 1024)
+
+    wide =
+      adapter_reply(
+        request,
+        List.duplicate(
+          %{"id" => "call-1", "name" => "tool", "arguments" => %{"text" => megabyte}},
+          @record_cardinality_limit
+        )
+      )
+
+    deep_arguments =
+      Enum.reduce(1..10_000, %{"leaf" => 1}, fn _level, nested -> %{"nested" => nested} end)
+
+    deep =
+      adapter_reply(request, [
+        %{"id" => "call-1", "name" => "tool", "arguments" => deep_arguments}
+      ])
+
+    for {name, raw} <- [{"byte", wide}, {"depth", deep}] do
+      :erlang.garbage_collect()
+      {:memory, before} = Process.info(self(), :memory)
+      {elapsed, result} = :timer.tc(fn -> ProviderAttempt.canonical_reply(raw, request) end)
+      {:memory, after_admission} = Process.info(self(), :memory)
+
+      assert result == {:error, :unreadable_model_answer},
+             "the #{name} ceiling did not refuse the raw reply"
+
+      assert elapsed < 2_000_000, "the #{name} refusal took #{elapsed} microseconds"
+
+      assert after_admission - before < 4 * 1024 * 1024,
+             "the #{name} refusal allocated as if it had projected the reply"
+    end
+
+    ordinary = %{"id" => "call-1", "name" => "tool", "arguments" => %{"path" => "README.md"}}
+
+    assert {:ok, projected} =
+             ProviderAttempt.canonical_reply(adapter_reply(request, [ordinary]), request)
+
+    assert projected["tool_calls"] == [ordinary]
+    assert projected["staged_request_digest"] == request.staged_request_digest
+    refute Map.has_key?(projected, "canonical_request_bytes")
   end
 
   # Concept: a settlement is valid when it is one of the combinations ADR 0018
