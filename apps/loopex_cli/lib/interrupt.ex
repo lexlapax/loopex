@@ -129,51 +129,91 @@ defmodule LoopexCli.Interrupt do
   ## Technical depth
 
   ADR 0016 makes installation and the prepared handoff one serialized step, and
-  this is that step: the handler is installed carrying the activation, so there
-  is no instant in which a signal reaches a handler that does not know a
-  prepared owner is waiting. What the handler does with it is refuse it. On a
-  signal it submits the ordinary public abort, and an admitted abort is what
-  permanently invalidates activation, so recovered work cannot start behind the
-  operator's back.
+  this is that step. The handler is installed carrying the activation first, so
+  there is no instant in which a signal reaches a handler that does not know a
+  prepared owner is waiting; the capability is then handed to the process that
+  owns the handler — the signal server itself — and the owner's `:ok` is the
+  acknowledgement that completes the handoff.
 
-  The capability itself stays where preparation put it, with the process that
-  prepared the owner, because only that process may spend or abandon it. That is
-  what makes a preparer which died before this step unable to leave an
-  activatable owner behind, and it is also this implementation's exact
-  divergence from ADR 0016's wording: the handoff transfers the responsibility
-  for giving the capability up, not the authority to spend it.
+  Holding it there is what makes the two decisions one. A signal's abort is
+  submitted from that process and an activation is answered by that process, so
+  the command's decision to continue and the operator's decision to stop are
+  taken in one place instead of raced between two. A preparer that dies before
+  the acknowledgement leaves a capability no live process can present, exactly
+  as ADR 0016 requires; one that dies after it leaves the handler still able to
+  activate, abandon, or abort.
+
+  A handoff the owner refuses — most often because a signal beat it and the
+  abort already fenced the capability — leaves the activation installed rather
+  than removing it. The refusal that matters is the owner's, and presenting the
+  capability from here afterwards returns it by name, which is more truthful
+  than this module reporting that nothing was ever installed.
   """
   @spec install_prepared(Loopex.Attachment.t(), pos_integer(), term()) :: :ok
-  def install_prepared(attachment, cleanup_grace_ms, activation),
-    do: do_install(attachment, backstop_ms(cleanup_grace_ms), activation)
+  def install_prepared(attachment, cleanup_grace_ms, activation) do
+    :ok = do_install(attachment, backstop_ms(cleanup_grace_ms), activation)
+    _ = hand_over(activation)
+    :ok
+  end
+
+  # Concept: the handler's own process takes the capability.
+  #
+  # Technical depth: `:gen_event` runs every handler inside its manager, so the
+  # manager is the process that will present the capability later and therefore
+  # the process the owner must record as the holder. The transfer is asked for
+  # from here, the caller's own process, because the owner admits it only from
+  # the current holder — which, until this call returns, is this one.
+  defp hand_over(activation) do
+    case Process.whereis(:erl_signal_server) do
+      manager when is_pid(manager) -> Loopex.transfer_resume(activation, manager)
+      nil -> {:error, :prepared_activation_not_installed}
+    end
+  end
 
   @doc """
   ## Concept
 
-  Gives up the prepared owner's capability from the terminal that holds it, and
-  forgets it here, so nothing this handler does later re-presents something the
-  operator has already given up.
+  Starts the prepared owner's recovered work, from the process that holds the
+  capability, so an interrupt arriving at the same moment cannot start it twice
+  or start it behind an abort.
 
   ## Technical depth
 
-  The handler is asked first, and it answers only for the exact activation
-  installed with it, so this entry cannot be used to give up a capability that
-  never crossed this boundary. The abandonment itself then runs in the caller's
-  own process, which is the holder: `Loopex` admits abandonment only from the
-  process that prepared the owner, so routing it through the signal server would
-  present the wrong process and be refused — and would block signal delivery on
-  a session call while doing it.
-  """
-  @spec abandon_resume(Loopex.Attachment.t(), term()) :: :ok | {:error, term()}
-  def abandon_resume(_attachment, activation) do
-    case forget_prepared(activation) do
-      :ok -> Loopex.abandon_resume(activation)
-      {:error, reason} -> {:error, reason}
-    end
-  end
+  The activation is presented by the handler's own manager, which the handoff
+  made the holder, and the handler answers only for the exact activation
+  installed with it, so this entry cannot spend a capability that never crossed
+  this boundary. The manager blocks for the length of the owner's answer, and
+  that is the point: a signal delivered while the answer is outstanding is
+  queued rather than interleaved, so this command never both starts the work and
+  reports that it did not.
 
-  defp forget_prepared(activation) do
-    :gen_event.call(:erl_signal_server, __MODULE__, {:forget_prepared, activation})
+  The capability is forgotten here once presented, whatever the owner answered.
+  It is one-use, so a second presentation could only be refused; forgetting it
+  keeps this handler from re-presenting on the operator's behalf something the
+  owner has already settled.
+  """
+  @spec activate_prepared(term()) :: {:ok, binary()} | {:error, term()}
+  def activate_prepared(activation), do: call_handler({:activate_prepared, activation})
+
+  @doc """
+  ## Concept
+
+  Gives up the prepared owner's capability from the process that holds it, so
+  nothing this handler does later re-presents something the operator has already
+  given up.
+
+  ## Technical depth
+
+  Abandonment travels the same route as activation and for the same reason: the
+  handoff made the manager the holder, so the manager is the only process whose
+  abandonment the owner admits. The handler answers only for the exact
+  activation installed with it, and forgets it once presented.
+  """
+  @spec abandon_prepared(term()) :: :ok | {:error, term()}
+  def abandon_prepared(activation), do: call_handler({:abandon_prepared, activation})
+
+  defp call_handler(request) do
+    :gen_event.call(:erl_signal_server, __MODULE__, request)
   catch
     :exit, _no_handler -> {:error, :prepared_activation_not_installed}
   end
@@ -298,11 +338,30 @@ defmodule LoopexCli.Interrupt do
 
   def handle_event(_other, state), do: {:ok, state}
 
+  # Concept: the two decisions about paused work are taken here, in the process
+  # that holds the capability, one at a time.
+  #
+  # Technical depth: this callback runs inside the signal server, and both calls
+  # block it for the length of a session call. That is deliberate here and the
+  # opposite of the choice `handle_event/2` makes: an abort submission is spawned
+  # away precisely so a later signal is still delivered, while these two must not
+  # interleave with anything, because a capability that could be spent while it
+  # was being given up is not a one-use capability. The owner's own state machine
+  # supplies the answer -- spent, abandoned, fenced, or not this holder's to
+  # present -- and it is returned by name.
   @impl :gen_event
-  def handle_call({:forget_prepared, activation}, %{activation: activation} = state),
-    do: {:ok, :ok, %{state | activation: nil}}
+  def handle_call({:activate_prepared, activation}, %{activation: activation} = state)
+      when not is_nil(activation),
+      do: {:ok, Loopex.activate_resume(activation), %{state | activation: nil}}
 
-  def handle_call({:forget_prepared, _other}, state),
+  def handle_call({:activate_prepared, _other}, state),
+    do: {:ok, {:error, :prepared_activation_not_installed}, state}
+
+  def handle_call({:abandon_prepared, activation}, %{activation: activation} = state)
+      when not is_nil(activation),
+      do: {:ok, Loopex.abandon_resume(activation), %{state | activation: nil}}
+
+  def handle_call({:abandon_prepared, _other}, state),
     do: {:ok, {:error, :prepared_activation_not_installed}, state}
 
   def handle_call(_request, state), do: {:ok, :ok, state}

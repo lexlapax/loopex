@@ -463,19 +463,26 @@ defmodule LoopexCli do
   # this command resumes is ever running while no handler owns stopping it.
   #
   # Technical depth: `resume` installs the interrupt handler first, carrying the
-  # prepared activation, and spends the activation only after that -- ADR 0016's
-  # serialized handoff. The order used to be the other way around, and the
-  # interval between them was the one moment where recovered work was live and
-  # the emulator's own `SIGTERM` handler was still installed: a signal landing
-  # there stopped the operating-system process where it stood, with the run it
-  # had just restarted continuing to no terminal and no abort submitted. Now a
-  # signal that lands first reaches this command's handler, which submits the
-  # ordinary public abort; an admitted abort permanently invalidates the
-  # activation, so the work never starts and `activate/1` reports the refusal
-  # rather than the terminal claiming a run it does not own. The backstop costs
-  # nothing until a signal arrives, so installing earlier changes only which
-  # handler is holding when one does. The handler is sized by the period this
-  # session committed rather than by a number the command invented.
+  # prepared activation, and the handler's own process takes the capability in
+  # the same step -- ADR 0016's serialized handoff. The order used to be the
+  # other way around, and the interval between them was the one moment where
+  # recovered work was live and the emulator's own `SIGTERM` handler was still
+  # installed: a signal landing there stopped the operating-system process where
+  # it stood, with the run it had just restarted continuing to no terminal and no
+  # abort submitted. Now a signal that lands first reaches this command's
+  # handler, which submits the ordinary public abort; an admitted abort
+  # permanently invalidates the activation, so the work never starts and
+  # `activate/1` reports the refusal rather than the terminal claiming a run it
+  # does not own. The backstop costs nothing until a signal arrives, so
+  # installing earlier changes only which handler is holding when one does. The
+  # handler is sized by the period this session committed rather than by a number
+  # the command invented.
+  #
+  # Activation is then asked of that handler rather than of the owner directly,
+  # because the handler's process is now the capability's holder. Both decisions
+  # about the paused work -- this command's to continue it and a signal's to stop
+  # it -- are therefore taken one at a time in one process, and this command can
+  # no longer be told its activation failed while the work it activated starts.
   #
   # `cancel` spends nothing: it admits the ordinary public abort while the
   # recovered work is still paused, which is what keeps a reconciling command
@@ -502,7 +509,7 @@ defmodule LoopexCli do
   end
 
   defp activate(nil), do: {:ok, :replayed}
-  defp activate(activation), do: facade(Loopex, :activate_resume, [activation])
+  defp activate(activation), do: facade(Interrupt, :activate_prepared, [activation])
 
   defp give_up(nil), do: :ok
   defp give_up(activation), do: facade(Loopex, :abandon_resume, [activation])
