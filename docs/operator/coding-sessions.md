@@ -389,15 +389,17 @@ loopex: `loopex resume` continues reading from the durable record
 ### Interrupt Handling in Detail
 
 `install/1` in `LoopexCli.Interrupt` is the compatibility entry. Production
-uses `install(attachment, cleanup_ms)` for an ordinary active run, including a
-resumed one, which it installs after the recovered work is activated.
-`install_prepared(attachment, cleanup_ms, activation)` exists for recovered
-work that must remain paused until the interrupt owner decides whether to
-activate it, and `abandon_resume(attachment, activation)` consumes that exact
-prepared pair without scheduling recovered work; the shipped `resume` command
-does not yet route through that prepared installation, so a signal in the
-interval between activation and the ordinary installation is handled by the
-runtime's default handler rather than by the command's. Installation sets `SIGTERM`, `SIGHUP`, and
+uses `install(attachment, cleanup_ms)` for an ordinary active run, and
+`install_prepared(attachment, cleanup_ms, activation)` for recovered work that
+must remain paused until the interrupt owner decides whether to activate it.
+`loopex resume` uses the prepared entry: it installs the handler carrying the
+activation and spends the activation only afterwards, so there is no interval in
+which recovered work is running and the runtime's default handler is still the
+one installed. A signal arriving before the activation is spent submits the
+ordinary abort, which permanently invalidates that activation, and the command
+reports the refusal rather than continuing a run it no longer owns.
+`abandon_resume(attachment, activation)` consumes the same prepared pair without
+scheduling recovered work. Installation sets `SIGTERM`, `SIGHUP`, and
 `SIGQUIT` to `handle`, removes the runtime's own `:erl_signal_handler`, and
 installs the command's handler on `:erl_signal_server`.
 

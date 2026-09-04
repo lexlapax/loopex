@@ -203,10 +203,13 @@ coordinator that has died refuses through its own exit.
 installs an interrupt owner that holds the activation, and
 `LoopexCli.Interrupt.abandon_resume(attachment, activation)` consumes the same
 pair without scheduling recovered work; a durable abort admitted first defeats
-later activation. The shipped `resume` command activates recovered work and
-then installs the ordinary handler rather than routing through that prepared
-installation, so the paused-until-decided path is available to an embedder but
-is not what the command exercises today.
+later activation. The shipped `resume` command routes through that prepared
+installation: the handler is installed carrying the activation and the
+activation is spent only afterwards, so recovered work is never running while
+the runtime's default signal handler is still the one installed. Handler
+installation alone never schedules recovered work, so a signal that arrives
+first ends the session through the ordinary abort and the command reports the
+refused activation.
 
 ### Reference Composition
 

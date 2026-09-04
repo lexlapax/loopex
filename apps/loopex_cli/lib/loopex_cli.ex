@@ -453,23 +453,35 @@ defmodule LoopexCli do
     end
   end
 
-  # Concept: continuing starts the paused work; reconciling never does.
+  # Concept: continuing starts the paused work; reconciling never does. Nothing
+  # this command resumes is ever running while no handler owns stopping it.
   #
-  # Technical depth: `resume` spends the activation and only then installs the
-  # interrupt handler, sized by the period this session committed rather than by
-  # a number the command invented. `cancel` spends nothing: it admits the
-  # ordinary public abort while the recovered work is still paused, which is what
-  # keeps a reconciling command from starting the very run it was asked to end.
-  # A session with no active run has nothing to abort, so `cancel` reports its
-  # settled history instead of refusing over an abort the session cannot accept.
+  # Technical depth: `resume` installs the interrupt handler first, carrying the
+  # prepared activation, and spends the activation only after that -- ADR 0016's
+  # serialized handoff. The order used to be the other way around, and the
+  # interval between them was the one moment where recovered work was live and
+  # the emulator's own `SIGTERM` handler was still installed: a signal landing
+  # there stopped the operating-system process where it stood, with the run it
+  # had just restarted continuing to no terminal and no abort submitted. Now a
+  # signal that lands first reaches this command's handler, which submits the
+  # ordinary public abort; an admitted abort permanently invalidates the
+  # activation, so the work never starts and `activate/1` reports the refusal
+  # rather than the terminal claiming a run it does not own. The backstop costs
+  # nothing until a signal arrives, so installing earlier changes only which
+  # handler is holding when one does. The handler is sized by the period this
+  # session committed rather than by a number the command invented.
+  #
+  # `cancel` spends nothing: it admits the ordinary public abort while the
+  # recovered work is still paused, which is what keeps a reconciling command
+  # from starting the very run it was asked to end. A session with no active run
+  # has nothing to abort, so `cancel` reports its settled history instead of
+  # refusing over an abort the session cannot accept.
   defp continue_attached(:resume, attachment, status, activation) do
-    case activate(activation) do
-      {:ok, _session_id} ->
-        Interrupt.install(attachment, Map.fetch!(status, :cleanup_grace_ms))
-        Render.stream(attachment)
+    Interrupt.install_prepared(attachment, Map.fetch!(status, :cleanup_grace_ms), activation)
 
-      {:error, reason} ->
-        {:error, reason}
+    case activate(activation) do
+      {:ok, _session_id} -> Render.stream(attachment)
+      {:error, reason} -> {:error, reason}
     end
   end
 
