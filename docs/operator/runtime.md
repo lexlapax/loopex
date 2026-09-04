@@ -119,19 +119,24 @@ corresponding durable fact.
 
 After a normal stop or an ungraceful VM or OS-process death:
 
-1. Establish that the prior runtime process tree is gone. Do not attempt
-   concurrent recovery.
-2. Reopen the local Store with `recover_stale_writer: true`. That option removes
-   the deliberate stale writer marker; it is safe only under the single-active
-   placement rule above.
-3. Start a replacement runtime with the same `runtime_id`, Store namespace,
+1. Reopen the local Store with `recover_stale_writer: true`. The option is a
+   request, not a removal. The store reads the marker the previous holder wrote
+   (`loopex_store_writer_v2`, carrying that process's operating-system pid and
+   start identity) and asks the operating system whether that process is still
+   alive: a live holder is refused as `store_writer_active` no matter who asks,
+   a holder that is gone or whose identity no longer matches its pid is
+   recovered, and a marker carrying no identity, including one written by an
+   earlier version, is never recovered automatically and must be removed by
+   hand once its writer is known dead. Concurrent recovery is refused rather
+   than attempted.
+2. Start a replacement runtime with the same `runtime_id`, Store namespace,
    workspace, executor identity, receipt ledger, and tool contract.
-4. Resume the session under a fresh command identity. Resume commits a new owner
+3. Resume the session under a fresh command identity. Resume commits a new owner
    epoch before accepting commands or consequences.
-5. If the session reports an effect awaiting recovery, request the current
+4. If the session reports an effect awaiting recovery, request the current
    reconciliation query. Look up the exact job receipt in the executor ledger
    and answer that query with the retained receipt.
-6. If no provable receipt exists, answer `outcome_unknown`. Never redispatch the
+5. If no provable receipt exists, answer `outcome_unknown`. Never redispatch the
    old effect merely because its result is missing. `outcome_unknown` is durable
    and terminal for that run.
 

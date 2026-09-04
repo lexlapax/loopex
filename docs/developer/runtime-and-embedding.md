@@ -193,23 +193,30 @@ Recovery that may race an operator interrupt is deliberately two phase.
 `prepare_resume_session/3` and `prepare_resume_known_session/4` return either a
 replayed result or an opaque one-use activation capability while ordinary work
 remains paused. The caller then invokes `activate_resume/1` or
-`abandon_resume/1`. Both wait for the coordinator's answer rather than expiring
+`abandon_resume/1`, or hands the capability to another process with
+`transfer_resume/2`, which only the current holder may do and which the
+coordinator acknowledges before answering. All three wait for the coordinator's
+answer rather than expiring
 on a bound: the message carrying either call is not withdrawn when its caller
 stops waiting, so an expired call would report the session unavailable while the
 coordinator went on to spend the very activation the caller was told it had not
 got. Neither proposes a Store mutation, so waiting commits nothing, and a
 coordinator that has died refuses through its own exit.
 `LoopexCli.Interrupt.install_prepared(attachment, cleanup_ms, activation)`
-installs an interrupt owner that holds the activation, and
-`LoopexCli.Interrupt.abandon_resume(attachment, activation)` consumes the same
-pair without scheduling recovered work; a durable abort admitted first defeats
-later activation. The shipped `resume` command routes through that prepared
-installation: the handler is installed carrying the activation and the
-activation is spent only afterwards, so recovered work is never running while
-the runtime's default signal handler is still the one installed. Handler
-installation alone never schedules recovered work, so a signal that arrives
-first ends the session through the ordinary abort and the command reports the
-refused activation.
+installs an interrupt owner and, in the same step, makes that handler's own
+process the capability's acknowledged holder.
+`LoopexCli.Interrupt.activate_prepared(activation)` and
+`LoopexCli.Interrupt.abandon_prepared(activation)` are how the capability is
+spent or given up from then on: both are answered by the handler's process, so
+a signal's abort and the command's activation cannot interleave. A preparer
+that dies after the acknowledgement leaves the handler able to activate,
+abandon, or abort; one that dies before it leaves a capability no live process
+can present. A durable abort admitted first defeats later activation. The
+shipped `resume` command routes through that prepared installation: the
+handler is installed carrying the activation, the capability is handed to it,
+and the command then asks the handler to start the work, so recovered work is
+never running while the runtime's default signal handler is still the one
+installed and no two processes can each decide the paused work's fate.
 
 ### Reference Composition
 
@@ -265,9 +272,16 @@ no second composition to give evidence for its abstraction.
 
 ### Recovery
 
-After the original process tree is known stopped or dead, the host reopens the
-local Store with `recover_stale_writer: true`, starts a replacement runtime with
-the same placement identity, and calls `Loopex.resume_session/3`. The new coordinator
+The host reopens the local Store with `recover_stale_writer: true`, which the
+store honours only after asking the operating system whether the marker's
+recorded holder is still alive. The marker (`loopex_store_writer_v2`) carries
+the holder's operating-system pid, its start identity as `/bin/ps` reports it,
+its BEAM pid, and a nonce: a live holder is refused as `store_writer_active`
+whoever asks, a holder that is gone or whose start identity no longer matches
+its pid is recovered, and a marker carrying no identity, such as one written by
+an earlier version, is never recovered automatically. The host then starts a
+replacement runtime with the same placement identity and calls
+`Loopex.resume_session/3`. The new coordinator
 discovers unresolved succession state, resolves the exact prior transaction,
 reads the non-authorizing ownership head, and commits a fresh owner succession
 before routing commands.

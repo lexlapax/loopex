@@ -73,7 +73,7 @@ so nothing has welded two surfaces together by shipping them in one artifact.
 `next_event/1`, `snapshot/1`, `attachment_status/1`, `progress/2`,
 `diagnostic/2`, `session_status/2`, `reconciliation_query/1`, `reconcile/2`,
 `prepare_resume_session/3`, `prepare_resume_known_session/4`,
-`activate_resume/1`, `abandon_resume/1`, `state_root/0`,
+`activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `state_root/0`,
 `runtime_placement_id/1`, `track_session/3`, `list_sessions/1`, and `version/0`.
 Prepared resume entries return an opaque one-use activation capability; neither
 preparation nor handler installation schedules recovered work. `activate_resume/1`
@@ -319,10 +319,13 @@ remaining word as data, which is what makes an artifact locator beginning with
 value to 8,192; prepared `resume` and `cancel` recover an active run's committed
 value on omission and refuse an explicit conflict before activation or abort.
 The command's cross-application interrupt entries are `install/1`,
-`install/2`, `install_prepared(attachment, cleanup_ms, activation)`, and
-`abandon_resume(attachment, activation)`. Prepared installation binds the
-handler to the attachment and the exact one-use capability; abandonment consumes
-that same pair without scheduling recovered work.
+`install/2`, `install_prepared(attachment, cleanup_ms, activation)`,
+`activate_prepared(activation)`, and `abandon_prepared(activation)`. Prepared
+installation binds the handler to the attachment and the exact one-use
+capability and makes the handler's own process that capability's acknowledged
+holder; activation and abandonment are both answered by that process, and
+abandonment schedules no recovered work. `abandon_resume(attachment, activation)`
+was removed with that change.
 An unrecognised flag is refused rather than
 ignored, which means adding a flag is observable and removing one is breaking.
 `loopex artifact` reads objects through the `Loopex.ArtifactStore` port, so the

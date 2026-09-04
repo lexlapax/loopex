@@ -222,11 +222,15 @@ What is held back is fixed once, at preparation, rather than recomputed, so a
 prompt admitted after you decided is not silenced by a decision that predates it.
 
 **Activation is a one-use capability.** It is runtime-local, non-serializable,
-and usable only by the process that asked for the preparation; it never enters a
-record, an event, a snapshot, a progress item, or a diagnostic. It has four
-states — prepared, spent, abandoned, fenced — and only *spent* schedules
-anything. `resume` spends it, then installs the interrupt handler sized by the
-period this session committed. `cancel` never spends it: it admits the abort
+and usable only by its current holder; it never enters a record, an event, a
+snapshot, a progress item, or a diagnostic. The holder is the process that asked
+for the preparation until it hands the capability on, which `resume` does as
+part of installing its interrupt handler: from then on the handler's own
+process holds it, and a preparer that dies afterwards takes nothing with it. It
+has four states — prepared, spent, abandoned, fenced — and only *spent*
+schedules anything. `resume` installs the interrupt handler sized by the period
+this session committed, hands the capability to it, and asks it to spend it.
+`cancel` never spends it: it admits the abort
 while the work is still held. An abort fences the capability *before* its store
 transaction, so even an abort whose commit is unknown permanently blocks
 activation. Abandoning is idempotent; activating is not.
