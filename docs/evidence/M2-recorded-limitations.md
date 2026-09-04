@@ -779,7 +779,10 @@ a child that outlives the first.
 **Disposition.** Maintainer, 2026-09-03: repair the three defects on `main` as a
 hotfix ahead of the successor milestone, as a recorded override of the
 plan-first rule, because each defect denies an operator a shipped workflow.
-Each repair carries its own test, and the successor milestone inherits the
-obligation to lock those tests in its gate. Nineteenth recorded override. The
-review's remaining product findings are carried to the successor unchanged.
+Later the same day the maintainer widened the override to every product
+finding the review rated high, thirteen in all, ruling that none is postponed
+to a successor: each is verified against the code first, a finding that does
+not hold is refuted with the code path rather than patched, and each confirmed
+one carries its own red-then-green test. The successor milestone inherits the
+obligation to lock those tests in its gate. Nineteenth recorded override.
 
