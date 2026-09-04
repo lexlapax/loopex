@@ -404,8 +404,12 @@ defmodule Loopex.Runtime.ProviderAttempt do
       overflowing?(input) or overflowing?(output) ->
         unreported("uint64_overflow")
 
-      uint64?(input) and uint64?(output) ->
-        %{"status" => "reported", "input_tokens" => input, "output_tokens" => output}
+      reported?(input) and reported?(output) ->
+        %{
+          "status" => "reported",
+          "input_tokens" => supplied(input),
+          "output_tokens" => supplied(output)
+        }
 
       present?(input) != present?(output) and readable_member?(input) and
           readable_member?(output) ->
@@ -905,13 +909,25 @@ defmodule Loopex.Runtime.ProviderAttempt do
     end)
   end
 
+  # Concept: "this member was never sent" is a different answer from "this
+  # member says `:absent`", and only one of them is the adapter's to give.
+  #
+  # Technical depth: a bare atom marker is a term an adapter can supply. While
+  # `:absent` meant missing, `%{"input_tokens" => :absent, "output_tokens" => 10}`
+  # read as a reply that stated no input count, so an unreadable pair was
+  # classified `partial` rather than `malformed` -- a true category replaced by a
+  # false one on the record the operator reads. The Store admission in
+  # `admitted_raw_reply/1` cannot catch it either, because `usage` is
+  # deliberately outside that walk. Wrapping every supplied term instead makes
+  # the two cases structurally different: no map member can be `:absent`, because
+  # every supplied term arrives inside `{:present, term}`.
   defp usage_member(usage, name) do
     cond do
       Map.has_key?(usage, name) ->
-        Map.fetch!(usage, name)
+        {:present, Map.fetch!(usage, name)}
 
       Map.has_key?(usage, String.to_existing_atom(name)) ->
-        Map.fetch!(usage, String.to_existing_atom(name))
+        {:present, Map.fetch!(usage, String.to_existing_atom(name))}
 
       true ->
         :absent
@@ -920,13 +936,19 @@ defmodule Loopex.Runtime.ProviderAttempt do
     ArgumentError -> :absent
   end
 
+  defp supplied({:present, value}), do: value
+
   defp present?(:absent), do: false
-  defp present?(_value), do: true
+  defp present?({:present, _value}), do: true
+
+  defp reported?(:absent), do: false
+  defp reported?({:present, value}), do: uint64?(value)
 
   defp readable_member?(:absent), do: true
-  defp readable_member?(value), do: uint64?(value)
+  defp readable_member?({:present, value}), do: uint64?(value)
 
-  defp overflowing?(value), do: is_integer(value) and value > @uint64_max
+  defp overflowing?(:absent), do: false
+  defp overflowing?({:present, value}), do: is_integer(value) and value > @uint64_max
 
   defp unreported(category), do: %{"status" => "unreported", "category" => category}
 
