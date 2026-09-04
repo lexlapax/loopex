@@ -266,22 +266,22 @@ defmodule Loopex.Executor.Local do
   @spec cancel(t(), binary()) :: {:ok, :cleaned} | {:ok, :unconfirmed}
   def cancel(executor, job_id) when is_pid(executor) and is_binary(job_id) do
     case lookup_inflight(executor, job_id) do
-      {:ok, group, grace, probe, _ledger} ->
+      {:ok, group, default, probe, ledger} ->
         # The cancellation is its own cleanup episode, so its one absolute
         # instant opens here rather than being inherited from a job whose own
         # deadline may be minutes away. It takes the whole period rather than the
         # period less the receipt's share, because a cancellation writes no
         # receipt: it answers its caller and the job's own path retains the
         # record.
-        episode = cancellation_episode(grace, probe)
+        episode = cancellation_episode(committed_grace(ledger, job_id, default), probe)
         terminate_group(group, episode)
 
         if confirm_group_terminated(group, episode),
           do: {:ok, :cleaned},
           else: {:ok, :unconfirmed}
 
-      {:starting, worker, grace, probe, _ledger} ->
-        cancel_starting_job(worker, grace, probe)
+      {:starting, worker, default, probe, ledger} ->
+        cancel_starting_job(worker, committed_grace(ledger, job_id, default), probe)
 
       {:absent, ledger} ->
         absent_job_answer(ledger, job_id)
@@ -304,6 +304,23 @@ defmodule Loopex.Executor.Local do
   # `unconfirmed`; only a readable root with no open entry for this identity is
   # clean, because an entry is removed only for a matching durable refusal or a
   # receipt whose captured-group cleanup was confirmed.
+  # Concept: the period a cancellation spends is the period the cancelled job
+  # committed, not the period this executor happened to be started with.
+  #
+  # Technical depth: ADR 0016 makes the committed value the one Local uses for
+  # the job being cancelled, and the open-authority entry is where that value is
+  # durably recorded for exactly this job -- which is also what lets an instance
+  # spend the right period for a job another instance admitted. The start default
+  # stands only where no committed value can be read: a root that is unavailable
+  # or holds no entry for this identity. That is a fallback for an unreadable
+  # root rather than a second source of truth.
+  defp committed_grace(ledger, job_id, default) do
+    case open_authority(ledger, job_id) do
+      {:ok, %{"cleanup_grace_ms" => grace}} -> grace
+      _no_committed_value -> default
+    end
+  end
+
   defp absent_job_answer(ledger, job_id) do
     case open_authority(ledger, job_id) do
       :absent -> {:ok, :cleaned}
@@ -1000,7 +1017,7 @@ defmodule Loopex.Executor.Local do
   # a launch-owned guard watches the process whose authority admitted the work,
   # so losing that authority still ends the captured group.
   defp run_reserved(placement, job, grant, options, progress) do
-    Process.put(:loopex_cleanup_grace_ms, placement.cleanup_grace_ms)
+    Process.put(:loopex_cleanup_grace_ms, job_cleanup_grace_ms(placement, job))
     Process.put(:loopex_process_probe, placement.process_probe)
     Process.put(:loopex_inflight_table, placement.inflight_table)
     Process.put(:loopex_effect_owner, placement.executor)
@@ -1030,6 +1047,26 @@ defmodule Loopex.Executor.Local do
       Process.delete(:loopex_process_probe)
       Process.delete(:loopex_inflight_table)
       Process.delete(:loopex_effect_owner)
+    end
+  end
+
+  # Concept: every cleanup and retention window this job spends is derived from
+  # the period the job's own request committed.
+  #
+  # Technical depth: ADR 0016 carries the committed session value on every
+  # canonical `JobRequest`, uses it for the job being cancelled, and leaves this
+  # executor's start option as a default for new work that names none. Installing
+  # the start option here made the cleanup episode, the cooperative share, and
+  # the retention reserve spend one number while the receipt reported another --
+  # an executor started with twenty seconds gave a job committing four hundred
+  # milliseconds a ten-second cooperative window. The start default therefore
+  # stands for exactly one case: a request whose own validation has not run yet
+  # and may carry no admissible value. Such a request is refused before any
+  # effect and spends no cleanup window at all, so no job ever runs under it.
+  defp job_cleanup_grace_ms(placement, job) do
+    case Map.get(job, :cleanup_grace_ms) do
+      grace when is_integer(grace) and grace >= 1 and grace <= @max_uint64 -> grace
+      _uncommitted -> placement.cleanup_grace_ms
     end
   end
 
