@@ -78,6 +78,11 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @uint64_max 18_446_744_073_709_551_615
   @response_id_bytes 256
 
+  # Technical depth: ADR 0017's per-collection ceiling, read at compile time so
+  # the projection and the Store cannot disagree about how many members any
+  # durable item may carry.
+  @max_reply_members Loopex.Store.max_item_cardinality()
+
   @attempt_limit 2
 
   @doc """
@@ -582,6 +587,35 @@ defmodule Loopex.Runtime.ProviderAttempt do
   defp reply_identity(_identity), do: {:error, :unreadable_model_answer}
 
   defp reply_tool_calls(calls) when is_list(calls) do
+    with :ok <- bounded_members(calls, 0) do
+      project_tool_calls(calls)
+    end
+  end
+
+  defp reply_tool_calls(_calls), do: {:error, :unreadable_model_answer}
+
+  # Concept: an answer carrying more members than any record could hold is
+  # refused at the first member past the ceiling, not after all of them have
+  # been read.
+  #
+  # Technical depth: an adapter is untrusted input, and this projection runs
+  # before any Store bound applies to the settlement built from it. ADR 0017
+  # fixes 1,024 members as the most any collection inside a durable item may
+  # carry, so a longer one has no admissible outcome and the walk that would
+  # discover that is the cost being avoided: a million-member tool-call list was
+  # visited and projected into a million fresh maps before the settlement failed
+  # to fit. Counting cons cells one at a time never calls `length/1` on the
+  # untrusted tail and stops at the first rejected witness, and a tail that is
+  # not `[]` inside the admitted range is an unreadable answer like any other
+  # malformed member.
+  defp bounded_members(_members, counted) when counted > @max_reply_members,
+    do: {:error, :unreadable_model_answer}
+
+  defp bounded_members([_head | tail], counted), do: bounded_members(tail, counted + 1)
+  defp bounded_members([], _counted), do: :ok
+  defp bounded_members(_improper_tail, _counted), do: {:error, :unreadable_model_answer}
+
+  defp project_tool_calls(calls) do
     Enum.reduce_while(calls, {:ok, []}, fn call, {:ok, acc} ->
       case reply_tool_call(call) do
         {:ok, normalized} -> {:cont, {:ok, [normalized | acc]}}
@@ -593,8 +627,6 @@ defmodule Loopex.Runtime.ProviderAttempt do
       {:error, reason} -> {:error, reason}
     end
   end
-
-  defp reply_tool_calls(_calls), do: {:error, :unreadable_model_answer}
 
   defp reply_tool_call(call) when is_map(call) and not is_struct(call) do
     with {:ok, encoded} <- stringify(call),
@@ -679,6 +711,15 @@ defmodule Loopex.Runtime.ProviderAttempt do
   # Technical depth: the durable projection is string-keyed, so normalising
   # silently would let `%{text: "a", "text" => "b"}` retain whichever survived
   # the traversal. The collision refuses the reply instead.
+  # Technical depth: every map of an adapter answer -- the callback map itself,
+  # the identity, each tool call, and the usage -- reaches key normalisation
+  # here, and normalising keys visits every member. The closed key sets below
+  # would refuse an over-wide map afterwards, which is one walk of untrusted
+  # input too late, so `map_size/1` decides it first in constant time against
+  # the same ceiling no durable item may exceed.
+  defp stringify(map) when map_size(map) > @max_reply_members,
+    do: {:error, :unreadable_model_answer}
+
   defp stringify(map) do
     Enum.reduce_while(map, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
       normalized = if is_atom(key), do: Atom.to_string(key), else: key
