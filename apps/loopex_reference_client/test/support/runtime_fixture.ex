@@ -217,11 +217,41 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
 
   def stop(fixture, remove_root \\ true) do
     stop_runtime(fixture)
-    if Process.alive?(fixture.executor), do: GenServer.stop(fixture.executor)
-    if Process.alive?(fixture.lease), do: GenServer.stop(fixture.lease)
-    if Process.alive?(fixture.store_pid), do: GenServer.stop(fixture.store_pid)
+    stop_if_alive(fixture.executor)
+    stop_if_alive(fixture.lease)
+    stop_if_alive(fixture.store_pid)
     if remove_root, do: File.rm_rf!(fixture.root)
     :ok
+  end
+
+  # Concept: a process already following its parent down is waited for rather
+  # than stopped a second time.
+  #
+  # Technical depth: these processes are linked to the test process that
+  # started them, and `on_exit` runs after that process has gone. The store
+  # traps exits so that an orderly stop releases its writer marker, which makes
+  # its exit an ordered message behind the parent's `:EXIT` rather than an
+  # instantaneous link kill; stopping it inside that window exited the caller
+  # with the reason the store was already stopping for. The stop is therefore
+  # attempted and the exit waited for, and the fixture returns only once the
+  # process is really gone, so a restart on the same root never opens against a
+  # store that has not yet released it.
+  defp stop_if_alive(pid) do
+    reference = Process.monitor(pid)
+
+    if Process.alive?(pid) do
+      try do
+        GenServer.stop(pid)
+      catch
+        :exit, _already_stopping -> :ok
+      end
+    end
+
+    receive do
+      {:DOWN, ^reference, :process, ^pid, _reason} -> :ok
+    after
+      5_000 -> raise "#{inspect(pid)} did not stop within five seconds"
+    end
   end
 
   defp model_spec(Loopex.LLM.ReqLLM), do: Loopex.LLM.ReqLLM.default_model()
