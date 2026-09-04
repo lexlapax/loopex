@@ -142,6 +142,8 @@ defmodule Loopex.Executor.Local.Ledger do
 
   Creation publishes exclusively without following symlinks, syncs the file and
   then its parent, and reads the bytes back before the authority is returned.
+  Each directory this creates is synced into the directory that names it, so a
+  crash cannot leave a record durable inside a directory that is not.
   """
   @spec prepare(binary(), binary(), pos_integer()) :: {:ok, prepared()} | {:error, term()}
   def prepare(root, identity, cleanup_grace_ms) do
@@ -149,10 +151,10 @@ defmodule Loopex.Executor.Local.Ledger do
          true <- is_binary(identity) and identity != "",
          true <- is_integer(cleanup_grace_ms) and cleanup_grace_ms in 1..@max_uint64,
          expanded = Path.expand(root),
-         :ok <- File.mkdir_p(expanded),
+         :ok <- mkdir_synced(expanded),
          {:ok, binding} <- root_binding(expanded),
-         :ok <- File.mkdir_p(open_directory(expanded)),
-         :ok <- File.mkdir_p(marker_directory(expanded)),
+         :ok <- mkdir_synced(open_directory(expanded)),
+         :ok <- mkdir_synced(marker_directory(expanded)),
          {:ok, generation} <- read_or_create_generation(expanded, identity, binding) do
       {:ok,
        %{
@@ -278,11 +280,22 @@ defmodule Loopex.Executor.Local.Ledger do
   synced, before this returns. Publication is first-writer-wins: an existing
   marker or open entry for the same job is reported so the caller can join or
   conflict rather than overwrite newer truth.
+
+  The open entry is published first, and the order is the whole of what a crash
+  between the two publications leaves behind. Publishing the marker first left a
+  marker with no open entry: the quarantine scan reads open entries, so it saw a
+  root with nothing to reconcile, while every later request for that identity
+  read the marker as a live admission and joined an operation that would never
+  produce a receipt. An open entry with no marker is the opposite and the safe
+  one -- the scan sees unresolved authority and quarantines the root, which is
+  exactly what an admission nobody can prove either way deserves. Neither order
+  makes the pair atomic; this one makes the incomplete state the one that fails
+  closed.
   """
   @spec admit(prepared(), map(), map()) :: :ok | {:error, term()}
   def admit(%{root: root}, marker, open) do
-    with :ok <- publish(marker_path(root, marker["job_id"]), encode(marker)),
-         :ok <- publish(open_path(root, open["job_id"]), encode(open)) do
+    with :ok <- publish(open_path(root, open["job_id"]), encode(open)),
+         :ok <- publish(marker_path(root, marker["job_id"]), encode(marker)) do
       :ok
     end
   end
@@ -703,6 +716,21 @@ defmodule Loopex.Executor.Local.Ledger do
   # that can see the name can always read complete bytes. The parent sync after
   # the file sync is the order the retained evidence checks: reversing it makes
   # the directory entry durable before the bytes it names.
+  # Concept: a directory this ledger created is not durable until the directory
+  # that names it is.
+  #
+  # Technical depth: `File.mkdir_p/1` returns once the kernel holds the entry, so
+  # a crash before the parent's own metadata reached the disk could leave the
+  # root, the open index, or the marker directory absent while a record synced
+  # into one of them was not. Every publication already syncs the directory its
+  # record lands in; this closes the level above, which is the only one that was
+  # created without it.
+  defp mkdir_synced(path) do
+    with :ok <- File.mkdir_p(path) do
+      sync_parent(Path.dirname(path))
+    end
+  end
+
   defp publish(path, bytes) do
     with :ok <- File.mkdir_p(Path.dirname(path)),
          :ok <- write_synced(path, bytes, [:write, :binary, :exclusive]) do
