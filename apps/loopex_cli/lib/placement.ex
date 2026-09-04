@@ -533,8 +533,10 @@ defmodule LoopexCli.Placement do
         # fact about the owner, and a lock reclaimed on it would let two
         # commands run one root. It is reported as a failed probe, which the
         # owner-status readers treat as a live owner they cannot examine.
-        {output, 1} when output == "" or output == "\n" ->
-          {:error, :process_absent}
+        {output, 1} ->
+          if String.trim(output) == "",
+            do: {:error, :process_absent},
+            else: {:error, {:process_probe_failed, {:exit_status, 1}}}
 
         {_output, status} ->
           {:error, {:process_probe_failed, {:exit_status, status}}}

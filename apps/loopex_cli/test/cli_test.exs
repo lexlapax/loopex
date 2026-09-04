@@ -1416,7 +1416,7 @@ defmodule LoopexCliTest do
     # A lock left by a process that is gone describes nothing, and the session
     # behind it is reconcilable rather than permanently blocked.
     Placement.release(lock)
-    File.write!(Path.join(state_root, "placement.lock"), "999999")
+    File.write!(Path.join(state_root, "placement.lock"), dead_os_pid())
     assert :none = Placement.live_owner(state_root)
     assert {:ok, reclaimed} = Placement.acquire(state_root)
     assert {:ok, reclaimed_pid} = Placement.live_owner(state_root)
@@ -1594,7 +1594,7 @@ defmodule LoopexCliTest do
 
   test "concurrent placement reclaimers elect exactly one owner for a stale lock" do
     {state_root, _workspace} = roots()
-    File.write!(Path.join(state_root, "placement.lock"), "999999999")
+    File.write!(Path.join(state_root, "placement.lock"), dead_os_pid())
     parent = self()
 
     contenders =
@@ -3050,6 +3050,19 @@ defmodule LoopexCliTest do
   # operating-system process, and the test process is shared with every later
   # case. Leaving it removed would mean a stray signal during the rest of the
   # suite went unhandled rather than stopping the runner as it should.
+  # Concept: a lock left by a dead process names a process that really existed
+  # and is really gone.
+  #
+  # Technical depth: an out-of-range number used to stand in for it, and the
+  # placement probe read the helper's "process id too large" as absence. Now
+  # that only the exact no-such-process answer is absence, the stand-in must be
+  # a genuine pid the operating system has already reaped, which is what a
+  # shell child that has exited before its parent returns provides.
+  defp dead_os_pid do
+    {output, 0} = System.cmd("/bin/sh", ["-c", "sleep 0 & echo $!; wait"])
+    String.trim(output)
+  end
+
   defp restore_signal_handlers do
     _ = :gen_event.delete_handler(:erl_signal_server, Interrupt, [])
     _ = :gen_event.add_handler(:erl_signal_server, :erl_signal_handler, [])

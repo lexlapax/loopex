@@ -306,8 +306,10 @@ defmodule Loopex.Store.Local.WriterLock do
       # absence, so a second opener deleted a live holder's marker and two
       # writers shared one log. That reading contradicted the fail-closed rule
       # this module states for itself; the marker now stays held.
-      {output, 1} when output == "" or output == "\n" ->
-        {:error, :process_absent}
+      {output, 1} ->
+        if String.trim(output) == "",
+          do: {:error, :process_absent},
+          else: {:error, {:process_probe_failed, {:exit_status, 1}}}
 
       {_output, status} ->
         {:error, {:process_probe_failed, {:exit_status, status}}}
