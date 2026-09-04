@@ -182,20 +182,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
       when is_pid(coordinator) and is_map(owner) and is_map(response),
       do: safe_call(coordinator, {:reconcile, owner, response}, :infinity)
 
-  # Concept: the two answers a prepared owner's capability can be given, asked
+  # Concept: the three answers a prepared owner's capability can be given, asked
   # by the holder itself rather than on its behalf.
   #
-  # Technical depth: both are called from the holder's own process, so the
-  # coordinator compares the caller in `from` against the holder it was started
-  # with. Routing either through a helper process would make the holder rule
-  # unenforceable, because the coordinator would then only ever see the proxy.
+  # Technical depth: all three are called from the holder's own process, so the
+  # coordinator compares the caller in `from` against the holder it currently
+  # records. Routing any of them through a helper process would make the holder
+  # rule unenforceable, because the coordinator would then only ever see the
+  # proxy. The holder is not fixed for the capability's life: `transfer_resume/4`
+  # is the one way it changes, and only the current holder may ask for it.
   #
   # The bound is `:infinity`, and that is the point rather than an omission.
-  # These two calls decide a one-use capability: the message that carries them
+  # These calls decide a one-use capability: the message that carries them
   # is not withdrawn when its caller stops waiting, so a bounded call that
   # expired would answer `:session_unavailable` while the coordinator went on to
   # spend the very activation the caller was told it had not got -- and a
-  # prepared owner spends it by starting the recovered run. Neither call
+  # prepared owner spends it by starting the recovered run. None of them
   # proposes a Store mutation, so waiting cannot commit anything, and a
   # coordinator that never answers is a dead process rather than a deadline:
   # `safe_call/3` turns its exit into the refusal that is actually true.
@@ -210,6 +212,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   def abandon_resume(coordinator, owner, capability)
       when is_pid(coordinator) and is_map(owner) and is_reference(capability),
       do: safe_call(coordinator, {:abandon_resume, owner, capability}, :infinity)
+
+  @doc false
+  @spec transfer_resume(pid(), owner(), reference(), pid()) :: :ok | {:error, term()}
+  def transfer_resume(coordinator, owner, capability, holder)
+      when is_pid(coordinator) and is_map(owner) and is_reference(capability) and is_pid(holder),
+      do: safe_call(coordinator, {:transfer_resume, owner, capability, holder}, :infinity)
 
   @impl GenServer
   def init(options) do
@@ -294,10 +302,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
        #
        # Technical depth: `nil` is an ordinary owner, which schedules as soon as
        # it is ready. A prepared owner carries the runtime-local reference
-       # Control minted for it, the process that asked for the preparation, and
-       # one of `:prepared`, `:spent`, `:abandoned`, or `:fenced`. Only `:spent`
-       # schedules. The reference and holder are transient BEAM values and are
-       # never proposed to the Store or returned in a refusal.
+       # Control minted for it, the process that currently holds it -- the
+       # preparer until an acknowledged transfer moves it -- the monitor watching
+       # that process once it is no longer the preparer, and one of `:prepared`,
+       # `:spent`, `:abandoned`, or `:fenced`. Only `:spent` schedules. The
+       # reference, holder, and monitor are transient BEAM values and are never
+       # proposed to the Store or returned in a refusal.
        prepared: prepared_state(Keyword.get(options, :prepared)),
        superseded: false
      }, {:continue, :acquire_owner}}
@@ -380,6 +390,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # already become the session's own.
       {:error, :resume_activation_abandoned} ->
         {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Concept: the capability changes hands exactly once per handoff, and this
+  # reply is the acknowledgement that it did.
+  #
+  # Technical depth: ADR 0016 makes interrupt installation and holder transfer
+  # one serialized handoff. The current holder asks, from its own process, for a
+  # named process to hold the capability instead; the coordinator answers `:ok`
+  # only after it has recorded that process, so a preparer that dies after the
+  # answer leaves a live holder rather than an orphaned capability. The prepared
+  # state is checked exactly as activation and abandonment check it, so a
+  # capability an admitted abort has already fenced cannot be handed on and then
+  # spent behind the abort.
+  def handle_call({:transfer_resume, supplied_owner, capability, holder}, {caller, _tag}, state) do
+    case prepared_holder(state, supplied_owner, capability, caller) do
+      {:ok, prepared} ->
+        {:reply, :ok, %{state | prepared: held_by(prepared, holder)}}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -611,6 +642,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       {_work, remaining} ->
         {:stop, {:worker_failed, reason}, %{state | in_flight: remaining}}
+    end
+  end
+
+  # Concept: a capability whose acknowledged holder is gone can never be spent,
+  # and the owner says so rather than waiting to be asked.
+  #
+  # Technical depth: the monitor carries its own tag, so a holder's death is a
+  # message of its own shape rather than one more `:DOWN` competing with the
+  # worker monitors above. It fails closed: the recovered work stays paused for
+  # good, which is the same answer the holder would get if it presented the
+  # capability from a process that is no longer the holder, without resting that
+  # answer on a process identifier never being reused. Only a still-`:prepared`
+  # capability is affected; one already spent, abandoned, or fenced has its
+  # answer already.
+  def handle_info({:prepared_holder_down, monitor, :process, _pid, _reason}, state) do
+    case state.prepared do
+      %{monitor: ^monitor, state: :prepared} = prepared ->
+        {:noreply, %{state | prepared: %{prepared | state: :abandoned}}}
+
+      _other ->
+        {:noreply, state}
     end
   end
 
@@ -3930,7 +3982,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   # Concept: only this owner's current holder, presenting the exact capability
-  # it was given, decides anything about paused work.
+  # it was given, decides anything about paused work -- including who holds it
+  # next.
   #
   # Technical depth: the owner argument, the coordinator's readiness, and
   # Control's current-owner fence are checked exactly as an ordinary command
@@ -3938,8 +3991,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # has moved on. The reference comparison is `===` on a runtime-local
   # `make_ref/0`, which cannot be constructed by a caller that was not given it,
   # and the holder comparison uses the calling process from `from` rather than
-  # anything the caller supplied. Every refusal is a bare atom: the capability
-  # and its holder never appear in a value the caller can print.
+  # anything the caller supplied. The holder compared against is the one this
+  # owner currently records, which is the preparer until a transfer it
+  # acknowledged moved it; the preparer's own liveness is never consulted, so a
+  # preparer that died after the acknowledgement takes nothing with it. Every
+  # refusal is a bare atom: the capability and its holder never appear in a value
+  # the caller can print.
   defp prepared_holder(state, supplied_owner, capability, caller) do
     with :ok <- ready_current?(state, supplied_owner),
          %{capability: ^capability} = prepared <- state.prepared,
@@ -3977,9 +4034,30 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   defp prepared_state(%{capability: capability, holder: holder})
        when is_reference(capability) and is_pid(holder),
-       do: %{capability: capability, holder: holder, state: :prepared, recovered: MapSet.new()}
+       do: %{
+         capability: capability,
+         holder: holder,
+         monitor: nil,
+         state: :prepared,
+         recovered: MapSet.new()
+       }
 
   defp prepared_state(_absent), do: nil
+
+  # Concept: recording who holds the capability now, and watching them.
+  #
+  # Technical depth: the preparer is not monitored, because a preparer that dies
+  # before any handoff already leaves a holder no live process can present as.
+  # An acknowledged holder is monitored, because the coordinator answered `:ok`
+  # to it and must therefore know when it is gone. Any monitor from an earlier
+  # handoff is dropped with its message flushed, so a superseded holder's death
+  # cannot invalidate the capability the current one is holding.
+  defp held_by(prepared, holder) do
+    _ = prepared.monitor && Process.demonitor(prepared.monitor, [:flush])
+
+    monitor = :erlang.monitor(:process, holder, [{:tag, :prepared_holder_down}])
+    %{prepared | holder: holder, monitor: monitor}
+  end
 
   # Concept: exactly which work this preparation is holding back.
   #

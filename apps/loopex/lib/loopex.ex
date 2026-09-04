@@ -397,11 +397,12 @@ defmodule Loopex do
 
   ## Technical depth
 
-  Delegates to `Loopex.ResumeActivation.activate/1`. Only the process that
-  prepared the owner may present the capability, and only while it is unspent,
-  unabandoned, unfenced by an admitted abort, and still held by the runtime's
-  current owner. Every other presentation is refused by name and schedules
-  nothing.
+  Delegates to `Loopex.ResumeActivation.activate/1`. Only the capability's
+  current holder may present it — the process that prepared the owner, or the
+  one a `transfer_resume/2` the owner acknowledged made the holder instead — and
+  only while it is unspent, unabandoned, unfenced by an admitted abort, and
+  still held by the runtime's current owner. Every other presentation is refused
+  by name and schedules nothing.
   """
   @spec activate_resume(ResumeActivation.t()) :: {:ok, binary()} | {:error, term()}
   def activate_resume(activation), do: ResumeActivation.activate(activation)
@@ -420,4 +421,24 @@ defmodule Loopex do
   """
   @spec abandon_resume(ResumeActivation.t()) :: :ok | {:error, term()}
   def abandon_resume(activation), do: ResumeActivation.abandon(activation)
+
+  @doc """
+  ## Concept
+
+  Hands a prepared owner's capability to another process, so that the decision to
+  continue or to stop is taken by one process rather than raced between two.
+
+  ## Technical depth
+
+  ADR 0016's serialized handoff. Delegates to
+  `Loopex.ResumeActivation.transfer/2`. Only the current holder may ask, and the
+  `:ok` reply means the owner has already recorded the named process as the
+  holder: from then on only that process can spend or give the capability up,
+  and the asking process may die without invalidating it. A capability an
+  admitted abort has fenced, one already spent or abandoned, an owner that has
+  been superseded, and a caller that is not the holder are each refused by name
+  and move nothing.
+  """
+  @spec transfer_resume(ResumeActivation.t(), pid()) :: :ok | {:error, term()}
+  def transfer_resume(activation, holder), do: ResumeActivation.transfer(activation, holder)
 end

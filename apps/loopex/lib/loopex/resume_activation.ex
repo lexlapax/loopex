@@ -14,10 +14,11 @@ defmodule Loopex.ResumeActivation do
   ADR 0016 requires the capability to be opaque, non-serializable, and usable
   once by its current holder only. It is a runtime-local pair: an unforgeable
   reference minted by `Loopex.Runtime.Control` when it starts the prepared
-  owner, and the process that asked for the preparation. Neither member can be
-  encoded into a Store record, a public event, a snapshot, a progress item, or a
-  diagnostic, and this module puts neither into a refusal it returns, so a caller
-  that prints an error cannot print the capability.
+  owner, and the process that holds it — the process that asked for the
+  preparation, until `transfer/2` moves it to one the owner has acknowledged.
+  Neither member can be encoded into a Store record, a public event, a snapshot,
+  a progress item, or a diagnostic, and this module puts neither into a refusal
+  it returns, so a caller that prints an error cannot print the capability.
 
   Every operation is answered by the coordinator that holds the matching
   reference, under its ordinary current-owner fence. A superseded coordinator,
@@ -95,4 +96,35 @@ defmodule Loopex.ResumeActivation do
       )
 
   def abandon(_activation), do: {:error, :invalid_resume_activation}
+
+  @doc """
+  ## Concept
+
+  Hands the capability to another process, which from then on is the only one
+  that may spend or give it up.
+
+  ## Technical depth
+
+  ADR 0016 makes interrupt installation and holder transfer one serialized
+  handoff, and this is the half that moves the holder. Only the current holder
+  may ask, from its own process, and only while the capability is unspent,
+  unabandoned, and unfenced; the `:ok` reply is the acknowledgement, because the
+  owner has recorded the new holder by the time it answers. A preparer that dies
+  before that answer leaves a capability no live process can present, exactly as
+  before; one that dies after it leaves the new holder able to spend or abandon
+  it. The new holder is monitored, so its own death permanently pauses the
+  recovered work rather than leaving a capability waiting on a process that is
+  gone.
+  """
+  @spec transfer(t(), pid()) :: :ok | {:error, term()}
+  def transfer(%__MODULE__{} = activation, holder) when is_pid(holder),
+    do:
+      SessionCoordinator.transfer_resume(
+        activation.coordinator,
+        activation.owner,
+        activation.capability,
+        holder
+      )
+
+  def transfer(_activation, _holder), do: {:error, :invalid_resume_activation}
 end
