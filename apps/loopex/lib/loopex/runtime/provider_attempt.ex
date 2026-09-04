@@ -465,68 +465,94 @@ defmodule Loopex.Runtime.ProviderAttempt do
          result,
          accounting
        ) do
-    reply? = match?(%{"kind" => "reply"}, result)
-    source = accounting["source"]
-
-    cond do
-      # A reply that arrived can never prove the transport was not entered.
-      reply? and transport == "not_dispatched" ->
-        {:error, :invalid_attempt_settlement}
-
-      # Exactly the pre-permit refusal: nothing was sent, so nothing is owed and
-      # nothing was said.
-      transport == "not_dispatched" and (source != "none" or conversation != "none") ->
-        {:error, :invalid_attempt_settlement}
-
-      # A possibly billed attempt is always charged.
-      transport == "dispatched_or_unknown" and source == "none" ->
-        {:error, :invalid_attempt_settlement}
-
-      # Reported accounting is the reply's own usage, never a separate claim.
-      source == "reported" and not reported_matches?(result, accounting) ->
-        {:error, :invalid_attempt_settlement}
-
-      # Only an exact not-dispatched first attempt may retry.
-      next == "retry" and
-          (transport != "not_dispatched" or termination != nil) ->
-        {:error, :invalid_attempt_settlement}
-
-      # Technical depth: ADR 0018 names "attempt-two retry" invalid history, and
-      # combination 4 selects terminal model-call failure at the limit "because
-      # version 1 has no remaining allowance". Reading the attempt here is what
-      # makes that refusal a refusal. Without it the record validates, the
-      # reducer installs `retry_permitted(next_attempt: 3)`, and the position the
-      # attempt-open record then refuses is one this settlement already created:
-      # the owner crashes on history it accepted rather than refusing history it
-      # cannot accept.
-      next == "retry" and attempt >= @attempt_limit ->
-        {:error, :invalid_attempt_settlement}
-
-      # Continuing means the model asked for tools it can still be given.
-      next == "continue" and not continuing_reply?(result, conversation, termination) ->
-        {:error, :invalid_attempt_settlement}
-
-      # An answer that entered no conversation cannot be the canonical one.
-      conversation == "canonical" and (not reply? or termination != nil) ->
-        {:error, :invalid_attempt_settlement}
-
-      conversation == "evidence_only" and (not reply? or termination == nil) ->
-        {:error, :invalid_attempt_settlement}
-
-      # Technical depth: ADR 0018 combination 2 fixes a late valid reply as
-      # evidence-only, which is the whole of what the plane is for -- the answer
-      # arrived, the ending was already chosen, and the reply is retained as
-      # evidence rather than as the conversation. A reply carrying a termination
-      # and claiming no conversation at all is a retained answer the run has no
-      # record of having received, which is neither of the two dispositions the
-      # table admits.
-      reply? and termination != nil and conversation != "evidence_only" ->
-        {:error, :invalid_attempt_settlement}
-
-      true ->
-        :ok
+    with {:ok, expected_conversation, expected_next, expected_sources} <-
+           settlement_cell(attempt, transport, termination, result),
+         true <- conversation == expected_conversation,
+         true <- next == expected_next,
+         true <- accounting["source"] in expected_sources,
+         # Reported accounting is the reply's own usage, never a separate claim.
+         true <- accounting["source"] != "reported" or reported_matches?(result, accounting) do
+      :ok
+    else
+      _other -> {:error, :invalid_attempt_settlement}
     end
   end
+
+  # Concept: one cell of ADR 0018's closed table -- given who was answering,
+  # what the transport did, which termination won, and what came back, there is
+  # exactly one conversation and one `next`, and at most two accounting sources.
+  #
+  # Technical depth: this was a list of refusals with `:ok` underneath, so every
+  # member assignment nobody had thought to forbid validated by default. An
+  # attempt-one settlement with exact `not_dispatched`, no termination, no
+  # conversation and no accounting validated with `next: "terminal"`, although
+  # combination 4 fixes `retry` for that exact cell: the record silently spent
+  # the version-1 retry allowance the run still had. Stating the table instead
+  # makes "all other combinations are invalid history" the default rather than
+  # the part that has to be remembered, and it keeps every refusal the list held
+  # -- a reply tagged not-dispatched, dispatched accounting `none`, attempt-two
+  # or dispatched retry, a `continue` without continuable tool calls, and a
+  # canonical or evidence-only conversation without the reply and termination
+  # that name it -- because no cell produces any of them.
+  #
+  # A reply's accounting is `reported` exactly when the reply carries complete
+  # reported usage, which combination 1 fixes and `reported_matches?/2` then
+  # ties to the exact figures. Combination 5 is the one cell with a choice:
+  # compaction removed the reply the numbers came from, so the record can no
+  # longer say whether usage was available, and both sources stay admissible.
+  defp settlement_cell(attempt, "not_dispatched", termination, %{
+         "kind" => "error",
+         "category" => "model_call_failed"
+       })
+       when termination in [nil, "abort", "deadline"] do
+    # Combination 4: nothing was sent, so nothing is owed and nothing was said.
+    # Attempt one retries only when no termination has won; the limit and every
+    # termination select the terminal model-call failure, because version 1 has
+    # no further allowance.
+    next = if attempt < @attempt_limit and is_nil(termination), do: "retry", else: "terminal"
+    {:ok, "none", next, ["none"]}
+  end
+
+  defp settlement_cell(_attempt, "dispatched_or_unknown", nil, %{
+         "kind" => "reply",
+         "reply" => reply
+       }) do
+    # Combination 1: the canonical answer. Tool calls select `continue`; a
+    # no-tool reply selects the normal completed terminal.
+    next = if reply["tool_calls"] == [], do: "terminal", else: "continue"
+    {:ok, "canonical", next, [reply_accounting_source(reply)]}
+  end
+
+  defp settlement_cell(_attempt, "dispatched_or_unknown", termination, %{
+         "kind" => "reply",
+         "reply" => reply
+       })
+       when termination in ["abort", "deadline"] do
+    # Combination 2: the ending was already chosen, so a late valid reply is
+    # retained as evidence rather than as the conversation.
+    {:ok, "evidence_only", "terminal", [reply_accounting_source(reply)]}
+  end
+
+  defp settlement_cell(_attempt, "dispatched_or_unknown", _termination, %{
+         "kind" => "error",
+         "category" => "model_call_failed"
+       }),
+       # Combination 3: a live ambiguous error or a recovered open attempt.
+       do: {:ok, "none", "terminal", ["estimated"]}
+
+  defp settlement_cell(_attempt, "dispatched_or_unknown", termination, %{
+         "kind" => "error",
+         "category" => "unreadable_model_answer"
+       })
+       when termination in [nil, "abort", "deadline"],
+       # Combination 5: an answer this runtime could not read or could not fit.
+       do: {:ok, "none", "terminal", ["reported", "estimated"]}
+
+  defp settlement_cell(_attempt, _transport, _termination, _result),
+    do: {:error, :invalid_attempt_settlement}
+
+  defp reply_accounting_source(%{"usage" => %{"status" => "reported"}}), do: "reported"
+  defp reply_accounting_source(_reply), do: "estimated"
 
   defp reported_matches?(%{"kind" => "reply", "reply" => reply}, accounting) do
     reply["usage"] ==
@@ -555,11 +581,6 @@ defmodule Loopex.Runtime.ProviderAttempt do
        do: true
 
   defp reported_matches?(_result, _accounting), do: false
-
-  defp continuing_reply?(%{"kind" => "reply", "reply" => reply}, conversation, termination),
-    do: reply["tool_calls"] != [] and conversation == "canonical" and termination == nil
-
-  defp continuing_reply?(_result, _conversation, _termination), do: false
 
   defp validate_identity(record) do
     with true <- bounded_binary?(record["run_id"]),
