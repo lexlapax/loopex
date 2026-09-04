@@ -1053,6 +1053,14 @@ defmodule Loopex.Runtime.SessionState do
   # validated reply supplies it where canonicalization succeeded, and the raw
   # answer's normalized usage supplies it where canonicalization refused the
   # reply before there was a validated one.
+  #
+  # The raw answer reaches `canonical_reply/2` unmeasured on purpose: that
+  # function admits it against ADR 0017's plain-data, depth, cardinality and
+  # byte ceilings before it projects anything, which is the order M2's row-one
+  # obligation fixes. Measuring here instead would put the settlement check
+  # after a projection that has already walked and copied the whole answer. The
+  # settlement measurement below stays where it is, because the ceiling that
+  # decides what is retained applies to the record, not to the reply.
   defp attempt_result(work, {:reply, raw}, termination) do
     case ProviderAttempt.canonical_reply(raw, work.request) do
       {:ok, reply} ->

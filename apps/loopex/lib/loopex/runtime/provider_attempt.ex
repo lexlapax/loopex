@@ -83,6 +83,18 @@ defmodule Loopex.Runtime.ProviderAttempt do
   # durable item may carry.
   @max_reply_members Loopex.Store.max_item_cardinality()
 
+  # Technical depth: the other two ADR 0017 ceilings the raw admission below
+  # charges against, read from the same core contract for the same reason. Both
+  # are measured from the reply's own root, while the durable settlement that
+  # carries the reply is measured from the record root, so admission here is
+  # deliberately the more permissive of the two and the exact settlement
+  # measurement still decides what is retained.
+  @max_reply_bytes Loopex.Store.max_item_bytes()
+  @max_reply_depth Loopex.Store.max_item_depth()
+
+  @echoed_request_key "canonical_request_bytes"
+  @usage_key "usage"
+
   @attempt_limit 2
 
   @doc """
@@ -237,13 +249,13 @@ defmodule Loopex.Runtime.ProviderAttempt do
   Control spends an attempt, and the registered state of a run, turn, operation,
   attempt and digest is the committed `model_attempt_opened_v1` row, never the
   argument of the process asking for the permit. So the binding is rebuilt here
-  from that row's own five members plus the session it belongs to, and a
-  caller's map is admitted only by equality with this one. The row is validated
-  as the exact attempt-open record first, including its kind, so a row of any
-  other kind standing at the same journal position names no binding at all
-  rather than contributing whichever of these members it happens to carry. Every
-  refusal is the binding refusal, because the only question asked here is which
-  binding, if any, this row registers.
+  from that row's own five members plus the session it belongs to, and a caller's
+  map is admitted only by equality with this one. The row is validated as the
+  exact attempt-open record first, including its kind, so a row of any other
+  kind standing at the same journal position names no binding at all rather than
+  contributing whichever of these members it happens to carry. Every refusal is
+  the binding refusal, because the only question asked here is which binding, if
+  any, this row registers.
   """
   @spec binding_from_opened(term(), term()) :: {:ok, map()} | {:error, term()}
   def binding_from_opened(session_id, record)
@@ -320,6 +332,10 @@ defmodule Loopex.Runtime.ProviderAttempt do
 
   ## Technical depth
 
+  The raw answer is admitted against ADR 0017's plain-data, depth, cardinality
+  and byte ceilings before anything is projected, and that admission stops at
+  the first member that breaks one of them.
+
   The echoed `canonical_request_bytes` is compared byte-for-byte with the
   already committed request and then excluded from measurement, so a staged
   request and a durable reply that each fit their own record do not have to fit
@@ -329,7 +345,8 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
   @spec canonical_reply(term(), map()) :: {:ok, map()} | {:error, term()}
   def canonical_reply(reply, request) when is_map(reply) and not is_struct(reply) do
-    with {:ok, encoded} <- stringify(reply),
+    with :ok <- admitted_raw_reply(reply),
+         {:ok, encoded} <- stringify(reply),
          :ok <- callback_keys(encoded),
          {:ok, identity} <- reply_identity(Map.get(encoded, "identity")),
          {:ok, calls} <- reply_tool_calls(Map.get(encoded, "tool_calls")),
@@ -662,6 +679,129 @@ defmodule Loopex.Runtime.ProviderAttempt do
       {:error, :unreadable_model_answer}
     end
   end
+
+  # Concept: an answer no record could ever hold is refused before it is read,
+  # at the first member that proves it, not after every member has been walked.
+  #
+  # Technical depth: the cardinality ceiling alone left the other three ADR 0017
+  # dimensions applying only after projection. `canonical_reply/2` normalised
+  # keys, projected identity, walked and rebuilt every tool call, and only then
+  # did `attempt_result/3` measure the settlement -- so 1,024 tool calls each
+  # carrying a megabyte of argument text, or an arguments map nested ten
+  # thousand levels deep, were traversed and copied in full before the 65,536
+  # byte and depth-12 refusals could apply. M2's row-one obligation is the
+  # opposite order: "every raw model-reply candidate first satisfies the Store's
+  # plain-data, depth, item, and byte ceilings, then refuses any undeclared
+  # top-level key while projecting". This is that first pass. It carries a depth
+  # counter, a per-collection member counter and a cumulative byte counter, and
+  # returns at the first violation, so the walk costs what the admitted prefix
+  # costs rather than what the answer claims to be.
+  #
+  # Bytes are counted, never built: `byte_size/1` for a binary, and
+  # `:erlang.external_size/2` for the scalars whose encoded width is not their
+  # own -- both read a term without allocating it, which `term_to_binary/2`
+  # would not. Containers add nothing of their own, so the total is at or below
+  # the eventual external size of the same term and can only be the more
+  # permissive of the two; the exact settlement measurement in
+  # `Loopex.Runtime.SessionState` still decides what is retained.
+  #
+  # Two root members are deliberately outside the walk, because neither one is
+  # retained as supplied and each is already closed. `canonical_request_bytes`
+  # is excluded from reply-size measurement by ADR 0018 -- the committed request
+  # already fit its own record -- so it is charged against its own allowance
+  # instead, which also keeps the byte-for-byte comparison further down from
+  # being handed an unbounded binary. `usage` is replaced wholesale by
+  # `normalize_usage/1`'s closed two- or three-key classification, and the path
+  # that does it is bounded without this walk: the map is refused above
+  # `max_item_cardinality/0` members, only `input_tokens` and `output_tokens`
+  # may be named, and their values are read but never descended into. Walking it
+  # here would also break ADR 0018 combination 1, which requires a present but
+  # negative, non-integer, oversized, or wholly non-map usage to be classified
+  # rather than to refuse an otherwise canonical reply.
+  defp admitted_raw_reply(reply) do
+    with :ok <- bounded_cardinality(map_size(reply)) do
+      case admitted_members(reply, 0, 0) do
+        {:ok, _charged} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  defp admitted_members(map, depth, charged) do
+    Enum.reduce_while(map, {:ok, charged}, fn {key, value}, {:ok, charged} ->
+      with {:ok, charged} <- admitted_key(key, charged),
+           {:ok, charged} <- admitted_member(key, value, depth, charged) do
+        {:cont, {:ok, charged}}
+      else
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp admitted_member(key, value, 0, charged)
+       when key in [:canonical_request_bytes, @echoed_request_key] do
+    if is_binary(value) and byte_size(value) <= @max_reply_bytes,
+      do: {:ok, charged},
+      else: {:error, :unreadable_model_answer}
+  end
+
+  defp admitted_member(key, _value, 0, charged) when key in [:usage, @usage_key],
+    do: {:ok, charged}
+
+  defp admitted_member(_key, value, depth, charged), do: admitted_term(value, depth + 1, charged)
+
+  defp admitted_term(_value, depth, _charged) when depth > @max_reply_depth,
+    do: {:error, :unreadable_model_answer}
+
+  defp admitted_term(value, _depth, charged) when is_binary(value),
+    do: charge(charged, byte_size(value))
+
+  defp admitted_term(value, _depth, charged) when is_integer(value) or is_float(value),
+    do: charge(charged, :erlang.external_size(value, [:deterministic]))
+
+  defp admitted_term(value, _depth, charged) when value in [nil, true, false],
+    do: {:ok, charged}
+
+  defp admitted_term([], _depth, charged), do: {:ok, charged}
+
+  defp admitted_term([_head | _tail] = list, depth, charged) do
+    with :ok <- bounded_members(list, 0), do: admitted_list(list, depth, charged)
+  end
+
+  defp admitted_term(map, depth, charged) when is_map(map) and not is_struct(map) do
+    with :ok <- bounded_cardinality(map_size(map)), do: admitted_members(map, depth, charged)
+  end
+
+  defp admitted_term(_other, _depth, _charged), do: {:error, :unreadable_model_answer}
+
+  defp admitted_list([], _depth, charged), do: {:ok, charged}
+
+  defp admitted_list([head | tail], depth, charged) do
+    case admitted_term(head, depth + 1, charged) do
+      {:ok, charged} -> admitted_list(tail, depth, charged)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Technical depth: a key is charged like the scalar it is. Only the two forms
+  # the Store normalises are admitted, so a key that could never reach a durable
+  # item stops the walk here rather than after its subtree has been visited.
+  defp admitted_key(key, charged) when is_binary(key), do: charge(charged, byte_size(key))
+
+  defp admitted_key(key, charged) when is_atom(key),
+    do: charge(charged, :erlang.external_size(key, [:deterministic]))
+
+  defp admitted_key(_key, _charged), do: {:error, :unreadable_model_answer}
+
+  defp charge(charged, bytes) when charged + bytes > @max_reply_bytes,
+    do: {:error, :unreadable_model_answer}
+
+  defp charge(charged, bytes), do: {:ok, charged + bytes}
+
+  defp bounded_cardinality(size) when size > @max_reply_members,
+    do: {:error, :unreadable_model_answer}
+
+  defp bounded_cardinality(_size), do: :ok
 
   defp reply_identity(identity) when is_map(identity) and not is_struct(identity) do
     with {:ok, encoded} <- stringify(identity),
