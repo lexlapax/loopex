@@ -257,16 +257,16 @@ defmodule Loopex.Executor.Local do
   meant to end.
 
   Signals the job's owned process group and then confirms by looking for
-  survivors. A job a live executor has no record of is trivially clean: it
-  either never started or already finished. An unavailable executor proves
-  nothing, because its process-local ledger may have disappeared with work still
-  in flight.
+  survivors. A job this instance has no record of is decided by the root every
+  instance shares rather than by this one's memory. An unavailable executor
+  proves nothing, because its process-local ledger may have disappeared with
+  work still in flight.
   """
   @impl Loopex.Executor
   @spec cancel(t(), binary()) :: {:ok, :cleaned} | {:ok, :unconfirmed}
   def cancel(executor, job_id) when is_pid(executor) and is_binary(job_id) do
     case lookup_inflight(executor, job_id) do
-      {:ok, group, grace, probe} ->
+      {:ok, group, grace, probe, _ledger} ->
         # The cancellation is its own cleanup episode, so its one absolute
         # instant opens here rather than being inherited from a job whose own
         # deadline may be minutes away. It takes the whole period rather than the
@@ -280,14 +280,66 @@ defmodule Loopex.Executor.Local do
           do: {:ok, :cleaned},
           else: {:ok, :unconfirmed}
 
-      {:starting, worker, grace, probe} ->
+      {:starting, worker, grace, probe, _ledger} ->
         cancel_starting_job(worker, grace, probe)
 
-      :absent ->
-        {:ok, :cleaned}
+      {:absent, ledger} ->
+        absent_job_answer(ledger, job_id)
 
       :executor_unavailable ->
         {:ok, :unconfirmed}
+    end
+  end
+
+  # Concept: what this instance happens to remember is not what decides whether
+  # an effect is over; the root every instance shares is.
+  #
+  # Technical depth: ADR 0016 returns `cleaned` only from a matching durable
+  # refusal or independently confirmed cleanup, and makes absence, conflict, a
+  # stranded claim, or malformed truth `unconfirmed`. A job another Local
+  # admitted on this root -- or this one admitted before it restarted -- leaves
+  # an open authority entry there while its effect may still be running, and an
+  # empty in-flight table says nothing about it. Reading the table alone reported
+  # that live effect cleaned. An entry that is still open is therefore
+  # `unconfirmed`; only a readable root with no open entry for this identity is
+  # clean, because an entry is removed only for a matching durable refusal or a
+  # receipt whose captured-group cleanup was confirmed.
+  defp absent_job_answer(ledger, job_id) do
+    case open_authority(ledger, job_id) do
+      :absent -> {:ok, :cleaned}
+      _open_or_unavailable -> {:ok, :unconfirmed}
+    end
+  end
+
+  # Concept: one closed reading of the shared root, taken while nothing may
+  # change it.
+  #
+  # Technical depth: ADR 0016 requires every decision that reads open authority
+  # to acquire the root-wide claim, read one complete bounded snapshot while
+  # mutation is excluded, and fix its decision before releasing it; no unlocked
+  # observation is cancellation authority. The claim is not waited for, because a
+  # cancellation carries no deadline of its own to spend on contention, and
+  # refusal is unavailability rather than permission either way.
+  defp open_authority(nil, _job_id), do: :unavailable
+
+  defp open_authority(ledger, job_id) do
+    answer =
+      Ledger.with_claim(ledger, fn ->
+        case Ledger.open_snapshot(ledger) do
+          {:ok, entries} ->
+            case Enum.find(entries, &(&1["job_id"] == job_id)) do
+              nil -> :absent
+              entry -> {:ok, entry}
+            end
+
+          {:error, _unreadable} ->
+            :unavailable
+        end
+      end)
+
+    case answer do
+      {:error, _claim_unavailable} -> :unavailable
+      settled -> settled
     end
   end
 
@@ -403,20 +455,45 @@ defmodule Loopex.Executor.Local do
           )
 
         probe = Keyword.get(dictionary, :loopex_process_probe, @default_process_probe)
+        ledger = table && ledger_authority(table)
 
         case table && :ets.lookup(table, job_id) do
           [{^job_id, {:starting, worker}}] when is_pid(worker) ->
-            {:starting, worker, grace, probe}
+            {:starting, worker, grace, probe, ledger}
 
           [{^job_id, group}] when is_integer(group) and group > 1 ->
-            {:ok, group, grace, probe}
+            {:ok, group, grace, probe, ledger}
 
           _absent ->
-            :absent
+            {:absent, ledger}
         end
     end
   rescue
     ArgumentError -> :executor_unavailable
+  end
+
+  # Concept: the root authority a cancellation reads is kept where this
+  # executor's other cancellation state is kept, and not where a crash prints
+  # it.
+  #
+  # Technical depth: `cancel/2` runs in its caller, so it reaches this
+  # executor's state without calling it -- the period, the probe and the
+  # in-flight table are already read that way. The prepared ledger authority
+  # cannot join them in the process dictionary: `proc_lib` crash reports carry a
+  # process's whole dictionary, and ADR 0016 keeps the root path, generation
+  # digest, and root binding out of every log and diagnostic plane. The
+  # executor's own in-flight table is the same private per-instance state,
+  # readable without waiting for the server, and is not dumped anywhere. The key
+  # is an atom and every job identity is a binary, so the two cannot collide.
+  @ledger_authority_key :loopex_ledger_authority
+
+  defp ledger_authority(table) do
+    case :ets.lookup(table, @ledger_authority_key) do
+      [{@ledger_authority_key, ledger}] -> ledger
+      _absent -> nil
+    end
+  rescue
+    ArgumentError -> nil
   end
 
   # Concept: a job's process cleanup is one episode with one instant, opened the
@@ -623,6 +700,7 @@ defmodule Loopex.Executor.Local do
       # it here makes that independent of where the work runs, and the table is
       # public so a caller performing an effect can register the group it owns.
       table = inflight_table()
+      :ets.insert(table, {@ledger_authority_key, ledger})
 
       {:ok,
        %{
