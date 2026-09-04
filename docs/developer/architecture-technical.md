@@ -111,7 +111,9 @@ bound there would manufacture a dispatch verdict out of scheduling latency.
 serialized state — the caller is still the prepared current owner, the journal
 position carrying the open row is current, the worker is the one the coordinator
 started, the deadline has not elapsed, and the full attempt identity has never
-been permitted — and then spends and sends together, so a succession linearizes
+been permitted, and the binding itself equals the one rebuilt from the committed
+attempt-open row at that journal position, so the caller's map is compared and
+never trusted — and then spends and sends together, so a succession linearizes
 entirely before or entirely after the send. The binding is
 `session_id`, `run_id`, `turn_id`, `operation_id`, `attempt`, and
 `staged_request_digest`. Spent identities are dropped only when control stops

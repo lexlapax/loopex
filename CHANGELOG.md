@@ -255,10 +255,13 @@ the exact document set its milestone must update.
 - A completed create replayed into a restarted runtime started a new owner
   generation; a replay now answers from the durable result and starts nothing.
   Store items are measured without encoding them first, so an oversized binary
-  is refused without an allocated copy. Adapter replies are bounded before they
-  are projected, so a reply with a million tool calls is refused as unreadable
-  in bounded time. The one-use provider permit validates the complete six-member
-  binding and binds one journal position to one identity. Settlement validation
+  is refused without an allocated copy. Adapter replies are admitted against
+  plain-data, depth, member, and byte ceilings before any projection, so a reply
+  with a million tool calls, a thousand calls each carrying a megabyte, or a
+  ten-thousand-level nesting is refused as unreadable in bounded time. The
+  one-use provider permit is authorized only where the binding equals the one
+  rebuilt from the committed attempt-open row at that journal position, so a
+  fabricated first binding is refused rather than recorded. Settlement validation
   computes the single admissible combination for each cell of the ADR 0018 table
   rather than refusing an enumerated list.
 - An artifact use's `uses/<xx>` directory entry was never synced, so a crash
