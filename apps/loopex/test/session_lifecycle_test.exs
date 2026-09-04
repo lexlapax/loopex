@@ -738,6 +738,50 @@ defmodule Loopex.SessionLifecycleTest do
     )
   end
 
+  # Concept: replaying a create that already completed answers with the session
+  # it created and acquires nothing.
+  #
+  # Technical depth: ADR 0008 makes a completed create or resume replay
+  # historical only -- it "returns its original result without advancing the
+  # epoch" and "does not recreate a dead coordinator". A runtime that has lost
+  # its process-local session table cannot tell a replay from a first commit by
+  # looking at itself, so the replayed create fell through to `start_owner` and
+  # took a fresh owner generation through the create path's unstaged
+  # succession, which is exactly the staged recovery ADR 0008 exists to force.
+  test "a completed create replayed into a restarted runtime starts no owner generation" do
+    fixture = start_fixture("replayed-create-runtime")
+
+    {:ok, session_id} =
+      Loopex.create_session(fixture.runtime, %{"workspace" => "one"}, command_id: "create-replay")
+
+    before = M1RuntimeTestStore.inspect_state(fixture.store_pid)
+    assert Map.fetch!(before.sessions, session_id).owner_epoch == 1
+
+    :ok = Loopex.stop(fixture.runtime)
+
+    {:ok, restarted} =
+      Loopex.start_link(
+        context_token_budget: 8_192,
+        runtime_id: fixture.runtime_id,
+        store: fixture.store
+      )
+
+    on_exit(fn -> if Runtime.alive?(restarted), do: Loopex.stop(restarted) end)
+
+    assert {:ok, ^session_id} =
+             Loopex.create_session(restarted, %{"workspace" => "one"},
+               command_id: "create-replay"
+             )
+
+    replayed = M1RuntimeTestStore.inspect_state(fixture.store_pid)
+
+    assert Map.fetch!(replayed.sessions, session_id).owner_epoch == 1
+    assert durable_store_projection(before) == durable_store_projection(replayed)
+
+    {:ok, %{control: control}} = Runtime.children(restarted)
+    assert :sys.get_state(control).sessions == %{}
+  end
+
   defp start_fixture(runtime_id) do
     {store_pid, store} = M1RuntimeTestStore.start_store(label: runtime_id)
 

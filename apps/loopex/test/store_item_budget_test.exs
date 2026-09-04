@@ -219,6 +219,77 @@ defmodule Loopex.StoreItemBudgetTest do
              normalize(:record, %{:kind => "depth-first", "value" => depth_and_cardinality})
   end
 
+  # Concept: an item nothing could ever admit is refused without a copy of it
+  # ever being built.
+  #
+  # Technical depth: ADR 0017 requires a structurally valid item to be "measured
+  # with a deterministic external-term size calculator without first allocating
+  # the encoded byte string", and returns the exact count even above
+  # `max_item_bytes/0`. The normalizer admits an arbitrary-size binary as an
+  # ordinary scalar, so encoding the complete normalized term to measure it
+  # built a full encoded copy of a 100 MiB payload and only then refused it at
+  # the 65,536-byte ceiling. The exact count is still asserted here, because a
+  # calculator that stops counting at the ceiling would break the byte cost an
+  # over-ceiling refusal has to report.
+  test "an oversized scalar binary is measured exactly and refused without an encoded copy" do
+    payload = :binary.copy("x", 100 * 1024 * 1024)
+    item = %{"body" => payload, kind: "allocation-safety"}
+    expected = independent_size(%{"body" => "", kind: "allocation-safety"}) + byte_size(payload)
+
+    :erlang.garbage_collect()
+    before = :erlang.memory(:binary)
+    measured = normalize(:record, item)
+    refusal = Store.create_session("runtime-allocation", "allocation-safety", item)
+    allocated = :erlang.memory(:binary) - before
+
+    assert {:ok, ^item, ^expected} = measured
+    assert expected > @max_item_bytes
+    assert refusal == {:error, {:item_too_large, expected, @max_item_bytes}}
+    assert allocated < 32 * 1024 * 1024
+  end
+
+  # Concept: the size a caller is told is the size the Store will encode.
+  #
+  # Technical depth: the measured cost is compared with `max_item_bytes/0` by
+  # the caller and again by `transact/2`, and an over-ceiling refusal records it
+  # as a durable byte cost, so an approximation anywhere in the admitted scalar
+  # domain would move the ceiling or record a number that was never true. Every
+  # admitted form is pinned against the encoding itself: small and large
+  # integers, bignums of both signs, floats, the byte-list shape the external
+  # format encodes as a string rather than a list, empty collections, and depth.
+  test "the measured cost equals the deterministic encoding for every admitted form" do
+    values = [
+      0,
+      255,
+      256,
+      -1,
+      2_147_483_647,
+      -2_147_483_648,
+      123_456_789_012_345_678_901_234_567_890,
+      -123_456_789_012_345_678_901_234_567_890,
+      1.5,
+      -0.125,
+      nil,
+      true,
+      false,
+      "",
+      :binary.copy("z", 300),
+      [],
+      Enum.to_list(0..255),
+      [1, 2, 3, 256],
+      List.duplicate(7, 1_000),
+      %{},
+      %{"a" => %{"b" => [%{"c" => []}]}},
+      nested_value(@max_item_depth - 1)
+    ]
+
+    for {value, index} <- Enum.with_index(values) do
+      item = %{"value" => value, kind: "sizer-#{index}"}
+      assert {:ok, normalized, bytes} = normalize(:record, item)
+      assert bytes == byte_size(:erlang.term_to_binary(normalized, [:deterministic]))
+    end
+  end
+
   defp normalize(plane, item),
     do: dynamic_apply(Store, :normalize_and_measure_item, [plane, item])
 

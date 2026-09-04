@@ -57,6 +57,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   alias Loopex.M1RuntimeTestStore
   alias Loopex.ProviderAttemptPageOneStore
   alias Loopex.Runtime
+  alias Loopex.Runtime.ProviderAttempt
   alias Loopex.Runtime.SessionState
   alias Loopex.Store
   alias Loopex.StreamDomain
@@ -209,6 +210,86 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     assert_receive {[:alias | ^reply_alias], {:error, :provider_attempt_already_permitted}}, 5_000
     refute_receive {:fresh_permit_received, ^fresh_worker, _message}, 0
+    refute_receive {:trace, ^control, :send, _second_permit, ^worker}, 0
+
+    send(worker, :release)
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+    :erlang.trace(control, false, [:all])
+  end
+
+  test "a dispatch binding that is not the canonical attempt identity is refused, not spent" do
+    # Concept: the permit is one-use in the identity it names, so an identity
+    # Control did not check is not the identity it spent.
+    #
+    # Technical depth: Control validated ownership, position, worker, and
+    # deadline through `authority`, but took the caller's `binding` map as the
+    # spent-permit key after reading only `"session_id"` out of it. A binding
+    # carrying an extra member, or naming a different attempt, is a different
+    # map and therefore a different key, so it passed the unspent check and was
+    # reported dispatched -- a second permit for the same attempt under a
+    # different spelling. ADR 0018 requires Control to verify that "every
+    # identity equals its registered state" before it spends anything, so the
+    # exact six-member binding is validated first.
+    fixture = start(script: [%{text: "done", calls: [], hold: self()}], progress_to: self())
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    :erlang.trace(control, true, [:send, :receive])
+
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "open once")
+    assert_receive {:holding, worker}, 5_000
+    assert_receive {:trace, ^control, :send, permit, ^worker}, 5_000
+
+    records = Fixture.records(fixture, session_id)
+    [opened] = Enum.filter(records, &(&1.payload[:kind] == "model_attempt_opened_v1"))
+    expected_binding = Map.put(attempt_identity(opened.payload), "session_id", session_id)
+    assert coherent_attempt_binding!(permit, expected_binding) == expected_binding
+
+    {caller, request} = await_control_request_binding(control, worker, expected_binding)
+    assert caller == coordinator_of(fixture.runtime)
+    assert spent_attempt_bindings(control) == [expected_binding]
+
+    [permit_reference] =
+      request
+      |> references()
+      |> MapSet.intersection(references(permit))
+      |> MapSet.to_list()
+
+    observer = self()
+
+    tampered = [
+      {Map.put(expected_binding, "extra", "member"), :invalid_provider_attempt_binding},
+      {Map.delete(expected_binding, "turn_id"), :invalid_provider_attempt_binding},
+      {Map.put(expected_binding, "attempt", expected_binding["attempt"] + 1),
+       :invalid_provider_attempt_binding},
+      {Map.put(expected_binding, "run_id", "run_" <> String.duplicate("z", 30)),
+       :invalid_provider_attempt_binding},
+      {Map.put(expected_binding, "session_id", session_id <> "-other"), :superseded_owner}
+    ]
+
+    for {binding, expected_reason} <- tampered do
+      fresh_worker =
+        spawn(fn ->
+          receive do
+            message -> send(observer, {:fresh_permit_received, self(), message})
+          after
+            5_000 -> :ok
+          end
+        end)
+
+      tampered_request =
+        request
+        |> replace_exact(worker, fresh_worker)
+        |> replace_exact(permit_reference, make_ref())
+        |> put_elem(1, binding)
+
+      reply_alias = :erlang.alias([:reply])
+      send(control, {:"$gen_call", {caller, [:alias | reply_alias]}, tampered_request})
+
+      assert_receive {[:alias | ^reply_alias], {:error, ^expected_reason}}, 5_000
+      refute_receive {:fresh_permit_received, ^fresh_worker, _message}, 0
+      assert spent_attempt_bindings(control) == [expected_binding]
+    end
+
     refute_receive {:trace, ^control, :send, _second_permit, ^worker}, 0
 
     send(worker, :release)
@@ -3032,6 +3113,254 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     after
       50 -> Enum.reverse(acc)
     end
+  end
+
+  # Concept: an adapter answer no record could ever hold is refused before it is
+  # read, not after it has been copied.
+  #
+  # Technical depth: `attempt_result/3` canonicalizes the raw answer before any
+  # Store bound applies, and the projection visits every member of the reply's
+  # collections. An adapter returning a million tool calls was therefore fully
+  # traversed and projected into a million fresh maps, and the settlement built
+  # from it only then failed to fit. ADR 0017's cardinality ceiling already
+  # decides the question -- a collection above 1,024 members can never be
+  # admitted into any item -- so it is applied to the raw collections first and
+  # the answer becomes ADR 0018 combination 5's `unreadable_model_answer`.
+  test "an adapter reply above the item cardinality ceiling is refused without projecting it" do
+    request = %{
+      canonical_request_bytes: "canonical-request-bytes",
+      staged_request_digest: String.duplicate("d", 64)
+    }
+
+    call = %{"id" => "call-1", "name" => "tool", "arguments" => %{}}
+    raw = adapter_reply(request, List.duplicate(call, 1_000_000))
+
+    :erlang.garbage_collect()
+    {:memory, before} = Process.info(self(), :memory)
+    result = ProviderAttempt.canonical_reply(raw, request)
+    {:memory, after_projection} = Process.info(self(), :memory)
+
+    assert result == {:error, :unreadable_model_answer}
+    assert after_projection - before < 16 * 1024 * 1024
+
+    wide_usage =
+      Map.new(1..(@record_cardinality_limit + 1), fn index -> {"member-#{index}", index} end)
+
+    assert ProviderAttempt.canonical_reply(Map.put(raw, "usage", wide_usage), request) ==
+             {:error, :unreadable_model_answer}
+
+    wide_reply = Map.new(1..(@record_cardinality_limit + 1), fn i -> {"member-#{i}", i} end)
+
+    assert ProviderAttempt.canonical_reply(wide_reply, request) ==
+             {:error, :unreadable_model_answer}
+
+    assert {:ok, projected} =
+             ProviderAttempt.canonical_reply(adapter_reply(request, [call]), request)
+
+    assert projected["tool_calls"] == [call]
+  end
+
+  # Concept: a settlement is valid when it is one of the combinations ADR 0018
+  # lists, not when it avoids the ones somebody remembered to forbid.
+  #
+  # Technical depth: the verdict was checked as a blacklist, so every member
+  # assignment nobody had enumerated validated by default. An attempt-one
+  # settlement with exact `not_dispatched` transport, no termination, no
+  # conversation and no accounting validated with `next: "terminal"`, although
+  # combination 4 fixes `retry` for exactly that cell -- history that skips the
+  # allowance version 1 grants. Every cell of the closed table is enumerated
+  # here against every other assignment of the same members, so a combination
+  # the ADR does not list is invalid because it is not listed.
+  test "exactly the ADR 0018 settlement combinations validate" do
+    valid = valid_settlement_cells()
+
+    reviewers_example =
+      settlement_record(1, "not_dispatched", nil, :failed, "none", "terminal", :none)
+
+    assert ProviderAttempt.validate_settled(reviewers_example) ==
+             {:error, :invalid_attempt_settlement}
+
+    assert ProviderAttempt.validate_settled(
+             settlement_record(1, "not_dispatched", nil, :failed, "none", "retry", :none)
+           ) == :ok
+
+    for attempt <- [1, 2],
+        transport <- ["not_dispatched", "dispatched_or_unknown"],
+        termination <- [nil, "abort", "deadline", "owner_loss"],
+        result_tag <- settlement_result_tags(),
+        conversation <- ["canonical", "evidence_only", "none"],
+        next <- ["retry", "continue", "terminal"],
+        accounting_tag <- settlement_accounting_tags() do
+      cell = {attempt, transport, termination, result_tag, conversation, next, accounting_tag}
+
+      record =
+        settlement_record(
+          attempt,
+          transport,
+          termination,
+          result_tag,
+          conversation,
+          next,
+          accounting_tag
+        )
+
+      expected =
+        if MapSet.member?(valid, cell), do: :ok, else: {:error, :invalid_attempt_settlement}
+
+      assert ProviderAttempt.validate_settled(record) == expected,
+             "settlement cell #{inspect(cell)} expected #{inspect(expected)}"
+    end
+  end
+
+  # The closed table of ADR 0018, transcribed as the cells it lists rather than
+  # derived from the module under test.
+  defp valid_settlement_cells do
+    attempts = [1, 2]
+    replies = [:reply_tools_reported, :reply_tools_bare, :reply_plain_reported, :reply_plain_bare]
+
+    combination_one =
+      for attempt <- attempts, reply <- replies do
+        {attempt, "dispatched_or_unknown", nil, reply, "canonical", settlement_reply_next(reply),
+         settlement_reply_accounting(reply)}
+      end
+
+    combination_two =
+      for attempt <- attempts, termination <- ["abort", "deadline"], reply <- replies do
+        {attempt, "dispatched_or_unknown", termination, reply, "evidence_only", "terminal",
+         settlement_reply_accounting(reply)}
+      end
+
+    combination_three =
+      for attempt <- attempts, termination <- [nil, "abort", "deadline", "owner_loss"] do
+        {attempt, "dispatched_or_unknown", termination, :failed, "none", "terminal", :estimated}
+      end
+
+    combination_four =
+      for attempt <- attempts, termination <- [nil, "abort", "deadline"] do
+        next = if attempt == 1 and is_nil(termination), do: "retry", else: "terminal"
+        {attempt, "not_dispatched", termination, :failed, "none", next, :none}
+      end
+
+    combination_five =
+      for attempt <- attempts,
+          termination <- [nil, "abort", "deadline"],
+          accounting <- [:reported_pair, :reported_other, :estimated] do
+        {attempt, "dispatched_or_unknown", termination, :unreadable, "none", "terminal",
+         accounting}
+      end
+
+    MapSet.new(
+      combination_one ++
+        combination_two ++
+        combination_three ++
+        combination_four ++
+        combination_five
+    )
+  end
+
+  defp settlement_reply_next(reply)
+       when reply in [:reply_tools_reported, :reply_tools_bare],
+       do: "continue"
+
+  defp settlement_reply_next(_reply), do: "terminal"
+
+  defp settlement_reply_accounting(reply)
+       when reply in [:reply_tools_reported, :reply_plain_reported],
+       do: :reported_pair
+
+  defp settlement_reply_accounting(_reply), do: :estimated
+
+  defp settlement_result_tags,
+    do: [
+      :reply_tools_reported,
+      :reply_tools_bare,
+      :reply_plain_reported,
+      :reply_plain_bare,
+      :failed,
+      :unreadable
+    ]
+
+  defp settlement_accounting_tags, do: [:none, :reported_pair, :reported_other, :estimated]
+
+  defp settlement_record(attempt, transport, termination, result_tag, conversation, next, tag) do
+    %{
+      "run_id" => "run_" <> String.duplicate("r", 30),
+      "turn_id" => "turn_" <> String.duplicate("t", 30),
+      "operation_id" => "model-operation_" <> String.duplicate("o", 23),
+      "attempt" => attempt,
+      "staged_request_digest" => String.duplicate("d", 64),
+      "transport" => transport,
+      "termination" => termination,
+      "conversation" => conversation,
+      "next" => next,
+      "result" => settlement_result(result_tag),
+      "accounting" => settlement_accounting(tag),
+      "kind" => "model_attempt_settled_v1"
+    }
+  end
+
+  defp settlement_result(:failed), do: %{"kind" => "error", "category" => "model_call_failed"}
+
+  defp settlement_result(:unreadable),
+    do: %{"kind" => "error", "category" => "unreadable_model_answer"}
+
+  defp settlement_result(tag) do
+    calls =
+      if tag in [:reply_tools_reported, :reply_tools_bare],
+        do: [%{"id" => "call-1", "name" => "tool", "arguments" => %{}}],
+        else: []
+
+    usage =
+      if tag in [:reply_tools_reported, :reply_plain_reported],
+        do: %{"status" => "reported", "input_tokens" => 3, "output_tokens" => 2},
+        else: %{"status" => "unreported", "category" => "missing"}
+
+    %{
+      "kind" => "reply",
+      "reply" => %{
+        "text" => "answer",
+        "identity" => %{
+          "provider" => "scripted",
+          "model" => "scripted:v1",
+          "endpoint" => "in-process"
+        },
+        "usage" => usage,
+        "tool_calls" => calls,
+        "delta_count" => 0,
+        "streamed" => false,
+        "provider_response_id" => nil,
+        "staged_request_digest" => String.duplicate("d", 64)
+      }
+    }
+  end
+
+  defp settlement_accounting(:none), do: %{"source" => "none", "basis" => "not_dispatched"}
+
+  defp settlement_accounting(:estimated),
+    do: %{"source" => "estimated", "basis" => "remaining_allowance"}
+
+  defp settlement_accounting(:reported_pair),
+    do: %{"source" => "reported", "input_tokens" => 3, "output_tokens" => 2}
+
+  defp settlement_accounting(:reported_other),
+    do: %{"source" => "reported", "input_tokens" => 9, "output_tokens" => 9}
+
+  defp adapter_reply(request, calls) do
+    %{
+      "text" => "",
+      "identity" => %{
+        "provider" => "scripted",
+        "model" => "scripted:v1",
+        "endpoint" => "in-process"
+      },
+      "usage" => %{"input_tokens" => 3, "output_tokens" => 2},
+      "tool_calls" => calls,
+      "delta_count" => 0,
+      "streamed" => false,
+      "provider_response_id" => nil,
+      "staged_request_digest" => request.staged_request_digest,
+      "canonical_request_bytes" => request.canonical_request_bytes
+    }
   end
 
   defp canonical_reply(options) do
