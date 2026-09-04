@@ -196,6 +196,38 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @doc """
   ## Concept
 
+  Whether a value is exactly the six-member identity one provider permit may
+  authorize: the attempt-open record's five members plus the session they
+  belong to.
+
+  ## Technical depth
+
+  ADR 0018 makes Control spend the full
+  `{session, run, turn, operation, attempt}` identity once per attempt, after
+  verifying that "every identity equals its registered state". The binding is
+  the map that identity is spelled in, so a member Control never looked at is a
+  member the one-use key can vary in freely: an extra key, a missing key, or a
+  changed attempt produces a different map and therefore a second unspent key
+  for the same attempt. The key set is closed and every member is checked
+  against the same domain `validate_opened/1` enforces, so the spelling cannot
+  vary at all.
+  """
+  @spec validate_binding(term()) :: :ok | {:error, term()}
+  def validate_binding(binding) when is_map(binding) and not is_struct(binding) do
+    with :ok <- exact_keys(binding, ["session_id" | @opened_keys]),
+         true <- bounded_binary?(binding["session_id"]),
+         :ok <- validate_identity(binding) do
+      :ok
+    else
+      _other -> {:error, :invalid_provider_attempt_binding}
+    end
+  end
+
+  def validate_binding(_binding), do: {:error, :invalid_provider_attempt_binding}
+
+  @doc """
+  ## Concept
+
   Whether a replayed settlement row is the exact twelve-key record with a
   closed, internally consistent verdict.
 

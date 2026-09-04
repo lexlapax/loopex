@@ -28,6 +28,7 @@ defmodule Loopex.Runtime.Control do
   alias Loopex.ResumeActivation
   alias Loopex.Runtime.EventDispatcher
   alias Loopex.Runtime.OwnerGroup
+  alias Loopex.Runtime.ProviderAttempt
   alias Loopex.Runtime.SessionCoordinator
   alias Loopex.Runtime.StreamRelay
   alias Loopex.Runtime.Supervisor, as: RuntimeSupervisor
@@ -205,6 +206,7 @@ defmodule Loopex.Runtime.Control do
        # `{session, run, turn, operation, attempt}` is refused even when it
        # supplies a fresh PID and a fresh reference.
        spent_attempts: %{},
+       permitted_positions: %{},
        generation_counter: 0
      }}
   end
@@ -357,11 +359,18 @@ defmodule Loopex.Runtime.Control do
          :ok <- provider_position_current(entry, authority),
          :ok <- provider_worker_ready(authority),
          :ok <- provider_before_deadline(authority),
+         :ok <- provider_position_binding(state, session_id, authority, binding),
          :ok <- provider_attempt_unspent(state, binding) do
       %{worker: worker, permit_reference: reference} = authority
       spent = Map.put(state.spent_attempts, binding, {worker, reference})
+
+      position =
+        Map.put(state.permitted_positions, {session_id, authority.journal_version}, binding)
+
       send(worker, {:loopex_provider_permit, reference, binding})
-      {:reply, {:ok, :dispatched}, %{state | spent_attempts: spent}}
+
+      {:reply, {:ok, :dispatched},
+       %{state | spent_attempts: spent, permitted_positions: position}}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -566,7 +575,8 @@ defmodule Loopex.Runtime.Control do
          %{
            state
            | sessions: Map.delete(state.sessions, session_id),
-             spent_attempts: forget_spent_attempts(state.spent_attempts, session_id)
+             spent_attempts: forget_spent_attempts(state.spent_attempts, session_id),
+             permitted_positions: forget_permitted_positions(state, session_id)
          }}
 
       _other ->
@@ -589,6 +599,14 @@ defmodule Loopex.Runtime.Control do
   defp forget_spent_attempts(spent, session_id) do
     spent
     |> Enum.reject(fn {binding, _bound} -> Map.get(binding, "session_id") == session_id end)
+    |> Map.new()
+  end
+
+  # The positions a session's permits were bound at are dropped on exactly the
+  # line its spent identities are, for exactly the reason above.
+  defp forget_permitted_positions(state, session_id) do
+    state.permitted_positions
+    |> Enum.reject(fn {{session, _version}, _binding} -> session == session_id end)
     |> Map.new()
   end
 
@@ -1134,10 +1152,24 @@ defmodule Loopex.Runtime.Control do
     }
   end
 
-  defp provider_binding_session(%{"session_id" => session_id}) when is_binary(session_id),
-    do: {:ok, session_id}
-
-  defp provider_binding_session(_binding), do: {:error, :invalid_provider_attempt_binding}
+  # Concept: the identity Control spends is the identity Control checked.
+  #
+  # Technical depth: the spent-permit key is this map, so reading only
+  # `"session_id"` out of it left every other member free to vary: a binding
+  # with an extra key, a missing key, or another attempt is a different map,
+  # passed the unspent check, and was reported dispatched -- a second permit for
+  # one attempt under a second spelling. ADR 0018 requires "every identity
+  # equals its registered state" before the spend, and the coordinator builds
+  # this map from the committed attempt-open record, so Control admits exactly
+  # that closed six-member shape. The session member is then compared against
+  # Control's own registered owner entry by the lookup below; the remaining
+  # members name a journal position `authority` does not carry, which is why
+  # their shape, not their value, is what Control can settle here.
+  defp provider_binding_session(binding) do
+    with :ok <- ProviderAttempt.validate_binding(binding) do
+      {:ok, binding["session_id"]}
+    end
+  end
 
   defp provider_current_owner(state, session_id, %{coordinator: coordinator} = authority, caller)
        when is_pid(coordinator) do
@@ -1174,6 +1206,26 @@ defmodule Loopex.Runtime.Control do
   end
 
   defp provider_before_deadline(_authority), do: {:error, :deadline_elapsed}
+
+  # Concept: one committed attempt-open record is one permitted identity.
+  #
+  # Technical depth: the members Control can check by shape alone still leave
+  # the attempt number free, and a binding naming another attempt at the same
+  # journal position is a second identity for one open record -- exactly the
+  # duplicate the one-use spend exists to stop, spelled so that the spent-key
+  # lookup misses. Each attempt-open commits at its own journal version, and
+  # `authority.journal_version` is the position carrying this one, so the
+  # position identifies the record and admits exactly the binding first
+  # permitted against it. An exact re-presentation is left to
+  # `provider_attempt_unspent/2` so it keeps reporting the identity refusal by
+  # its own name.
+  defp provider_position_binding(state, session_id, %{journal_version: version}, binding) do
+    case Map.fetch(state.permitted_positions, {session_id, version}) do
+      {:ok, ^binding} -> :ok
+      {:ok, _other} -> {:error, :invalid_provider_attempt_binding}
+      :error -> :ok
+    end
+  end
 
   defp provider_attempt_unspent(state, binding) do
     if Map.has_key?(state.spent_attempts, binding),
