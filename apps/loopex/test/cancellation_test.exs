@@ -435,7 +435,17 @@ defmodule Loopex.CancellationTest do
     |> Map.fetch!(:cleanup_grace_ms)
   end
 
-  defp settled?(fixture, session_id, attempts \\ 300) do
+  # Concept: the window this poll allows is the run's own settling time, not the
+  # length of a call that used to block for it.
+  #
+  # Technical depth: the execute-result reserve was spent inside the
+  # coordinator's own reduction, so the first read here queued behind it and
+  # answered only once the run had already settled — one call covered the whole
+  # reserve however long it was, and the budget below was never what these cases
+  # actually allowed. Every read answers at once now, so the budget has to name
+  # the settling time itself: the longest of these cases withholds its executor
+  # receipt for four seconds after the cancellation answers.
+  defp settled?(fixture, session_id, attempts \\ 800) do
     case Loopex.session_status(fixture.runtime, session_id) do
       {:ok, %{active_run_id: nil}} ->
         true
