@@ -19,6 +19,23 @@ the exact document set its milestone must update.
 
 ## [Unreleased]
 
+### Planned
+
+- `M3`, kernel consolidation, is Open: its plan pair and red gate exist and
+  await maintainer acceptance. It adds no operator capability and no public
+  surface. It locks in a gate the seventy-three regression cases the
+  post-closure override sets produced, implements ADR 0017 evaluation step 5,
+  moves the event dispatcher off synchronous Store reads inside its own call
+  handler, bounds spent provider-attempt retention, makes a repository-owned
+  aggregate run every Closed gate with its own invocation structurally
+  verified, repairs the test-honesty weaknesses two independent reviews froze,
+  and raises the bootstrap runtime floor by amendment to ADR 0002.
+- The headless stdio JSONL app-server milestone drafted on this branch is now
+  `M4` rather than `M3`. Its plan pair and gate are retained unopened in
+  the [retained `M4` draft](docs/archive/M4.md), its proposed decisions were renumbered
+  to ADR 0019 and ADR 0020, and the projected `0.1.0` tag moves with it to the
+  end of that milestone.
+
 ### Added
 
 - `loopex`, a command an operator runs from their own terminal. `run` submits a
