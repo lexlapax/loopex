@@ -110,6 +110,9 @@ defmodule Loopex.Checks.Register do
       {"docs/adr/0009-tool-executor-and-grant-contracts.md", "ADR 0009"},
       {"docs/adr/0010-provider-continuation-and-context-staging.md", "ADR 0010"},
       {"docs/adr/0011-session-input-algebra-and-streaming.md", "ADR 0011"}
+    ],
+    "M3" => [
+      {"docs/adr/0002-bootstrap-runtime-floor.md", "ADR 0002"}
     ]
   }
 

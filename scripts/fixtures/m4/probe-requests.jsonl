@@ -1,0 +1,5 @@
+{"type":"request","method":"session.create","request_id":"m4-create-1","command_id":"m4-create-command-1","params":{}}
+{"type":"request","method":"session.attach","request_id":"m4-attach-1","params":{"after_event_sequence":0,"session_id":"${SESSION_ID}"}}
+{"type":"request","method":"session.prompt","request_id":"m4-prompt-1","command_id":"m4-prompt-command-1","params":{"content":"Read the fixture, request approval, and write the bounded result.","session_id":"${SESSION_ID}"}}
+{"type":"request","method":"session.respond_interaction","request_id":"m4-interaction-1","command_id":"m4-interaction-command-1","params":{"answer":{"choice_id":"continue"},"interaction_id":"${INTERACTION_ID}","session_id":"${SESSION_ID}"}}
+{"type":"request","method":"session.attach","request_id":"m4-settled-attach-1","params":{"after_event_sequence":${SETTLED_EVENT_SEQUENCE},"session_id":"${SESSION_ID}"}}

@@ -99,8 +99,11 @@ The bootstrap floor is OTP 26+ and Elixir 1.17+, and ADR 0002 locks two exact
 pairs, recorded in `.tool-versions`. The product scaffold exists, so installing
 the toolchain lets you build and test today: `mix test` from the repository root,
 `bash scripts/check-bootstrap.sh` for the aggregate,
-`bash scripts/check-m0-gate.sh` for the closed M0 gate, and
-`/bin/bash -p scripts/check-m1-gate.sh` for the M1 gate. The
+`bash scripts/check-m0-gate.sh` for the closed M0 gate,
+`/bin/bash -p scripts/check-m1-gate.sh` for the closed M1 gate,
+`bash scripts/check-m2-gate.sh` for the closed M2 gate, and
+`bash scripts/check-m3-gate.sh` for the Open M3 gate, which is red by design
+until M3 delivers what it declares. The
 privileged-Bash flag is part of the command: the runner refuses an ordinary Bash
 because inherited functions and `BASH_ENV` would otherwise precede its
 environment boundary.

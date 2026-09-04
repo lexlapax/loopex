@@ -1164,6 +1164,32 @@ defmodule Loopex.StatusCheckTest do
     end
   end
 
+  test "M3 names its runtime-floor decision and cannot outrun it" do
+    floor = "docs/adr/0002-bootstrap-runtime-floor.md"
+    proposed = %{floor => "Proposed"}
+    accepted = %{floor => "Accepted"}
+
+    open = Register.expected_capsule("Open", "M3", proposed)
+
+    assert open["Blockers"] =~ "ADR 0002"
+    assert open["Next maintainer decision"] == "Disposition ADR 0002"
+    assert open["Next transition"] =~ "After the prerequisite is accepted"
+
+    for state <- ["Accepted", "In progress", "In review", "Closed"] do
+      assert_raise Invalid, ~r/`M3` cannot move to #{state} before ADR 0002 is accepted/, fn ->
+        Register.expected_capsule(state, "M3", proposed)
+      end
+    end
+
+    clear = Register.expected_capsule("Open", "M3", accepted)
+    refute clear["Blockers"] =~ "ADR 0002"
+    refute clear["Next maintainer decision"] =~ "ADR 0002"
+
+    assert_raise Invalid, ~r/M3` names ADR 0002 as a prerequisite but/, fn ->
+      Register.expected_capsule("Open", "M3", %{})
+    end
+  end
+
   test "a milestone state with no derived capsule fails closed" do
     assert "In review" in Register.delivery_states()
 
