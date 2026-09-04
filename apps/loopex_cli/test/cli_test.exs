@@ -9,6 +9,7 @@
 # behind a passing test.
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+Code.require_file("support/demonstration.ex", __DIR__)
 
 defmodule LoopexCliTest do
   @moduledoc false
@@ -18,6 +19,7 @@ defmodule LoopexCliTest do
   import ExUnit.CaptureIO
 
   alias Loopex.AgentLoopFixture
+  alias LoopexCli.Demonstration
   alias LoopexCli.Interrupt
   alias LoopexCli.Placement
   alias LoopexCli.Policy.AllowAll
@@ -215,6 +217,72 @@ defmodule LoopexCliTest do
 
       _absent ->
         Enum.reverse(acc)
+    end
+  end
+
+  # Concept: the demonstration stack, which is a real executor over a real
+  # workspace, for the one case here whose claim is about an operating-system
+  # process group.
+  #
+  # Technical depth: the agent-loop fixture's executor answers cancellation with
+  # a message, so nothing it owns can be left behind by a halt and no case built
+  # on it can state this outcome. This is the same stack the coding-task cases
+  # run, started here rather than copied.
+  defp demonstration(options) do
+    {root, workspace} = Demonstration.repository(Keyword.fetch!(options, :label))
+    state_root = Path.join(root, "state")
+
+    stack =
+      Demonstration.start(Keyword.merge(options, state_root: state_root, workspace: workspace))
+
+    on_exit(fn ->
+      Demonstration.stop(stack)
+      File.rm_rf(root)
+    end)
+
+    stack
+  end
+
+  # The child names itself, and the operating system says which group it leads.
+  defp await_group(marker, attempts \\ 600) do
+    {output, _status} = System.cmd("/bin/ps", ["-A", "-o", "pid=,pgid=,command="])
+
+    line =
+      output
+      |> String.split("\n")
+      |> Enum.find(&String.contains?(&1, marker))
+
+    cond do
+      line ->
+        [_pid, pgid | _rest] = String.split(String.trim(line))
+        String.to_integer(pgid)
+
+      attempts > 0 ->
+        Process.sleep(25)
+        await_group(marker, attempts - 1)
+
+      true ->
+        flunk("the signal-ignoring tool child never started")
+    end
+  end
+
+  defp await_group_gone(group, attempts \\ 600) do
+    {output, _status} = System.cmd("/bin/ps", ["-o", "pid=", "-g", Integer.to_string(group)])
+
+    cond do
+      String.trim(output) == "" -> true
+      attempts > 0 -> Process.sleep(25) && await_group_gone(group, attempts - 1)
+      true -> false
+    end
+  end
+
+  # Reads forward to the run's terminal without a formatter or a fixed sleep.
+  defp await_finished(attachment, idle \\ 0) do
+    case Loopex.next_event(attachment) do
+      {:ok, %{kind: "run.finished"} = event} -> event
+      {:ok, _event} -> await_finished(attachment, 0)
+      _absent when idle < 2_000 -> Process.sleep(10) && await_finished(attachment, idle + 1)
+      _absent -> nil
     end
   end
 
@@ -958,6 +1026,130 @@ defmodule LoopexCliTest do
 
     assert [id] = for("COMMAND_ID " <> id <- String.split(output, "\n"), do: id)
     id
+  end
+
+  # Concept: a second interrupt, sent because the first appeared to do nothing,
+  # must not end the process on top of the work it is stopping.
+  #
+  # Technical depth: reproduced live on `main`. A tool child that ignores every
+  # cooperative signal outlives the cooperative window, so the stop is genuinely
+  # still in flight when the operator interrupts again. The handler answered that
+  # second signal with nothing at all, which is what made an operator send a
+  # third; the launcher, meanwhile, took its own interrupted `wait` for the
+  # child's exit status and returned the prompt while the escript was still
+  # stopping, leaving the command processes with the init process as their
+  # parent. This case runs the real local executor against a real process group,
+  # because a double whose cleanup is a message cannot be left behind by a halt.
+  test "a second interrupt during an admitted stop is answered, and the owned process group still goes" do
+    marker = "loopex-interrupt-probe-#{System.unique_integer([:positive])}"
+
+    stack =
+      demonstration(
+        label: "double-interrupt",
+        script: [
+          %{
+            text: "running it",
+            calls: [
+              Demonstration.call("c1", "bash", %{
+                "command" => ~s(trap "" TERM HUP INT QUIT; echo #{marker}; sleep 240)
+              })
+            ]
+          },
+          %{text: "unreached"}
+        ]
+      )
+
+    {_session_id, attachment} = Demonstration.prompt(stack, "run the command")
+
+    # The claim is about a child that is really there and really refuses to go
+    # cooperatively, so its group is read from the operating system rather than
+    # from the executor's own bookkeeping.
+    group = await_group(marker)
+    assert group > 1
+
+    Interrupt.install(attachment, 5_000)
+    on_exit(fn -> restore_signal_handlers() end)
+
+    notices =
+      capture_io(:stderr, fn ->
+        {_output, 0} = System.cmd("/bin/kill", ["-TERM", System.pid()])
+
+        # The second interrupt has to arrive while the first is still joining,
+        # which it is for as long as cleanup lasts: the cooperative window alone
+        # is half of the committed period.
+        Process.sleep(250)
+        {_output, 0} = System.cmd("/bin/kill", ["-TERM", System.pid()])
+
+        send(self(), {:finished, await_finished(attachment)})
+      end)
+
+    assert_received {:finished, finished}
+
+    # The second signal was answered, and answered by the joining branch: it
+    # started no second admission and ended nothing.
+    assert notices =~ "still stopping"
+
+    # The run still reported what happened.
+    assert finished, "the interrupted run never reported a terminal"
+    assert finished["outcome"] in ["cancelled", "outcome_unknown"]
+
+    # And the group the executor owned is gone while this process is still
+    # running, rather than left for a halt to abandon.
+    assert await_group_gone(group), "the owned process group outlived the stop"
+  end
+
+  # Concept: the launcher leaves when the run leaves, and not before.
+  #
+  # Technical depth: a `wait` interrupted by a caught signal returns 128+n while
+  # the child is still running, and the launcher re-waited exactly once. A second
+  # interrupt interrupted that second wait too, so the launcher took 143 for the
+  # child's status and exited while the escript was still stopping -- which is
+  # what detached the run and left its command processes to the init process.
+  # The behaviour is the script's rather than the command's, so the real script
+  # is run against a stand-in that keeps going the way a joining handler does.
+  test "the launcher waits through a second interrupt and reports the escript's own status" do
+    root = Path.join(System.tmp_dir!(), "loopex-launcher-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf(root) end)
+
+    stand_in = Path.join(root, "escript")
+
+    File.write!(stand_in, """
+    #!/bin/sh
+    trap 'echo "stand-in: interrupted" >&2' TERM
+    i=0
+    while [ $i -lt 6 ]; do sleep 1; i=$((i+1)); done
+    exit 130
+    """)
+
+    File.chmod!(stand_in, 0o755)
+
+    port =
+      Port.open({:spawn_executable, app_path("bin/loopex")}, [
+        :binary,
+        :exit_status,
+        :hide,
+        env: [{~c"LOOPEX_ESCRIPT", String.to_charlist(stand_in)}]
+      ])
+
+    assert {:os_pid, launcher} = Port.info(port, :os_pid)
+
+    Process.sleep(1_000)
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(launcher)])
+    Process.sleep(2_000)
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", Integer.to_string(launcher)])
+
+    # Asked of the operating system rather than of the port: the stand-in inherits
+    # the port's output, so the emulator reports the launcher's exit only once
+    # that descendant has gone too, and a launcher that left early looks the same
+    # from here as one that waited.
+    Process.sleep(500)
+
+    assert {_output, 0} = System.cmd("/bin/kill", ["-0", Integer.to_string(launcher)]),
+           "the launcher left while its child was still running"
+
+    assert_receive {^port, {:exit_status, status}}, 20_000
+    assert status == 130, "the launcher reported its own interrupted wait, not the child"
   end
 
   test "an interrupt whose cleanup cannot be confirmed reports outcome unknown with its reconciliation reference" do
