@@ -681,10 +681,25 @@ defmodule Loopex.Executor.Local do
   Reads through the serialized owner, which validates the on-disk job binding
   before returning plain data.
   """
-  @impl Loopex.Executor
   @spec receipt(t(), binary()) :: {:ok, map()} | :absent | {:error, term()}
   def receipt(executor, job_id) when is_pid(executor) and is_binary(job_id),
     do: GenServer.call(executor, {:receipt, job_id})
+
+  @doc """
+  ## Concept
+
+  The executor port's optional retained-receipt lookup, answered by `receipt/2`.
+
+  ## Technical depth
+
+  Named distinctly from `receipt/2` on the port because that generic name was
+  already in use as an unrelated helper on more than one executor module, and a
+  callback a module implements by accident is called with arguments it never
+  meant to accept.
+  """
+  @impl Loopex.Executor
+  @spec retained_receipt(t(), binary()) :: {:ok, map()} | :absent | {:error, term()}
+  def retained_receipt(executor, job_id), do: receipt(executor, job_id)
 
   @doc false
   @spec stats(t()) :: map()

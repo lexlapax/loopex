@@ -230,10 +230,10 @@ defmodule Loopex.Executor do
   that does not export the callback leaves that reconciliation host-driven, and
   so does any answer the coordinator cannot validate.
   """
-  @callback receipt(reference :: term(), job_id :: binary()) ::
+  @callback retained_receipt(reference :: term(), job_id :: binary()) ::
               {:ok, map()} | :absent | {:error, term()}
 
-  @optional_callbacks receipt: 2
+  @optional_callbacks retained_receipt: 2
 
   @doc """
   ## Concept
@@ -348,7 +348,8 @@ defmodule Loopex.Executor do
 
   ## Technical depth
 
-  The optional `receipt/2` callback is consulted only where the module exports
+  The optional `retained_receipt/2` callback is consulted only where the module
+  exports
   it; a module that does not answers `{:error, :receipt_lookup_unsupported}`,
   which the coordinator reads as "leave this to the host" rather than as any
   fact about the effect. The call is bounded and runs in a process of its own
@@ -359,9 +360,10 @@ defmodule Loopex.Executor do
   is ever read as `:absent`, because absence is the one answer that ends a run
   `outcome_unknown` and must therefore be stated, never inferred.
   """
-  @spec receipt(module(), term(), binary()) :: {:ok, map()} | :absent | {:error, term()}
-  def receipt(module, reference, job_id) when is_atom(module) and is_binary(job_id) do
-    if Code.ensure_loaded?(module) and function_exported?(module, :receipt, 2) do
+  @spec retained_receipt(module(), term(), binary()) ::
+          {:ok, map()} | :absent | {:error, term()}
+  def retained_receipt(module, reference, job_id) when is_atom(module) and is_binary(job_id) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :retained_receipt, 2) do
       bounded_receipt(module, reference, job_id, @receipt_bound_ms)
     else
       {:error, :receipt_lookup_unsupported}
@@ -370,7 +372,9 @@ defmodule Loopex.Executor do
 
   defp bounded_receipt(module, reference, job_id, bound) do
     {pid, monitor} =
-      spawn_monitor(fn -> exit({:loopex_receipt_answer, module.receipt(reference, job_id)}) end)
+      spawn_monitor(fn ->
+        exit({:loopex_receipt_answer, module.retained_receipt(reference, job_id)})
+      end)
 
     await_receipt(pid, monitor, System.monotonic_time(:millisecond) + bound)
   end

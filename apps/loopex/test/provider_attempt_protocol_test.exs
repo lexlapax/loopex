@@ -597,7 +597,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         progress_to: self()
       )
 
-    {session_id, attachment, {:accepted, "prompt-1"}} =
+    {_session_id, attachment, {:accepted, "prompt-1"}} =
       Fixture.run(fixture, "closure publication order")
 
     assert_receive {:holding, worker}, 5_000

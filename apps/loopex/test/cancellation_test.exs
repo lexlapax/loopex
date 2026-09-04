@@ -209,8 +209,8 @@ defmodule Loopex.ReceiptTestExecutor do
   def cancel(_reference, _job_id), do: {:ok, :cleaned}
 
   @impl Loopex.Executor
-  def receipt({:raise, message}, _job_id), do: raise(message)
-  def receipt(answer, _job_id), do: answer
+  def retained_receipt({:raise, message}, _job_id), do: raise(message)
+  def retained_receipt(answer, _job_id), do: answer
 end
 
 defmodule Loopex.NoCancellationTestExecutor do
@@ -1051,33 +1051,46 @@ defmodule Loopex.CancellationTest do
   # admitted shapes, and one that does not answer inside the bound each reach a
   # distinct error the coordinator declines on and leaves to the host.
   test "a receipt lookup admits exactly the stated answers and reports every other as an error" do
-    refute function_exported?(Loopex.NoCancellationTestExecutor, :receipt, 2)
+    refute function_exported?(Loopex.NoCancellationTestExecutor, :retained_receipt, 2)
 
-    assert Loopex.Executor.receipt(Loopex.NoCancellationTestExecutor, :ignored, "job-1") ==
+    assert Loopex.Executor.retained_receipt(Loopex.NoCancellationTestExecutor, :ignored, "job-1") ==
              {:error, :receipt_lookup_unsupported}
 
     retained = %{job_id: "job-1", outcome: :completed}
 
     assert {:ok, ^retained} =
-             Loopex.Executor.receipt(Loopex.ReceiptTestExecutor, {:ok, retained}, "job-1")
+             Loopex.Executor.retained_receipt(
+               Loopex.ReceiptTestExecutor,
+               {:ok, retained},
+               "job-1"
+             )
 
-    assert :absent = Loopex.Executor.receipt(Loopex.ReceiptTestExecutor, :absent, "job-1")
+    assert :absent =
+             Loopex.Executor.retained_receipt(Loopex.ReceiptTestExecutor, :absent, "job-1")
 
     assert {:error, :effect_in_flight} =
-             Loopex.Executor.receipt(
+             Loopex.Executor.retained_receipt(
                Loopex.ReceiptTestExecutor,
                {:error, :effect_in_flight},
                "job-1"
              )
 
     assert {:error, :invalid_receipt_answer} =
-             Loopex.Executor.receipt(Loopex.ReceiptTestExecutor, :nothing_admitted, "job-1")
+             Loopex.Executor.retained_receipt(
+               Loopex.ReceiptTestExecutor,
+               :nothing_admitted,
+               "job-1"
+             )
 
     assert {:error, :invalid_receipt_answer} =
-             Loopex.Executor.receipt(Loopex.ReceiptTestExecutor, {:ok, "not a map"}, "job-1")
+             Loopex.Executor.retained_receipt(
+               Loopex.ReceiptTestExecutor,
+               {:ok, "not a map"},
+               "job-1"
+             )
 
     assert {:error, :receipt_lookup_failed} =
-             Loopex.Executor.receipt(
+             Loopex.Executor.retained_receipt(
                Loopex.ReceiptTestExecutor,
                {:raise, "ledger unreadable"},
                "job-1"

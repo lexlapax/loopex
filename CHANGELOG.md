@@ -203,7 +203,7 @@ the exact document set its milestone must update.
   did, so a run whose period exceeds ten seconds can still report `cancelled`.
 - A session whose process was killed mid-command resumed into a run nothing
   would settle, and the terminal waited on its idle limit. The executor port
-  gains an optional `receipt/2`; at activation of a prepared resume the
+  gains an optional `retained_receipt/2`; at activation of a prepared resume the
   coordinator asks for the retained receipt, validates it exactly as it
   validates a host's, and settles the run as completed or `outcome_unknown`. An
   executor that cannot say leaves reconciliation host-driven.

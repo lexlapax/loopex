@@ -285,7 +285,7 @@ retained. Activating the prepared owner is the host's statement that the process
 which dispatched the effect is gone, so no result is coming back through the
 coordinator and the executor's retained receipt is the only truth left. The
 coordinator therefore solicits its own query at activation, asks the executor
-through the optional `Loopex.Executor.receipt/2` callback, and validates the
+through the optional `Loopex.Executor.retained_receipt/2` callback, and validates the
 answer exactly as it validates a host's: a retained receipt commits the receipt
 fact and the run continues, `:absent` commits `outcome_unknown`, and an executor
 that does not export the callback, answers `{:error, :effect_in_flight}` or any

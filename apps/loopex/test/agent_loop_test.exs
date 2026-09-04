@@ -864,30 +864,6 @@ defmodule Loopex.AgentLoopTest do
     end
   end
 
-  defp await_worker_result_drain(coordinator, abort, attempts \\ 100_000) do
-    info = Process.info(coordinator, [:status, :current_function])
-
-    cond do
-      is_list(info) and Keyword.get(info, :status) == :waiting and
-          Keyword.get(info, :current_function) ==
-            {Loopex.Runtime.SessionCoordinator, :take_worker_result, 1} ->
-        :waiting
-
-      attempts == 0 ->
-        {:timeout, info}
-
-      true ->
-        case Task.yield(abort, 0) do
-          nil ->
-            :erlang.yield()
-            await_worker_result_drain(coordinator, abort, attempts - 1)
-
-          result ->
-            {:returned, result}
-        end
-    end
-  end
-
   defp admit_abort_before_queued_model_result(fixture, attachment, model, command_id) do
     coordinator = coordinator_of(fixture.runtime)
 

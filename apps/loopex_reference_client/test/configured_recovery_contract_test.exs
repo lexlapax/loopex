@@ -17,7 +17,7 @@ defmodule Loopex.ReferenceClient.InFlightReceiptExecutor do
   def cancel(reference, job_id), do: Local.cancel(reference, job_id)
 
   @impl Loopex.Executor
-  def receipt(_reference, _job_id), do: {:error, :effect_in_flight}
+  def retained_receipt(_reference, _job_id), do: {:error, :effect_in_flight}
 end
 
 defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
@@ -239,7 +239,7 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
     # no host has to ask.
     #
     # Technical depth: the coordinator solicits its own query at activation,
-    # reads the receipt through the executor port's optional `receipt/2`, and
+    # reads the receipt through the executor port's optional `retained_receipt/2`, and
     # validates it exactly as it validates a host's answer. A host that asks
     # afterwards finds nothing pending, which is the proof the kernel did it.
     terminal = await_run_finished(attachment, 10_000)

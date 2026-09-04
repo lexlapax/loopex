@@ -4022,7 +4022,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     task =
       Task.Supervisor.async_nolink(state.workers, fn ->
-        Executor.receipt(executor.module, executor.reference, job_id)
+        Executor.retained_receipt(executor.module, executor.reference, job_id)
       end)
 
     state = %{

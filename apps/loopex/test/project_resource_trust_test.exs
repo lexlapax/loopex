@@ -6,8 +6,6 @@ defmodule Loopex.ProjectResourceTrustTest do
 
   use ExUnit.Case, async: false
 
-  import ExUnit.CaptureIO
-
   alias Loopex.AgentLoopFixture, as: Fixture
   alias Loopex.AgentLoopTestModel
   alias Loopex.Bounds
