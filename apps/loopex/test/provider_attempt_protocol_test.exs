@@ -66,6 +66,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   @record_limit 65_536
   @record_depth_limit 12
   @record_cardinality_limit 1_024
+  @identifier_limit 256
   @delivery_ledger :provider_attempt_delivery_ledger
 
   test "the request and first attempt open atomically before one direct one-use Control permit can invoke the provider" do
@@ -3332,6 +3333,234 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert projected["tool_calls"] == [ordinary]
     assert projected["staged_request_digest"] == request.staged_request_digest
     refute Map.has_key?(projected, "canonical_request_bytes")
+  end
+
+  # Concept: the raw reply is admitted by the Store itself, so exactly what the
+  # Store refuses is refused here.
+  #
+  # Technical depth: the retired pre-walk was a second opinion about ADR 0017
+  # and it disagreed with the Store in two directions. Containers contributed
+  # nothing of their own, so an answer whose cost is collection overhead rather
+  # than payload bytes charged a few thousand bytes and passed; and any binary
+  # was an admissible key, so a key above the 256-byte identifier limit reached
+  # projection. Each arm below is legal in every other dimension -- shallow,
+  # inside the cardinality ceiling, every binary short -- so only a delegated
+  # Store verdict can decide it, and `retired_charge/1` reproduces the old
+  # arithmetic to show the first arm is exactly what that model false-greened.
+  test "raw reply admission refuses container overhead and keys past the identifier limit" do
+    request = %{
+      canonical_request_bytes: "canonical-request-bytes",
+      staged_request_digest: String.duplicate("d", 64)
+    }
+
+    container_heavy =
+      Map.new(1..1_000, fn index ->
+        {"k#{index}", List.duplicate(List.duplicate(nil, 64), 8)}
+      end)
+
+    assert :erlang.external_size(container_heavy, [:deterministic]) > 20 * @record_limit
+    assert retired_charge(container_heavy) < @record_limit
+    assert map_size(container_heavy) <= @record_cardinality_limit
+
+    heavy_call = %{"id" => "call-1", "name" => "tool", "arguments" => container_heavy}
+
+    assert ProviderAttempt.canonical_reply(adapter_reply(request, [heavy_call]), request) ==
+             {:error, :unreadable_model_answer}
+
+    over_key = %{
+      "id" => "call-1",
+      "name" => "tool",
+      "arguments" => %{String.duplicate("k", @identifier_limit + 1) => "v"}
+    }
+
+    assert ProviderAttempt.canonical_reply(adapter_reply(request, [over_key]), request) ==
+             {:error, :unreadable_model_answer}
+
+    at_key = %{
+      "id" => "call-1",
+      "name" => "tool",
+      "arguments" => %{String.duplicate("k", @identifier_limit) => "v"}
+    }
+
+    assert {:ok, projected} =
+             ProviderAttempt.canonical_reply(adapter_reply(request, [at_key]), request)
+
+    assert projected["tool_calls"] == [at_key]
+  end
+
+  # Concept: the ceiling admits the largest answer that fits, and refuses the
+  # first one that does not.
+  #
+  # Technical depth: moving admission onto the Store risks the opposite defect
+  # from the one it repairs -- a reply the settlement retains today refused a
+  # byte early. The exact boundary is computed rather than guessed: every extra
+  # byte of `text` adds exactly one byte to the deterministic external size, so
+  # the fitting reply measures the ceiling exactly and one more byte is the
+  # first refusal.
+  test "a reply measuring exactly the item ceiling is admitted and one byte more is not" do
+    request = %{
+      canonical_request_bytes: "canonical-request-bytes",
+      staged_request_digest: String.duplicate("d", 64)
+    }
+
+    raw = adapter_reply(request, [])
+    measured = Map.drop(raw, ["usage", "canonical_request_bytes"])
+
+    assert {:ok, base} = Store.admit_bounded(measured)
+
+    fitting = String.duplicate("x", @record_limit - base)
+    assert {:ok, @record_limit} = Store.admit_bounded(Map.put(measured, "text", fitting))
+
+    assert {:ok, projected} =
+             ProviderAttempt.canonical_reply(Map.put(raw, "text", fitting), request)
+
+    assert projected["text"] == fitting
+
+    assert ProviderAttempt.canonical_reply(Map.put(raw, "text", fitting <> "x"), request) ==
+             {:error, :unreadable_model_answer}
+  end
+
+  # Concept: a usage member an adapter actually sent is never read as a member
+  # it never sent.
+  #
+  # Technical depth: `usage` is deliberately outside the Store admission,
+  # because ADR 0018 combination 1 requires a malformed one to be classified
+  # rather than to refuse an otherwise canonical reply. That exclusion is why
+  # the missing-member marker had to stop being a bare atom: nothing else on
+  # this path would refuse an adapter that literally answers `:absent`. The last
+  # arm pins the exclusion itself, by showing the same atom anywhere the
+  # admission does cover refuses the whole reply.
+  test "an adapter-supplied :absent usage member is malformed, not missing" do
+    request = %{
+      canonical_request_bytes: "canonical-request-bytes",
+      staged_request_digest: String.duplicate("d", 64)
+    }
+
+    raw = adapter_reply(request, [])
+
+    sentinel = Map.put(raw, "usage", %{"input_tokens" => :absent, "output_tokens" => 10})
+
+    assert {:ok, supplied} = ProviderAttempt.canonical_reply(sentinel, request)
+    assert supplied["usage"] == %{"status" => "unreported", "category" => "malformed"}
+
+    assert Store.admit_bounded(%{"input_tokens" => :absent}) == {:error, :invalid_item}
+
+    absent = Map.put(raw, "usage", %{"output_tokens" => 10})
+
+    assert {:ok, partial} = ProviderAttempt.canonical_reply(absent, request)
+    assert partial["usage"] == %{"status" => "unreported", "category" => "partial"}
+
+    elsewhere = %{"id" => "call-1", "name" => "tool", "arguments" => %{"a" => :absent}}
+
+    assert ProviderAttempt.canonical_reply(adapter_reply(request, [elsewhere]), request) ==
+             {:error, :unreadable_model_answer}
+  end
+
+  # Concept: the exposed admission and the Store's real item verdict are one
+  # answer, sampled rather than argued.
+  #
+  # Technical depth: the sweep draws plain and non-plain data -- oversized and
+  # empty keys, atoms, tuples, a binary past the ceiling, a 1,025-member map, a
+  # twenty-level chain -- and compares `admit_bounded/1` against storing the
+  # same term as a private record. The two differ by exactly one root member,
+  # `kind`, whose encoded cost is constant because a deterministic map header
+  # has a fixed arity width, so the byte relation is checked exactly rather than
+  # approximately and a drifting reason or a drifting count both fail here.
+  test "admit_bounded agrees with the Store item verdict over random plain data" do
+    :rand.seed(:exsss, {101, 202, 303})
+
+    # The cost of the one member the item carries and the bare term does not,
+    # measured as the difference between two whole encodings so that the
+    # version byte and the fixed-width map header cancel exactly.
+    kind_cost =
+      :erlang.external_size(%{kind: "sweep"}, [:deterministic]) -
+        :erlang.external_size(%{}, [:deterministic])
+
+    for _index <- 1..200 do
+      term = sweep_root()
+      expected = Store.validate_private_record(Map.put(term, :kind, "sweep"))
+
+      case Store.admit_bounded(term) do
+        {:ok, bytes} when bytes + kind_cost <= @record_limit ->
+          assert expected == :ok, "admitted a term the Store refused: #{inspect(expected)}"
+
+        {:ok, bytes} ->
+          assert expected == {:error, {:item_too_large, bytes + kind_cost, @record_limit}}
+
+        {:error, {:item_too_large, observed, limit}} ->
+          assert expected == {:error, {:item_too_large, observed + kind_cost, limit}}
+
+        {:error, reason} ->
+          assert expected == {:error, reason}
+      end
+    end
+  end
+
+  defp retired_charge(value) when is_binary(value), do: byte_size(value)
+
+  defp retired_charge(value) when is_integer(value) or is_float(value),
+    do: :erlang.external_size(value, [:deterministic])
+
+  defp retired_charge(value) when is_list(value),
+    do: Enum.reduce(value, 0, fn item, acc -> acc + retired_charge(item) end)
+
+  defp retired_charge(value) when is_map(value) and not is_struct(value) do
+    Enum.reduce(value, 0, fn {key, item}, acc ->
+      acc + retired_charge(key) + retired_charge(item)
+    end)
+  end
+
+  defp retired_charge(_value), do: 0
+
+  defp sweep_root do
+    base = Map.new(1..:rand.uniform(4), fn _ -> {sweep_key(), sweep_term(:rand.uniform(4))} end)
+
+    case :rand.uniform(8) do
+      1 ->
+        Map.put(base, "deep", sweep_chain(:rand.uniform(20)))
+
+      2 ->
+        Map.put(base, "wide", Map.new(1..(@record_cardinality_limit + 1), &{"m#{&1}", &1}))
+
+      _other ->
+        base
+    end
+  end
+
+  defp sweep_chain(0), do: 1
+  defp sweep_chain(levels), do: %{"n" => sweep_chain(levels - 1)}
+
+  defp sweep_term(0), do: sweep_scalar()
+
+  defp sweep_term(depth) do
+    case :rand.uniform(6) do
+      1 -> Enum.map(1..:rand.uniform(3), fn _ -> sweep_term(depth - 1) end)
+      2 -> Map.new(1..:rand.uniform(3), fn _ -> {sweep_key(), sweep_term(depth - 1)} end)
+      _other -> sweep_scalar()
+    end
+  end
+
+  defp sweep_key do
+    case :rand.uniform(12) do
+      1 -> String.duplicate("k", @identifier_limit + 1)
+      2 -> ""
+      _other -> "k" <> Integer.to_string(:rand.uniform(1_000_000))
+    end
+  end
+
+  defp sweep_scalar do
+    case :rand.uniform(14) do
+      1 -> :not_plain_data
+      2 -> {:tuple, 1}
+      3 -> nil
+      4 -> true
+      5 -> String.duplicate("x", @record_limit + 1)
+      6 -> :rand.uniform(1_000_000)
+      7 -> 1.5
+      8 -> false
+      9 -> []
+      _other -> "s" <> Integer.to_string(:rand.uniform(1_000_000))
+    end
   end
 
   # Concept: a settlement is valid when it is one of the combinations ADR 0018
