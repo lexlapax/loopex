@@ -19,6 +19,11 @@ the exact document set its milestone must update.
 
 ## [Unreleased]
 
+The next milestone, `M3` (kernel consolidation), is being opened gate-first on
+branch `m3`, where its plan pair and red gate live until acceptance; the headless
+session-protocol draft is retained there as `M4`. Nothing about either is on
+`main` yet, by the contract's rule that an unaccepted Open tree never merges.
+
 ### Added
 
 - `loopex`, a command an operator runs from their own terminal. `run` submits a
@@ -321,7 +326,8 @@ the exact document set its milestone must update.
   exhausted the retry allowance and stopped the run's owner — roughly one run in
   twelve, while runs in isolation were clean. The transport now receives the
   remaining time on the committed deadline, so there is one bound and it is the
-  one the run declared. It became visible only because an interrupted stream is
+  one the run declared, apart from Control's one-second bound on the read that
+  rebuilds a permit's binding, which refuses the attempt rather than the run. It became visible only because an interrupted stream is
   now an error rather than the partial text already emitted; the same timeout
   previously produced a truncated answer indistinguishable from a short one.
 - The core-only lane measured the ambient VM, which made outcomes 7 and 9 appear

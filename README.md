@@ -195,3 +195,6 @@ Erlang/OTP are both Apache-2.0 — and gives you an explicit patent grant
 alongside explicit "AS IS", no-warranty terms that match the no-promises
 posture above. If you contribute, your contribution is licensed under the
 same terms — that is Apache-2.0 §5, and there is no separate CLA.
+
+The next milestone, `M3` (kernel consolidation), is being opened gate-first on
+branch `m3` and is not yet accepted; see that branch's `docs/plans/README.md`.
