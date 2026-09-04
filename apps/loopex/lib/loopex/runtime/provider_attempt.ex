@@ -228,6 +228,42 @@ defmodule Loopex.Runtime.ProviderAttempt do
   @doc """
   ## Concept
 
+  The exact permit binding one committed attempt-open row authorizes, in the
+  session that row was read from.
+
+  ## Technical depth
+
+  ADR 0018 requires that "every identity equals its registered state" before
+  Control spends an attempt, and the registered state of a run, turn, operation,
+  attempt and digest is the committed `model_attempt_opened_v1` row, never the
+  argument of the process asking for the permit. So the binding is rebuilt here
+  from that row's own five members plus the session it belongs to, and a
+  caller's map is admitted only by equality with this one. The row is validated
+  as the exact attempt-open record first, including its kind, so a row of any
+  other kind standing at the same journal position names no binding at all
+  rather than contributing whichever of these members it happens to carry. Every
+  refusal is the binding refusal, because the only question asked here is which
+  binding, if any, this row registers.
+  """
+  @spec binding_from_opened(term(), term()) :: {:ok, map()} | {:error, term()}
+  def binding_from_opened(session_id, record)
+      when is_binary(session_id) and is_map(record) and not is_struct(record) do
+    with @opened_kind <- Map.get(record, :kind, Map.get(record, "kind")),
+         :ok <- validate_opened(record),
+         binding = Map.put(Map.take(record, @opened_keys), "session_id", session_id),
+         :ok <- validate_binding(binding) do
+      {:ok, binding}
+    else
+      _other -> {:error, :invalid_provider_attempt_binding}
+    end
+  end
+
+  def binding_from_opened(_session_id, _record),
+    do: {:error, :invalid_provider_attempt_binding}
+
+  @doc """
+  ## Concept
+
   Whether a replayed settlement row is the exact twelve-key record with a
   closed, internally consistent verdict.
 
