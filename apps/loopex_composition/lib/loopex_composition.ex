@@ -54,6 +54,15 @@ defmodule LoopexComposition do
   `:policy` is required and has no default. `:state_root` and `:workspace` are
   resolved by the caller rather than discovered here, because where an operator's
   data lives is the host's decision.
+
+  `:recover_stale_writer` defaults to `false` and is forwarded unchanged to the
+  durable store. Passing `true` asserts that the caller controls this state root
+  and has already established that the process tree which left the store's writer
+  marker is gone — the shipped command asserts it only while holding the
+  placement lock, whose acquisition probes the recorded owner's liveness and
+  refuses a live one. An embedder that cannot establish the same fact leaves it
+  absent and is refused by a marker it did not write, which is the pre-existing
+  behaviour and stays the default.
   """
   @spec start(keyword()) :: {:ok, Loopex.Runtime.t()} | {:error, term()}
   def start(options) when is_list(options) do
@@ -83,7 +92,16 @@ defmodule LoopexComposition do
   defp validate(options) do
     with {:ok, policy} <- policy(Keyword.get(options, :policy)),
          {:ok, [root, workspace, id]} <- required(options, @required_options),
+         :ok <- boolean(options, :recover_stale_writer),
          do: {:ok, {options, root, workspace, id, policy}}
+  end
+
+  # An assertion about the world is refused unless it was actually made, rather
+  # than read as truthy: only `true` and `false` say anything here.
+  defp boolean(options, key) do
+    if is_boolean(Keyword.get(options, key, false)),
+      do: :ok,
+      else: {:error, {:invalid_composition_option, key}}
   end
 
   defp policy(module) when is_atom(module) and not is_nil(module), do: {:ok, module}
@@ -147,7 +165,7 @@ defmodule LoopexComposition do
   defp compose({options, root, workspace, runtime_id, policy}) do
     with :ok <- start_applications(),
          :ok <- File.mkdir_p(root),
-         {:ok, adapter} <- start_edge(Store.Local, path: Path.join(root, "store.log")),
+         {:ok, adapter} <- start_edge(Store.Local, store_options(root, options)),
          {:ok, store} <- Store.new(Store.Local, adapter),
          {:ok, executor} <- open_executor(root, workspace, options) do
       tools = CodingTools.definitions()
@@ -162,6 +180,14 @@ defmodule LoopexComposition do
       )
     end
   end
+
+  # Concept: whether a stale writer marker may be broken is the caller's
+  # assertion to make, so it is forwarded rather than decided here.
+  defp store_options(root, options),
+    do: [
+      path: Path.join(root, "store.log"),
+      recover_stale_writer: Keyword.get(options, :recover_stale_writer, false)
+    ]
 
   # Concept: the reference stack ships a working context-admission ceiling, and
   # an operator who names their own value gets exactly that value.

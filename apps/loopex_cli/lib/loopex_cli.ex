@@ -760,6 +760,20 @@ defmodule LoopexCli do
 
       runtime_starter = Keyword.get(options, :runtime_starter, &LoopexComposition.start/1)
 
+      # Concept: yesterday's session can be resumed today, and the file the
+      # previous run left behind is not what decides that.
+      #
+      # Technical depth: the store's writer marker is physical exclusion and
+      # survives its holder's death by design, because nothing portable can
+      # compare-and-delete it. An `escript` halts the emulator, so the marker
+      # outlives every completed run, and a later `resume` or `cancel` used to be
+      # refused with `{:store_writer_active, path}` by a process that had already
+      # proved nobody was there. `own_placement/1` above is that proof: the
+      # placement lock is only granted after the recorded owner's process
+      # incarnation is probed and found absent, and a live owner is refused
+      # instead. Asserting the recovery here, after that succeeded and nowhere
+      # else, is the trusted-local operation `WriterLock` describes; the option
+      # stays absent for an embedder that has established nothing.
       runtime_starter.(
         [
           runtime_id: placement,
@@ -768,7 +782,8 @@ defmodule LoopexCli do
           policy: policy,
           project_manifest: manifest,
           project_decision: decision,
-          progress_to: self()
+          progress_to: self(),
+          recover_stale_writer: true
         ] ++ cleanup ++ context
       )
     end

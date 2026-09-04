@@ -6,29 +6,41 @@ defmodule Loopex.Store.Local.WriterLock do
   second ordinary opener fails closed instead of running another stale cache
   against the same transaction log.
 
-  Restart after an ungraceful VM or OS-process death is explicit. The caller
-  may recover the stale writer marker only after it controls the runtime root
-  and has established that the prior process tree is gone. This marker is
-  physical writer exclusion, not session ownership; ADR 0006 owner epochs and
-  incarnation IDs remain the commit-authority fence.
+  A holder that terminates in an orderly way gives its own marker back, so an
+  ordinary stop leaves nothing behind for the next opener to reason about.
+  Restart after an ungraceful VM or OS-process death is still explicit, because
+  a killed holder never runs anything. The caller may recover the stale writer
+  marker only after it controls the runtime root and has established that the
+  prior process tree is gone. This marker is physical writer exclusion, not
+  session ownership; ADR 0006 owner epochs and incarnation IDs remain the
+  commit-authority fence.
 
   ## Technical depth
 
-  Acquisition creates and syncs a sidecar with exclusive-create semantics. A
-  marker deliberately remains after Erlang-process or whole-VM death because a
-  portable compare-and-delete primitive is unavailable in OTP's file API.
-  `:recover_stale_writer` is the narrow trusted-local operation that breaks it
-  only after the prior process tree is known dead. Concurrent or speculative
-  recovery is unsupported and never occurs in M1's one-runtime process-tree
-  topology; automatic cleanup would introduce a check/delete race capable of
-  removing a successor's lock.
+  Acquisition creates and syncs a sidecar with exclusive-create semantics.
+
+  `release/1` is the orderly give-back: it deletes the marker only when the
+  file still holds the exact bytes this holder wrote, so a release that arrives
+  after someone else already recovered the path cannot remove a successor's
+  lock. The comparison is not one kernel operation — OTP's file API exposes no
+  compare-and-delete — but the holder is by construction the only live writer
+  while its own bytes are present, so the window it leaves is the one that
+  recovery already handles rather than a new one.
+
+  A marker therefore remains after an untrappable kill, a whole-VM death, or a
+  power loss, none of which run a release. `:recover_stale_writer` is the narrow
+  trusted-local operation that breaks such a marker, and only after the prior
+  process tree is known dead. Concurrent or speculative recovery is unsupported;
+  automatic cleanup on open would introduce a check/delete race capable of
+  removing a live successor's lock.
   """
 
   alias Loopex.Store.Local.Log
 
   @prefix "loopex_store_writer_v1\n"
 
-  @typep t :: %{path: Path.t()}
+  @typedoc false
+  @type t :: %{path: Path.t(), marker: binary()}
 
   @doc false
   @spec acquire(Path.t(), boolean()) :: {:ok, t()} | {:error, term()}
@@ -37,8 +49,22 @@ defmodule Loopex.Store.Local.WriterLock do
     path = store_path <> ".writer"
 
     with :ok <- maybe_recover(path, recover_stale_writer),
-         {:ok, _marker} <- create_marker(path) do
-      {:ok, %{path: path}}
+         {:ok, marker} <- create_marker(path) do
+      {:ok, %{path: path, marker: marker}}
+    end
+  end
+
+  @doc false
+  @spec release(t()) :: :ok
+  def release(%{path: path, marker: marker}) do
+    case File.read(path) do
+      {:ok, ^marker} ->
+        _ = File.rm(path)
+        _ = Log.sync_parent(path)
+        :ok
+
+      _absent_or_foreign ->
+        :ok
     end
   end
 

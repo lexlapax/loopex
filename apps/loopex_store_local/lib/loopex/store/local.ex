@@ -34,6 +34,13 @@ defmodule Loopex.Store.Local do
   interrupted write cannot become an acknowledged retained outcome until a
   successful recovery sync establishes their durability.
 
+  One live process at a time writes a path, enforced by the physical writer
+  marker `Loopex.Store.Local.WriterLock` describes. This process takes that
+  marker at startup and gives it back on an orderly stop, so an embedder who
+  stops a Store can open the same path again without recovering anything. A
+  marker outliving an untrappable kill or a dead VM is broken only by the
+  `:recover_stale_writer` option, which its caller must have earned.
+
   OTP status formatting removes the last transaction message, Store state,
   termination reason, and debug log before inspection or abnormal-termination
   reporting; private records and owner-incarnation capabilities never enter
@@ -66,6 +73,12 @@ defmodule Loopex.Store.Local do
 
   `:path` is required. `:fault_probe` is optional runtime-local test evidence
   and is never encoded or exposed through the Store port.
+
+  `:recover_stale_writer` defaults to `false` and belongs to a trusted-local
+  caller that already controls the runtime root and has established that the
+  process tree which left the writer marker is gone. It is never a default and
+  never speculative: an opener that has not established that fact leaves it
+  absent and is refused by a marker it did not write.
   """
   @type option ::
           {:path, Path.t()} | {:fault_probe, pid()} | {:recover_stale_writer, boolean()}
@@ -80,6 +93,10 @@ defmodule Loopex.Store.Local do
   Startup reads and semantically audits the entire bounded transaction history;
   a corrupt frame or illegal owner/version sequence prevents the process from
   starting. No process name is registered.
+
+  Startup also takes the physical writer marker for the path, and a startup that
+  fails after taking it gives it back before stopping, so a refused open leaves
+  no marker naming a process that never ran.
   """
   @spec start_link([option()]) :: GenServer.on_start()
   def start_link(options) when is_list(options) do
@@ -122,11 +139,31 @@ defmodule Loopex.Store.Local do
 
   @impl GenServer
   def init(options) do
+    # Technical depth: exits are trapped so that an orderly stop reaches
+    # `terminate/2` and gives the writer marker back. An untrappable kill, a VM
+    # death, or a power loss still leaves the marker, which is why recovery
+    # rather than release is what makes a successor able to open the path.
+    Process.flag(:trap_exit, true)
+
     with {:ok, path} <- fetch_path(options),
          {:ok, log_identity} <- Log.prepare_path(path),
          {:ok, writer_lock} <-
-           WriterLock.acquire(path, Keyword.get(options, :recover_stale_writer, false)),
-         {:ok, frames, tail} <- Log.read(path),
+           WriterLock.acquire(path, Keyword.get(options, :recover_stale_writer, false)) do
+      recover(options, path, log_identity, writer_lock)
+    else
+      {:error, reason} -> {:stop, reason}
+    end
+  end
+
+  @impl GenServer
+  def terminate(_reason, %{writer_lock: writer_lock}), do: WriterLock.release(writer_lock)
+  def terminate(_reason, _state), do: :ok
+
+  # Concept: a startup that took the marker and then refused to run gives it
+  # back, rather than leaving an exclusion behind for a process that never
+  # existed.
+  defp recover(options, path, log_identity, writer_lock) do
+    with {:ok, frames, tail} <- Log.read(path),
          :ok <- repair_if_torn(path, tail),
          {:ok, state} <- State.replay(frames),
          :ok <- Log.sync_recovered(path) do
@@ -139,7 +176,9 @@ defmodule Loopex.Store.Local do
          writer_lock: writer_lock
        }}
     else
-      {:error, reason} -> {:stop, reason}
+      {:error, reason} ->
+        WriterLock.release(writer_lock)
+        {:stop, reason}
     end
   end
 
