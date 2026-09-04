@@ -1207,24 +1207,44 @@ defmodule Loopex.Executor.Local do
   # for a receipt whose captured-group cleanup is confirmed; an `outcome_unknown`
   # whose cleanup is unconfirmed deliberately leaves the entry, and therefore
   # quarantines the root until an operator reconciles it.
+  #
+  # The disposition of that entry is decided *before* the receipt is published,
+  # and the receipt published is the one that decision produced. This used to run
+  # the other way round: the confirmed receipt was retained, the claim was taken
+  # afterwards, and a failed removal replaced the durable bytes with the
+  # quarantined form. ADR 0016 clause 7 requires a terminal-plus-open decision to
+  # be fixed under the root claim before it is released, and the reversal was
+  # observable -- between the two writes, a peer instance's `receipt/2` returned
+  # `completed`/`confirmed` for an operation whose durable truth was about to
+  # become `outcome_unknown`/`unconfirmed`, which is exactly the reported
+  # completion a coordinator must never be handed. A reader cannot be excluded
+  # from the receipt path by a claim it does not take, so the only shape that
+  # holds is to publish nothing until the answer is final.
+  #
+  # The cost of that order is one narrower case: a removal that succeeded
+  # followed by a retention that failed leaves the root unquarantined with no
+  # receipt on it. The caller is told exactly that with
+  # `{:receipt_not_retained, reason}`, and a later reader gets `:absent`, which
+  # already ends a recovered run `outcome_unknown`. What is lost is the standing
+  # warning to the next executor on that root, and that is strictly less than
+  # what the old order lost, which was the correctness of an answer already
+  # given.
   defp settle_receipt(placement, job, receipt, lease) do
+    settled = settled_receipt(placement, job, receipt, lease)
     bound = retention_remaining()
 
-    case retain_receipt_under_lease(placement.ledger_root, receipt, lease, bound) do
-      {:ok, retained} ->
-        close_settled_authority(placement, job, retained, lease)
-
-      {:error, reason} ->
-        {:error, {:receipt_not_retained, reason}}
+    case retain_receipt_under_lease(placement.ledger_root, settled, lease, bound) do
+      {:ok, retained} -> {:ok, retained}
+      {:error, reason} -> {:error, {:receipt_not_retained, reason}}
     end
   end
 
   # Concept: removing this job's open authority is part of settling it, so a
-  # removal that did not happen is part of the answer.
+  # removal that did not happen is part of the receipt.
   #
-  # Technical depth: the removal's result was discarded. A claim this instance
-  # could not take, an unreadable root, or a failed unlink therefore returned a
-  # receipt asserting confirmed cleanup while the entry it names quarantines
+  # Technical depth: the removal's result was once discarded entirely. A claim
+  # this instance could not take, an unreadable root, or a failed unlink returned
+  # a receipt asserting confirmed cleanup while the entry it names quarantines
   # every later effect on that root -- success to this caller and reconciliation
   # required for everyone else. ADR 0016 removes an entry only under exact
   # authority proof and otherwise leaves the root quarantined, so the truthful
@@ -1232,14 +1252,22 @@ defmodule Loopex.Executor.Local do
   # cleanup beside `outcome_unknown`. That is the one pairing the ADR admits, it
   # is what stops a coordinator retrying an effectful job blindly, and it is what
   # tells an operator there is something on this root to reconcile.
-  defp close_settled_authority(placement, job, receipt, lease) do
+  #
+  # The removal now runs before the receipt is written, and it waits on the same
+  # lease the retention after it waits on. A lease's `:DOWN` is delivered once, so
+  # whichever phase waits first is the only one that can see it: the removal
+  # therefore reports whether the lease survived it, and a lease lost here makes
+  # the receipt unproven exactly as losing it during retention does. Without that
+  # the reordering silently swallowed the lease-lost fact -- the phase that used
+  # to notice it no longer ran first, and a job whose workspace claim had gone
+  # would have been written down as though nothing about it were in doubt.
+  defp settled_receipt(placement, job, receipt, lease) do
     if receipt.cleanup_confirmation == :confirmed do
-      case remove_open_authority(placement, job, lease) do
-        :ok -> {:ok, receipt}
-        _unremoved -> retain_quarantined(placement, receipt, lease)
-      end
+      {removal, workspace_lease} = remove_open_authority(placement, job, lease)
+      settled = if workspace_lease == :lost, do: unproven_receipt(receipt), else: receipt
+      if removal == :ok, do: settled, else: quarantined_receipt(settled)
     else
-      {:ok, receipt}
+      receipt
     end
   end
 
@@ -1264,6 +1292,12 @@ defmodule Loopex.Executor.Local do
   # bounded unavailability the ADR already admits and which the quarantined
   # receipt is exactly the warning about; reaping it would turn a timeout into
   # permission.
+  #
+  # The second member of the answer is whether the workspace lease was still held
+  # when this phase ended. It is reported rather than kept because this phase is
+  # now the first of the settlement to wait on that lease, and a monitor delivers
+  # its `:DOWN` exactly once: the caller cannot re-observe here what this wait has
+  # already consumed.
   defp remove_open_authority(placement, job, lease) do
     bound = removal_bound()
 
@@ -1282,16 +1316,22 @@ defmodule Loopex.Executor.Local do
 
     case removal do
       {:done, result} ->
-        result
+        {result, :held}
+
+      {:abandoned, :workspace_lease_lost, _stopped, {:late, :ok}} ->
+        {:ok, :lost}
+
+      {:abandoned, :workspace_lease_lost, _stopped, _unfinished} ->
+        {{:error, {:ledger_unavailable, :workspace_lease_lost}}, :lost}
 
       {:abandoned, _cause, _stopped, {:late, :ok}} ->
-        :ok
+        {:ok, :held}
 
       {:stopped, reason} ->
-        {:error, {:ledger_unavailable, {:open_authority_removal_stopped, reason}}}
+        {{:error, {:ledger_unavailable, {:open_authority_removal_stopped, reason}}}, :held}
 
       {:abandoned, cause, _stopped, _unfinished} ->
-        {:error, {:ledger_unavailable, cause}}
+        {{:error, {:ledger_unavailable, cause}}, :held}
     end
   end
 
@@ -1310,22 +1350,18 @@ defmodule Loopex.Executor.Local do
 
   defp removal_bound, do: div(retention_remaining(), @removal_share)
 
-  # The replacement names no ledger reason. Which claim, path, or errno refused
-  # is this executor's private root authority, and a receipt is one of the planes
-  # ADR 0016 keeps it out of; what the reader needs is that this root holds work
-  # nothing has resolved.
-  defp retain_quarantined(placement, receipt, lease) do
-    quarantined = %{
+  # The quarantined form names no ledger reason. Which claim, path, or errno
+  # refused is this executor's private root authority, and a receipt is one of
+  # the planes ADR 0016 keeps it out of; what the reader needs is that this root
+  # holds work nothing has resolved. It is a pure transformation because it is
+  # applied before anything is published: there is no earlier receipt to replace.
+  defp quarantined_receipt(receipt) do
+    %{
       receipt
       | outcome: :outcome_unknown,
         cleanup_confirmation: :unconfirmed,
         output: receipt.output <> @open_authority_note
     }
-
-    case retain_now(placement.ledger_root, quarantined, lease) do
-      {:ok, retained} -> {:ok, retained}
-      {:error, reason} -> {:error, {:receipt_not_retained, reason}}
-    end
   end
 
   # Concept: one serialized decision about whether this exact request may begin.
