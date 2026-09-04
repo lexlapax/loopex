@@ -41,6 +41,10 @@ defmodule Loopex.Executor do
   # How long this runtime waits for a host-supplied `cancel/2` before reporting
   # the cleanup unproven. Not an operator budget — see `cancel/3`.
   @cancel_bound_ms 60_000
+  # A receipt lookup reads retained bytes and starts nothing; an executor that
+  # cannot answer inside this bound is broken, and the coordinator leaves the
+  # reconciliation to the host rather than waiting on it.
+  @receipt_bound_ms 30_000
 
   @grant_bindings [
     :operation_id,
@@ -209,6 +213,31 @@ defmodule Loopex.Executor do
   @doc """
   ## Concept
 
+  Reads the terminal receipt an executor retained for one job, so a runtime
+  that has taken a session over from a dead process can learn what that
+  process's effect did without running it again.
+
+  ## Technical depth
+
+  Optional. `{:ok, receipt}` is the retained terminal fact for the job;
+  `:absent` says no receipt exists and none is coming from this executor;
+  `{:error, reason}` says the executor could not answer, and a job the executor
+  still holds in flight answers `{:error, :effect_in_flight}` rather than
+  `:absent`, because absence there would read live work as lost. The session
+  coordinator asks this once, at the activation of a prepared resume whose
+  pending work is a dispatched effect, and validates the answer exactly as it
+  validates a receipt a host presents through `Loopex.reconcile/2`; an executor
+  that does not export the callback leaves that reconciliation host-driven, and
+  so does any answer the coordinator cannot validate.
+  """
+  @callback receipt(reference :: term(), job_id :: binary()) ::
+              {:ok, map()} | :absent | {:error, term()}
+
+  @optional_callbacks receipt: 2
+
+  @doc """
+  ## Concept
+
   Asks an executor to stop a job and fails closed when cleanup is not proved.
 
   ## Technical depth
@@ -310,6 +339,67 @@ defmodule Loopex.Executor do
         end
     end
   end
+
+  @doc """
+  ## Concept
+
+  Asks an executor for the receipt it retained for one job, and answers
+  honestly when it cannot.
+
+  ## Technical depth
+
+  The optional `receipt/2` callback is consulted only where the module exports
+  it; a module that does not answers `{:error, :receipt_lookup_unsupported}`,
+  which the coordinator reads as "leave this to the host" rather than as any
+  fact about the effect. The call is bounded and runs in a process of its own
+  for the reason `cancel/3` gives: it is host-supplied code invoked by the
+  session coordinator, which must stay able to answer an operator while it
+  waits. A raise, an exit, an answer outside the three admitted shapes, or the
+  bound elapsing each become an error the coordinator declines on; none of them
+  is ever read as `:absent`, because absence is the one answer that ends a run
+  `outcome_unknown` and must therefore be stated, never inferred.
+  """
+  @spec receipt(module(), term(), binary()) :: {:ok, map()} | :absent | {:error, term()}
+  def receipt(module, reference, job_id) when is_atom(module) and is_binary(job_id) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :receipt, 2) do
+      bounded_receipt(module, reference, job_id, @receipt_bound_ms)
+    else
+      {:error, :receipt_lookup_unsupported}
+    end
+  end
+
+  defp bounded_receipt(module, reference, job_id, bound) do
+    {pid, monitor} =
+      spawn_monitor(fn -> exit({:loopex_receipt_answer, module.receipt(reference, job_id)}) end)
+
+    await_receipt(pid, monitor, System.monotonic_time(:millisecond) + bound)
+  end
+
+  defp await_receipt(pid, monitor, deadline) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {:DOWN, ^monitor, :process, ^pid, {:loopex_receipt_answer, answer}} ->
+        admitted_receipt(answer)
+
+      {:DOWN, ^monitor, :process, ^pid, _abnormal} ->
+        {:error, :receipt_lookup_failed}
+    after
+      min(remaining, @cancel_slice_ms) ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          Process.demonitor(monitor, [:flush])
+          Process.exit(pid, :kill)
+          {:error, :receipt_lookup_timeout}
+        else
+          await_receipt(pid, monitor, deadline)
+        end
+    end
+  end
+
+  defp admitted_receipt({:ok, receipt}) when is_map(receipt), do: {:ok, receipt}
+  defp admitted_receipt(:absent), do: :absent
+  defp admitted_receipt({:error, reason}), do: {:error, reason}
+  defp admitted_receipt(_other), do: {:error, :invalid_receipt_answer}
 
   @doc """
   ## Concept

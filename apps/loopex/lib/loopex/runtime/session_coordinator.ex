@@ -276,6 +276,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
        policy_timers: %{},
        pending_fault: nil,
        query: nil,
+       # Concept: whether this owner still owes the reconciliation of a
+       # dispatched effect it was activated over.
+       #
+       # Technical depth: `nil` is an owner that was never a prepared resume,
+       # for which reconciliation stays host-driven. Activation sets `:owed`;
+       # the first scheduling pass that finds an effect at `effect_dispatched`
+       # asks the executor for its retained receipt and moves to `:in_flight`;
+       # the answer settles the run (`:settled`) or, where the executor cannot
+       # say or the answer does not validate, leaves the work pending for the
+       # host (`:declined`). It is asked exactly once per activation.
+       activation_reconciliation: nil,
        owner: nil,
        durable: nil,
        # Concept: whether this owner is allowed to schedule the work it
@@ -346,7 +357,9 @@ defmodule Loopex.Runtime.SessionCoordinator do
     case prepared_holder(state, supplied_owner, capability, caller) do
       {:ok, prepared} ->
         send(self(), :advance_work)
-        {:reply, {:ok, state.session_id}, %{state | prepared: %{prepared | state: :spent}}}
+
+        {:reply, {:ok, state.session_id},
+         %{state | prepared: %{prepared | state: :spent}, activation_reconciliation: :owed}}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -507,6 +520,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
         Process.demonitor(reference, [:flush])
         dispatch_result(%{state | in_flight: remaining}, :executor, run_id, result)
 
+      {{:reconciliation, run_id, _pid}, remaining} ->
+        Process.demonitor(reference, [:flush])
+        settle_activation_reconciliation(%{state | in_flight: remaining}, run_id, result)
+
       {{:cleanup, run_id, _pid}, remaining} ->
         Process.demonitor(reference, [:flush])
         complete_cleanup(%{state | in_flight: remaining}, run_id, admitted_cleanup(result))
@@ -582,6 +599,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
         |> cancel_policy_timeout(reference)
         |> disarm_deadline(run_id)
         |> complete_policy_consultation(run_id, {:deny, :policy_unavailable})
+
+      # A receipt lookup that died answered nothing; the work stays pending for
+      # the host rather than being settled on silence.
+      {{:reconciliation, run_id, _pid}, remaining} ->
+        decline_activation_reconciliation(
+          %{state | in_flight: remaining},
+          run_id,
+          :receipt_lookup_failed
+        )
 
       {_work, remaining} ->
         {:stop, {:worker_failed, reason}, %{state | in_flight: remaining}}
@@ -1189,6 +1215,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # dispatched, its process tree is owned, and ending the run over it here would
   # abandon that tree without cancelling it. Its own receipt brings the run back
   # through this check a moment later, which is where it ends.
+  # Concept: a run activated over a dispatched effect is settled from what the
+  # executor retained, not left waiting for a host that may never ask.
+  #
+  # Technical depth: a prepared resume is the host's statement that the process
+  # which dispatched this effect is gone, so no result is coming back through
+  # this coordinator and the only truth left is the executor's retained
+  # receipt. `loopex resume` used to sit here until its terminal's idle limit,
+  # because nothing in the command solicited the query. The lookup runs once,
+  # in a worker, with no other work in flight and no host query open, and its
+  # answer takes the same validation and commit path a host answer takes.
+  defp advance_run(
+         %{activation_reconciliation: :owed, query: nil, in_flight: in_flight} = state,
+         %{stage: "effect_dispatched"} = work
+       )
+       when map_size(in_flight) == 0,
+       do: start_activation_reconciliation(state, work)
+
   defp advance_run(state, %{stage: "effect_dispatched"}), do: {:noreply, state}
 
   defp advance_run(state, work) do
@@ -3964,6 +4007,85 @@ defmodule Loopex.Runtime.SessionCoordinator do
       _other -> {:error, :no_effect_recovery_pending}
     end
   end
+
+  defp start_activation_reconciliation(state, work) do
+    query_id =
+      stable_id(
+        "reconciliation-query",
+        state.owner.generation,
+        System.unique_integer([:positive])
+      )
+
+    query = reconciliation_query_data(query_id, state.owner, work.job)
+    executor = state.executor
+    job_id = work.job.job_id
+
+    task =
+      Task.Supervisor.async_nolink(state.workers, fn ->
+        Executor.receipt(executor.module, executor.reference, job_id)
+      end)
+
+    state = %{
+      state
+      | query: %{data: query, run_id: work.run_id, job: work.job},
+        activation_reconciliation: :in_flight
+    }
+
+    {:noreply, put_in_flight(state, task.ref, {:reconciliation, work.run_id, task.pid})}
+  end
+
+  # Concept: the executor's answer is evidence to validate, never a verdict to
+  # apply.
+  #
+  # Technical depth: a retained receipt becomes the same `evidence: "receipt"`
+  # response a host would construct, and absence becomes `outcome_unknown`;
+  # both then pass `validate_reconciliation_response/3` against the solicited
+  # query and the journaled job, exactly as a host answer must. An executor
+  # error, a receipt that does not bind to this job, or a Store that cannot
+  # commit the fact all decline: the query is withdrawn and the work stays
+  # pending, so a later host query is solicited fresh rather than answered by
+  # evidence this coordinator already refused.
+  defp settle_activation_reconciliation(state, run_id, answer) do
+    with %{data: query, run_id: ^run_id, job: job} <- state.query,
+         {:ok, response} <- activation_reconciliation_response(query, answer),
+         :ok <- validate_reconciliation_response(response, query, job),
+         {:ok, proposal} <- reconciliation_proposal(state.durable, run_id, response, query),
+         {:ok, next} <- commit_internal(state, proposal) do
+      send(self(), :advance_work)
+      {:noreply, %{next | query: nil, activation_reconciliation: :settled}}
+    else
+      {:error, reason} -> decline_activation_reconciliation(state, run_id, reason)
+      _withdrawn -> decline_activation_reconciliation(state, run_id, :query_withdrawn)
+    end
+  end
+
+  defp activation_reconciliation_response(query, {:ok, receipt}) when is_map(receipt),
+    do: {:ok, Map.merge(query, %{evidence: "receipt", retained_receipt: receipt})}
+
+  defp activation_reconciliation_response(query, :absent),
+    do: {:ok, Map.put(query, :evidence, "outcome_unknown")}
+
+  defp activation_reconciliation_response(_query, {:error, reason}), do: {:error, reason}
+  defp activation_reconciliation_response(_query, _other), do: {:error, :invalid_receipt_answer}
+
+  defp decline_activation_reconciliation(state, run_id, reason) do
+    emit_diagnostic(state, %{
+      "kind" => "activation_reconciliation_declined",
+      "run_id" => run_id,
+      "reason" => declined_reason(reason)
+    })
+
+    {:noreply, %{state | query: nil, activation_reconciliation: :declined}}
+  end
+
+  # The diagnostic plane carries bounded plain data, so a reason is named by
+  # its classification rather than by the term that carried it.
+  defp declined_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
+
+  defp declined_reason({:mismatch, field}) when is_atom(field),
+    do: "mismatch:" <> Atom.to_string(field)
+
+  defp declined_reason(_other), do: "failed"
 
   defp reconciliation_query_data(query_id, owner, job) do
     %{

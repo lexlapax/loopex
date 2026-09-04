@@ -681,6 +681,7 @@ defmodule Loopex.Executor.Local do
   Reads through the serialized owner, which validates the on-disk job binding
   before returning plain data.
   """
+  @impl Loopex.Executor
   @spec receipt(t(), binary()) :: {:ok, map()} | :absent | {:error, term()}
   def receipt(executor, job_id) when is_pid(executor) and is_binary(job_id),
     do: GenServer.call(executor, {:receipt, job_id})
@@ -846,8 +847,18 @@ defmodule Loopex.Executor.Local do
     do: {System.system_time(:millisecond), System.monotonic_time(:millisecond)}
 
   @impl GenServer
-  def handle_call({:receipt, job_id}, _from, state),
-    do: {:reply, read_receipt(state.ledger_root, job_id), state}
+  # Concept: a job this instance is still running has no receipt yet, and
+  # saying so is different from saying there is none.
+  #
+  # Technical depth: `:absent` is what ends a recovered run `outcome_unknown`,
+  # so a lookup that arrives while the job is reserved here answers
+  # `effect_in_flight` instead. The reservation table is this server's own
+  # state, read without waiting on the job, which runs in its caller.
+  def handle_call({:receipt, job_id}, _from, state) do
+    if Map.has_key?(state.reserved, job_id),
+      do: {:reply, {:error, :effect_in_flight}, state},
+      else: {:reply, read_receipt(state.ledger_root, job_id), state}
+  end
 
   def handle_call(:stats, _from, state),
     do: {:reply, %{dispatches: state.dispatches}, state}
