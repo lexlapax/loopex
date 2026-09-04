@@ -259,6 +259,93 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert_refused(invoke(Loopex, :activate_resume, [activation]))
   end
 
+  # Concept: nothing `loopex resume` restarts is ever running while no handler
+  # owns stopping it.
+  #
+  # Technical depth: ADR 0016 makes installation and the prepared handoff one
+  # serialized step, and `Interrupt.install_prepared/3` is that step -- but the
+  # command spent the activation first and installed afterwards, so between the
+  # two the recovered run was live and the emulator's own `SIGTERM` handler was
+  # still the one installed. A signal landing there ended the operating-system
+  # process where it stood, with a run it had just restarted continuing to no
+  # terminal and no abort submitted. This case stands in that interval: the
+  # command's own facade seam holds `activate_resume` at the instant the command
+  # reaches it, asserts whose handler is installed, and delivers the signal from
+  # there. The handler assertion comes before the signal deliberately -- with the
+  # ordering wrong the emulator's handler is still installed and delivering a
+  # `sigterm` would stop this suite rather than fail this case.
+  test "resume installs its interrupt handler before it spends the activation" do
+    fixture = recovered_fixture("resume-signal-window", :active)
+    before = length(Loopex.AgentLoopTestModel.dispatched(fixture.model))
+    test = self()
+    starter = fn _options -> {:ok, fixture.runtime} end
+
+    observer = fn
+      Loopex, :activate_resume, [activation] ->
+        handlers = :gen_event.which_handlers(:erl_signal_server)
+
+        assert Interrupt in handlers,
+               "resume reached activation with no handler of its own owning the stop"
+
+        refute :erl_signal_handler in handlers,
+               "the emulator's own handler would have ended this process here"
+
+        send(test, {:activation_reached, activation})
+        :gen_event.notify(:erl_signal_server, :sigterm)
+
+        assert await_interrupt_admission(fixture),
+               "the signal's abort did not reach its durable admission"
+
+        apply(Loopex, :activate_resume, [activation])
+
+      module, function, arguments ->
+        apply(module, function, arguments)
+    end
+
+    Process.put(:"$loopex_cli_facade_observer", observer)
+
+    output =
+      try do
+        capture_io(fn ->
+          send(
+            test,
+            {:resume_result,
+             LoopexCli.dispatch(
+               [
+                 "resume",
+                 fixture.session_id,
+                 "--policy",
+                 "allow-all",
+                 "--state-root",
+                 fixture.state_root,
+                 "--workspace",
+                 fixture.workspace
+               ],
+               runtime_starter: starter
+             )}
+          )
+        end)
+      after
+        Process.delete(:"$loopex_cli_facade_observer")
+      end
+
+    assert_receive {:activation_reached, activation}, 5_000
+    assert_receive {:resume_result, result}, 5_000
+
+    # The terminal says it did not continue the session, rather than streaming a
+    # run it no longer owns.
+    assert_refused(result)
+    refute output =~ "prepared recovery contract"
+
+    # And the work the activation would have started never started.
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == before
+    assert_refused(invoke(Loopex, :activate_resume, [activation]))
+
+    {:ok, bounds} = Loopex.Executor.cancellation_bounds(@grace)
+    finished = run_terminal(fixture, bounds.cli_backstop_ms + 2_000)
+    assert finished["outcome"] in ["cancelled", "outcome_unknown"]
+  end
+
   test "resume omission recovers the committed cleanup period before active work resumes" do
     fixture = recovered_fixture("cli-omission", :active)
     parent = self()
@@ -849,6 +936,27 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     fixture.store_pid
     |> M1RuntimeTestStore.inspect_state()
     |> get_in([:sessions, fixture.session_id, :records])
+  end
+
+  # The session already carries an admission for the prompt that ran before
+  # recovery, so waiting on the kind alone would answer immediately. The
+  # interrupt's own identity is what distinguishes the abort this signal caused.
+  defp await_interrupt_admission(fixture, attempts \\ 300)
+  defp await_interrupt_admission(_fixture, 0), do: false
+
+  defp await_interrupt_admission(fixture, attempts) do
+    admitted =
+      Enum.any?(records(fixture), fn record ->
+        record.payload[:kind] == "command_admitted" and
+          String.starts_with?(record.payload["command_id"] || "", "interrupt-")
+      end)
+
+    if admitted do
+      true
+    else
+      Process.sleep(10)
+      await_interrupt_admission(fixture, attempts - 1)
+    end
   end
 
   defp wait_for_record(fixture, kind, attempts \\ 200)

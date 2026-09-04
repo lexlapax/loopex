@@ -46,4 +46,8 @@ defmodule Loopex.Store.Local.ConformanceTest do
   test "the durable local store survives process death with consecutive store-stamped history" do
     Conformance.durable_restart()
   end
+
+  test "an orderly stop gives the writer marker back and never removes a successor's" do
+    Conformance.orderly_writer_release()
+  end
 end

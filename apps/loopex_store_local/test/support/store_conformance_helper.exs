@@ -829,6 +829,50 @@ defmodule LoopexStoreLocalTest.Conformance do
     assert_status_unavailable()
   end
 
+  # Concept: a Store that is stopped rather than killed leaves nothing behind
+  # for the next opener of that path to reason about.
+  #
+  # Technical depth: the writer marker is physical exclusion and survives its
+  # holder's death by design, because no portable compare-and-delete exists. That
+  # is the right answer for a killed holder and the wrong one for a stopped
+  # holder: an embedder that opened a Store, stopped it, and opened the same path
+  # again was refused by its own marker. The give-back is content-compared, so a
+  # release that arrives after someone recovered the path removes nothing; that
+  # is asserted here by recovering the marker out from under a live holder and
+  # requiring the successor's marker to survive the earlier holder's stop.
+  def orderly_writer_release do
+    context = start_store(:local)
+    marker = context.path <> ".writer"
+
+    try do
+      _owned = create_owned(context, unique("writer-release"), "writer-release-owner")
+      assert File.regular?(marker)
+
+      stop(context.pid)
+      refute File.exists?(marker), "an orderly stop left its writer marker behind"
+
+      # And the same path opens again with nothing recovered and nothing lost.
+      {:ok, pid} = Local.start_link(path: context.path)
+      {:ok, store} = Store.new(Local, pid)
+      assert File.regular?(marker)
+      reopened = %{context | pid: pid, store: store}
+
+      # A release only ever removes this holder's own bytes.
+      taken = File.read!(marker)
+      :ok = File.rm(marker)
+      {:ok, successor} = Local.start_link(path: context.path)
+      refute File.read!(marker) == taken
+
+      stop(reopened.pid)
+      assert File.regular?(marker), "a stale holder's release removed a successor's marker"
+      stop(successor)
+      refute File.exists?(marker)
+    after
+      close(context)
+      File.rm(marker)
+    end
+  end
+
   def durable_restart do
     context = start_store(:local)
 

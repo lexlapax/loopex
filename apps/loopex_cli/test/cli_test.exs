@@ -846,6 +846,134 @@ defmodule LoopexCliTest do
     assert message =~ "session identifier"
   end
 
+  # Concept: the session a finished run left behind is still reachable from a
+  # process that was not there when it ran.
+  #
+  # Technical depth: the durable store's writer marker is physical exclusion and
+  # outlives its holder by design, because nothing portable can compare and
+  # delete it. An `escript` halts the emulator, so every completed `loopex run`
+  # leaves one, and the next `resume` or `cancel` was refused with
+  # `{:store_writer_active, path}` by a process that had already established --
+  # through the placement lock's liveness probe -- that nobody was there.
+  #
+  # The path exercised here is the shipped one: the real composition, the real
+  # durable store, the real placement lock, the real subcommands. Only the
+  # provider edge is replaced, through the composition's caller-local observer,
+  # so no credential or network call is involved. Each store is killed rather
+  # than stopped between commands, because an untrappable death is what halting
+  # an emulator is and the only ending that leaves the marker; that also keeps
+  # two live Stores off one log, which across real processes is what the
+  # placement lock prevents.
+  test "resume and cancel reach a session whose finished run left its writer marker behind" do
+    {state_root, workspace} = roots()
+    marker = Path.join(state_root, "store.log.writer")
+    parent = self()
+
+    model =
+      Loopex.AgentLoopTestModel.start([
+        %{text: "yesterday's answer", calls: []},
+        %{text: "today's answer", calls: []}
+      ])
+
+    observer = fn
+      Loopex, :start_link, [options] ->
+        scripted = %{
+          module: Loopex.AgentLoopTestModel,
+          model: "scripted:v1",
+          options: [script: model, max_tokens: 256]
+        }
+
+        apply(Loopex, :start_link, [Keyword.put(options, :model, scripted)])
+
+      Loopex.Store.Local, :start_link, [options] ->
+        result = apply(Loopex.Store.Local, :start_link, [options])
+        with {:ok, pid} <- result, do: send(parent, {:composed_store, pid})
+        result
+
+      module, function, arguments ->
+        apply(module, function, arguments)
+    end
+
+    Process.put(:"$loopex_composition_edge_observer", observer)
+    on_exit(fn -> Process.delete(:"$loopex_composition_edge_observer") end)
+    on_exit(&restore_signal_handlers/0)
+
+    run_output =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch([
+                   "run",
+                   "--policy",
+                   "allow-all",
+                   "--state-root",
+                   state_root,
+                   "--workspace",
+                   workspace,
+                   "do yesterday's work"
+                 ])
+      end)
+
+    assert run_output =~ "yesterday's answer"
+
+    assert {:ok, [%{session_id: session_id}]} = Loopex.list_sessions(state_root)
+    first_marker = end_the_process(marker)
+
+    resume_output =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch([
+                   "resume",
+                   session_id,
+                   "--policy",
+                   "allow-all",
+                   "--state-root",
+                   state_root,
+                   "--workspace",
+                   workspace
+                 ])
+      end)
+
+    assert resume_output =~ "yesterday's answer"
+
+    resumed_marker = end_the_process(marker)
+
+    refute resumed_marker == first_marker,
+           "resume reused the dead process's marker instead of recovering it"
+
+    cancel_output =
+      capture_io(fn ->
+        assert :ok =
+                 LoopexCli.dispatch([
+                   "cancel",
+                   session_id,
+                   "--policy",
+                   "allow-all",
+                   "--state-root",
+                   state_root,
+                   "--workspace",
+                   workspace
+                 ])
+      end)
+
+    assert cancel_output =~ "yesterday's answer"
+    _cancelled_marker = end_the_process(marker)
+  end
+
+  # Ends the composition the way halting an emulator does, and answers with the
+  # marker bytes the dead process left behind for its successor to recover.
+  defp end_the_process(marker) do
+    assert_receive {:composed_store, store_pid}, 5_000
+    down = Process.monitor(store_pid)
+    Process.exit(store_pid, :kill)
+    assert_receive {:DOWN, ^down, :process, ^store_pid, :killed}, 5_000
+
+    assert File.regular?(marker),
+           "the command left no writer marker, so nothing here would need recovering"
+
+    assert :ok = LoopexCli.release_placement()
+    File.read!(marker)
+  end
+
   test "an interrupt signal delivered to a running loopex process cancels the task through the public facade" do
     fixture = fixture(script: [%{text: "", hold: self()}, %{text: "unreached"}])
     {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "do the thing")
