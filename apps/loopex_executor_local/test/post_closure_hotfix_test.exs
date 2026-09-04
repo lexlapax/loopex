@@ -114,9 +114,17 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
       assert Local.cancel(peer, job_id) == {:ok, :unconfirmed},
              "an instance with no local record of a job open on its own root reported it cleaned"
 
-      # A job no instance has admitted on a readable root really is settled.
+      # ADR 0016 clause 4: "An absent ID has no request digest and answers
+      # unconfirmed without durable cancellation state." This assertion read
+      # `{:ok, :cleaned}` and locked the opposite. A readable root that holds no
+      # entry for an identity is not proof that that identity's effect is over:
+      # it is equally the root of a job admitted somewhere this instance cannot
+      # see, of a job whose request digest nothing here can bind, and of a job
+      # that never existed. `cleaned` is reserved for a matching durable refusal
+      # or an independently confirmed cleanup, and an absent ID produces
+      # neither.
       assert Local.cancel(peer, "absent-#{System.unique_integer([:positive])}") ==
-               {:ok, :cleaned}
+               {:ok, :unconfirmed}
     after
       _answer = Local.cancel(owner, job_id)
 
@@ -195,6 +203,78 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     end
   end
 
+  # H3
+  test "a peer never reads a confirmed receipt for a job whose settlement ends quarantined" do
+    # Concept: publishing this job's terminal truth and disposing of its open
+    # authority are one decision, so nothing a reader can see is allowed to
+    # reverse afterwards.
+    #
+    # Technical depth: ADR 0016 clause 7 requires every terminal-plus-open
+    # decision to acquire the root-wide claim, read one complete bounded snapshot
+    # while mutation is excluded, and fix its answer before releasing it. The
+    # settlement instead retained the confirmed receipt first and only then took
+    # the claim to remove the entry, so between the two a peer's
+    # `handle_call({:receipt, job_id})` returned `completed`/`confirmed` for an
+    # operation whose durable terminal truth was about to become
+    # `outcome_unknown`/`unconfirmed`. One operation reported completed before it
+    # reversed is exactly what a coordinator must never be handed. This case
+    # holds the root claim so the settlement is certain to end quarantined, and
+    # polls a peer instance across the whole window.
+    root = workspace()
+    ledger = ledger_root()
+    {owner, owner_lease} = executor_on(root, ledger, cleanup_grace_ms: 8_000)
+    {peer, _peer_lease} = executor_on(root, ledger, cleanup_grace_ms: 8_000)
+
+    ready = Path.join(root, "publication-ready")
+    job_id = "publication-#{System.unique_integer([:positive])}"
+
+    running =
+      Task.async(fn ->
+        run(root, "loopex.bash", %{"command" => "printf ready > #{ready}; sleep 1"}, %{
+          executor: owner,
+          lease_id: owner_lease,
+          job_id: job_id,
+          cleanup_grace_ms: 8_000
+        })
+      end)
+
+    assert wait_for_file(ready), "the command never started"
+
+    claim = Path.join(ledger, "claim")
+    on_exit(fn -> File.rmdir(claim) end)
+    assert :ok = File.mkdir(claim)
+
+    polling = Task.async(fn -> poll_receipt(peer, job_id, []) end)
+
+    assert {:ok, receipt} = Task.await(running, 30_000)
+    send(polling.pid, :stop)
+    observations = Task.await(polling, 10_000)
+
+    assert receipt.cleanup_confirmation == :unconfirmed
+    assert receipt.outcome == :outcome_unknown
+
+    assert File.regular?(Path.join([ledger, "open", digest(job_id)])),
+           "the open entry was removed while the root claim was held"
+
+    # The poller's last read happens after the settlement returned, so the
+    # retained receipt is on the root by then: an empty list would mean this case
+    # watched nothing.
+    assert observations != [],
+           "the peer never read this job's receipt at all, so nothing was observed"
+
+    assert List.last(observations) == {:outcome_unknown, :unconfirmed}
+
+    reversed =
+      Enum.filter(observations, fn {outcome, confirmation} ->
+        outcome == :completed or confirmation == :confirmed
+      end)
+
+    assert reversed == [],
+           "a peer read #{length(reversed)} confirmed receipt(s) for a job whose settlement " <>
+             "ended quarantined, so one operation was reported completed before its durable " <>
+             "terminal truth reversed"
+  end
+
   # F5
   test "a settlement that cannot remove its open record never reports confirmed cleanup" do
     # Concept: a receipt that says its cleanup is confirmed while this job's open
@@ -239,6 +319,70 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     assert {:ok, retained} = Local.receipt(executor, job_id)
     assert retained.cleanup_confirmation == :unconfirmed
     assert retained.outcome == :outcome_unknown
+  end
+
+  # H4
+  test "open-entry removal spends the settlement's remaining allowance and ends inside it" do
+    # Concept: removing this job's open authority is a phase of the same
+    # settlement the receipt is, so it spends what that settlement has left
+    # rather than nothing and rather than however long the filesystem takes.
+    #
+    # Technical depth: ADR 0016 clause 6 gives receipt preparation, artifact
+    # retention, publication, lease-loss handoff, sync recovery and open-entry
+    # removal one monotonic deadline that no phase refreshes. The removal had no
+    # bound of any kind: it took the root claim with a zero wait, so a peer's
+    # claim quarantined the root instead of being waited out, and the `File.rm/1`
+    # and parent sync inside the claim could block for as long as the filesystem
+    # liked with no allowance to answer to. This case holds the claim past the
+    # allowance: the settlement must spend the allowance waiting for it and then
+    # end, so the elapsed time is neither the zero of no allowance carried nor
+    # the unbounded wait of no bound at all.
+    root = workspace()
+    ledger = ledger_root()
+    {executor, lease_id} = executor_on(root, ledger, cleanup_grace_ms: 8_000)
+    ready = Path.join(root, "bounded-removal-ready")
+    job_id = "bounded-removal-#{System.unique_integer([:positive])}"
+
+    running =
+      Task.async(fn ->
+        elapsed(fn ->
+          run(root, "loopex.bash", %{"command" => "printf ready > #{ready}; sleep 1"}, %{
+            executor: executor,
+            lease_id: lease_id,
+            job_id: job_id,
+            cleanup_grace_ms: 8_000
+          })
+        end)
+      end)
+
+    # The claim is taken after admission, because admission takes it too: a claim
+    # held before the job starts refuses the effect rather than its settlement.
+    assert wait_for_file(ready), "the command never started"
+
+    claim = Path.join(ledger, "claim")
+    on_exit(fn -> File.rmdir(claim) end)
+    assert :ok = File.mkdir(claim)
+
+    assert {ms, {:ok, receipt}} = Task.await(running, 30_000)
+
+    # The committed period's quarter is the whole settlement's allowance, and the
+    # removal takes a share of what is left of it so that the phase writing down
+    # what happened is never starved by the phase clearing the root.
+    assert receipt.receipt_retention_bound_ms == 2_000
+
+    assert receipt.cleanup_confirmation == :unconfirmed
+    assert receipt.outcome == :outcome_unknown
+
+    assert File.regular?(Path.join([ledger, "open", digest(job_id)])),
+           "the open entry was removed while the root claim was held"
+
+    assert ms >= 1_600,
+           "the job slept a second and its settlement returned after #{ms}ms, so the removal " <>
+             "spent none of the allowance waiting for the claim it could not take"
+
+    assert ms < 5_000,
+           "the settlement took #{ms}ms against a #{receipt.receipt_retention_bound_ms}ms " <>
+             "allowance, so the removal was not bounded by it"
   end
 
   # F6
@@ -329,10 +473,120 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
              }),
            "an interrupted admission left no truth the quarantine scan could see"
 
-    source = File.read!(Path.expand("../lib/ledger.ex", __DIR__))
+    # This case used to close by reading `../lib/ledger.ex` and asserting that
+    # the text `defp mkdir_synced(` appeared in it. That is not a test of
+    # anything: it passes for any body whatsoever, including the `File.mkdir_p/1`
+    # body that synced only the deepest parent, and it fails for a correct
+    # implementation that renames the function. The behaviour it was standing in
+    # for is proved directly by "every ledger directory level is created and
+    # synced into the parent that names it" below, which observes the syscalls.
+  end
 
-    assert source =~ ~r/defp mkdir_synced\(/,
-           "the ledger's created directories are not synced into their parents"
+  # H6
+  test "every ledger directory level is created and synced into the parent that names it" do
+    # Concept: a directory this ledger created is not durable until the directory
+    # that names it is, and that is true of every level it created, not only the
+    # last one.
+    #
+    # Technical depth: `ledger.ex` promises that "each directory this creates is
+    # synced into the directory that names it, so a crash cannot leave a record
+    # durable inside a directory that is not". `File.mkdir_p/1` creates as many
+    # components as are missing and returns once the kernel holds the entries,
+    # and only the deepest parent was synced afterwards. For an absent
+    # `<base>/a/b/c` neither `<base>` nor `<base>/a` was ever synced, so a crash
+    # could lose the whole subtree with the generation record durable inside it.
+    # `:erlang.trace_pattern/3` over `:file.make_dir/1` and `:file.sync/1` is what
+    # observes the ordering; the artifact store's `ensure_directory/2` proves the
+    # same property the same way.
+    base = temporary_root("hotfix-nested")
+    File.mkdir_p!(base)
+    on_exit(fn -> File.rm_rf(base) end)
+
+    levels = [
+      Path.join(base, "a"),
+      Path.join([base, "a", "b"]),
+      Path.join([base, "a", "b", "c"])
+    ]
+
+    assert :erlang.trace_pattern({:file, :make_dir, 1}, true, [:local]) == 1
+    assert :erlang.trace_pattern({:file, :sync, 1}, true, [:local]) == 1
+
+    assert :erlang.trace_pattern(
+             {:file, :open, 2},
+             [{:_, [], [{:return_trace}]}],
+             [:local]
+           ) == 1
+
+    on_exit(fn ->
+      _ = :erlang.trace_pattern({:file, :make_dir, 1}, false, [:local])
+      _ = :erlang.trace_pattern({:file, :sync, 1}, false, [:local])
+      _ = :erlang.trace_pattern({:file, :open, 2}, false, [:local])
+    end)
+
+    parent = self()
+
+    {preparer, monitor} =
+      spawn_monitor(fn ->
+        :erlang.trace(self(), true, [:call, :set_on_spawn, {:tracer, parent}])
+
+        send(
+          parent,
+          {:nested_prepared, Local.prepare_placement(List.last(levels), "executor-local", 2_000)}
+        )
+      end)
+
+    assert_receive {:nested_prepared, preparation}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, ^preparer, :normal}, 1_000
+    assert {:ok, _prepared} = preparation
+
+    events = collect_directory_trace() |> directory_events()
+
+    for level <- levels do
+      created = Enum.find_index(events, &(&1 == {:created, level}))
+      assert created, "#{level} was never created, so this case observed nothing"
+
+      assert Enum.find_index(
+               Enum.drop(events, created + 1),
+               &(&1 == {:synced, Path.dirname(level)})
+             ),
+             "#{level} was created and #{Path.dirname(level)} was never synced after it, so a " <>
+               "crash could leave a record durable inside a directory that is not"
+    end
+  end
+
+  # H5
+  test "a root claim that cannot be released reaches the caller instead of the body's answer" do
+    # Concept: giving the claim back is part of taking it, so a release that did
+    # not happen is part of this call's answer.
+    #
+    # Technical depth: `with_claim/3` released in an `after` and discarded the
+    # result. A non-empty or EIO claim directory therefore returned the body's
+    # success while every later claim on that root answered
+    # `{:ledger_unavailable, :root_claim_held}` for the life of the root -- ADR
+    # 0016 clause 7's bounded ledger-unavailability, delivered to everyone except
+    # the caller that caused it.
+    ledger = ledger_root()
+    assert {:ok, prepared} = Local.prepare_placement(ledger, "executor-local", 2_000)
+
+    claim = Path.join(ledger, "claim")
+    stray = Path.join(claim, "late-writer")
+    on_exit(fn -> File.rm(stray) end)
+
+    answer =
+      Ledger.with_claim(prepared, fn ->
+        File.write!(stray, "a byte a late writer left inside the claim")
+        :ok
+      end)
+
+    assert {:error, {:ledger_unavailable, {:root_claim_not_released, _reason}}} = answer,
+           "a body that stranded the root claim was reported as having succeeded"
+
+    # Stranded, and honestly so: the reason above is the only warning anyone gets
+    # that this root now refuses every claim until an operator clears it.
+    assert File.dir?(claim), "the claim was reported unreleasable but is gone"
+
+    assert Ledger.with_claim(prepared, fn -> :ok end) ==
+             {:error, {:ledger_unavailable, :root_claim_held}}
   end
 
   # F13
@@ -490,4 +744,84 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
   end
 
   defp digest(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
+
+  # Every reading this peer could have taken, in order, with the last one taken
+  # after the settlement returned so that the retained receipt is certain to be
+  # in the list.
+  defp poll_receipt(peer, job_id, seen) do
+    seen = record_receipt(peer, job_id, seen)
+
+    receive do
+      :stop -> Enum.reverse(record_receipt(peer, job_id, seen))
+    after
+      0 -> poll_receipt(peer, job_id, seen)
+    end
+  end
+
+  defp record_receipt(peer, job_id, seen) do
+    case Local.receipt(peer, job_id) do
+      {:ok, retained} -> [{retained.outcome, retained.cleanup_confirmation} | seen]
+      _no_receipt_yet -> seen
+    end
+  end
+
+  defp collect_directory_trace(acc \\ []) do
+    receive do
+      {:trace, _pid, :call, {:file, :make_dir, [_path]}} = event ->
+        collect_directory_trace([event | acc])
+
+      {:trace, _pid, :call, {:file, :open, [_path, _modes]}} = event ->
+        collect_directory_trace([event | acc])
+
+      {:trace, _pid, :return_from, {:file, :open, 2}, _result} = event ->
+        collect_directory_trace([event | acc])
+
+      {:trace, _pid, :call, {:file, :sync, [_device]}} = event ->
+        collect_directory_trace([event | acc])
+    after
+      100 -> Enum.reverse(acc)
+    end
+  end
+
+  # `:file.sync/1` names an open device rather than a path, so the open calls are
+  # traced with their returns and the device is resolved back to the path it was
+  # opened on. The result is the creation and sync events in the order the
+  # filesystem saw them, which is what an ordering claim needs.
+  defp directory_events(events) do
+    {_pending, _devices, ordered} =
+      Enum.reduce(events, {%{}, %{}, []}, fn
+        {:trace, _pid, :call, {:file, :make_dir, [path]}}, {pending, devices, ordered} ->
+          {pending, devices, [{:created, normalize_path(path)} | ordered]}
+
+        {:trace, pid, :call, {:file, :open, [path, _modes]}}, {pending, devices, ordered} ->
+          stack = Map.get(pending, pid, [])
+          {Map.put(pending, pid, [normalize_path(path) | stack]), devices, ordered}
+
+        {:trace, pid, :return_from, {:file, :open, 2}, {:ok, device}},
+        {pending, devices, ordered} ->
+          case Map.get(pending, pid, []) do
+            [path | rest] ->
+              {Map.put(pending, pid, rest), Map.put(devices, device, path), ordered}
+
+            [] ->
+              {pending, devices, ordered}
+          end
+
+        {:trace, _pid, :call, {:file, :sync, [device]}}, {pending, devices, ordered} ->
+          case Map.get(devices, device) do
+            nil -> {pending, devices, ordered}
+            path -> {pending, devices, [{:synced, path} | ordered]}
+          end
+
+        _other, accumulated ->
+          accumulated
+      end)
+
+    Enum.reverse(ordered)
+  end
+
+  defp normalize_path(path) when is_binary(path), do: Path.expand(path)
+
+  defp normalize_path(path) when is_list(path),
+    do: path |> IO.chardata_to_string() |> Path.expand()
 end

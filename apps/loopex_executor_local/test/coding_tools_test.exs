@@ -3196,9 +3196,11 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              match?({:error, {:receipt_not_retained, _reason}}, settled),
            "the cancelled job never settled: #{inspect(settled)}"
 
-    # A job this executor has no record of never started or already finished, so
-    # there is nothing running and the answer is clean by construction.
-    assert Local.cancel(executor, "no-such-job") == {:ok, :cleaned}
+    # ADR 0016 clause 4: "An absent ID has no request digest and answers
+    # unconfirmed without durable cancellation state." This assertion read
+    # `{:ok, :cleaned}`, which is the claim that the job never started or already
+    # finished -- a claim no record supports. Absence is not proof.
+    assert Local.cancel(executor, "no-such-job") == {:ok, :unconfirmed}
 
     # Concept: a cancellation confirms with the program its host named, not with
     # the one this module was written against.
@@ -3317,8 +3319,14 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     try do
       assert wait_for_file(ready), "the owned command never entered the in-flight table"
 
-      assert Local.cancel(executor, wrong_job_id) == {:ok, :cleaned},
-             "an unknown job should have no process tree left to clean"
+      # ADR 0016 clause 4: an absent ID answers unconfirmed. This assertion read
+      # `{:ok, :cleaned}` on the reasoning that an unknown job has no process
+      # tree left to clean; having no record of a tree is not the same as having
+      # confirmed there is none. What this case is actually about -- that
+      # cancelling one identity leaves a different live job alone -- is proved by
+      # the `continued` file below and is unaffected by the answer's name.
+      assert Local.cancel(executor, wrong_job_id) == {:ok, :unconfirmed},
+             "an unknown job has no durable cancellation state and cannot answer cleaned"
 
       assert wait_for_file(continued),
              "cancelling #{wrong_job_id} stopped the different live job #{job_id}"
