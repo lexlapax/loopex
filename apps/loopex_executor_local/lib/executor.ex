@@ -291,27 +291,32 @@ defmodule Loopex.Executor.Local do
           cancellation_episode(committed_grace(ledger, job_id, default), probe)
         )
 
-      {:absent, ledger} ->
-        absent_job_answer(ledger, job_id)
+      # Concept: an identity nothing here has ever heard of is an identity this
+      # executor cannot speak for, and saying nothing is different from saying
+      # nothing happened.
+      #
+      # Technical depth: ADR 0016 clause 4 -- "An absent ID has no request digest
+      # and answers unconfirmed without durable cancellation state." This branch
+      # read the shared root and answered `{:ok, :cleaned}` wherever the root held
+      # no open entry for the identity. That treated absence as a positive claim
+      # in the one place the ADR forbids it: `cleaned` is reserved for a matching
+      # durable refusal or an independently confirmed cleanup, and an ID with no
+      # entry produces neither. A root holds no entry for an identity admitted on
+      # a different root, for one whose request digest nothing here can bind, and
+      # for one this instance simply never saw -- and the first two of those can
+      # still be running. The open-entry read is gone rather than inverted,
+      # because both of its answers are `unconfirmed` and a read whose result
+      # cannot change the answer is a claim to authority this branch does not
+      # have. `committed_grace/3` still reads the root, because the period a
+      # cancellation spends is a different question from what it may assert.
+      :absent ->
+        {:ok, :unconfirmed}
 
       :executor_unavailable ->
         {:ok, :unconfirmed}
     end
   end
 
-  # Concept: what this instance happens to remember is not what decides whether
-  # an effect is over; the root every instance shares is.
-  #
-  # Technical depth: ADR 0016 returns `cleaned` only from a matching durable
-  # refusal or independently confirmed cleanup, and makes absence, conflict, a
-  # stranded claim, or malformed truth `unconfirmed`. A job another Local
-  # admitted on this root -- or this one admitted before it restarted -- leaves
-  # an open authority entry there while its effect may still be running, and an
-  # empty in-flight table says nothing about it. Reading the table alone reported
-  # that live effect cleaned. An entry that is still open is therefore
-  # `unconfirmed`; only a readable root with no open entry for this identity is
-  # clean, because an entry is removed only for a matching durable refusal or a
-  # receipt whose captured-group cleanup was confirmed.
   # Concept: the period a cancellation spends is the period the cancelled job
   # committed, not the period this executor happened to be started with.
   #
@@ -326,13 +331,6 @@ defmodule Loopex.Executor.Local do
     case open_authority(ledger, job_id) do
       {:ok, %{"cleanup_grace_ms" => grace}} -> grace
       _no_committed_value -> default
-    end
-  end
-
-  defp absent_job_answer(ledger, job_id) do
-    case open_authority(ledger, job_id) do
-      :absent -> {:ok, :cleaned}
-      _open_or_unavailable -> {:ok, :unconfirmed}
     end
   end
 
@@ -508,7 +506,7 @@ defmodule Loopex.Executor.Local do
             {:ok, group, grace, probe, ledger}
 
           _absent ->
-            {:absent, ledger}
+            :absent
         end
     end
   rescue
