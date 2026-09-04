@@ -1076,6 +1076,26 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp commit_command(state, command) do
     {state, resolved} = resolve_command(state, command)
 
+    with {:ok, _declared} <- declared_bounds(resolved) do
+      propose_command(state, command, resolved)
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  # Concept: the bounds a command is admitted with are exactly the bounds the
+  # runtime can read back.
+  #
+  # Technical depth: a command may name its own bounds and they are merged
+  # unchecked, so a duration outside `Bounds.declare/1`'s domain used to be
+  # committed into the admission record and refused only when replay read it
+  # back — a session with a run no owner could reconstruct. The same function
+  # replay uses decides admission here, before the Store transaction, so there is
+  # one statement of the domain rather than a second copy of it.
+  defp declared_bounds(resolved),
+    do: Bounds.declare(Map.take(resolved, [:max_turns, :token_budget, :deadline_ms]))
+
+  defp propose_command(state, command, resolved) do
     case SessionState.propose(state.durable, command, resolved) do
       {:replayed, reply} ->
         {:reply, reply, state}
@@ -1937,14 +1957,32 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     case committed_deadline(state, run_id) do
       deadline when is_integer(deadline) ->
-        remaining = max(deadline - System.system_time(:millisecond), 0)
-        timer = Process.send_after(self(), {:run_deadline, run_id, deadline}, remaining)
+        remaining = deadline - System.system_time(:millisecond)
+        timer = arm_slice({:run_deadline, run_id, deadline}, remaining)
         %{state | deadline_timers: Map.put(state.deadline_timers, run_id, timer)}
 
       _undeclared ->
         state
     end
   end
+
+  # Concept: a wait derived from an admitted duration is spent in slices, never
+  # handed to one VM timer.
+  #
+  # Technical depth: `Process.send_after/3` raises `:timeout_value` above the
+  # VM's timer ceiling, while the durations this coordinator arms against come
+  # from domains far larger than it — ADR 0016 admits `1..2^64-1` for the cleanup
+  # period every reserve derives from, and a run deadline is admitted over the
+  # same unsigned 64-bit domain. Handing either over whole killed the coordinator
+  # of a run that may already have been billed. Each such wait is therefore one
+  # absolute instant consumed in slices no larger than `@timer_slice_ms`: every
+  # expiry recomputes what remains against that same instant and re-arms, so
+  # slicing changes how the wait is implemented and never how long it lasts. The
+  # allowance is never refreshed, because no clause reads the clock twice for it.
+  @timer_slice_ms 3_600_000
+
+  defp arm_slice(message, remaining),
+    do: Process.send_after(self(), message, min(max(remaining, 0), @timer_slice_ms))
 
   defp disarm_deadline(state, run_id) do
     case Map.pop(state.deadline_timers, run_id) do

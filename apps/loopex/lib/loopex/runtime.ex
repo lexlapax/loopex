@@ -563,10 +563,13 @@ defmodule Loopex.Runtime do
     merged =
       Map.merge(@default_bounds, Map.take(bounds, [:max_turns, :token_budget, :deadline_ms]))
 
+    # The deadline is a duration over the same positive unsigned 64-bit domain
+    # `Bounds.declare/1` admits, so a runtime default outside it is refused at
+    # start rather than at the first command that inherits it.
     valid =
       Enum.all?([:max_turns, :token_budget, :deadline_ms], fn key ->
         value = Map.fetch!(merged, key)
-        is_integer(value) and value > 0
+        is_integer(value) and value > 0 and (key != :deadline_ms or value <= @uint64_max)
       end)
 
     if valid and map_size(Map.drop(bounds, [:max_turns, :token_budget, :deadline_ms])) == 0,

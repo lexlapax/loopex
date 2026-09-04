@@ -133,12 +133,21 @@ defmodule Loopex.Bounds do
 
   `decide/2` therefore reads `:deadline`, the resolved instant, while `declare/1`
   validates `:deadline_ms`, the configured duration.
+
+  The declared duration is bounded above by `2^64-1`, the same positive unsigned
+  64-bit domain ADR 0016 gives the cleanup period and ADR 0017 gives the context
+  ceiling. A duration outside it corresponds to no absolute instant the durable
+  plane can carry and to no timer the VM will arm, so it is refused where every
+  other bound is rather than committed and discovered later. This function is the
+  only statement of that domain: the admission path calls it before a command is
+  committed, and replay calls it again on the way back out.
   """
   @spec declare(term()) :: {:ok, declared()} | {:error, term()}
   def declare(%{max_turns: max_turns, token_budget: token_budget, deadline_ms: deadline_ms})
       when is_integer(max_turns) and max_turns > 0 and
              is_integer(token_budget) and token_budget > 0 and
-             is_integer(deadline_ms) and deadline_ms > 0 do
+             is_integer(deadline_ms) and deadline_ms > 0 and
+             deadline_ms <= 18_446_744_073_709_551_615 do
     {:ok, %{max_turns: max_turns, token_budget: token_budget, deadline_ms: deadline_ms}}
   end
 
