@@ -607,6 +607,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
       is_nil(timer) ->
         {:noreply, state}
 
+      # Concept: an owner that has lost the session ends its wait; it does not
+      # decide what the wait was waiting for.
+      #
+      # Technical depth: the same guard `{:run_deadline, …}` carries, for the
+      # same reason -- the successor owns the decision, and two owners settling
+      # one attempt is what the succession fence exists to prevent. The Store
+      # fence would refuse the commit this branch skips, but a refusal is not a
+      # substitute for not asking: reaching the settlement first terminates a
+      # worker, disarms timers, closes a stream and forms a durable proposal
+      # under an epoch this owner already knows is stale, and its non-ownership
+      # refusals are classified in one place while every other refusal stops the
+      # coordinator abnormally. Correctness would then rest on a remote
+      # component's answer rather than on the local invariant that a superseded
+      # owner performs no run work. The wait is abandoned exactly as
+      # supersession abandons it, so the reaper's condition can still become
+      # true.
+      state.phase != :ready or state.superseded ->
+        state
+        |> abandon_terminated_model_cleanup(run_id)
+        |> continue_after_owner_loss()
+
       System.monotonic_time(:millisecond) < until ->
         {:noreply, arm_model_reserve_slice(state, run_id, until)}
 
@@ -615,28 +636,36 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: the executor's reserve expired without a receipt.
+  # Concept: the executor's reserve expired without a receipt -- and an owner
+  # that has lost the session stops enforcing its own willingness to wait, and
+  # stops nothing else.
   #
-  # Technical depth: the same two branches the `receive ... after` had, reached
-  # from the loop instead of from inside it. The worker is stopped first and its
-  # result then drained, because `terminate_child/2` answers from the supervisor
-  # while the result is sent by the task: only the task's own `DOWN` proves no
-  # answer can still arrive, and a receipt that was already sent is still the
-  # operation's terminal fact.
+  # Technical depth: expiry keeps the same two branches the `receive ... after`
+  # had, reached from the loop instead of from inside it. The worker is stopped
+  # first and its result then drained, because `terminate_child/2` answers from
+  # the supervisor while the result is sent by the task: only the task's own
+  # `DOWN` proves no answer can still arrive, and a receipt that was already
+  # sent is still the operation's terminal fact.
+  #
+  # The guard is the one `{:run_deadline, …}` and the model reserve carry, with
+  # the one difference that makes an effect an effect. Expiry terminates an
+  # effectful worker *and* commits a disposition for it; under supersession both
+  # are wrong, and the Store fence stops only the second. The fence would refuse
+  # the commit, but only after the worker holding the operation's own receipt
+  # had been killed for a bound its successor never agreed to -- ADR 0014
+  # forbids killing an effectful worker for lifecycle reasons, and a refusal
+  # arrives far too late to give the receipt back. So a superseded owner settles
+  # nothing and kills nothing here: the worker stays alive until it answers, its
+  # retained receipt closes the originating domain through the ownership-fenced
+  # path that already handles a stale predecessor, and the successor reconciles
+  # the dispatched operation before any replacement. The predecessor therefore
+  # stays exactly as long as it owns evidence-producing executor work, which is
+  # the lifetime ADR 0014 gives it.
   def handle_info({:execute_result_reserve, run_id, until}, state) do
-    case Map.get(state.executor_reserves, run_id) do
-      nil ->
-        {:noreply, state}
-
-      %{reference: reference, pid: pid} ->
-        if System.monotonic_time(:millisecond) < until do
-          {:noreply, arm_execute_result_slice(state, run_id, until)}
-        else
-          _ = Task.Supervisor.terminate_child(state.workers, pid)
-          answer = take_worker_result(reference)
-          state = %{state | in_flight: Map.delete(state.in_flight, reference)}
-          close_execute_result_reserve(state, run_id, answer)
-        end
+    if state.phase != :ready or state.superseded do
+      {:noreply, state}
+    else
+      expire_execute_result_reserve(state, run_id, until)
     end
   end
 
@@ -2703,6 +2732,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         next
         |> Map.update!(:in_flight, &Map.delete(&1, reference))
         |> disarm_deadline(run_id)
+        |> abandon_terminated_model_cleanup(run_id)
 
       {reference, {:policy, run_id, pid}}, next ->
         _ = Task.Supervisor.terminate_child(next.owner_workers, pid)
@@ -2718,6 +2748,36 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end)
   end
 
+  # Concept: a cleanup whose only evidence producer this coordinator has just
+  # killed has nothing left to wait for, and is abandoned rather than kept.
+  #
+  # Technical depth: `begin_model_termination/3` records the run in
+  # `pending_cleanup` and then waits, inside `arm_model_reserve/2`, for the
+  # model worker's own answer. Supersession kills that worker above, so no
+  # answer can arrive: the reserve expired against an absent worker and settled
+  # nothing, the entry stayed, and `continue_after_owner_loss/1` then refused to
+  # stop a coordinator that owned no live work at all -- one leaked predecessor
+  # process, and one obsolete Control monitor, per succession over a terminating
+  # attempt.
+  #
+  # The entry is closed here, at the termination that made it unanswerable,
+  # rather than at reserve expiry. A superseded owner is not the session's
+  # serial writer any more, so the settlement an expiry would reach commits
+  # nothing: ADR 0014 gives the successor the durable abandonment and the charge
+  # for the inherited attempt, and this coordinator publishes nothing durable
+  # under a stale epoch. Waiting out the reserve to discover that would keep the
+  # predecessor alive for the whole reserve period for no evidence. The entry is
+  # local bookkeeping about a wait, so abandoning the wait is the whole of it,
+  # and its reserve is cancelled with it so no later slice can fire against a
+  # run this coordinator no longer tracks. Only a run whose model worker was
+  # terminated here is touched; an executor cleanup keeps its worker, keeps its
+  # entry, and is still waited on.
+  defp abandon_terminated_model_cleanup(state, run_id) do
+    state
+    |> cancel_model_reserve(run_id)
+    |> clear_model_cleanup(run_id)
+  end
+
   # Concept: a superseded coordinator stays only while it still carries live
   # evidence-producing work; once settled, it leaves no stale session owner
   # process behind.
@@ -2728,10 +2788,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # ended first. When those maps are empty, the successor has all durable truth
   # and stopping normally lets Control remove its obsolete monitor without
   # changing the active successor entry.
+  #
+  # The predicate names every map an unsettled wait can live in, because a
+  # coordinator that stops while one of them still holds a run drops evidence,
+  # and one that waits on a map nothing will ever empty never stops at all. Both
+  # reserve maps are therefore named beside the work they belong to:
+  # `executor_reserves` is the receipt wait that outlives the cancel call, and
+  # `model_reserves` is the provider-answer wait. Each holds a run only while
+  # that run's worker is in `in_flight` or its own expiry is still to come, so
+  # naming them cannot retain a coordinator whose work is finished; leaving them
+  # unnamed is what let a wait be invisible to the reaper.
   defp continue_after_owner_loss(state) do
     settled =
       map_size(state.in_flight) == 0 and
         map_size(state.pending_cleanup) == 0 and
+        map_size(state.executor_reserves) == 0 and
+        map_size(state.model_reserves) == 0 and
         map_size(state.streams) == 0 and
         is_nil(state.pending_fault)
 
@@ -3411,6 +3483,26 @@ defmodule Loopex.Runtime.SessionCoordinator do
         Map.merge(reserve, %{purpose: purpose, model: model, host: host})
       end)
     )
+  end
+
+  # The two branches the reserve's own timer has: a slice that is not yet due is
+  # re-armed, and the instant it was armed against stops the worker, drains
+  # whatever it had already produced, and settles the run on that.
+  defp expire_execute_result_reserve(state, run_id, until) do
+    case Map.get(state.executor_reserves, run_id) do
+      nil ->
+        {:noreply, state}
+
+      %{reference: reference, pid: pid} ->
+        if System.monotonic_time(:millisecond) < until do
+          {:noreply, arm_execute_result_slice(state, run_id, until)}
+        else
+          _ = Task.Supervisor.terminate_child(state.workers, pid)
+          answer = take_worker_result(reference)
+          state = %{state | in_flight: Map.delete(state.in_flight, reference)}
+          close_execute_result_reserve(state, run_id, answer)
+        end
+    end
   end
 
   # Concept: whichever of the two arrives first ends the wait, and both end it
