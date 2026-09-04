@@ -154,6 +154,11 @@ defmodule Loopex.Executor.Local do
                              "rather than confirmed stopped and whether its effect landed is " <>
                              "unproven.]"
 
+  @open_authority_note "\n[loopex: this job's open authority could not be removed after its " <>
+                         "receipt was retained, so this executor's state root stays quarantined " <>
+                         "until an operator reconciles it and this job's cleanup is reported " <>
+                         "unconfirmed.]"
+
   @lease_lost_note "\n[loopex: the workspace lease was lost before this job's receipt was " <>
                      "durably retained. Whether its effect landed in the workspace this job " <>
                      "was authorised against is unproven.]"
@@ -1121,17 +1126,57 @@ defmodule Loopex.Executor.Local do
 
     case retain_receipt_under_lease(placement.ledger_root, receipt, lease, bound) do
       {:ok, retained} ->
-        if retained.cleanup_confirmation == :confirmed do
-          _ =
-            Ledger.with_claim(placement.ledger, fn ->
-              Ledger.close_open(placement.ledger, job.job_id)
-            end)
-        end
-
-        {:ok, retained}
+        close_settled_authority(placement, job, retained, lease)
 
       {:error, reason} ->
         {:error, {:receipt_not_retained, reason}}
+    end
+  end
+
+  # Concept: removing this job's open authority is part of settling it, so a
+  # removal that did not happen is part of the answer.
+  #
+  # Technical depth: the removal's result was discarded. A claim this instance
+  # could not take, an unreadable root, or a failed unlink therefore returned a
+  # receipt asserting confirmed cleanup while the entry it names quarantines
+  # every later effect on that root -- success to this caller and reconciliation
+  # required for everyone else. ADR 0016 removes an entry only under exact
+  # authority proof and otherwise leaves the root quarantined, so the truthful
+  # receipt for a job whose authority is still open reports an unconfirmed
+  # cleanup beside `outcome_unknown`. That is the one pairing the ADR admits, it
+  # is what stops a coordinator retrying an effectful job blindly, and it is what
+  # tells an operator there is something on this root to reconcile.
+  defp close_settled_authority(placement, job, receipt, lease) do
+    if receipt.cleanup_confirmation == :confirmed do
+      removal =
+        Ledger.with_claim(placement.ledger, fn ->
+          Ledger.close_open(placement.ledger, job.job_id)
+        end)
+
+      case removal do
+        :ok -> {:ok, receipt}
+        _unremoved -> retain_quarantined(placement, receipt, lease)
+      end
+    else
+      {:ok, receipt}
+    end
+  end
+
+  # The replacement names no ledger reason. Which claim, path, or errno refused
+  # is this executor's private root authority, and a receipt is one of the planes
+  # ADR 0016 keeps it out of; what the reader needs is that this root holds work
+  # nothing has resolved.
+  defp retain_quarantined(placement, receipt, lease) do
+    quarantined = %{
+      receipt
+      | outcome: :outcome_unknown,
+        cleanup_confirmation: :unconfirmed,
+        output: receipt.output <> @open_authority_note
+    }
+
+    case retain_now(placement.ledger_root, quarantined, lease) do
+      {:ok, retained} -> {:ok, retained}
+      {:error, reason} -> {:error, {:receipt_not_retained, reason}}
     end
   end
 
