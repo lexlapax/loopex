@@ -1234,12 +1234,7 @@ defmodule Loopex.Executor.Local do
   # tells an operator there is something on this root to reconcile.
   defp close_settled_authority(placement, job, receipt, lease) do
     if receipt.cleanup_confirmation == :confirmed do
-      removal =
-        Ledger.with_claim(placement.ledger, fn ->
-          Ledger.close_open(placement.ledger, job.job_id)
-        end)
-
-      case removal do
+      case remove_open_authority(placement, job, lease) do
         :ok -> {:ok, receipt}
         _unremoved -> retain_quarantined(placement, receipt, lease)
       end
@@ -1247,6 +1242,73 @@ defmodule Loopex.Executor.Local do
       {:ok, receipt}
     end
   end
+
+  # Concept: the removal is a phase of one settlement, so it spends what that
+  # settlement has left rather than nothing and rather than however long the
+  # filesystem takes.
+  #
+  # Technical depth: ADR 0016 clause 6 gives receipt preparation, artifact
+  # retention, publication, lease-loss handoff, sync recovery and open-entry
+  # removal one monotonic deadline that no phase refreshes, and this phase was
+  # outside it in both directions. It took the root claim with a zero wait, so a
+  # peer holding the claim for one admission quarantined a root that a moment of
+  # waiting would have cleared; and `File.rm/1` and the parent sync inside the
+  # claim ran inline with no bound at all, so a ledger that never answers held
+  # the job for as long as it liked while the receipt already declared the bound
+  # its whole settlement received. The allowance is now carried into both: it is
+  # the claim's wait, and it is the hard stop on the work done under the claim.
+  #
+  # An exhausted allowance is the same answer as a failed unlink, because it is
+  # the same fact -- this executor did not prove the entry gone. A worker killed
+  # at the bound while it held the claim leaves that claim behind, which is
+  # bounded unavailability the ADR already admits and which the quarantined
+  # receipt is exactly the warning about; reaping it would turn a timeout into
+  # permission.
+  defp remove_open_authority(placement, job, lease) do
+    bound = removal_bound()
+
+    removal =
+      bounded_work(
+        fn ->
+          Ledger.with_claim(
+            placement.ledger,
+            fn -> Ledger.close_open(placement.ledger, job.job_id) end,
+            bound
+          )
+        end,
+        bound,
+        lease
+      )
+
+    case removal do
+      {:done, result} ->
+        result
+
+      {:abandoned, _cause, _stopped, {:late, :ok}} ->
+        :ok
+
+      {:stopped, reason} ->
+        {:error, {:ledger_unavailable, {:open_authority_removal_stopped, reason}}}
+
+      {:abandoned, cause, _stopped, _unfinished} ->
+        {:error, {:ledger_unavailable, cause}}
+    end
+  end
+
+  # Concept: the removal takes a share of what the settlement has left, so that
+  # clearing the root can never starve writing down what happened.
+  #
+  # Technical depth: this is the reason `@retention_spill_share` exists for the
+  # artifact phase, arriving at the phase after it. Handing the removal the whole
+  # remainder makes a held claim spend every millisecond the receipt still needed:
+  # the quarantined replacement would then be written against an allowance of
+  # zero and abandoned, and exactly the job whose durable record matters most --
+  # one whose root nothing has resolved -- would produce none. A share is not a
+  # number for the same reason the cooperative one is not: it cannot drift away
+  # from the declared period.
+  @removal_share 2
+
+  defp removal_bound, do: div(retention_remaining(), @removal_share)
 
   # The replacement names no ledger reason. Which claim, path, or errno refused
   # is this executor's private root authority, and a receipt is one of the planes
