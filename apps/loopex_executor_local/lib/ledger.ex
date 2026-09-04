@@ -199,10 +199,16 @@ defmodule Loopex.Executor.Local.Ledger do
 
   The claim is an atomic directory creation, so two executors on one root cannot
   both hold it and neither can be persuaded by elapsed time that the other has
-  finished. A claim this call could not take is bounded unavailability. The claim
-  is released in an `after`, so a raising body cannot strand it inside one live
-  process; a claim stranded by process death stays, because reaping it would turn
-  absence of a process into permission.
+  finished. A claim this call could not take is bounded unavailability. A raising
+  or exiting body releases the claim before the exception continues, so it cannot
+  strand it inside one live process; a claim stranded by process death stays,
+  because reaping it would turn absence of a process into permission.
+
+  A release that fails replaces the body's result with
+  `{:ledger_unavailable, {:root_claim_not_released, reason}}`. The body's
+  decision was real, but it was reached on a root this call has just stranded,
+  and every later claim on it answers `root_claim_held` until an operator clears
+  the claim directory.
   """
   @spec with_claim(prepared(), (-> term()), non_neg_integer()) :: term() | {:error, term()}
   def with_claim(prepared, work, wait_ms \\ 0)
@@ -213,13 +219,41 @@ defmodule Loopex.Executor.Local.Ledger do
 
     case File.mkdir(path) do
       :ok ->
-        try do
-          case revalidate(prepared) do
-            :ok -> work.()
-            {:error, reason} -> {:error, reason}
+        outcome =
+          try do
+            case revalidate(prepared) do
+              :ok -> work.()
+              {:error, reason} -> {:error, reason}
+            end
+          catch
+            kind, reason ->
+              _released = File.rmdir(path)
+              :erlang.raise(kind, reason, __STACKTRACE__)
           end
-        after
-          File.rmdir(path)
+
+        # Concept: giving the claim back is part of taking it, so a release that
+        # did not happen is part of this call's answer.
+        #
+        # Technical depth: the release ran in an `after` and its result was
+        # discarded. `File.rmdir/1` fails on a claim directory a late writer left
+        # something in and on EIO, so the caller was handed the body's success
+        # while every later `File.mkdir/1` on this path answered
+        # `{:ledger_unavailable, :root_claim_held}` for the life of the root. ADR
+        # 0016 clause 7 makes claim refusal bounded ledger-unavailability rather
+        # than permission, and a root that will refuse every claim from here on
+        # is exactly that fact reaching everyone except the caller that caused
+        # it. The rule is that a failed release replaces the body's result: the
+        # decision was real, but it was fixed on a root this call has stranded,
+        # and reporting success would publish a decision nothing can follow up.
+        # No retry is attempted and no claim is reaped, because elapsed time is
+        # not proof that no late writer survives; the reason names what an
+        # operator has to clear.
+        case File.rmdir(path) do
+          :ok ->
+            outcome
+
+          {:error, reason} ->
+            {:error, {:ledger_unavailable, {:root_claim_not_released, reason}}}
         end
 
       {:error, :eexist} when wait_ms > 0 ->
