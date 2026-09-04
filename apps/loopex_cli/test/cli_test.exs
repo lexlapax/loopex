@@ -819,6 +819,147 @@ defmodule LoopexCliTest do
     refute source =~ "Process.send"
   end
 
+  # Concept: two `loopex` processes started at different times against one state
+  # root must never present the journal with the same command identifier, and the
+  # identifiers they do present must be two commands to that journal.
+  #
+  # Technical depth: the defect cannot be reproduced inside one virtual machine,
+  # because `System.unique_integer/1` repeats itself only after a restart, so the
+  # case runs the shipped `cancel` path in two real operating-system processes.
+  # Each child installs the command's own facade seam, so what is compared is the
+  # identifier the command generated rather than one this case built, and refuses
+  # at that seam so no store, model, or executor is needed to reach it.
+  #
+  # The shape assertion is the decisive one and the only one that is decisive:
+  # two fresh child virtual machines reach the generator at slightly different
+  # counter positions, so a counter can produce two different small integers by
+  # accident, and did in one run of this case against the old code. `cli-` plus
+  # thirty-two lowercase hexadecimal digits is what no per-virtual-machine
+  # counter can produce and what makes the collision impossible rather than
+  # unlikely. The journal half then shows the consequence that was denied: two
+  # such identifiers are two commands against one real runtime and one real
+  # Store, and neither is refused as a repetition of the other.
+  test "identifiers from two operating-system processes are two commands to one journal" do
+    ids = [first, second] = for _child <- 1..2, do: command_id_from_a_fresh_process()
+
+    for id <- ids do
+      assert id =~ ~r/^cli-[0-9a-f]{32}$/
+      assert byte_size(id) == 36
+      assert Enum.all?(String.to_charlist(id), &(&1 in ?!..?~)), "not bounded printable ASCII"
+    end
+
+    assert first != second, "a fresh process reissued the identifier of an earlier one"
+
+    fixture = fixture(script: [%{text: "done"}])
+    genesis = %{"surface" => "cli"}
+
+    assert {:ok, one} = Loopex.create_session(fixture.runtime, genesis, command_id: first)
+    assert {:ok, two} = Loopex.create_session(fixture.runtime, genesis, command_id: second)
+    assert one != two
+
+    # The reviewer's exact shape, and what the counter walked into: an identifier
+    # the journal already holds, presented for a different command. It is refused,
+    # which is why a completed session could be neither resumed nor cancelled
+    # from a fresh terminal.
+    assert {:error, :runtime_command_conflict} =
+             Loopex.resume_session(fixture.runtime, two, command_id: first)
+  end
+
+  # Concept: making identifiers unpredictable must not make the same command
+  # unrepeatable.
+  #
+  # Technical depth: idempotent replay is what a durable command identifier is
+  # for, and the repair keeps it by drawing the identifier once per command
+  # rather than once per call: a command that has to be re-presented carries the
+  # identifier it was already given. This case fails against a repair that draws
+  # a fresh identifier on re-presentation, which would turn every replay into a
+  # second session.
+  test "a command re-presented under its own generated identifier still replays" do
+    id = command_id_from_a_fresh_process()
+    fixture = fixture(script: [%{text: "done"}])
+    genesis = %{"surface" => "cli"}
+
+    assert {:ok, session} = Loopex.create_session(fixture.runtime, genesis, command_id: id)
+    assert {:ok, ^session} = Loopex.create_session(fixture.runtime, genesis, command_id: id)
+    assert {:ok, ^session} = Loopex.create_session(fixture.runtime, genesis, command_id: id)
+  end
+
+  # Concept: the abort an interrupt submits is named the same way.
+  #
+  # Technical depth: the identifier is read back off the durable terminal record
+  # rather than off the handler, so what is asserted is the name the journal
+  # holds. The refutation is the decisive half: `interrupt-` followed by a bare
+  # counter is exactly what a second virtual machine used to repeat.
+  test "an interrupt names its abort with an identifier no second virtual machine repeats" do
+    fixture = fixture(script: [%{text: "", hold: self()}, %{text: "unreached"}])
+    {_session_id, attachment, {:accepted, _id}} = AgentLoopFixture.run(fixture, "do the thing")
+    assert_receive {:holding, model}, 2_000
+
+    Interrupt.install(attachment)
+    on_exit(fn -> restore_signal_handlers() end)
+
+    {_output, 0} = System.cmd("/bin/kill", ["-TERM", System.pid()])
+
+    finished = Enum.find(events(observe(attachment)), &(&1.kind == "run.finished"))
+    send(model, :release)
+
+    assert finished, "the interrupt never ended the run"
+    assert finished["outcome"] in ["cancelled", "outcome_unknown"]
+    assert finished["command_id"] =~ ~r/^interrupt-[0-9a-f]{32}$/
+    refute finished["command_id"] =~ ~r/^interrupt-\d+$/
+  end
+
+  # The child drives the real command surface, not a copy of it: `dispatch/2` is
+  # what `main/1` calls, the facade seam is the command's own, and the runtime is
+  # never started because the identifier is generated before the call that would
+  # have needed one.
+  @identifier_probe ~S"""
+  [root, workspace] = System.argv()
+
+  Process.put(:"$loopex_cli_facade_observer", fn
+    Loopex, :runtime_placement_id, [_root] ->
+      {:ok, "runtime-probe"}
+
+    Loopex, :prepare_resume_known_session, [_root, _runtime, _session, command_id] ->
+      IO.puts("COMMAND_ID " <> command_id)
+      {:error, :probe_stop}
+
+    module, function, arguments ->
+      apply(module, function, arguments)
+  end)
+
+  LoopexCli.dispatch(
+    [
+      "cancel",
+      "probe-session",
+      "--policy",
+      "allow-all",
+      "--state-root",
+      root,
+      "--workspace",
+      workspace
+    ],
+    runtime_starter: fn _options -> {:ok, :probe_runtime} end
+  )
+  """
+
+  defp command_id_from_a_fresh_process do
+    {state_root, workspace} = roots()
+    script = Path.join(state_root, "identifier_probe.exs")
+    File.write!(script, @identifier_probe)
+
+    elixir = System.find_executable("elixir")
+    assert elixir, "no elixir executable to start a second process with"
+
+    paths = Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end)
+
+    {output, 0} =
+      System.cmd(elixir, paths ++ [script, state_root, workspace], stderr_to_stdout: true)
+
+    assert [id] = for("COMMAND_ID " <> id <- String.split(output, "\n"), do: id)
+    id
+  end
+
   test "an interrupt whose cleanup cannot be confirmed reports outcome unknown with its reconciliation reference" do
     fixture =
       fixture(
