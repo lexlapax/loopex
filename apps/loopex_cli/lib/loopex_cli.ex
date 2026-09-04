@@ -242,8 +242,14 @@ defmodule LoopexCli do
          {:ok, runtime} <- start_runtime(flags, policy, options),
          {:ok, session_id} <- create(runtime),
          {:ok, attachment} <-
-           facade(Loopex, :attach, [runtime, session_id, [after_event_sequence: 0]]) do
-      Interrupt.install(attachment)
+           facade(Loopex, :attach, [runtime, session_id, [after_event_sequence: 0]]),
+         {:ok, status} <- facade(Loopex, :session_status, [runtime, session_id]) do
+      # Technical depth: the backstop is sized from the cleanup period this
+      # session committed, exactly as `resume` sizes its own, because a fixed
+      # ten seconds ends the process before an executor given a longer period
+      # can reach its own kill, leaving `cancelled` unreachable at any grace
+      # above that number and the operator holding the backstop every time.
+      Interrupt.install(attachment, Map.fetch!(status, :cleanup_grace_ms))
 
       case facade(Loopex, :command, [
              attachment,
