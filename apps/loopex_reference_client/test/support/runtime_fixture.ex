@@ -144,7 +144,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
         options: Keyword.put_new(model_options, :max_tokens, 256)
       },
       executor: %{
-        module: Local,
+        module: Keyword.get(options, :executor_module, Local),
         reference: executor,
         identity: "executor-local",
         epoch: 11,

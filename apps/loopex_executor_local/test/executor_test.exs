@@ -171,6 +171,48 @@ defmodule Loopex.Executor.LocalTest do
     end
   end
 
+  # Concept: a job this executor is still running has no receipt yet, and the
+  # lookup says so rather than saying there is none.
+  #
+  # Technical depth: `:absent` is the answer that ends a recovered run
+  # `outcome_unknown`, so a lookup that lands while the job is reserved here
+  # answers `effect_in_flight`. The delaying tool keeps the job in flight long
+  # enough for the lookup to land inside it, and the same lookup returns the
+  # retained receipt once the job has settled.
+  test "a receipt lookup for a job this executor still holds answers effect_in_flight" do
+    fixture = fixture("in-flight-receipt")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "in-flight", "loopex.demo.wait_write")
+
+    running = Task.async(fn -> Local.execute(fixture.executor, job, grant) end)
+
+    assert await_answer(fn -> Local.receipt(fixture.executor, job.job_id) end, 4_000) ==
+             {:error, :effect_in_flight}
+
+    assert {:ok, receipt} = Task.await(running, 30_000)
+    assert {:ok, ^receipt} = Local.receipt(fixture.executor, job.job_id)
+  end
+
+  defp await_answer(lookup, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    await_answer_until(lookup, deadline)
+  end
+
+  defp await_answer_until(lookup, deadline) do
+    case lookup.() do
+      :absent ->
+        if System.monotonic_time(:millisecond) < deadline do
+          Process.sleep(10)
+          await_answer_until(lookup, deadline)
+        else
+          :absent
+        end
+
+      answer ->
+        answer
+    end
+  end
+
   defp fixture(label) do
     root =
       Path.join(

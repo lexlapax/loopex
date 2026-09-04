@@ -280,6 +280,21 @@ from its executor authority, constructs either
 with `Loopex.reconcile/2`. The current coordinator validates every query and
 origin binding before committing one receipt fact or terminal unknown outcome.
 
+A prepared resume settles that effect itself where its executor can say what it
+retained. Activating the prepared owner is the host's statement that the process
+which dispatched the effect is gone, so no result is coming back through the
+coordinator and the executor's retained receipt is the only truth left. The
+coordinator therefore solicits its own query at activation, asks the executor
+through the optional `Loopex.Executor.receipt/2` callback, and validates the
+answer exactly as it validates a host's: a retained receipt commits the receipt
+fact and the run continues, `:absent` commits `outcome_unknown`, and an executor
+that does not export the callback, answers `{:error, :effect_in_flight}` or any
+other error, or returns a receipt that does not bind to the journaled job leaves
+the work pending for the host, which then solicits a fresh query. The lookup is
+asked once per activation, runs in a worker under a bound, and never reads
+silence as absence. `loopex resume` relies on this: before it, a session whose
+process died mid-command resumed into a run nothing would ever settle.
+
 The query is the contract, not a hint. It carries eleven members — the
 reconciliation query identity, the current session epoch, the expected executor
 identity, the current recovery contract, and the journaled operation, attempt,

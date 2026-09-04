@@ -52,7 +52,7 @@ belongs to under
 | Embedded facade | `Loopex` | 5, embedded Elixir API | Unstable |
 | Store port | `Loopex.Store` behaviour and handle | 1, private journal and store schema | Unstable |
 | Model port | `Loopex.Model` behaviour, request and reply shapes, delta contract | 2, public protocol semantics | Unstable |
-| Executor port | `Loopex.Executor` behaviour, job, grant, receipt, `cancel/2` | 3, executor protocol | Unstable |
+| Executor port | `Loopex.Executor` behaviour, job, grant, receipt, `cancel/2`, optional `receipt/2` | 3, executor protocol | Unstable |
 | Policy port | `Loopex.Policy` behaviour, request, context, refusal categories | 2, public protocol semantics | Unstable |
 | Artifact-store port | `Loopex.ArtifactStore` object/use behaviour and eight-member `artifact_reference` | 6, artifact formats | Unstable |
 | Durable record shapes | committed record kinds, replayed by `Loopex.Runtime.SessionState` | 1, private journal and store schema | Unstable, and changed in M2 |
@@ -101,9 +101,16 @@ callback before it is conformant. The callback returns `{:ok, :cleaned}`,
 `{:ok, :unconfirmed}`, or `{:error, term()}`. The facade defensively maps the
 latter two, a malformed or failed call, and a legacy module missing the required
 callback to unconfirmed cleanup. That fallback makes mixed-version failure safe;
-it does not restore conformance to an implementation that omits the callback. An
-implementation of any port is written against bytes that may change in the next
-milestone.
+it does not restore conformance to an implementation that omits the callback.
+The port also declares an optional `receipt/2`, which reads the terminal receipt
+an executor retained for one job: `{:ok, receipt}`, `:absent`, or
+`{:error, term()}`, with `{:error, :effect_in_flight}` reserved for a job the
+executor still holds. The session coordinator consults it once when a prepared
+resume is activated over a dispatched effect; `Loopex.Executor.receipt/3` bounds
+the call and reports an absent callback, a raise, a malformed answer, or the
+bound elapsing as distinct errors that leave reconciliation host-driven. Omitting
+it is conformant. An implementation of any port is written against bytes that
+may change in the next milestone.
 
 The shipped local executor's `process_probe` start option is edge configuration,
 defaults to `/bin/ps`, and is recorded on receipts that use it. The cleanup

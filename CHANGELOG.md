@@ -183,6 +183,56 @@ the exact document set its milestone must update.
 
 ### Fixed
 
+- A completed run could not be resumed or cancelled from a fresh process. The
+  store's writer marker survives its holder's death by design, and every later
+  `resume` or `cancel` was refused by a marker the previous run left behind. The
+  shipped command now asserts recovery of that marker only after the placement
+  lock has proved the recorded owner's process gone; an embedder that cannot
+  prove it keeps the refusal. The store also releases the marker on an orderly
+  stop. `resume` installs its interrupt owner before it spends the activation,
+  so a signal landing in that window submits the ordinary abort instead of
+  stopping the process with recovered work live.
+- Command identifiers were a per-process counter, so a second `loopex` process
+  against the same state root replayed the first one's identifiers and was
+  refused as a conflict. They are now random.
+- A second interrupt during an admitted stop orphaned a signal-ignoring tool
+  child and ended the process with no terminal recorded. The launcher now waits
+  through interrupted waits while its child is alive, and the backstop kills
+  every process group this run owns before it halts and says so. `run` sizes
+  that backstop from the session's committed cleanup period, as `resume` already
+  did, so a run whose period exceeds ten seconds can still report `cancelled`.
+- A session whose process was killed mid-command resumed into a run nothing
+  would settle, and the terminal waited on its idle limit. The executor port
+  gains an optional `receipt/2`; at activation of a prepared resume the
+  coordinator asks for the retained receipt, validates it exactly as it
+  validates a host's, and settles the run as completed or `outcome_unknown`. An
+  executor that cannot say leaves reconciliation host-driven.
+- The local executor decided a cancellation from process-local state, so an
+  instance with no record of a job open on its own root reported it cleaned;
+  absence is now decided from the shared root and answers `unconfirmed`. Every
+  cleanup window derives from the period the job committed rather than the
+  executor's start default; a settled receipt whose open record could not be
+  removed is retained `outcome_unknown` with cleanup unconfirmed; every
+  retention phase spends one settlement deadline; ledger directories are synced
+  into their parents and the open record is published before the marker so an
+  interrupted admission fails closed; and every wait derived from an admitted
+  period is sliced below the VM's timer ceiling, so the largest admitted value
+  no longer raises.
+- A completed create replayed into a restarted runtime started a new owner
+  generation; a replay now answers from the durable result and starts nothing.
+  Store items are measured without encoding them first, so an oversized binary
+  is refused without an allocated copy. Adapter replies are bounded before they
+  are projected, so a reply with a million tool calls is refused as unreadable
+  in bounded time. The one-use provider permit validates the complete six-member
+  binding and binds one journal position to one identity. Settlement validation
+  computes the single admissible combination for each cell of the ADR 0018 table
+  rather than refusing an enumerated list.
+- An artifact use's `uses/<xx>` directory entry was never synced, so a crash
+  after a successful put could lose the use; every directory a put creates is
+  now synced into its parent. Competing publishers of one use were shown to
+  write identical bytes by construction, since the sidecar's name is the digest
+  of its bytes.
+
 - The durable store followed a path rather than holding a file. A log deleted
   underneath a live session was answered by opening a new, empty one at the same
   name, and the session went on writing into a history that had lost everything

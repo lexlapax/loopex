@@ -229,6 +229,12 @@ rebuild the session's history first; `resume` then lets the recovered work go,
 and `cancel` never does — it reconciles while that work stays paused, which is
 what keeps a command asked to end a run from starting it.
 
+A command the dead process had already started is never run again to find out
+what it did. `resume` settles it from the receipt the executor kept: where one
+was retained the run continues with that result, and where none was the run
+ends `outcome_unknown` with a reconciliation reference, exactly as `cancel`
+would report it.
+
 <a id="operator-sessions-project-trust"></a>
 ## Project Resources Are Your Decision
 

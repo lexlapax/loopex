@@ -195,6 +195,24 @@ defmodule Loopex.CancellationTestExecutor do
   end
 end
 
+# An executor whose receipt answer is whatever reference it was handed, so a
+# case can drive every shape the facade must classify. `{:raise, message}`
+# raises inside the lookup.
+defmodule Loopex.ReceiptTestExecutor do
+  @moduledoc false
+  @behaviour Loopex.Executor
+
+  @impl Loopex.Executor
+  def execute(_reference, _job, _grant, _options, _progress), do: {:error, :never_executes}
+
+  @impl Loopex.Executor
+  def cancel(_reference, _job_id), do: {:ok, :cleaned}
+
+  @impl Loopex.Executor
+  def receipt({:raise, message}, _job_id), do: raise(message)
+  def receipt(answer, _job_id), do: answer
+end
+
 defmodule Loopex.NoCancellationTestExecutor do
   @moduledoc false
 
@@ -1022,6 +1040,48 @@ defmodule Loopex.CancellationTest do
 
     assert Loopex.Executor.cancel(Loopex.NoCancellationTestExecutor, :ignored, "job-1") ==
              {:ok, :unconfirmed}
+  end
+
+  # Concept: a receipt lookup states what the executor retained, and every way
+  # it cannot say so is an error, never absence.
+  #
+  # Technical depth: `:absent` ends a recovered run `outcome_unknown`, so the
+  # facade admits it only when the callback stated it. A module without the
+  # optional callback, one that raises, one that answers outside the three
+  # admitted shapes, and one that does not answer inside the bound each reach a
+  # distinct error the coordinator declines on and leaves to the host.
+  test "a receipt lookup admits exactly the stated answers and reports every other as an error" do
+    refute function_exported?(Loopex.NoCancellationTestExecutor, :receipt, 2)
+
+    assert Loopex.Executor.receipt(Loopex.NoCancellationTestExecutor, :ignored, "job-1") ==
+             {:error, :receipt_lookup_unsupported}
+
+    retained = %{job_id: "job-1", outcome: :completed}
+
+    assert {:ok, ^retained} =
+             Loopex.Executor.receipt(Loopex.ReceiptTestExecutor, {:ok, retained}, "job-1")
+
+    assert :absent = Loopex.Executor.receipt(Loopex.ReceiptTestExecutor, :absent, "job-1")
+
+    assert {:error, :effect_in_flight} =
+             Loopex.Executor.receipt(
+               Loopex.ReceiptTestExecutor,
+               {:error, :effect_in_flight},
+               "job-1"
+             )
+
+    assert {:error, :invalid_receipt_answer} =
+             Loopex.Executor.receipt(Loopex.ReceiptTestExecutor, :nothing_admitted, "job-1")
+
+    assert {:error, :invalid_receipt_answer} =
+             Loopex.Executor.receipt(Loopex.ReceiptTestExecutor, {:ok, "not a map"}, "job-1")
+
+    assert {:error, :receipt_lookup_failed} =
+             Loopex.Executor.receipt(
+               Loopex.ReceiptTestExecutor,
+               {:raise, "ledger unreadable"},
+               "job-1"
+             )
   end
 
   test "a run being cleaned up is still active and admits nothing new until its ending commits" do
