@@ -555,6 +555,40 @@ defmodule Loopex.Executor.Local do
 
   defp close_cleanup_episode, do: Process.delete(:loopex_cleanup_episode)
 
+  # Concept: one settlement gets one retention allowance, opened once and spent
+  # down by every phase that follows.
+  #
+  # Technical depth: ADR 0016 gives receipt preparation, optional artifact
+  # retention, publication, lease-loss handoff, sync recovery, and open-entry
+  # removal one monotonic deadline that no phase refreshes. Each phase derived a
+  # new wait instead: artifact retention took whatever remained of the run,
+  # receipt retention took a fresh committed quarter, and the lease-lost
+  # replacement took another quarter after that -- so a settlement could run for
+  # the sum of its phases while its receipt declared one bound, which is the
+  # thing the comment on `settle_receipt/4` already claimed was impossible.
+  #
+  # The allowance is the committed quarter the receipt declares, and the instant
+  # is opened lazily by the first phase that needs it, so a settlement that
+  # retains nothing starts no clock. It is memoized in the process that owns the
+  # job for the reason the cleanup episode is: it is that job's own state, every
+  # phase must reach it without being threaded through the functions between
+  # them, and a VM-global name would collide between two executors in one VM.
+  defp retention_until do
+    case Process.get(:loopex_retention_episode) do
+      nil ->
+        until = cleanup_now_ms() + receipt_reserve_ms(cleanup_grace_ms())
+        Process.put(:loopex_retention_episode, until)
+        until
+
+      until ->
+        until
+    end
+  end
+
+  defp retention_remaining, do: cleanup_remaining(retention_until())
+
+  defp close_retention_episode, do: Process.delete(:loopex_retention_episode)
+
   defp cleanup_grace_ms,
     do: Process.get(:loopex_cleanup_grace_ms, Executor.default_cleanup_grace_ms())
 
@@ -1027,6 +1061,7 @@ defmodule Loopex.Executor.Local do
     Process.put(:loopex_inflight_table, placement.inflight_table)
     Process.put(:loopex_effect_owner, placement.executor)
     close_cleanup_episode()
+    close_retention_episode()
 
     try do
       case final_prestart_validation(placement, job, grant) do
@@ -1048,6 +1083,7 @@ defmodule Loopex.Executor.Local do
       end
     after
       close_cleanup_episode()
+      close_retention_episode()
       Process.delete(:loopex_cleanup_grace_ms)
       Process.delete(:loopex_process_probe)
       Process.delete(:loopex_inflight_table)
@@ -1117,12 +1153,17 @@ defmodule Loopex.Executor.Local do
   # authority spend one allowance, and no phase refreshes it.
   #
   # Technical depth: the allowance is the committed cleanup period's own quarter,
-  # which is also the value the receipt reports. Open authority is removed only
+  # which is also the value the receipt reports, and it is opened by the first
+  # retention phase this settlement performs rather than here -- an artifact
+  # spill is a phase of the same settlement and draws on the same instant, so the
+  # sequence is bounded by that one value rather than by the sum of its parts.
+  # What reaches this phase is therefore what the earlier ones left. Open
+  # authority is removed only
   # for a receipt whose captured-group cleanup is confirmed; an `outcome_unknown`
   # whose cleanup is unconfirmed deliberately leaves the entry, and therefore
   # quarantines the root until an operator reconciles it.
   defp settle_receipt(placement, job, receipt, lease) do
-    bound = receipt.receipt_retention_bound_ms
+    bound = retention_remaining()
 
     case retain_receipt_under_lease(placement.ledger_root, receipt, lease, bound) do
       {:ok, retained} ->
@@ -1778,14 +1819,15 @@ defmodule Loopex.Executor.Local do
   # The replacement receipt is written the same way the first attempt was.
   # Writing it inline would put the last unbounded call in the job exactly where
   # the lease is already gone and nothing is left to notice a ledger that never
-  # answers. It gets the declared quarter-period receipt reserve rather than what
-  # remains of the run, because it is reached only once the lease has been lost.
+  # answers. It gets what remains of this settlement's one retention allowance
+  # rather than a second copy of it: it is a later phase of the same settlement,
+  # and ADR 0016 lets no phase refresh that deadline.
   defp retain_now(root, receipt, lease) do
     staging = staging_path(root, receipt)
 
     case bounded_work(
            fn -> retain_receipt(root, receipt, staging) end,
-           receipt_reserve_ms(cleanup_grace_ms()),
+           retention_remaining(),
            lease
          ) do
       {:done, :ok} -> {:ok, receipt}
@@ -2850,7 +2892,9 @@ defmodule Loopex.Executor.Local do
       "tool_call_id" => job.tool_call_id
     }
 
-    case retain_under_lease(state.artifacts, full, metadata, lease, retention_bound(job)) do
+    {bound, bound_cause} = retention_bound(job)
+
+    case retain_under_lease(state.artifacts, full, metadata, lease, bound) do
       {:ok, reference} ->
         {outcome, bounded_artifact_notice(full, diagnostic, limit, reference), [reference]}
 
@@ -2873,25 +2917,20 @@ defmodule Loopex.Executor.Local do
            "\n[loopex: retention unavailable; nothing beyond it was retained.]"
          ), []}
 
-      # Concept: the run's own instant ended the retention, and the result it was
-      # retaining is untouched by that.
+      # Concept: this settlement ran out of the time it had for retaining
+      # things, and the result it was retaining is untouched by that.
       #
       # Technical depth: the effect produced its bytes and this executor holds
       # them, so the outcome stays exactly what the tool proved. What the
       # abandonment costs is the retrieval: no reference this executor can honour
       # exists, so the model is shown the plain truncation marker and the receipt
       # names no artifact. That is the same loss the store's own refusal causes
-      # above, said with the reason that actually applies.
-      :run_deadline_passed ->
+      # above, said with the reason that actually applies. The bound reached is
+      # the smaller of the run's remaining instant and this settlement's share of
+      # its one retention allowance, and the message names the one that ended it.
+      :retention_bound_reached ->
         {outcome,
-         bounded_truncation_with_extra(
-           full,
-           diagnostic,
-           limit,
-           "\n[loopex: the run deadline passed while this job's output was being" <>
-             " retained, and the retention was abandoned. The result above is what the" <>
-             " tool produced; nothing beyond it was retained.]"
-         ), []}
+         bounded_truncation_with_extra(full, diagnostic, limit, retention_note(bound_cause)), []}
 
       :workspace_lease_lost ->
         {:outcome_unknown,
@@ -2906,33 +2945,61 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  # Concept: artifact retention is work the run owns, so it gets only what
-  # remains of the run.
-  #
-  # Technical depth: spilled-artifact retention had no bound of any kind, so the
-  # run's own instant was not among the ways the wait could end. It takes no
-  # cleanup reserve: an operator may lose the retrieval while the tool's own
-  # bounded result still survives, so there is no process-cleanup fact for that
-  # reserve to protect. Receipt retention makes the different decision below.
-  #
-  # The run's committed instant is used rather than the tool's effective
-  # deadline, because a tool's declared budget bounds the tool and this is the
-  # run retaining what the tool produced.
-  defp retention_bound(job), do: max(job.run_deadline - System.system_time(:millisecond), 0)
+  defp retention_note(:run_deadline) do
+    "\n[loopex: the run deadline passed while this job's output was being" <>
+      " retained, and the retention was abandoned. The result above is what the" <>
+      " tool produced; nothing beyond it was retained.]"
+  end
 
-  # Concept: the receipt says the bound its own retention received.
+  defp retention_note(:retention_allowance) do
+    "\n[loopex: this job's settlement ran out of the allowance it had for" <>
+      " retaining its output, and the retention was abandoned. The result above" <>
+      " is what the tool produced; nothing beyond it was retained.]"
+  end
+
+  # Concept: artifact retention is the first phase of one settlement, so it is
+  # bounded by what the run has left and by what that settlement has left.
   #
-  # Technical depth: whether retention gets the separate quarter-period reserve
-  # or whatever the process-cleanup episode left is otherwise invisible: a fast
-  # ledger finishes either way, so no elapsed time and no outcome differs.
-  # Recording the value the write was actually bounded by makes the guarantee a
-  # fact on the durable record rather than an argument about a line.
+  # Technical depth: spilled-artifact retention had no bound of any kind, and
+  # then had the run's remaining instant alone -- which is not a bound this
+  # settlement shares with the phases after it. ADR 0016 gives artifact
+  # retention, receipt retention, and open-entry removal one monotonic deadline,
+  # so a spill into a store that answers slowly cannot spend the receipt's
+  # allowance as well as its own; it takes a share of what remains of that one
+  # instant. The run's committed instant is still one of the
+  # two, and it is the run's rather than the tool's effective deadline because a
+  # tool's declared budget bounds the tool and this is the run retaining what the
+  # tool produced.
+  # The share is what keeps one shared allowance from starving the phase that
+  # writes down what happened. A store that answers more slowly than the whole
+  # allowance would otherwise leave nothing for the receipt, and exactly the job
+  # whose durable record matters most would produce none -- the defect the
+  # separate reserve was introduced for, reappearing as the cost of sharing one
+  # instant. It is a share rather than a number for the reason the cooperative
+  # one is: it cannot drift away from the declared period.
+  @retention_spill_share 2
+
+  # Which of the two bound it is carried out, because the two are different
+  # facts and an abandoned retention has to say which one ended it.
+  defp retention_bound(job) do
+    run_remaining = max(job.run_deadline - System.system_time(:millisecond), 0)
+    share = div(retention_remaining(), @retention_spill_share)
+
+    if run_remaining <= share,
+      do: {run_remaining, :run_deadline},
+      else: {share, :retention_allowance}
+  end
+
+  # Concept: the receipt says the bound its whole settlement received.
   #
-  # `cleanup_grace_ms` beside it is the process-cleanup period this executor was
-  # configured with. A receipt following cleanup carries one quarter of it. A
-  # receipt for a job that needed no cleanup carries more than the configured
-  # period, because that job never exceeded anything and still owns its run
-  # instant.
+  # Technical depth: the value is the committed quarter ADR 0016 derives from the
+  # period this job committed, and it is the allowance every retention phase of
+  # this settlement shares rather than the slice one of them happened to get.
+  # Recording it makes the guarantee a fact on the durable record rather than an
+  # argument about a line.
+  #
+  # `cleanup_grace_ms` beside it is the process-cleanup period this job
+  # committed, which is the period its cleanup actually spent.
 
   # Concept: retaining output is work the lease still covers and the run still
   # owns, so it is waited on rather than simply called.
@@ -2949,7 +3016,7 @@ defmodule Loopex.Executor.Local do
       {:done, result} -> result
       {:stopped, reason} -> {:error, {:artifact_retention_stopped, reason}}
       {:abandoned, :workspace_lease_lost, _stopped, _late} -> :workspace_lease_lost
-      {:abandoned, :bound_reached, _stopped, _late} -> :run_deadline_passed
+      {:abandoned, :bound_reached, _stopped, _late} -> :retention_bound_reached
     end
   end
 
