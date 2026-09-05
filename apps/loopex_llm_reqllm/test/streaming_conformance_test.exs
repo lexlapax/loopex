@@ -771,6 +771,7 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
       {%{"X-Request-ID" => "req_openai_map"}, "req_openai_map"},
       {%{"request-id" => ["req_anthropic_list_value"]}, "req_anthropic_list_value"},
       {[{"x-request-id", ["req_openai_list_value"]}], "req_openai_list_value"},
+      {[{"request-id", " Req_MiXeD_exact_bytes "}], " Req_MiXeD_exact_bytes "},
       {[{"request-id", valid_at_ceiling}], valid_at_ceiling},
       {[{"request-id", valid_at_ceiling <> "x"}], nil},
       {[{"request-id", <<255>>}], nil}
