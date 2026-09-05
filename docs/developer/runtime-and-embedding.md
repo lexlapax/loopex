@@ -147,6 +147,46 @@ that a turn may carry several tool calls, and that a call is dispatched only
 after the host policy allows it. The stage-by-stage ordering is in
 [Agent loop and tools](agent-loop-and-tools.md#technical-depth).
 
+Provider dispatch has two deadline fences around its one-use permit. Control
+allocates the permit only after rebuilding the committed attempt binding and
+takes its final clock sample immediately before sending it. The receiving
+worker compares the committed deadline again immediately after receiving that
+exact permit and before entering the adapter. Equality means the deadline has
+been reached. A permit delivered late is retained conservatively as possibly
+dispatched, never retried, and never turned into a provider call outside the
+committed authority. The Store read that rebuilds the binding runs in a reader
+owned by a separate guardian that monitors Control. Timeout cancellation or
+Control death kills and awaits that exact reader, and a successful result is
+forwarded only after the reader has exited. The adapter's result remains inside
+its worker-provenance wrapper until admission, so its data cannot impersonate
+the receiver's private deadline observation.
+
+The adapter's complete raw reply, including every raw usage key and value, must
+pass the Store's bounded plain-data admission before normalization or
+projection. If some other reply member is unreadable, only an unambiguous exact
+input/output usage pair whose values normalize as reported remains reported.
+Extra, missing, colliding, or invalid usage consumes the run's remaining
+allowance as unreported. Private salvage checks map cardinality before it
+inspects a key, so a hostile wide map cannot add a second unbounded traversal
+after Store admission.
+
+The local executor separates queue ownership from effect authority. Its first
+serialized decision reserves or joins a job but grants no permission to run.
+The same server answers a second permit request only after checking the exact
+live reservation holder, repeating complete root reconciliation after bounded
+pre-start validation, and validating the job, grant, lease, and deadline. For
+new work it publishes the durable marker and open entry and installs the exact
+operation-owner token under the same root claim before returning the permit; a
+joiner never owns or erases that token. A close that only partly changes the
+ledger restores the open authority before releasing the claim or retains the
+claim and quarantines the root when restoration cannot be proved, so unrelated
+work cannot turn an ambiguous prior effect into permission. A missing or
+oversized job identity is refused before ledger or reservation work. Filesystem
+effects run under an owner-aware worker bound to the Local instance that
+admitted them; command launch also monitors the execute caller before the child
+announces readiness, so neither form can begin after its exact authority is
+gone.
+
 All durable and public boundary data is bounded plain data. Provider structs,
 PIDs, functions, arbitrary terms, credentials, and implementation types remain
 inside their owning edge or transient runtime process.
@@ -194,19 +234,21 @@ Recovery that may race an operator interrupt is deliberately two phase.
 replayed result or an opaque one-use activation capability while ordinary work
 remains paused. The caller then invokes `activate_resume/1` or
 `abandon_resume/1`, or hands the capability to another process with
-`transfer_resume/2`, which only the current holder may do and which the
-coordinator acknowledges before answering. All three wait for the coordinator's
-answer rather than expiring
+`transfer_resume/2`, which only the current holder may do. The session
+coordinator is the sole transfer linearization point and answers `:ok` only
+after the exact destination guard has processed its commit. All three wait for
+the coordinator's answer rather than expiring
 on a bound: the message carrying either call is not withdrawn when its caller
 stops waiting, so an expired call would report the session unavailable while the
 coordinator went on to spend the very activation the caller was told it had not
 got. Neither proposes a Store mutation, so waiting commits nothing, and a
 coordinator that has died refuses through its own exit.
 `LoopexCli.Interrupt.install_prepared(attachment, cleanup_ms, activation)`
-installs an interrupt owner and, in the same step, hands the capability to a
-holder process started for that one purpose; it returns the owner's
-acknowledgement, `:ok`, or the owner's refusal, and a caller that continues
-past a refusal as though the capability had moved has a defect of its own.
+arms the signal-manager guard and makes the handler visible before it asks the
+coordinator to hand the capability to a holder process started for that one
+purpose. It returns `:ok` only after that guard has processed the coordinator's
+commit, or returns the owner's refusal; a caller that continues past a refusal
+as though the capability had moved has a defect of its own.
 `LoopexCli.Interrupt.activate_prepared(activation)` and
 `LoopexCli.Interrupt.abandon_prepared(activation)` present the capability from
 that holder and wait for the owner's answer without a bound, as the facade
@@ -215,11 +257,12 @@ never as a refusal. The holder is deliberately not the signal server: a
 blocked signal server could handle no signal, so the holder blocks instead and
 the handler keeps submitting the abort and arming the backstop. A signal's
 abort and an activation still cannot both win, because the owner fences the
-capability on an admitted abort and refuses a later activation as fenced. A
-preparer that dies after the acknowledgement leaves a live holder; one that
-dies before it leaves a capability no live process can present. An independent
-guard ends the holder if the signal manager dies without terminating its
-handlers. Orderly replacement installs a successor first, keeps interrupt
+capability on an admitted abort and refuses a later activation as fenced. Death
+before the transfer verdict fails closed; death after it leaves the acknowledged
+holder live. Loss of the exact manager, coordinator, or holder ends that exact
+authority rather than allowing a different process to infer success. An
+independent guard ends the holder if the signal manager dies without terminating
+its handlers. Orderly replacement installs a successor first, keeps interrupt
 coverage while it waits for every predecessor holder to end, and retains that
 drain in the live handler if the installer itself dies. Concurrent replacements
 serialize behind the same obligation. Once an interrupt has begun, replacement

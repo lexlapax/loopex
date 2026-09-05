@@ -116,9 +116,18 @@ attempt-open row at that journal position, so the caller's map is compared and
 never trusted — re-establishes the deadline after that read and immediately
 before the send, since the read is a Store call that takes time the deadline
 does not stop for, and then spends and sends together, so a succession
-linearizes entirely before or entirely after the send. The read is bounded at
-one second; a read that does not answer refuses the permit rather than holding
-Control, so a slow store costs one attempt, never the runtime. The binding is
+linearizes entirely before or entirely after the send. The receiver checks the
+same committed deadline immediately after the exact permit arrives and before
+adapter entry. A late permit is therefore retained conservatively as possibly
+dispatched without making the provider call or minting retry authority. Adapter
+results remain inside their worker-provenance wrapper until admission, so their
+data cannot impersonate that private deadline observation.
+
+The binding read is bounded at one second and runs in a reader owned by a
+guardian that monitors Control. A timeout or Control death kills and awaits the
+exact reader, while a successful result reaches Control only after the reader is
+down. A slow store therefore costs one attempt without holding or outliving
+Control. The binding is
 `session_id`, `run_id`, `turn_id`, `operation_id`, `attempt`, and
 `staged_request_digest`. Spent identities are dropped only when control stops
 holding the session at all; dropping them at succession would hand a successor a
@@ -252,8 +261,9 @@ sequenceDiagram
     ST-->>S: committed
     S->>W: start worker blocked on its permit reference
     S->>C: provider_dispatch with binding and authority
-    C->>W: one-use permit for that exact binding
-    W->>M: complete with request, options, progress
+    C->>W: one-use permit after final pre-send deadline sample
+    W->>W: check the same committed deadline after receipt
+    W->>M: complete with request, options, progress only while current
     M-->>W: complete reply, or a classified failure
     W-->>S: attempt evidence
     S->>ST: model_attempt_settled_v1 plus assistant.message_appended
@@ -263,6 +273,7 @@ sequenceDiagram
     S->>ST: effect_intent_committed plus tool.started
     ST-->>S: committed
     S->>X: execute with job, grant, options, progress
+    X->>X: reserve or join without authority; reconcile and permit exact live holder
     X-->>S: receipt, or an error declaring effect-start
     S->>ST: executor_receipt_committed plus tool.finished
     ST-->>S: committed

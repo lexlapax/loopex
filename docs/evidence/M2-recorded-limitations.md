@@ -809,3 +809,51 @@ evidence; carry the digest-bound gate-isolation fixture collision to the
 successor milestone rather than open a gate generation now. The successor
 inherits the obligation to lock every test this override added. Twentieth
 recorded override.
+
+<a id="fourth-audit-release-repair"></a>
+## Fourth-audit repair and verified source baseline
+
+**Rule.** A post-closure repair does not reopen M2, advance its locked gate, or
+create release authority. Publication, a package, and a version tag remain
+separate governed decisions. Tests added outside M2's frozen gate are evidence
+for the repaired source tree but are not silently promoted into that gate.
+
+**What is true.** The repair range from `24f7f861147caf23103c84f96229204085d83670`
+through `FINAL_SOURCE_CANDIDATE` closes the authority and evidence gaps found
+after the fourth audit. Prepared interrupt installation arms the exact
+signal-manager guard and exposes the handler before transfer; the session
+coordinator alone linearizes that transfer and answers only after the guard has
+processed its commit. Handler replacement installs the successor before
+draining predecessor holders, keeps unfinished drains alive across installer
+death, serializes concurrent replacement, and refuses replacement once an
+interrupt owns its abort and backstop.
+
+Provider dispatch takes Control's final deadline sample next to permit send and
+checks the same committed deadline again in the receiving worker before adapter
+entry. The Store reader used to rebuild that permit is owned by a guardian tied
+to Control's lifetime, and adapter results retain their worker provenance until
+admission. The complete raw usage subtree now passes Store admission before
+normalization; only the unambiguous exact valid input/output pair can be
+salvaged as reported from an otherwise unreadable reply, and private salvage
+rejects cardinality before inspecting a key.
+
+The trusted-local executor distinguishes queue and join reservations from the
+one exact operation-owner token, restores open authority after a partial close
+or keeps the root claim when restoration cannot be proved, and uses a second
+serialized permit decision to repeat reconciliation and final validation before
+publishing admission and owner authority under one claim. A reservation made
+before another executor owner dies therefore cannot outrun that owner's
+unresolved durable effect. Missing and oversized job identities are refused
+before ledger or reservation work, filesystem workers are tied to the Local
+authority that admitted them, and a command worker cannot begin after its exact
+execute caller or launch guard is lost.
+
+**Disposition.** Maintainer, 2026-09-04: “Repair and release.” In the repository
+state where `VERSION` remains `0.0.0`, no surface is labelled, and M2 explicitly
+authorizes no package or publication, this instruction authorizes completing
+and integrating the verified source baseline named above. It does not authorize
+a version tag, package build or publication, registry upload, or other public release.
+Those require their own accepted release-bearing decision. M3 inherits the
+obligation to lock the tests added by this repair range, alongside the earlier
+post-closure hotfix tests, before it can claim the corresponding protections.
+Twenty-first recorded override.

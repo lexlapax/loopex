@@ -130,6 +130,24 @@ committed value before effect authority exists. These additions are source and
 behaviour changes to direct integrations even though every surface remains
 unreleased.
 
+The local adapter's queue reservation is deliberately not evidence that an
+effect is live. A second serialized permit decision revalidates the exact live
+holder, the complete shared-root reconciliation result, the job, grant, lease,
+and deadline. Only a newly admitted permit publishes the marker and open entry,
+installs the exact operation-owner token under the same root claim, and counts
+as a dispatch; another reservation for that job is only a joiner. If closing an
+entry changes only part of the ledger, the adapter restores the open authority
+before releasing the root claim or retains the claim and quarantines the root
+when restoration cannot be proved. These are current semantics of the unstable
+trusted-local adapter, not new callbacks in the executor port.
+
+The adapter refuses a missing, empty, or larger-than-8,192-byte `job_id` before
+it enters the shared ledger or creates a reservation. That is a constraint of
+this concrete unstable adapter rather than a new field or callback in the
+executor protocol. Its filesystem effects also remain bound to the exact Local
+instance that admitted them, and a command worker is not released to run after
+its execute caller or launch guard has disappeared.
+
 **Artifact object and use identity.** The adapter callbacks are `put/3`,
 `fetch/2`, `stat/2`, and `describe/2`. Core owns the caller-facing
 `Loopex.ArtifactStore` facade, computes and validates the object and immutable
@@ -198,7 +216,9 @@ measurements do not otherwise know is measured by encoding it, so an unbounded
 integer no longer measures as nothing. Both are behaviour changes for an adapter
 that compiles unchanged, and the shipped adapter already emitted complete deltas.
 
-A reply's usage map is also closed to `input_tokens` and `output_tokens`. An
+A reply's usage map is also closed to `input_tokens` and `output_tokens`, and
+the complete raw usage subtree must satisfy the Store's bounded plain-data
+admission before either key or value is normalized. An
 adapter that reports a third key — a cache count, a reasoning count, a provider's
 own total — now settles the attempt as `unreadable_model_answer` instead of
 having the extra number silently dropped, because a usage record Core cannot
@@ -208,6 +228,13 @@ of the wrong numeric shape is classified rather than refused; a non-plain raw
 term fails the reply's Store admission before projection. Widening that key set
 is the change a later milestone makes deliberately, and it is why the closure
 exists rather than a lenient filter.
+
+When another reply member is unreadable, accounting salvages reported usage
+only from one unambiguous exact two-key input/output map whose values themselves
+normalize as reported. An extra, missing, colliding, or invalid member instead
+charges the committed remaining allowance as unreported. The private salvage
+path rejects map cardinality before inspecting a key; it does not perform a
+second traversal of a hostile wide map after Store admission.
 
 **Store port.** An append failure gains one pair of reasons and one changed
 consequence. The local Store holds the log *file* rather than its path: it
@@ -331,10 +358,19 @@ The command's cross-application interrupt entries are `install/1`,
 returns `:ok` or the owner's `{:error, reason}`, `activate_prepared(activation)`,
 and `abandon_prepared(activation)`. Prepared installation binds the handler to
 the attachment and the exact one-use capability and makes a holder process the
-handler owns that capability's acknowledged holder; activation and abandonment
-are presented from that holder and wait without a bound, a holder that dies
+handler owns that capability's acknowledged holder. Its signal-manager guard is
+armed and the handler is visible before public transfer begins; the session
+coordinator alone linearizes the transfer and returns `:ok` only after the exact
+guard has processed its commit. Death before that verdict fails closed, while
+death after it leaves the acknowledged holder live. Activation and abandonment
+are presented from that holder and wait without a bound; a holder that dies
 without answering is reported as `{:error, :prepared_activation_holder_lost}`,
-and abandonment schedules no recovered work. `abandon_resume(attachment,
+and abandonment schedules no recovered work. Orderly handler replacement
+installs the successor before draining every predecessor holder, preserves
+interrupt coverage during that drain, and carries unfinished drains in the
+successor if the installing process dies. Concurrent replacements serialize;
+once an interrupt is active, replacement is refused atomically so the admitted
+abort identity and backstop are not erased. `abandon_resume(attachment,
 activation)`, the entry ADR 0016 names, is kept and presents the capability
 from the same holder.
 An unrecognised flag is refused rather than

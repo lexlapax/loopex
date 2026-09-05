@@ -224,11 +224,14 @@ prompt admitted after you decided is not silenced by a decision that predates it
 **Activation is a one-use capability.** It is runtime-local, non-serializable,
 and usable only by its current holder; it never enters a record, an event, a
 snapshot, a progress item, or a diagnostic. The holder is the process that asked
-for the preparation until it hands the capability on, which `resume` does as
-part of installing its interrupt handler: from then on a holder process the
-handler owns holds it, and a preparer that dies afterwards takes nothing with
-it. It has four states — prepared, spent, abandoned, fenced — and only *spent*
-schedules anything. `resume` installs the interrupt handler sized by the period
+for the preparation until `resume` installs its signal-manager guard and visible
+handler, then asks the session coordinator to hand the capability to the exact
+guarded holder. The coordinator alone linearizes that handoff and returns `:ok`
+only after the guard has processed its commit. Death before that verdict fails
+closed; death after it leaves the acknowledged holder live. Manager,
+coordinator, or holder loss ends the exact authority rather than authorizing a
+substitute. The capability has four states — prepared, spent, abandoned, fenced
+— and only *spent* schedules anything. `resume` installs the interrupt handler sized by the period
 this session committed (a period the sizing formula refuses would leave a fixed
 ten-second backstop, and no such period can be committed), hands the
 capability to its holder, and asks that

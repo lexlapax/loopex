@@ -255,10 +255,21 @@ The staged digest is identity, not dispatch authority. First staging commits
 without its consecutive open row exposes no dispatchable request. After the
 open fact is durable, Runtime Control validates the complete current owner,
 operation, attempt, digest, journal position, worker, permit reference, and
-deadline, then sends one fresh permit directly to that worker. That send is the
-provider-dispatch linearization point. The spent attempt identity survives
+deadline, samples the deadline again immediately before sending one fresh permit
+directly to that worker, and spends the attempt with that send. The receiving
+worker compares the same committed deadline immediately after receiving the
+permit and before entering the adapter. The send remains the
+provider-dispatch linearization point: a permit that arrives late is retained as
+possibly dispatched and is never retried, even though the receiver makes no
+provider call. The spent attempt identity survives
 owner and worker replacement, so no timeout, lost reply, dead worker, or
 successor can mint a second call for it.
+
+The Store read that rebuilds the committed binding is owned by a guardian that
+monitors Runtime Control. A timeout or Control death kills and awaits the exact
+reader, and its successful result is forwarded only after that reader exits. A
+model result likewise retains its worker-provenance wrapper through admission,
+so adapter data cannot impersonate the receiver's private deadline result.
 
 A conforming adapter may report `not_dispatched` only before it invokes or
 hands bytes to provider transport. The coordinator proves the same fact for one
@@ -307,9 +318,12 @@ error category. A run's usage map is also closed to `input_tokens` and
 `output_tokens`: an adapter that reports any other key produces
 `unreadable_model_answer` rather than having an unrecognised number silently
 ignored, while omitting either key stays legal and normalizes as unreported.
-A reply Core cannot canonicalize settles under that same category and keeps the
-provider's complete reported usage, because an answer that could not be read is
-still an answer that was billed.
+A reply Core cannot canonicalize settles under that same category. It keeps
+reported accounting only where the raw usage subtree is an unambiguous exact
+input/output pair and both values normalize as reported; every extra, missing,
+colliding, or invalid shape charges the run's remaining allowance as unreported,
+because the answer may still have been billed but Core cannot vouch for a
+partial projection.
 
 ### Declared Bounds and the Split Deadline
 
@@ -335,11 +349,14 @@ own is `completed` and stays `completed`. A non-integer `deadline` raises rather
 than returning `:continue`, because Elixir orders numbers below atoms and
 `now >= nil` would make an uncommitted deadline a silently unreachable bound.
 
-Provider accounting settles atomically with the attempt result. A reply with a
-complete valid input/output pair charges those exact reported values. Missing,
-partial, malformed, negative, non-integer, or unsigned-64-overflow usage is
-normalized as unreported; every possibly dispatched attempt with unreported
-usage charges exactly the run's remaining cumulative allowance. Exact
+Provider accounting settles atomically with the attempt result. The complete
+raw usage subtree passes Store bounded-plain-data admission before projection. A
+reply with a complete valid input/output pair charges those exact reported
+values. Missing, partial, colliding, malformed, negative, non-integer,
+unsigned-64-overflow, or extra-key usage is normalized as unreported; every
+possibly dispatched attempt with unreported usage charges exactly the run's
+remaining cumulative allowance. The private salvage path checks `map_size/1`
+before fixed key fetches rather than traversing a hostile wide map. Exact
 pretransport `not_dispatched` proof charges nothing. The settlement, accounting,
 conversation disposition, retry/continue/terminal choice, and paired run
 terminal where one is owed are one Store transaction, so commit-unknown replay
@@ -590,12 +607,14 @@ ambiguous and reports the nearest line it did find. `bash` takes either an argv
 vector, passed through without a shell, or an explicit raw `command`, which asks
 for a shell and gets one; collapsing the two would surprise a caller who supplied
 arguments safely. A job dispatched past its effective deadline is refused before it begins rather
-than interrupted while running: the three filesystem tools cannot be interrupted
-once started, so `run_coding_tool/5` compares the instant against the clock and
-returns `the effective deadline passed before this tool began`. No process is
-terminated because none was started. `bash` is the tool whose deadline governs a
-running child, and its expiry enters the termination and cleanup-confirmation
-sequence.
+than interrupted while running: the three filesystem tools do not use deadline
+expiry as a mid-call verdict, so `run_coding_tool/5` compares the instant against
+the clock and returns `the effective deadline passed before this tool began`. No
+process is terminated because none was started. `bash` is the tool whose deadline
+governs a running child, and its expiry enters the termination and
+cleanup-confirmation sequence. Independently, loss of the Local instance that
+admitted a filesystem effect terminates its owner-aware worker and reports the
+effect unproven.
 
 The three filesystem tools start no operating-system process.
 A child runs in a process group of its own, established by the spawn itself
@@ -755,9 +774,11 @@ facts, so a successor resumes from the journal rather than from anyone's memory:
    ordered transaction before any adapter sees them.
 2. `model_attempt_open` — start a worker that cannot call the adapter until
    Runtime Control validates the current owner, attempt, journal position,
-   worker, fresh reference, and deadline and sends that worker its one-use
-   permit. The send opens exactly one attempt-scoped model stream domain and is
-   the provider-dispatch linearization point.
+   worker, fresh reference, and deadline, takes a final pre-send clock sample,
+   and sends that worker its one-use permit. The worker checks the same deadline
+   again immediately after receipt and before adapter entry. The send opens
+   exactly one attempt-scoped model stream domain and is the provider-dispatch
+   linearization point even where late receipt prevents the provider call.
 3. On reply or failure — validate the provider-neutral result and atomically
    commit `model_attempt_settled_v1` with its accounting, conversation
    disposition, and retry/continue/terminal choice. A valid canonical reply
@@ -775,10 +796,13 @@ facts, so a successor resumes from the journal rather than from anyone's memory:
    dispatch. That record emits `tool.started`. A denial, an unresolvable name,
    or a passed deadline commits a terminal `tool_result_committed` record
    instead, which emits `tool.finished`, and the loop continues.
-5. `effect_dispatched` — the executor revalidates job, grant, lease, audience,
-   expiry, epoch, identity, and fence at its final pre-start boundary, runs, and
-   retains its receipt. This state is never restarted by recovery; an intent
-   without a fact is reconciled.
+5. `effect_dispatched` — the Local executor first reserves or joins the job
+   without granting effect authority, then answers one serialized permit request
+   only after revalidating the exact live reservation holder, complete shared
+   root, job, grant, lease, audience, expiry, epoch, identity, and fence. New
+   work publishes admission and the operation-owner token under the same claim,
+   runs under that exact Local authority, and retains its receipt. This state is
+   never restarted by recovery; an intent without a fact is reconciled.
 6. On receipt — one `executor_receipt_committed` record matches the receipt
    against the dispatched job, appends the `tool_result` element, and emits
    `tool.finished`. The turn returns to `effect_pending` while calls remain and

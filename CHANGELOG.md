@@ -188,6 +188,45 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
 
 ### Fixed
 
+- Replacing the command's interrupt handler could either drop a prepared
+  capability presentation or leave an interval with no interrupt coverage. The
+  signal-manager guard is now armed and the handler is visible before the
+  capability transfer begins. The session coordinator alone linearizes the
+  transfer and acknowledges it only after the exact guard has processed the
+  commit: death before that verdict fails closed, while death afterwards leaves
+  the acknowledged holder live. The successor is installed before retired
+  holders are drained, unfinished drains survive the installer's death in that
+  live successor, concurrent replacements serialize, and replacement is refused
+  atomically once an interrupt has admitted its one abort identity and backstop.
+- Provider authority could expire between Control's permit decision and the
+  worker entering the adapter, while raw usage values bypassed the Store
+  admission applied to the rest of a reply. Control now takes its final deadline
+  sample next to permit send and the worker rechecks the same committed deadline
+  immediately after receiving that exact permit. Equality is expired, a late
+  permit is retained conservatively without retry, and every raw usage key and
+  value passes bounded Store admission before normalization. Only the exact
+  closed input/output pair is salvaged as reported accounting from an otherwise
+  unreadable reply; extra, missing, colliding, and invalid shapes consume the
+  remaining allowance as unreported, and cardinality is rejected before private
+  salvage inspects a key. Adapter results retain their worker provenance through
+  admission, so provider data cannot impersonate the runtime's private deadline
+  observation.
+- A local executor reservation was treated too broadly as live-effect evidence,
+  allowing a joiner to erase an owner's standing and allowing a job reserved
+  before a peer died to outrun the unresolved open entry that death left. Queue
+  reservation and effect permission are now separate serialized decisions. The
+  final permit revalidates the exact live holder and the complete shared root,
+  then publishes admission and the operation-owner token under one claim. A
+  partially completed ledger close restores open authority before releasing the
+  claim or keeps the root quarantined when restoration cannot be proved. Missing
+  and oversized job identities are refused before ledger or reservation work;
+  filesystem work remains bound to the Local authority that admitted it, and a
+  command worker cannot survive loss of its execute caller before its run signal.
+- Control's bounded provider-position read could outlive Control itself while
+  blocked in a Store call. A guardian now owns that exact reader and monitors
+  Control; timeout cancellation and Control death kill and await the reader, and
+  a successful value is forwarded only after the reader has exited.
+
 - A completed run could not be resumed or cancelled from a fresh process. The
   store's writer marker survives its holder's death by design, and every later
   `resume` or `cancel` was refused by a marker the previous run left behind. The

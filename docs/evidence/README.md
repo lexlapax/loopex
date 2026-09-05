@@ -25,7 +25,7 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M2 negative demonstrations](M2-negative-demonstrations.md) | The ordered safeguards required by the active M2 gate, disabled one at a time with each locked selector failure and exact restored artifact digest. |
 | [M2 coding demonstration](M2-coding-demonstration.md) | The attended real-provider coding task through the shipped command, and what its capture can and cannot establish. |
 | [M2 real-call attestations](M2-real-call-attestations.md) | Provider-supplied response identifiers and reported usage for each of the three real-provider roles. |
-- [M2 post-closure real-call attestations](M2-post-closure-attestations.md) — the three real-provider roles retaken on the post-hotfix candidate with Mint 1.10.0, with the account lookup
+| [M2 post-closure real-call attestations](M2-post-closure-attestations.md) | Additive retakes of the three real-provider roles on post-closure source candidates with Mint 1.10.0, including the separately recorded provider-account lookup state. |
 | [M2 toolchain matrix](M2-toolchain-matrix.md) | Source-candidate metadata and the floor, current, and Linux-current M2 captures. |
 
 ## Related

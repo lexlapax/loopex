@@ -399,9 +399,13 @@ uses `install(attachment, cleanup_ms)` for an ordinary active run, and
 `install_prepared(attachment, cleanup_ms, activation)` for recovered work that
 must remain paused until the interrupt owner decides whether to activate it.
 `loopex resume` uses the prepared entry: it installs the handler carrying the
-activation and, in the same step, hands the capability to a holder process the
-handler owns, so there is no interval in which recovered work is running and
-the runtime's default handler is still the one installed. The command then asks
+activation, arms its signal-manager guard, and makes the handler visible before
+asking the session coordinator to hand the capability to the holder process the
+handler owns. The coordinator alone decides that transfer and reports success
+only after the exact guard has processed its commit, so there is no interval in
+which recovered work is running and the runtime's default handler is still the
+one installed. Death before that verdict fails closed; death after it leaves the
+acknowledged holder live. The command then asks
 that holder to start the work and waits for the answer without a bound. The
 signal server itself is never blocked by that wait, so a signal arriving
 meanwhile still submits the ordinary abort and arms the backstop; the abort
