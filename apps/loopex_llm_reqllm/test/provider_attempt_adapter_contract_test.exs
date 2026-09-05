@@ -54,7 +54,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
   alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.Model
 
-  test "committed assistant tool history is normalized before provider encoding" do
+  test "committed assistant tool history reaches OpenAI in its required function-call shape" do
     variable = Adapter.credential_variable()
     previous_credential = System.get_env(variable)
     previous_adapter = Application.get_env(:req_llm, :finch_request_adapter)
@@ -120,6 +120,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
              } = assistant
 
       assert Jason.decode!(arguments) == %{"path" => "README.md"}
+
+      tool_result = Enum.find(body["messages"], &(&1["role"] == "tool"))
+      assert tool_result["tool_call_id"] == "call_MiXeD_123"
+      assert tool_result["content"] == "file contents"
     after
       restore_env(variable, previous_credential)
       restore_application_env(:req_llm, :finch_request_adapter, previous_adapter)
