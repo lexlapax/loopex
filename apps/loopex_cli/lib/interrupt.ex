@@ -1087,6 +1087,8 @@ defmodule LoopexCli.Interrupt do
   # admission nor takes a second identity. The backstop is armed here, before the
   # possibly blocking admission call rather than after it, because an admission
   # that never returns is exactly the case the backstop exists for.
+  # Creation and monitoring are atomic so even an immediate refusal cannot end
+  # before the handler owns the DOWN signal that retires its backstop.
   #
   # A further signal is answered rather than absorbed in silence. An operator who
   # interrupts a second time has been told nothing by the first, and silence is
@@ -1229,13 +1231,11 @@ defmodule LoopexCli.Interrupt do
     backstop = state.backstop || spawn(fn -> backstop(terminal, grace_ms) end)
     manager = self()
 
-    worker =
-      spawn(fn ->
+    {_worker, monitor} =
+      spawn_monitor(fn ->
         result = Loopex.command(attachment, %{type: :abort, command_id: command_id})
         send(manager, {:loopex_interrupt_result, command_id, result})
       end)
-
-    monitor = Process.monitor(worker)
 
     %{
       state

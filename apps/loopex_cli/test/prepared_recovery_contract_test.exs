@@ -2567,6 +2567,57 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
   end
 
+  # Concept: an interrupt the runtime refuses immediately leaves no stop behind;
+  # a later signal can still stop work that begins afterwards.
+  #
+  # Technical depth: the behavior halves prove the refused command clears its
+  # backstop and a later signal begins another abort. The few reductions between
+  # creating the worker and monitoring it cannot be paused through a public
+  # interface, so parsed syntax also locks their atomic `spawn_monitor/1`.
+  test "an immediate interrupt refusal leaves an atomically monitored handler reusable" do
+    fixture =
+      recovered_fixture("immediate-interrupt-refusal", :idle,
+        script: [
+          %{text: "", hold: self(), hold_timeout_ms: 30_000},
+          %{text: "unreached", calls: []}
+        ]
+      )
+
+    assert :ok = invoke(Interrupt, :install, [fixture.attachment, @grace])
+    :gen_event.notify(:erl_signal_server, :sigterm)
+
+    assert await_interrupt_disarmed(),
+           "the refused interrupt left its abort identity or backstop armed"
+
+    prompt_id = "prompt-after-immediate-interrupt-refusal"
+
+    assert {:accepted, ^prompt_id} =
+             Loopex.command(fixture.attachment, %{
+               type: :prompt,
+               command_id: prompt_id,
+               content: "work that the later signal must stop"
+             })
+
+    assert_receive {:holding, model}, 5_000
+    assert :ok = :gen_event.sync_notify(:erl_signal_server, :sigterm)
+
+    assert [%{abort: %{command_id: later_interrupt}, backstop: later_backstop}] =
+             interrupt_handler_states()
+
+    assert String.starts_with?(later_interrupt, "interrupt-")
+    assert is_pid(later_backstop) and Process.alive?(later_backstop)
+
+    send(model, :release)
+    assert run_terminal(fixture, 10_000)
+
+    source = File.read!(Path.expand("../lib/interrupt.ex", __DIR__))
+    {:ok, ast} = Code.string_to_quoted(source)
+    submission = private_function_body!(ast, :submit_abort, 1)
+
+    assert is_integer(local_call_line!(submission, :spawn_monitor, 1)),
+           "the interrupt submission worker is not monitored atomically at creation"
+  end
+
   test "prepared recovery and separately prepared Local authority stay out of durable and rendered planes" do
     fixture =
       recovered_fixture("security-plane", :admitted,
@@ -3597,6 +3648,20 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       {Interrupt, _id, state} -> [state]
       _other -> []
     end)
+  end
+
+  defp await_interrupt_disarmed(attempts \\ 300)
+  defp await_interrupt_disarmed(0), do: false
+
+  defp await_interrupt_disarmed(attempts) do
+    case interrupt_handler_states() do
+      [%{abort: nil, backstop: nil}] ->
+        true
+
+      _other ->
+        Process.sleep(10)
+        await_interrupt_disarmed(attempts - 1)
+    end
   end
 
   defp suspended?(process) do
