@@ -50,6 +50,48 @@ defmodule Loopex.ProviderAttemptExitModel do
   end
 end
 
+defmodule Loopex.ProviderAttemptUnlinkingModel do
+  @moduledoc false
+
+  @behaviour Loopex.Model
+
+  @impl Loopex.Model
+  def complete(request, options, _progress) do
+    observer = Keyword.fetch!(options, :observer)
+    mode = Keyword.fetch!(options, :unlink_mode)
+    callback = self()
+
+    guard =
+      case Process.info(callback, :links) do
+        {:links, [guard]} when is_pid(guard) -> guard
+        {:links, links} -> raise "provider callback did not have one guard: #{inspect(links)}"
+      end
+
+    Process.unlink(guard)
+    send(observer, {:provider_attempt_unlinked, mode, callback, guard})
+
+    case mode do
+      :return ->
+        {:ok,
+         %{
+           text: "detached callback completed",
+           identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
+           usage: %{input_tokens: 1, output_tokens: 1},
+           tool_calls: [],
+           delta_count: 0,
+           streamed: false,
+           canonical_request_bytes: request.canonical_request_bytes,
+           staged_request_digest: request.staged_request_digest
+         }}
+
+      :hold ->
+        receive do
+          :provider_attempt_unlinking_model_never_returns -> :unreachable
+        end
+    end
+  end
+end
+
 defmodule Loopex.ProviderLinkedCredentialFailureModel do
   @moduledoc false
 
@@ -841,6 +883,49 @@ defmodule Loopex.ProviderAttemptProtocolTest do
            }
   end
 
+  test "a returning third-party Model cannot unlink around provider lifetime cleanup" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptUnlinkingModel,
+        model_options: [unlink_mode: :return]
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "return after unlink")
+
+    assert_receive {:provider_attempt_unlinked, :return, callback, guard}, 5_000
+    await_process_down(callback)
+    await_process_down(guard)
+
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+
+    assert length(
+             records_of_kind(Fixture.records(fixture, session_id), "model_attempt_opened_v1")
+           ) == 1
+  end
+
+  test "a blocked third-party Model cannot unlink around provider lifetime cleanup" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptUnlinkingModel,
+        model_options: [unlink_mode: :hold]
+      )
+
+    attempt = queue_provider_permit_request(fixture, "hold after unlink")
+    worker_monitor = Process.monitor(attempt.worker)
+    resume_process(attempt.control)
+
+    assert_receive {:provider_attempt_unlinked, :hold, callback, guard}, 5_000
+    Process.exit(attempt.worker, :kill)
+    assert_receive {:DOWN, ^worker_monitor, :process, _worker, :killed}, 5_000
+
+    await_process_down(callback)
+    await_process_down(guard)
+    assert await_event(attempt.attachment, "run.finished")["outcome"] == "failed"
+  end
+
   # Concept: a successful provider reply is not evidence that its process tree
   # has ended; the runtime crosses that boundary only after both callback and
   # guard are gone.
@@ -857,8 +942,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     {:ok, ast} = Code.string_to_quoted(source)
     call_provider = private_function_body!(ast, :call_provider, 6)
-    await_callback = private_function_body!(ast, :await_provider_callback, 6)
-    await_callback_exit = private_function_body!(ast, :await_provider_callback_exit, 7)
+    await_callback = private_function_body!(ast, :await_provider_callback, 7)
+    await_callback_exit = private_function_body!(ast, :await_provider_callback_exit, 8)
 
     guard_result = receive_clause_body!(call_provider, :loopex_provider_guard_result)
 
@@ -872,9 +957,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     callback_result = receive_clause_body!(await_callback, :loopex_provider_callback_result)
 
     assert {:await_provider_callback_exit, _metadata, arguments} = callback_result
-    assert length(arguments) == 7
+    assert length(arguments) == 8
 
-    normal_exit = receive_clause_body!(await_callback_exit, {:EXIT, :normal})
+    normal_down = receive_clause_body!(await_callback_exit, {:DOWN, :normal})
 
     assert {:send, _metadata,
             [
@@ -886,7 +971,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
                  {:self, _self_metadata, []},
                  {:result, _reply_metadata, nil}
                ]}
-            ]} = normal_exit,
+            ]} = normal_down,
            "the guard does not wait for normal callback exit before forwarding its result"
   end
 
@@ -3840,6 +3925,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
   defp receive_pattern_matches?(pattern, {:EXIT, reason}),
     do: ast_contains_atom?(pattern, :EXIT) and ast_contains_atom?(pattern, reason)
+
+  defp receive_pattern_matches?(pattern, {:DOWN, reason}),
+    do: ast_contains_atom?(pattern, :DOWN) and ast_contains_atom?(pattern, reason)
 
   defp ast_contains_atom?(ast, expected) do
     {_ast, found?} =

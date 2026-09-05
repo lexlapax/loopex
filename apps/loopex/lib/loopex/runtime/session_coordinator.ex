@@ -2526,14 +2526,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # `DOWN`. The coordinator therefore creates and retains a plain lifetime guard
   # before it asks Control for a permit. The supervised worker's first act stays
   # the exact selective permit receive; only afterwards does it ask that guard to
-  # create the linked callback. Catchable callback failures are normalized inside
-  # the callback; an external linked exit kills only it and is reduced by the
-  # guard without ever becoming the supervised Task's exit reason. The guard does
-  # not finish before its callback, so every terminal path can synchronously stop
-  # the one retained pid and thereby prove the whole provider tree is gone. The
-  # fixed result carries no raw reason and deliberately cannot forge the one exact
-  # `not_dispatched` shape; `accept_model_result/3` therefore settles it
-  # dispatched-or-unknown without retrying.
+  # create the linked callback and retain a monitor the callback cannot remove.
+  # Catchable callback failures are normalized inside the callback; an external
+  # linked exit kills only it and is reduced by the guard without ever becoming
+  # the supervised Task's exit reason. A third-party callback may unlink itself,
+  # so the link is propagation while the monitor is lifetime proof. The guard
+  # does not finish before that monitor reports the callback down, which lets
+  # every terminal path synchronously stop the one retained pid and prove the
+  # whole provider tree is gone. The fixed result carries no raw reason and
+  # deliberately cannot forge the one exact `not_dispatched` shape;
+  # `accept_model_result/3` therefore settles it dispatched-or-unknown without
+  # retrying.
   defp call_provider(guard, reference, module, request, options, progress) do
     guard_monitor = Process.monitor(guard)
 
@@ -2581,11 +2584,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:loopex_provider_guard_start, ^reference, ^owner, module, request, options, progress} ->
         guard = self()
 
-        callback =
-          spawn_link(fn ->
-            result = normalize_provider_call(module, request, options, progress)
-            send(guard, {:loopex_provider_callback_result, reference, self(), result})
-          end)
+        {callback, callback_monitor} =
+          :erlang.spawn_opt(
+            fn ->
+              result = normalize_provider_call(module, request, options, progress)
+              send(guard, {:loopex_provider_callback_result, reference, self(), result})
+            end,
+            [:link, :monitor]
+          )
 
         await_provider_callback(
           owner,
@@ -2593,6 +2599,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           coordinator,
           coordinator_monitor,
           callback,
+          callback_monitor,
           reference
         )
 
@@ -2627,6 +2634,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
          coordinator,
          coordinator_monitor,
          callback,
+         callback_monitor,
          reference
        ) do
     receive do
@@ -2637,30 +2645,42 @@ defmodule Loopex.Runtime.SessionCoordinator do
           coordinator,
           coordinator_monitor,
           callback,
+          callback_monitor,
           reference,
           result
         )
 
       {:EXIT, ^callback, _reason} ->
+        await_provider_callback(
+          owner,
+          owner_monitor,
+          coordinator,
+          coordinator_monitor,
+          callback,
+          callback_monitor,
+          reference
+        )
+
+      {:DOWN, ^callback_monitor, :process, ^callback, _reason} ->
         send(
           owner,
           {:loopex_provider_guard_result, reference, self(), {:error, :provider_call_failed}}
         )
 
       {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
-        stop_linked_provider_callback(callback)
+        stop_provider_callback(callback, callback_monitor)
 
       {:loopex_provider_tree_stop, ^reference, stop, ^owner} when is_reference(stop) ->
-        stop_registered_provider_callback(owner, callback, stop)
+        stop_registered_provider_callback(owner, callback, callback_monitor, stop)
 
       {:loopex_provider_tree_stop, ^reference, stop, ^coordinator} when is_reference(stop) ->
-        stop_registered_provider_callback(coordinator, callback, stop)
+        stop_registered_provider_callback(coordinator, callback, callback_monitor, stop)
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
-        stop_linked_provider_callback(callback)
+        stop_provider_callback(callback, callback_monitor)
 
       {:EXIT, _owner_workers, _reason} ->
-        stop_linked_provider_callback(callback)
+        stop_provider_callback(callback, callback_monitor)
     end
   end
 
@@ -2670,49 +2690,62 @@ defmodule Loopex.Runtime.SessionCoordinator do
          coordinator,
          coordinator_monitor,
          callback,
+         callback_monitor,
          reference,
          result
        ) do
     receive do
-      {:EXIT, ^callback, :normal} ->
+      {:EXIT, ^callback, _reason} ->
+        await_provider_callback_exit(
+          owner,
+          owner_monitor,
+          coordinator,
+          coordinator_monitor,
+          callback,
+          callback_monitor,
+          reference,
+          result
+        )
+
+      {:DOWN, ^callback_monitor, :process, ^callback, :normal} ->
         send(owner, {:loopex_provider_guard_result, reference, self(), result})
 
-      {:EXIT, ^callback, _reason} ->
+      {:DOWN, ^callback_monitor, :process, ^callback, _reason} ->
         send(
           owner,
           {:loopex_provider_guard_result, reference, self(), {:error, :provider_call_failed}}
         )
 
       {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
-        stop_linked_provider_callback(callback)
+        stop_provider_callback(callback, callback_monitor)
 
       {:loopex_provider_tree_stop, ^reference, stop, ^owner} when is_reference(stop) ->
-        stop_registered_provider_callback(owner, callback, stop)
+        stop_registered_provider_callback(owner, callback, callback_monitor, stop)
 
       {:loopex_provider_tree_stop, ^reference, stop, ^coordinator} when is_reference(stop) ->
-        stop_registered_provider_callback(coordinator, callback, stop)
+        stop_registered_provider_callback(coordinator, callback, callback_monitor, stop)
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
-        stop_linked_provider_callback(callback)
+        stop_provider_callback(callback, callback_monitor)
 
       {:EXIT, _owner_workers, _reason} ->
-        stop_linked_provider_callback(callback)
+        stop_provider_callback(callback, callback_monitor)
     end
   end
 
-  defp stop_registered_provider_callback(requester, callback, stop) do
-    stop_linked_provider_callback(callback)
+  defp stop_registered_provider_callback(requester, callback, callback_monitor, stop) do
+    stop_provider_callback(callback, callback_monitor)
     acknowledge_provider_stop(requester, stop)
   end
 
   defp acknowledge_provider_stop(requester, stop),
     do: send(requester, {:loopex_provider_tree_stopped, stop, self()})
 
-  defp stop_linked_provider_callback(callback) do
+  defp stop_provider_callback(callback, callback_monitor) do
     Process.exit(callback, :kill)
 
     receive do
-      {:EXIT, ^callback, _reason} -> :ok
+      {:DOWN, ^callback_monitor, :process, ^callback, _reason} -> :ok
     end
   end
 
