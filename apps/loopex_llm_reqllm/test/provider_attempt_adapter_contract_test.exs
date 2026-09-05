@@ -54,6 +54,83 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
   alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.Model
 
+  test "one durable model attempt invokes the provider transport exactly once" do
+    variable = Adapter.credential_variable()
+    previous_credential = System.get_env(variable)
+    previous_adapter = Application.get_env(:req_llm, :finch_request_adapter)
+    previous_observer = Application.get_env(:loopex_llm_reqllm, :provider_attempt_canary_observer)
+    previous_port = Application.get_env(:loopex_llm_reqllm, :provider_attempt_closed_port)
+    previous_mode = Application.get_env(:loopex_llm_reqllm, :provider_attempt_canary_mode)
+    closed_port = reserve_closed_port()
+    telemetry_handler = "loopex-provider-attempt-#{System.unique_integer([:positive])}"
+
+    Application.put_env(
+      :req_llm,
+      :finch_request_adapter,
+      Loopex.LLM.ReqLLM.ProviderAttemptCanaryAdapter
+    )
+
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_canary_observer, self())
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_closed_port, closed_port)
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_canary_mode, :closed_port)
+
+    :ok =
+      :telemetry.attach(
+        telemetry_handler,
+        [:finch, :request, :start],
+        fn _event, _measurements, metadata, observer ->
+          case metadata do
+            %{request: %Finch.Request{host: "127.0.0.1", port: ^closed_port}} ->
+              send(observer, {:provider_transport_attempt, self()})
+
+            _other ->
+              :ok
+          end
+        end,
+        self()
+      )
+
+    try do
+      System.put_env(variable, "credential-shaped-canary-secret")
+
+      {:ok, request} =
+        Model.request(
+          Adapter.default_model(),
+          [%{"role" => "user", "content" => "one transport only"}],
+          sampling: %{"max_tokens" => 1},
+          deadline: System.system_time(:millisecond) + 10_000
+        )
+
+      assert Adapter.complete(request, [], Model.discard_progress()) ==
+               {:error, {:dispatched_or_unknown, "model_call_failed"}}
+
+      assert_receive {:provider_transport_attempt, _worker}, 5_000
+      refute_receive {:provider_transport_attempt, _worker}, 0
+    after
+      :telemetry.detach(telemetry_handler)
+      restore_env(variable, previous_credential)
+      restore_application_env(:req_llm, :finch_request_adapter, previous_adapter)
+
+      restore_application_env(
+        :loopex_llm_reqllm,
+        :provider_attempt_canary_observer,
+        previous_observer
+      )
+
+      restore_application_env(
+        :loopex_llm_reqllm,
+        :provider_attempt_closed_port,
+        previous_port
+      )
+
+      restore_application_env(
+        :loopex_llm_reqllm,
+        :provider_attempt_canary_mode,
+        previous_mode
+      )
+    end
+  end
+
   test "committed assistant tool history reaches OpenAI in its required function-call shape" do
     variable = Adapter.credential_variable()
     previous_credential = System.get_env(variable)
