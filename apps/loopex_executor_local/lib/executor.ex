@@ -3296,7 +3296,19 @@ defmodule Loopex.Executor.Local do
     receive do
       {^tag, :run} ->
         Process.demonitor(caller_monitor, [:flush])
-        {:run, {guard_monitor, guard}}
+
+        # `:run` comes from the execute caller while `:DOWN` comes from the VM's
+        # monitor service. Their arrival order cannot establish whether the
+        # Local authority was still alive when this worker consumed the permit.
+        # Recheck the guarded process itself at that boundary: a queued permit
+        # cannot revive authority that has already ended.
+        if Process.alive?(guard) do
+          {:run, {guard_monitor, guard}}
+        else
+          forget_inflight(job_id)
+          Process.demonitor(guard_monitor, [:flush])
+          :stop
+        end
 
       {:loopex_cancel_pending, token, from, _cancel_grace, _cancel_probe} ->
         forget_inflight(job_id)
@@ -3465,16 +3477,7 @@ defmodule Loopex.Executor.Local do
             bounded_terminal_output(output, suffix, limits.output)}, progress_count}
 
         {:executor_owner_lost, output, _group, progress_count, confirmed} ->
-          suffix =
-            "\n[loopex: the local executor owner stopped while this command was running." <>
-              if(confirmed,
-                do:
-                  " Its process group was terminated and confirmed cleaned, but no receipt owner remained.]",
-                else: " Cleanup could not be confirmed and the effect remains unproven.]"
-              )
-
-          {{:outcome_unknown, bounded_terminal_output(output, suffix, limits.output)},
-           progress_count}
+          executor_owner_lost_result(output, progress_count, confirmed, limits.output)
 
         # Concept: a command whose lease vanished is unproven, not cancelled.
         #
@@ -3505,7 +3508,7 @@ defmodule Loopex.Executor.Local do
       end
 
     Process.demonitor(elem(local_lease, 0), [:flush])
-    result
+    finalize_effect_owner_result(result, owner, limits.output)
   end
 
   # Concept: an in-flight job publishes the group it owns, so a cancel can reach
@@ -3528,6 +3531,44 @@ defmodule Loopex.Executor.Local do
   # reservation, ledger, and cancellation entry are what the child is owned
   # through. `self()` is the fallback for the one path that has no reservation.
   defp effect_owner, do: Process.get(:loopex_effect_owner, self())
+
+  defp effect_owner_alive?({_monitor, owner}) when is_pid(owner), do: Process.alive?(owner)
+
+  # Port data, exit, deadlines, cancellation, lease monitors, and owner monitors
+  # are independent signal paths. None of their mailbox positions proves the
+  # exact Local authority still existed when this worker fixed a terminal
+  # result. Every branch above performs its branch-specific group cleanup first;
+  # this one final boundary admits a proved outcome only while that authority is
+  # still live. Results already unproven remain so without changing their more
+  # specific diagnosis.
+  defp finalize_effect_owner_result({result, progress_count} = settled, owner, output_limit) do
+    case result do
+      {outcome, output, _spill} when outcome in [:completed, :failed, :cancelled] ->
+        if effect_owner_alive?(owner),
+          do: settled,
+          else: executor_owner_lost_result(output, progress_count, true, output_limit)
+
+      {outcome, output} when outcome in [:completed, :failed, :cancelled] ->
+        if effect_owner_alive?(owner),
+          do: settled,
+          else: executor_owner_lost_result(output, progress_count, true, output_limit)
+
+      _already_unproven ->
+        settled
+    end
+  end
+
+  defp executor_owner_lost_result(output, progress_count, confirmed, output_limit) do
+    suffix =
+      "\n[loopex: the local executor owner stopped while this command was running." <>
+        if(confirmed,
+          do:
+            " Its process group was terminated and confirmed cleaned, but no receipt owner remained.]",
+          else: " Cleanup could not be confirmed and the effect remains unproven.]"
+        )
+
+    {{:outcome_unknown, bounded_terminal_output(output, suffix, output_limit)}, progress_count}
+  end
 
   defp inflight_table do
     case Process.get(:loopex_inflight_table) do

@@ -252,6 +252,137 @@ defmodule Loopex.Executor.LocalTest do
     refute File.exists?(target), "the command worker acted after its execute caller died"
   end
 
+  test "a command worker refuses a queued run after Local authority is already dead" do
+    # Concept: a queued permit is not authority after the Local instance that
+    # issued it has died.
+    #
+    # Technical depth: the caller's `:run` and the guard monitor's `:DOWN`
+    # arrive from different senders, so their mailbox order cannot decide which
+    # fact happened first. Suspend the worker, queue `:run`, kill the exact
+    # guard, and resume only after its death is established. The worker must
+    # validate the guard at the point it consumes `:run`; merely selecting the
+    # first mailbox entry writes the marker under dead authority.
+    fixture = fixture("guard-lost-before-run")
+    on_exit(fn -> stop_fixture(fixture) end)
+    Process.unlink(fixture.executor)
+
+    parent = self()
+    tag = make_ref()
+    job_id = "job-guard-lost-before-run"
+    target = Path.join(fixture.workspace, "guard-lost-before-run.txt")
+    table = :ets.new(:guard_lost_before_run, [:set, :public])
+
+    {worker, worker_monitor} =
+      spawn_monitor(fn ->
+        Process.put(:loopex_inflight_table, table)
+
+        case Local.await_owned_process_start(parent, fixture.executor, tag, job_id) do
+          {:run, _owner} -> File.write!(target, "escaped")
+          :stop -> :ok
+        end
+      end)
+
+    on_exit(fn ->
+      resume_if_suspended(worker)
+      if Process.alive?(worker), do: Process.exit(worker, :kill)
+    end)
+
+    assert_receive {^tag, :worker_ready, ^worker}, 2_000
+    true = :ets.insert(table, {job_id, {:starting, worker}})
+    assert :erlang.suspend_process(worker)
+
+    # Queue the caller's message first, then make it stale before the worker can
+    # consume it. This fixes the otherwise scheduler-dependent cross-sender
+    # ordering at one deterministic point.
+    send(worker, {tag, :run})
+    guard_monitor = Process.monitor(fixture.executor)
+    Process.exit(fixture.executor, :kill)
+    assert_receive {:DOWN, ^guard_monitor, :process, _guard, :killed}, 2_000
+
+    assert :erlang.resume_process(worker)
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 2_000
+
+    assert :ets.lookup(table, job_id) == []
+
+    refute File.exists?(target),
+           "the command worker consumed a stale run permit after Local authority died"
+  end
+
+  test "a queued port exit cannot outrun Local authority lost before effect completion" do
+    # Concept: a command result becomes proved only while the Local hand that
+    # admitted it is still authoritative.
+    #
+    # Technical depth: port exit and owner `:DOWN` are independent signal paths.
+    # Hold the real command worker while its real child is still blocked, inject
+    # the exact port-exit tuple ahead of the monitor signal, then kill Local
+    # before the child can finish. This is deterministic fault injection for the
+    # otherwise scheduler-dependent cross-source ordering. Accepting the queued
+    # exit without rechecking owner liveness kills the group and reports
+    # `completed` even though authority ended first. The correct result remains
+    # `outcome_unknown`; cleanup can prove the group ended but cannot recreate
+    # the dead receipt owner.
+    fixture = fixture("owner-lost-after-port-exit")
+    on_exit(fn -> stop_fixture(fixture) end)
+    Process.unlink(fixture.executor)
+
+    target = Path.join(fixture.workspace, "command-finished.txt")
+    ready = Path.join(fixture.workspace, "command-ready.txt")
+
+    arguments = %{
+      "argv" => [
+        "/bin/sh",
+        "-c",
+        "printf ready > \"$1\"; while :; do sleep 1; done; printf finished > \"$2\"",
+        "loopex-owner-exit",
+        ready,
+        target
+      ]
+    }
+
+    {job, grant} =
+      job_and_grant(fixture, "owner-lost-after-port-exit", "loopex.bash", arguments)
+
+    parent = self()
+
+    running =
+      Task.async(fn -> Local.execute(fixture.executor, job, grant, notify: parent) end)
+
+    on_exit(fn ->
+      case await_command_worker(running.pid, 1) do
+        nil -> :ok
+        worker -> resume_if_suspended(worker)
+      end
+
+      if Process.alive?(running.pid), do: Task.shutdown(running, :brutal_kill)
+    end)
+
+    assert_receive {:executor_process_started, job_id, "loopex.bash", ["PATH"]}, 2_000
+    assert job_id == job.job_id
+    assert await_file(ready), "the real child did not begin its blocked effect"
+
+    worker = await_command_worker(running.pid)
+    assert is_pid(worker), "the execute caller did not monitor its command worker"
+    port = command_port(worker)
+    assert is_port(port), "the command worker did not own its real port"
+    assert :erlang.suspend_process(worker)
+
+    # The OS child is deliberately still live here. This exact signal shape is
+    # queued first solely to force the adverse mailbox order; the owner dies
+    # before production quiesces the group and fixes the result.
+    send(worker, {port, {:exit_status, 0}})
+
+    owner_monitor = Process.monitor(fixture.executor)
+    Process.exit(fixture.executor, :kill)
+    assert_receive {:DOWN, ^owner_monitor, :process, _owner, :killed}, 2_000
+
+    assert :erlang.resume_process(worker)
+
+    assert {:ok, %{outcome: :outcome_unknown}} = Task.await(running, 5_000)
+
+    refute File.exists?(target),
+           "the child finished an effect after the Local authority that owned it died"
+  end
+
   test "command dispatch uses the caller-monitored pre-run handshake" do
     # Concept: every production command worker watches its execute caller before
     # it announces readiness.
@@ -1111,11 +1242,12 @@ defmodule Loopex.Executor.LocalTest do
     end
   end
 
-  defp job_and_grant(fixture, label, tool_id) do
+  defp job_and_grant(fixture, label, tool_id),
+    do: job_and_grant(fixture, label, tool_id, tool_arguments(label, tool_id))
+
+  defp job_and_grant(fixture, label, tool_id, arguments) do
     {:ok, tool} = Local.tool(tool_id)
     now = System.system_time(:millisecond)
-
-    arguments = tool_arguments(label, tool_id)
 
     fields = %{
       protocol_version: 1,
@@ -1147,6 +1279,57 @@ defmodule Loopex.Executor.LocalTest do
     {:ok, job} = Executor.job(fields)
     {:ok, grant} = Executor.issue_grant({:host_policy, :allow}, job, now + 60_000)
     {job, grant}
+  end
+
+  defp await_command_worker(caller, attempts \\ 200)
+  defp await_command_worker(_caller, 0), do: nil
+
+  defp await_command_worker(caller, attempts) do
+    worker =
+      case Process.info(caller, :monitors) do
+        {:monitors, monitors} ->
+          Enum.find_value(monitors, fn
+            {:process, pid} -> if is_port(command_port(pid)), do: pid
+            _other -> nil
+          end)
+
+        _dead ->
+          nil
+      end
+
+    if worker do
+      worker
+    else
+      Process.sleep(5)
+      await_command_worker(caller, attempts - 1)
+    end
+  end
+
+  defp command_port(pid) when is_pid(pid) do
+    case Process.info(pid, :links) do
+      {:links, links} -> Enum.find(links, &is_port/1)
+      _dead -> nil
+    end
+  end
+
+  defp await_file(path, attempts \\ 400)
+  defp await_file(_path, 0), do: false
+
+  defp await_file(path, attempts) do
+    if File.exists?(path) do
+      true
+    else
+      Process.sleep(5)
+      await_file(path, attempts - 1)
+    end
+  end
+
+  defp resume_if_suspended(pid) do
+    if Process.alive?(pid) and Process.info(pid, :status) == {:status, :suspended} do
+      :erlang.resume_process(pid)
+    else
+      :ok
+    end
   end
 
   defp maybe_delay(arguments, "loopex.demo.wait_write"), do: Map.put(arguments, "delay_ms", 5_000)
