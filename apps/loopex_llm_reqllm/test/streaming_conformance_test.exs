@@ -795,6 +795,8 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
 
   test "provider response identifiers are exact bounded header values and never manufactured" do
     valid_at_ceiling = String.duplicate("r", 256)
+    decomposed_utf8 = "req_e\u0301"
+    refute decomposed_utf8 == String.normalize(decomposed_utf8, :nfc)
 
     cases = [
       {"anthropic", [], nil},
@@ -806,6 +808,7 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
       {"anthropic", %{"request-id" => ["req_anthropic_list_value"]}, "req_anthropic_list_value"},
       {"openai", [{"x-request-id", ["req_openai_list_value"]}], "req_openai_list_value"},
       {"anthropic", [{"request-id", " Req_MiXeD_exact_bytes "}], " Req_MiXeD_exact_bytes "},
+      {"anthropic", [{"request-id", decomposed_utf8}], decomposed_utf8},
       {"anthropic",
        [
          {"proxy-request-id", "req_not_an_exact_header"},
