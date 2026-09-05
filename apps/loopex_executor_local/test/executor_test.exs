@@ -521,6 +521,68 @@ defmodule Loopex.Executor.LocalTest do
     end
   end
 
+  test "a permit whose holder dies during final validation starts no effect" do
+    # Concept: the process that owns a queued reservation must still be alive
+    # when the final permit is fixed; a dead caller cannot leave runnable work.
+    #
+    # Technical depth: suspending the lease holds the permit handler inside its
+    # last bounded validation after it acquired the root claim. The holder dies
+    # there, before the server can process its queued `DOWN`. Live-holder checks
+    # after validation and at owner-token insertion must therefore observe the
+    # process itself, withhold the permit, and leave no durable admission.
+    fixture = fixture("permit-holder-dies")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "permit-holder-dies", "loopex.demo.write")
+    parent = self()
+
+    holder =
+      spawn(fn ->
+        {:ok, placement} = GenServer.call(fixture.executor, {:reserve, job}, 10_000)
+        reservation_ref = Map.fetch!(placement, :reservation_ref)
+        send(parent, {:permit_holder_reserved, self(), reservation_ref})
+
+        receive do
+          :request_permit ->
+            GenServer.call(
+              fixture.executor,
+              {:permit, job, grant, reservation_ref},
+              15_000
+            )
+        end
+      end)
+
+    assert_receive {:permit_holder_reserved, ^holder, _reservation_ref}, 5_000
+    :erlang.suspend_process(fixture.lease)
+
+    try do
+      send(holder, :request_permit)
+
+      assert await_queued_call(fixture.lease),
+             "the permit never reached the final workspace-lease validation"
+
+      Process.exit(holder, :kill)
+      :erlang.resume_process(fixture.lease)
+
+      _permit_barrier = Local.stats(fixture.executor)
+
+      assert await_reservation_count(fixture.executor, job.job_id, 0, 2_000)
+      assert Local.receipt(fixture.executor, job.job_id) == :absent
+      assert %{dispatches: dispatches} = Local.stats(fixture.executor)
+      refute Map.has_key?(dispatches, job.job_id)
+
+      assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+      assert Ledger.read_marker(prepared, job.job_id) == :absent
+      refute Ledger.open?(prepared, job.job_id)
+      refute File.exists?(Path.join(fixture.workspace, "permit-holder-dies.txt"))
+    after
+      if Process.alive?(fixture.lease) and
+           Process.info(fixture.lease, :status) == {:status, :suspended},
+         do: :erlang.resume_process(fixture.lease)
+
+      if Process.alive?(holder), do: Process.exit(holder, :kill)
+    end
+  end
+
   test "a reserve blocked by a held claim is answered inside its own bound" do
     fixture = fixture("reservation-claim")
     on_exit(fn -> stop_fixture(fixture) end)
@@ -617,6 +679,24 @@ defmodule Loopex.Executor.LocalTest do
       else
         false
       end
+    end
+  end
+
+  defp await_queued_call(pid, attempts \\ 200)
+  defp await_queued_call(_pid, 0), do: false
+
+  defp await_queued_call(pid, attempts) do
+    queued? =
+      case Process.info(pid, :messages) do
+        {:messages, messages} -> Enum.any?(messages, &match?({:"$gen_call", _from, _}, &1))
+        _dead -> false
+      end
+
+    if queued? do
+      true
+    else
+      Process.sleep(5)
+      await_queued_call(pid, attempts - 1)
     end
   end
 

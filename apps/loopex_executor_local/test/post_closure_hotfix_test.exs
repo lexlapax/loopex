@@ -351,6 +351,62 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
            "the quarantined receipt became final merely because its open entry disappeared"
   end
 
+  test "a failed close whose open authority cannot be restored retains the root claim" do
+    # Concept: if neither the close nor restoration of its warning can be
+    # proved, the administrative claim itself becomes the fail-closed warning.
+    #
+    # Technical depth: the close removes and syncs the exact open path, then
+    # replaces that path with a directory before reporting failure. Restoration
+    # must refuse the non-regular path. Releasing the surrounding root claim in
+    # that state would leave later work free to interpret the missing record as
+    # permission, so the exact restoration failure must retain the claim and
+    # every later effect must stop there.
+    root = workspace()
+    ledger = ledger_root()
+    job_id = "restore-failure-#{System.unique_integer([:positive])}"
+    open_path = Path.join([ledger, "open", digest(job_id)])
+
+    unrestorable_close = fn _prepared, ^job_id ->
+      :ok = File.rm(open_path)
+      :ok = sync_directory(Path.dirname(open_path))
+      :ok = File.mkdir(open_path)
+      {:error, :close_failed_after_durable_unlink}
+    end
+
+    {executor, lease_id} =
+      executor_on(root, ledger,
+        cleanup_grace_ms: 2_000,
+        open_authority_close: unrestorable_close
+      )
+
+    assert {:error,
+            {:receipt_not_retained,
+             {:ledger_unavailable,
+              {:root_claim_retained,
+               {:open_authority_not_restored, :close_failed_after_durable_unlink,
+                {:ledger_unavailable, :record_not_a_regular_file}}}}}} =
+             run(root, "loopex.write", %{"path" => "first.txt", "content" => "once"}, %{
+               executor: executor,
+               lease_id: lease_id,
+               job_id: job_id,
+               cleanup_grace_ms: 2_000
+             })
+
+    assert File.dir?(Path.join(ledger, "claim")),
+           "the root claim was released after both close and restoration were unproved"
+
+    assert {:error, {:ledger_unavailable, :root_claim_held}} =
+             run(root, "loopex.write", %{"path" => "unrelated.txt", "content" => "forbidden"}, %{
+               executor: executor,
+               lease_id: lease_id,
+               job_id: "after-restore-failure-#{System.unique_integer([:positive])}",
+               run_deadline: System.system_time(:millisecond) + 250,
+               cleanup_grace_ms: 2_000
+             })
+
+    refute File.exists?(Path.join(root, "unrelated.txt"))
+  end
+
   # F5
   test "a settlement that cannot remove its open record never reports confirmed cleanup" do
     # Concept: a receipt that says its cleanup is confirmed while this job's open
