@@ -144,11 +144,12 @@ defmodule Loopex.LLM.ReqLLM do
   where the provider reported none, so no provider struct crosses the boundary.
 
   `provider_response_id` is the provider's own identifier for the response, taken
-  from the `request-id` header the provider returns per call. It is the one field
-  in a reply that a deterministic adapter cannot invent, because it exists in the
-  provider's account and can be looked up there. That is what makes it the anchor
-  of the milestone's real-call evidence, and it is `nil` wherever the provider
-  supplied none rather than being filled in with a plausible value.
+  from the provider's per-call request identifier header (`request-id` or
+  `x-request-id`). It is the one field in a reply that a deterministic adapter
+  cannot invent, because it exists in the provider's account and can be looked up
+  there. That is what makes it the anchor of the milestone's real-call evidence,
+  and it is `nil` wherever the provider supplied none rather than being filled in
+  with a plausible value.
 
   A streamed call cannot carry the provider's assembled *message* identifier: the
   library keeps only usage from the provider's opening event and discards the
@@ -344,6 +345,10 @@ defmodule Loopex.LLM.ReqLLM do
   # negative or zero timeout, because a call dispatched at all is owed a bounded
   # attempt to fail in; the coordinator, not this adapter, decides that a run
   # past its deadline stops.
+  #
+  # ReqLLM's own retry loop is disabled. Core owns retry authority and issues a
+  # new one-use permit only after an exact pre-transport refusal; letting the
+  # transport library retry would spend one durable attempt more than once.
   @doc """
   ## Concept
 
@@ -370,7 +375,8 @@ defmodule Loopex.LLM.ReqLLM do
          api_key: credential,
          max_tokens: Model.max_tokens(request),
          tools: tools,
-         receive_timeout: bound
+         receive_timeout: bound,
+         max_retries: 0
        ]}
     end
   end
@@ -905,17 +911,19 @@ defmodule Loopex.LLM.ReqLLM do
   # Technical depth: a streamed call cannot carry the assembled message
   # identifier, because the library keeps only usage from the provider's
   # `message_start` event and discards the rest. What survives is the response's
-  # own `request-id` header, which the provider issues per call and which is the
-  # identifier its account and its support surface use -- so it is the one an
-  # auditor looks a retained claim up by, and the attestation declares its form.
+  # own per-call request identifier header. Anthropic calls it `request-id` and
+  # OpenAI calls it `x-request-id`; both are the identifiers their account and
+  # support surfaces use. The attestation declares the concrete form it retained.
   #
   # A provider that returns no such header yields `nil` rather than a
   # manufactured substitute, and an evidence claim built from replies carrying
   # none is refused rather than recorded.
   defp provider_request_id(metadata) do
-    metadata
-    |> Map.get(:headers, [])
+    headers = Map.get(metadata, :headers, [])
+
+    headers
     |> header("request-id")
+    |> then(&(&1 || header(headers, "x-request-id")))
     |> bounded_response_id()
   end
 

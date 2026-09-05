@@ -744,6 +744,21 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     assert reply.provider_response_id == "req_synthetic_conformance"
   end
 
+  test "the provider response identifier follows the account visible request header" do
+    metadata =
+      Shipped.clean_metadata()
+      |> Map.put(:headers, [{"x-request-id", "req_openai_synthetic_conformance"}])
+
+    assert {:ok, reply} =
+             Shipped.complete(
+               request(),
+               [chunks: ["acknowledged"], metadata: metadata],
+               Model.discard_progress()
+             )
+
+    assert reply.provider_response_id == "req_openai_synthetic_conformance"
+  end
+
   test "a reply the provider's own builder cannot assemble is an error and never a completion with no tool calls" do
     # A builder failure used to become `nil`, and `nil` became empty text and no
     # tool calls -- the exact reply shape that means "the model asked for nothing
@@ -828,6 +843,10 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     assert Keyword.fetch!(options, :max_tokens) == 32
     assert Keyword.fetch!(options, :api_key) == "credential"
 
+    # Core owns the only retry authority. A transport-library retry would spend
+    # the same durable attempt more than once without a second Control permit.
+    assert Keyword.fetch!(options, :max_retries) == 0
+
     # An adapter is also an enforcement point. It refuses an already-expired
     # request rather than extending the run by inventing a minimum transport
     # wait after the committed instant.
@@ -843,6 +862,42 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
 
     assert Loopex.LLM.ReqLLM.call_options(expired, "credential", []) ==
              {:error, :deadline_elapsed}
+  end
+
+  test "one durable adapter attempt invokes provider transport at most once" do
+    deadline = System.system_time(:millisecond) + 60_000
+
+    {:ok, request} =
+      Loopex.Model.request(
+        Loopex.LLM.ReqLLM.default_model(),
+        [%{"role" => "user", "content" => "one transport"}],
+        sampling: %{"max_tokens" => 8},
+        deadline: deadline
+      )
+
+    assert {:ok, call_options} =
+             Loopex.LLM.ReqLLM.call_options(request, "credential", [])
+
+    stream_options = ReqLLM.Streaming.FinchClient.stream_options(%{}, call_options)
+    owner = self()
+
+    transport = fn _request, _finch, state, _callback, _options ->
+      send(owner, :provider_transport_invoked)
+      {:error, %Mint.TransportError{reason: :timeout}, state}
+    end
+
+    assert {:error, %Mint.TransportError{reason: :timeout}, :initial} =
+             ReqLLM.Streaming.Retry.stream(
+               Finch.build(:post, "http://provider.invalid", [], ""),
+               ReqLLM.Finch,
+               :initial,
+               fn _event, state -> state end,
+               stream_options,
+               transport
+             )
+
+    assert_receive :provider_transport_invoked
+    refute_receive :provider_transport_invoked, 0
   end
 
   test "the exported reply type names exactly the fields a reply carries" do
