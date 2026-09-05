@@ -669,6 +669,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
         end
       end)
 
+    :erlang.trace(local, true, [:call, {:tracer, parent}])
     :erlang.trace(task.pid, true, [:call, :set_on_spawn, {:tracer, parent}])
     send(task.pid, :begin_admission)
 

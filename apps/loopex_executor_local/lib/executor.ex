@@ -9,8 +9,8 @@ defmodule Loopex.Executor.Local do
 
   ## Technical depth
 
-  One GenServer serializes final validation and process start. The fixed tool
-  registry is code-owned rather than model-owned. `/usr/bin/env -i` constructs
+  One GenServer serializes final validation and the durable effect permit. The
+  fixed tool registry is code-owned rather than model-owned. `/usr/bin/env -i` constructs
   the child environment from nothing, then a fixed shell program receives only
   validated bounded arguments. The lease is monitored for every job's full
   lifetime: losing it ends the owned process group or abandons the filesystem
@@ -116,6 +116,12 @@ defmodule Loopex.Executor.Local do
   # a margin, and the server monitors the caller besides; only the later token
   # that wins durable admission becomes operation-owner evidence.
   @reserve_call_ms @claim_wait_ms + 5_000
+
+  # The permit call performs the final validation and may then spend the root
+  # claim wait. Its caller bound outlives both bounded waits; if the caller still
+  # dies during durable publication, the final live-holder check withholds the
+  # effect permit and leaves the open authority unresolved rather than runnable.
+  @permit_call_ms @reserve_call_ms + 5_000
 
   # The longest a receipt lookup waits for another instance's root claim. It is a
   # fraction of the admission ceiling because `receipt/2` is a `GenServer.call`
@@ -231,11 +237,11 @@ defmodule Loopex.Executor.Local do
   The serialized owner decides *whether* this job may proceed; the caller then
   performs the work. ADR 0016 names the effect boundary as the serialized
   transition that reserves exact worker authority immediately before its single
-  permit, and that is exactly what crosses the GenServer here: the quarantine
-  check, the retained-receipt decision, and the in-memory reservation. Prestart
-  validation, the durable admission publication under the root claim, the effect,
-  its receipt, and the removal of this job's open authority all run in the
-  calling process.
+  permit. The initial call decides quarantine, retained receipt, or queueing.
+  Immediately before the effect, a second call repeats reconciliation, performs
+  final validation, publishes durable admission under the root claim, and fixes
+  the exact operation owner. The effect, receipt, and removal of its open
+  authority remain in the calling process.
 
   That placement is not a detail. A serialized owner that also *ran* every effect
   was unavailable for the whole length of the longest job it had admitted, so a
@@ -572,28 +578,32 @@ defmodule Loopex.Executor.Local do
   # waiters remain reservations and never become effect evidence.
   #
   # Technical depth: the token is inserted into this executor's private table
-  # while `open_admission/2` still holds the root claim, after the marker and open
+  # while `open_admission/4` still holds the root claim, after the marker and open
   # entry are durable and before the effect permit returns. A GenServer message
   # here would either leave an observable open-without-owner gap after claim
   # release or deadlock behind a receipt call waiting for the claim. The tuple
   # key cannot collide with binary in-flight job keys or the atom ledger key.
   # Release and `DOWN` delete the exact `{key, reference}` object, so a joiner's
   # cleanup cannot erase the owner.
-  defp claim_operation_owner(state, job_id) do
-    key = {@operation_owner_key, job_id}
-    entry = {key, state.reservation_ref}
+  defp claim_operation_owner(state, job_id, reservation_ref, caller) do
+    if reservation_owned?(state, job_id, reservation_ref, caller) do
+      key = {@operation_owner_key, job_id}
+      entry = {key, reservation_ref}
 
-    case :ets.lookup(state.inflight_table, key) do
-      [^entry] ->
-        :ok
+      case :ets.lookup(state.inflight_table, key) do
+        [^entry] ->
+          :ok
 
-      [] ->
-        if :ets.insert_new(state.inflight_table, entry),
-          do: :ok,
-          else: {:error, {:ledger_unavailable, :operation_owner_unavailable}}
+        [] ->
+          if :ets.insert_new(state.inflight_table, entry),
+            do: :ok,
+            else: {:error, {:ledger_unavailable, :operation_owner_unavailable}}
 
-      _other ->
-        {:error, {:ledger_unavailable, :operation_owner_unavailable}}
+        _other ->
+          {:error, {:ledger_unavailable, :operation_owner_unavailable}}
+      end
+    else
+      {:error, {:ledger_unavailable, :operation_owner_unavailable}}
     end
   rescue
     ArgumentError -> {:error, {:ledger_unavailable, :operation_owner_unavailable}}
@@ -605,17 +615,6 @@ defmodule Loopex.Executor.Local do
     case :ets.lookup(state.inflight_table, key) do
       [{^key, reservation_ref}] -> reservation_held?(state, job_id, reservation_ref)
       _absent -> false
-    end
-  rescue
-    ArgumentError -> false
-  end
-
-  defp operation_owner?(state, job_id, reservation_ref) do
-    key = {@operation_owner_key, job_id}
-
-    case :ets.lookup(state.inflight_table, key) do
-      [{^key, ^reservation_ref}] -> reservation_held?(state, job_id, reservation_ref)
-      _absent_or_other_owner -> false
     end
   rescue
     ArgumentError -> false
@@ -638,9 +637,24 @@ defmodule Loopex.Executor.Local do
   end
 
   defp reservation_held?(state, job_id, reservation_ref) do
-    state.reserved
-    |> Map.get(job_id, MapSet.new())
-    |> MapSet.member?(reservation_ref)
+    held? =
+      state.reserved
+      |> Map.get(job_id, MapSet.new())
+      |> MapSet.member?(reservation_ref)
+
+    held? and
+      Enum.any?(state.reservation_monitors, fn
+        {_monitor, {^job_id, ^reservation_ref, holder}} -> Process.alive?(holder)
+        _other -> false
+      end)
+  end
+
+  defp reservation_owned?(state, job_id, reservation_ref, caller) do
+    reservation_held?(state, job_id, reservation_ref) and
+      Enum.any?(state.reservation_monitors, fn
+        {_monitor, {^job_id, ^reservation_ref, ^caller}} -> true
+        _other -> false
+      end)
   end
 
   defp forget_operation_owner(table, job_id, reservation_ref) do
@@ -1040,11 +1054,45 @@ defmodule Loopex.Executor.Local do
            state
            | reserved: Map.put(state.reserved, job_id, MapSet.put(holders, reservation_ref)),
              reservation_monitors:
-               Map.put(state.reservation_monitors, monitor, {job_id, reservation_ref})
+               Map.put(state.reservation_monitors, monitor, {job_id, reservation_ref, caller})
          }}
 
       answer ->
         {:reply, answer, state}
+    end
+  end
+
+  # Concept: a reservation queues or joins work; this second decision is the
+  # only permission for its holder to begin an effect.
+  #
+  # Technical depth: the request is handled by the same server that observes
+  # reservation-owner `DOWN` messages. While it holds the root claim it verifies
+  # the exact live holder, validates the job and grant, re-runs complete root
+  # reconciliation at the final boundary, resolves the durable marker, and for new work installs the
+  # operation-owner token. A reservation obtained before another operation died
+  # therefore cannot outrun the unresolved open authority that death leaves.
+  # The reply carries only the private values the caller needs after permission;
+  # the server never blocks for the duration of the tool.
+  def handle_call({:permit, job, grant, reservation_ref}, {caller, _tag}, state) do
+    job_id = Map.get(job, :job_id, "")
+
+    if reservation_owned?(state, job_id, reservation_ref, caller) do
+      case permit_reserved(state, job, grant, reservation_ref, caller) do
+        {:ok, permit} ->
+          dispatches =
+            if match?({:admitted, _admission}, permit.decision) do
+              Map.update(state.dispatches, job_id, 1, fn count -> count + 1 end)
+            else
+              state.dispatches
+            end
+
+          {:reply, {:ok, permit}, %{state | dispatches: dispatches}}
+
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
+    else
+      {:reply, refused_before_effect(:effect_start_authority_unavailable), state}
     end
   end
 
@@ -1075,6 +1123,80 @@ defmodule Loopex.Executor.Local do
     )
   end
 
+  # Concept: the effect permit is fixed from one current view of this root and
+  # one current validation of the request.
+  #
+  # Technical depth: queueing occurred earlier and grants no authority. This
+  # second root-claim transaction validates the request, then repeats
+  # reconciliation after every potentially blocking validation step and resolves
+  # the marker without an unlocked gap. The live exact holder is checked after
+  # the claim wait, after final validation, and once more when the operation-owner token is installed.
+  # A caller lost during publication can leave only unresolved durable authority,
+  # never a permit to run an effect. A validation refusal is written while the
+  # same claim is held.
+  # Only a newly admitted operation increments dispatch evidence; a join merely
+  # waits for the one existing operation's receipt.
+  defp permit_reserved(state, job, grant, reservation_ref, caller) do
+    Ledger.with_claim(
+      state.ledger,
+      fn ->
+        job_id = Map.get(job, :job_id, "")
+
+        if reservation_owned?(state, job_id, reservation_ref, caller) do
+          validate_and_permit(state, job, grant, reservation_ref, caller)
+        else
+          refused_before_effect(:effect_start_authority_unavailable)
+        end
+      end,
+      claim_wait(job)
+    )
+  end
+
+  defp validate_and_permit(state, job, grant, reservation_ref, caller) do
+    case final_prestart_validation(state, job, grant) do
+      {:ok, tool, lease_pid, workspace, arguments} ->
+        case reconcile_and_permit_marker(state, job, reservation_ref, caller) do
+          {:ok, admission} ->
+            {:ok,
+             %{
+               decision: {:admitted, admission},
+               tool: tool,
+               lease_pid: lease_pid,
+               workspace: workspace,
+               arguments: arguments
+             }}
+
+          :join ->
+            {:ok,
+             %{
+               decision: :join,
+               tool: tool,
+               lease_pid: lease_pid,
+               workspace: workspace,
+               arguments: arguments
+             }}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:error, {:refused_before_effect, reason} = refusal} ->
+        publish_refusal(state, job, reason)
+        {:error, refusal}
+    end
+  end
+
+  defp reconcile_and_permit_marker(state, job, reservation_ref, caller) do
+    if reservation_owned?(state, job.job_id, reservation_ref, caller) do
+      case reconcile(state.ledger, resolved_jobs(state, job.job_id)) do
+        nil -> admit_under_claim(state, job, reservation_ref, caller)
+        quarantine -> {:error, quarantine}
+      end
+    else
+      refused_before_effect(:effect_start_authority_unavailable)
+    end
+  end
+
   defp resolved_jobs(state, job_id),
     do: MapSet.new([job_id | operation_owner_jobs(state)])
 
@@ -1087,8 +1209,8 @@ defmodule Loopex.Executor.Local do
   # form, and handing them back as a replay would report a completion that is
   # about to reverse. An entry with no receipt is this exact request already
   # admitted somewhere, which ADR 0016 requires to be joined rather than refused,
-  # so the caller is reserved and `admit/2` resolves it from the marker into a
-  # join. Only the true absence starts a new effect.
+  # so the caller is reserved and `admit_under_claim/4` resolves it from the
+  # marker into a join. Only the true absence starts a new effect.
   defp settled_or_reserved(state, job, job_id) do
     case final_receipt(state.ledger, state.ledger_root, job_id) do
       {:ok, receipt} ->
@@ -1143,22 +1265,6 @@ defmodule Loopex.Executor.Local do
   def handle_cast({:release, job_id, reservation_ref}, state),
     do: {:noreply, drop_reservation(state, job_id, reservation_ref)}
 
-  # Concept: a job is counted as dispatched once it has been durably admitted,
-  # never merely because someone asked for it.
-  #
-  # Technical depth: the count is the executor's own evidence of what it let
-  # start, so a pre-effect refusal must leave it untouched. The caller reports
-  # admission from the process that obtained it, and message order from that one
-  # caller keeps the count settled before any answer that reads it.
-  def handle_cast({:admitted, job_id, reservation_ref}, state) do
-    if operation_owner?(state, job_id, reservation_ref) do
-      {:noreply,
-       update_in(state.dispatches, &Map.update(&1, job_id, 1, fn count -> count + 1 end))}
-    else
-      {:noreply, state}
-    end
-  end
-
   # Concept: a message that arrives after the job it belongs to is over is
   # dropped, not treated as a fault.
   #
@@ -1173,7 +1279,7 @@ defmodule Loopex.Executor.Local do
       {nil, _monitors} ->
         {:noreply, state}
 
-      {{job_id, reservation_ref}, monitors} ->
+      {{job_id, reservation_ref, _holder}, monitors} ->
         {:noreply,
          drop_reservation(%{state | reservation_monitors: monitors}, job_id, reservation_ref)}
     end
@@ -1183,8 +1289,9 @@ defmodule Loopex.Executor.Local do
 
   defp drop_reservation(state, job_id, reservation_ref) do
     {gone, monitors} =
-      Enum.split_with(state.reservation_monitors, fn {_monitor, held} ->
-        held == {job_id, reservation_ref}
+      Enum.split_with(state.reservation_monitors, fn
+        {_monitor, {^job_id, ^reservation_ref, _holder}} -> true
+        _other -> false
       end)
 
     Enum.each(gone, fn {monitor, _job_id} -> Process.demonitor(monitor, [:flush]) end)
@@ -1314,11 +1421,19 @@ defmodule Loopex.Executor.Local do
     close_retention_episode()
 
     try do
-      case final_prestart_validation(placement, job, grant) do
-        {:ok, tool, lease_pid, workspace, arguments} ->
+      case request_effect_permit(placement, job, grant) do
+        {:ok,
+         %{
+           decision: decision,
+           tool: tool,
+           lease_pid: lease_pid,
+           workspace: workspace,
+           arguments: arguments
+         }} ->
           admitted_execute(
             placement,
             job,
+            decision,
             tool,
             lease_pid,
             workspace,
@@ -1327,9 +1442,8 @@ defmodule Loopex.Executor.Local do
             progress
           )
 
-        {:error, {:refused_before_effect, reason}} ->
-          publish_refusal(placement, job, reason)
-          {:error, {:refused_before_effect, reason}}
+        {:error, reason} ->
+          {:error, reason}
       end
     after
       close_cleanup_episode()
@@ -1339,6 +1453,14 @@ defmodule Loopex.Executor.Local do
       Process.delete(:loopex_inflight_table)
       Process.delete(:loopex_effect_owner)
     end
+  end
+
+  defp request_effect_permit(placement, job, grant) do
+    GenServer.call(
+      placement.executor,
+      {:permit, job, grant, placement.reservation_ref},
+      @permit_call_ms
+    )
   end
 
   # Concept: every cleanup and retention window this job spends is derived from
@@ -1371,14 +1493,19 @@ defmodule Loopex.Executor.Local do
   # operation. `observed_at_ms` is the wall half of the one paired sample taken
   # here and is carried to terminal construction rather than resampled, so the
   # receipt reports when the effect was admitted and not when it finished.
-  defp admitted_execute(placement, job, tool, lease_pid, workspace, arguments, options, progress) do
-    case admit(placement, job) do
-      {:ok, admission} ->
-        GenServer.cast(
-          placement.executor,
-          {:admitted, job.job_id, placement.reservation_ref}
-        )
-
+  defp admitted_execute(
+         placement,
+         job,
+         decision,
+         tool,
+         lease_pid,
+         workspace,
+         arguments,
+         options,
+         progress
+       ) do
+    case decision do
+      {:admitted, admission} ->
         lease = {Process.monitor(lease_pid), lease_pid}
         Process.put(:loopex_admission, admission)
 
@@ -1394,12 +1521,6 @@ defmodule Loopex.Executor.Local do
 
       :join ->
         join_admitted_operation(placement, job)
-
-      {:error, {:refused_before_effect, _reason} = refusal} ->
-        {:error, refusal}
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 
@@ -1680,32 +1801,26 @@ defmodule Loopex.Executor.Local do
   # derived monotonic action deadline under checked arithmetic. A sample that
   # cannot produce a finite action deadline is unavailable authority, never
   # permission.
-  defp admit(state, job) do
-    Ledger.with_claim(
-      state.ledger,
-      fn ->
-        case Ledger.read_marker(state.ledger, job.job_id) do
-          :absent ->
-            open_admission(state, job)
+  defp admit_under_claim(state, job, reservation_ref, caller) do
+    case Ledger.read_marker(state.ledger, job.job_id) do
+      :absent ->
+        open_admission(state, job, reservation_ref, caller)
 
-          {:ok, record} ->
-            cond do
-              record["canonical_request_digest"] != job.canonical_request_digest ->
-                {:error, :job_id_conflict}
+      {:ok, record} ->
+        cond do
+          record["canonical_request_digest"] != job.canonical_request_digest ->
+            {:error, :job_id_conflict}
 
-              Map.get(record, :ledger_kind) == Ledger.refusal_kind() ->
-                {:error, {:refused_before_effect, refusal_reason(record)}}
+          Map.get(record, :ledger_kind) == Ledger.refusal_kind() ->
+            {:error, {:refused_before_effect, refusal_reason(record)}}
 
-              true ->
-                :join
-            end
-
-          {:error, reason} ->
-            {:error, reason}
+          true ->
+            :join
         end
-      end,
-      claim_wait(job)
-    )
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   # Concept: the deadline is derived from one sample, and the permit is decided
@@ -1722,7 +1837,7 @@ defmodule Loopex.Executor.Local do
   # to withdraw. After the durable records, the exact reservation token becomes
   # the operation owner under the still-held root claim; only then may the one
   # effect permit return.
-  defp open_admission(state, job) do
+  defp open_admission(state, job, reservation_ref, caller) do
     with {:ok, wall, monotonic} <- sample(state),
          {:ok, action} <- derive_action_deadline(wall, monotonic, job),
          :ok <- authorize_effect(state, job, action),
@@ -1732,11 +1847,11 @@ defmodule Loopex.Executor.Local do
              Ledger.marker(job),
              Ledger.open_entry(job, state.identity)
            ),
-         :ok <- claim_operation_owner(state, job.job_id) do
+         :ok <- claim_operation_owner(state, job.job_id, reservation_ref, caller) do
       {:ok, %{wall: wall, monotonic: monotonic, action: action, observed_at_ms: wall}}
     else
       {:error, {:refused_before_effect, reason}} ->
-        publish_refusal(state, job, reason, :claim_held)
+        publish_refusal(state, job, reason)
         {:error, {:refused_before_effect, reason}}
 
       {:error, reason} ->
@@ -1823,10 +1938,11 @@ defmodule Loopex.Executor.Local do
   #
   # Technical depth: a refusal replaces exactly the marker path it names, which
   # is how a pre-marker deadline records the refusal without inventing an
-  # admission. A reason outside the sixteen admitted codes is not journaled: a
+  # admission. The caller already holds the root claim, so refusal publication
+  # stays in the same serialized decision. A reason outside the sixteen admitted codes is not journaled: a
   # record no reader can interpret is not proof of anything, and the caller still
   # receives its truthful pre-effect answer.
-  defp publish_refusal(state, job, reason, claim \\ :take_claim) do
+  defp publish_refusal(state, job, reason) do
     {code, field} =
       case reason do
         {code, field} when is_atom(code) -> {code, field}
@@ -1834,14 +1950,8 @@ defmodule Loopex.Executor.Local do
       end
 
     case durable_refusal(job, code, field) do
-      {:ok, refusal} when claim == :claim_held ->
-        Ledger.refuse(state.ledger, refusal)
-
-      {:ok, refusal} ->
-        Ledger.with_claim(state.ledger, fn -> Ledger.refuse(state.ledger, refusal) end)
-
-      :error ->
-        :ok
+      {:ok, refusal} -> Ledger.refuse(state.ledger, refusal)
+      :error -> :ok
     end
   rescue
     _malformed_job -> :ok
@@ -4633,11 +4743,12 @@ defmodule Loopex.Executor.Local do
       {:ok, receipt} ->
         if Ledger.open?(ledger, job_id), do: {:error, :effect_settling}, else: {:ok, receipt}
 
-      # An entry with no receipt on an instance that does not hold the job is an
-      # effect no live instance is settling: unresolved, which is different from
-      # `effect_in_flight`, the answer this server gives for a job it holds. A
-      # coordinator activating a prepared resume ends the run `outcome_unknown`
-      # on the former and leaves the latter to its executor.
+      # An entry with no receipt that this instance's exact live owner table does
+      # not prove is unresolved. That is different from `effect_in_flight`, the
+      # answer this server gives for a job whose admitted owner it still holds;
+      # it makes no claim about another process or VM. A coordinator activating a
+      # prepared resume ends the run `outcome_unknown` on the former and leaves
+      # the latter to its executor.
       :absent ->
         if Ledger.open?(ledger, job_id), do: {:error, :effect_unresolved}, else: :absent
 

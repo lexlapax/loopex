@@ -429,6 +429,98 @@ defmodule Loopex.Executor.LocalTest do
     end
   end
 
+  test "a pre-reserved unrelated job is rechecked after an effect owner dies" do
+    # Concept: queueing a job while this root is healthy is not permission to
+    # run it after the root acquires unresolved effect authority.
+    #
+    # Technical depth: A owns an admitted delayed effect while B obtains only a
+    # reservation. The same B holder asks for the later permit after A dies, so
+    # this reaches the final authority boundary rather than merely failing a
+    # caller-token check. A permit that trusts the earlier reservation admits B;
+    # a permit that repeats root reconciliation refuses it before any marker,
+    # owner token, dispatch count, or filesystem effect exists.
+    fixture = fixture("pre-reserved-after-owner-loss")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    {owned, owned_grant} =
+      job_and_grant(fixture, "pre-reserved-owner", "loopex.demo.wait_write")
+
+    {queued, queued_grant} =
+      job_and_grant(fixture, "pre-reserved-unrelated", "loopex.demo.write")
+
+    parent = self()
+
+    owner =
+      Task.async(fn ->
+        Local.execute(fixture.executor, owned, owned_grant, notify: parent)
+      end)
+
+    assert_receive {:executor_process_started, owned_job_id, "loopex.demo.wait_write", ["PATH"]},
+                   5_000
+
+    assert owned_job_id == owned.job_id
+
+    queued_holder =
+      spawn(fn ->
+        result = GenServer.call(fixture.executor, {:reserve, queued}, 10_000)
+        send(parent, {:unrelated_reserved, self(), result})
+
+        case result do
+          {:ok, placement} ->
+            reservation_ref = Map.fetch!(placement, :reservation_ref)
+
+            receive do
+              :request_permit ->
+                permit =
+                  GenServer.call(
+                    fixture.executor,
+                    {:permit, queued, queued_grant, reservation_ref},
+                    15_000
+                  )
+
+                GenServer.cast(fixture.executor, {:release, queued.job_id, reservation_ref})
+                _barrier = GenServer.call(fixture.executor, :stats)
+                send(parent, {:unrelated_permit, self(), permit})
+            end
+
+          _not_reserved ->
+            :ok
+        end
+      end)
+
+    assert_receive {:unrelated_reserved, ^queued_holder, {:ok, _placement}}, 5_000
+    assert await_reservation_count(fixture.executor, queued.job_id, 1, 2_000)
+
+    try do
+      _owner_result = Task.shutdown(owner, :brutal_kill)
+
+      assert await_reservation_count(fixture.executor, owned.job_id, 0, 2_000),
+             "the admitted owner's reservation did not leave with its process"
+
+      assert await_reservation_count(fixture.executor, queued.job_id, 1, 2_000),
+             "the unrelated queued holder lost its reservation before asking for a permit"
+
+      assert Local.receipt(fixture.executor, owned.job_id) == {:error, :effect_unresolved}
+
+      send(queued_holder, :request_permit)
+
+      assert_receive {:unrelated_permit, ^queued_holder, {:error, {:reconciliation_required, 1}}},
+                     15_000
+
+      assert %{dispatches: dispatches} = Local.stats(fixture.executor)
+      refute Map.has_key?(dispatches, queued.job_id)
+
+      assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+      assert Ledger.read_marker(prepared, queued.job_id) == :absent
+      refute Ledger.open?(prepared, queued.job_id)
+      assert Ledger.open?(prepared, owned.job_id)
+      refute File.exists?(Path.join(fixture.workspace, "pre-reserved-unrelated.txt"))
+    after
+      if Process.alive?(owner.pid), do: Task.shutdown(owner, :brutal_kill)
+      if Process.alive?(queued_holder), do: Process.exit(queued_holder, :kill)
+    end
+  end
+
   test "a reserve blocked by a held claim is answered inside its own bound" do
     fixture = fixture("reservation-claim")
     on_exit(fn -> stop_fixture(fixture) end)
