@@ -1232,27 +1232,51 @@ defmodule Loopex.Executor.Local do
   defp validate_new_permit(state, job, grant, reservation_ref, caller) do
     case final_prestart_validation(state, job, grant) do
       {:ok, tool, lease_pid, workspace, arguments} ->
-        if reservation_owned?(state, job.job_id, reservation_ref, caller) do
-          case open_admission(state, job, reservation_ref, caller) do
-            {:ok, admission} ->
-              {:ok,
-               %{
-                 decision: {:admitted, admission},
-                 tool: tool,
-                 lease_pid: lease_pid,
-                 workspace: workspace,
-                 arguments: arguments
-               }}
+        case final_root_reconciliation(state, job, reservation_ref, caller) do
+          :ok ->
+            case open_admission(state, job, reservation_ref, caller) do
+              {:ok, admission} ->
+                {:ok,
+                 %{
+                   decision: {:admitted, admission},
+                   tool: tool,
+                   lease_pid: lease_pid,
+                   workspace: workspace,
+                   arguments: arguments
+                 }}
 
-            {:error, reason} ->
-              {:error, reason}
-          end
-        else
-          refused_before_effect(:effect_start_authority_unavailable)
+              {:error, reason} ->
+                {:error, reason}
+            end
+
+          {:error, reason} ->
+            {:error, reason}
         end
 
       {:error, {:refused_before_effect, reason} = refusal} ->
         refusal_result(state, job, reason, refusal)
+    end
+  end
+
+  # Concept: validation can wait, and authority that was live before that wait
+  # may be unresolved by the time it ends.
+  #
+  # Technical depth: the Local server holds the root claim while it calls the
+  # bounded lease boundary, so reservation-owner `DOWN` messages cannot update
+  # its maps during that call. `operation_owner_jobs/1` deliberately samples the
+  # exact holder processes instead. Repeating the complete snapshot here, after
+  # validation and immediately before durable admission, exposes an open entry
+  # whose holder died in that interval. The current reservation is checked in
+  # the same step; neither a stale caller nor newly unresolved effect truth can
+  # become a permit merely because the earlier snapshot was healthy.
+  defp final_root_reconciliation(state, job, reservation_ref, caller) do
+    if reservation_owned?(state, job.job_id, reservation_ref, caller) do
+      case reconcile(state.ledger, resolved_jobs(state, job.job_id)) do
+        nil -> :ok
+        quarantine -> {:error, quarantine}
+      end
+    else
+      refused_before_effect(:effect_start_authority_unavailable)
     end
   end
 

@@ -883,6 +883,94 @@ defmodule Loopex.Executor.LocalTest do
     end
   end
 
+  test "a permit repeats root reconciliation after blocking final validation" do
+    # Concept: a healthy root observed before validation is not permission to
+    # ignore effect authority that becomes unresolved while validation waits.
+    #
+    # Technical depth: A owns an admitted delayed effect. B enters its permit
+    # decision while A is live, then blocks in the real workspace-lease resolve
+    # after that first root snapshot. Killing A's exact reservation holder there
+    # queues its `DOWN` behind B's serialized call, so only a post-validation
+    # snapshot that samples live operation holders can see A's open entry as
+    # unresolved. Without that second snapshot B receives an admitted permit.
+    fixture = fixture("post-validation-reconciliation")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    {owned, owned_grant} =
+      job_and_grant(fixture, "post-validation-owner", "loopex.demo.wait_write")
+
+    {queued, queued_grant} =
+      job_and_grant(fixture, "post-validation-unrelated", "loopex.demo.write")
+
+    parent = self()
+
+    owner =
+      Task.async(fn ->
+        Local.execute(fixture.executor, owned, owned_grant, notify: parent)
+      end)
+
+    assert_receive {:executor_process_started, owned_job_id, "loopex.demo.wait_write", ["PATH"]},
+                   5_000
+
+    assert owned_job_id == owned.job_id
+
+    queued_holder =
+      spawn(fn ->
+        {:ok, placement} = GenServer.call(fixture.executor, {:reserve, queued}, 10_000)
+        reservation_ref = Map.fetch!(placement, :reservation_ref)
+        send(parent, {:post_validation_reserved, self()})
+
+        receive do
+          :request_permit ->
+            answer =
+              GenServer.call(
+                fixture.executor,
+                {:permit, queued, queued_grant, reservation_ref},
+                15_000
+              )
+
+            GenServer.cast(fixture.executor, {:release, queued.job_id, reservation_ref})
+            send(parent, {:post_validation_permit, self(), answer})
+        end
+      end)
+
+    assert_receive {:post_validation_reserved, ^queued_holder}, 5_000
+    :erlang.suspend_process(fixture.lease)
+
+    try do
+      send(queued_holder, :request_permit)
+
+      assert await_queued_call(fixture.lease),
+             "the permit never reached its blocking final lease validation"
+
+      _owner_result = Task.shutdown(owner, :brutal_kill)
+      refute Process.alive?(owner.pid), "the admitted effect owner remained live"
+
+      :erlang.resume_process(fixture.lease)
+
+      assert_receive {:post_validation_permit, ^queued_holder,
+                      {:error, {:reconciliation_required, 1}}},
+                     15_000
+
+      _permit_barrier = Local.stats(fixture.executor)
+      assert %{dispatches: dispatches} = Local.stats(fixture.executor)
+      refute Map.has_key?(dispatches, queued.job_id)
+
+      assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+      assert Ledger.read_marker(prepared, queued.job_id) == :absent
+      refute Ledger.open?(prepared, queued.job_id)
+      assert Ledger.open?(prepared, owned.job_id)
+      refute File.exists?(Path.join(fixture.workspace, "post-validation-unrelated.txt"))
+    after
+      if Process.alive?(fixture.lease) and
+           Process.info(fixture.lease, :status) == {:status, :suspended},
+         do: :erlang.resume_process(fixture.lease)
+
+      if Process.alive?(owner.pid), do: Task.shutdown(owner, :brutal_kill)
+      if Process.alive?(queued_holder), do: Process.exit(queued_holder, :kill)
+    end
+  end
+
   test "a permit whose holder dies during final validation starts no effect" do
     # Concept: the process that owns a queued reservation must still be alive
     # when the final permit is fixed; a dead caller cannot leave runnable work.
