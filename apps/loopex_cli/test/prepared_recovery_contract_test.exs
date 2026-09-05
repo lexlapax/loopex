@@ -740,6 +740,114 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
   end
 
+  # Concept: a prepared holder belongs to the signal manager that actually
+  # accepted its handler, not to whichever process happened to own the name
+  # before installation entered its serialized section.
+  #
+  # Technical depth: the installer is held behind the same global lock the
+  # production transaction uses while the well-known manager name is absent.
+  # The previous implementation sampled that absence before waiting, then
+  # successfully installed on the manager registered while it waited and armed
+  # no manager guard. This case proves the installer has reached the lock, makes
+  # the replacement manager available, and kills it after the successful handoff.
+  # The exact installed manager must take the holder down and let the owner
+  # abandon the still-prepared capability.
+  test "a prepared holder is guarded by the signal manager selected inside installation" do
+    fixture = recovered_fixture("signal-manager-install-race", :active)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-signal-manager-install-race"
+             ])
+
+    parent = self()
+
+    lock_owner =
+      spawn(fn ->
+        :global.trans(
+          {{Interrupt, :handler_install}, self()},
+          fn ->
+            send(parent, {:handler_install_lock_held, self()})
+
+            receive do
+              :release_handler_install_lock -> :ok
+            end
+          end,
+          [node()]
+        )
+      end)
+
+    assert_receive {:handler_install_lock_held, ^lock_owner}, 5_000
+
+    actual_manager = Process.whereis(:erl_signal_server)
+    assert is_pid(actual_manager)
+    assert {:ok, replacement_manager} = :gen_event.start()
+    Process.unlink(replacement_manager)
+    Process.unregister(:erl_signal_server)
+
+    installer = self()
+
+    registrar =
+      spawn(fn ->
+        if await_installer_lock(installer) do
+          registered = Process.register(replacement_manager, :erl_signal_server)
+          send(lock_owner, :release_handler_install_lock)
+          send(parent, {:replacement_manager_registered, self(), registered})
+        else
+          send(lock_owner, :release_handler_install_lock)
+          send(parent, {:replacement_manager_not_registered, self()})
+        end
+      end)
+
+    try do
+      assert :ok =
+               invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
+
+      assert_receive {:replacement_manager_registered, ^registrar, true}, 1_000
+
+      [handler] =
+        replacement_manager
+        |> :sys.get_state()
+        |> Enum.flat_map(fn
+          {Interrupt, _id, state} -> [state]
+          _other -> []
+        end)
+
+      holder = handler.holder
+      assert is_pid(holder) and Process.alive?(holder)
+
+      manager_monitor = Process.monitor(replacement_manager)
+      Process.exit(replacement_manager, :kill)
+
+      assert_receive {:DOWN, ^manager_monitor, :process, ^replacement_manager, :killed},
+                     1_000
+
+      assert await_settled_capability(activation, :resume_activation_abandoned),
+             "the installed manager died but its prepared holder remained authoritative"
+
+      refute Process.alive?(holder),
+             "the holder outlived the exact signal manager that installed it"
+    after
+      send(lock_owner, :release_handler_install_lock)
+
+      case Process.whereis(:erl_signal_server) do
+        ^replacement_manager -> Process.unregister(:erl_signal_server)
+        _other -> :ok
+      end
+
+      if Process.alive?(replacement_manager), do: Process.exit(replacement_manager, :kill)
+
+      if is_nil(Process.whereis(:erl_signal_server)),
+        do: Process.register(actual_manager, :erl_signal_server)
+    end
+
+    Process.sleep(100)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
   # Concept: replacing a prepared handler cannot report success while its prior
   # holder is still presenting the capability to the session owner.
   #
@@ -1986,6 +2094,30 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     else
       Process.sleep(10)
       await_installer_drain(installer, attempts - 1)
+    end
+  end
+
+  defp await_installer_lock(installer, attempts \\ 300)
+  defp await_installer_lock(_installer, 0), do: false
+
+  defp await_installer_lock(installer, attempts) do
+    waiting =
+      case Process.info(installer, :current_stacktrace) do
+        {:current_stacktrace, stacktrace} ->
+          Enum.any?(stacktrace, fn
+            {:global, :set_lock, _arity_or_args, _location} -> true
+            _other -> false
+          end)
+
+        nil ->
+          false
+      end
+
+    if waiting do
+      true
+    else
+      Process.sleep(10)
+      await_installer_lock(installer, attempts - 1)
     end
   end
 
