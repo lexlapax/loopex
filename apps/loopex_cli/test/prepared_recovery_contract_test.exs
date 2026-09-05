@@ -792,6 +792,250 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert_refused(invoke(Interrupt, :activate_prepared, [activation]))
   end
 
+  # Concept: replacing a prepared handler never creates an interval in which an
+  # operator interrupt has nobody to receive it.
+  #
+  # Technical depth: the predecessor holder is blocked in a real activation
+  # call while the coordinator is suspended, so replacement cannot finish. A
+  # signal delivered in that established drain window must still reach an
+  # installed handler and queue its abort at the same coordinator. Deleting the
+  # predecessor before installing its successor loses the signal and leaves no
+  # abort call in the mailbox, even though the simpler drain test above remains
+  # green.
+  test "handler replacement keeps interrupt coverage while its predecessor drains" do
+    fixture = recovered_fixture("handler-replacement-signal", :active)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-handler-replacement-signal"
+             ])
+
+    assert :ok = invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
+
+    coordinator = coordinator_of(fixture.runtime)
+    :erlang.suspend_process(coordinator)
+
+    presentation = Task.async(fn -> invoke(Interrupt, :activate_prepared, [activation]) end)
+    capability = activation.capability
+
+    try do
+      assert queued_activation?(coordinator, capability),
+             "the prepared presentation never reached the suspended coordinator"
+
+      replacement =
+        Task.async(fn -> invoke(Interrupt, :install, [fixture.attachment, @grace]) end)
+
+      refute Task.yield(replacement, 250),
+             "handler replacement did not remain in the established drain window"
+
+      assert await_handler_terminal(replacement.pid),
+             "the successor handler was not installed before its predecessor drain"
+
+      :gen_event.notify(:erl_signal_server, :sigterm)
+
+      assert queued_abort?(coordinator),
+             "an interrupt delivered during replacement reached no installed handler"
+
+      :erlang.resume_process(coordinator)
+
+      assert {:ok, {:ok, session_id}} = Task.yield(presentation, 10_000)
+      assert session_id == fixture.session_id
+      assert {:ok, :ok} = Task.yield(replacement, 10_000)
+    after
+      if suspended?(coordinator), do: :erlang.resume_process(coordinator)
+    end
+  end
+
+  # Concept: concurrent replacements all wait for the oldest presentation they
+  # supersede; a later installer cannot route around an earlier drain.
+  #
+  # Technical depth: the first successor is proved installed while its caller is
+  # still waiting for the prepared predecessor. A second installation started
+  # then must remain behind the complete first transaction. Serializing only
+  # each event-manager call lets it replace the first successor, observe no
+  # holder of its own, and report success while the original presentation is
+  # still blocked.
+  test "concurrent handler replacements cannot outrun the oldest prepared holder" do
+    fixture = recovered_fixture("concurrent-handler-replacement", :active)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-concurrent-handler-replacement"
+             ])
+
+    assert :ok = invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
+
+    coordinator = coordinator_of(fixture.runtime)
+    :erlang.suspend_process(coordinator)
+
+    presentation = Task.async(fn -> invoke(Interrupt, :activate_prepared, [activation]) end)
+    capability = activation.capability
+
+    try do
+      assert queued_activation?(coordinator, capability),
+             "the prepared presentation never reached the suspended coordinator"
+
+      first = Task.async(fn -> invoke(Interrupt, :install, [fixture.attachment, @grace]) end)
+
+      assert await_handler_terminal(first.pid),
+             "the first successor was not installed before its predecessor drain"
+
+      refute Task.yield(first, 250),
+             "the first replacement did not remain in the established drain window"
+
+      second = Task.async(fn -> invoke(Interrupt, :install, [fixture.attachment, @grace]) end)
+
+      refute Task.yield(second, 250),
+             "a concurrent replacement outran the oldest prepared holder"
+
+      :erlang.resume_process(coordinator)
+
+      assert {:ok, {:ok, session_id}} = Task.yield(presentation, 10_000)
+      assert session_id == fixture.session_id
+      assert {:ok, :ok} = Task.yield(first, 10_000)
+      assert {:ok, :ok} = Task.yield(second, 10_000)
+    after
+      if suspended?(coordinator), do: :erlang.resume_process(coordinator)
+    end
+  end
+
+  # Concept: installing a new attachment cannot erase a stop this process has
+  # already begun or turn the next interrupt into a second stop.
+  #
+  # Technical depth: the abort worker is held inside its real Store admission
+  # after the handler has fixed one command identity and armed one backstop. A
+  # replacement then crosses the public installation entry. The current handler
+  # must remain installed with the same abort and backstop; checking before a
+  # separate swap is insufficient because the signal can arrive between them.
+  # A second signal must still join that one admission, proved after releasing
+  # the transaction by the single interrupt-shaped durable command.
+  test "handler replacement cannot discard an in flight interrupt" do
+    fixture = recovered_fixture("replacement-active-interrupt", :running)
+    store_pid = fixture.store_pid
+
+    assert :ok = invoke(Interrupt, :install, [fixture.attachment, @grace])
+
+    :ok =
+      M1RuntimeTestStore.hold_next_record_before_linearization(
+        store_pid,
+        "command_admitted",
+        self()
+      )
+
+    :gen_event.notify(:erl_signal_server, :sigterm)
+
+    assert_receive {:record_held_before_linearization, waiter, ^store_pid, "command_admitted",
+                    _held},
+                   5_000
+
+    [before] = interrupt_handler_states()
+    assert %{command_id: command_id} = before.abort
+    assert is_pid(before.backstop) and Process.alive?(before.backstop)
+
+    replacement =
+      Task.async(fn -> invoke(Interrupt, :install, [fixture.attachment, @grace]) end)
+
+    assert {:ok, :ok} = Task.yield(replacement, 5_000)
+
+    [after_replacement] = interrupt_handler_states()
+    assert after_replacement.abort.command_id == command_id
+    assert after_replacement.backstop == before.backstop
+    assert after_replacement.terminal == before.terminal
+
+    :gen_event.sync_notify(:erl_signal_server, :sigterm)
+    [after_second_signal] = interrupt_handler_states()
+    assert after_second_signal.abort.command_id == command_id
+    assert after_second_signal.backstop == before.backstop
+
+    M1RuntimeTestStore.release(waiter)
+
+    assert await_interrupt_admission(fixture),
+           "the retained interrupt did not reach durable admission"
+
+    assert Enum.count(records(fixture), fn record ->
+             record.payload[:kind] == "command_admitted" and
+               String.starts_with?(record.payload["command_id"] || "", "interrupt-")
+           end) == 1
+  end
+
+  # Concept: the obligation to drain an older prepared presentation belongs to
+  # the installed handler, not to the particular process that started replacing
+  # it.
+  #
+  # Technical depth: the first installer is proved to have swapped its successor
+  # in and to be blocked awaiting the old holder, then is killed. A caller-owned
+  # lock disappears with that process, so a later installer can proceed; it may
+  # report success only after inheriting and draining the same old holder. An
+  # implementation that takes the predecessor pid out of handler state before
+  # waiting loses the only durable reference at the kill and completes the next
+  # installation while the old presentation remains live.
+  test "installer death cannot discard an unfinished predecessor drain" do
+    fixture = recovered_fixture("installer-death-drain", :active)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-installer-death-drain"
+             ])
+
+    assert :ok = invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
+
+    coordinator = coordinator_of(fixture.runtime)
+    :erlang.suspend_process(coordinator)
+
+    presentation = Task.async(fn -> invoke(Interrupt, :activate_prepared, [activation]) end)
+    capability = activation.capability
+    parent = self()
+
+    try do
+      assert queued_activation?(coordinator, capability),
+             "the prepared presentation never reached the suspended coordinator"
+
+      {installer, installer_monitor} =
+        spawn_monitor(fn ->
+          send(
+            parent,
+            {:installer_result, invoke(Interrupt, :install, [fixture.attachment, @grace])}
+          )
+        end)
+
+      assert await_handler_terminal(installer),
+             "the successor handler was not installed before the installer drain"
+
+      assert await_installer_drain(installer),
+             "the installer never began waiting for its predecessor holder"
+
+      Process.exit(installer, :kill)
+      assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :killed}, 1_000
+      refute_receive {:installer_result, _result}, 0
+
+      replacement =
+        Task.async(fn -> invoke(Interrupt, :install, [fixture.attachment, @grace]) end)
+
+      assert await_handler_terminal(replacement.pid),
+             "the replacement did not acquire the released installer transaction"
+
+      refute Task.yield(replacement, 250),
+             "replacement forgot the predecessor drain when its installer died"
+
+      :erlang.resume_process(coordinator)
+
+      assert {:ok, {:ok, session_id}} = Task.yield(presentation, 10_000)
+      assert session_id == fixture.session_id
+      assert {:ok, :ok} = Task.yield(replacement, 10_000)
+    after
+      if suspended?(coordinator), do: :erlang.resume_process(coordinator)
+    end
+  end
+
   test "the prepared interrupt owner can abandon its capability without activating work" do
     fixture = recovered_fixture("interrupt-abandon", :active)
 
@@ -1675,6 +1919,83 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       Process.sleep(10)
       queued_activation?(coordinator, capability, attempts - 1)
     end
+  end
+
+  defp queued_abort?(coordinator, attempts \\ 300)
+  defp queued_abort?(_coordinator, 0), do: false
+
+  defp queued_abort?(coordinator, attempts) do
+    queued =
+      case Process.info(coordinator, :messages) do
+        {:messages, messages} ->
+          Enum.any?(messages, fn
+            {:"$gen_call", _from, {:command, _owner, %{type: :abort}}} -> true
+            _other -> false
+          end)
+
+        nil ->
+          false
+      end
+
+    if queued do
+      true
+    else
+      Process.sleep(10)
+      queued_abort?(coordinator, attempts - 1)
+    end
+  end
+
+  defp await_handler_terminal(terminal, attempts \\ 300)
+  defp await_handler_terminal(_terminal, 0), do: false
+
+  defp await_handler_terminal(terminal, attempts) do
+    installed =
+      :erl_signal_server
+      |> :sys.get_state()
+      |> Enum.any?(fn
+        {Interrupt, _id, %{terminal: ^terminal}} -> true
+        _other -> false
+      end)
+
+    if installed do
+      true
+    else
+      Process.sleep(10)
+      await_handler_terminal(terminal, attempts - 1)
+    end
+  end
+
+  defp await_installer_drain(installer, attempts \\ 300)
+  defp await_installer_drain(_installer, 0), do: false
+
+  defp await_installer_drain(installer, attempts) do
+    draining =
+      case Process.info(installer, :current_stacktrace) do
+        {:current_stacktrace, stacktrace} ->
+          Enum.any?(stacktrace, fn
+            {Interrupt, :await_released_holder, _arity_or_args, _location} -> true
+            _other -> false
+          end)
+
+        nil ->
+          false
+      end
+
+    if draining do
+      true
+    else
+      Process.sleep(10)
+      await_installer_drain(installer, attempts - 1)
+    end
+  end
+
+  defp interrupt_handler_states do
+    :erl_signal_server
+    |> :sys.get_state()
+    |> Enum.flat_map(fn
+      {Interrupt, _id, state} -> [state]
+      _other -> []
+    end)
   end
 
   defp suspended?(process) do

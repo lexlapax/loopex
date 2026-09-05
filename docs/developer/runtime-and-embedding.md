@@ -219,9 +219,13 @@ capability on an admitted abort and refuses a later activation as fenced. A
 preparer that dies after the acknowledgement leaves a live holder; one that
 dies before it leaves a capability no live process can present. An independent
 guard ends the holder if the signal manager dies without terminating its
-handlers. Orderly replacement waits for the predecessor holder to end before it
-reports success. A presentation that already reached the owner is decided
-first; otherwise holder loss permanently pauses a still-prepared capability.
+handlers. Orderly replacement installs a successor first, keeps interrupt
+coverage while it waits for every predecessor holder to end, and retains that
+drain in the live handler if the installer itself dies. Concurrent replacements
+serialize behind the same obligation. Once an interrupt has begun, replacement
+is refused atomically so its one abort identity and backstop cannot be erased. A
+presentation that already reached the owner is decided first; otherwise holder
+loss permanently pauses a still-prepared capability.
 The shipped `resume` command routes through that installation and, where the
 owner refuses the activation, gives the capability up through the handler
 before it reports.
