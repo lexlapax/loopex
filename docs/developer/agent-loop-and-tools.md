@@ -578,6 +578,14 @@ artifact list, which is true rather than a silent absence. The shipped
 composition always supplies a store, so an operator using `loopex` does not take
 that path.
 
+Artifact retention is part of settlement and runs in a monitored worker under
+the workspace lease and the run's remaining bound. A store refusal or a worker
+confirmed stopped loses only retrieval, as above. If the worker cannot be
+confirmed stopped, the executor cannot know whether it may still publish after
+returning. It therefore writes no receipt, clears no open authority, and reports
+`receipt_not_retained`; the existing durable open entry quarantines the root for
+reconciliation.
+
 `CodingTools.present/1` remains conformance-only: nothing in the production path
 calls it.
 
@@ -619,18 +627,31 @@ admitted a filesystem effect terminates its owner-aware worker and reports the
 effect unproven.
 
 The three filesystem tools start no operating-system process.
-A Port-owned launch guard runs in a process group of its own, established by the
-spawn itself rather than by a later helper program, and announces the group the
-operating system actually assigned before doing anything else. It forks one
-status wrapper and the supplied command without replacing that identity, remains
-the group leader until release or final KILL, and performs group signals itself
-after receiving a private token-bound control message. The runtime therefore
-does not turn a sampled numeric process-group identifier into later signal
-authority. The Port, wrapper, command, and descendants that remain in the
-inherited group keep one owned group from spawn through receipt, so exit status,
-termination, and cleanup confirmation all describe the same work. A descendant
-that calls `setsid` or `setpgid` can deliberately leave that boundary, as ADR
-0009 records.
+A credential-clean Port carrier opens first and starts the token-bound launch
+guard. In command mode, the carrier leads the Port-created process group and the
+guard, status wrapper, command, and remaining descendants share that group. The
+guard receives private control and signals the group it is still a member of, so
+the runtime never turns a sampled numeric process-group identifier into later
+signal authority. In bounded-helper mode, job control places the guard in its
+own guard-led group; the carrier stays outside that group, survives the guard's
+final KILL, and relays the guard's protocol evidence through the Port. A helper
+answer is usable only after the guard acknowledges the private final-KILL command
+and the carrier reports the resulting Port exit; a timeout requests the same
+cleanup and remains a non-answer. Neither path delegates a late signal to a
+second process holding a sampled helper PID. A descendant that calls `setsid` or
+`setpgid` can deliberately leave the applicable group boundary, as ADR 0009
+records.
+Group confirmation invokes the configured process probe with the portable
+`-e -o pid= -o pgid=` table shape and selects exact PGID equality in the
+runtime. A zero-status table is usable only when it also contains the probe's
+own Port carrier as a PID-equals-PGID witness; an empty or malformed response and
+the incompatible BSD/procps meanings of filtered `ps -g` therefore cannot turn
+silence into confirmed cleanup.
+The status wrapper and its parent guard are separate operating-system writers.
+An ordinary release is sent only after the collector has already parsed the
+wrapper's authenticated frame. A cleanup path that sees group quiescence before
+those bytes instead uses the live guard's final KILL, so cross-writer message
+arrival cannot turn an unproved release into a result.
 The effective deadline of a job is the earlier of the run's deadline and the
 tool's own wall-time budget.
 

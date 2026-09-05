@@ -119,8 +119,11 @@ it is conformant. An implementation of any port is written against bytes that
 may change in the next milestone.
 
 The shipped local executor's `process_probe` start option is edge configuration,
-defaults to `/bin/ps`, and is recorded on receipts that use it. The cleanup
-period is different: the session commits it, every job and terminal carries it,
+defaults to `/bin/ps`, and is recorded on receipts that use it. The probe contract
+is the `-e -o pid= -o pgid=` table dialect with the probe's Port carrier as the
+PID-equals-PGID witness row; empty, malformed, or nonzero answers fail closed.
+The cleanup period is
+different: the session commits it, every job and terminal carries it,
 and `Loopex.Executor.cancellation_bounds/1` derives each production observation
 window from it. `Loopex.Executor.cancel/4` applies that configured observation
 around required callback `cancel/2`; retained `cancel/3` is a defensive legacy
@@ -151,6 +154,9 @@ executor protocol. Its filesystem effects also remain bound to the exact Local
 instance that admitted them. A command worker is not released to run after its
 execute caller or launch guard has disappeared, and a potentially proved command
 result is re-fenced by the Local owner after cleanup before it can be reported.
+An artifact-retention worker that cannot be confirmed stopped produces no
+receipt and leaves the job's durable open entry in place, so uncertainty in a
+host-supplied store cannot be converted into permission for a later effect.
 
 **Artifact object and use identity.** The adapter callbacks are `put/3`,
 `fetch/2`, `stat/2`, and `describe/2`. Core owns the caller-facing

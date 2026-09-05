@@ -71,6 +71,9 @@ defmodule Loopex.Executor.Local do
   # executor then reports every command unproven with nothing to say why. Naming
   # it is also what makes the unconfirmed branch reachable: a case can compose an
   # executor whose probe is not there, which no case could do with a literal.
+  # A configured replacement implements the same `-e -o pid= -o pgid=` table
+  # dialect. The runtime parses and witnesses that table itself; it never relies
+  # on the incompatible BSD/procps meanings of a filtering flag.
   #
   # The reserve exists because one declared period taken first-come means the
   # last step gets whatever the earlier ones left -- and a job that spent its
@@ -155,11 +158,12 @@ defmodule Loopex.Executor.Local do
   # the moment it is signalled -- pays one look rather than the whole window.
   @cooperative_poll_ms 25
 
-  # The wait for a cleanup helper's own kill to be reported. It is a fixed bound
-  # for the same reason `@abandon_confirmation_ms` is: it is asked only once a
-  # bound has already been exceeded, and `kill(2)` either returns at once or the
-  # process running it is itself the thing that has stopped answering.
+  # The wait for a cleanup helper's Port-owned guard to report its final exit.
+  # It is a fixed bound for the same reason `@abandon_confirmation_ms` is: it is
+  # asked only after the helper has answered or its own bound has expired, and a
+  # token-bound KILL has already been delivered to the still-live guard.
   @helper_signal_ms 250
+  @helper_control_bytes 256
   @launch_guard_handshake_ms 5_000
 
   # The wait for a killed worker to be confirmed dead. It is a fixed bound rather
@@ -178,6 +182,7 @@ defmodule Loopex.Executor.Local do
   @guard_run "loopex-run"
   @guard_abort "loopex-abort"
   @guard_status "loopex-command-status"
+  @guard_signal_ack "loopex-signal-accepted"
   @guard_signal "loopex-signal"
   @guard_release "loopex-release"
 
@@ -1547,10 +1552,32 @@ defmodule Loopex.Executor.Local do
         Process.put(:loopex_admission, admission)
 
         try do
-          receipt =
-            run_tool(placement, job, tool, workspace, arguments, options, lease, progress)
+          case run_tool(
+                 placement,
+                 job,
+                 tool,
+                 workspace,
+                 arguments,
+                 options,
+                 lease,
+                 progress
+               ) do
+            {:settle, receipt} ->
+              settle_receipt(placement, job, receipt, lease)
 
-          settle_receipt(placement, job, receipt, lease)
+            {:settlement_unconfirmed, reason} ->
+              # No receipt can truthfully summarize a retention worker that may
+              # still publish. Drop transient ownership so reconciliation sees
+              # the durable open entry, but leave that entry in place to
+              # quarantine the root.
+              forget_operation_owner(
+                placement.inflight_table,
+                job.job_id,
+                placement.reservation_ref
+              )
+
+              {:error, {:receipt_not_retained, reason}}
+          end
         after
           Process.delete(:loopex_admission)
           Process.demonitor(elem(lease, 0), [:flush])
@@ -2137,21 +2164,25 @@ defmodule Loopex.Executor.Local do
 
     _retention_deadline = retention_until()
 
-    {outcome, output, artifacts} =
-      spill(tool_result, state, job, lease, limits)
+    case spill(tool_result, state, job, lease, limits) do
+      {:settlement_unconfirmed, _reason} = unconfirmed ->
+        unconfirmed
 
-    receipt(
-      state,
-      job,
-      tool,
-      outcome,
-      output,
-      coding_tool_environment(arguments),
-      artifacts,
-      deadline,
-      progress_count,
-      cleanup_confirmation
-    )
+      {outcome, output, artifacts} ->
+        {:settle,
+         receipt(
+           state,
+           job,
+           tool,
+           outcome,
+           output,
+           coding_tool_environment(arguments),
+           artifacts,
+           deadline,
+           progress_count,
+           cleanup_confirmation
+         )}
+    end
   end
 
   defp run_tool(
@@ -2185,18 +2216,19 @@ defmodule Loopex.Executor.Local do
 
     {outcome, output, _complete} = normalize_tool_result(tool_result)
 
-    receipt(
-      state,
-      job,
-      tool,
-      outcome,
-      output,
-      demonstration_environment(),
-      [],
-      deadline,
-      progress_count,
-      cleanup_confirmation
-    )
+    {:settle,
+     receipt(
+       state,
+       job,
+       tool,
+       outcome,
+       output,
+       demonstration_environment(),
+       [],
+       deadline,
+       progress_count,
+       cleanup_confirmation
+     )}
   end
 
   defp progress_identity(state, job) do
@@ -2340,10 +2372,10 @@ defmodule Loopex.Executor.Local do
   # cannot reverse the verdict merely because a later DOWN reaches its mailbox
   # first. Work with no lease uses the same row transition in its own effect.
   #
-  # It is exposed for the reason `group_answered_empty?/1` is. No case can make a
-  # healthy local ledger take longer than the run's remaining time plus the
-  # declared grace, so the branch deciding whether a receipt is reported durable
-  # would otherwise rest on a wait nothing can reach.
+  # It is exposed for the reason `process_group_answered_empty?/3` is. No case can
+  # make a healthy local ledger take longer than the run's remaining time plus
+  # the declared grace, so the branch deciding whether a receipt is reported
+  # durable would otherwise rest on a wait nothing can reach.
   @doc false
   @spec bounded_work((-> term()), non_neg_integer(), {reference(), pid()}) ::
           {:done, term()}
@@ -3858,7 +3890,7 @@ defmodule Loopex.Executor.Local do
       {:executor_process_started, job.job_id, job.tool_id, environment_names(environment)}
     )
 
-    register_inflight(job.job_id, os_pid)
+    register_inflight(job.job_id, collector.group)
 
     local_lease = {Process.monitor(lease_pid), lease_pid}
 
@@ -4245,7 +4277,9 @@ defmodule Loopex.Executor.Local do
   # A tool whose output fits spills nothing. Where no artifact store is composed,
   # or the store refuses, the tool keeps the marker it had: an operator loses the
   # retrieval, never the result, and the receipt says truthfully that nothing was
-  # retained.
+  # retained. A different rule applies when the store worker cannot be confirmed
+  # stopped: no receipt is written and the durable open entry remains quarantine,
+  # because that worker may still publish after any receipt assembled here.
   defp spill({outcome, output}, state, job, lease, limits),
     do: spill({outcome, output, :complete}, state, job, lease, limits)
 
@@ -4338,6 +4372,9 @@ defmodule Loopex.Executor.Local do
              " retained, and the retention was abandoned. Whether the effect landed in" <>
              " the workspace this job was authorised against is unproven.]"
          ), []}
+
+      {:unconfirmed, reason} ->
+        {:settlement_unconfirmed, reason}
     end
   end
 
@@ -4366,6 +4403,11 @@ defmodule Loopex.Executor.Local do
   # two, and it is the run's rather than the tool's effective deadline because a
   # tool's declared budget bounds the tool and this is the run retaining what the
   # tool produced.
+  #
+  # The guardian's stop bit is settlement truth, not teardown detail. When it is
+  # false, the host store may still publish after this function returns. Such a
+  # result bypasses receipt construction and leaves the admission's open record
+  # in place, so later work sees quarantine rather than a false terminal.
   # The share is what keeps one shared allowance from starving the phase that
   # writes down what happened. A store that answers more slowly than the whole
   # allowance would otherwise leave nothing for the receipt, and exactly the job
@@ -4409,26 +4451,56 @@ defmodule Loopex.Executor.Local do
   # after about four seconds, reporting `completed`. Both are alternatives of the
   # one wait now.
   defp retain_under_lease(store, bytes, metadata, {_monitor, lease_pid}, deadline) do
-    case bounded_guardian_until(
-           fn -> Loopex.ArtifactStore.put(store, bytes, metadata) end,
-           deadline,
-           lease_pid,
-           nil
-         ) do
+    bounded_guardian_until(
+      fn -> Loopex.ArtifactStore.put(store, bytes, metadata) end,
+      deadline,
+      lease_pid,
+      nil
+    )
+    |> artifact_retention_result()
+  end
+
+  # The operating system normally confirms an untrappable BEAM kill before a
+  # deterministic test can observe the false branch. Keep the decision as one
+  # pure seam so every guardian result, including that safety boundary, can be
+  # mutation-tested without turning scheduler timing into evidence.
+  @doc false
+  @spec artifact_retention_result(
+          {:done, term()}
+          | {:stopped, term()}
+          | {:guardian_stopped, term(), boolean()}
+          | {:abandoned, :workspace_lease_lost | :bound_reached, boolean(), term()}
+        ) ::
+          term()
+          | {:error, term()}
+          | {:unconfirmed, term()}
+          | :workspace_lease_lost
+          | :retention_bound_reached
+  def artifact_retention_result(result) do
+    case result do
       {:done, result} ->
         result
 
       {:stopped, reason} ->
         {:error, {:artifact_retention_stopped, reason}}
 
-      {:guardian_stopped, reason, _confirmed} ->
+      {:guardian_stopped, reason, true} ->
         {:error, {:artifact_retention_guardian_stopped, reason}}
 
-      {:abandoned, :workspace_lease_lost, _stopped, _late} ->
+      {:guardian_stopped, reason, false} ->
+        {:unconfirmed, {:artifact_retention_guardian_unconfirmed, reason}}
+
+      {:abandoned, :workspace_lease_lost, true, _late} ->
         :workspace_lease_lost
 
-      {:abandoned, :bound_reached, _stopped, _late} ->
+      {:abandoned, :workspace_lease_lost, false, _late} ->
+        {:unconfirmed, :workspace_lease_lost_with_artifact_retention_worker_unconfirmed}
+
+      {:abandoned, :bound_reached, true, _late} ->
         :retention_bound_reached
+
+      {:abandoned, :bound_reached, false, _late} ->
+        {:unconfirmed, :artifact_retention_worker_unconfirmed_at_bound}
     end
   end
 
@@ -4619,7 +4691,7 @@ defmodule Loopex.Executor.Local do
   # The command can inspect its parent's command line, so putting that token in
   # argv would let it forge status or release evidence on the shared Port pipe.
   # The fixed vector is exposed for direct inspection, for the reason
-  # `group_answered_empty?/1` is: the rule that decides what runs before the
+  # `process_group_answered_empty?/3` is: the rule that decides what runs before the
   # environment is cleared must not rest on a branch nothing can observe. A case
   # places a recorder at the first operand
   # `env` will execute -- the first argument that is neither an option nor a
@@ -4637,6 +4709,8 @@ defmodule Loopex.Executor.Local do
        [
          "sh",
          "-c",
+         launch_carrier_script(),
+         "loopex-port-carrier",
          launch_guard_script(),
          "loopex-launch-guard",
          "argv",
@@ -4645,43 +4719,131 @@ defmodule Loopex.Executor.Local do
        ]}
   end
 
+  defp process_launcher(%{helper: [program | rest]}, environment) do
+    {"/usr/bin/env",
+     env_prefix(environment) ++
+       [
+         "sh",
+         "-c",
+         launch_carrier_script(),
+         "loopex-port-carrier",
+         launch_guard_script(),
+         "loopex-launch-guard",
+         "helper",
+         program
+         | rest
+       ]}
+  end
+
   defp process_launcher(%{command: command}, environment) do
     {"/usr/bin/env",
      env_prefix(environment) ++
-       ["sh", "-c", launch_guard_script(), "loopex-launch-guard", "command", command]}
+       [
+         "sh",
+         "-c",
+         launch_carrier_script(),
+         "loopex-port-carrier",
+         launch_guard_script(),
+         "loopex-launch-guard",
+         "command",
+         command
+       ]}
   end
 
-  # Concept: the process owned by the Port stays as the command group's leader
-  # until this runtime has either proved the group quiescent or delivered the
-  # final KILL. A direct command child may exit; its numeric group cannot become
-  # detached signal authority merely because that happened.
+  # Concept: the operating-system cleanup guard outlives an abrupt death of the
+  # BEAM process that opened its Port.
   #
-  # Technical depth: the guard announces the Port-established group before it
-  # starts the command, runs a status-owning wrapper and that command as children
-  # in the same group, and retains the Port and group-leader identity after both
-  # exit. The Port-owned guard itself reads control for the whole job. EOF can
-  # therefore terminate its still-anchored group even while the command is
-  # silent, and TERM/KILL actuation occurs inside the group leader rather than in
-  # a later helper aimed at a sampled number. The wrapper's private status frame
+  # Technical depth: the VM closes a dead Port owner's direct operating-system
+  # image before that image can act on EOF. A direct guard therefore cannot
+  # clean descendants on Port-owner death. This fixed carrier is the disposable
+  # Port image: it starts the real guard as a second member of the Port-created
+  # command group, waits for it, and never admits the command. If the carrier is
+  # destroyed, the guard retains the control descriptor, observes the BEAM end
+  # closing, and aborts the group it still anchors. During an ordinary group TERM
+  # the carrier stays alive long enough to relay the guard's eventual exit. A
+  # bounded helper instead gets a guard-led group: if that guard disappears, the
+  # carrier reports failure without signalling a now-detached numeric group. In
+  # command mode the carrier still anchors its own group and may safely terminate
+  # that group as its last act after an abnormal guard exit.
+  defp launch_carrier_script do
+    """
+    guard_script=$1
+    shift
+    guard_name=$1
+    shift
+    carrier_pid=$$
+    mode=$1
+    trap ':' TERM
+    if [ "$mode" = helper ]; then
+      set -m
+      sh -c "$guard_script" "$guard_name" "$carrier_pid" "$@" <&0 &
+      guard_pid=$!
+      set +m
+    else
+      sh -c "$guard_script" "$guard_name" "$carrier_pid" "$@" <&0 &
+      guard_pid=$!
+    fi
+    guard_status=125
+    while :; do
+      wait "$guard_pid" 2>/dev/null
+      guard_status=$?
+      case " $(jobs -p) " in
+        *" $guard_pid "*) ;;
+        *) break ;;
+      esac
+    done
+    if [ "$guard_status" -eq 0 ]; then
+      exit 0
+    fi
+    if [ "$mode" != helper ]; then
+      trap '' TERM
+      kill -TERM -- -"$carrier_pid" >/dev/null 2>&1
+      kill -KILL -- -"$carrier_pid" >/dev/null 2>&1
+    fi
+    exit 125
+    """
+  end
+
+  # Concept: the guard stays in the Port-created command group until this runtime
+  # has either proved the group quiescent or delivered the final KILL. A direct
+  # command child or the disposable Port carrier may exit; the numeric group
+  # cannot become detached signal authority while the guard remains a member.
+  #
+  # Technical depth: the carrier supplies its own stable group identity as a
+  # positional argument. A command guard announces that Port-established group;
+  # a helper guard is its own group leader and announces its shell PID. This
+  # avoids a second, unbounded `ps` merely to discover launch identity. The guard
+  # also announces its own member identity before it starts the command, then
+  # runs a status-owning wrapper and that command as children in the same group. The guard itself
+  # reads control for the whole job. EOF can therefore terminate its
+  # still-anchored group even while the command is silent, and TERM/KILL
+  # actuation occurs inside a current member rather than in a later helper aimed
+  # at a sampled number. The wrapper's private status frame
   # reports the direct child's wait status; the guard accepts token-bound signal
   # and release lines on stdin. The token itself is delivered over that control
   # channel before the child is created, never through argv or environment that
   # the child can inspect. FD 3 is copied from the Port's output before the child
   # is started and closed in the child, keeping protocol writes separate from
-  # ordinary inherited descriptors. Both guard and status wrapper trap TERM so
-  # cooperative cancellation cannot discard either authority before the direct
-  # child answers. KILL is deliberately not trapped: it is the final group signal
-  # and no later signal may use that group number.
+  # ordinary inherited descriptors. The status wrapper traps TERM so cooperative
+  # cancellation cannot discard it before the direct child answers. The guard
+  # treats an externally delivered TERM as authority loss and aborts the whole
+  # group; only while it sends its own cooperative group TERM does it temporarily
+  # ignore that one signal. KILL is deliberately not trapped: it is the final
+  # group signal and no later signal may use that group number.
   defp launch_guard_script do
     """
+    carrier_group=$1
+    shift
     mode=$1
     shift
+    group_id=
     guard_abort() {
-      kill -TERM -- -$$ >/dev/null 2>&1
-      kill -KILL -- -$$ >/dev/null 2>&1
+      trap '' TERM
+      [ -n "$group_id" ] && kill -TERM -- -"$group_id" >/dev/null 2>&1
+      [ -n "$group_id" ] && kill -KILL -- -"$group_id" >/dev/null 2>&1
       exit 125
     }
-    trap 'guard_abort' HUP INT PIPE
+    trap 'guard_abort' HUP INT PIPE TERM
     IFS= read -r init || exit 125
     case "$init" in
       '#{@guard_init}:'*) token=${init#'#{@guard_init}:'} ;;
@@ -4689,8 +4851,12 @@ defmodule Loopex.Executor.Local do
     esac
     [ -n "$token" ] || exit 125
     exec 3>&2
-    trap ':' TERM
-    printf '#{@guard_preamble}:%s:%s\\n' "$token" "$(ps -o pgid= -p $$ | tr -d ' ')" >&3
+    if [ "$mode" = helper ]; then
+      group_id=$$
+    else
+      group_id=$carrier_group
+    fi
+    printf '#{@guard_preamble}:%s:%s:%s\\n' "$token" "$group_id" "$$" >&3
     IFS= read -r permit || guard_abort
     case "$permit" in
       '#{@guard_run}:'"$token") ;;
@@ -4700,20 +4866,21 @@ defmodule Loopex.Executor.Local do
     (
       trap - HUP INT PIPE
       trap ':' TERM
-      if [ "$mode" = argv ]; then
-        "$@" 3>&- </dev/null &
-      else
+      if [ "$mode" = command ]; then
         command=$1
         sh -c "$command" 3>&- </dev/null &
+      else
+        "$@" 3>&- </dev/null &
       fi
       command_pid=$!
       command_status=125
       while :; do
         wait "$command_pid"
         command_status=$?
-        if ! kill -0 "$command_pid" 2>/dev/null; then
-          break
-        fi
+        case " $(jobs -p) " in
+          *" $command_pid "*) ;;
+          *) break ;;
+        esac
       done
       printf '\\n#{@guard_status}:%s:%s\\n' "$token" "$command_status" >&3
       exit "$command_status"
@@ -4721,11 +4888,20 @@ defmodule Loopex.Executor.Local do
     status_pid=$!
     while IFS= read -r control; do
       case "$control" in
-        '#{@guard_signal}:'"$token"':TERM') kill -TERM -- -$$ >/dev/null 2>&1 ;;
-        '#{@guard_signal}:'"$token"':KILL') kill -KILL -- -$$ >/dev/null 2>&1 ;;
+        '#{@guard_signal}:'"$token"':TERM')
+          trap '' TERM
+          kill -TERM -- -"$group_id" >/dev/null 2>&1
+          trap 'guard_abort' TERM
+          ;;
+        '#{@guard_signal}:'"$token"':KILL')
+          if [ "$mode" = helper ]; then
+            printf '\n#{@guard_signal_ack}:%s:KILL\n' "$token" >&3
+          fi
+          kill -KILL -- -"$group_id" >/dev/null 2>&1
+          ;;
         '#{@guard_release}:'"$token")
           wait "$status_pid"
-          exit $?
+          exit 0
           ;;
         *) guard_abort ;;
       esac
@@ -4785,7 +4961,7 @@ defmodule Loopex.Executor.Local do
     %{
       chunks: [],
       bytes: 0,
-      group: os_pid,
+      group: nil,
       preamble: <<>>,
       control_buffer: <<>>,
       command_status: nil,
@@ -4793,6 +4969,9 @@ defmodule Loopex.Executor.Local do
       guard: %{
         port: port,
         os_pid: os_pid,
+        group: nil,
+        anchor_pid: nil,
+        carrier_in_group: nil,
         token: token,
         announced: false,
         state: :live
@@ -4975,14 +5154,29 @@ defmodule Loopex.Executor.Local do
 
         expected =
           Regex.compile!(
-            "^#{Regex.escape(@guard_preamble)}:#{Regex.escape(collector.guard.token)}:(\\d+)\\n$"
+            "^#{Regex.escape(@guard_preamble)}:#{Regex.escape(collector.guard.token)}:" <>
+              "(\\d+):(\\d+)\\n$"
           )
 
         case Regex.run(expected, line) do
-          [_all, group] ->
-            if String.to_integer(group) == collector.guard.os_pid do
+          [_all, group, anchor] ->
+            group = String.to_integer(group)
+            anchor = String.to_integer(anchor)
+
+            carrier_in_group =
+              cond do
+                group == collector.guard.os_pid and anchor != group -> true
+                group == anchor and group != collector.guard.os_pid -> false
+                true -> nil
+              end
+
+            if group > 1 and anchor > 1 and is_boolean(carrier_in_group) do
               collector
+              |> Map.put(:group, group)
               |> Map.put(:preamble, nil)
+              |> put_in([:guard, :group], group)
+              |> put_in([:guard, :anchor_pid], anchor)
+              |> put_in([:guard, :carrier_in_group], carrier_in_group)
               |> put_in([:guard, :announced], true)
               |> collect_guard_chunk(rest, limit)
             else
@@ -5233,8 +5427,11 @@ defmodule Loopex.Executor.Local do
        ) do
     {guard, quiescence, cleanup_proved} =
       case action do
-        :quiesce -> quiesce_launch_guard(collector.guard, episode)
-        :terminate -> terminate_launch_guard(collector.guard, episode)
+        :quiesce ->
+          quiesce_launch_guard(collector.guard, episode, is_integer(collector.command_status))
+
+        :terminate ->
+          terminate_launch_guard(collector.guard, episode, is_integer(collector.command_status))
       end
 
     collector = %{collector | guard: guard}
@@ -5260,9 +5457,9 @@ defmodule Loopex.Executor.Local do
     }
   end
 
-  defp quiesce_launch_guard(guard, episode) do
+  defp quiesce_launch_guard(guard, episode, status_known?) do
     if guard_children_gone?(guard, episode) do
-      {released, release_sent} = release_launch_guard(guard, episode)
+      {released, release_sent} = release_launch_guard(guard, episode, status_known?)
 
       if release_sent do
         {released, :quiescent, true}
@@ -5271,15 +5468,15 @@ defmodule Loopex.Executor.Local do
         {killed, :terminated, kill_sent and await_released_group_empty(killed, episode)}
       end
     else
-      terminate_launch_guard(guard, episode)
+      terminate_launch_guard(guard, episode, status_known?)
     end
   end
 
-  defp terminate_launch_guard(guard, {_until, _grace, _probe} = episode) do
+  defp terminate_launch_guard(guard, {_until, _grace, _probe} = episode, status_known?) do
     term_sent = signal_guard_group(guard, :term)
 
     if exited_cooperatively?(guard, cooperative_episode(episode)) do
-      {released, release_sent} = release_launch_guard(guard, episode)
+      {released, release_sent} = release_launch_guard(guard, episode, status_known?)
 
       if release_sent do
         {released, :terminated, term_sent or release_sent}
@@ -5294,8 +5491,20 @@ defmodule Loopex.Executor.Local do
     end
   end
 
-  defp release_launch_guard(guard, episode) do
-    if launch_guard_live?(guard) and guard_children_gone?(guard, episode) do
+  # The wrapper and guard are separate writers to the Port. Seeing through `ps`
+  # that the wrapper exited does not prove its status bytes reached this BEAM
+  # process before the guard can exit. Ordinary release is therefore available
+  # only after the collector already parsed the authenticated frame. A cleanup
+  # path that has not seen it uses the live guard's final KILL instead, which
+  # preserves cleanup truth without depending on cross-writer message order.
+  defp release_launch_guard(guard, _episode, status_known?) do
+    # Both callers reach this function only from the positive result of
+    # `guard_children_gone?/2`. The status wrapper has already exited at that
+    # point, so nothing in the guard can create a new child between that proof
+    # and this token-bound release. Re-running the bounded external probe here
+    # made a transient second non-answer turn an already-proved clean group into
+    # a forced KILL and lose the carrier's status.
+    if status_known? and launch_guard_live?(guard) do
       sent = safe_port_command(guard.port, "#{@guard_release}:#{guard.token}\n")
       {%{guard | state: if(sent, do: :release_sent, else: :live)}, sent}
     else
@@ -5314,9 +5523,11 @@ defmodule Loopex.Executor.Local do
 
   defp signal_guard_group(guard, signal) when signal in [:term, :kill] do
     # The Port object is the authority operation: a token-bound instruction is
-    # delivered to its still-live group leader, and that leader signals the group
-    # it currently anchors. There is no check-then-act interval in which a cached
-    # numeric PGID can be reused by unrelated work.
+    # delivered to its still-live guard, and that guard signals the group it
+    # currently anchors. The Port-facing carrier leads the ordinary command
+    # group; the bounded-helper guard leads its separate group. Neither topology
+    # leaves a check-then-act interval in which unrelated work can reuse a cached
+    # numeric PGID.
     if launch_guard_live?(guard) do
       signal_name = signal |> Atom.to_string() |> String.upcase()
       safe_port_command(guard.port, "#{@guard_signal}:#{guard.token}:#{signal_name}\n")
@@ -5335,29 +5546,50 @@ defmodule Loopex.Executor.Local do
 
   defp guard_children_gone?(guard, {until, _grace, probe}) do
     if launch_guard_live?(guard) do
-      answer =
-        probe
-        |> answer_within(
-          ["-o", "pid=", "-g", Integer.to_string(guard.os_pid)],
-          cleanup_remaining(until)
-        )
+      answer = process_table_within(probe, cleanup_remaining(until))
 
-      guard_answered_alone?(answer, guard.os_pid)
+      guard_answered_alone?(
+        answer,
+        guard.group,
+        guard.anchor_pid,
+        guard.os_pid,
+        guard.carrier_in_group
+      )
     else
       false
     end
   end
 
-  defp guard_answered_alone?({output, status}, guard_pid) when status in 0..1 do
-    case output |> String.split() |> Enum.map(&Integer.parse/1) do
-      [{^guard_pid, ""}] -> true
+  defp guard_answered_alone?(
+         answer,
+         group,
+         anchor_pid,
+         carrier_pid,
+         carrier_in_group
+       )
+       when is_integer(group) and is_integer(anchor_pid) and is_integer(carrier_pid) and
+              is_boolean(carrier_in_group) do
+    expected =
+      if carrier_in_group,
+        do: Enum.sort([anchor_pid, carrier_pid]),
+        else: [anchor_pid]
+
+    case process_group_members(answer, group) do
+      {:ok, members} -> Enum.sort(members) == expected
       _other -> false
     end
   end
 
-  defp guard_answered_alone?(_answer, _guard_pid), do: false
+  defp guard_answered_alone?(
+         _answer,
+         _group,
+         _anchor_pid,
+         _carrier_pid,
+         _carrier_in_group
+       ),
+       do: false
 
-  defp await_released_group_empty(%{os_pid: group}, {until, _grace, probe} = episode) do
+  defp await_released_group_empty(%{group: group}, {until, _grace, probe} = episode) do
     cond do
       confirm_released_group_terminated(group, probe, cleanup_remaining(until)) ->
         true
@@ -5367,14 +5599,14 @@ defmodule Loopex.Executor.Local do
 
       true ->
         Process.sleep(min(@cooperative_poll_ms, cleanup_remaining(until)))
-        await_released_group_empty(%{os_pid: group}, episode)
+        await_released_group_empty(%{group: group}, episode)
     end
   end
 
   defp confirm_released_group_terminated(group, probe, bound) do
     probe
-    |> answer_within(["-o", "pid=", "-g", Integer.to_string(group)], bound)
-    |> group_answered_empty?()
+    |> process_table_within(bound)
+    |> process_group_answered_empty?(group)
   end
 
   defp await_launch_guard_exit(
@@ -5424,7 +5656,7 @@ defmodule Loopex.Executor.Local do
   defp launch_guard_exit_proved?(collector, status) do
     case collector.guard.state do
       :release_sent ->
-        is_integer(collector.command_status) and status == collector.command_status
+        is_integer(collector.command_status) and status == 0
 
       :kill_sent ->
         status != 0
@@ -5495,12 +5727,14 @@ defmodule Loopex.Executor.Local do
   # this executor believes its cleanup already ended, and process-group
   # identifiers are reissued.
   #
-  # The program is now this process's own port, so the bound reaches the thing
-  # that has to stop: at expiry the child is signalled by the process identifier
-  # the port reported, and only then is the port closed. Signalling before
-  # closing is deliberate -- the child is still this port's child while the port
-  # is open, so the identifier still names it rather than whatever the operating
-  # system reissues next.
+  # A sampled process identifier is still not authority, even while a Port that
+  # once reported it remains open: the child can exit and the operating system
+  # can reuse the number between the observation and an external signal. Helpers
+  # therefore use the same Port-owned carrier/guard protocol as model commands.
+  # At expiry the runtime sends a private token-bound KILL instruction over that
+  # Port; the live guard performs the signal against its separately anchored
+  # helper group, while the carrier remains available to flush the acknowledgement
+  # and exit status. No later `/bin/kill` process and no cached PID participates.
   #
   # The wait is the declared cleanup grace rather than the run deadline because
   # this is the sequence that runs *after* expiry: bounding it by an instant
@@ -5508,115 +5742,215 @@ defmodule Loopex.Executor.Local do
   # deadline. Every caller now passes what remains of one absolute instant, so
   # the whole sequence shares the budget rather than each program receiving one.
   #
-  # `:no_answer` is not silence. `group_answered_empty?/1` reads an empty answer
-  # as an empty group, which is only sound for an answer that arrived, so a
-  # program that never answered confirms nothing and the effect stays unproven --
-  # the same rule that already refuses a `ps` killed by a signal. A program that
-  # cannot be run at all raises where the port is opened and arrives as the same
-  # non-answer.
+  # `:no_answer` is not silence. `process_group_answered_empty?/2` accepts only a
+  # complete process table from a probe that answered successfully, so a program
+  # that never answered confirms nothing and the effect stays unproven. A program
+  # that cannot be run at all raises where the port is opened and arrives as the
+  # same non-answer.
   #
-  # It is exposed for the reason `group_answered_empty?/1` is: no case can make
-  # the operating system's own `ps` hang, and a case that must prove a timed-out
-  # helper is dead has to be able to time one out.
+  # It is exposed for the reason `process_group_answered_empty?/2` is: no case
+  # can make the operating system's own `ps` hang, and a case that must prove a
+  # timed-out helper is dead has to be able to time one out.
   @doc false
   @spec answer_within(binary(), [binary()], non_neg_integer()) ::
           {binary(), integer()} | :no_answer
-  def answer_within(program, arguments, bound)
-      when is_binary(program) and is_list(arguments) and is_integer(bound) and bound >= 0 do
-    port =
-      Port.open(
-        {:spawn_executable, String.to_charlist(program)},
-        [
-          :binary,
-          :exit_status,
-          :use_stdio,
-          :stderr_to_stdout,
-          :hide,
-          args: Enum.map(arguments, &String.to_charlist/1),
-          env: spawn_environment(demonstration_environment())
-        ]
-      )
+  def answer_within(program, arguments, 0) when is_binary(program) and is_list(arguments),
+    do: :no_answer
 
-    collect_answer(port, helper_os_pid(port), <<>>, System.monotonic_time(:millisecond) + bound)
+  def answer_within(program, arguments, bound)
+      when is_binary(program) and is_list(arguments) and is_integer(bound) and bound > 0 do
+    case guarded_answer_within(program, arguments, bound) do
+      {:answered, output, status, _witness} -> {output, status}
+      :no_answer -> :no_answer
+    end
+  end
+
+  defp process_table_within(program, bound) do
+    guarded_answer_within(program, ["-e", "-o", "pid=", "-o", "pgid="], bound)
+  end
+
+  defp guarded_answer_within(_program, _arguments, 0), do: :no_answer
+
+  defp guarded_answer_within(program, arguments, bound) do
+    stop = System.monotonic_time(:millisecond) + bound
+    environment = demonstration_environment()
+    token = launch_guard_token()
+
+    {launcher, command_arguments} =
+      process_launcher(%{helper: [program | arguments]}, environment)
+
+    port = open_launcher(launcher, command_arguments, environment, File.cwd!())
+    {:os_pid, os_pid} = Port.info(port, :os_pid)
+    collector = new_output_collector(port, os_pid, token, nil, %{})
+    collector_limit = @max_output_bytes + @helper_control_bytes
+
+    try do
+      case start_guarded_helper(port, collector, stop, collector_limit) do
+        {:ok, ready} -> collect_answer(port, ready, stop, collector_limit)
+        {:error, last} -> abandon_helper(port, last)
+      end
+    rescue
+      _error -> abandon_helper(port, collector)
+    catch
+      _kind, _value -> abandon_helper(port, collector)
+    after
+      close_helper(port)
+    end
   rescue
     _error -> :no_answer
   catch
     _kind, _value -> :no_answer
   end
 
-  defp collect_answer(port, os_pid, acc, stop) do
+  defp start_guarded_helper(port, collector, stop, limit) do
+    with true <- safe_port_command(port, "#{@guard_init}:#{collector.guard.token}\n"),
+         {:ok, ready} <- await_helper_guard_ready(port, collector, stop, limit),
+         true <- System.monotonic_time(:millisecond) < stop,
+         true <- safe_port_command(port, "#{@guard_run}:#{collector.guard.token}\n") do
+      {:ok, ready}
+    else
+      {:error, last} -> {:error, last}
+      _not_started -> {:error, collector}
+    end
+  end
+
+  defp await_helper_guard_ready(port, collector, stop, limit) do
     remaining = stop - System.monotonic_time(:millisecond)
 
     if remaining <= 0 do
-      abandon_helper(port, os_pid)
+      {:error, collector}
     else
       receive do
         {^port, {:data, chunk}} ->
-          collect_answer(port, os_pid, acc <> chunk, stop)
+          case collect_chunk(collector, chunk, limit) do
+            {:ok, %{guard: %{announced: true}} = ready} -> {:ok, ready}
+            {:ok, next} -> await_helper_guard_ready(port, next, stop, limit)
+            {:artifact_limit_exceeded, next, _observed} -> {:error, next}
+          end
 
-        {^port, {:exit_status, status}} ->
-          {acc, status}
+        {^port, {:exit_status, _status}} ->
+          {:error, collector}
       after
-        # One allowance, spent in slices, refreshed by nothing -- the rule
-        # `await_bounded_work/6` follows and for the same reason. An admitted
-        # cleanup period spans the whole positive unsigned 64-bit range and this
-        # wait is derived from it, so an unsliced `after` raised `:timeout_value`
-        # and this function reported `:no_answer` for a program that had not been
-        # asked anything yet: every confirmation under a large period failed and
-        # the helper's own child was left running. The instant above is what the
-        # wait ends against; a slice only decides how often it is looked at.
-        min(remaining, @timer_slice_ms) -> collect_answer(port, os_pid, acc, stop)
+        min(remaining, @timer_slice_ms) ->
+          await_helper_guard_ready(port, collector, stop, limit)
       end
     end
   end
 
-  # Concept: the helper is killed, and only then let go of.
+  defp collect_answer(port, collector, stop, limit) do
+    remaining = stop - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      abandon_helper(port, collector)
+    else
+      receive do
+        {^port, {:data, chunk}} ->
+          case collect_chunk(collector, chunk, limit) do
+            {:ok, %{command_status: status} = answered} when is_integer(status) ->
+              finish_helper_answer(port, answered, limit)
+
+            {:ok, next} ->
+              collect_answer(port, next, stop, limit)
+
+            {:artifact_limit_exceeded, next, _observed} ->
+              abandon_helper(port, next)
+          end
+
+        {^port, {:exit_status, _status}} ->
+          :no_answer
+      after
+        # One allowance, spent in slices, refreshed by nothing -- the rule
+        # `await_bounded_work/6` follows and for the same reason. An admitted
+        # cleanup period spans the whole positive unsigned 64-bit range and this
+        # wait is derived from it, so an unsliced `after` raises
+        # `:timeout_value`. The instant above is what the wait ends against; a
+        # slice only decides how often it is looked at.
+        min(remaining, @timer_slice_ms) -> collect_answer(port, collector, stop, limit)
+      end
+    end
+  end
+
+  defp finish_helper_answer(port, collector, limit) do
+    case kill_guarded_helper(port, collector, limit) do
+      {:ok, complete, output}
+      when complete.command_status not in [126, 127] and byte_size(output) <= @max_output_bytes ->
+        {:answered, output, complete.command_status, complete.guard.os_pid}
+
+      :error ->
+        :no_answer
+
+      _over_limit ->
+        :no_answer
+    end
+  end
+
+  # Concept: a helper answer is accepted only after the Port-owned guard proves
+  # it processed final cleanup; a timeout remains a non-answer.
   #
-  # Technical depth: closing the port releases this runtime's handle and does not
-  # end the process behind it, which is the whole defect. `kill(2)` on the
-  # reported identifier is what ends it, and it is sent while the port still owns
-  # the child. The confirmation is bounded because a `/bin/kill` that does not
-  # answer is itself a process that has stopped answering, and the caller is
-  # already past a bound; the answer is `:no_answer` either way, because this
-  # runtime cannot prove a kill it did not see reported.
-  defp abandon_helper(port, os_pid) do
-    if is_integer(os_pid), do: signal_helper(os_pid)
-    close_helper(port)
+  # Technical depth: a helper may fork before its direct process answers. The
+  # authenticated status proves that direct answer, not group quiescence, so the
+  # normal path also uses the guard's final KILL. Before making that untrappable
+  # group signal, helper mode writes one token-bound acknowledgement. The returned
+  # answer is admitted only when the status frame, guard identity, exactly one
+  # acknowledgement and Port exit all agree. Merely queueing `Port.command/2`
+  # cannot prove the instruction ran. The timeout path requests the same cleanup
+  # but returns no verdict regardless of whether confirmation arrives.
+  defp abandon_helper(port, collector) do
+    _ = kill_guarded_helper(port, collector, @max_output_bytes)
     :no_answer
   end
 
-  defp signal_helper(os_pid) do
-    port =
-      Port.open(
-        {:spawn_executable, ~c"/bin/kill"},
-        [
-          :binary,
-          :exit_status,
-          :use_stdio,
-          :stderr_to_stdout,
-          :hide,
-          args: [~c"-KILL", String.to_charlist(Integer.to_string(os_pid))],
-          env: spawn_environment(demonstration_environment())
-        ]
-      )
+  defp kill_guarded_helper(port, collector, limit) do
+    {guard, sent} = kill_launch_guard(collector.guard, {0, 0, nil})
+    collector = %{collector | guard: guard}
+    stop = System.monotonic_time(:millisecond) + @helper_signal_ms
 
-    receive do
-      {^port, {:exit_status, _status}} -> :ok
-    after
-      @helper_signal_ms -> :ok
+    case await_helper_guard_exit(port, collector, stop, limit, false) do
+      {finished, true, false} when sent -> finish_guarded_helper(finished, limit)
+      {_finished, _proved, _overflow} -> :error
     end
-
-    close_helper(port)
-  rescue
-    _error -> :ok
-  catch
-    _kind, _value -> :ok
   end
 
-  defp helper_os_pid(port) do
-    case Port.info(port, :os_pid) do
-      {:os_pid, os_pid} -> os_pid
-      _absent -> nil
+  defp finish_guarded_helper(collector, limit) do
+    with {:ok, complete} <- finish_collector(collector, limit),
+         output = flatten_chunks(complete),
+         acknowledgement = helper_kill_ack(complete.guard.token),
+         1 <- occurrences(output, acknowledgement) do
+      {:ok, complete, String.replace(output, acknowledgement, "", global: false)}
+    else
+      _missing_or_duplicate_acknowledgement -> :error
+    end
+  end
+
+  defp helper_kill_ack(token), do: "\n#{@guard_signal_ack}:#{token}:KILL\n"
+
+  defp await_helper_guard_exit(port, collector, stop, limit, overflow) do
+    remaining = stop - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      close_helper(port)
+      {collector, false, overflow}
+    else
+      receive do
+        {^port, {:data, chunk}} ->
+          case collect_chunk(collector, chunk, limit) do
+            {:ok, next} ->
+              await_helper_guard_exit(port, next, stop, limit, overflow)
+
+            {:artifact_limit_exceeded, next, _observed} ->
+              await_helper_guard_exit(port, next, stop, limit, true)
+          end
+
+        {^port, {:exit_status, status}} ->
+          proved =
+            collector.protocol_valid and collector.guard.announced and
+              launch_guard_exit_proved?(collector, status)
+
+          {collector, proved, overflow}
+      after
+        min(remaining, @timer_slice_ms) ->
+          await_helper_guard_exit(port, collector, stop, limit, overflow)
+      end
     end
   end
 
@@ -5629,42 +5963,80 @@ defmodule Loopex.Executor.Local do
     _kind, _value -> :ok
   end
 
-  # Concept: silence only means "no survivors" when it came from a `ps` that
-  # actually answered.
+  # Concept: a process group is empty only when a complete process table from a
+  # probe that actually answered contains no row with that exact PGID.
   #
-  # Technical depth: the exit status was discarded, so any empty response read as
-  # an empty group. A `ps` killed by a signal reports `{"", 137}` through
-  # `System.cmd/3` -- measured on the supported toolchain -- and that read as a
-  # confirmed-clean group. This is the single piece of evidence standing between
-  # `:completed` and `:outcome_unknown`, and between `cancel/2`'s `:cleaned` and
-  # `:unconfirmed`, so a non-answer must confirm nothing.
-  #
-  # The status cannot simply be required to be zero: measured on the same
-  # toolchain, an empty group is reported as `{"", 1}`, so zero-only would refuse
-  # every honest confirmation this executor makes. `0` and `1` are the two
-  # statuses `ps` uses to answer -- survivors listed, and none matched -- and its
-  # own errors print a diagnostic that `stderr_to_stdout` puts in the same
-  # output, so an error is already non-empty. Anything outside those two statuses
-  # is not an answer.
-  #
-  # A program that never answered within its bound, or could not be run at all,
-  # arrives here as `:no_answer` rather than as an empty answer. It is the same
-  # rule the abnormal status above states, reaching the same place: this decides
-  # between a proved and an unproven effect, so it is one function rather than a
-  # mapping at each call site that a later change can get wrong in only one of
-  # them.
+  # Technical depth: `ps -g` has incompatible dialects: BSD selects a process
+  # group while procps selects a session. Filtering there can therefore return an
+  # empty answer while same-PG descendants remain alive. The probe instead emits
+  # the whole `pid,pgid` table with headers suppressed, and this runtime selects
+  # exact PGID equality. Every row must contain exactly two decimal integers and
+  # the command must exit zero; malformed output, diagnostics, abnormal status
+  # and `:no_answer` all confirm nothing. This is the single fact standing
+  # between `:completed` and `:outcome_unknown`, and between cancellation's
+  # `:cleaned` and `:unconfirmed`.
   #
   # It is exposed rather than private because no test can make the operating
   # system's `ps` die abnormally, and a rule that decides between a proved and an
   # unproven effect should not rest on an unreachable branch.
   @doc false
-  @spec group_answered_empty?({binary(), integer()} | :no_answer) :: boolean()
-  def group_answered_empty?({output, status}) when status in 0..1,
-    do: String.trim(output) == ""
+  @spec process_group_answered_empty?(
+          {:answered, binary(), integer(), non_neg_integer()} | :no_answer,
+          non_neg_integer()
+        ) :: boolean()
+  def process_group_answered_empty?(answer, group) when is_integer(group) and group >= 0 do
+    process_group_members(answer, group) == {:ok, []}
+  end
 
-  def group_answered_empty?({_output, _status}), do: false
+  @doc false
+  @spec process_group_answered_empty?(
+          {binary(), integer()} | :no_answer,
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: boolean()
+  def process_group_answered_empty?({output, status}, group, witness)
+      when is_integer(group) and group >= 0 and is_integer(witness) and witness >= 0 do
+    process_group_answered_empty?({:answered, output, status, witness}, group)
+  end
 
-  def group_answered_empty?(:no_answer), do: false
+  def process_group_answered_empty?(:no_answer, group, witness)
+      when is_integer(group) and group >= 0 and is_integer(witness) and witness >= 0,
+      do: false
+
+  defp process_group_members({:answered, output, 0, witness}, group)
+       when is_binary(output) do
+    with {:ok, rows} <- parse_process_table(output),
+         true <- Enum.member?(rows, {witness, witness}) do
+      {:ok, for({pid, row_group} <- rows, row_group == group, do: pid)}
+    else
+      _invalid_or_unwitnessed -> :error
+    end
+  end
+
+  defp process_group_members(_non_answer, _group), do: :error
+
+  defp parse_process_table(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Enum.reduce_while({:ok, []}, fn line, {:ok, rows} ->
+      case String.split(line) do
+        [pid_bytes, group_bytes] ->
+          with {pid, ""} <- Integer.parse(pid_bytes),
+               {group, ""} <- Integer.parse(group_bytes) do
+            {:cont, {:ok, [{pid, group} | rows]}}
+          else
+            _invalid_integer -> {:halt, :error}
+          end
+
+        _invalid_row ->
+          {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, rows} -> {:ok, Enum.reverse(rows)}
+      :error -> :error
+    end
+  end
 
   defp occurrences(content, needle) when needle != "" do
     content |> String.split(needle) |> length() |> Kernel.-(1)

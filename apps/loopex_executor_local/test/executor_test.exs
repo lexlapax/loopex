@@ -166,7 +166,10 @@ defmodule Loopex.Executor.LocalTest do
     # though the owned process group was positively stopped. Those are separate
     # facts: losing authority cannot erase the cleanup proof.
     assert receipt.outcome == :outcome_unknown
-    assert receipt.cleanup_confirmation == :confirmed
+
+    assert receipt.cleanup_confirmation == :confirmed,
+           "lease-loss cleanup was not proved: #{inspect(receipt)}"
+
     assert receipt.provider_credential_present == false
 
     # Confirmed cleanup permits the open authority to be removed, so the durable

@@ -467,13 +467,22 @@ ignores the first signal is killed when the period is spent, and a group that
 cannot be confirmed gone makes the run's outcome `outcome_unknown` rather than
 `cancelled`.
 
+Spilling truncated output into the artifact store is part of that settlement.
+If its worker cannot be confirmed stopped at lease loss or at its bound, Loopex
+does not write a receipt that could race the late publication. The job remains
+open and quarantines the state root until it is reconciled.
+
 Confirming that a group is gone means running a program, and Loopex runs
 `/bin/ps`. On an image that ships `ps` somewhere else, or not at all, nothing can
 be confirmed and every command is reported `outcome_unknown` — correct, and
 useless. A host embedding Loopex names the program
 (`Loopex.Executor.Local.start_link(process_probe: "/usr/bin/ps")`), and every
 receipt records which program was asked, so an unproven outcome says what could
-not confirm it.
+not confirm it. A replacement must implement the same
+`-e -o pid= -o pgid=` table dialect. Loopex parses exact PGID equality and
+requires the probe's own Port carrier to appear as its PID-equals-PGID witness in
+the table, so an empty or
+malformed answer confirms nothing.
 
 The period is yours to choose. `loopex run --cleanup-grace-ms 8000` declares it
 for that session, and the run's ending reports whichever period applied, so an

@@ -2292,38 +2292,39 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   end
 
   test "a process group is confirmed clean only by a ps that answered" do
-    # Concept: silence from a program that died is not an answer.
+    # Concept: absence from a complete process table is evidence; silence from a
+    # different program or one that died is not.
     #
-    # Technical depth: the confirmation discarded `ps`'s exit status, so any
-    # empty response read as an empty group -- and that single boolean is what
-    # stands between `:completed` and `:outcome_unknown`, and between `cancel/2`
-    # reporting `:cleaned` and `:unconfirmed`. A program killed by a signal
-    # reports empty output with an abnormal status, which read as proof.
-    #
-    # The status cannot simply be required to be zero, and the first assertion is
-    # why: measured against the toolchain this suite runs on, an empty group is
-    # reported with status 1. A rule that demanded zero would refuse every
-    # honest confirmation this executor makes.
-    group = ephemeral_process_group()
+    # Technical depth: BSD `ps -g` selects a process group while procps `-g`
+    # selects a session. Production asks for every PID and PGID and filters the
+    # exact second column itself. The helper guard is a known witness in its own
+    # group, so an arbitrary configured program such as `/usr/bin/true` cannot
+    # pass by returning empty output and zero.
+    witness = 700
+    absent_group = 900
+    table = "  42    42\n 700   700\n"
 
-    assert Local.group_answered_empty?(
-             System.cmd("/bin/ps", ["-o", "pid=", "-g", Integer.to_string(group)],
-               stderr_to_stdout: true
-             )
-           ),
-           "a group with no members is no longer confirmed clean"
+    assert Local.process_group_answered_empty?({table, 0}, absent_group, witness)
 
-    # The two answers `ps` gives: members listed, and none matched.
-    refute Local.group_answered_empty?({"48965\n", 0})
-    assert Local.group_answered_empty?({"", 1})
+    refute Local.process_group_answered_empty?(
+             {table <> " 48965   900\n", 0},
+             absent_group,
+             witness
+           )
 
-    # A `ps` that was killed says nothing at all, and nothing is not proof.
-    refute Local.group_answered_empty?({"", 137})
-    refute Local.group_answered_empty?({"", 2})
+    refute Local.process_group_answered_empty?({"", 0}, absent_group, witness),
+           "an empty answer from an arbitrary configured executable proved quiescence"
 
-    # Its own diagnostics arrive on the same stream this executor captures, so
-    # an error is already non-empty.
-    refute Local.group_answered_empty?({"ps: process group too large: 999999\n", 1})
+    refute Local.process_group_answered_empty?({table, 1}, absent_group, witness)
+    refute Local.process_group_answered_empty?({table, 137}, absent_group, witness)
+
+    refute Local.process_group_answered_empty?(
+             {"not a process table\n", 0},
+             absent_group,
+             witness
+           )
+
+    refute Local.process_group_answered_empty?(:no_answer, absent_group, witness)
   end
 
   retained_manual_probe(
@@ -2641,15 +2642,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # assembled their own option list, and the option that removes the provider
     # credential could be dropped from one of them without any case noticing.
     #
-    # There are three spawns and they are not interchangeable. One is the job
-    # launcher, now built in a single place so that one observation covers every
-    # job. The other two run `ps` and `kill` on this executor's own behalf; they
-    # take no workspace and no operator input, but they are still images the
-    # operating system loads while this process holds the provider credential,
-    # so the loader reaches them on exactly the same terms. The invariant is
-    # therefore about every spawn rather than about how many there are: none of
-    # them may omit the central environment override that explicitly removes the
-    # named credential.
+    # There is one spawn boundary. Jobs and bounded cleanup probes both reach
+    # `open_launcher/4`, so the production-path observation above covers every
+    # first image. A separate direct helper spawn is precisely how environment
+    # handling and process authority drifted before: no call site may bypass the
+    # common option list or turn a sampled PID into permission for a later
+    # `/bin/kill`.
     #
     # Reading the source is the only way to ask a question of that shape. A
     # behavioural case can prove what one spawn does and can never prove that no
@@ -2662,26 +2660,33 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       |> Enum.drop(1)
       |> Enum.map(&(&1 |> String.split(~r/^\s*\)\s*$/m) |> hd()))
 
-    assert length(spawns) == 3,
+    assert length(spawns) == 1,
            "this executor now opens #{length(spawns)} ports; every one of them is an image the " <>
              "loader reaches, so each needs its own constructed environment and this case needs " <>
              "to have been told about it"
 
-    # The job launcher reaches its `env:` through `launcher_port_options/2`,
-    # which the probe case above observes behaviourally at the spawn; the two
-    # helpers carry theirs literally. What no spawn may do is name neither.
+    # Every caller reaches its `env:` through `launcher_port_options/2`, which
+    # the probe case above observes behaviourally at the spawn.
     assert source =~ "options = launcher_port_options(environment, workspace)",
            "the job launcher no longer derives the option list whose environment the " <>
              "production-path probe observes"
 
     assert Enum.count(spawns, &String.contains?(&1, "++ options")) == 1,
-           "the single job-launch port no longer receives the production option list"
+           "the single launch port no longer receives the production option list"
 
-    assert Enum.count(
-             spawns,
-             &String.contains?(&1, "env: spawn_environment(demonstration_environment())")
-           ) == 2,
-           "each helper spawn must use the central provider-credential removal path"
+    assert source =~
+             ~r/defp guarded_answer_within\(program, arguments, bound\).*?process_launcher\(%\{helper: \[program \| arguments\]\}, environment\).*?open_launcher\(launcher, command_arguments, environment/s,
+           "bounded helpers no longer use the same guarded launcher and environment boundary"
+
+    refute source =~ ~s|{:spawn_executable, ~c"/bin/kill"}|,
+           "a helper timeout turned a sampled numeric PID into signal authority"
+
+    refute source =~ "defp signal_helper(",
+           "a second process can still deliver a late signal to a sampled helper PID"
+
+    assert source =~
+             ~r/defp finish_guarded_helper.*?1 <- occurrences\(output, acknowledgement\)/s,
+           "a queued helper KILL can be mistaken for one the live guard processed"
 
     # The job launcher's option list is built once. A second construction of it
     # is how the two spawn sites drifted apart before, and it is also how a
@@ -3481,7 +3486,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # reported durable and the branch that decides whether a process group is
     # confirmed clean would otherwise rest on waits no case can enter. Both
     # mechanisms are exposed and asked directly, exactly as
-    # `group_answered_empty?/1` is.
+    # `process_group_answered_empty?/3` is.
     root = workspace()
     {_executor, _lease_id, lease} = executor_and_lease(root)
     monitor = Process.monitor(lease)
@@ -3520,7 +3525,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # And a non-answer is not an empty process group. It reaches the same rule
     # that already refuses a `ps` killed by a signal, because silence from a
     # program that never spoke is the weaker fact of the two.
-    refute Local.group_answered_empty?(:no_answer)
+    refute Local.process_group_answered_empty?(:no_answer, 900, 700)
 
     # A program that cannot be run at all arrives as the same non-answer, which
     # is what the removed rescue used to produce.
@@ -3571,53 +3576,6 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     Process.sleep(delay + 500)
     refute File.exists?(Path.join(root, "delayed.txt"))
-  end
-
-  # Concept: a real process group identifier that no longer has any members.
-  #
-  # Technical depth: taken from a child that led its own group and has since
-  # exited, so the confirmation above is asked about the same kind of identifier
-  # the executor asks about rather than an invented number, which `ps` reports
-  # differently.
-  defp ephemeral_process_group do
-    port =
-      Port.open({:spawn_executable, ~c"/bin/sh"}, [
-        :binary,
-        :exit_status,
-        :use_stdio,
-        :stderr_to_stdout,
-        :hide,
-        args: [~c"-c", ~c"ps -o pgid= -p $$ | tr -d ' '; exit 0"]
-      ])
-
-    group =
-      receive do
-        {^port, {:data, data}} -> data |> String.trim() |> String.to_integer()
-      after
-        10_000 -> flunk("the probe child never reported its process group")
-      end
-
-    receive do
-      {^port, {:exit_status, _status}} -> :ok
-    after
-      10_000 -> flunk("the probe child never exited")
-    end
-
-    assert {:ok, :empty} =
-             await_path(
-               fn ->
-                 case System.cmd("/bin/ps", ["-o", "pid=", "-g", Integer.to_string(group)],
-                        stderr_to_stdout: true
-                      ) do
-                   {"", _status} -> {:ok, :empty}
-                   {_survivors, _status} -> :error
-                 end
-               end,
-               10_000
-             ),
-           "the probe child's group still has members"
-
-    group
   end
 
   test "the cleanup budget is one configured period with a declared default and every receipt records it" do
@@ -4183,6 +4141,69 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "a command owned by the dead executor continued and wrote after its owner vanished"
   end
 
+  test "a command owner crash closes control and the live guard reaps its silent group" do
+    # Concept: the operating-system guard, not the BEAM worker's continued
+    # existence, is the final owner of a command that has already started.
+    #
+    # Technical depth: an abrupt worker exit closes the Port's control stdin.
+    # The guard must observe that EOF while the command is silent and terminate
+    # the group it still anchors. Merely returning an unconfirmed receipt is not
+    # enough: without the concurrent control read, the silent descendant below
+    # remains in the operating-system process table after the worker and receipt
+    # owner have both moved on.
+    root = workspace()
+    ready = Path.join(root, "port-owner-crash-ready")
+    job_id = "port-owner-crash-#{System.unique_integer([:positive])}"
+    {executor, lease_id} = executor_for(root)
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{
+            "command" =>
+              "(printf ready > #{shell_path(ready)}; while :; do :; done) & while :; do :; done"
+          },
+          %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 600}
+        )
+      end)
+
+    assert {:ok, ^ready} =
+             await_path(fn -> if File.exists?(ready), do: {:ok, ready}, else: :error end, 5_000)
+
+    {:dictionary, dictionary} = Process.info(executor, :dictionary)
+    table = Keyword.fetch!(dictionary, :loopex_inflight_table)
+    authority_key = {:loopex_process_authority, job_id}
+
+    assert {:ok, worker} =
+             await_path(
+               fn ->
+                 case :ets.lookup(table, authority_key) do
+                   [{^authority_key, worker, 600}] when is_pid(worker) -> {:ok, worker}
+                   _not_published -> :error
+                 end
+               end,
+               5_000
+             )
+
+    assert [{^job_id, group}] = :ets.lookup(table, job_id)
+    assert is_integer(group) and group > 1
+
+    Process.exit(worker, :kill)
+
+    assert {:ok, receipt} = Task.await(running, 5_000)
+    assert receipt.outcome == :outcome_unknown
+    assert receipt.cleanup_confirmation == :unconfirmed
+
+    assert {:ok, ^group} =
+             await_path(
+               fn -> if process_group_empty?(group), do: {:ok, group}, else: :error end,
+               5_000
+             ),
+           "the Port-owned guard did not reap the group after control stdin closed"
+  end
+
   test "each of the three quiescence answers reaches a distinct outcome and only one is proved" do
     # Concept: bringing a group to quiescence has three answers, and `completed`
     # belongs to exactly one of them.
@@ -4523,14 +4544,19 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     {answered_ms, answer} =
       elapsed(fn ->
-        Local.answer_within("/bin/sh", ["-c", "sleep 2; printf x > #{written}"], 150)
+        Local.answer_within(
+          "/bin/sh",
+          ["-c", "(sleep 1; printf x > #{shell_path(written)}) & sleep 20"],
+          150
+        )
       end)
 
     assert answer == :no_answer
     assert answered_ms < 1_500, "the bound was not honoured: #{answered_ms}ms"
 
-    # Long enough that the helper would have finished if it were still alive.
-    Process.sleep(3_000)
+    # The writer is a descendant rather than the direct helper shell. Killing
+    # only that shell would leave the writer alive and make this assertion fail.
+    Process.sleep(1_500)
 
     refute File.exists?(written),
            "the helper outlived its bound and completed its work afterwards"
@@ -4572,17 +4598,49 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # answer, and admitting a missing/duplicate control frame breaks the final
     # protocol conjunction.
     {"/usr/bin/env", vector} = Local.launcher_vector(%{argv: ["/usr/bin/true"]})
-    script = Enum.at(vector, Enum.find_index(vector, &(&1 == "-c")) + 1)
+    carrier = Enum.at(vector, Enum.find_index(vector, &(&1 == "-c")) + 1)
+    script = Enum.at(vector, Enum.find_index(vector, &(&1 == "loopex-port-carrier")) + 1)
 
+    assert carrier =~
+             ~r/mode=\$1.*?if \[ "\$mode" = helper \]; then.*?set -m.*?sh -c "\$guard_script" "\$guard_name" "\$carrier_pid" "\$@" <&0 &.*?set \+m.*?else.*?sh -c "\$guard_script" "\$guard_name" "\$carrier_pid" "\$@" <&0 &/s
+
+    assert carrier =~
+             ~r/if \[ "\$mode" != helper \]; then.*?kill -TERM -- -"\$carrier_pid".*?kill -KILL -- -"\$carrier_pid"/s,
+           "the carrier no longer reaps its still-anchored command group after guard loss"
+
+    refute carrier =~ ~r/guard_group=.*?kill -(?:TERM|KILL) -- -"\$guard_group"/s,
+           "the helper carrier signals a detached sampled group after its guard has exited"
+
+    assert carrier =~ ~r/while :; do\n\s+wait "\$guard_pid"/
     assert script =~ "IFS= read -r init"
     assert script =~ "IFS= read -r permit"
+
+    assert script =~
+             ~r/carrier_group=\$1.*?if \[ "\$mode" = helper \]; then\s+group_id=\$\$\s+else\s+group_id=\$carrier_group/s
+
+    refute script =~ ~r/group_id=\$\(.*?ps /s
     assert script =~ ~r/while :; do\n\s+wait \"\$command_pid\"/
     assert script =~ "while IFS= read -r control"
+    assert script =~ ~r/case " \$\(jobs -p\) ".*?\*" \$command_pid "\*\).*?\*\) break/s
+    refute script =~ ~s|kill -0 "$command_pid"|
     assert script =~ "trap - HUP INT PIPE\n  trap ':' TERM"
-    assert script =~ "'loopex-signal:'\"$token\"':TERM') kill -TERM -- -$$"
-    assert script =~ "'loopex-signal:'\"$token\"':KILL') kill -KILL -- -$$"
+
+    assert script =~
+             ~r/'loopex-signal:'"\$token"':TERM'\).*?trap '' TERM.*?kill -TERM -- -"\$group_id".*?trap 'guard_abort' TERM/s,
+           "a cooperative group TERM no longer masks an external owner-loss TERM permanently"
+
+    assert script =~
+             ~r/'loopex-signal:'"\$token"':KILL'\).*?if \[ "\$mode" = helper \]; then.*?loopex-signal-accepted:%s:KILL.*?kill -KILL -- -"\$group_id"/s,
+           "the live guard no longer acknowledges and performs the final group KILL"
+
     assert script =~ "guard_abort"
-    assert script =~ "trap 'guard_abort' HUP INT PIPE"
+    assert script =~ "trap 'guard_abort' HUP INT PIPE TERM"
+
+    assert script =~
+             ~r/guard_abort\(\) \{\s+trap '' TERM\s+\[ -n "\$group_id" \] && kill -TERM -- -"\$group_id"/,
+           "the abort trap can recurse on the group TERM it sends itself"
+
+    assert script =~ ~r/\*\) guard_abort ;;/
     refute script =~ "exec \"$@\""
 
     # The unpredictable token is supplied only after Port.open; neither launcher
@@ -4620,12 +4678,16 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "a pre-permit refusal signals a sampled process identifier"
 
     assert source =~
-             ~r/defp release_launch_guard\(guard, episode\) do\s+if launch_guard_live\?\(guard\) and guard_children_gone\?\(guard, episode\) do\s+sent = safe_port_command/s,
-           "the guard can be released before the captured group is proved quiescent"
+             ~r/defp quiesce_launch_guard.*?if guard_children_gone\?\(guard, episode\) do.*?release_launch_guard\(guard, episode, status_known\?\)/s,
+           "the normal path can release the guard without first proving group quiescence"
 
     assert source =~
-             ~r/defp guard_answered_alone\?\(\{output, status\}, guard_pid\).*?\[\{\^guard_pid, ""\}\] -> true/s,
-           "the still-live guard is counted as unresolved work instead of its group's anchor"
+             ~r/defp release_launch_guard\(guard, _episode, status_known\?\) do.*?if status_known\? and launch_guard_live\?\(guard\) do\s+sent = safe_port_command/s,
+           "the guard can be released without authenticated status or live Port authority"
+
+    assert source =~
+             ~r/defp guard_answered_alone\?.*?expected =\s+if carrier_in_group,\s+do: Enum\.sort\(\[anchor_pid, carrier_pid\]\),\s+else: \[anchor_pid\].*?Enum\.sort\(members\) == expected/s,
+           "normal completion no longer requires every fixed authority member and no command member"
 
     assert source =~
              ~r/defp launch_guard_live\?\(%\{state: :live, port: port, os_pid: os_pid\}\).*?Port\.info\(port, :os_pid\) == \{:os_pid, os_pid\}/s,
@@ -4644,8 +4706,80 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "a malformed authenticated command-status frame does not invalidate the protocol"
 
     assert source =~
-             ~r/defp launch_guard_exit_proved\?.*?:release_sent ->\s+is_integer\(collector\.command_status\) and status == collector\.command_status.*?:kill_sent ->\s+status != 0.*?_missing_transition ->\s+false/s,
+             ~r/defp launch_guard_exit_proved\?.*?:release_sent ->\s+is_integer\(collector\.command_status\) and status == 0.*?:kill_sent ->\s+status != 0.*?_missing_transition ->\s+false/s,
            "normal release is not status-bound, or an unowned guard exit is treated as proof"
+  end
+
+  test "a malformed control message makes the live guard reap its admitted group" do
+    # Concept: malformed control is a refusal and cleanup event, never a way to
+    # release an already-admitted command from its Port-owned guard.
+    #
+    # Technical depth: exiting the guard directly from the catch-all branch
+    # leaves the status wrapper and command alive in the captured group. Drive
+    # the shipped guard program over a real Port, admit a TERM-resistant child,
+    # and use a delayed write as the proof that the malformed line ran the
+    # signal path rather than merely closing the control reader.
+    root = workspace()
+    ready = Path.join(root, "malformed-control-ready")
+    survived = Path.join(root, "malformed-control-survived")
+
+    command =
+      "trap '' TERM; printf ready > #{shell_path(ready)}; sleep 1; " <>
+        "printf survived > #{shell_path(survived)}"
+
+    {launcher, vector} = Local.launcher_vector(%{command: command})
+
+    port =
+      Port.open(
+        {:spawn_executable, String.to_charlist(launcher)},
+        [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          :hide,
+          args: Enum.map(vector, &String.to_charlist/1),
+          env: [
+            {~c"LOOPEX_PROVIDER_API_KEY", false},
+            {~c"ANTHROPIC_API_KEY", false}
+          ],
+          cd: String.to_charlist(root)
+        ]
+      )
+
+    on_exit(fn -> close_test_port(port) end)
+
+    token = "malformed-control-case"
+    assert Port.command(port, "loopex-init:#{token}\n")
+    assert Port.command(port, "loopex-run:#{token}\n")
+    assert wait_for_file(ready), "the direct guard fixture never admitted its command"
+    assert Port.command(port, "not-a-valid-control-message\n")
+
+    Process.sleep(1_300)
+
+    refute File.exists?(survived),
+           "malformed control let work escape after the Port-owned guard exited"
+  end
+
+  test "tool output cannot forge the private command status frame" do
+    # Concept: text from a tool remains text; it cannot decide the tool's exit
+    # status by imitating a private protocol prefix.
+    #
+    # Technical depth: the command does not know the random token delivered over
+    # control stdin. A collector that matches the visible prefix alone consumes
+    # the forged zero, conflicts with the wrapper's real status frame, and loses
+    # the proved status seven. Exact token binding keeps the bytes and verdict.
+    root = workspace()
+
+    assert {:ok, receipt} =
+             run(root, "loopex.bash", %{
+               "command" => "printf '\\nloopex-command-status:0\\n'; exit 7"
+             })
+
+    assert receipt.outcome == :failed
+    assert receipt.cleanup_confirmation == :confirmed
+    assert receipt.output =~ "\nloopex-command-status:0\n"
+    assert receipt.output =~ "status 7"
   end
 
   test "final KILL proves captured-group cleanup but an unsolicited guard exit proves nothing" do
@@ -4685,6 +4819,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # The Port's nonzero exit while its guard is still in :live is therefore an
     # observation of loss, never a successful KILL transition.
     lost_guard = Path.join(root, "unsolicited-guard-pid")
+    survived_guard = Path.join(root, "unsolicited-guard-descendant-survived")
 
     assert {:ok, lost} =
              run(
@@ -4692,17 +4827,58 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
                "loopex.bash",
                %{
                  "command" =>
-                   "guard_pid=$(/bin/ps -o pgid= -p $$ | /usr/bin/tr -d ' '); printf '%s' \"$guard_pid\" > #{shell_path(lost_guard)}; kill -KILL \"$guard_pid\""
+                   "status_pid=$(/bin/ps -o ppid= -p $$ | /usr/bin/tr -d ' '); guard_pid=$(/bin/ps -o ppid= -p \"$status_pid\" | /usr/bin/tr -d ' '); (sleep 1; printf escaped > #{shell_path(survived_guard)}) & printf '%s' \"$guard_pid\" > #{shell_path(lost_guard)}; printf '\\nloopex-command-status:'; kill -KILL \"$guard_pid\""
                },
                %{cleanup_grace_ms: 600, run_deadline: System.system_time(:millisecond) + 2_000}
              )
 
     assert lost.outcome == :outcome_unknown
     assert lost.cleanup_confirmation == :unconfirmed
-    assert lost.output =~ "could not be confirmed cleaned"
+    assert lost.output =~ "\nloopex-command-status:"
+    assert lost.output =~ "effect is complete is unproven"
 
     guard_pid = lost_guard |> File.read!() |> String.to_integer()
     assert wait_for_os_pid_exit(guard_pid, 200), "the sabotaged finite workload leaked"
+
+    Process.sleep(1_300)
+
+    refute File.exists?(survived_guard),
+           "the carrier let work survive after its launch guard was killed"
+  end
+
+  test "a TERM-interrupted wrapper waits for its owned shell job rather than rechecking its pid" do
+    # Concept: cooperative cancellation waits for the command that actually
+    # owns the job, even when TERM interrupts the wrapper's first `wait`.
+    #
+    # Technical depth: observing the numeric PID with `kill -0` after `wait`
+    # reaped the child let PID reuse turn an unrelated process into a reason to
+    # wait again. The non-interactive shell's own job table is stable ownership:
+    # while the trapped child handles TERM it remains listed; after the final
+    # wait it does not, whatever process later receives the number.
+    root = workspace()
+    ready = Path.join(root, "term-interrupted-wrapper-ready")
+    job_id = "term-interrupted-wrapper-#{System.unique_integer([:positive])}"
+    {executor, lease_id} = executor_with_grace(root, 2_000)
+
+    running =
+      Task.async(fn ->
+        run(
+          root,
+          "loopex.bash",
+          %{
+            "command" =>
+              "trap 'exit 7' TERM; printf ready > #{shell_path(ready)}; while :; do sleep 1; done"
+          },
+          %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 2_000}
+        )
+      end)
+
+    assert wait_for_file(ready), "the cooperative command never reached its TERM wait"
+    assert Local.cancel(executor, job_id) == {:ok, :cleaned}
+
+    assert {:ok, receipt} = Task.await(running, 5_000)
+    assert receipt.outcome == :cancelled
+    assert receipt.cleanup_confirmation == :confirmed
   end
 
   test "a reentrant progress callback restores the outer job's complete execution context" do
@@ -4780,6 +4956,32 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   end
 
   defp shell_path(path), do: "'" <> String.replace(path, "'", "'\\''") <> "'"
+
+  defp process_group_empty?(group) when is_integer(group) do
+    case System.cmd("/bin/ps", ["-e", "-o", "pid=", "-o", "pgid="], stderr_to_stdout: true) do
+      {output, 0} ->
+        output
+        |> String.split("\n", trim: true)
+        |> Enum.all?(fn line ->
+          case String.split(line) do
+            [_pid, row_group] -> row_group != Integer.to_string(group)
+            _malformed -> false
+          end
+        end)
+
+      {_output, _status} ->
+        false
+    end
+  end
+
+  defp close_test_port(port) do
+    Port.close(port)
+    :ok
+  rescue
+    ArgumentError -> :ok
+  catch
+    _kind, _reason -> :ok
+  end
 
   defp wait_for_os_pid_exit(_os_pid, 0), do: false
 

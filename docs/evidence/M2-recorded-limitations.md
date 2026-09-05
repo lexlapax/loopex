@@ -189,7 +189,10 @@ executor. A host embedding Loopex names it
 (`Loopex.Executor.Local.start_link(process_probe: "/usr/bin/ps")`); the `loopex`
 command does not expose a flag for it and takes `/bin/ps`. Every receipt records
 which program was asked, so an outcome that could not be confirmed says what
-failed to confirm it.
+failed to confirm it. A replacement implements the same
+`-e -o pid= -o pgid=` table dialect; the runtime parses exact PGID equality and
+requires the probe's own Port carrier to appear as a PID-equals-PGID witness before
+absence can confirm cleanup.
 
 **Why it is recorded rather than fixed here.** An image that ships `ps` at
 another path has every command reported `outcome_unknown` under the shipped
@@ -857,6 +860,13 @@ be reported as proved, while unresolved effect truth keeps the root
 quarantined. The execute caller may leave after handing that one-use permit to
 the launch worker; its later lifetime is not authority to revoke an already
 admitted effect.
+
+Artifact retention preserves the same stop truth as receipt and open-entry
+administration. A worker confirmed stopped may lose only the overflow retrieval;
+a worker not confirmed stopped bypasses receipt publication and leaves the
+durable open entry to quarantine the root. The host store can therefore answer
+late only into an already-unresolved operation, never behind a completed receipt
+that cleared its authority.
 
 **Frozen-source precedence.** One earlier sentence in the closed M2 Technical
 envelope says that a valid usage pair remains reported when the reply itself is

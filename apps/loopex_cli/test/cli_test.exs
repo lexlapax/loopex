@@ -267,10 +267,16 @@ defmodule LoopexCliTest do
   end
 
   defp await_group_gone(group, attempts \\ 600) do
-    {output, _status} = System.cmd("/bin/ps", ["-o", "pid=", "-g", Integer.to_string(group)])
+    {output, status} = System.cmd("/bin/ps", ["-e", "-o", "pid=", "-o", "pgid="])
+
+    members =
+      for line <- String.split(output, "\n", trim: true),
+          [pid, pgid] = String.split(line),
+          String.to_integer(pgid) == group,
+          do: String.to_integer(pid)
 
     cond do
-      String.trim(output) == "" -> true
+      status == 0 and members == [] -> true
       attempts > 0 -> Process.sleep(25) && await_group_gone(group, attempts - 1)
       true -> false
     end

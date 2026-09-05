@@ -478,7 +478,7 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     refute File.exists?(Path.join(root, "unrelated.txt"))
   end
 
-  test "an unconfirmed administrative worker retains the root claim by construction" do
+  test "an unconfirmed administrative or artifact worker preserves quarantine by construction" do
     # Concept: a worker that may still mutate the ledger is itself a quarantine
     # fact. Releasing the administrative claim would turn uncertainty into
     # permission for an unrelated effect.
@@ -488,9 +488,13 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     # interval is not a deterministic test boundary. These assertions therefore
     # name their structural scope explicitly: every receipt-writer and open-entry
     # removal branch maps a failed confirmation to `:unconfirmed`, and both outer
-    # settlement branches convert that exact result into the Ledger's deliberate
-    # retain-claim sentinel. The behavioral sibling above proves the sentinel
-    # actually strands the root when reached.
+    # administrative settlement branches convert that exact result into the
+    # Ledger's deliberate retain-claim sentinel. A pre-receipt artifact writer
+    # has no claim to retain; it instead propagates the same uncertainty past
+    # spill and refuses to write any receipt, leaving the already-durable open
+    # entry as quarantine. The behavioral sibling above proves the retained-claim
+    # sentinel actually strands the root when reached; the assertions below
+    # protect the artifact path's equivalent open-authority route.
     source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
 
     assert source =~
@@ -512,6 +516,41 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     assert source =~
              ~r/\{:unconfirmed, close_reason\} ->\s+Ledger\.retain_claim\(\{:open_authority_close_unconfirmed, close_reason\}\)/s,
            "unconfirmed open-entry removal no longer retains the root claim"
+
+    assert Local.artifact_retention_result({:done, :stored}) == :stored
+
+    assert Local.artifact_retention_result({:stopped, :store_crashed}) ==
+             {:error, {:artifact_retention_stopped, :store_crashed}}
+
+    assert Local.artifact_retention_result({:guardian_stopped, :killed, true}) ==
+             {:error, {:artifact_retention_guardian_stopped, :killed}}
+
+    assert Local.artifact_retention_result({:guardian_stopped, :killed, false}) ==
+             {:unconfirmed, {:artifact_retention_guardian_unconfirmed, :killed}}
+
+    assert Local.artifact_retention_result({:abandoned, :workspace_lease_lost, true, :none}) ==
+             :workspace_lease_lost
+
+    assert Local.artifact_retention_result({:abandoned, :workspace_lease_lost, false, :none}) ==
+             {:unconfirmed, :workspace_lease_lost_with_artifact_retention_worker_unconfirmed}
+
+    assert Local.artifact_retention_result({:abandoned, :bound_reached, true, :none}) ==
+             :retention_bound_reached
+
+    assert Local.artifact_retention_result({:abandoned, :bound_reached, false, :none}) ==
+             {:unconfirmed, :artifact_retention_worker_unconfirmed_at_bound}
+
+    assert source =~
+             ~r/\{:unconfirmed, reason\} ->\s+\{:settlement_unconfirmed, reason\}/s,
+           "artifact uncertainty no longer crosses the truncation boundary"
+
+    assert source =~
+             ~r/case spill\(tool_result, state, job, lease, limits\) do\s+\{:settlement_unconfirmed, _reason\} = unconfirmed ->\s+unconfirmed/s,
+           "the coding-tool path no longer carries artifact uncertainty past spill"
+
+    assert source =~
+             ~r/\{:settlement_unconfirmed, reason\} ->\s+# No receipt.*?forget_operation_owner\(.*?\)\s+\{:error, \{:receipt_not_retained, reason\}\}/s,
+           "artifact uncertainty can still publish a receipt or clear open authority"
   end
 
   # F5
@@ -885,15 +924,15 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     assert_ordered.(coding_clause, [
       "      run_coding_tool(",
       "    _retention_deadline = retention_until()",
-      "      spill(",
-      "    receipt("
+      "case spill(tool_result",
+      "receipt("
     ])
 
     assert_ordered.(demonstration_clause, [
       "      run_owned_process(",
       "    _retention_deadline = retention_until()",
       "    {outcome, output, _complete} = normalize_tool_result(tool_result)",
-      "    receipt("
+      "receipt("
     ])
   end
 

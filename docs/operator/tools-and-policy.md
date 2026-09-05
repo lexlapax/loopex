@@ -69,7 +69,11 @@ reason it matters.
 permissions. That is the honest statement of its reach: **it is not a sandbox.**
 Loopex does not isolate a tool child from your machine in this milestone, and the
 protection that exists is the host policy you name plus the workspace-root
-containment above.
+containment above. The same user can also inspect or signal Loopex's local helper
+processes. If a command deliberately disables its launch guard, Loopex refuses to
+claim cleanup, reports the effect unproven, and keeps the ledger root quarantined;
+this milestone does not claim that an unsandboxed same-user command can always be
+reaped synchronously after sabotaging the cleanup mechanism itself.
 
 Every process the executor starts explicitly removes the provider credential.
 The model-supplied command then crosses `/usr/bin/env -i` and receives only a

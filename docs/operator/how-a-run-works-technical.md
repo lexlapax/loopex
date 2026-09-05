@@ -127,6 +127,9 @@ unproven effect deliberately leaves its entry open — and an open entry left
 stranded quarantines the root until it is reconciled. Treat that directory as one
 intact administrative unit; the full disposition is in
 [What local execution can reach](tools-and-policy.md#operator-tools-reach).
+The same quarantine remains when a bounded artifact-store worker cannot be
+confirmed stopped: no receipt is published while that worker may still publish
+its result.
 
 <a id="technical-run-bounds"></a>
 ## The Numbers You Control
@@ -186,7 +189,9 @@ group is gone. Confirmation means running
 a program — `/bin/ps` by default — and an image where that program is elsewhere
 can confirm nothing, so every command is reported `outcome_unknown`. Each receipt
 records which program was asked, the period it ran under as `cleanup_grace_ms`,
-and its own write bound as `receipt_retention_bound_ms`.
+and its own write bound as `receipt_retention_bound_ms`. The program must emit
+the full `-e -o pid= -o pgid=` table: the runtime parses exact PGID equality and
+requires the probe's Port carrier PID-equals-PGID row before absence is accepted.
 
 An interrupt becomes the ordinary public abort. However many signals arrive, one
 stop is submitted under one identity; acceptance extends the backstop exactly

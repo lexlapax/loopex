@@ -233,13 +233,24 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
   and a command worker cannot survive loss of its execute caller before its run
   signal. The launch owner remains independently responsive while the execute
   caller delivers progress, so a blocked progress consumer cannot keep a command
-  alive past cancellation. An inert Port-owned guard opens first; the final wall
-  and monotonic deadline fence runs immediately before the token-bound permit
-  that lets it start the command. Expiry there closes the waiting guard and
-  produces a confirmed no-effect cancellation without starting model work.
-  That guard remains the process-group leader through release or final KILL and
-  performs token-bound TERM and KILL inside the group it still anchors, so a
+  alive past cancellation. A credential-clean Port carrier opens first and
+  starts an inert waiting guard; the final wall and monotonic deadline fence runs
+  immediately before the token-bound permit that lets the guard start the
+  command. Expiry there closes the waiting guard and produces a confirmed
+  no-effect cancellation without starting model work. Command mode keeps the carrier as
+  the Port group's leader while its token-bound guard signals that group; a
   sampled numeric process-group identifier never becomes later signal authority.
+  Bounded cleanup probes instead place the guard in a separate guard-led group,
+  letting the carrier survive final KILL and relay protocol evidence. A helper
+  answer is admitted only after the live guard acknowledges the private
+  final-KILL command and the carrier reports the resulting Port exit; timeout
+  requests the same cleanup but remains a non-answer. Neither path starts a later
+  `/bin/kill` aimed at a sampled and potentially reused PID.
+  Process-group confirmation reads a complete `pid,pgid` table and filters PGID
+  itself instead of relying on the incompatible BSD/procps meanings of `ps -g`;
+  the probe's Port carrier must appear as a self-grouped witness before absence
+  can prove quiescence, so an empty answer from a misconfigured probe fails
+  closed.
   Closing its control channel also ends the anchored group while a command is
   silent, and private status framing no longer drops an incomplete marker-like
   suffix from the command's real output.
@@ -323,9 +334,11 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
   that: the settlement takes one root claim, retains the receipt, removes the
   entry, and where removal fails preserves the receipt's proved operation and
   cleanup facts while the retained or restored open entry keeps them
-  provisional. A retention or administrative worker that cannot be confirmed
-  stopped retains the root claim rather than releasing permission around a late
-  writer. Readers see a receipt whose entry still stands as `effect_settling`,
+  provisional. A receipt or open-entry worker that cannot be confirmed stopped
+  retains the root claim rather than releasing permission around a late writer;
+  an artifact worker with the same uncertainty produces no receipt and leaves
+  the durable open entry as quarantine. Readers see a receipt whose entry still
+  stands as `effect_settling`,
   an entry with no receipt as `effect_unresolved` unless this executor holds the
   job, and `effect_in_flight` only for a job it holds. The retention episode
   opens immediately after the effect result and before normalization, optional
@@ -336,7 +349,10 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
   Local job without erasing the outer job's admission, cleanup, retention, lease,
   owner, probe, or in-flight context. A root claim the ledger could not release
   is reported to the caller, including after a body that raised, rather than
-  swallowed; every level of a ledger directory is synced into its own parent;
+  swallowed; ordinary guard release now requires the status wrapper's
+  authenticated frame to have been observed, while a cleanup path that has not
+  seen it uses final KILL instead of relying on cross-writer arrival order; every
+  level of a ledger directory is synced into its own parent;
   the open record is published
   before the marker so an interrupted admission fails closed; and every executor
   wait derived from an admitted period is sliced below the VM's timer ceiling.
@@ -903,6 +919,9 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
   is a start option, `process_probe`, defaulting to `/bin/ps` and recorded on
   every receipt. An image that ships `ps` elsewhere previously had every command
   reported `outcome_unknown` with nothing to say which program was missing.
+  The configured program must implement the full `ps -e -o pid= -o pgid=`
+  dialect; its zero-status table must include the probe's own Port carrier as a
+  PID-equals-PGID witness or it confirms nothing.
 - Cancelling a job through the shipped local executor now spends the period its
   host configured. `cancel/2` remains reachable from its caller, but routes the
   request to the live launch owner carrying the captured process group and the
