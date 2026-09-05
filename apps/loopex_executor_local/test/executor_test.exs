@@ -43,6 +43,26 @@ defmodule Loopex.Executor.LocalTest do
     assert Local.receipt(fixture.executor, "") == :absent
   end
 
+  test "an oversized job identity is refused before ledger lookup or reservation" do
+    fixture = fixture("oversized-job-identity")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    job_id = String.duplicate("x", 8_193)
+    invalid_job = %{job_id: job_id}
+    refusal = {:error, {:refused_before_effect, :canonical_job_request_mismatch}}
+
+    assert ^refusal = Local.execute(fixture.executor, invalid_job, %{})
+
+    # The public answer alone cannot distinguish this early refusal from a
+    # reservation followed by full permit validation. The serialized boundary
+    # must itself refuse the identifier before it reaches ledger path/key work.
+    assert ^refusal = GenServer.call(fixture.executor, {:reserve, invalid_job})
+
+    assert Process.alive?(fixture.executor)
+    assert %{dispatches: %{}} = Local.stats(fixture.executor)
+    refute Map.has_key?(:sys.get_state(fixture.executor).reserved, job_id)
+  end
+
   test "each missing and wrong grant binding is refused before process start" do
     fixture = fixture("negative-bindings")
     on_exit(fn -> stop_fixture(fixture) end)
@@ -171,6 +191,146 @@ defmodule Loopex.Executor.LocalTest do
     send(worker, :stop)
     assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
     :ets.delete(table)
+  end
+
+  test "a command worker exits before run when its execute caller dies" do
+    # Concept: a command worker that has only announced readiness cannot survive
+    # the caller responsible for sending its run signal.
+    #
+    # Technical depth: the caller intercepts readiness, publishes the same
+    # `{:starting, worker}` entry production publishes, and deliberately withholds
+    # `:run`. Its `DOWN` must make the production handshake remove that entry and
+    # end the worker. Sending the withheld signal afterwards proves no effect can
+    # occur later.
+    fixture = fixture("caller-lost-before-run")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    parent = self()
+    tag = make_ref()
+    job_id = "job-caller-lost-before-run"
+    target = Path.join(fixture.workspace, "caller-lost-before-run.txt")
+    table = :ets.new(:caller_lost_before_run, [:set, :public])
+
+    caller =
+      spawn(fn ->
+        receive do
+          {^tag, :worker_ready, worker} ->
+            true = :ets.insert(table, {job_id, {:starting, worker}})
+            send(parent, {tag, :worker_ready_intercepted, self(), worker})
+
+            receive do
+              {^tag, :release_run} -> send(worker, {tag, :run})
+            end
+        end
+      end)
+
+    {worker, worker_monitor} =
+      spawn_monitor(fn ->
+        Process.put(:loopex_inflight_table, table)
+
+        case Local.await_owned_process_start(caller, fixture.executor, tag, job_id) do
+          {:run, _owner} -> File.write!(target, "escaped")
+          :stop -> :ok
+        end
+      end)
+
+    on_exit(fn ->
+      if Process.alive?(caller), do: Process.exit(caller, :kill)
+      if Process.alive?(worker), do: Process.exit(worker, :kill)
+    end)
+
+    assert_receive {^tag, :worker_ready_intercepted, ^caller, ^worker}, 2_000
+    assert :ets.lookup(table, job_id) == [{job_id, {:starting, worker}}]
+
+    caller_monitor = Process.monitor(caller)
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :killed}, 2_000
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 2_000
+
+    assert :ets.lookup(table, job_id) == []
+    send(worker, {tag, :run})
+    refute File.exists?(target), "the command worker acted after its execute caller died"
+  end
+
+  test "command dispatch uses the caller-monitored pre-run handshake" do
+    # Concept: every production command worker watches its execute caller before
+    # it announces readiness.
+    #
+    # Technical depth: the behavioral case above proves the handshake boundary;
+    # this compiled-code assertion proves `run_owned_process/10` routes its worker
+    # through that boundary and that the boundary installs both monitors before
+    # announcing readiness. Bypassing it with the former inline receive or
+    # announcing before either monitor makes this assertion fail without a
+    # scheduler race.
+    module = Local
+
+    assert {:ok, {^module, [{:abstract_code, {:raw_abstract_v1, forms}}]}} =
+             :beam_lib.chunks(:code.which(module), [:abstract_code])
+
+    assert run_owned_process =
+             Enum.find(forms, &match?({:function, _, :run_owned_process, 10, _}, &1))
+
+    helper_calls =
+      matching_terms(run_owned_process, fn
+        {:call, _, {:atom, _, :await_owned_process_start}, [_, _, _, _]} -> true
+        _other -> false
+      end)
+
+    assert length(helper_calls) == 1,
+           "run_owned_process/10 must call await_owned_process_start/4 exactly once"
+
+    refute contains_term?(run_owned_process, fn
+             {:call, _, callee, [_recipient, message]} ->
+               send_call?(callee) and abstract_atom?(message, :worker_ready)
+
+             _other ->
+               false
+           end),
+           "run_owned_process/10 still announces worker readiness outside the handshake"
+
+    assert {:function, _, :await_owned_process_start, 4,
+            [
+              {:clause, _,
+               [
+                 {:var, _, caller_name},
+                 {:var, _, guard_name},
+                 {:var, _, tag_name},
+                 {:var, _, _job_id_name}
+               ], _, handshake_body}
+            ]} = Enum.find(forms, &match?({:function, _, :await_owned_process_start, 4, _}, &1))
+
+    assert [guard_monitor, caller_monitor, ready_announcement | _rest] = handshake_body
+
+    assert match?(
+             {:match, _, {:var, _, _},
+              {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :monitor}},
+               [{:atom, _, :process}, {:var, _, ^guard_name}]}},
+             guard_monitor
+           ),
+           "the handshake did not monitor Local authority before readiness"
+
+    assert match?(
+             {:match, _, {:var, _, _},
+              {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :monitor}},
+               [{:atom, _, :process}, {:var, _, ^caller_name}]}},
+             caller_monitor
+           ),
+           "the handshake did not monitor its execute caller before readiness"
+
+    assert match?(
+             {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :send}},
+              [
+                {:var, _, ^caller_name},
+                {:tuple, _,
+                 [
+                   {:var, _, ^tag_name},
+                   {:atom, _, :worker_ready},
+                   {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :self}}, []}
+                 ]}
+              ]},
+             ready_announcement
+           ),
+           "the handshake announced readiness before both owner monitors existed"
   end
 
   test "the executor starts one credential-free OS tool that writes the expected workspace bytes and retains its receipt" do
@@ -748,64 +908,88 @@ defmodule Loopex.Executor.LocalTest do
     send(owner, :release_quarantined_owner)
   end
 
-  test "a filesystem worker cannot outlive the Local executor authority that admitted it" do
-    # Concept: losing the Local hand ends a filesystem worker just as it ends a
-    # captured command group; a blocked caller is not the authority that keeps
-    # either effect alive.
+  test "owner-aware bounded work stops a filesystem effect when Local authority is lost" do
+    # Concept: losing the Local hand ends a filesystem effect worker; a blocked
+    # caller is not the authority that keeps it alive.
     #
-    # Technical depth: `run_bounded_tool/6` once selected `bounded_work/3`, which
-    # watched only its worker, the lease, and the deadline. This drives the real
-    # `loopex.write` production path, stopping it at the execution-local barrier
-    # immediately before `File.*`, then kills the executor. A path that still
-    # selects the unguarded boundary stays blocked; the fallback below releases it
-    # and proves the escaped write. The guarded production path answers before
-    # that release with an owner-loss receipt, and the killed worker cannot act
-    # later.
+    # Technical depth: this asks the exposed owner-aware boundary directly with
+    # a closure whose file effect is held behind a test-owned message. Killing the
+    # exact Local owner must kill and confirm that closure before answering. The
+    # separate wiring case below proves production filesystem dispatch selects
+    # this boundary, without adding a caller-controlled switch to shipped code.
     fixture = fixture("filesystem-owner-loss")
     on_exit(fn -> stop_fixture(fixture) end)
     Process.unlink(fixture.executor)
 
     parent = self()
     target = Path.join(fixture.workspace, "filesystem-owner-loss.txt")
-    {job, grant} = job_and_grant(fixture, "filesystem-owner-loss", "loopex.write")
     barrier_ref = make_ref()
 
     running =
       Task.async(fn ->
-        Local.execute(
-          fixture.executor,
-          job,
-          grant,
-          filesystem_effect_barrier: {parent, barrier_ref}
-        )
+        lease_monitor = Process.monitor(fixture.lease)
+
+        try do
+          Local.bounded_work(
+            fn ->
+              send(parent, {barrier_ref, :filesystem_worker_ready, self()})
+
+              receive do
+                {^barrier_ref, :perform_effect} -> File.write!(target, "escaped")
+              end
+            end,
+            30_000,
+            {lease_monitor, fixture.lease},
+            fixture.executor
+          )
+        after
+          Process.demonitor(lease_monitor, [:flush])
+        end
       end)
 
     assert_receive {^barrier_ref, :filesystem_worker_ready, effect_worker}, 2_000
+    effect_monitor = Process.monitor(effect_worker)
     executor_monitor = Process.monitor(fixture.executor)
     Process.exit(fixture.executor, :kill)
     assert_receive {:DOWN, ^executor_monitor, :process, _executor, :killed}, 2_000
 
-    result =
-      case Task.yield(running, 2_000) do
-        {:ok, answer} ->
-          answer
+    assert {:abandoned, :effect_owner_lost, true, :none} = Task.await(running, 2_000)
+    assert_receive {:DOWN, ^effect_monitor, :process, ^effect_worker, :killed}, 2_000
 
-        nil ->
-          send(effect_worker, {barrier_ref, :continue})
-          Task.await(running, 2_000)
-      end
-
-    send(effect_worker, {barrier_ref, :continue})
-
-    assert {:ok,
-            %{
-              outcome: :outcome_unknown,
-              cleanup_confirmation: :unconfirmed,
-              output: output
-            }} = result
-
-    assert output =~ "Local executor authority was lost"
+    send(effect_worker, {barrier_ref, :perform_effect})
     refute File.exists?(target), "the filesystem worker acted after its Local owner died"
+  end
+
+  test "filesystem dispatch selects the owner-aware bounded work boundary" do
+    # Concept: every production filesystem effect is guarded by the Local
+    # authority that admitted it.
+    #
+    # Technical depth: the behavioral case above proves `bounded_work/4`; this
+    # compiled-code assertion proves `run_bounded_tool/6` supplies
+    # `effect_owner/0` as its fourth argument. Inspecting BEAM abstract code keeps
+    # the proof deterministic while avoiding a test-only branch in production.
+    module = Local
+
+    assert {:ok, {^module, [{:abstract_code, {:raw_abstract_v1, forms}}]}} =
+             :beam_lib.chunks(:code.which(module), [:abstract_code])
+
+    assert run_bounded_tool =
+             Enum.find(forms, &match?({:function, _, :run_bounded_tool, 6, _}, &1))
+
+    bounded_calls =
+      matching_terms(run_bounded_tool, fn
+        {:call, _, {:atom, _, :bounded_work}, _arguments} -> true
+        _other -> false
+      end)
+
+    assert [bounded_call] = bounded_calls
+
+    assert match?(
+             {:call, _, {:atom, _, :bounded_work},
+              [_, _, _, {:call, _, {:atom, _, :effect_owner}, []}]},
+             bounded_call
+           ),
+           "run_bounded_tool/6 did not call bounded_work/4 with effect_owner/0"
   end
 
   test "a reserve blocked by a held claim is answered inside its own bound" do
@@ -985,6 +1169,47 @@ defmodule Loopex.Executor.LocalTest do
       value when is_binary(value) -> value <> "-wrong"
       _other -> "wrong"
     end
+  end
+
+  defp contains_term?(term, predicate) do
+    predicate.(term) or
+      case term do
+        tuple when is_tuple(tuple) ->
+          tuple |> Tuple.to_list() |> Enum.any?(&contains_term?(&1, predicate))
+
+        list when is_list(list) ->
+          Enum.any?(list, &contains_term?(&1, predicate))
+
+        _leaf ->
+          false
+      end
+  end
+
+  defp matching_terms(term, predicate) do
+    own = if predicate.(term), do: [term], else: []
+
+    children =
+      case term do
+        tuple when is_tuple(tuple) -> Tuple.to_list(tuple)
+        list when is_list(list) -> list
+        _leaf -> []
+      end
+
+    own ++ Enum.flat_map(children, &matching_terms(&1, predicate))
+  end
+
+  defp send_call?({:atom, _, :send}), do: true
+
+  defp send_call?({:remote, _, {:atom, _, :erlang}, {:atom, _, :send}}),
+    do: true
+
+  defp send_call?(_callee), do: false
+
+  defp abstract_atom?(term, value) do
+    contains_term?(term, fn
+      {:atom, _, ^value} -> true
+      _other -> false
+    end)
   end
 
   defp stop_fixture(fixture) do

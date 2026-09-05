@@ -30,6 +30,7 @@ defmodule Loopex.Executor.Local do
 
   @max_output_bytes 1_048_576
   @max_progress_chunk_bytes 65_536
+  @max_job_id_bytes 8_192
 
   # Concept: the declared grace the cancellation sequence gets once the run's own
   # instant has passed, and the only number any of that work is measured against.
@@ -291,11 +292,12 @@ defmodule Loopex.Executor.Local do
 
   ## Technical depth
 
-  Runs in the caller rather than in this executor's GenServer, because that
-  server is blocked for the duration of the job being cancelled. The operating
+  Runs in the caller rather than serializing process cleanup through this
+  executor's GenServer. That server owns only the short reserve and permit
+  decisions; the requesting caller performs the admitted work. The operating
   system effect still belongs to this application — the hand owns effects, and
-  this is the hand's code — but it must not be queued behind the very work it is
-  meant to end.
+  this is the hand's code — while cancellation remains independently reachable
+  from the process doing that work.
 
   Signals the job's owned process group and then confirms by looking for
   survivors. A job this instance has no record of is decided by the root every
@@ -1035,12 +1037,15 @@ defmodule Loopex.Executor.Local do
   # else is reserved to the caller, which then owns the waiting. Each reservation
   # records its exact live holder so receipt lookup and release below describe
   # work still held here rather than work this server is performing.
-  # A missing identity cannot name durable truth and is refused without entering
-  # the reservation map. Full validation deliberately remains after marker
-  # resolution, so a valid same-digest admission still joins before a duplicate
-  # caller's ephemeral grant is revalidated.
+  # A missing or oversized identity cannot name durable truth and is refused
+  # without reaching the ledger or entering the reservation map. The bound is
+  # the canonical JobRequest identifier bound; applying it here keeps hostile
+  # input out of serialized key and path work without moving full validation.
+  # Full validation deliberately remains after marker resolution, so a valid
+  # same-digest admission still joins before a duplicate caller's ephemeral
+  # grant is revalidated.
   def handle_call({:reserve, %{job_id: job_id} = job}, {caller, _tag}, state)
-      when is_binary(job_id) and job_id != "" do
+      when is_binary(job_id) and byte_size(job_id) in 1..@max_job_id_bytes do
     case reserve_decision(state, job, job_id) do
       # Technical depth: every call gets an opaque reference and its own caller
       # monitor. Several callers can therefore join one durable job without a
@@ -2751,14 +2756,12 @@ defmodule Loopex.Executor.Local do
   # arrives first decides the result: the effect's own answer, the worker dying
   # on its own, the lease holder going down, or the remaining deadline elapsing.
   #
-  # The mechanics of the wait live in `bounded_work/3`, which the two retentions
-  # that follow the effect use as well.
-  defp run_bounded_tool(workspace, arguments, remaining, lease, limits, options) do
+  # The effect uses owner-aware `bounded_work/4`; the two retentions that follow
+  # it use the general `bounded_work/3` boundary because they may finish retaining
+  # already-produced evidence after the Local server disappears.
+  defp run_bounded_tool(workspace, arguments, remaining, lease, limits, _options) do
     case bounded_work(
-           fn ->
-             filesystem_effect_barrier(options)
-             filesystem_effect(workspace, arguments, limits)
-           end,
+           fn -> filesystem_effect(workspace, arguments, limits) end,
            remaining,
            lease,
            effect_owner()
@@ -2777,27 +2780,6 @@ defmodule Loopex.Executor.Local do
 
       {:abandoned, :bound_reached, stopped, _late} ->
         abandoned(:deadline, arguments, stopped)
-    end
-  end
-
-  # Concept: a case can stop the real filesystem path at its exact effect edge.
-  #
-  # Technical depth: ordinary files offer no deterministic way to block between
-  # guarded-worker creation and `File.*`. This optional execution-local message
-  # barrier runs inside that same worker immediately before the real effect;
-  # production callers omit it. It executes no supplied function, substitutes no
-  # effect, and enters no job, receipt, ledger record, or public result.
-  defp filesystem_effect_barrier(options) do
-    case Keyword.get(options, :filesystem_effect_barrier) do
-      {recipient, barrier_ref} when is_pid(recipient) and is_reference(barrier_ref) ->
-        send(recipient, {barrier_ref, :filesystem_worker_ready, self()})
-
-        receive do
-          {^barrier_ref, :continue} -> :ok
-        end
-
-      _absent ->
-        :ok
     end
   end
 
@@ -3250,11 +3232,9 @@ defmodule Loopex.Executor.Local do
         Process.put(:loopex_inflight_table, table)
         Process.put(:loopex_cleanup_grace_ms, grace)
         Process.put(:loopex_process_probe, probe)
-        guard_monitor = Process.monitor(guard)
-        send(caller, {tag, :worker_ready, self()})
 
-        receive do
-          {^tag, :run} ->
+        case await_owned_process_start(caller, guard, tag, job.job_id) do
+          {:run, owner} ->
             result =
               run_owned_process_worker(
                 job,
@@ -3267,23 +3247,12 @@ defmodule Loopex.Executor.Local do
                 limits,
                 progress,
                 identity,
-                {guard_monitor, guard}
+                owner
               )
 
             send(caller, {tag, :worker_result, result, not is_nil(cleanup_episode())})
 
-          {:loopex_cancel_pending, token, from, _cancel_grace, _cancel_probe} ->
-            forget_inflight(job.job_id)
-            send(from, {:loopex_cancel_result, token, {:ok, :cleaned}})
-
-            send(
-              caller,
-              {tag, :worker_result,
-               {{:cancelled, "[loopex: the job was cancelled before its process began.]",
-                 :complete}, 0}, false}
-            )
-
-          {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
+          :stop ->
             :ok
         end
       end)
@@ -3300,6 +3269,57 @@ defmodule Loopex.Executor.Local do
         {{:outcome_unknown,
           "[loopex: the process owner stopped before it could report cleanup: " <>
             inspect(reason) <> "]", :complete}, 0}
+    end
+  end
+
+  # Concept: a command worker that has not received its run signal belongs to
+  # both the Local authority and the execute caller arranging its admission.
+  # Losing either ends that not-yet-started worker without an effect.
+  #
+  # Technical depth: both monitors exist before readiness is announced. The
+  # caller sends `:run` after receiving that announcement, so BEAM signal ordering
+  # makes a prior run signal win over the same caller's later `DOWN`; after that
+  # handoff only the Local authority guards the admitted effect. A caller lost
+  # before sending `:run` removes any `{:starting, worker}` publication and lets
+  # the worker exit. This boundary is exposed because a public caller cannot be
+  # stopped deterministically inside the private ready/run exchange without a
+  # shipped test switch.
+  @doc false
+  @spec await_owned_process_start(pid(), pid(), reference(), binary()) ::
+          {:run, {reference(), pid()}} | :stop
+  def await_owned_process_start(caller, guard, tag, job_id)
+      when is_pid(caller) and is_pid(guard) and is_reference(tag) and is_binary(job_id) do
+    guard_monitor = Process.monitor(guard)
+    caller_monitor = Process.monitor(caller)
+    send(caller, {tag, :worker_ready, self()})
+
+    receive do
+      {^tag, :run} ->
+        Process.demonitor(caller_monitor, [:flush])
+        {:run, {guard_monitor, guard}}
+
+      {:loopex_cancel_pending, token, from, _cancel_grace, _cancel_probe} ->
+        forget_inflight(job_id)
+        send(from, {:loopex_cancel_result, token, {:ok, :cleaned}})
+
+        send(
+          caller,
+          {tag, :worker_result,
+           {{:cancelled, "[loopex: the job was cancelled before its process began.]", :complete},
+            0}, false}
+        )
+
+        :stop
+
+      {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
+        forget_inflight(job_id)
+        Process.demonitor(caller_monitor, [:flush])
+        :stop
+
+      {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
+        forget_inflight(job_id)
+        Process.demonitor(guard_monitor, [:flush])
+        :stop
     end
   end
 
@@ -3489,16 +3509,16 @@ defmodule Loopex.Executor.Local do
   end
 
   # Concept: an in-flight job publishes the group it owns, so a cancel can reach
-  # it without calling a server that is busy running it.
+  # it without routing cleanup through the executor's serialized call path.
   #
-  # Technical depth: `execute/5` blocks this executor's GenServer for the whole
-  # job, so a concurrent `cancel/2` cannot be a call. The table is created per
-  # executor process and its identifier is kept in that process's own dictionary
-  # rather than under a registered name, because a named table is VM-global and
-  # two executors in one VM would collide on it — the same reason nothing else in
-  # this project hides per-runtime state in a global name. Reading another
-  # process's dictionary is unusual, and it is used here precisely because it
-  # reads state that process owns without waiting for it to be free.
+  # Technical depth: `execute/5` performs admitted work in its caller while this
+  # executor's GenServer remains available for short authority decisions. The
+  # table is created per executor process and its identifier is kept in that
+  # process's own dictionary rather than under a registered name, because a named
+  # table is VM-global and two executors in one VM would collide on it — the same
+  # reason nothing else in this project hides per-runtime state in a global name.
+  # Reading another process's dictionary is unusual, and it lets `cancel/2` find
+  # the caller-published process group without routing cleanup through the server.
   # Concept: the process whose authority admitted the effect is the one a
   # launch-owned guard watches.
   #
