@@ -1035,9 +1035,12 @@ defmodule Loopex.Executor.Local do
   # else is reserved to the caller, which then owns the waiting. Each reservation
   # records its exact live holder so receipt lookup and release below describe
   # work still held here rather than work this server is performing.
-  def handle_call({:reserve, job}, {caller, _tag}, state) do
-    job_id = Map.get(job, :job_id, "")
-
+  # A missing identity cannot name durable truth and is refused without entering
+  # the reservation map. Full validation deliberately remains after marker
+  # resolution, so a valid same-digest admission still joins before a duplicate
+  # caller's ephemeral grant is revalidated.
+  def handle_call({:reserve, %{job_id: job_id} = job}, {caller, _tag}, state)
+      when is_binary(job_id) and job_id != "" do
     case reserve_decision(state, job, job_id) do
       # Technical depth: every call gets an opaque reference and its own caller
       # monitor. Several callers can therefore join one durable job without a
@@ -1061,6 +1064,9 @@ defmodule Loopex.Executor.Local do
         {:reply, answer, state}
     end
   end
+
+  def handle_call({:reserve, _invalid_job}, _from, state),
+    do: {:reply, refused_before_effect(:canonical_job_request_mismatch), state}
 
   # Concept: a reservation queues or joins work; this second decision is the
   # only permission for its holder to begin an effect.
@@ -1182,8 +1188,10 @@ defmodule Loopex.Executor.Local do
   # reaches validation for a new effect; a matching admission joins, a refusal
   # replays, and a conflicting digest conflicts.
   defp permit_marker_decision(state, job, reservation_ref, caller) do
-    if reservation_owned?(state, job.job_id, reservation_ref, caller) do
-      case reconcile(state.ledger, resolved_jobs(state, job.job_id)) do
+    job_id = Map.get(job, :job_id, "")
+
+    if reservation_owned?(state, job_id, reservation_ref, caller) do
+      case reconcile(state.ledger, resolved_jobs(state, job_id)) do
         nil -> existing_marker_decision(state, job)
         quarantine -> {:error, quarantine}
       end
@@ -1193,13 +1201,15 @@ defmodule Loopex.Executor.Local do
   end
 
   defp existing_marker_decision(state, job) do
-    case Ledger.read_marker(state.ledger, job.job_id) do
+    job_id = Map.get(job, :job_id, "")
+
+    case Ledger.read_marker(state.ledger, job_id) do
       :absent ->
         :new
 
       {:ok, record} ->
         cond do
-          record["canonical_request_digest"] != job.canonical_request_digest ->
+          record["canonical_request_digest"] != Map.get(job, :canonical_request_digest) ->
             {:error, :job_id_conflict}
 
           Map.get(record, :ledger_kind) == Ledger.refusal_kind() ->

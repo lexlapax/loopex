@@ -23,6 +23,26 @@ defmodule Loopex.Executor.LocalTest do
     assert MapSet.new(Executor.required_grant_bindings()) == @oracle
   end
 
+  test "a malformed job is refused without reserving an empty identity" do
+    fixture = fixture("malformed-job")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    refusal = {:error, {:refused_before_effect, :canonical_job_request_mismatch}}
+
+    assert ^refusal = Local.execute(fixture.executor, %{}, %{})
+
+    # The serialized boundary itself refuses the missing identity. Observing it
+    # directly makes the no-reservation half non-vacuous: a path that briefly
+    # reserves under "" and releases after the public call would otherwise look
+    # identical once `execute/3` returns.
+    assert ^refusal = GenServer.call(fixture.executor, {:reserve, %{}})
+
+    assert Process.alive?(fixture.executor)
+    assert %{dispatches: %{}} = Local.stats(fixture.executor)
+    refute Map.has_key?(:sys.get_state(fixture.executor).reserved, "")
+    assert Local.receipt(fixture.executor, "") == :absent
+  end
+
   test "each missing and wrong grant binding is refused before process start" do
     fixture = fixture("negative-bindings")
     on_exit(fn -> stop_fixture(fixture) end)
