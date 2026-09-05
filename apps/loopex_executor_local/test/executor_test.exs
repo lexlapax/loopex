@@ -3,6 +3,7 @@ defmodule Loopex.Executor.LocalTest do
 
   alias Loopex.Executor
   alias Loopex.Executor.Local
+  alias Loopex.Executor.Local.Ledger
   alias Loopex.Executor.Local.WorkspaceLease
 
   @oracle MapSet.new([
@@ -193,6 +194,16 @@ defmodule Loopex.Executor.LocalTest do
     assert {:ok, ^receipt} = Local.receipt(fixture.executor, job.job_id)
   end
 
+  defp await_absent(lookup, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+
+    Stream.repeatedly(fn -> lookup.() end)
+    |> Enum.find_value(false, fn
+      :absent -> true
+      _other -> System.monotonic_time(:millisecond) > deadline && :expired
+    end) == true
+  end
+
   defp await_answer(lookup, timeout_ms) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
     await_answer_until(lookup, deadline)
@@ -211,6 +222,59 @@ defmodule Loopex.Executor.LocalTest do
       answer ->
         answer
     end
+  end
+
+  # Concept: a reservation belongs to the process that asked for it, and does
+  # not outlive that process.
+  #
+  # Technical depth: the reserve call used to run under the default five-second
+  # bound while the server could spend exactly five seconds waiting for the root
+  # claim, so an expired caller left a reservation nothing released and the job
+  # read as in flight forever. The caller is now monitored, and the call bound
+  # outlives the claim wait. The first case kills a reserving caller; the second
+  # holds the root claim for longer than the old bound and proves the caller is
+  # answered, not exited.
+  test "a reservation dies with the process that asked for it" do
+    fixture = fixture("reservation-owner")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, _grant} = job_and_grant(fixture, "owner", "loopex.demo.write")
+    parent = self()
+
+    reserver =
+      spawn(fn ->
+        send(parent, {:reserved, GenServer.call(fixture.executor, {:reserve, job})})
+        receive do: (:release_me -> :ok)
+      end)
+
+    assert_receive {:reserved, {:ok, _placement}}, 5_000
+    assert {:error, :effect_in_flight} = Local.receipt(fixture.executor, job.job_id)
+
+    Process.exit(reserver, :kill)
+
+    assert await_absent(fn -> Local.receipt(fixture.executor, job.job_id) end, 2_000),
+           "the reservation outlived the process that asked for it"
+  end
+
+  test "a reserve blocked by a held claim is answered inside its own bound" do
+    fixture = fixture("reservation-claim")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "claim", "loopex.demo.write")
+    {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+
+    holder =
+      Task.async(fn ->
+        Ledger.with_claim(prepared, fn -> Process.sleep(6_500) end)
+      end)
+
+    Process.sleep(100)
+    started = System.monotonic_time(:millisecond)
+    result = Local.execute(fixture.executor, job, grant)
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    assert {:error, {:ledger_unavailable, :root_claim_held}} = result
+    assert elapsed < 9_000, "the caller waited #{elapsed} ms instead of being answered"
+    Task.await(holder, 10_000)
+    assert :absent = Local.receipt(fixture.executor, job.job_id)
   end
 
   defp fixture(label) do

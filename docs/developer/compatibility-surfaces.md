@@ -330,9 +330,10 @@ and `abandon_prepared(activation)`. Prepared installation binds the handler to
 the attachment and the exact one-use capability and makes a holder process the
 handler owns that capability's acknowledged holder; activation and abandonment
 are presented from that holder and wait without a bound, a holder that dies
-without answering is reported as `:prepared_holder_down`, and abandonment
-schedules no recovered work. `abandon_resume(attachment, activation)` was
-removed with that change.
+without answering is reported as `{:error, :prepared_activation_holder_lost}`,
+and abandonment schedules no recovered work. `abandon_resume(attachment,
+activation)`, the entry ADR 0016 names, is kept and presents the capability
+from the same holder.
 An unrecognised flag is refused rather than
 ignored, which means adding a flag is observable and removing one is breaking.
 `loopex artifact` reads objects through the `Loopex.ArtifactStore` port, so the

@@ -313,6 +313,23 @@ defmodule LoopexCli.Interrupt do
     end
   end
 
+  @doc """
+  ## Concept
+
+  ADR 0016's additive entry for giving a prepared capability up, kept at the
+  shape the decision names.
+
+  ## Technical depth
+
+  The attachment is the one the handler was installed with and carries no
+  authority of its own; the capability is what the owner checks, and it is
+  presented from its holder exactly as `abandon_prepared/1` presents it. The
+  entry exists so that the accepted decision's named surface stays true rather
+  than being retired by a changelog line.
+  """
+  @spec abandon_resume(Loopex.Attachment.t(), term()) :: :ok | {:error, term()}
+  def abandon_resume(_attachment, activation), do: abandon_prepared(activation)
+
   # Concept: which process holds this exact capability now.
   #
   # Technical depth: the handler answers from its manager's own process, and the

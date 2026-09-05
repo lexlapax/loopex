@@ -105,6 +105,17 @@ defmodule Loopex.Executor.Local do
   # sharing one root, is capped by the job's own deadline, and never becomes
   # permission: only the holder releases the claim.
   @claim_wait_ms 5_000
+  # Concept: the call that asks for a reservation must outlive the wait the
+  # server may spend answering it.
+  #
+  # Technical depth: `handle_call({:reserve, job})` waits for the root claim for
+  # up to `@claim_wait_ms` inside the server, and `GenServer.call/2`'s default
+  # bound is that same number, so a caller expired exactly as the claim was won:
+  # the server then recorded a reservation for a caller that had already exited
+  # and no release ever arrived, and every later lookup of that job answered
+  # `effect_in_flight` for work nobody was doing. The call bound is therefore the
+  # claim wait plus a margin, and the server monitors the caller besides.
+  @reserve_call_ms @claim_wait_ms + 5_000
 
   # The longest a receipt lookup waits for another instance's root claim. It is a
   # fraction of the admission ceiling because `receipt/2` is a `GenServer.call`
@@ -251,7 +262,7 @@ defmodule Loopex.Executor.Local do
     progress = progress || Executor.discard_progress()
     job_id = Map.get(job, :job_id, "")
 
-    case GenServer.call(executor, {:reserve, job}) do
+    case GenServer.call(executor, {:reserve, job}, @reserve_call_ms) do
       {:ok, placement} ->
         try do
           run_reserved(placement, job, grant, options, progress)
@@ -839,6 +850,7 @@ defmodule Loopex.Executor.Local do
          process_probe: process_probe,
          inflight_table: table,
          reserved: %{},
+         reservation_monitors: %{},
          dispatches: %{}
        }}
     else
@@ -939,9 +951,19 @@ defmodule Loopex.Executor.Local do
     job_id = Map.get(job, :job_id, "")
 
     case reserve_decision(state, job, job_id) do
+      # Technical depth: the caller is monitored so that a reservation never
+      # outlives the process it was made for; a release that arrives later is
+      # then the ordinary path, and one that never arrives is answered by the
+      # monitor rather than by a job that reads as in flight forever.
       :reserve ->
+        monitor = Process.monitor(caller)
+
         {:reply, {:ok, placement(state)},
-         %{state | reserved: Map.put(state.reserved, job_id, caller)}}
+         %{
+           state
+           | reserved: Map.put(state.reserved, job_id, caller),
+             reservation_monitors: Map.put(state.reservation_monitors, monitor, job_id)
+         }}
 
       answer ->
         {:reply, answer, state}
@@ -1038,8 +1060,7 @@ defmodule Loopex.Executor.Local do
   end
 
   @impl GenServer
-  def handle_cast({:release, job_id}, state),
-    do: {:noreply, %{state | reserved: Map.delete(state.reserved, job_id)}}
+  def handle_cast({:release, job_id}, state), do: {:noreply, drop_reservation(state, job_id)}
 
   # Concept: a job is counted as dispatched once it has been durably admitted,
   # never merely because someone asked for it.
@@ -1061,7 +1082,30 @@ defmodule Loopex.Executor.Local do
   # this clause the default implementation logs each one as an unexpected
   # message, which turns a bounded abandonment into noise in an operator's log.
   @impl GenServer
+  def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
+    case Map.pop(state.reservation_monitors, monitor) do
+      {nil, _monitors} ->
+        {:noreply, state}
+
+      {job_id, monitors} ->
+        {:noreply, drop_reservation(%{state | reservation_monitors: monitors}, job_id)}
+    end
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp drop_reservation(state, job_id) do
+    {gone, monitors} =
+      Enum.split_with(state.reservation_monitors, fn {_monitor, held} -> held == job_id end)
+
+    Enum.each(gone, fn {monitor, _job_id} -> Process.demonitor(monitor, [:flush]) end)
+
+    %{
+      state
+      | reserved: Map.delete(state.reserved, job_id),
+        reservation_monitors: Map.new(monitors)
+    }
+  end
 
   @impl GenServer
   def format_status(status) do

@@ -211,7 +211,8 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
   exist and a preparer's death left nothing any process could present. The
   handler now hands the capability, at installation, to a holder process it
   owns: activation and abandonment go through that holder
-  (`activate_prepared/1`, `abandon_prepared/1`; `abandon_resume/2` is removed)
+  (`activate_prepared/1`, `abandon_prepared/1`; `abandon_resume/2` is kept
+  and delegates to the holder)
   and wait for the owner without a bound, `install_prepared/3` returns the
   owner's acknowledgement or refusal, a refused activation is given up through
   the holder before the command reports, and a preparer that dies after the

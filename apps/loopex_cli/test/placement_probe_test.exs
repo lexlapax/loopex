@@ -45,6 +45,13 @@ defmodule LoopexCli.PlacementProbeTest do
     assert :ok = Placement.release(handle)
   end
 
+  test "a probe that never answers is bounded and is not absence" do
+    hanging = probe_script("sleep 30")
+    started = System.monotonic_time(:millisecond)
+    assert {:error, :process_probe_timeout} = Placement.process_incarnation("1", hanging)
+    assert System.monotonic_time(:millisecond) - started < 15_000
+  end
+
   defp probe_script(body) do
     file = Path.join(System.tmp_dir!(), "loopex-probe-#{System.unique_integer([:positive])}.sh")
     File.write!(file, "#!/bin/sh\n#{body}\n")
