@@ -106,9 +106,10 @@ The port also declares an optional `retained_receipt/2`, which reads the termina
 an executor retained for one job: `{:ok, receipt}`, `:absent`, or
 `{:error, term()}`, with `{:error, :effect_in_flight}` reserved for a job the
 executor still holds; the shipped local executor also answers
-`{:error, :effect_unresolved}` for an admitted effect no live instance is
-settling and `{:error, :effect_settling}` for a receipt whose open entry still
-stands, and a receipt is final only once its entry is gone. The session
+`{:error, :effect_unresolved}` for an admitted job this Local does not hold,
+with an open entry and no final receipt, and `{:error, :effect_settling}` for a
+receipt whose open entry still stands. A receipt is final only once its entry is
+gone. The session
 coordinator consults it once when a prepared resume is activated over a
 dispatched effect, ending the run `outcome_unknown` on absence, an unresolved
 entry, or a settling one; `Loopex.Executor.retained_receipt/3` bounds

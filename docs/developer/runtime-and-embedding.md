@@ -217,11 +217,14 @@ the handler keeps submitting the abort and arming the backstop. A signal's
 abort and an activation still cannot both win, because the owner fences the
 capability on an admitted abort and refuses a later activation as fenced. A
 preparer that dies after the acknowledgement leaves a live holder; one that
-dies before it leaves a capability no live process can present; removing the
-handler stops its holder, and the owner then pauses the recovered work for
-good rather than strand a capability nobody can present. The shipped `resume`
-command routes through that installation and, where the owner refuses the
-activation, gives the capability up through the handler before it reports.
+dies before it leaves a capability no live process can present. An independent
+guard ends the holder if the signal manager dies without terminating its
+handlers. Orderly replacement waits for the predecessor holder to end before it
+reports success. A presentation that already reached the owner is decided
+first; otherwise holder loss permanently pauses a still-prepared capability.
+The shipped `resume` command routes through that installation and, where the
+owner refuses the activation, gives the capability up through the handler
+before it reports.
 
 ### Reference Composition
 
@@ -313,10 +316,11 @@ coordinator therefore solicits its own query at activation, asks the executor
 through the optional `Loopex.Executor.retained_receipt/2` callback, and validates the
 answer exactly as it validates a host's: a retained receipt commits the receipt
 fact and the run continues; `:absent`, `{:error, :effect_unresolved}` (an
-admitted effect no live instance is settling), and `{:error, :effect_settling}`
-(a receipt whose open entry still stands) each commit `outcome_unknown`, since
-the process that could have finished them is gone once a prepared resume is
-activated, and the root's quarantine stands until an operator clears it; an
+admitted job this Local does not hold, with an open entry and no final receipt),
+and `{:error, :effect_settling}` (a receipt whose open entry still stands) each
+commit `outcome_unknown`, because none is a final fact from which this recovered
+owner may resume or re-dispatch, and the root's quarantine stands until an
+operator clears it; an
 executor that does not export the callback, answers `{:error, :effect_in_flight}`
 for a job it still holds or any other error, or returns a receipt that does not
 bind to the journaled job leaves the work pending for the host, which then

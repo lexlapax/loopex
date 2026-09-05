@@ -687,6 +687,111 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
   end
 
+  # Concept: an abrupt signal-manager loss cannot leave a prepared capability
+  # held by a process that no signal handler can reach.
+  #
+  # Technical depth: a manager crash does not invoke the handler's termination
+  # callback. The test temporarily gives the well-known name to an isolated
+  # event manager, completes the real prepared handoff through it, and kills
+  # only that manager. The holder's independent guard must then end the holder,
+  # allowing the session owner's existing monitor to abandon the still-prepared
+  # capability. The emulator's actual signal manager is never killed and is
+  # restored before any assertion leaves the protected block.
+  test "signal manager loss cannot strand its prepared holder" do
+    fixture = recovered_fixture("signal-manager-holder", :active)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-signal-manager-holder"
+             ])
+
+    actual_manager = Process.whereis(:erl_signal_server)
+    assert is_pid(actual_manager)
+    assert {:ok, isolated_manager} = :gen_event.start()
+    Process.unlink(isolated_manager)
+    Process.unregister(:erl_signal_server)
+
+    try do
+      assert Process.register(isolated_manager, :erl_signal_server)
+      assert :ok = invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
+
+      manager_monitor = Process.monitor(isolated_manager)
+      Process.exit(isolated_manager, :kill)
+      assert_receive {:DOWN, ^manager_monitor, :process, ^isolated_manager, :killed}, 1_000
+    after
+      case Process.whereis(:erl_signal_server) do
+        ^isolated_manager -> Process.unregister(:erl_signal_server)
+        _other -> :ok
+      end
+
+      if Process.alive?(isolated_manager), do: Process.exit(isolated_manager, :kill)
+
+      if is_nil(Process.whereis(:erl_signal_server)),
+        do: Process.register(actual_manager, :erl_signal_server)
+    end
+
+    assert await_settled_capability(activation, :resume_activation_abandoned),
+           "the dead signal manager left its prepared holder alive"
+
+    Process.sleep(100)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  # Concept: replacing a prepared handler cannot report success while its prior
+  # holder is still presenting the capability to the session owner.
+  #
+  # Technical depth: handler termination used to enqueue `:loopex_prepared_release`
+  # and return immediately. If the holder was already blocked in
+  # `activate_resume/1`, the replacement was installed and reported before that
+  # presentation had even been decided; releasing the coordinator afterwards
+  # could then spend the old capability behind the successful replacement. The
+  # coordinator is suspended only to establish that ordering without a timing
+  # race. Replacement must remain pending until the earlier presentation and
+  # holder have both settled.
+  test "handler replacement drains an in flight prepared presentation before it succeeds" do
+    fixture = recovered_fixture("handler-replacement-drain", :active)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-handler-replacement-drain"
+             ])
+
+    assert :ok = invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
+
+    coordinator = coordinator_of(fixture.runtime)
+    :erlang.suspend_process(coordinator)
+
+    presentation = Task.async(fn -> invoke(Interrupt, :activate_prepared, [activation]) end)
+    capability = activation.capability
+
+    try do
+      assert queued_activation?(coordinator, capability),
+             "the prepared presentation never reached the suspended coordinator"
+
+      replacement =
+        Task.async(fn -> invoke(Interrupt, :install, [fixture.attachment, @grace]) end)
+
+      refute Task.yield(replacement, 250),
+             "handler replacement succeeded while its predecessor was still presenting"
+
+      :erlang.resume_process(coordinator)
+
+      assert {:ok, {:ok, session_id}} = Task.yield(presentation, 10_000)
+      assert session_id == fixture.session_id
+      assert {:ok, :ok} = Task.yield(replacement, 10_000)
+    after
+      if suspended?(coordinator), do: :erlang.resume_process(coordinator)
+    end
+
+    assert_refused(invoke(Interrupt, :activate_prepared, [activation]))
+  end
+
   test "the prepared interrupt owner can abandon its capability without activating work" do
     fixture = recovered_fixture("interrupt-abandon", :active)
 
@@ -1545,6 +1650,37 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     else
       Process.sleep(10)
       await_settled_capability(activation, expected, attempts - 1)
+    end
+  end
+
+  defp queued_activation?(coordinator, capability, attempts \\ 300)
+  defp queued_activation?(_coordinator, _capability, 0), do: false
+
+  defp queued_activation?(coordinator, capability, attempts) do
+    queued =
+      case Process.info(coordinator, :messages) do
+        {:messages, messages} ->
+          Enum.any?(messages, fn
+            {:"$gen_call", _from, {:activate_resume, _owner, ^capability}} -> true
+            _other -> false
+          end)
+
+        nil ->
+          false
+      end
+
+    if queued do
+      true
+    else
+      Process.sleep(10)
+      queued_activation?(coordinator, capability, attempts - 1)
+    end
+  end
+
+  defp suspended?(process) do
+    case Process.info(process, :status) do
+      {:status, :suspended} -> true
+      _other -> false
     end
   end
 
