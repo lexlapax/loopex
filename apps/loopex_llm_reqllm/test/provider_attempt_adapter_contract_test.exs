@@ -20,6 +20,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptCanaryAdapter do
       when mode in [
              :closed_port,
              :capture_closed_port,
+             :rate_limited,
              :http_error,
              :malformed_response,
              :incomplete_stream,
@@ -61,8 +62,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     previous_observer = Application.get_env(:loopex_llm_reqllm, :provider_attempt_canary_observer)
     previous_port = Application.get_env(:loopex_llm_reqllm, :provider_attempt_closed_port)
     previous_mode = Application.get_env(:loopex_llm_reqllm, :provider_attempt_canary_mode)
-    closed_port = reserve_closed_port()
-    telemetry_handler = "loopex-provider-attempt-#{System.unique_integer([:positive])}"
+    rate_limited_port = start_rate_limited_server(self())
 
     Application.put_env(
       :req_llm,
@@ -71,24 +71,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     )
 
     Application.put_env(:loopex_llm_reqllm, :provider_attempt_canary_observer, self())
-    Application.put_env(:loopex_llm_reqllm, :provider_attempt_closed_port, closed_port)
-    Application.put_env(:loopex_llm_reqllm, :provider_attempt_canary_mode, :closed_port)
-
-    :ok =
-      :telemetry.attach(
-        telemetry_handler,
-        [:finch, :request, :start],
-        fn _event, _measurements, metadata, observer ->
-          case metadata do
-            %{request: %Finch.Request{host: "127.0.0.1", port: ^closed_port}} ->
-              send(observer, {:provider_transport_attempt, self()})
-
-            _other ->
-              :ok
-          end
-        end,
-        self()
-      )
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_closed_port, rate_limited_port)
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_canary_mode, :rate_limited)
 
     try do
       System.put_env(variable, "credential-shaped-canary-secret")
@@ -107,7 +91,6 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
       assert_receive {:provider_transport_attempt, _worker}, 5_000
       refute_receive {:provider_transport_attempt, _worker}, 0
     after
-      :telemetry.detach(telemetry_handler)
       restore_env(variable, previous_credential)
       restore_application_env(:req_llm, :finch_request_adapter, previous_adapter)
 
@@ -312,6 +295,43 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     {:ok, {_address, port}} = :inet.sockname(socket)
     :ok = :gen_tcp.close(socket)
     port
+  end
+
+  defp start_rate_limited_server(observer) do
+    caller = self()
+
+    spawn_link(fn ->
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+      {:ok, {_address, port}} = :inet.sockname(listener)
+      send(caller, {:rate_limited_port, port})
+      serve_rate_limits(listener, observer)
+    end)
+
+    receive do
+      {:rate_limited_port, port} -> port
+    after
+      5_000 -> flunk("the rate-limit fixture did not start")
+    end
+  end
+
+  defp serve_rate_limits(listener, observer) do
+    case :gen_tcp.accept(listener, 1_000) do
+      {:ok, socket} ->
+        _request = :gen_tcp.recv(socket, 0, 1_000)
+        send(observer, {:provider_transport_attempt, self()})
+
+        :ok =
+          :gen_tcp.send(
+            socket,
+            "HTTP/1.1 429 Too Many Requests\r\nretry-after: 0\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          )
+
+        :gen_tcp.close(socket)
+        serve_rate_limits(listener, observer)
+
+      {:error, :timeout} ->
+        :gen_tcp.close(listener)
+    end
   end
 
   defp server_port_for(:closed_port, port), do: port
