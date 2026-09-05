@@ -202,6 +202,12 @@ defmodule Loopex.Runtime.Control do
        context_token_budget: Keyword.fetch!(options, :context_token_budget),
        progress_to: Keyword.get(options, :progress_to),
        diagnostics_to: Keyword.get(options, :diagnostics_to),
+       # Concept: every provider-permit decision reads one runtime-local wall clock.
+       #
+       # Technical depth: the function stays in private process state so the exact
+       # send boundary can be exercised deterministically without widening runtime
+       # configuration or changing production's System clock.
+       wall_clock: fn -> System.system_time(:millisecond) end,
        lane: OwnerLane.new(Keyword.fetch!(options, :store)),
        sessions: %{},
        monitor_to_session: %{},
@@ -377,14 +383,14 @@ defmodule Loopex.Runtime.Control do
          {:ok, entry} <- provider_current_owner(state, session_id, authority, caller),
          :ok <- provider_position_current(entry, authority),
          :ok <- provider_worker_ready(authority),
-         :ok <- provider_before_deadline(authority),
+         :ok <- provider_before_deadline(authority, state.wall_clock),
          :ok <- provider_position_binding(state, session_id, authority, binding),
          :ok <- provider_attempt_unspent(state, binding) do
       %{worker: worker, permit_reference: reference} = authority
       permit = {:loopex_provider_permit, reference, binding}
       spent = Map.put(state.spent_attempts, binding, {worker, reference})
 
-      case send_provider_permit_before_deadline(worker, permit, authority) do
+      case send_provider_permit_before_deadline(worker, permit, authority, state.wall_clock) do
         :ok -> {:reply, {:ok, :dispatched}, %{state | spent_attempts: spent}}
         {:error, reason} -> {:reply, {:error, reason}, state}
       end
@@ -1220,21 +1226,22 @@ defmodule Loopex.Runtime.Control do
 
   defp provider_worker_ready(_authority), do: {:error, :provider_worker_unavailable}
 
-  defp provider_before_deadline(%{deadline: deadline}) when is_integer(deadline) do
-    if System.system_time(:millisecond) < deadline,
+  defp provider_before_deadline(%{deadline: deadline}, wall_clock)
+       when is_integer(deadline) and is_function(wall_clock, 0) do
+    if wall_clock.() < deadline,
       do: :ok,
       else: {:error, :deadline_elapsed}
   end
 
-  defp provider_before_deadline(_authority), do: {:error, :deadline_elapsed}
+  defp provider_before_deadline(_authority, _wall_clock), do: {:error, :deadline_elapsed}
 
   # Technical depth: callers allocate the message and the state they will
   # publish before entering this helper. Its only successful-path actions are
   # the final clock sample, comparison, and direct send; the receiver-side fence
   # covers the irreducible scheduler boundary between that sample and the send.
-  defp send_provider_permit_before_deadline(worker, permit, %{deadline: deadline})
-       when is_pid(worker) and is_integer(deadline) do
-    if System.system_time(:millisecond) < deadline do
+  defp send_provider_permit_before_deadline(worker, permit, %{deadline: deadline}, wall_clock)
+       when is_pid(worker) and is_integer(deadline) and is_function(wall_clock, 0) do
+    if wall_clock.() < deadline do
       send(worker, permit)
       :ok
     else
@@ -1242,7 +1249,7 @@ defmodule Loopex.Runtime.Control do
     end
   end
 
-  defp send_provider_permit_before_deadline(_worker, _permit, _authority),
+  defp send_provider_permit_before_deadline(_worker, _permit, _authority, _wall_clock),
     do: {:error, :deadline_elapsed}
 
   # Concept: the permit names the attempt the journal committed, never the

@@ -825,6 +825,69 @@ defmodule Loopex.ProviderAttemptProtocolTest do
            }
   end
 
+  # Concept: the deadline instant itself is outside provider authority at the
+  # actual Control send boundary, not merely in the shared Bounds helper.
+  #
+  # Technical depth: the queued dispatch is held while Control's private clock
+  # is scripted to answer one millisecond before the committed deadline at the
+  # early check and exactly the deadline at the final send check. This drives
+  # the real durable-binding read and permit path without racing wall time. A
+  # final comparison changed from `<` to `<=` sends the permit, enters the model,
+  # and fails this case.
+  test "Control refuses a provider permit when its final clock sample equals the committed deadline" do
+    fixture =
+      start(
+        script: [%{text: "must not run", calls: []}],
+        bounds_deadline_ms: 10_000,
+        bounds_token_budget: 17
+      )
+
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+    {:ok, clock} = Agent.start_link(fn -> :not_armed end)
+
+    :sys.replace_state(control, fn state ->
+      Map.put(state, :wall_clock, fn -> next_clock_sample!(clock) end)
+    end)
+
+    attempt = queue_provider_permit_request(fixture, "exact Control deadline")
+    deadline = committed_deadline!(attempt.request_record)
+    Agent.update(clock, fn :not_armed -> [deadline - 1, deadline] end)
+    {:"$gen_call", {_caller, tag}, _request} = attempt.control_message
+
+    # Keep the coordinator from interpreting the deliberately injected clock;
+    # this case owns Control's exact reply and send boundary only.
+    suspend_process(attempt.coordinator)
+
+    try do
+      resume_process(control)
+
+      assert_receive {:trace, ^control, :send, {^tag, {:error, :deadline_elapsed}}, _target},
+                     5_000
+
+      worker = attempt.worker
+
+      refute_receive {:trace, ^control, :send, {:loopex_provider_permit, _reference, _binding},
+                      ^worker},
+                     50
+
+      assert AgentLoopTestModel.dispatched(fixture.model) == []
+      assert Agent.get(clock, & &1) == []
+
+      refute Map.has_key?(
+               control |> :sys.get_state() |> Map.fetch!(:spent_attempts),
+               attempt.binding
+             )
+    after
+      if Process.alive?(control) do
+        :sys.replace_state(control, fn state ->
+          Map.put(state, :wall_clock, fn -> System.system_time(:millisecond) end)
+        end)
+      end
+
+      resume_process(attempt.coordinator)
+    end
+  end
+
   # Concept: a permit sent inside the run's authority cannot make a provider
   # call when scheduler delay keeps its worker from handling that permit until
   # after the committed deadline.
@@ -2030,6 +2093,58 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert_late_error_ordering()
   end
 
+  # Concept: usage rejected as part of an unreadable provider reply cannot be
+  # recovered under a different interpretation for durable accounting.
+  #
+  # Technical depth: atom and binary spellings of one usage member collide at
+  # canonical reply admission. Selecting the binary spelling afterwards would
+  # turn the same ambiguous bytes into a reported zero charge even though the
+  # reply was refused. The full runtime path must instead charge the declared
+  # remaining allowance, which is the conservative accounting cell for an
+  # unreadable dispatched answer.
+  test "an unreadable usage key collision consumes the remaining allowance rather than reporting one spelling" do
+    token_budget = 11
+
+    fixture =
+      start(
+        script: [
+          %{
+            text: "ambiguous usage",
+            calls: [],
+            usage: %{
+              "input_tokens" => 0,
+              "output_tokens" => 0,
+              input_tokens: 99_999,
+              output_tokens: 99_999
+            }
+          }
+        ],
+        bounds_token_budget: token_budget
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "refuse ambiguous usage")
+
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+
+    [settlement] =
+      fixture
+      |> Fixture.records(session_id)
+      |> records_of_kind("model_attempt_settled_v1")
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "unreadable_model_answer"
+           }
+
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
+
+    assert_remaining_allowance(fixture, session_id, token_budget)
+  end
+
   test "recovery settles an unresolved open without redispatch and never reuses or closes the dead predecessor stream" do
     fixture =
       start(
@@ -3051,6 +3166,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       [] -> flunk("the committed request carries no absolute deadline")
       _many -> flunk("the committed request carries competing absolute deadlines")
     end
+  end
+
+  defp next_clock_sample!(clock) do
+    Agent.get_and_update(clock, fn
+      [sample | rest] -> {sample, rest}
+      other -> raise "Control sampled an unarmed or exhausted test clock: #{inspect(other)}"
+    end)
   end
 
   defp wait_past_deadline(deadline) do

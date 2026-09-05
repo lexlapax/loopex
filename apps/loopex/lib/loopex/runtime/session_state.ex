@@ -1123,13 +1123,53 @@ defmodule Loopex.Runtime.SessionState do
   end
 
   defp raw_reply_usage(raw) when is_map(raw) and not is_struct(raw) do
-    case Map.get(raw, :usage, Map.get(raw, "usage", :absent)) do
-      :absent -> nil
-      usage -> ProviderAttempt.normalize_usage(usage)
+    with {:ok, usage} <- unambiguous_raw_usage(raw),
+         true <- normalized_keys_unique?(usage) do
+      ProviderAttempt.normalize_usage(usage)
+    else
+      _ambiguous_or_absent -> nil
     end
   end
 
   defp raw_reply_usage(_raw), do: nil
+
+  # Concept: bytes refused as ambiguous cannot become reported accounting under
+  # one of their competing interpretations.
+  #
+  # Technical depth: canonical reply admission normalises atom keys to their
+  # binary spelling and refuses collisions. Settlement may still recover an
+  # otherwise valid usage pair when another reply member is unreadable, but it
+  # must apply that same ambiguity boundary to the raw `usage` member and every
+  # key inside it. Returning no usable pair selects the conservative remaining-
+  # allowance accounting cell below.
+  defp unambiguous_raw_usage(raw) do
+    case {Map.fetch(raw, :usage), Map.fetch(raw, "usage")} do
+      {{:ok, _atom_usage}, {:ok, _binary_usage}} -> :ambiguous
+      {{:ok, usage}, :error} -> {:ok, usage}
+      {:error, {:ok, usage}} -> {:ok, usage}
+      {:error, :error} -> :absent
+    end
+  end
+
+  defp normalized_keys_unique?(usage) when is_map(usage) and not is_struct(usage) do
+    usage
+    |> Map.keys()
+    |> Enum.reduce_while(MapSet.new(), fn key, seen ->
+      normalized = if is_atom(key), do: Atom.to_string(key), else: key
+
+      if MapSet.member?(seen, normalized) do
+        {:halt, false}
+      else
+        {:cont, MapSet.put(seen, normalized)}
+      end
+    end)
+    |> case do
+      false -> false
+      %MapSet{} -> true
+    end
+  end
+
+  defp normalized_keys_unique?(_usage), do: true
 
   defp attempt_accounting("not_dispatched", _usage),
     do: %{"source" => "none", "basis" => "not_dispatched"}
