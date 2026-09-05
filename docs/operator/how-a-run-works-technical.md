@@ -226,9 +226,11 @@ and usable only by its current holder; it never enters a record, an event, a
 snapshot, a progress item, or a diagnostic. The holder is the process that asked
 for the preparation until `resume` installs its signal-manager guard and visible
 handler, then asks the session coordinator to hand the capability to the exact
-guarded holder. The coordinator alone linearizes that handoff and returns `:ok`
-only after the guard has processed its commit. Death before that verdict fails
-closed; death after it leaves the acknowledged holder live. Manager,
+guarded holder. The coordinator decides the handoff and sends its verdict to the
+installer; the installer forwards it to the guard, and the coordinator records
+the holder and returns `:ok` only after that guard acknowledges it. Installer
+death before forwarding fails closed. After forwarding, ordered delivery makes
+the handoff independent of the installer even if its reply is lost. Manager,
 coordinator, or holder loss ends the exact authority rather than authorizing a
 substitute. The capability has four states — prepared, spent, abandoned, fenced
 — and only *spent* schedules anything. `resume` installs the interrupt handler sized by the period

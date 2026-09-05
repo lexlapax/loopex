@@ -971,6 +971,138 @@ defmodule Loopex.Executor.LocalTest do
     end
   end
 
+  # Concept: malformed durable authority is unavailability, never evidence that
+  # this root is clear to run another effect.
+  #
+  # Technical depth: `reconcile/2` returns the open-snapshot error directly. A
+  # fail-open branch that turns that error into `nil` admits this job and writes
+  # its file, so the case drives the real reserve/permit boundary and checks both
+  # the exact refusal and absence of every new-effect artifact.
+  test "a malformed open authority snapshot cannot become permission" do
+    fixture = fixture("malformed-open-snapshot")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "malformed-open-snapshot", "loopex.demo.write")
+
+    assert {:ok, placement} = GenServer.call(fixture.executor, {:reserve, job}, 10_000)
+    reservation_ref = Map.fetch!(placement, :reservation_ref)
+
+    File.write!(Path.join([fixture.ledger, "open", "malformed"]), "not a ledger record")
+
+    assert GenServer.call(
+             fixture.executor,
+             {:permit, job, grant, reservation_ref},
+             10_000
+           ) == {:error, {:ledger_unavailable, :malformed_record}}
+
+    GenServer.cast(fixture.executor, {:release, job.job_id, reservation_ref})
+    _release_barrier = Local.stats(fixture.executor)
+
+    assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+    assert Ledger.read_marker(prepared, job.job_id) == :absent
+    refute Ledger.open?(prepared, job.job_id)
+    refute File.exists?(Path.join(fixture.workspace, "malformed-open-snapshot.txt"))
+  end
+
+  # Concept: every unresolved open operation contributes to the quarantine; a
+  # root does not become usable merely because more than one needs repair.
+  #
+  # Technical depth: two valid foreign admissions are installed under one real
+  # root claim. A shortcut that treats a list with two or more members as clear
+  # admits the unrelated effect, while the correct snapshot reports the exact
+  # unresolved count and publishes nothing for the new job.
+  test "several unresolved open authorities preserve their exact quarantine count" do
+    fixture = fixture("several-unresolved-open")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    {first, _first_grant} = job_and_grant(fixture, "unresolved-first", "loopex.demo.write")
+    {second, _second_grant} = job_and_grant(fixture, "unresolved-second", "loopex.demo.write")
+    {job, grant} = job_and_grant(fixture, "after-several-unresolved", "loopex.demo.write")
+    assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+
+    assert :ok =
+             Ledger.with_claim(prepared, fn ->
+               with :ok <-
+                      Ledger.admit(
+                        prepared,
+                        Ledger.marker(first),
+                        Ledger.open_entry(first, "foreign-executor")
+                      ) do
+                 Ledger.admit(
+                   prepared,
+                   Ledger.marker(second),
+                   Ledger.open_entry(second, "foreign-executor")
+                 )
+               end
+             end)
+
+    assert Local.execute(fixture.executor, job, grant) ==
+             {:error, {:reconciliation_required, 2}}
+
+    assert Ledger.read_marker(prepared, job.job_id) == :absent
+    refute Ledger.open?(prepared, job.job_id)
+    refute File.exists?(Path.join(fixture.workspace, "after-several-unresolved.txt"))
+  end
+
+  # Concept: the quarantine count describes only unresolved authority. Work
+  # still owned by this exact Local instance remains protected, but it is not an
+  # operator reconciliation item.
+  #
+  # Technical depth: one delayed job supplies a live operation-owner token while
+  # one foreign open entry is installed beside it. Counting the complete
+  # snapshot instead of the filtered unresolved set reports two and misdirects
+  # recovery; the correct refusal reports one and starts no third effect.
+  test "live owned work does not inflate the unresolved quarantine count" do
+    fixture = fixture("exact-unresolved-count")
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    {owned, owned_grant} =
+      job_and_grant(fixture, "exact-count-owned", "loopex.demo.wait_write", %{
+        "relative_path" => "exact-count-owned.txt",
+        "content" => "bytes-exact-count-owned",
+        "delay_ms" => 30_000
+      })
+
+    {foreign, _foreign_grant} =
+      job_and_grant(fixture, "exact-count-foreign", "loopex.demo.write")
+
+    {job, grant} = job_and_grant(fixture, "exact-count-new", "loopex.demo.write")
+    parent = self()
+
+    owner =
+      Task.async(fn ->
+        Local.execute(fixture.executor, owned, owned_grant, notify: parent)
+      end)
+
+    assert_receive {:executor_process_started, owned_job_id, "loopex.demo.wait_write", ["PATH"]},
+                   5_000
+
+    assert owned_job_id == owned.job_id
+
+    try do
+      assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+
+      assert :ok =
+               Ledger.with_claim(prepared, fn ->
+                 Ledger.admit(
+                   prepared,
+                   Ledger.marker(foreign),
+                   Ledger.open_entry(foreign, "foreign-executor")
+                 )
+               end)
+
+      assert Local.execute(fixture.executor, job, grant) ==
+               {:error, {:reconciliation_required, 1}}
+
+      assert Ledger.read_marker(prepared, job.job_id) == :absent
+      refute Ledger.open?(prepared, job.job_id)
+      assert Ledger.open?(prepared, owned.job_id)
+      assert Ledger.open?(prepared, foreign.job_id)
+      refute File.exists?(Path.join(fixture.workspace, "exact-count-new.txt"))
+    after
+      if Process.alive?(owner.pid), do: Task.shutdown(owner, :brutal_kill)
+    end
+  end
+
   test "a permit whose holder dies during final validation starts no effect" do
     # Concept: the process that owns a queued reservation must still be alive
     # when the final permit is fixed; a dead caller cannot leave runnable work.

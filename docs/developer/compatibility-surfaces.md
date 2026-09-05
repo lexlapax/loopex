@@ -133,20 +133,24 @@ unreleased.
 The local adapter's queue reservation is deliberately not evidence that an
 effect is live. A second serialized permit decision revalidates the exact live
 holder, the complete shared-root reconciliation result, the job, grant, lease,
-and deadline. Only a newly admitted permit publishes the marker and open entry,
-installs the exact operation-owner token under the same root claim, and counts
-as a dispatch; another reservation for that job is only a joiner. If closing an
-entry changes only part of the ledger, the adapter restores the open authority
-before releasing the root claim or retains the claim and quarantines the root
-when restoration cannot be proved. These are current semantics of the unstable
-trusted-local adapter, not new callbacks in the executor port.
+and deadline, then repeats the complete root snapshot after any bounded
+validation wait. A successful newly admitted permit publishes the marker and
+open entry, installs the exact operation-owner token under the same root claim,
+and counts as a dispatch. Publication can stop after the open entry but before
+the marker; that incomplete state installs no owner token and deliberately
+quarantines the root. Another reservation for that job is only a joiner. If
+closing an entry changes only part of the ledger, the adapter restores the open
+authority before releasing the root claim or retains the claim and quarantines
+the root when restoration cannot be proved. These are current semantics of the
+unstable trusted-local adapter, not new callbacks in the executor port.
 
 The adapter refuses a missing, empty, or larger-than-8,192-byte `job_id` before
 it enters the shared ledger or creates a reservation. That is a constraint of
 this concrete unstable adapter rather than a new field or callback in the
 executor protocol. Its filesystem effects also remain bound to the exact Local
-instance that admitted them, and a command worker is not released to run after
-its execute caller or launch guard has disappeared.
+instance that admitted them. A command worker is not released to run after its
+execute caller or launch guard has disappeared, and a potentially proved command
+result is re-fenced by the Local owner after cleanup before it can be reported.
 
 **Artifact object and use identity.** The adapter callbacks are `put/3`,
 `fetch/2`, `stat/2`, and `describe/2`. Core owns the caller-facing
@@ -229,12 +233,11 @@ term fails the reply's Store admission before projection. Widening that key set
 is the change a later milestone makes deliberately, and it is why the closure
 exists rather than a lenient filter.
 
-When another reply member is unreadable, accounting salvages reported usage
-only from one unambiguous exact two-key input/output map whose values themselves
-normalize as reported. An extra, missing, colliding, or invalid member instead
-charges the committed remaining allowance as unreported. The private salvage
-path rejects map cardinality before inspecting a key; it does not perform a
-second traversal of a hostile wide map after Store admission.
+An unreadable sibling or any other canonical mismatch invalidates the usage
+projection as well: accounting charges the committed remaining allowance as
+estimated even when the rejected raw reply contains a plausible pair. Reported
+usage survives only when the entire canonical reply validates and the later
+complete-settlement size preflight alone requires a compact unreadable result.
 
 **Store port.** An append failure gains one pair of reasons and one changed
 consequence. The local Store holds the log *file* rather than its path: it
@@ -359,10 +362,14 @@ returns `:ok` or the owner's `{:error, reason}`, `activate_prepared(activation)`
 and `abandon_prepared(activation)`. Prepared installation binds the handler to
 the attachment and the exact one-use capability and makes a holder process the
 handler owns that capability's acknowledged holder. Its signal-manager guard is
-armed and the handler is visible before public transfer begins; the session
-coordinator alone linearizes the transfer and returns `:ok` only after the exact
-guard has processed its commit. Death before that verdict fails closed, while
-death after it leaves the acknowledged holder live. Activation and abandonment
+armed and the handler is visible before public transfer begins. On this private
+CLI path the coordinator fixes the verdict, the installer forwards it to the
+guard, and the guard acknowledges it before the coordinator records the holder
+and returns `:ok`. Installer death before forwarding fails closed; after
+forwarding, ordered delivery makes the handoff independent of the installer even
+if its public reply is lost. Ordinary `transfer_resume/2` has no guard and a
+missing reply does not prove whether its coordinator transfer happened.
+Activation and abandonment
 are presented from that holder and wait without a bound; a holder that dies
 without answering is reported as `{:error, :prepared_activation_holder_lost}`,
 and abandonment schedules no recovered work. Orderly handler replacement

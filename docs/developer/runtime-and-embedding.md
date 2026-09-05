@@ -162,30 +162,33 @@ its worker-provenance wrapper until admission, so its data cannot impersonate
 the receiver's private deadline observation.
 
 The adapter's complete raw reply, including every raw usage key and value, must
-pass the Store's bounded plain-data admission before normalization or
-projection. If some other reply member is unreadable, only an unambiguous exact
-input/output usage pair whose values normalize as reported remains reported.
-Extra, missing, colliding, or invalid usage consumes the run's remaining
-allowance as unreported. Private salvage checks map cardinality before it
-inspects a key, so a hostile wide map cannot add a second unbounded traversal
-after Store admission.
+pass the Store's bounded plain-data admission and full canonical validation
+before accounting. Store or canonical refusal yields an unreadable result and
+charges the run's remaining allowance as estimated, even if one raw usage member
+looks valid. Missing or invalid usage in an otherwise canonical reply has the
+same accounting result. Only after full canonical success, when the complete
+durable settlement itself fails the Store-size preflight, may the compact
+unreadable settlement retain already validated reported usage.
 
 The local executor separates queue ownership from effect authority. Its first
 serialized decision reserves or joins a job but grants no permission to run.
 The same server answers a second permit request only after checking the exact
 live reservation holder, repeating complete root reconciliation after bounded
 pre-start validation, and validating the job, grant, lease, and deadline. For
-new work it publishes the durable marker and open entry and installs the exact
-operation-owner token under the same root claim before returning the permit; a
-joiner never owns or erases that token. A close that only partly changes the
+new work it publishes the durable open entry and marker and installs the exact
+operation-owner token under the same root claim before returning a successful
+permit; a joiner never owns or erases that token. If publication stops between
+the open entry and marker, no owner token is installed and the unresolved entry
+quarantines the root. A close that only partly changes the
 ledger restores the open authority before releasing the claim or retains the
 claim and quarantines the root when restoration cannot be proved, so unrelated
 work cannot turn an ambiguous prior effect into permission. A missing or
 oversized job identity is refused before ledger or reservation work. Filesystem
 effects run under an owner-aware worker bound to the Local instance that
-admitted them; command launch also monitors the execute caller before the child
-announces readiness, so neither form can begin after its exact authority is
-gone.
+admitted them. Command launch also monitors the execute caller before the child
+announces readiness, and a command's potentially proved result is checked
+against the Local owner again after cleanup, so neither start nor final proof can
+outlive its exact authority.
 
 All durable and public boundary data is bounded plain data. Provider structs,
 PIDs, functions, arbitrary terms, credentials, and implementation types remain
@@ -234,20 +237,23 @@ Recovery that may race an operator interrupt is deliberately two phase.
 replayed result or an opaque one-use activation capability while ordinary work
 remains paused. The caller then invokes `activate_resume/1` or
 `abandon_resume/1`, or hands the capability to another process with
-`transfer_resume/2`, which only the current holder may do. The session
-coordinator is the sole transfer linearization point and answers `:ok` only
-after the exact destination guard has processed its commit. All three wait for
-the coordinator's answer rather than expiring
-on a bound: the message carrying either call is not withdrawn when its caller
-stops waiting, so an expired call would report the session unavailable while the
-coordinator went on to spend the very activation the caller was told it had not
-got. Neither proposes a Store mutation, so waiting commits nothing, and a
-coordinator that has died refuses through its own exit.
+`transfer_resume/2`, which only the current holder may do. An ordinary transfer
+is fixed when the coordinator records the new holder; it has no destination
+guard, and loss of the caller before the reply leaves the result unknown to that
+caller rather than proving refusal. All three wait for the coordinator's answer
+rather than expiring on a bound: the message carrying either call is not
+withdrawn when its caller stops waiting, so an expired call would report the
+session unavailable while the coordinator went on to spend the very activation
+the caller was told it had not got. Neither proposes a Store mutation, so
+waiting commits nothing, and a coordinator that has died refuses through its
+own exit.
 `LoopexCli.Interrupt.install_prepared(attachment, cleanup_ms, activation)`
 arms the signal-manager guard and makes the handler visible before it asks the
 coordinator to hand the capability to a holder process started for that one
-purpose. It returns `:ok` only after that guard has processed the coordinator's
-commit, or returns the owner's refusal; a caller that continues past a refusal
+purpose. The coordinator fixes a verdict and sends it to the installer; the
+installer forwards it to the guard, whose exact acknowledgement precedes the
+coordinator recording the holder and replying. It returns `:ok` only after that
+sequence, or returns the owner's refusal; a caller that continues past a refusal
 as though the capability had moved has a defect of its own.
 `LoopexCli.Interrupt.activate_prepared(activation)` and
 `LoopexCli.Interrupt.abandon_prepared(activation)` present the capability from
@@ -257,9 +263,11 @@ never as a refusal. The holder is deliberately not the signal server: a
 blocked signal server could handle no signal, so the holder blocks instead and
 the handler keeps submitting the abort and arming the backstop. A signal's
 abort and an activation still cannot both win, because the owner fences the
-capability on an admitted abort and refuses a later activation as fenced. Death
-before the transfer verdict fails closed; death after it leaves the acknowledged
-holder live. Loss of the exact manager, coordinator, or holder ends that exact
+capability on an admitted abort and refuses a later activation as fenced.
+Installer death before forwarding the verdict fails closed. Once it has
+forwarded, same-sender ordering puts the verdict ahead of the installer's `DOWN`
+at the guard, so installer death cannot undo the handoff even if the public reply
+is lost. Loss of the exact manager, coordinator, or holder ends that exact
 authority rather than allowing a different process to infer success. An
 independent guard ends the holder if the signal manager dies without terminating
 its handlers. Orderly replacement installs a successor first, keeps interrupt

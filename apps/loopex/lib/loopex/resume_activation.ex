@@ -105,16 +105,22 @@ defmodule Loopex.ResumeActivation do
 
   ## Technical depth
 
-  ADR 0016 makes interrupt installation and holder transfer one serialized
-  handoff, and this is the half that moves the holder. Only the current holder
-  may ask, from its own process, and only while the capability is unspent,
-  unabandoned, and unfenced; the `:ok` reply is the acknowledgement, because the
-  owner has recorded the new holder by the time it answers. A preparer that dies
-  before that answer leaves a capability no live process can present, exactly as
-  before; one that dies after it leaves the new holder able to spend or abandon
-  it. The new holder is monitored, so its own death permanently pauses the
-  recovered work rather than leaving a capability waiting on a process that is
-  gone.
+  Only the current holder may ask, from its own process, and only while the
+  capability is unspent, unabandoned, and unfenced. On the ordinary path the
+  coordinator records the new holder before returning `:ok`; if the caller dies
+  before receiving that reply, the transfer may still have happened and the
+  missing reply is not a refusal.
+
+  The command's prepared-interrupt installer selects a private guarded variant.
+  The coordinator sends its verdict to that installer, the installer forwards it
+  to the signal-manager guard, and the guard acknowledges it before the
+  coordinator records the holder and replies. Installer death before forwarding
+  fails closed. After forwarding, same-sender message ordering makes the guard
+  process the verdict before the installer's `DOWN`, so installer death cannot
+  undo the handoff even if the public reply is lost. In either variant a returned
+  `:ok` proves the holder was recorded. The new holder is monitored, so its own
+  death permanently pauses the recovered work rather than leaving a capability
+  waiting on a process that is gone.
   """
   @spec transfer(t(), pid()) :: :ok | {:error, term()}
   def transfer(%__MODULE__{} = activation, holder) when is_pid(holder),

@@ -61,6 +61,31 @@ defmodule Loopex.ProviderDeadlineForgeryModel do
   end
 end
 
+defmodule Loopex.ProviderBinaryUsageMalformedModel do
+  @moduledoc false
+
+  @behaviour Loopex.Model
+
+  @impl Loopex.Model
+  def complete(request, _options, _progress) do
+    {:ok,
+     %{
+       "text" => "invalid binary-keyed reply",
+       "identity" => %{
+         "provider" => nil,
+         "model" => "scripted:v1",
+         "endpoint" => "in-process"
+       },
+       "usage" => %{"input_tokens" => 1, "output_tokens" => 1},
+       "tool_calls" => [],
+       "delta_count" => 0,
+       "streamed" => false,
+       "canonical_request_bytes" => request.canonical_request_bytes,
+       "staged_request_digest" => request.staged_request_digest
+     }}
+  end
+end
+
 defmodule Loopex.ProviderAttemptProtocolTest do
   @moduledoc false
 
@@ -2190,6 +2215,47 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       fixture
       |> Fixture.records(session_id)
       |> records_of_kind("model_attempt_settled_v1")
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "unreadable_model_answer"
+           }
+
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
+
+    assert_remaining_allowance(fixture, session_id, token_budget)
+  end
+
+  # Concept: a binary-keyed provider reply has the same accounting boundary as
+  # an atom-keyed one: a valid-looking usage pair is not reportable when the
+  # complete reply is malformed.
+  #
+  # Technical depth: the ordinary scripted adapter constructs atom keys, which
+  # left a binary-only salvage mutant invisible to the entire suite. This model
+  # returns the adapter boundary's other admitted spelling and an invalid
+  # provider identity. Store admission succeeds, canonical validation refuses,
+  # and accounting must consume the exact remaining allowance rather than read
+  # the adjacent binary `usage` member independently.
+  test "a malformed binary-keyed reply cannot salvage otherwise valid raw usage" do
+    token_budget = 19
+
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderBinaryUsageMalformedModel,
+        bounds_token_budget: token_budget
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "refuse malformed binary-keyed provider reply")
+
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+
+    [settlement] =
+      records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v1")
 
     assert settlement["result"] == %{
              "kind" => "error",

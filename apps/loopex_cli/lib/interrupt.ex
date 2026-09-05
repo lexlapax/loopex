@@ -147,8 +147,10 @@ defmodule LoopexCli.Interrupt do
   this is that step. The handler is installed carrying the activation first, so
   there is no instant in which a signal reaches a handler that does not know a
   prepared owner is waiting; the capability is then handed to a process started
-  here for that single purpose — the handler's holder — and the owner's `:ok` is
-  the acknowledgement that completes the handoff.
+  here for that single purpose — the handler's holder. The owner sends its
+  transfer verdict to this installer, which forwards it to the manager-lifetime
+  guard. The guard acknowledges the forwarded verdict to the owner; only then
+  does the owner record the holder and return the public answer.
 
   The holder is a process of its own rather than the signal server, because the
   signal server is the one process in this emulator that must never be blocked.
@@ -171,12 +173,14 @@ defmodule LoopexCli.Interrupt do
 
   A temporary one-way guard ties the holder to the installer, so it cannot
   survive a death before the exact signal manager is guarded, the handler is
-  installed, and the session owner acknowledges the capability transfer, while
+  installed, and the session owner's committed verdict reaches the guard, while
   a holder killed by manager loss cannot kill the public installer in return.
-  The manager guard is armed before installation makes the holder reachable;
-  only the owner's `:ok` ends the temporary installer lifetime. A preparer that
-  dies after that handoff therefore leaves a live holder, exactly as ADR 0016
-  requires, while abrupt manager loss cannot strand one. Orderly replacement
+  The manager guard is armed before installation makes the holder reachable.
+  Receipt of the installer-forwarded verdict ends the temporary installer
+  lifetime before the guard acknowledges the owner, so installer death after
+  that point cannot undo the handoff even if the public reply is lost. Installer
+  death before forwarding still fails closed, while abrupt manager loss cannot
+  strand a holder. Orderly replacement
   installs its successor first, completes its prepared handoff, then drains
   every predecessor holder before reporting success, and retains that drain in
   the live handler if the installer dies. Concurrent replacements serialize
@@ -544,9 +548,10 @@ defmodule LoopexCli.Interrupt do
   # Technical depth: before the handler is made visible, the pending lifetime
   # guard begins monitoring the exact signal manager selected inside the
   # serialized installation. Manager loss kills the holder; holder loss ends the
-  # guard. Only the session owner's acknowledged capability transfer releases
-  # the installer monitor. The owner then monitors the acknowledged holder and
-  # permanently abandons a capability that is still prepared when it goes.
+  # guard. Only receipt of the installer-forwarded committed verdict releases
+  # the installer monitor; the guard then acknowledges the owner, which records
+  # and monitors the holder and permanently abandons a capability that is still
+  # prepared when it goes.
   defp arm_holder(nil, _signal_server), do: :ok
 
   defp arm_holder(%{holder: holder, lifetime_guard: guard}, signal_server)

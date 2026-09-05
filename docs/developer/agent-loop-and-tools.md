@@ -318,12 +318,13 @@ error category. A run's usage map is also closed to `input_tokens` and
 `output_tokens`: an adapter that reports any other key produces
 `unreadable_model_answer` rather than having an unrecognised number silently
 ignored, while omitting either key stays legal and normalizes as unreported.
-A reply Core cannot canonicalize settles under that same category. It keeps
-reported accounting only where the raw usage subtree is an unambiguous exact
-input/output pair and both values normalize as reported; every extra, missing,
-colliding, or invalid shape charges the run's remaining allowance as unreported,
-because the answer may still have been billed but Core cannot vouch for a
-partial projection.
+A reply Core cannot canonicalize settles under that same category and contributes
+no reported usage, even when one raw member looks like a valid pair. Every
+extra, missing, colliding, or invalid usage shape likewise charges the run's
+remaining allowance as estimated, because the answer may still have been billed
+but Core cannot vouch for a partial projection. A fully canonical reply that is
+compacted only because its complete durable settlement does not fit retains its
+already validated reported usage.
 
 ### Declared Bounds and the Split Deadline
 
@@ -349,15 +350,16 @@ own is `completed` and stays `completed`. A non-integer `deadline` raises rather
 than returning `:continue`, because Elixir orders numbers below atoms and
 `now >= nil` would make an uncommitted deadline a silently unreachable bound.
 
-Provider accounting settles atomically with the attempt result. The complete
-raw usage subtree passes Store bounded-plain-data admission before projection. A
-reply with a complete valid input/output pair charges those exact reported
-values. Missing, partial, colliding, malformed, negative, non-integer,
-unsigned-64-overflow, or extra-key usage is normalized as unreported; every
-possibly dispatched attempt with unreported usage charges exactly the run's
-remaining cumulative allowance. The private salvage path checks `map_size/1`
-before fixed key fetches rather than traversing a hostile wide map. Exact
-pretransport `not_dispatched` proof charges nothing. The settlement, accounting,
+Provider accounting settles atomically with the attempt result. The complete raw
+reply passes Store bounded-plain-data admission before full canonical projection.
+Missing, partial, malformed, negative, non-integer, unsigned-64-overflow, or
+extra-key usage in an otherwise canonical reply is unreported; an extra,
+colliding, non-plain, or invalid sibling that rejects the reply cannot leave its
+usage independently reportable. Every possibly dispatched attempt in either
+class charges exactly the run's remaining cumulative allowance as estimated.
+Only a fully validated canonical reply whose complete settlement later fails the
+Store-size preflight preserves its reported usage in the compact settlement.
+Exact pretransport `not_dispatched` proof charges nothing. The settlement, accounting,
 conversation disposition, retry/continue/terminal choice, and paired run
 terminal where one is owed are one Store transaction, so commit-unknown replay
 cannot apply cost without outcome or make retry authority reappear. Estimated
@@ -799,10 +801,13 @@ facts, so a successor resumes from the journal rather than from anyone's memory:
 5. `effect_dispatched` — the Local executor first reserves or joins the job
    without granting effect authority, then answers one serialized permit request
    only after revalidating the exact live reservation holder, complete shared
-   root, job, grant, lease, audience, expiry, epoch, identity, and fence. New
-   work publishes admission and the operation-owner token under the same claim,
-   runs under that exact Local authority, and retains its receipt. This state is
-   never restarted by recovery; an intent without a fact is reconciled.
+   root, job, grant, lease, audience, expiry, epoch, identity, and fence, then
+   repeating the complete root snapshot after any blocking validation. Successful
+   new work publishes admission and the operation-owner token under the same
+   claim, runs under that exact Local authority, and retains its receipt. A stop
+   between open-entry and marker publication installs no token and leaves
+   quarantine truth instead of a permit. This state is never restarted by
+   recovery; an intent without a fact is reconciled.
 6. On receipt — one `executor_receipt_committed` record matches the receipt
    against the dispatched job, appends the `tool_result` element, and emits
    `tool.finished`. The turn returns to `effect_pending` while calls remain and

@@ -401,11 +401,13 @@ must remain paused until the interrupt owner decides whether to activate it.
 `loopex resume` uses the prepared entry: it installs the handler carrying the
 activation, arms its signal-manager guard, and makes the handler visible before
 asking the session coordinator to hand the capability to the holder process the
-handler owns. The coordinator alone decides that transfer and reports success
-only after the exact guard has processed its commit, so there is no interval in
-which recovered work is running and the runtime's default handler is still the
-one installed. Death before that verdict fails closed; death after it leaves the
-acknowledged holder live. The command then asks
+handler owns. The coordinator decides the transfer and sends its verdict to the
+installer; the installer forwards it to the exact guard, whose acknowledgement
+precedes the coordinator recording the holder and reporting success. There is no
+interval in which recovered work is running and the runtime's default handler is
+still the one installed. Installer death before forwarding fails closed. After
+forwarding, ordered delivery makes the handoff independent of the installer even
+if its reply is lost. The command then asks
 that holder to start the work and waits for the answer without a bound. The
 signal server itself is never blocked by that wait, so a signal arriving
 meanwhile still submits the ordinary abort and arms the backstop; the abort
