@@ -937,11 +937,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # Concept: a provider worker that died after a possible permit send proves
       # nothing about the transport.
       #
-      # Technical depth: a third-party adapter that raises, throws, or exits
-      # reaches this coordinator as a task `DOWN`. ADR 0018 classifies it
-      # dispatched-or-unknown: it is charged, it enters no conversation, and it
-      # never retries. Stopping the session here instead would leave the run
-      # with no ending at all.
+      # Technical depth: catchable third-party failures are normalized inside
+      # the worker so Task cannot log their reasons. An uncatchable worker death
+      # still reaches this coordinator as a task `DOWN`. ADR 0018 classifies it
+      # dispatched-or-unknown: it is charged, enters no conversation, and never
+      # retries. Stopping the session here instead would leave the run with no
+      # ending at all.
       {{:model, run_id, _pid}, remaining} ->
         settle_model_attempt(%{state | in_flight: remaining}, run_id, :dispatched_or_unknown)
 
@@ -2479,7 +2480,25 @@ defmodule Loopex.Runtime.SessionCoordinator do
     if Bounds.deadline_reached?(observed, deadline) do
       {@provider_deadline_tag, deadline, observed}
     else
-      {@provider_result_tag, module.complete(request, options, progress)}
+      {@provider_result_tag, call_provider(module, request, options, progress)}
+    end
+  end
+
+  # Concept: an adapter failure becomes one private, fixed runtime result before
+  # any task machinery can render the adapter's reason.
+  #
+  # Technical depth: `Task.Supervised` logs uncaught errors, throws, and exits
+  # with their raw reasons before this coordinator can normalize the resulting
+  # `DOWN`. Catching them inside the provider worker prevents credential-shaped
+  # third-party data from entering that diagnostic plane. The fixed result does
+  # not carry the reason and deliberately cannot forge the one exact
+  # `not_dispatched` shape; `accept_model_result/3` therefore settles it
+  # dispatched-or-unknown without retrying.
+  defp call_provider(module, request, options, progress) do
+    try do
+      module.complete(request, options, progress)
+    catch
+      _kind, _reason -> {:error, :provider_call_failed}
     end
   end
 

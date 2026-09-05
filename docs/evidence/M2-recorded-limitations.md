@@ -849,10 +849,14 @@ before publishing admission and owner authority under one claim. An admission
 that stops after its open entry installs no token and leaves the root
 quarantined. A reservation made before another executor owner dies therefore
 cannot outrun that owner's unresolved durable effect. Missing and oversized job identities are refused
-before ledger or reservation work, filesystem workers are tied to the Local
-authority that admitted them, and a command worker cannot begin or report a
-potentially proved result after its exact execute caller, launch guard, or Local
-owner is lost.
+before ledger or reservation work, and filesystem workers are tied to the Local
+authority that admitted them. The serialized permit is the effect boundary: a
+queued command whose permit has not been consumed is refused once its Local
+owner is known dead; work admitted before owner loss is terminated and cannot
+be reported as proved, while unresolved effect truth keeps the root
+quarantined. The execute caller may leave after handing that one-use permit to
+the launch worker; its later lifetime is not authority to revoke an already
+admitted effect.
 
 **Frozen-source precedence.** One earlier sentence in the closed M2 Technical
 envelope says that a valid usage pair remains reported when the reply itself is

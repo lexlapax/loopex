@@ -276,6 +276,42 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       else: await_path(check, stop, check.())
   end
 
+  defp await_queued_message(pid, predicate, deadline_ms) do
+    stop = System.monotonic_time(:millisecond) + deadline_ms
+    await_queued_message(pid, predicate, stop, Process.info(pid, :messages))
+  end
+
+  defp await_queued_message(pid, predicate, stop, {:messages, messages}) do
+    if Enum.any?(messages, predicate) do
+      :ok
+    else
+      await_queued_message_retry(pid, predicate, stop)
+    end
+  end
+
+  defp await_queued_message(pid, predicate, stop, _gone) do
+    await_queued_message_retry(pid, predicate, stop)
+  end
+
+  defp await_queued_message_retry(pid, predicate, stop) do
+    if System.monotonic_time(:millisecond) >= stop do
+      :timeout
+    else
+      Process.sleep(1)
+      await_queued_message(pid, predicate, stop, Process.info(pid, :messages))
+    end
+  end
+
+  defp resume_if_suspended(pid) when is_pid(pid) do
+    if Process.alive?(pid) do
+      try do
+        :erlang.resume_process(pid)
+      catch
+        :error, :badarg -> :ok
+      end
+    end
+  end
+
   defp staging_file(ledger) do
     case File.ls(ledger) do
       {:ok, entries} ->
@@ -287,6 +323,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
       {:error, _reason} ->
         :error
     end
+  end
+
+  defp retained_receipt!(ledger, job_id) do
+    name = (:crypto.hash(:sha256, job_id) |> Base.encode16(case: :lower)) <> ".receipt"
+    bytes = File.read!(Path.join(ledger, name))
+    :erlang.binary_to_term(bytes, [:safe])
   end
 
   defp run(root, tool_id, arguments, overrides \\ %{}) do
@@ -2048,7 +2090,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # became a false negative the moment the sequence stopped wasting time.
     root = workspace()
     marker = Path.join(root, "launcher-exited.txt")
-    {executor, lease_id, lease} = executor_and_lease(root)
+    {executor, lease_id, lease, ledger} = executor_lease_and_ledger(root)
 
     running =
       Task.async(fn ->
@@ -2085,8 +2127,11 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert receipt.output =~ "workspace lease was lost"
     assert receipt.output =~ "unproven"
 
-    # The reply and the durable record are the same fact, not two.
-    assert {:ok, %{outcome: :outcome_unknown}} = Local.receipt(executor, receipt.job_id)
+    # The returned and retained bytes are the same fact. The open authority is
+    # deliberately still present, so ordinary readers see a settling effect
+    # rather than treating the unconfirmed record as final.
+    assert retained_receipt!(ledger, receipt.job_id) == receipt
+    assert {:error, :effect_settling} = Local.receipt(executor, receipt.job_id)
   end
 
   test "a lease lost while a job's receipt is being retained is reported unproven" do
@@ -2150,12 +2195,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert receipt.output =~ "workspace lease was lost"
     assert receipt.output =~ "unproven"
 
-    # The durable receipt is the plane a recovering coordinator reads, so the
-    # replacement has to have overwritten the one the abandoned write may have
-    # left behind.
-    assert {:ok, durable} = Local.receipt(executor, receipt.job_id)
-    assert durable.outcome == :outcome_unknown
-    assert durable.output == receipt.output
+    # The replacement has to have overwritten the one the abandoned write may
+    # have left behind. It remains quarantined behind the open entry until an
+    # operator reconciles the unknown effect, so the ordinary lookup refuses to
+    # present it as final.
+    assert retained_receipt!(ledger, receipt.job_id) == receipt
+    assert {:error, :effect_settling} = Local.receipt(executor, receipt.job_id)
 
     # Nothing half-written is left in the ledger.
     assert {:ok, entries} = File.ls(ledger)
@@ -2699,6 +2744,133 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              run(root, "loopex.write", %{"path" => "durable.txt", "content" => "durable"})
 
     assert receipt.outcome == :completed
+  end
+
+  test "a completed bounded result queued before lease DOWN is still refused under the dead lease" do
+    # Concept: message arrival order is not lease authority.
+    #
+    # Technical depth: the worker result and the lease monitor are independent
+    # signal paths. Suspend the exact waiter, let its worker finish and queue the
+    # successful value first, then kill the lease before the waiter can inspect
+    # either message. Selecting the first mailbox entry reports `:done`; checking
+    # the lease at result admission reports the value as late and unproven.
+    root = workspace()
+    {_executor, _lease_id, lease} = executor_and_lease(root)
+    Process.unlink(lease)
+    parent = self()
+
+    waiter =
+      spawn(fn ->
+        monitor = Process.monitor(lease)
+
+        result =
+          Local.bounded_work(
+            fn ->
+              send(parent, {:bounded_worker_ready, self()})
+
+              receive do
+                :finish_bounded_work -> :retained
+              end
+            end,
+            5_000,
+            {monitor, lease}
+          )
+
+        send(parent, {:bounded_waiter_result, result})
+      end)
+
+    on_exit(fn ->
+      resume_if_suspended(waiter)
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+    end)
+
+    assert_receive {:bounded_worker_ready, worker}, 2_000
+    assert :erlang.suspend_process(waiter)
+    send(worker, :finish_bounded_work)
+
+    assert :ok =
+             await_queued_message(
+               waiter,
+               fn
+                 {tag, :retained} when is_reference(tag) -> true
+                 _other -> false
+               end,
+               2_000
+             )
+
+    lease_monitor = Process.monitor(lease)
+    Process.exit(lease, :kill)
+    assert_receive {:DOWN, ^lease_monitor, :process, ^lease, :killed}, 2_000
+
+    assert :erlang.resume_process(waiter)
+
+    assert_receive {:bounded_waiter_result,
+                    {:abandoned, :workspace_lease_lost, true, {:late, :retained}}},
+                   2_000
+  end
+
+  test "a guarded filesystem result queued before lease DOWN is still unproven" do
+    # The owner-aware boundary has a separate result receiver. Exercise the same
+    # adverse ordering there so one branch cannot regain the mailbox-order bug
+    # while the retention branch stays protected.
+    root = workspace()
+    {executor, _lease_id, lease} = executor_and_lease(root)
+    Process.unlink(lease)
+    parent = self()
+
+    waiter =
+      spawn(fn ->
+        monitor = Process.monitor(lease)
+
+        result =
+          Local.bounded_work(
+            fn ->
+              send(parent, {:guarded_worker_ready, self()})
+
+              receive do
+                :finish_guarded_work -> :effect_result
+              end
+            end,
+            5_000,
+            {monitor, lease},
+            executor
+          )
+
+        send(parent, {:guarded_waiter_result, result})
+      end)
+
+    on_exit(fn ->
+      resume_if_suspended(waiter)
+      if Process.alive?(waiter), do: Process.exit(waiter, :kill)
+    end)
+
+    assert_receive {:guarded_worker_ready, worker}, 2_000
+    assert :erlang.suspend_process(waiter)
+    send(worker, :finish_guarded_work)
+
+    assert :ok =
+             await_queued_message(
+               waiter,
+               fn
+                 {tag, {:loopex_bounded_result, owner_tag, :effect_result}}
+                 when is_reference(tag) and is_reference(owner_tag) ->
+                   true
+
+                 _other ->
+                   false
+               end,
+               2_000
+             )
+
+    lease_monitor = Process.monitor(lease)
+    Process.exit(lease, :kill)
+    assert_receive {:DOWN, ^lease_monitor, :process, ^lease, :killed}, 2_000
+
+    assert :erlang.resume_process(waiter)
+
+    assert_receive {:guarded_waiter_result,
+                    {:abandoned, :workspace_lease_lost, true, {:late, :effect_result}}},
+                   2_000
   end
 
   test "work this executor cannot bound is abandoned at its bound and a program that never answers confirms nothing" do

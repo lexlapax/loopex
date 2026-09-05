@@ -1119,8 +1119,8 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     # A refutation over an untraced function proves nothing, so the pattern is
     # asserted to have matched exactly the one entry this reads.
-    assert :erlang.trace_pattern({Local, :bounded_work, 3}, true, [:local]) == 1
-    assert :erlang.trace_pattern({Local, :retain_now, 3}, true, [:local]) == 1
+    assert :erlang.trace_pattern({Local, :bound_only_work, 2}, true, [:local]) == 1
+    assert :erlang.trace_pattern({Local, :retain_after_lease_loss, 2}, true, [:local]) == 1
 
     assert :erlang.trace_pattern(
              {Local, :receipt_reserve_ms, 1},
@@ -1135,8 +1135,8 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
            ) == 1
 
     on_exit(fn ->
-      _ = :erlang.trace_pattern({Local, :bounded_work, 3}, false, [:local])
-      _ = :erlang.trace_pattern({Local, :retain_now, 3}, false, [:local])
+      _ = :erlang.trace_pattern({Local, :bound_only_work, 2}, false, [:local])
+      _ = :erlang.trace_pattern({Local, :retain_after_lease_loss, 2}, false, [:local])
       _ = :erlang.trace_pattern({Local, :receipt_reserve_ms, 1}, false, [:local])
       _ = :erlang.trace_pattern({Local, :retention_remaining, 0}, false, [:local])
     end)
@@ -1178,7 +1178,10 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     events = collect_call_trace()
 
-    assert Enum.any?(events, &match?({:call, Local, :retain_now, _arguments}, &1)),
+    assert Enum.any?(
+             events,
+             &match?({:call, Local, :retain_after_lease_loss, _arguments}, &1)
+           ),
            "the lease-lost retention path was never reached, so its reserve was not observed"
 
     assert canonical_retention_bound!(events, grace) == bounds.receipt_retention_ms
@@ -1252,12 +1255,15 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     end
   end
 
-  # The trace is ordered per process. Inside `retain_now/3`, production first
+  # The trace is ordered per process. Inside `retain_after_lease_loss/2`, production first
   # reads the shared deadline's remainder and then hands exactly that value to
-  # `bounded_work/3`; zero is valid when the earlier phases spent the sole 1 ms.
+  # `bound_only_work/2`; zero is valid when the earlier phases spent the sole 1 ms.
   defp lease_lost_reserve!(events) do
     after_retain =
-      Enum.drop_while(events, &(not match?({:call, Local, :retain_now, _arguments}, &1)))
+      Enum.drop_while(
+        events,
+        &(not match?({:call, Local, :retain_after_lease_loss, _arguments}, &1))
+      )
 
     remaining =
       Enum.find_value(after_retain, fn
@@ -1267,7 +1273,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     reserve =
       Enum.find_value(after_retain, fn
-        {:call, Local, :bounded_work, [_work, value, _lease]} -> {:ok, value}
+        {:call, Local, :bound_only_work, [_work, value]} -> {:ok, value}
         _other -> nil
       end)
 

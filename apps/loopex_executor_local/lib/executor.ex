@@ -2271,7 +2271,7 @@ defmodule Loopex.Executor.Local do
   defp retain_receipt_under_lease(root, receipt, {monitor, lease_pid} = lease, bound) do
     receive do
       {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-        retain_now(root, unproven_receipt(receipt), lease)
+        retain_after_lease_loss(root, unproven_receipt(receipt))
     after
       0 -> stage_and_commit(root, receipt, lease, bound)
     end
@@ -2401,6 +2401,42 @@ defmodule Loopex.Executor.Local do
     )
   end
 
+  defp bound_only_work(work, bound)
+       when is_function(work, 0) and is_integer(bound) and bound >= 0 do
+    parent = self()
+    tag = make_ref()
+    {worker, reference} = spawn_monitor(fn -> send(parent, {tag, work.()}) end)
+
+    await_bound_only_work(
+      worker,
+      reference,
+      tag,
+      System.monotonic_time(:millisecond) + bound
+    )
+  end
+
+  defp await_bound_only_work(worker, reference, tag, deadline) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {^tag, result} ->
+        Process.demonitor(reference, [:flush])
+        {:done, result}
+
+      {:DOWN, ^reference, :process, ^worker, reason} ->
+        {:stopped, reason}
+    after
+      min(remaining, @timer_slice_ms) ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          case abandon_worker(:bound_reached, worker, reference, tag) do
+            {:abandoned, :bound_reached, stopped, late} -> {:abandoned, stopped, late}
+          end
+        else
+          await_bound_only_work(worker, reference, tag, deadline)
+        end
+    end
+  end
+
   # Concept: an effect worker cannot outlive the Local authority that admitted
   # it, even if the process waiting for its result disappears too.
   #
@@ -2516,7 +2552,15 @@ defmodule Loopex.Executor.Local do
     receive do
       {^tag, result} ->
         Process.demonitor(reference, [:flush])
-        {:done, result}
+
+        # The result and the lease monitor arrive from different senders, so
+        # mailbox order cannot prove the lease still covered the completed
+        # work. Re-read the process fact at the result boundary before admitting
+        # the value. A lease that has already ended makes the completed value
+        # late evidence, never a proved result.
+        if Process.alive?(lease_pid),
+          do: {:done, result},
+          else: {:abandoned, :workspace_lease_lost, true, {:late, result}}
 
       {:DOWN, ^reference, :process, ^worker, reason} ->
         {:stopped, reason}
@@ -2567,7 +2611,13 @@ defmodule Loopex.Executor.Local do
     receive do
       {^tag, {:loopex_bounded_result, ^owner_tag, result}} ->
         Process.demonitor(reference, [:flush])
-        {:done, result}
+
+        # The guarded worker's answer and the lease DOWN are independent signal
+        # paths. A result already produced under a dead lease is still unproven,
+        # even when its message happened to reach this mailbox first.
+        if Process.alive?(lease_pid),
+          do: {:done, result},
+          else: {:abandoned, :workspace_lease_lost, true, {:late, result}}
 
       {^tag, {:loopex_effect_owner_lost, ^owner_tag, stopped}} ->
         Process.demonitor(reference, [:flush])
@@ -2659,17 +2709,23 @@ defmodule Loopex.Executor.Local do
   # still land after this one, so which receipt is durable is genuinely unknown;
   # saying the receipt was not retained is honest, and claiming an outcome for
   # bytes this executor cannot vouch for is not.
-  defp abandon_retention(root, receipt, staging, stopped, lease) do
+  defp abandon_retention(root, receipt, staging, stopped, _lease) do
     if stopped do
       File.rm(staging)
-      retain_now(root, unproven_receipt(receipt), lease)
+      retain_after_lease_loss(root, unproven_receipt(receipt))
     else
       {:error, :workspace_lease_lost_during_retention}
     end
   end
 
-  defp unproven_receipt(receipt),
-    do: %{receipt | outcome: :outcome_unknown, output: receipt.output <> @lease_lost_note}
+  defp unproven_receipt(receipt) do
+    %{
+      receipt
+      | outcome: :outcome_unknown,
+        output: receipt.output <> @lease_lost_note,
+        cleanup_confirmation: :unconfirmed
+    }
+  end
 
   # The replacement receipt is written the same way the first attempt was.
   # Writing it inline would put the last unbounded call in the job exactly where
@@ -2690,6 +2746,30 @@ defmodule Loopex.Executor.Local do
       {:stopped, reason} -> {:error, {:receipt_retention_stopped, reason}}
       {:abandoned, _cause, _stopped, {:late, :ok}} -> {:ok, receipt}
       {:abandoned, _cause, _stopped, _unfinished} -> {:error, :receipt_retention_abandoned}
+    end
+  end
+
+  # Concept: once lease loss has made the effect unproven, the executor still
+  # owes the operator that durable warning.
+  #
+  # Technical depth: ordinary retention uses `bounded_work/3`, whose successful
+  # result is admitted only while the lease process is live. The replacement
+  # written *because* that lease died cannot pass that condition by definition;
+  # it therefore uses the same monotonic bound and worker-stop confirmation but
+  # no lease alternative. This is the only call site allowed to do so, and the
+  # receipt it writes is already downgraded to `outcome_unknown`.
+  defp retain_after_lease_loss(root, receipt) do
+    staging = staging_path(root, receipt)
+
+    case bound_only_work(
+           fn -> retain_receipt(root, receipt, staging) end,
+           retention_remaining()
+         ) do
+      {:done, :ok} -> {:ok, receipt}
+      {:done, {:error, reason}} -> {:error, reason}
+      {:stopped, reason} -> {:error, {:receipt_retention_stopped, reason}}
+      {:abandoned, _stopped, {:late, :ok}} -> {:ok, receipt}
+      {:abandoned, _stopped, _unfinished} -> {:error, :receipt_retention_abandoned}
     end
   end
 

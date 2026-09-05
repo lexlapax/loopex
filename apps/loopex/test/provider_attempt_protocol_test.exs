@@ -47,6 +47,29 @@ defmodule Loopex.ProviderAttemptExitModel do
   end
 end
 
+defmodule Loopex.ProviderCredentialFailureModel do
+  @moduledoc false
+
+  @behaviour Loopex.Model
+
+  @credential "provider-credential-shaped-task-failure-must-stay-private"
+
+  def credential, do: @credential
+
+  @impl Loopex.Model
+  def complete(request, options, _progress) do
+    observer = Keyword.fetch!(options, :observer)
+    failure_kind = Keyword.fetch!(options, :failure_kind)
+    send(observer, {:provider_credential_failure_model_called, failure_kind, self(), request})
+
+    case failure_kind do
+      :raise -> raise @credential
+      :throw -> throw({:provider_credential, @credential})
+      :exit -> exit({:provider_credential, @credential})
+    end
+  end
+end
+
 defmodule Loopex.ProviderDeadlineForgeryModel do
   @moduledoc false
 
@@ -1637,6 +1660,74 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       :erlang.term_to_binary([records, durable_store, durable_public], [:deterministic])
 
     assert :binary.match(durable_bytes, secret) == :nomatch
+  end
+
+  test "catchable credential-shaped Model failures enter no diagnostic retained or public plane" do
+    secret = Loopex.ProviderCredentialFailureModel.credential()
+
+    for failure_kind <- [:raise, :throw, :exit] do
+      fixture =
+        start(
+          script: [],
+          model_module: Loopex.ProviderCredentialFailureModel,
+          model_options: [failure_kind: failure_kind],
+          progress_to: self(),
+          diagnostics_to: self(),
+          bounds_token_budget: 113
+        )
+
+      test_process = self()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          {session_id, attachment, {:accepted, "prompt-1"}} =
+            Fixture.run(fixture, "keep task failure reasons private")
+
+          public_events = await_events_through(attachment, "run.finished")
+          send(test_process, {:provider_failure_result, failure_kind, session_id, public_events})
+
+          # With the catch removed, Task emits the raw credential-shaped reason.
+          # Flush synchronously so its absence is not inferred from a timer.
+          Logger.flush()
+        end)
+
+      assert_receive {:provider_credential_failure_model_called, ^failure_kind, worker, _request},
+                     5_000
+
+      assert is_pid(worker)
+
+      assert_receive {:provider_failure_result, ^failure_kind, session_id, public_events},
+                     5_000
+
+      finished = Enum.find(public_events, &(&1.kind == "run.finished"))
+      assert finished["outcome"] == "failed"
+
+      records = Fixture.records(fixture, session_id)
+      [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+
+      assert settlement["transport"] == "dispatched_or_unknown"
+      assert settlement["next"] == "terminal"
+
+      assert settlement["result"] == %{
+               "kind" => "error",
+               "category" => "model_call_failed"
+             }
+
+      planes = [
+        diagnostic_log: log,
+        durable: records,
+        durable_public: Fixture.events(fixture, session_id),
+        public: public_events,
+        progress: receive_progress(),
+        diagnostic: receive_diagnostics(),
+        terminal: finished
+      ]
+
+      for {plane, value} <- planes do
+        refute printable(value) =~ secret,
+               "credential-shaped task failure entered the #{plane} plane"
+      end
+    end
   end
 
   test "request-open commit-unknown re-presents identical bytes and dispatches only after the retained pair resolves" do
@@ -3559,6 +3650,10 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     {:ok, store} = Store.new(M1RuntimeTestStore, fixture.store)
     model_module = Keyword.fetch!(options, :model_module)
 
+    model_options =
+      [observer: self(), max_tokens: Keyword.get(options, :max_tokens, 256)]
+      |> Keyword.merge(Keyword.get(options, :model_options, []))
+
     {:ok, runtime} =
       Loopex.start_link(
         context_token_budget: 8_192,
@@ -3569,7 +3664,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         model: %{
           module: model_module,
           model: "scripted:v1",
-          options: [observer: self(), max_tokens: Keyword.get(options, :max_tokens, 256)]
+          options: model_options
         },
         executor: %{
           module: Loopex.AgentLoopTestExecutor,

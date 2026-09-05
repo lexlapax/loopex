@@ -161,9 +161,23 @@ defmodule Loopex.Executor.LocalTest do
     GenServer.stop(fixture.lease, :normal)
 
     assert {:ok, receipt} = Task.await(task, 5_000)
-    assert receipt.outcome == :cancelled_workspace_lease_lost
+
+    # The lease ended before the receipt existed. Even though the live port
+    # observed that loss, its uncaptured process group was not confirmed
+    # quiescent and the durable result therefore cannot claim a proved
+    # cancellation.
+    assert receipt.outcome == :outcome_unknown
+    assert receipt.cleanup_confirmation == :unconfirmed
     assert receipt.provider_credential_present == false
-    assert {:ok, ^receipt} = Local.receipt(fixture.executor, job.job_id)
+
+    # The receipt is durable, but the still-open authority keeps ordinary
+    # readers from treating it as a final answer until reconciliation.
+    receipt_name =
+      (:crypto.hash(:sha256, job.job_id) |> Base.encode16(case: :lower)) <> ".receipt"
+
+    assert {:ok, retained_bytes} = File.read(Path.join(fixture.ledger, receipt_name))
+    assert :erlang.binary_to_term(retained_bytes, [:safe]) == receipt
+    assert {:error, :effect_settling} = Local.receipt(fixture.executor, job.job_id)
     refute File.exists?(Path.join(fixture.workspace, "lease-loss.txt"))
   end
 
