@@ -619,14 +619,18 @@ admitted a filesystem effect terminates its owner-aware worker and reports the
 effect unproven.
 
 The three filesystem tools start no operating-system process.
-A child runs in a process group of its own, established by the spawn itself
-rather than by any helper program, announces the group the operating system
-actually assigned before doing anything else, and is terminated by group rather
-than by leader. No launcher in the executor's chain may fork or replace that
-identity: the Port, command, and descendants that remain in the inherited group
-keep one owned group from spawn through receipt, so exit status, termination,
-and cleanup confirmation all describe the same work. A descendant that calls
-`setsid` or `setpgid` can deliberately leave that boundary, as ADR 0009 records.
+A Port-owned launch guard runs in a process group of its own, established by the
+spawn itself rather than by a later helper program, and announces the group the
+operating system actually assigned before doing anything else. It forks one
+status wrapper and the supplied command without replacing that identity, remains
+the group leader until release or final KILL, and performs group signals itself
+after receiving a private token-bound control message. The runtime therefore
+does not turn a sampled numeric process-group identifier into later signal
+authority. The Port, wrapper, command, and descendants that remain in the
+inherited group keep one owned group from spawn through receipt, so exit status,
+termination, and cleanup confirmation all describe the same work. A descendant
+that calls `setsid` or `setpgid` can deliberately leave that boundary, as ADR
+0009 records.
 The effective deadline of a job is the earlier of the run's deadline and the
 tool's own wall-time budget.
 

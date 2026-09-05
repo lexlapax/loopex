@@ -222,8 +222,43 @@ defmodule Loopex.Executor.Local.Ledger do
   @spec with_claim(prepared(), (-> term()), non_neg_integer()) :: term() | {:error, term()}
   def with_claim(prepared, work, wait_ms \\ 0)
 
-  def with_claim(%{root: root} = prepared, work, wait_ms)
+  def with_claim(%{root: _root} = prepared, work, wait_ms)
       when is_function(work, 0) and is_integer(wait_ms) and wait_ms >= 0 do
+    # `wait_ms` bounds contention, not a claim that is immediately available.
+    # Preserve the zero-wait form's one immediate attempt while making every
+    # retry spend the original absolute deadline.
+    do_with_claim_until(
+      prepared,
+      work,
+      System.monotonic_time(:millisecond) + wait_ms,
+      if(wait_ms == 0, do: :initial_attempt, else: :deadline_bound)
+    )
+  end
+
+  @doc """
+  ## Concept
+
+  Runs one function under the root claim without refreshing an already-open
+  caller deadline.
+
+  ## Technical depth
+
+  The absolute monotonic instant is preserved across claim contention. Each
+  poll recomputes what remains from that same instant, so scheduler delay cannot
+  silently extend a settlement's shared retention allowance. After acquiring
+  and revalidating the root, the call checks the same instant once more before
+  entering the protected body; acquiring just before expiry is not authority to
+  begin a settlement phase after it.
+  """
+  @spec with_claim_until(prepared(), (-> term()), integer()) :: term() | {:error, term()}
+  def with_claim_until(%{root: _root} = prepared, work, deadline)
+      when is_function(work, 0) and is_integer(deadline) do
+    if System.monotonic_time(:millisecond) < deadline,
+      do: do_with_claim_until(prepared, work, deadline, :deadline_bound),
+      else: {:error, {:ledger_unavailable, :root_claim_held}}
+  end
+
+  defp do_with_claim_until(%{root: root} = prepared, work, deadline, work_policy) do
     path = claim_directory(root)
 
     case File.mkdir(path) do
@@ -231,8 +266,16 @@ defmodule Loopex.Executor.Local.Ledger do
         outcome =
           try do
             case revalidate(prepared) do
-              :ok -> work.()
-              {:error, reason} -> {:error, reason}
+              :ok ->
+                if work_policy == :initial_attempt or
+                     System.monotonic_time(:millisecond) < deadline do
+                  work.()
+                else
+                  {:error, {:ledger_unavailable, :claim_deadline_reached}}
+                end
+
+              {:error, reason} ->
+                {:error, reason}
             end
           catch
             # Concept: the release is part of taking the claim on this path too,
@@ -299,7 +342,7 @@ defmodule Loopex.Executor.Local.Ledger do
             end
         end
 
-      {:error, :eexist} when wait_ms > 0 ->
+      {:error, :eexist} ->
         # Concept: waiting for a claim someone else is holding is not the same as
         # deciding it has been held long enough.
         #
@@ -307,11 +350,14 @@ defmodule Loopex.Executor.Local.Ledger do
         # ends in unavailability, never in permission: the claim is released by
         # its holder and by nothing else. Polling is what a filesystem lock
         # offers; there is no message to wait on across processes or VMs.
-        Process.sleep(min(wait_ms, @claim_poll_ms))
-        with_claim(prepared, work, max(wait_ms - @claim_poll_ms, 0))
+        remaining = deadline - System.monotonic_time(:millisecond)
 
-      {:error, :eexist} ->
-        {:error, {:ledger_unavailable, :root_claim_held}}
+        if remaining > 0 do
+          Process.sleep(min(remaining, @claim_poll_ms))
+          with_claim_until(prepared, work, deadline)
+        else
+          {:error, {:ledger_unavailable, :root_claim_held}}
+        end
 
       {:error, reason} ->
         {:error, {:ledger_unavailable, reason}}

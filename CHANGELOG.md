@@ -231,7 +231,18 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
   filesystem work remains bound to the Local authority that admitted it, every
   potentially proved command result is fenced by that authority after cleanup,
   and a command worker cannot survive loss of its execute caller before its run
-  signal.
+  signal. The launch owner remains independently responsive while the execute
+  caller delivers progress, so a blocked progress consumer cannot keep a command
+  alive past cancellation. An inert Port-owned guard opens first; the final wall
+  and monotonic deadline fence runs immediately before the token-bound permit
+  that lets it start the command. Expiry there closes the waiting guard and
+  produces a confirmed no-effect cancellation without starting model work.
+  That guard remains the process-group leader through release or final KILL and
+  performs token-bound TERM and KILL inside the group it still anchors, so a
+  sampled numeric process-group identifier never becomes later signal authority.
+  Closing its control channel also ends the anchored group while a command is
+  silent, and private status framing no longer drops an incomplete marker-like
+  suffix from the command's real output.
 - Control's bounded provider-position read could outlive Control itself while
   blocked in a Store call. A guardian now owns that exact reader and monitors
   Control; timeout cancellation and Control death kill and await the reader, and
@@ -301,23 +312,32 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
   coordinator asks for the retained receipt, validates it exactly as it
   validates a host's, and settles the run as completed or `outcome_unknown`. An
   executor that cannot say leaves reconciliation host-driven.
-- The local executor decided a cancellation from process-local state, so an
-  instance with no record of a job open on its own root reported it cleaned;
-  absence is now decided from the shared root and answers `unconfirmed`, and so
-  does an identity the root has never admitted. Every cleanup window derives
-  from the period the job committed rather than the executor's start default.
+- The local executor decided cancellation from a numeric process-group
+  observation and process-local absence. Cancellation now routes to the live
+  launch owner that captured the group and carries the job's committed cleanup
+  period; cached numeric identifiers are never signal authority in another
+  process, and an absent or unavailable owner answers `unconfirmed`. Every
+  cleanup window therefore derives from the cancelled job's committed period
+  rather than the executor's start default, even while the root claim is held.
   A receipt is final only once its open entry is gone, and every reader honours
   that: the settlement takes one root claim, retains the receipt, removes the
-  entry, and only where the removal fails replaces the receipt with the
-  quarantined `outcome_unknown` form, so no reader ever consumes a confirmed
-  receipt that later reverses, and a retention that fails leaves the entry so
-  the root's quarantine stands. Readers see a receipt whose entry still stands
-  as `effect_settling`, an entry with no receipt as `effect_unresolved` unless
-  this executor holds the job, and `effect_in_flight` only for a job it holds.
-  Open-entry removal shares the settlement allowance with every other retention
-  phase; a root claim the ledger could not release is reported to the caller,
-  including after a body that raised, rather than swallowed; every level of a
-  ledger directory is synced into its own parent; the open record is published
+  entry, and where removal fails preserves the receipt's proved operation and
+  cleanup facts while the retained or restored open entry keeps them
+  provisional. A retention or administrative worker that cannot be confirmed
+  stopped retains the root claim rather than releasing permission around a late
+  writer. Readers see a receipt whose entry still stands as `effect_settling`,
+  an entry with no receipt as `effect_unresolved` unless this executor holds the
+  job, and `effect_in_flight` only for a job it holds. The retention episode
+  opens immediately after the effect result and before normalization, optional
+  spill, or receipt preparation; claim acquisition, retention, recovery, and
+  open-entry removal then spend that one absolute settlement deadline, rechecked
+  immediately before a newly acquired claim enters its protected body, so
+  contention never refreshes it. A reentrant progress callback may run another
+  Local job without erasing the outer job's admission, cleanup, retention, lease,
+  owner, probe, or in-flight context. A root claim the ledger could not release
+  is reported to the caller, including after a body that raised, rather than
+  swallowed; every level of a ledger directory is synced into its own parent;
+  the open record is published
   before the marker so an interrupted admission fails closed; and every executor
   wait derived from an admitted period is sliced below the VM's timer ceiling.
   A truly absent cancellation target answers `unconfirmed`, as ADR 0016 says.
@@ -884,9 +904,12 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
   every receipt. An image that ships `ps` elsewhere previously had every command
   reported `outcome_unknown` with nothing to say which program was missing.
 - Cancelling a job through the shipped local executor now spends the period its
-  host configured. `cancel/2` runs in its caller so it is not queued behind the
-  job it is ending, and it read the period from a process dictionary the caller
-  does not have, so it spent the compiled-in default instead.
+  host configured. `cancel/2` remains reachable from its caller, but routes the
+  request to the live launch owner carrying the captured process group and the
+  job's committed period; it no longer reads a missing caller-side process
+  dictionary or substitutes the compiled-in default. Progress delivery runs in
+  the execute caller, leaving that owner responsive to cancellation and Local
+  authority loss even when a progress consumer blocks.
 - The cleanup period is a declared session configuration value with a default,
   as ADR 0009 requires. `Loopex.start_link(cleanup_grace_ms: …)` declares it,
   `loopex run --cleanup-grace-ms …` is the operator's way to name it, and

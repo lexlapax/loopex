@@ -337,6 +337,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     cases = [
       {"monotonic", [{wall, 1_000}, {wall - 10_000, 2_000}], :refused},
       {"wall", [{wall, 1_000}, {wall + 2_000, 1_001}], :refused},
+      {"narrow-normal", [{wall, 1_000}, {wall + 90, 1_090}], :completed},
       {"normal", [{wall, 1_000}, {wall + 1, 1_001}], :completed}
     ]
 
@@ -398,6 +399,175 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     assert File.read!(Path.join(sliced.workspace, "sliced.txt")) == "ok"
   end
 
+  test "an owned process cannot start after its admitted action deadline expires" do
+    # Concept: admission authorizes one future transition; it does not authorize
+    # a process to start after that transition's immutable deadline has passed.
+    #
+    # Technical depth: the first two paired samples admit the job. The third is
+    # consumed by the launch worker immediately before it sends the token-bound
+    # run permit to an already-open waiting guard and crosses both fences. Opening
+    # the guard is not the effect: it cannot create the command before that
+    # permit. The missing process-start notification is the decisive observation
+    # that no model command was created.
+    fixture = prepared_fixture("process-expired-before-port")
+    wall = System.system_time(:millisecond)
+
+    clock =
+      clock_provider([
+        {wall, 1_000},
+        {wall + 1, 1_001},
+        {wall + 200, 1_200}
+      ])
+
+    {:ok, local} = start_local(fixture, clock_provider: clock)
+    on_exit(fn -> stop(local) end)
+
+    target = Path.join(fixture.workspace, "must-not-start.txt")
+
+    request =
+      job(
+        fixture,
+        "process-expired-before-port",
+        %{"command" => "printf forbidden > #{shell_path(target)}"},
+        wall + 100
+      )
+
+    assert {:ok, receipt} =
+             Local.execute(local, request, grant(request), [notify: self()], nil)
+
+    assert receipt.outcome == :cancelled
+    assert receipt.cleanup_confirmation == :confirmed
+
+    refute_receive {:executor_process_started, "process-expired-before-port", _tool,
+                    _environment},
+                   100
+
+    refute File.exists?(target)
+
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    [launch_boundary] =
+      Regex.run(
+        ~r/defp run_owned_process_after_fence\((.*?)\n  end\n\n  # Concept: an in-flight/s,
+        source,
+        capture: :all_but_first
+      )
+
+    {ready_offset, _size} =
+      :binary.match(launch_boundary, "await_launch_guard_ready(")
+
+    {fence_offset, _size} =
+      :binary.match(launch_boundary, "remaining = fence_remaining(deadline)")
+
+    {run_offset, _size} =
+      :binary.match(
+        launch_boundary,
+        ~S|safe_port_command(port, "#{@guard_run}:#{token}\n")|
+      )
+
+    {notification_offset, _size} =
+      :binary.match(launch_boundary, "{:executor_process_started,")
+
+    assert ready_offset < fence_offset,
+           "the final fence ran before the waiting guard established its identity"
+
+    assert fence_offset < run_offset,
+           "the final fence moved after the token-bound command-start permit"
+
+    assert run_offset < notification_offset,
+           "the process-start notification moved before the command-start permit"
+
+    assert launch_boundary =~ "not Process.alive?(lease_pid)"
+    assert launch_boundary =~ "not effect_owner_alive?(owner)"
+    assert launch_boundary =~ "remaining <= 0"
+
+    assert launch_boundary =~ "close_waiting_guard(port, token)"
+
+    assert launch_boundary =~
+             ~S|unless safe_port_command(port, "#{@guard_run}:#{token}\n")|,
+           "the command can start without the authenticated run permit"
+  end
+
+  test "an owned process cannot start after its workspace lease dies at the launch boundary" do
+    fixture = prepared_fixture("process-lease-lost-before-port")
+    Process.unlink(fixture.lease)
+    wall = System.system_time(:millisecond)
+
+    clock =
+      clock_provider_with_action(
+        [{wall, 1_000}, {wall + 1, 1_001}, {wall + 2, 1_002}],
+        3,
+        fn -> stop(fixture.lease) end
+      )
+
+    {:ok, local} = start_local(fixture, clock_provider: clock)
+    on_exit(fn -> stop(local) end)
+    target = Path.join(fixture.workspace, "must-not-start-after-lease.txt")
+
+    request =
+      job(
+        fixture,
+        "process-lease-lost-before-port",
+        %{"command" => "printf forbidden > #{shell_path(target)}"},
+        wall + 10_000
+      )
+
+    assert {:ok, receipt} =
+             Local.execute(local, request, grant(request), [notify: self()], nil)
+
+    assert receipt.outcome == :outcome_unknown
+    assert receipt.cleanup_confirmation == :confirmed
+
+    refute_receive {:executor_process_started, "process-lease-lost-before-port", _tool,
+                    _environment},
+                   100
+
+    refute File.exists?(target)
+  end
+
+  test "an owned process cannot start after its Local owner dies at the launch boundary" do
+    fixture = prepared_fixture("process-owner-lost-before-port")
+    wall = System.system_time(:millisecond)
+    {:ok, owner_cell} = Agent.start_link(fn -> nil end)
+    on_exit(fn -> stop(owner_cell) end)
+
+    clock =
+      clock_provider_with_action(
+        [{wall, 1_000}, {wall + 1, 1_001}, {wall + 2, 1_002}],
+        3,
+        fn ->
+          owner = Agent.get(owner_cell, & &1)
+          if is_pid(owner), do: Process.exit(owner, :kill)
+        end
+      )
+
+    {:ok, local} = start_local(fixture, clock_provider: clock)
+    Process.unlink(local)
+    Agent.update(owner_cell, fn _old -> local end)
+    on_exit(fn -> stop(local) end)
+    target = Path.join(fixture.workspace, "must-not-start-after-owner.txt")
+
+    request =
+      job(
+        fixture,
+        "process-owner-lost-before-port",
+        %{"command" => "printf forbidden > #{shell_path(target)}"},
+        wall + 10_000
+      )
+
+    assert {:ok, receipt} =
+             Local.execute(local, request, grant(request), [notify: self()], nil)
+
+    assert receipt.outcome == :outcome_unknown
+    assert receipt.cleanup_confirmation == :confirmed
+
+    refute_receive {:executor_process_started, "process-owner-lost-before-port", _tool,
+                    _environment},
+                   100
+
+    refute File.exists?(target)
+  end
+
   test "a later effect transition reuses the handoff deadline after wall time moves backward" do
     fixture = prepared_fixture("clock-no-refresh")
     wall = System.system_time(:millisecond)
@@ -435,11 +605,11 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     assert {:ok, %{outcome: outcome, output: output}} = result
 
-    assert outcome in [:outcome_unknown, :failed],
-           "a job stopped at its deadline cannot report a proven outcome"
+    refute outcome == :completed,
+           "a job stopped at its deadline was reported completed: #{inspect(result)}"
 
-    assert output =~ "deadline passed while this tool was running",
-           "the receipt does not name a stop that happened after the tool started"
+    assert output =~ "run deadline passed" and output =~ "terminated",
+           "the receipt does not name the post-start deadline termination: #{output}"
 
     refute File.exists?(Path.join(fixture.workspace, "clock-no-refresh.txt"))
   end
@@ -1092,19 +1262,21 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     assert {:ok, %{outcome: :completed}} = Task.await(holder, 15_000)
   end
 
-  test "lease-lost retention opens the declared one-millisecond allowance once and spends its remainder" do
+  test "lease-lost retention carries one shared absolute allowance into its worker" do
     # ADR 0016 gives one formula for `receipt_retention_ms`, and a committed
     # period of three is exactly where a second derivation by integer division
     # disagrees with it: the canonical result is one millisecond while `div/2`
     # produces zero. Proving the pure function alone proves nothing about the
     # running path, so this observes both the allowance production opens and the
-    # exact remainder its later lease-lost retention worker receives. That
-    # remainder may truthfully be zero: claim acquisition is an earlier phase of
-    # the same one-millisecond episode, and refreshing the worker to a new
-    # millisecond would violate the contract this case protects.
-    grace = 3
+    # exact absolute instant its later lease-lost retention worker receives.
+    # Claim acquisition is an earlier phase of the same episode;
+    # translating the remainder back into a duration would let scheduling delay
+    # refresh it and violate the contract this case protects.
+    assert {:ok, one_millisecond} = Executor.cancellation_bounds(3)
+    assert one_millisecond.receipt_retention_ms == 1
+
+    grace = 4_000
     assert {:ok, bounds} = Executor.cancellation_bounds(grace)
-    assert bounds.receipt_retention_ms == 1
 
     fixture = prepared_fixture("lease-lost-reserve", grace)
     {:ok, local} = start_local(fixture)
@@ -1119,7 +1291,7 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     # A refutation over an untraced function proves nothing, so the pattern is
     # asserted to have matched exactly the one entry this reads.
-    assert :erlang.trace_pattern({Local, :bound_only_work, 2}, true, [:local]) == 1
+    assert :erlang.trace_pattern({Local, :bound_only_work_until, 2}, true, [:local]) == 1
     assert :erlang.trace_pattern({Local, :retain_after_lease_loss, 2}, true, [:local]) == 1
 
     assert :erlang.trace_pattern(
@@ -1129,16 +1301,16 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
            ) == 1
 
     assert :erlang.trace_pattern(
-             {Local, :retention_remaining, 0},
+             {Local, :retention_until, 0},
              [{:_, [], [{:return_trace}]}],
              [:local]
            ) == 1
 
     on_exit(fn ->
-      _ = :erlang.trace_pattern({Local, :bound_only_work, 2}, false, [:local])
+      _ = :erlang.trace_pattern({Local, :bound_only_work_until, 2}, false, [:local])
       _ = :erlang.trace_pattern({Local, :retain_after_lease_loss, 2}, false, [:local])
       _ = :erlang.trace_pattern({Local, :receipt_reserve_ms, 1}, false, [:local])
-      _ = :erlang.trace_pattern({Local, :retention_remaining, 0}, false, [:local])
+      _ = :erlang.trace_pattern({Local, :retention_until, 0}, false, [:local])
     end)
 
     task =
@@ -1186,15 +1358,17 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
 
     assert canonical_retention_bound!(events, grace) == bounds.receipt_retention_ms
 
-    {remaining, reserve} = lease_lost_reserve!(events)
+    {shared_deadline, worker_deadline} = lease_lost_deadline!(events)
 
-    assert remaining in 0..bounds.receipt_retention_ms,
-           "the shared retention deadline reported #{remaining} ms remaining from a " <>
-             "#{bounds.receipt_retention_ms} ms allowance"
+    assert worker_deadline == shared_deadline,
+           "the lease-lost retention refreshed or translated the shared absolute deadline: " <>
+             "#{worker_deadline} != #{shared_deadline}"
 
-    assert reserve == remaining,
-           "the lease-lost retention reserved #{reserve} ms instead of the shared " <>
-             "deadline's exact #{remaining} ms remainder"
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    assert source =~
+             ~r/defp retention_until do\s+case Process\.get\(:loopex_retention_episode\) do.*?Process\.put\(:loopex_retention_episode, until\).*?until ->\s+until\s+end/s,
+           "retention_until/0 no longer memoizes and reuses the first settlement deadline"
   end
 
   test "a refusal never renames over an admission marker for the same job" do
@@ -1255,32 +1429,39 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     end
   end
 
-  # The trace is ordered per process. Inside `retain_after_lease_loss/2`, production first
-  # reads the shared deadline's remainder and then hands exactly that value to
-  # `bound_only_work/2`; zero is valid when the earlier phases spent the sole 1 ms.
-  defp lease_lost_reserve!(events) do
+  # The trace is ordered per process. Inside `retain_after_lease_loss/2`,
+  # production reads the one shared instant and hands those exact bytes to
+  # `bound_only_work_until/2`; no later phase turns its remainder into a fresh
+  # duration.
+  defp lease_lost_deadline!(events) do
+    all_shared_deadlines =
+      for {:return, Local, :retention_until, 0, value} <- events,
+          do: value
+
     after_retain =
       Enum.drop_while(
         events,
         &(not match?({:call, Local, :retain_after_lease_loss, _arguments}, &1))
       )
 
-    remaining =
+    worker_deadline =
       Enum.find_value(after_retain, fn
-        {:return, Local, :retention_remaining, 0, value} -> {:ok, value}
+        {:call, Local, :bound_only_work_until, [_work, value]} -> {:ok, value}
         _other -> nil
       end)
 
-    reserve =
-      Enum.find_value(after_retain, fn
-        {:call, Local, :bound_only_work, [_work, value]} -> {:ok, value}
-        _other -> nil
-      end)
+    case {all_shared_deadlines, worker_deadline} do
+      {[first, _later | _rest] = deadlines, {:ok, worker_deadline}} ->
+        assert Enum.uniq(deadlines) == [first],
+               "one settlement returned more than one retention deadline: #{inspect(deadlines)}"
 
-    case {remaining, reserve} do
-      {{:ok, remaining}, {:ok, reserve}} -> {remaining, reserve}
-      {nil, _reserve} -> flunk("the lease-lost retention read no shared deadline remainder")
-      {_remaining, nil} -> flunk("the lease-lost retention entered no bounded work")
+        {first, worker_deadline}
+
+      {deadlines, _worker_deadline} when length(deadlines) < 2 ->
+        flunk("the lease-lost settlement did not read its shared deadline in both phases")
+
+      {_shared_deadlines, nil} ->
+        flunk("the lease-lost retention entered no absolute-deadline bounded work")
     end
   end
 
@@ -1456,6 +1637,26 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
         {current, [next | tail]} -> {current, {next, tail}}
         {current, []} -> {current, {current, []}}
       end)
+    end
+  end
+
+  defp clock_provider_with_action([first | rest], action_sample, action)
+       when is_integer(action_sample) and action_sample > 0 and is_function(action, 0) do
+    {:ok, clock} = Agent.start_link(fn -> {1, first, rest} end)
+    on_exit(fn -> stop(clock) end)
+
+    fn ->
+      {sample, act?} =
+        Agent.get_and_update(clock, fn
+          {index, current, [next | tail]} ->
+            {{current, index == action_sample}, {index + 1, next, tail}}
+
+          {index, current, []} ->
+            {{current, index == action_sample}, {index + 1, current, []}}
+        end)
+
+      if act?, do: action.()
+      sample
     end
   end
 

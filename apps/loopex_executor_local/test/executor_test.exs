@@ -162,22 +162,27 @@ defmodule Loopex.Executor.LocalTest do
 
     assert {:ok, receipt} = Task.await(task, 5_000)
 
-    # The lease ended before the receipt existed. Even though the live port
-    # observed that loss, its uncaptured process group was not confirmed
-    # quiescent and the durable result therefore cannot claim a proved
-    # cancellation.
+    # The lease ended before the receipt existed, so the effect is unproven even
+    # though the owned process group was positively stopped. Those are separate
+    # facts: losing authority cannot erase the cleanup proof.
     assert receipt.outcome == :outcome_unknown
-    assert receipt.cleanup_confirmation == :unconfirmed
+    assert receipt.cleanup_confirmation == :confirmed
     assert receipt.provider_credential_present == false
 
-    # The receipt is durable, but the still-open authority keeps ordinary
-    # readers from treating it as a final answer until reconciliation.
+    # Confirmed cleanup permits the open authority to be removed, so the durable
+    # receipt is also the final recovery answer.
     receipt_name =
       (:crypto.hash(:sha256, job.job_id) |> Base.encode16(case: :lower)) <> ".receipt"
 
     assert {:ok, retained_bytes} = File.read(Path.join(fixture.ledger, receipt_name))
     assert :erlang.binary_to_term(retained_bytes, [:safe]) == receipt
-    assert {:error, :effect_settling} = Local.receipt(fixture.executor, job.job_id)
+    assert {:ok, ^receipt} = Local.receipt(fixture.executor, job.job_id)
+
+    # The demo waits five seconds before writing. Waiting beyond that declared
+    # horizon proves the owned effect was actually stopped rather than merely
+    # checking before a surviving child had time to act.
+    Process.sleep(5_500)
+
     refute File.exists?(Path.join(fixture.workspace, "lease-loss.txt"))
   end
 
@@ -197,13 +202,85 @@ defmodule Loopex.Executor.LocalTest do
       end)
 
     assert_receive {:starting_worker, ^worker}, 1_000
-    true = :ets.insert(table, {"starting-job", {:starting, worker}})
+
+    true =
+      :ets.insert(table, [
+        {"starting-job", {:starting, worker}},
+        {{:loopex_process_authority, "starting-job"}, worker, 5}
+      ])
 
     assert Local.cancel(worker, "starting-job") == {:ok, :unconfirmed}
 
     monitor = Process.monitor(worker)
     send(worker, :stop)
     assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+    :ets.delete(table)
+  end
+
+  test "cancellation reaches the live launch owner with the job's committed period" do
+    # Concept: the process that captured the group remains the only authority
+    # allowed to signal it; a numeric observation in another process is not.
+    #
+    # Technical depth: the primary row deliberately carries a group that has no
+    # relation to the worker. A cancellation implementation that signals the
+    # number directly can still answer `cleaned` when that group is absent, so the
+    # decisive assertion is that the live owner receives the caller's exact
+    # cleanup episode with the period published for this job rather than the
+    # executor's default. Carrying the absolute instant matters too: queueing at
+    # the owner spends this one episode and cannot open another full period.
+    table = :ets.new(:owned_cancel_test, [:set, :public])
+    parent = self()
+    job_id = "owned-cancel-job"
+    grace = 17
+    probe = "/fixture/process-probe"
+
+    worker =
+      spawn(fn ->
+        Process.put(:loopex_inflight_table, table)
+        Process.put(:loopex_process_probe, probe)
+        send(parent, {:owned_cancel_worker, self()})
+
+        receive do
+          {:loopex_cancel_pending, token, from, {received_until, received_grace, received_probe}} ->
+            send(
+              parent,
+              {:owned_cancel_received, self(), received_until, received_grace, received_probe}
+            )
+
+            send(from, {:loopex_cancel_result, token, {:ok, :cleaned}})
+        end
+      end)
+
+    assert_receive {:owned_cancel_worker, ^worker}, 1_000
+
+    true =
+      :ets.insert(table, [
+        {job_id, 4_294_967_000},
+        {{:loopex_process_authority, job_id}, worker, grace}
+      ])
+
+    started = System.monotonic_time(:millisecond)
+    monitor = Process.monitor(worker)
+    assert Local.cancel(worker, job_id) == {:ok, :cleaned}
+
+    assert_receive {:owned_cancel_received, ^worker, received_until, ^grace, ^probe}, 1_000
+    assert received_until >= started + grace
+    assert received_until <= System.monotonic_time(:millisecond) + grace
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 1_000
+
+    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+
+    [cancel_branch] =
+      Regex.run(
+        ~r/\{:loopex_cancel_pending, token, caller, episode\} ->(.*?)\{:DOWN, \^owner_monitor/s,
+        source,
+        capture: :all_but_first
+      )
+
+    assert cancel_branch =~ "finish_guarded_output("
+    assert cancel_branch =~ "episode,"
+    assert cancel_branch =~ ":terminate"
+    refute cancel_branch =~ "cancellation_episode("
     :ets.delete(table)
   end
 
@@ -229,7 +306,12 @@ defmodule Loopex.Executor.LocalTest do
       spawn(fn ->
         receive do
           {^tag, :worker_ready, worker} ->
-            true = :ets.insert(table, {job_id, {:starting, worker}})
+            true =
+              :ets.insert(table, [
+                {job_id, {:starting, worker}},
+                {{:loopex_process_authority, job_id}, worker, fixture.grace}
+              ])
+
             send(parent, {tag, :worker_ready_intercepted, self(), worker})
 
             receive do
@@ -256,12 +338,17 @@ defmodule Loopex.Executor.LocalTest do
     assert_receive {^tag, :worker_ready_intercepted, ^caller, ^worker}, 2_000
     assert :ets.lookup(table, job_id) == [{job_id, {:starting, worker}}]
 
+    assert :ets.lookup(table, {:loopex_process_authority, job_id}) == [
+             {{:loopex_process_authority, job_id}, worker, fixture.grace}
+           ]
+
     caller_monitor = Process.monitor(caller)
     Process.exit(caller, :kill)
     assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :killed}, 2_000
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 2_000
 
     assert :ets.lookup(table, job_id) == []
+    assert :ets.lookup(table, {:loopex_process_authority, job_id}) == []
     send(worker, {tag, :run})
     refute File.exists?(target), "the command worker acted after its execute caller died"
   end
@@ -302,7 +389,13 @@ defmodule Loopex.Executor.LocalTest do
     end)
 
     assert_receive {^tag, :worker_ready, ^worker}, 2_000
-    true = :ets.insert(table, {job_id, {:starting, worker}})
+
+    true =
+      :ets.insert(table, [
+        {job_id, {:starting, worker}},
+        {{:loopex_process_authority, job_id}, worker, fixture.grace}
+      ])
+
     assert :erlang.suspend_process(worker)
 
     # Queue the caller's message first, then make it stale before the worker can
@@ -317,6 +410,7 @@ defmodule Loopex.Executor.LocalTest do
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker, :normal}, 2_000
 
     assert :ets.lookup(table, job_id) == []
+    assert :ets.lookup(table, {:loopex_process_authority, job_id}) == []
 
     refute File.exists?(target),
            "the command worker consumed a stale run permit after Local authority died"
@@ -1261,7 +1355,8 @@ defmodule Loopex.Executor.LocalTest do
     send(close_worker, {:finish_quarantine_close, owned.job_id})
 
     assert_receive {:quarantined_owner_result, ^owner,
-                    {:ok, %{outcome: :outcome_unknown, cleanup_confirmation: :unconfirmed}}},
+                    {:error,
+                     {:effect_settling, {:open_authority_not_removed, :forced_close_failure}}}},
                    15_000
 
     assert_receive {:quarantine_waiter_answer, ^queued_holder, queued_answer}, 15_000
@@ -1329,8 +1424,8 @@ defmodule Loopex.Executor.LocalTest do
     # Concept: every production filesystem effect is guarded by the Local
     # authority that admitted it.
     #
-    # Technical depth: the behavioral case above proves `bounded_work/4`; this
-    # compiled-code assertion proves `run_bounded_tool/6` supplies
+    # Technical depth: the behavioral case above proves the owner-aware guardian;
+    # this compiled-code assertion proves `run_bounded_tool/6` supplies
     # `effect_owner/0` as its fourth argument. Inspecting BEAM abstract code keeps
     # the proof deterministic while avoiding a test-only branch in production.
     module = Local
@@ -1341,20 +1436,20 @@ defmodule Loopex.Executor.LocalTest do
     assert run_bounded_tool =
              Enum.find(forms, &match?({:function, _, :run_bounded_tool, 6, _}, &1))
 
-    bounded_calls =
+    guarded_calls =
       matching_terms(run_bounded_tool, fn
-        {:call, _, {:atom, _, :bounded_work}, _arguments} -> true
+        {:call, _, {:atom, _, :bounded_guardian_with_remaining}, _arguments} -> true
         _other -> false
       end)
 
-    assert [bounded_call] = bounded_calls
+    assert [guarded_call] = guarded_calls
 
     assert match?(
-             {:call, _, {:atom, _, :bounded_work},
+             {:call, _, {:atom, _, :bounded_guardian_with_remaining},
               [_, _, _, {:call, _, {:atom, _, :effect_owner}, []}]},
-             bounded_call
+             guarded_call
            ),
-           "run_bounded_tool/6 did not call bounded_work/4 with effect_owner/0"
+           "run_bounded_tool/6 did not call the guardian with effect_owner/0"
   end
 
   test "a reserve blocked by a held claim is answered inside its own bound" do
@@ -1421,7 +1516,8 @@ defmodule Loopex.Executor.LocalTest do
       lease_id: lease_id,
       fence: fence,
       lease: lease,
-      executor: executor
+      executor: executor,
+      grace: Keyword.get(extra, :cleanup_grace_ms, Executor.default_cleanup_grace_ms())
     }
   end
 
