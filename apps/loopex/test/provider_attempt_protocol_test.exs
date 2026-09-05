@@ -2256,6 +2256,39 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     end
   end
 
+  test "raw usage salvage keeps its constant-work cardinality guard in compiled code" do
+    # Concept: an unreadable provider reply cannot make salvage walk an
+    # arbitrarily wide usage map a second time merely to decide it is not the
+    # exact reported pair.
+    #
+    # Technical depth: end-to-end reductions cannot isolate this boundary:
+    # canonical reply admission necessarily performs the first bounded walk of
+    # the hostile map before salvage runs. The behavioral case above proves all
+    # four admitted spellings and the extra/missing/invalid refusals. This
+    # narrow compiled-code assertion proves the private salvage clause gates on
+    # BEAM's constant-work `map_size/1` before its body can inspect any key.
+    module = SessionState
+
+    assert {:ok, {^module, [{:abstract_code, {:raw_abstract_v1, forms}}]}} =
+             :beam_lib.chunks(:code.which(module), [:abstract_code])
+
+    assert {:function, _, :closed_raw_usage_pair, 1,
+            [
+              {:clause, _, [{:var, _, usage_name}], [[guard]], [_closed_pair_case]},
+              {:clause, _, [{:var, _, _fallback_name}], [], [{:atom, _, :invalid}]}
+            ]} =
+             Enum.find(forms, &match?({:function, _, :closed_raw_usage_pair, 1, _}, &1))
+
+    assert match?(
+             {:op, _, :andalso, _plain_map_guard,
+              {:op, _, :==,
+               {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :map_size}},
+                [{:var, _, ^usage_name}]}, {:integer, _, 2}}},
+             guard
+           ),
+           "closed_raw_usage_pair/1 no longer rejects cardinality before key inspection"
+  end
+
   test "recovery settles an unresolved open without redispatch and never reuses or closes the dead predecessor stream" do
     fixture =
       start(
