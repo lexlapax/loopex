@@ -2218,10 +2218,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
        when is_integer(deadline) do
     observed = System.system_time(:millisecond)
 
-    if observed < deadline do
-      {@provider_result_tag, module.complete(request, options, progress)}
-    else
+    if Bounds.deadline_reached?(observed, deadline) do
       {@provider_deadline_tag, deadline, observed}
+    else
+      {@provider_result_tag, module.complete(request, options, progress)}
     end
   end
 
@@ -4471,17 +4471,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp activation_reconciliation_response(query, :absent),
     do: {:ok, Map.put(query, :evidence, "outcome_unknown")}
 
-  # Concept: an effect no live instance is settling will never settle itself.
+  # Concept: a recovered owner acts only on durable effect truth, never on a
+  # guess about another runtime instance.
   #
   # Technical depth: activating a prepared resume is the host's statement that
-  # the process which dispatched this effect is gone. An open entry that no
-  # instance holds (`effect_unresolved`) or a receipt whose entry still stands
-  # because its origin's disposition never finished (`effect_settling`) can then
-  # only be resolved by an operator reconciling the root; the run is owed a
-  # terminal now, and the only truthful one is `outcome_unknown` carrying the
-  # reconciliation reference, exactly as `:absent` ends it. Neither is a blind
-  # retry: nothing is dispatched, and the root's quarantine stands until an
-  # operator clears it. A job this executor itself still holds
+  # the process which dispatched this effect is gone. `effect_unresolved` means
+  # the queried Local does not hold an admitted job whose open entry has no final
+  # receipt; it does not claim global process liveness. `effect_settling` means a
+  # receipt's open entry still stands. Neither is a final fact from which this
+  # owner may resume or re-dispatch, so it commits `outcome_unknown` carrying the
+  # reconciliation reference, exactly as `:absent` ends it. Nothing is
+  # dispatched, and the root's quarantine stands until an operator clears it. A
+  # job this executor itself still holds
   # (`effect_in_flight`) is different -- its result is still coming -- and is
   # left to the executor, so that answer still declines below.
   defp activation_reconciliation_response(query, {:error, reason})

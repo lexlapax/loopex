@@ -3477,19 +3477,22 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     oversized_value = String.duplicate("x", @record_limit)
 
-    assert {:error, {:item_too_large, _observed, @record_limit}} =
-             raw
-             |> Map.put("usage", %{"input_tokens" => oversized_value, "output_tokens" => 2})
-             |> Map.drop(["canonical_request_bytes"])
-             |> Store.admit_bounded()
+    for member <- ["input_tokens", "output_tokens"] do
+      oversized_usage =
+        %{"input_tokens" => 3, "output_tokens" => 2}
+        |> Map.put(member, oversized_value)
 
-    assert ProviderAttempt.canonical_reply(
-             Map.put(raw, "usage", %{
-               "input_tokens" => oversized_value,
-               "output_tokens" => 2
-             }),
-             request
-           ) == {:error, :unreadable_model_answer}
+      assert {:error, {:item_too_large, _observed, @record_limit}} =
+               raw
+               |> Map.put("usage", oversized_usage)
+               |> Map.drop(["canonical_request_bytes"])
+               |> Store.admit_bounded()
+
+      assert ProviderAttempt.canonical_reply(
+               Map.put(raw, "usage", oversized_usage),
+               request
+             ) == {:error, :unreadable_model_answer}
+    end
 
     assert {:ok, projected} = ProviderAttempt.canonical_reply(raw, request)
 

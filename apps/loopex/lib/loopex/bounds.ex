@@ -116,6 +116,23 @@ defmodule Loopex.Bounds do
   @doc """
   ## Concept
 
+  Whether a wall-clock observation has reached a run's committed deadline.
+
+  ## Technical depth
+
+  Equality is closed: an observation at the committed instant has reached the
+  bound. Runtime decisions and the provider worker's final pre-call fence share
+  this predicate so neither can quietly treat that exact millisecond as both
+  inside and outside the run's authority.
+  """
+  @spec deadline_reached?(integer(), integer()) :: boolean()
+  def deadline_reached?(observed, deadline)
+      when is_integer(observed) and is_integer(deadline),
+      do: observed >= deadline
+
+  @doc """
+  ## Concept
+
   Validates and normalizes the declared bounds for a run.
 
   ## Technical depth
@@ -187,7 +204,7 @@ defmodule Loopex.Bounds do
       tool_calls == [] -> :completed
       turn_number + 1 > declared.max_turns -> {:bound_reached, :max_turns, turn_number}
       tokens >= declared.token_budget -> {:bound_reached, :token_budget, tokens}
-      now >= declared.deadline -> {:bound_reached, :deadline, now}
+      deadline_reached?(now, declared.deadline) -> {:bound_reached, :deadline, now}
       true -> :continue
     end
   end

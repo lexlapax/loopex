@@ -203,9 +203,11 @@ adapter that reports a third key — a cache count, a reasoning count, a provide
 own total — now settles the attempt as `unreadable_model_answer` instead of
 having the extra number silently dropped, because a usage record Core cannot
 account for in full is one it must not charge from. Omitting either key stays
-legal and normalizes as unreported; a present but unreadable value is classified
-rather than refused. Widening that key set is the change a later milestone makes
-deliberately, and it is why the closure exists rather than a lenient filter.
+legal and normalizes as unreported. A present, Store-admitted plain-data value
+of the wrong numeric shape is classified rather than refused; a non-plain raw
+term fails the reply's Store admission before projection. Widening that key set
+is the change a later milestone makes deliberately, and it is why the closure
+exists rather than a lenient filter.
 
 **Store port.** An append failure gains one pair of reasons and one changed
 consequence. The local Store holds the log *file* rather than its path: it
