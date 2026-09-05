@@ -1485,6 +1485,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     installer_monitor = remote_call_line!(pending_guard_body, Process, :monitor, 1)
     holder_spawn = atom_remote_call_line!(pending_guard_body, :erlang, :spawn_opt, 2)
+    holder_unlink = remote_call_line!(pending_guard_body, Process, :unlink, 1)
 
     [_holder_fun, holder_options] =
       atom_remote_call_arguments!(pending_guard_body, :erlang, :spawn_opt, 2)
@@ -1497,6 +1498,9 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     assert holder_options == [:link, :monitor],
            "the holder is not linked and monitored atomically at creation"
+
+    assert holder_spawn < holder_unlink,
+           "the holder is not converted to one-way guard ownership after its linked handshake"
 
     assert holder_guard_monitor < holder_ready,
            "the holder acknowledges readiness before monitoring its lifetime guard"
