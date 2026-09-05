@@ -3924,7 +3924,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # operation that would emit it. A generic precheck here creates a
   # check-then-action interval and also makes those final branches impossible to
   # exercise: the precheck answers first and the claimed close never runs.
-  defp dispatch_result(state, :model, run_id, {@provider_result_tag, result}),
+  # Technical depth: keep the worker's provenance wrapper intact until model
+  # acceptance. An adapter may return any term, including one shaped exactly
+  # like the receiver's private deadline observation; unwrapping it here merged
+  # those two namespaces and let adapter data forge runtime authority.
+  defp dispatch_result(state, :model, run_id, {@provider_result_tag, _result} = result),
     do: dispatch_current_result(state, :model, run_id, result)
 
   defp dispatch_result(
@@ -3981,13 +3985,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp accept_model_result(state, run_id, {:ok, reply}) when is_map(reply),
-    do: settle_model_attempt(state, run_id, {:reply, reply})
+  defp accept_model_result(state, run_id, {@provider_result_tag, {:ok, reply}})
+       when is_map(reply),
+       do: settle_model_attempt(state, run_id, {:reply, reply})
 
-  defp accept_model_result(state, run_id, {:error, {:not_dispatched, "model_call_failed"}}),
-    do: settle_model_attempt(state, run_id, :not_dispatched)
+  defp accept_model_result(
+         state,
+         run_id,
+         {@provider_result_tag, {:error, {:not_dispatched, "model_call_failed"}}}
+       ),
+       do: settle_model_attempt(state, run_id, :not_dispatched)
 
-  defp accept_model_result(state, run_id, _ambiguous),
+  defp accept_model_result(state, run_id, {@provider_result_tag, _ambiguous}),
+    do: settle_model_attempt(state, run_id, :dispatched_or_unknown)
+
+  # A task result outside either worker-owned wrapper is equally unproved, but
+  # never gains the meaning of an internal receiver observation.
+  defp accept_model_result(state, run_id, _unwrapped),
     do: settle_model_attempt(state, run_id, :dispatched_or_unknown)
 
   defp accept_executor_result(state, run_id, {:ok, receipt}) when is_map(receipt) do
@@ -4124,11 +4138,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
       "kind" => "late_result_discarded",
       "run_id" => run_id,
       "operation" => Atom.to_string(kind),
-      "outcome" => if(match?({:ok, _}, result), do: "reply", else: "error")
+      "outcome" => late_result_outcome(kind, result)
     })
 
     state
   end
+
+  defp late_result_outcome(:model, {@provider_result_tag, {:ok, _reply}}), do: "reply"
+  defp late_result_outcome(:executor, {:ok, _receipt}), do: "reply"
+  defp late_result_outcome(_kind, _result), do: "error"
 
   defp emit_diagnostic(%{diagnostics_to: sink}, item) when is_pid(sink) do
     send(sink, {:loopex_diagnostic, item})

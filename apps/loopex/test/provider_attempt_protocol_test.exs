@@ -47,6 +47,20 @@ defmodule Loopex.ProviderAttemptExitModel do
   end
 end
 
+defmodule Loopex.ProviderDeadlineForgeryModel do
+  @moduledoc false
+
+  @behaviour Loopex.Model
+
+  @impl Loopex.Model
+  def complete(request, options, _progress) do
+    observer = Keyword.fetch!(options, :observer)
+    send(observer, {:provider_deadline_forgery_model_called, self(), request})
+
+    {:loopex_provider_deadline_elapsed, request.deadline, request.deadline}
+  end
+end
+
 defmodule Loopex.ProviderAttemptProtocolTest do
   @moduledoc false
 
@@ -1093,6 +1107,46 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
       refute inspect(no_retry_records) =~ "credential-shaped-raw-error"
     end
+  end
+
+  test "adapter data cannot forge the receiver's internal deadline observation" do
+    token_budget = 17
+
+    fixture =
+      start(
+        model_module: Loopex.ProviderDeadlineForgeryModel,
+        script: [],
+        bounds_token_budget: token_budget
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "keep provider result provenance")
+
+    assert_receive {:provider_deadline_forgery_model_called, _worker, request}, 5_000
+    assert is_integer(request.deadline)
+
+    finished = await_event(attachment, "run.finished")
+    assert finished["outcome"] == "failed"
+
+    records = Fixture.records(fixture, session_id)
+    assert records_of_kind(records, "model_termination_admitted_v1") == []
+
+    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+
+    assert settlement["transport"] == "dispatched_or_unknown"
+    assert settlement["termination"] == nil
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "model_call_failed"
+           }
+
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
+
+    assert_remaining_allowance(fixture, session_id, token_budget)
   end
 
   test "two exact not-dispatched settlements consume the version-one allowance with no third attempt" do
