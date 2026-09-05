@@ -1124,8 +1124,8 @@ defmodule Loopex.Runtime.SessionState do
 
   defp raw_reply_usage(raw) when is_map(raw) and not is_struct(raw) do
     with {:ok, usage} <- unambiguous_raw_usage(raw),
-         true <- closed_raw_usage_shape?(usage),
-         %{"status" => "reported"} = reported <- ProviderAttempt.normalize_usage(usage) do
+         {:ok, closed_usage} <- closed_raw_usage_pair(usage),
+         %{"status" => "reported"} = reported <- ProviderAttempt.normalize_usage(closed_usage) do
       reported
     else
       _ambiguous_or_absent -> nil
@@ -1153,18 +1153,33 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp closed_raw_usage_shape?(usage) when is_map(usage) and not is_struct(usage) do
-    normalized_keys =
-      usage
-      |> Map.keys()
-      |> Enum.map(fn key -> if is_atom(key), do: Atom.to_string(key), else: key end)
-      |> MapSet.new()
+  # Technical depth: test cardinality before inspecting keys. This path runs
+  # only after canonical reply admission has refused the provider value, so it
+  # must not make a second traversal of an arbitrarily wide hostile map merely
+  # to decide that the map was too wide. The four clauses are the complete
+  # atom/binary spelling product for the exact two admitted members; the result
+  # is canonicalised only after that constant-work boundary.
+  defp closed_raw_usage_pair(usage)
+       when is_map(usage) and not is_struct(usage) and map_size(usage) == 2 do
+    case usage do
+      %{input_tokens: input, output_tokens: output} ->
+        {:ok, %{"input_tokens" => input, "output_tokens" => output}}
 
-    map_size(usage) == 2 and
-      normalized_keys == MapSet.new(["input_tokens", "output_tokens"])
+      %{:input_tokens => input, "output_tokens" => output} ->
+        {:ok, %{"input_tokens" => input, "output_tokens" => output}}
+
+      %{"input_tokens" => input, :output_tokens => output} ->
+        {:ok, %{"input_tokens" => input, "output_tokens" => output}}
+
+      %{"input_tokens" => input, "output_tokens" => output} ->
+        {:ok, %{"input_tokens" => input, "output_tokens" => output}}
+
+      _other ->
+        :invalid
+    end
   end
 
-  defp closed_raw_usage_shape?(_usage), do: false
+  defp closed_raw_usage_pair(_usage), do: :invalid
 
   defp attempt_accounting("not_dispatched", _usage),
     do: %{"source" => "none", "basis" => "not_dispatched"}

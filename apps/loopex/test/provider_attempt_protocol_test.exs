@@ -2149,7 +2149,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     token_budget = 13
 
     for {label, raw_usage, expected_accounting} <- [
-          {"exact", %{input_tokens: 3, output_tokens: 2},
+          {"exact atoms", %{input_tokens: 3, output_tokens: 2},
+           %{"source" => "reported", "input_tokens" => 3, "output_tokens" => 2}},
+          {"exact binaries", %{"input_tokens" => 3, "output_tokens" => 2},
+           %{"source" => "reported", "input_tokens" => 3, "output_tokens" => 2}},
+          {"exact atom binary", %{:input_tokens => 3, "output_tokens" => 2},
+           %{"source" => "reported", "input_tokens" => 3, "output_tokens" => 2}},
+          {"exact binary atom", %{"input_tokens" => 3, :output_tokens => 2},
            %{"source" => "reported", "input_tokens" => 3, "output_tokens" => 2}},
           {"extra", %{input_tokens: 3, output_tokens: 2, billing_tier: "priority"},
            %{"source" => "estimated", "basis" => "remaining_allowance"}},
