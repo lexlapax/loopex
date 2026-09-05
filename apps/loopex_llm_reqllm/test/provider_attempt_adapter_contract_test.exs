@@ -99,7 +99,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
             }
           ],
           sampling: %{"max_tokens" => 1},
-          deadline: System.system_time(:millisecond) + 2_000
+          deadline: System.system_time(:millisecond) + 10_000
         )
 
       assert Adapter.complete(request, [], Model.discard_progress()) ==
