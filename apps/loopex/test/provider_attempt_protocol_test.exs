@@ -1967,14 +1967,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
            }
 
     assert unreadable_settlement["accounting"] == %{
-             "source" => "reported",
-             "input_tokens" => 3,
-             "output_tokens" => 2
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
            }
 
     assert unreadable_finished["outcome"] == "failed"
     assert length(AgentLoopTestModel.dispatched(unreadable.model)) == 1
     assert_exact_settlement_schema(unreadable_settlement)
+    assert_remaining_allowance(unreadable, unreadable_session, 100)
 
     malformed =
       start(
@@ -2007,13 +2007,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
            }
 
     assert malformed_settlement["accounting"] == %{
-             "source" => "reported",
-             "input_tokens" => 4,
-             "output_tokens" => 3
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
            }
 
     assert length(AgentLoopTestModel.dispatched(malformed.model)) == 1
     assert_exact_settlement_schema(malformed_settlement)
+    assert_remaining_allowance(malformed, malformed_session, 100)
 
     for reply_overrides <- [
           %{unexpected_reply_key: true},
@@ -2063,6 +2063,11 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       assert extra_settlement["result"] == %{
                "kind" => "error",
                "category" => "unreadable_model_answer"
+             }
+
+      assert extra_settlement["accounting"] == %{
+               "source" => "estimated",
+               "basis" => "remaining_allowance"
              }
 
       assert_exact_settlement_schema(extra_settlement)
@@ -2199,94 +2204,94 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert_remaining_allowance(fixture, session_id, token_budget)
   end
 
-  test "an unreadable reply reports usage only from the exact closed valid pair" do
+  # Concept: unreadable callback bytes cannot become an accounting fact merely
+  # because a valid-looking usage pair sits beside them.
+  #
+  # Technical depth: the PID makes Store admission refuse the raw reply before
+  # any member can be projected. Restoring the retired raw-usage salvage would
+  # recover the two-key pair after that refusal and make this case report five
+  # tokens instead of consuming the exact remaining allowance.
+  test "a Store-refused unreadable reply cannot salvage otherwise valid raw usage" do
     token_budget = 13
 
-    for {label, raw_usage, expected_accounting} <- [
-          {"exact atoms", %{input_tokens: 3, output_tokens: 2},
-           %{"source" => "reported", "input_tokens" => 3, "output_tokens" => 2}},
-          {"exact binaries", %{"input_tokens" => 3, "output_tokens" => 2},
-           %{"source" => "reported", "input_tokens" => 3, "output_tokens" => 2}},
-          {"exact atom binary", %{:input_tokens => 3, "output_tokens" => 2},
-           %{"source" => "reported", "input_tokens" => 3, "output_tokens" => 2}},
-          {"exact binary atom", %{"input_tokens" => 3, :output_tokens => 2},
-           %{"source" => "reported", "input_tokens" => 3, "output_tokens" => 2}},
-          {"extra", %{input_tokens: 3, output_tokens: 2, billing_tier: "priority"},
-           %{"source" => "estimated", "basis" => "remaining_allowance"}},
-          {"missing", %{input_tokens: 3},
-           %{"source" => "estimated", "basis" => "remaining_allowance"}},
-          {"invalid", %{input_tokens: -1, output_tokens: 2},
-           %{"source" => "estimated", "basis" => "remaining_allowance"}}
-        ] do
-      fixture =
-        start(
-          script: [
-            %{
-              text: "usage salvage #{label}",
-              calls: [],
-              usage: raw_usage,
-              reply_overrides: %{
-                identity: %{provider: nil, model: "scripted:v1", endpoint: "in-process"}
-              }
-            }
-          ],
-          bounds_token_budget: token_budget
-        )
+    fixture =
+      start(
+        script: [
+          %{
+            text: "unreadable sibling",
+            calls: [],
+            usage: %{input_tokens: 3, output_tokens: 2},
+            reply_overrides: %{adapter_private: self()}
+          }
+        ],
+        bounds_token_budget: token_budget
+      )
 
-      {session_id, attachment, {:accepted, "prompt-1"}} =
-        Fixture.run(fixture, "classify unreadable usage #{label}")
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "refuse non-plain provider sibling")
 
-      assert await_event(attachment, "run.finished")["outcome"] == "failed"
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
 
-      [settlement] =
-        fixture
-        |> Fixture.records(session_id)
-        |> records_of_kind("model_attempt_settled_v1")
+    [settlement] =
+      records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v1")
 
-      assert settlement["result"] == %{
-               "kind" => "error",
-               "category" => "unreadable_model_answer"
-             }
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "unreadable_model_answer"
+           }
 
-      assert settlement["accounting"] == expected_accounting
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
 
-      if expected_accounting["source"] == "estimated" do
-        assert_remaining_allowance(fixture, session_id, token_budget)
-      end
-    end
+    assert_remaining_allowance(fixture, session_id, token_budget)
   end
 
-  test "raw usage salvage keeps its constant-work cardinality guard in compiled code" do
-    # Concept: an unreadable provider reply cannot make salvage walk an
-    # arbitrarily wide usage map a second time merely to decide it is not the
-    # exact reported pair.
-    #
-    # Technical depth: end-to-end reductions cannot isolate this boundary:
-    # canonical reply admission necessarily performs the first bounded walk of
-    # the hostile map before salvage runs. The behavioral case above proves all
-    # four admitted spellings and the extra/missing/invalid refusals. This
-    # narrow compiled-code assertion proves the private salvage clause gates on
-    # BEAM's constant-work `map_size/1` before its body can inspect any key.
-    module = SessionState
+  # Concept: passing the Store's structural admission is necessary but not
+  # sufficient to make reported usage trustworthy.
+  #
+  # Technical depth: every supplied value here is admitted plain data, but the
+  # provider identity violates the canonical reply contract. Usage becomes
+  # reportable only after the complete reply passes that validation; restoring
+  # raw salvage makes this exact case fail by reporting the adjacent pair.
+  test "a semantically malformed reply cannot salvage otherwise valid raw usage" do
+    token_budget = 17
 
-    assert {:ok, {^module, [{:abstract_code, {:raw_abstract_v1, forms}}]}} =
-             :beam_lib.chunks(:code.which(module), [:abstract_code])
+    fixture =
+      start(
+        script: [
+          %{
+            text: "invalid identity",
+            calls: [],
+            usage: %{input_tokens: 4, output_tokens: 3},
+            reply_overrides: %{
+              identity: %{provider: nil, model: "scripted:v1", endpoint: "in-process"}
+            }
+          }
+        ],
+        bounds_token_budget: token_budget
+      )
 
-    assert {:function, _, :closed_raw_usage_pair, 1,
-            [
-              {:clause, _, [{:var, _, usage_name}], [[guard]], [_closed_pair_case]},
-              {:clause, _, [{:var, _, _fallback_name}], [], [{:atom, _, :invalid}]}
-            ]} =
-             Enum.find(forms, &match?({:function, _, :closed_raw_usage_pair, 1, _}, &1))
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "refuse semantically malformed provider reply")
 
-    assert match?(
-             {:op, _, :andalso, _plain_map_guard,
-              {:op, _, :==,
-               {:call, _, {:remote, _, {:atom, _, :erlang}, {:atom, _, :map_size}},
-                [{:var, _, ^usage_name}]}, {:integer, _, 2}}},
-             guard
-           ),
-           "closed_raw_usage_pair/1 no longer rejects cardinality before key inspection"
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+
+    [settlement] =
+      records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v1")
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "unreadable_model_answer"
+           }
+
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
+
+    assert_remaining_allowance(fixture, session_id, token_budget)
   end
 
   test "recovery settles an unresolved open without redispatch and never reuses or closes the dead predecessor stream" do

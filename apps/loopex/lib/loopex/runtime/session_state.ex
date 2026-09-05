@@ -1032,27 +1032,24 @@ defmodule Loopex.Runtime.SessionState do
   defp attempt_transport(:not_dispatched), do: "not_dispatched"
   defp attempt_transport(_other), do: "dispatched_or_unknown"
 
-  # Concept: a reply that cannot be retained truthfully becomes the compact
-  # unreadable answer, and it keeps whatever complete usage the provider did
-  # report.
+  # Concept: a reply that passed canonical request and usage validation but
+  # whose complete settlement cannot be retained becomes the compact unreadable
+  # answer and keeps its validated usage. A reply that never passed that
+  # boundary has no reported accounting fact to keep.
   #
   # Technical depth: the settlement is preflighted at its exact retained size
   # before it is proposed. A reply that passed validation but whose complete
   # settlement does not fit is compacted here rather than discovered at the
   # Store boundary, where the run would have no verdict at all.
   #
-  # Both ways a reply can fail to be retained land in the same compact record.
-  # ADR 0018 combination 5 is the only combination that names
-  # `unreadable_model_answer`, and it is the answer this runtime could not read,
-  # whether it contradicted itself or would not fit; combination 3's
-  # `model_call_failed` names an attempt that returned no answer at all -- a
-  # live ambiguous error or a recovered open attempt -- and takes the estimated
-  # remaining allowance because there is no reported figure to keep. Complete
-  # usage the provider did report survives either compaction, because
-  # combination 5 "preserves complete reported usage when available"; the
-  # validated reply supplies it where canonicalization succeeded, and the raw
-  # answer's normalized usage supplies it where canonicalization refused the
-  # reply before there was a validated one.
+  # Both ways a reply can fail to be retained land in the same compact result,
+  # but they do not carry the same accounting provenance. ADR 0018 combination
+  # 5 preserves usage only after request and usage validation succeeded and the
+  # complete settlement alone did not fit. A raw reply refused by Store
+  # admission or canonical validation supplies no trustworthy reported figure,
+  # so it takes the exact remaining allowance as estimated accounting. The same
+  # conservative cell applies to combination 3's live ambiguous error or
+  # recovered open attempt, where there was no readable answer at all.
   #
   # The raw answer reaches `canonical_reply/2` unmeasured on purpose: that
   # function admits it against ADR 0017's plain-data, depth, cardinality and
@@ -1074,7 +1071,7 @@ defmodule Loopex.Runtime.SessionState do
         end
 
       {:error, _reason} ->
-        {unreadable_result(), "none", raw_reply_usage(raw)}
+        {unreadable_result(), "none", nil}
     end
   end
 
@@ -1121,65 +1118,6 @@ defmodule Loopex.Runtime.SessionState do
       {:error, _refused} -> false
     end
   end
-
-  defp raw_reply_usage(raw) when is_map(raw) and not is_struct(raw) do
-    with {:ok, usage} <- unambiguous_raw_usage(raw),
-         {:ok, closed_usage} <- closed_raw_usage_pair(usage),
-         %{"status" => "reported"} = reported <- ProviderAttempt.normalize_usage(closed_usage) do
-      reported
-    else
-      _ambiguous_or_absent -> nil
-    end
-  end
-
-  defp raw_reply_usage(_raw), do: nil
-
-  # Concept: bytes refused as ambiguous cannot become reported accounting under
-  # one of their competing interpretations.
-  #
-  # Technical depth: canonical reply admission normalises atom keys to their
-  # binary spelling and refuses collisions. Settlement may still recover an
-  # otherwise valid usage pair when another reply member is unreadable, but it
-  # must apply that same ambiguity boundary and closed two-key shape to the raw
-  # `usage` member. An extra, missing, colliding, or invalid member returns no
-  # usable pair and selects the conservative remaining-allowance accounting cell
-  # below.
-  defp unambiguous_raw_usage(raw) do
-    case {Map.fetch(raw, :usage), Map.fetch(raw, "usage")} do
-      {{:ok, _atom_usage}, {:ok, _binary_usage}} -> :ambiguous
-      {{:ok, usage}, :error} -> {:ok, usage}
-      {:error, {:ok, usage}} -> {:ok, usage}
-      {:error, :error} -> :absent
-    end
-  end
-
-  # Technical depth: test cardinality before inspecting keys. This path runs
-  # only after canonical reply admission has refused the provider value, so it
-  # must not make a second traversal of an arbitrarily wide hostile map merely
-  # to decide that the map was too wide. The four clauses are the complete
-  # atom/binary spelling product for the exact two admitted members; the result
-  # is canonicalised only after that constant-work boundary.
-  defp closed_raw_usage_pair(usage)
-       when is_map(usage) and not is_struct(usage) and map_size(usage) == 2 do
-    case usage do
-      %{input_tokens: input, output_tokens: output} ->
-        {:ok, %{"input_tokens" => input, "output_tokens" => output}}
-
-      %{:input_tokens => input, "output_tokens" => output} ->
-        {:ok, %{"input_tokens" => input, "output_tokens" => output}}
-
-      %{"input_tokens" => input, :output_tokens => output} ->
-        {:ok, %{"input_tokens" => input, "output_tokens" => output}}
-
-      %{"input_tokens" => input, "output_tokens" => output} ->
-        {:ok, %{"input_tokens" => input, "output_tokens" => output}}
-
-      _other ->
-        :invalid
-    end
-  end
-
-  defp closed_raw_usage_pair(_usage), do: :invalid
 
   defp attempt_accounting("not_dispatched", _usage),
     do: %{"source" => "none", "basis" => "not_dispatched"}
