@@ -165,19 +165,31 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     # Nor can the handoff rescue it. Installation asks for the transfer from the
     # process that installs, and that process is not the holder either, so the
-    # owner refuses to move the capability and the handler is left holding one it
-    # will never be answered for. This is the half of ADR 0016 that death before
-    # the acknowledgement decides, and it is unchanged by the acknowledgement
-    # existing.
+    # owner refuses to move the capability. The unacknowledged holder is then
+    # released rather than leaked behind the installed handler. This is the half
+    # of ADR 0016 that death before the acknowledgement decides, and it is
+    # unchanged by the acknowledgement existing.
     #
     # Installation reports the owner's refusal rather than reporting itself
     # complete: the acknowledgement is the transfer's `:ok`, and there was none.
-    assert assert_refused(
-             invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
-           ) == :resume_activation_holder_mismatch
+    installer = self()
+    trace_collector = spawn(fn -> forward_trace(installer) end)
+    assert 1 = :erlang.trace(installer, true, [:procs, {:tracer, trace_collector}])
+
+    refusal = invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
+
+    assert_receive {:trace, ^installer, :spawn, rejected_holder, _entry}, 1_000
+    assert 1 = :erlang.trace(installer, false, [:procs])
+    send(trace_collector, :stop)
+    rejected_holder_monitor = Process.monitor(rejected_holder)
+
+    assert assert_refused(refusal) == :resume_activation_holder_mismatch
+
+    assert_receive {:DOWN, ^rejected_holder_monitor, :process, ^rejected_holder, _reason},
+                   1_000
 
     assert assert_refused(invoke(Interrupt, :activate_prepared, [activation])) ==
-             :resume_activation_holder_mismatch
+             :prepared_activation_not_installed
 
     Process.sleep(100)
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
@@ -685,6 +697,278 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     Process.sleep(100)
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+  end
+
+  # Concept: a prepared holder cannot survive the process that is still trying
+  # to make it reachable from an interrupt handler.
+  #
+  # Technical depth: the production installation lock holds the installer
+  # before it can select a signal manager or install a handler. Process tracing
+  # observes the real holder it spawns without adding a product seam. Killing
+  # the installer there must make its one-way lifetime guard take that holder
+  # down; otherwise a death before the handler swap can strand the same
+  # unguarded process. Once the owner acknowledges the handoff, the separate
+  # preparer- and manager-loss cases prove that the holder has transferred away
+  # from this temporary lifetime instead.
+  test "installer death before handler installation cannot leave its prepared holder alive" do
+    fixture = recovered_fixture("pre-install-installer-death", :active)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-pre-install-installer-death"
+             ])
+
+    parent = self()
+
+    lock_owner =
+      spawn(fn ->
+        :global.trans(
+          {{Interrupt, :handler_install}, self()},
+          fn ->
+            send(parent, {:handler_install_lock_held, self()})
+
+            receive do
+              :release_handler_install_lock -> :ok
+            end
+          end,
+          [node()]
+        )
+      end)
+
+    assert_receive {:handler_install_lock_held, ^lock_owner}, 5_000
+
+    installer =
+      spawn(fn ->
+        receive do
+          :install ->
+            send(
+              parent,
+              {:pre_install_installer_result,
+               invoke(Interrupt, :install_prepared, [
+                 fixture.attachment,
+                 @grace,
+                 activation
+               ])}
+            )
+        end
+      end)
+
+    assert 1 = :erlang.trace(installer, true, [:procs])
+    installer_monitor = Process.monitor(installer)
+    send(installer, :install)
+
+    assert_receive {:trace, ^installer, :spawn, holder, _entry}, 5_000
+    assert is_pid(holder)
+    holder_monitor = Process.monitor(holder)
+
+    try do
+      assert await_installer_lock(installer),
+             "the prepared installer did not reach the held installation lock"
+
+      Process.exit(installer, :kill)
+      assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :killed}, 1_000
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
+      refute_receive {:pre_install_installer_result, _result}, 0
+    after
+      send(lock_owner, :release_handler_install_lock)
+      if Process.alive?(installer), do: Process.exit(installer, :kill)
+      if Process.alive?(holder), do: Process.exit(holder, :kill)
+      _ = invoke(Loopex, :abandon_resume, [activation])
+    end
+  end
+
+  # Concept: installing the handler does not complete a prepared handoff; until
+  # the session owner acknowledges the new holder, that holder still belongs to
+  # the installer and disappears with it.
+  #
+  # Technical depth: the coordinator is suspended before installation, so the
+  # real signal manager can publish the successor handler while the owner's
+  # `transfer_resume` request remains queued and cannot acknowledge. Killing the
+  # installer in that established interval must make the one-way lifetime guard
+  # stop the exact holder. This distinguishes the owner acknowledgement from the
+  # earlier event-manager swap without a caller-controlled product seam.
+  test "installer death after handler installation but before owner acknowledgement ends its holder" do
+    fixture = recovered_fixture("pre-ack-installer-death", :active)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-pre-ack-installer-death"
+             ])
+
+    coordinator = coordinator_of(fixture.runtime)
+    :erlang.suspend_process(coordinator)
+    parent = self()
+
+    {installer, installer_monitor} =
+      spawn_monitor(fn ->
+        send(
+          parent,
+          {:pre_ack_installer_result,
+           invoke(Interrupt, :install_prepared, [
+             fixture.attachment,
+             @grace,
+             activation
+           ])}
+        )
+      end)
+
+    try do
+      assert await_handler_terminal(installer),
+             "the prepared successor handler was not installed"
+
+      [holder] =
+        for %{activation: ^activation, holder: holder} <- interrupt_handler_states(),
+            do: holder
+
+      holder_monitor = Process.monitor(holder)
+
+      assert queued_transfer?(coordinator, activation.capability, holder),
+             "the installer never reached the unacknowledged owner transfer"
+
+      Process.exit(installer, :kill)
+      assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :killed}, 1_000
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
+      refute_receive {:pre_ack_installer_result, _result}, 0
+    after
+      if Process.alive?(installer), do: Process.exit(installer, :kill)
+      if suspended?(coordinator), do: :erlang.resume_process(coordinator)
+      _ = invoke(Loopex, :abandon_resume, [activation])
+    end
+
+    assert await_settled_capability(activation, :resume_activation_abandoned),
+           "the dead unacknowledged installer left the capability prepared"
+  end
+
+  # Concept: installation never publishes a prepared holder during an interval
+  # in which neither its installer nor its signal manager owns its lifetime.
+  #
+  # Technical depth: the behavior cases above prove the temporary installer
+  # lifetime before installation and between installation and owner
+  # acknowledgement; the manager-loss cases prove the completed handoff. The
+  # few BEAM reductions between calls cannot be paused through a public
+  # interface without adding a caller-controlled product seam, so their order is
+  # locked structurally through parsed Elixir syntax. The serialized function
+  # must arm the exact manager, install the successor, complete the owner
+  # handoff, then drain the predecessor. Inside that completion, the owner's
+  # transfer acknowledgement must precede release of the installer lifetime.
+  test "prepared installation arms manager ownership before visibility and transfers lifetime after owner acknowledgement" do
+    source = File.read!(Path.expand("../lib/interrupt.ex", __DIR__))
+    {:ok, ast} = Code.string_to_quoted(source)
+    body = private_function_body!(ast, :do_serialized_install_on, 5)
+    handoff_body = private_function_body!(ast, :complete_live_prepared_handoff, 3)
+
+    arm = local_call_line!(body, :arm_holder, 2)
+    install = local_call_line!(body, :install_or_replace_handler, 2)
+    handoff = local_call_line!(body, :complete_prepared_handoff, 3)
+    drain = local_call_line!(body, :await_released_holders, 1)
+    owner_ack = remote_call_line!(handoff_body, Loopex, :transfer_resume, 2)
+    lifetime_transfer = local_call_line!(handoff_body, :transfer_holder_lifetime, 1)
+
+    assert arm < install,
+           "the prepared holder becomes handler-visible before its exact manager guard is armed"
+
+    assert install < handoff,
+           "the prepared capability is transferred before its handler is visible"
+
+    assert handoff < drain,
+           "the successor holder remains tied to a drain caller that may die"
+
+    assert owner_ack < lifetime_transfer,
+           "the installer lifetime ends before the session owner acknowledges the holder"
+  end
+
+  # Concept: abrupt manager loss while a prepared handoff is being installed
+  # refuses that installation without killing its caller or stranding its
+  # holder.
+  #
+  # Technical depth: an isolated signal manager is suspended before the
+  # installer enters. The queued first event-manager call proves the exact
+  # manager guard was armed and installation had not completed. Killing that
+  # manager makes the guard kill the holder. A direct temporary link from holder
+  # to installer would propagate the same `:killed` exit into the public caller;
+  # the one-way pre-install guard must instead let it return the documented
+  # installation refusal. This establishes the pre-transfer edge without a
+  # product hook or a scheduler race.
+  test "manager loss before lifetime transfer refuses installation without killing its caller" do
+    fixture = recovered_fixture("pre-transfer-manager-loss", :active)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-pre-transfer-manager-loss"
+             ])
+
+    actual_manager = Process.whereis(:erl_signal_server)
+    assert is_pid(actual_manager)
+    assert {:ok, isolated_manager} = :gen_event.start()
+    Process.unlink(isolated_manager)
+    Process.unregister(:erl_signal_server)
+    assert Process.register(isolated_manager, :erl_signal_server)
+    :erlang.suspend_process(isolated_manager)
+
+    parent = self()
+
+    installer =
+      spawn(fn ->
+        receive do
+          :install ->
+            send(
+              parent,
+              {:pre_transfer_installer_result,
+               invoke(Interrupt, :install_prepared, [
+                 fixture.attachment,
+                 @grace,
+                 activation
+               ])}
+            )
+        end
+      end)
+
+    assert 1 = :erlang.trace(installer, true, [:procs])
+    installer_monitor = Process.monitor(installer)
+    manager_monitor = Process.monitor(isolated_manager)
+    send(installer, :install)
+
+    assert_receive {:trace, ^installer, :spawn, holder, _entry}, 5_000
+    holder_monitor = Process.monitor(holder)
+
+    try do
+      assert await_manager_call(isolated_manager, installer),
+             "installation never reached the guarded signal manager"
+
+      Process.exit(isolated_manager, :kill)
+      assert_receive {:DOWN, ^manager_monitor, :process, ^isolated_manager, :killed}, 1_000
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
+
+      assert_receive {:pre_transfer_installer_result,
+                      {:error, :prepared_activation_not_installed}},
+                     1_000
+
+      assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :normal}, 1_000
+    after
+      if Process.alive?(installer), do: Process.exit(installer, :kill)
+      if Process.alive?(holder), do: Process.exit(holder, :kill)
+
+      case Process.whereis(:erl_signal_server) do
+        ^isolated_manager -> Process.unregister(:erl_signal_server)
+        _other -> :ok
+      end
+
+      if Process.alive?(isolated_manager), do: Process.exit(isolated_manager, :kill)
+
+      if is_nil(Process.whereis(:erl_signal_server)),
+        do: Process.register(actual_manager, :erl_signal_server)
+
+      _ = invoke(Loopex, :abandon_resume, [activation])
+    end
   end
 
   # Concept: an abrupt signal-manager loss cannot leave a prepared capability
@@ -2029,6 +2313,30 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     end
   end
 
+  defp queued_transfer?(coordinator, capability, holder, attempts \\ 300)
+  defp queued_transfer?(_coordinator, _capability, _holder, 0), do: false
+
+  defp queued_transfer?(coordinator, capability, holder, attempts) do
+    queued =
+      case Process.info(coordinator, :messages) do
+        {:messages, messages} ->
+          Enum.any?(messages, fn
+            {:"$gen_call", _from, {:transfer_resume, _owner, ^capability, ^holder}} -> true
+            _other -> false
+          end)
+
+        nil ->
+          false
+      end
+
+    if queued do
+      true
+    else
+      Process.sleep(10)
+      queued_transfer?(coordinator, capability, holder, attempts - 1)
+    end
+  end
+
   defp queued_abort?(coordinator, attempts \\ 300)
   defp queued_abort?(_coordinator, 0), do: false
 
@@ -2118,6 +2426,109 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     else
       Process.sleep(10)
       await_installer_lock(installer, attempts - 1)
+    end
+  end
+
+  defp await_manager_call(manager, caller, attempts \\ 300)
+  defp await_manager_call(_manager, _caller, 0), do: false
+
+  defp await_manager_call(manager, caller, attempts) do
+    queued =
+      case Process.info(manager, :messages) do
+        {:messages, messages} ->
+          Enum.any?(messages, fn
+            {:"$gen_call", {^caller, _tag}, _request} -> true
+            {^caller, {^caller, _tag}, _request} -> true
+            _other -> false
+          end)
+
+        nil ->
+          false
+      end
+
+    if queued do
+      true
+    else
+      Process.sleep(10)
+      await_manager_call(manager, caller, attempts - 1)
+    end
+  end
+
+  defp forward_trace(parent) do
+    receive do
+      :stop ->
+        :ok
+
+      message ->
+        send(parent, message)
+        forward_trace(parent)
+    end
+  end
+
+  defp private_function_body!(ast, name, arity) do
+    {_ast, bodies} =
+      Macro.prewalk(ast, [], fn
+        {:defp, _metadata, [{^name, _head_metadata, arguments}, clauses]} = node, bodies
+        when is_list(arguments) and length(arguments) == arity and is_list(clauses) ->
+          {node, [Keyword.fetch!(clauses, :do) | bodies]}
+
+        {:defp, _metadata,
+         [
+           {:when, _when_metadata, [{^name, _head_metadata, arguments} | _guards]},
+           clauses
+         ]} = node,
+        bodies
+        when is_list(arguments) and length(arguments) == arity and is_list(clauses) ->
+          {node, [Keyword.fetch!(clauses, :do) | bodies]}
+
+        node, bodies ->
+          {node, bodies}
+      end)
+
+    case bodies do
+      [body] -> body
+      [] -> flunk("private function #{name}/#{arity} was not found")
+      _many -> flunk("private function #{name}/#{arity} was defined more than once")
+    end
+  end
+
+  defp local_call_line!(body, name, arity) do
+    {_body, lines} =
+      Macro.prewalk(body, [], fn
+        {^name, metadata, arguments} = node, lines
+        when is_list(arguments) and length(arguments) == arity ->
+          {node, [Keyword.fetch!(metadata, :line) | lines]}
+
+        node, lines ->
+          {node, lines}
+      end)
+
+    case Enum.uniq(lines) do
+      [line] -> line
+      [] -> flunk("local call #{name}/#{arity} was not found")
+      _many -> flunk("local call #{name}/#{arity} was not unique")
+    end
+  end
+
+  defp remote_call_line!(body, module, name, arity) do
+    aliases = Module.split(module) |> Enum.map(&String.to_atom/1)
+
+    {_body, lines} =
+      Macro.prewalk(body, [], fn
+        {{:., _dot_metadata, [{:__aliases__, _alias_metadata, ^aliases}, ^name]}, metadata,
+         arguments} = node,
+        lines
+        when is_list(arguments) and length(arguments) == arity ->
+          {node, [Keyword.fetch!(metadata, :line) | lines]}
+
+        node, lines ->
+          {node, lines}
+      end)
+
+    case Enum.uniq(lines) do
+      [line] -> line
+      [] -> flunk("remote call #{inspect(module)}.#{name}/#{arity} was not found")
+      _many -> flunk("remote call #{inspect(module)}.#{name}/#{arity} was not unique")
     end
   end
 
