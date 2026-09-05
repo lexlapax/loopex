@@ -64,11 +64,14 @@ defmodule Loopex.ReferenceClientTestModel do
 end
 
 defmodule Loopex.ReferenceClientRuntimeFixture do
+  alias Loopex.Executor
   alias Loopex.Executor.Local
   alias Loopex.Executor.Local.WorkspaceLease
   alias Loopex.ReferenceClient
   alias Loopex.Store
   alias Loopex.Store.Local, as: LocalStore
+
+  @demo_tool_wall_time_ms 30_000
 
   def start(label, model_module, model_options \\ [], options \\ []) do
     root =
@@ -130,7 +133,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       "effect_class" => "workspace_write",
       "idempotency_class" => "reconcile_then_retry",
       "budgets" => %{
-        "wall_time_ms" => 30_000,
+        "wall_time_ms" => @demo_tool_wall_time_ms,
         "output_bytes" => 1_048_576,
         "artifact_bytes" => 1_048_576
       }
@@ -216,6 +219,92 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
         Process.sleep(10)
         await_terminal(fixture, attempts - 1)
     end
+  end
+
+  # Concept: the recovery fault boundary waits for the complete valid tool
+  # lifetime rather than an arbitrary fraction of it.
+  #
+  # Technical depth: the demonstration tool is a controlled process with its
+  # own wall bound. A successful answer may then spend the committed cleanup
+  # period confirming the process group and the separate receipt-retention
+  # reserve before Core can emit the fault hook. The former three-second receive
+  # raced that healthy path under suite load. This helper derives its ceiling
+  # from the same public cancellation formula, fails early if the run terminates
+  # without the hook, and reports the observable runtime and executor state if
+  # the complete bound expires.
+  def await_executor_receipt_fault(fixture) do
+    grace_ms =
+      Keyword.get(
+        fixture.runtime_options,
+        :cleanup_grace_ms,
+        Executor.default_cleanup_grace_ms()
+      )
+
+    {:ok, bounds} = Executor.cancellation_bounds(grace_ms)
+
+    timeout_ms =
+      @demo_tool_wall_time_ms + bounds.executor_observe_ms + bounds.receipt_retention_ms
+
+    await_executor_receipt_fault(
+      fixture,
+      System.monotonic_time(:millisecond) + timeout_ms,
+      timeout_ms
+    )
+  end
+
+  defp await_executor_receipt_fault(fixture, deadline, timeout_ms) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {:loopex_fault, :after_executor_receipt_before_fact, _coordinator, _reference, _receipt} =
+          fault ->
+        fault
+    after
+      min(remaining, 100) ->
+        status = safely(fn -> ReferenceClient.status(fixture.client) end)
+
+        cond do
+          terminal_without_fault?(status) ->
+            raise_fault_wait("run terminated without the recovery fault", fixture, status)
+
+          remaining == 0 ->
+            raise_fault_wait(
+              "recovery fault did not arrive within #{timeout_ms} ms",
+              fixture,
+              status
+            )
+
+          true ->
+            await_executor_receipt_fault(fixture, deadline, timeout_ms)
+        end
+    end
+  end
+
+  defp terminal_without_fault?({:ok, %{active_run_id: nil, pending_work_ids: []}}), do: true
+  defp terminal_without_fault?(_status), do: false
+
+  defp raise_fault_wait(reason, fixture, status) do
+    stats = safely(fn -> Local.stats(fixture.executor) end)
+
+    receipts =
+      case stats do
+        %{dispatches: dispatches} when is_map(dispatches) ->
+          Map.new(dispatches, fn {job_id, _count} ->
+            {job_id, safely(fn -> Local.receipt(fixture.executor, job_id) end)}
+          end)
+
+        _unavailable ->
+          :unavailable
+      end
+
+    raise "#{reason}; status=#{inspect(status)} stats=#{inspect(stats)} " <>
+            "receipts=#{inspect(receipts)}"
+  end
+
+  defp safely(fun) do
+    fun.()
+  catch
+    kind, reason -> {kind, reason}
   end
 
   def stop_runtime(fixture) do

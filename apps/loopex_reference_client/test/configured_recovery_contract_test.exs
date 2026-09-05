@@ -60,6 +60,9 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
   alias Loopex.ReferenceClient.Recovery
   alias Loopex.ReferenceClientRuntimeFixture, as: Fixture
 
+  @fault_test_timeout 60_000
+
+  @tag timeout: @fault_test_timeout
   test "a non-default cleanup value crosses real Local receipt restart prepared resume and cancel recovery" do
     label = "configured-cancel-recovery"
     cleanup_grace_ms = 7_311
@@ -99,9 +102,8 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
     assert {:accepted, ^prompt_id} = ReferenceClient.prompt(fixture.client, prompt_id, "do it")
     assert_receive {:model_request, _request}, 3_000
 
-    assert_receive {:loopex_fault, :after_executor_receipt_before_fact, _coordinator, _reference,
-                    retained},
-                   3_000
+    assert {:loopex_fault, :after_executor_receipt_before_fact, _coordinator, _reference,
+            retained} = Fixture.await_executor_receipt_fault(fixture)
 
     assert Local.stats(fixture.executor).dispatches[retained.job_id] == 1
     assert {:ok, ^retained} = Local.receipt(fixture.executor, retained.job_id)
@@ -194,6 +196,7 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
     assert File.read!(effect_path) == content
   end
 
+  @tag timeout: @fault_test_timeout
   test "prepared restart activation reconciles the retained effect once without redispatch" do
     label = "configured-resume-recovery"
     cleanup_grace_ms = 7_311
@@ -226,9 +229,8 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
     assert {:accepted, ^prompt_id} = ReferenceClient.prompt(fixture.client, prompt_id, "do it")
     assert_receive {:model_request, _request}, 3_000
 
-    assert_receive {:loopex_fault, :after_executor_receipt_before_fact, _coordinator, _reference,
-                    retained},
-                   3_000
+    assert {:loopex_fault, :after_executor_receipt_before_fact, _coordinator, _reference,
+            retained} = Fixture.await_executor_receipt_fault(fixture)
 
     effect_path = Path.join(fixture.workspace, relative_path)
     assert File.read!(effect_path) == content
@@ -295,6 +297,7 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
   # `Recovery.outcome_unknown/1` would. The effect's bytes are still on disk
   # and the dispatch count stays zero: absence settled the run, it did not
   # retry it.
+  @tag timeout: @fault_test_timeout
   test "prepared activation without a retained receipt ends outcome_unknown without redispatch" do
     {restarted, attachment, retained} =
       restart_prepared("activation-without-receipt", remove_receipt: true)
@@ -348,6 +351,7 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
   # the coordinator declines rather than settling on an answer it could not
   # validate; the run stays pending, the host's query is solicited fresh, and
   # the host's receipt completes the run. Silence is never read as absence.
+  @tag timeout: @fault_test_timeout
   test "prepared activation leaves an unanswerable receipt lookup to the host" do
     {restarted, attachment, retained} =
       restart_prepared("activation-declined", executor_module: InFlightReceiptExecutor)
@@ -415,9 +419,8 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
         assert {:error, :effect_settling} = Local.receipt(fixture.executor, job_id)
         retained
       else
-        assert_receive {:loopex_fault, :after_executor_receipt_before_fact, _coordinator,
-                        _reference, retained},
-                       3_000
+        assert {:loopex_fault, :after_executor_receipt_before_fact, _coordinator, _reference,
+                retained} = Fixture.await_executor_receipt_fault(fixture)
 
         retained
       end

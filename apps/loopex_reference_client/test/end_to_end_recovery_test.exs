@@ -24,10 +24,13 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
     :origin_fencing_token
   ]
 
+  @fault_test_timeout 60_000
+
   test "reconciliation schema covers the independent recovery contract oracle" do
     assert SessionCoordinator.reconciliation_fields() == @reconciliation_oracle
   end
 
+  @tag timeout: @fault_test_timeout
   test "exactly one dispatch ever carried each effect across the restart" do
     {fixture, session_id, retained, first_dispatches} = fault_and_restart("one-dispatch")
     on_exit(fn -> Fixture.stop(fixture) end)
@@ -46,6 +49,7 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
     assert Enum.count(events, &(&1.kind == "tool.finished")) == 1
   end
 
+  @tag timeout: @fault_test_timeout
   test "an effect without a durable receipt becomes outcome_unknown and is not blindly retried" do
     {fixture, session_id, retained, first_dispatches} =
       fault_and_restart("unknown-without-receipt", remove_receipt: true)
@@ -108,6 +112,7 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
     assert Enum.uniq_by(before, & &1.event_id) == before
   end
 
+  @tag timeout: @fault_test_timeout
   test "each wrong reconciliation and receipt identity is refused" do
     {fixture, _session_id, retained, _dispatches} = fault_and_restart("wrong-identities")
     on_exit(fn -> Fixture.stop(fixture) end)
@@ -257,9 +262,8 @@ defmodule Loopex.ReferenceClient.EndToEndRecoveryTest do
 
     assert command_id == "prompt-#{label}"
 
-    assert_receive {:loopex_fault, :after_executor_receipt_before_fact, _coordinator, _reference,
-                    retained},
-                   3_000
+    assert {:loopex_fault, :after_executor_receipt_before_fact, _coordinator, _reference,
+            retained} = Fixture.await_executor_receipt_fault(fixture)
 
     first_dispatches = Local.stats(fixture.executor).dispatches
     session_id = fixture.client.session_id
