@@ -136,6 +136,12 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       }
     }
 
+    executor_reference =
+      case Keyword.get(options, :executor_reference_builder) do
+        nil -> executor
+        builder when is_function(builder, 1) -> builder.(executor)
+      end
+
     runtime_options = [
       context_token_budget: 8_192,
       runtime_id: "runtime-#{label}",
@@ -147,7 +153,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       },
       executor: %{
         module: Keyword.get(options, :executor_module, Local),
-        reference: executor,
+        reference: executor_reference,
         identity: "executor-local",
         epoch: 11,
         fencing_token: fence,

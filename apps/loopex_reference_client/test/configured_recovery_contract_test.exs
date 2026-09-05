@@ -20,13 +20,42 @@ defmodule Loopex.ReferenceClient.InFlightReceiptExecutor do
   def retained_receipt(_reference, _job_id), do: {:error, :effect_in_flight}
 end
 
+# An executor that lets the shipped Local hand finish its complete durable
+# settlement, then holds the exact answer before the session coordinator can
+# journal it. Stopping the runtime at that boundary reproduces an origin lost
+# after the hand's truth exists without depending on a success-only kernel hook.
+defmodule Loopex.ReferenceClient.HeldSettlementExecutor do
+  @moduledoc false
+  @behaviour Loopex.Executor
+
+  alias Loopex.Executor.Local
+
+  @impl Loopex.Executor
+  def execute(%{local: local, observer: observer}, job, grant, options, progress) do
+    result = Local.execute(local, job, grant, options, progress)
+    send(observer, {:executor_settlement_held, self(), job.job_id, result})
+
+    receive do
+      {:release_executor_settlement, job_id} when job_id == job.job_id -> result
+    end
+  end
+
+  @impl Loopex.Executor
+  def cancel(%{local: local}, job_id), do: Local.cancel(local, job_id)
+
+  @impl Loopex.Executor
+  def retained_receipt(%{local: local}, job_id), do: Local.receipt(local, job_id)
+end
+
 defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
   @moduledoc false
 
   use ExUnit.Case, async: false
 
+  alias Loopex.Executor
   alias Loopex.Executor.Local
   alias Loopex.ReferenceClient
+  alias Loopex.ReferenceClient.HeldSettlementExecutor
   alias Loopex.ReferenceClient.InFlightReceiptExecutor
   alias Loopex.ReferenceClient.Recovery
   alias Loopex.ReferenceClientRuntimeFixture, as: Fixture
@@ -284,23 +313,28 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
   # the recovered run `outcome_unknown`, and the root stays quarantined.
   #
   # Technical depth: the origin's settlement is made to fail its open-entry
-  # removal through the executor's `open_authority_close` seam, so the receipt
-  # it retains is the quarantined form and the entry stands. The restarted
-  # executor then answers `effect_settling` for that job, and activation ends
-  # the run `outcome_unknown` rather than waiting on a disposition nobody will
+  # removal through the executor's `open_authority_close` seam. Local finishes
+  # that settlement before a port wrapper holds its unresolved answer, so the
+  # proved completed receipt is durable, the open entry still stands, and no
+  # root claim is stranded when the origin runtime dies. The restarted executor
+  # therefore answers `effect_settling` for that job, and activation ends the
+  # run `outcome_unknown` rather than waiting on a disposition nobody will
   # finish; the next admission on that root is still refused, which is the
   # quarantine doing its job.
   test "prepared activation over a quarantined root ends outcome_unknown and keeps the quarantine" do
     {restarted, attachment, retained} =
       restart_prepared("activation-quarantined",
+        hold_settlement: true,
         origin_executor_options: [open_authority_close: fn _ledger, _job_id -> {:error, :eio} end]
       )
 
-    assert retained.outcome == :outcome_unknown
+    assert retained.outcome == :completed
+    assert retained.cleanup_confirmation == :confirmed
     assert {:error, :effect_settling} = Local.receipt(restarted.executor, retained.job_id)
 
     terminal = await_run_finished(attachment, 10_000)
     assert terminal["outcome"] == "outcome_unknown"
+    assert_quarantine_refuses_unrelated_effect(restarted, "activation-quarantined")
     assert Local.stats(restarted.executor).dispatches == %{}
 
     host = %{restarted.client | attachment: attachment}
@@ -334,12 +368,26 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
     relative_path = "#{label}.txt"
     content = "effect-#{label}"
 
+    hold_settlement? = Keyword.get(options, :hold_settlement, false)
+    observer = self()
+
+    origin_runtime_options =
+      if hold_settlement? do
+        [
+          executor_module: HeldSettlementExecutor,
+          executor_reference_builder: fn local -> %{local: local, observer: observer} end
+        ]
+      else
+        []
+      end
+
     fixture =
       Fixture.start(
         label,
         Loopex.ReferenceClientTestModel,
         [relative_path: relative_path, content: content, observer: self()],
         [fault_to: self()] ++
+          origin_runtime_options ++
           Keyword.take(
             Keyword.get(options, :origin_executor_options, []) |> then(&[executor_options: &1]),
             [:executor_options]
@@ -354,9 +402,25 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
     assert {:accepted, _id} = ReferenceClient.prompt(fixture.client, "prompt-#{label}", "do it")
     assert_receive {:model_request, _request}, 3_000
 
-    assert_receive {:loopex_fault, :after_executor_receipt_before_fact, _coordinator, _reference,
-                    retained},
-                   3_000
+    retained =
+      if hold_settlement? do
+        assert_receive {:executor_settlement_held, worker, job_id,
+                        {:error, {:effect_settling, {:open_authority_not_removed, :eio}}}},
+                       3_000
+
+        retained = retained_receipt!(fixture.ledger, job_id)
+        worker_monitor = Process.monitor(worker)
+        Fixture.stop_runtime(fixture)
+        assert_receive {:DOWN, ^worker_monitor, :process, ^worker, _reason}, 3_000
+        assert {:error, :effect_settling} = Local.receipt(fixture.executor, job_id)
+        retained
+      else
+        assert_receive {:loopex_fault, :after_executor_receipt_before_fact, _coordinator,
+                        _reference, retained},
+                       3_000
+
+        retained
+      end
 
     assert File.read!(Path.join(fixture.workspace, relative_path)) == content
 
@@ -400,6 +464,59 @@ defmodule Loopex.ReferenceClient.ConfiguredRecoveryContractTest do
   defp receipt_path(ledger, job_id) do
     name = :crypto.hash(:sha256, job_id) |> Base.encode16(case: :lower)
     Path.join(ledger, name <> ".receipt")
+  end
+
+  defp retained_receipt!(ledger, job_id) do
+    ledger
+    |> receipt_path(job_id)
+    |> File.read!()
+    |> :erlang.binary_to_term([:safe])
+  end
+
+  defp assert_quarantine_refuses_unrelated_effect(fixture, label) do
+    now = System.system_time(:millisecond)
+    proof = "#{label}-unrelated"
+    target = "#{proof}.txt"
+    {:ok, tool} = Local.tool("loopex.demo.write")
+
+    {:ok, job} =
+      Executor.job(%{
+        protocol_version: 1,
+        job_id: "job-#{proof}",
+        operation_id: "operation-#{proof}",
+        attempt: 1,
+        session_id: "session-#{proof}",
+        run_id: "run-#{proof}",
+        turn_id: "turn-#{proof}",
+        tool_call_id: "tool-call-#{proof}",
+        origin_session_epoch: 1,
+        origin_executor_epoch: 11,
+        executor_identity: "executor-local",
+        required_capabilities: [tool.effect_class],
+        tool_id: tool.id,
+        tool_version: tool.version,
+        effect_class: tool.effect_class,
+        validated_arguments: %{"relative_path" => target, "content" => "must-not-run"},
+        workspace_ref: "workspace-#{label}",
+        workspace_lease: "lease-#{label}",
+        run_deadline: now + 60_000,
+        resource_budgets: %{
+          "max_output_bytes" => 1_048_576,
+          "max_wall_time_ms" => 30_000
+        },
+        idempotency_class: "reconcile_then_retry",
+        fencing_token: 73,
+        artifact_policy: %{"retain" => true},
+        output_policy: %{"capture" => true},
+        cleanup_grace_ms: Executor.default_cleanup_grace_ms()
+      })
+
+    {:ok, grant} = Executor.issue_grant({:host_policy, :allow}, job, now + 60_000)
+
+    assert {:error, {:reconciliation_required, 1}} =
+             Local.execute(fixture.executor, job, grant)
+
+    refute File.exists?(Path.join(fixture.workspace, target))
   end
 
   defp await_run_finished_or_pending(attachment, timeout_ms) do
