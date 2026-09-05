@@ -80,6 +80,7 @@ defmodule Loopex.Audit3RepairsTest do
   alias Loopex.AgentLoopTestModel
   alias Loopex.Audit3HoldingStore
   alias Loopex.M1RuntimeTestStore
+  alias Loopex.Runtime
   alias Loopex.Store
 
   # Concept: the authority a permit is sent under has to still be authority at
@@ -162,6 +163,37 @@ defmodule Loopex.Audit3RepairsTest do
            "the refused attempt reached the provider, or its one retry did not"
 
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "completed"
+  end
+
+  # Concept: a private Store reader cannot outlive the Control whose authority
+  # requested the read.
+  #
+  # Technical depth: the holding store positively names the exact process blocked
+  # inside `load_records/4`. Killing Control before its one-second timer can fire
+  # removes the caller that used to own that timeout; an unguarded reader would
+  # therefore remain blocked for the store's fifteen-second allowance. The
+  # guardian monitors Control independently and kills and awaits this exact
+  # reader, so the assertion does not infer cleanup from a later runtime result.
+  test "a blocked binding reader dies with its Control" do
+    {fixture, holder} = start_held(script: [%{text: "done", calls: []}])
+    :ok = Audit3HoldingStore.arm(holder, self())
+    {:ok, %{control: control}} = Runtime.children(fixture.runtime)
+
+    {_session_id, _attachment, _reply} = Fixture.run(fixture, "go")
+
+    assert_receive {:audit3_position_read_held, reader},
+                   5_000,
+                   "Control never entered the held Store read"
+
+    control_monitor = Process.monitor(control)
+    reader_monitor = Process.monitor(reader)
+    Process.exit(control, :kill)
+
+    assert_receive {:DOWN, ^control_monitor, :process, ^control, :killed}, 1_000
+
+    assert_receive {:DOWN, ^reader_monitor, :process, ^reader, :killed},
+                   1_000,
+                   "the blocked Store caller survived the Control that requested its read"
   end
 
   # Concept: a read that answers inside both bounds still dispatches.

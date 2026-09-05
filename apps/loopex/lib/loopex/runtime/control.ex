@@ -38,12 +38,11 @@ defmodule Loopex.Runtime.Control do
 
   @max_identifier_bytes 256
 
-  # Technical depth: the bound Control is willing to spend waiting for the one
-  # single-row page that rebuilds a provider attempt binding. It is a local
-  # store read of one record, so a second is already generous, while every
-  # committed run deadline this could be authorizing against is far larger --
-  # the bound can therefore expire only when the store is not answering, and it
-  # never becomes the reason an attempt inside its own authority is refused.
+  # Technical depth: this is Control's private responsiveness bound for the one
+  # single-row page that rebuilds a provider attempt binding. It is deliberately
+  # independent of the run deadline: expiry proves only that the Store did not
+  # answer inside Control's local allowance, so it refuses without manufacturing
+  # a dispatch verdict.
   @position_read_timeout_ms 1_000
 
   @doc """
@@ -1305,35 +1304,41 @@ defmodule Loopex.Runtime.Control do
   # authority, before the deadline was re-established. The read therefore runs in
   # a monitored throwaway process and is awaited for `@position_read_timeout_ms`.
   # An exhausted bound is not a verdict about the row -- it is the absence of
-  # one -- so it refuses exactly as an unreadable row does. The reader is killed
-  # and its death awaited before returning, because signals from one process
-  # arrive in order: once the `DOWN` is in hand, either the answer is already in
-  # this mailbox and is flushed here, or it can never arrive, and no late page
-  # can surface as an unmatched message in a later Control handler. An adapter
-  # that raises or exits is contained the same way instead of taking the whole
-  # runtime's Control down with it.
+  # one -- so it refuses exactly as an unreadable row does. A separate guardian
+  # owns the Store-call worker and monitors Control itself. Timeout cancellation
+  # and Control death both make the guardian kill and await that worker; a result
+  # is forwarded only after the worker has exited. That keeps a blocked adapter
+  # from surviving the private authority process that requested its read, while
+  # preserving the rule that a missing answer is never a dispatch verdict. An
+  # adapter that raises or exits is contained the same way instead of taking the
+  # whole runtime's Control down with it.
   defp bounded_position_read(store, session_id, version) do
-    parent = self()
+    control = self()
     tag = make_ref()
 
-    {reader, monitor} =
+    {guardian, monitor} =
       spawn_monitor(fn ->
-        send(parent, {tag, Store.load_records(store, session_id, version - 1, 1)})
+        guard_position_read(control, tag, fn ->
+          Store.load_records(store, session_id, version - 1, 1)
+        end)
       end)
 
     receive do
       {^tag, result} ->
-        Process.demonitor(monitor, [:flush])
+        receive do
+          {:DOWN, ^monitor, :process, ^guardian, _reason} -> :ok
+        end
+
         result
 
-      {:DOWN, ^monitor, :process, ^reader, _reason} ->
+      {:DOWN, ^monitor, :process, ^guardian, _reason} ->
         :unavailable
     after
       @position_read_timeout_ms ->
-        Process.exit(reader, :kill)
+        send(guardian, {:cancel_position_read, tag})
 
         receive do
-          {:DOWN, ^monitor, :process, ^reader, _reason} -> :ok
+          {:DOWN, ^monitor, :process, ^guardian, _reason} -> :ok
         end
 
         receive do
@@ -1343,6 +1348,65 @@ defmodule Loopex.Runtime.Control do
         end
 
         :unavailable
+    end
+  end
+
+  defp guard_position_read(control, tag, read) do
+    control_monitor = Process.monitor(control)
+    guardian = self()
+    result_tag = make_ref()
+
+    {reader, reader_monitor} =
+      spawn_monitor(fn ->
+        result = read.()
+        send(guardian, {result_tag, result})
+      end)
+
+    await_position_read(
+      control,
+      control_monitor,
+      tag,
+      reader,
+      reader_monitor,
+      result_tag
+    )
+  end
+
+  defp await_position_read(
+         control,
+         control_monitor,
+         tag,
+         reader,
+         reader_monitor,
+         result_tag
+       ) do
+    receive do
+      {^result_tag, result} ->
+        receive do
+          {:DOWN, ^reader_monitor, :process, ^reader, _reason} -> :ok
+        end
+
+        Process.demonitor(control_monitor, [:flush])
+        send(control, {tag, result})
+
+      {:DOWN, ^reader_monitor, :process, ^reader, _reason} ->
+        Process.demonitor(control_monitor, [:flush])
+        :ok
+
+      {:DOWN, ^control_monitor, :process, ^control, _reason} ->
+        stop_position_reader(reader, reader_monitor)
+
+      {:cancel_position_read, ^tag} ->
+        Process.demonitor(control_monitor, [:flush])
+        stop_position_reader(reader, reader_monitor)
+    end
+  end
+
+  defp stop_position_reader(reader, monitor) do
+    Process.exit(reader, :kill)
+
+    receive do
+      {:DOWN, ^monitor, :process, ^reader, _reason} -> :ok
     end
   end
 
