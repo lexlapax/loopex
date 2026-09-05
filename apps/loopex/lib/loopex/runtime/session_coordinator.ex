@@ -45,6 +45,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @page_size 1_024
   @provider_result_tag :loopex_provider_result
   @provider_deadline_tag :loopex_provider_deadline_elapsed
+  # Trusted same-VM implementation input from the exact current activation
+  # holder, never authority of its own. Core revalidates that holder before and
+  # after the private prepare phase. A guard which has not produced an owner
+  # verdict cannot retain a superseded coordinator; after a verdict, waiting
+  # for its exact acknowledgement is the ordinary unbounded two-phase handoff,
+  # not an inferred verdict about a live process.
+  @prepared_transfer_guard_key {Loopex.ResumeActivation, :prepared_transfer_guard_v1}
 
   # Concept: an owner that cannot reach the Store waits a while, then says so.
   # It does not wait forever, because the caller that asked for this session is
@@ -218,8 +225,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @doc false
   @spec transfer_resume(pid(), owner(), reference(), pid()) :: :ok | {:error, term()}
   def transfer_resume(coordinator, owner, capability, holder)
-      when is_pid(coordinator) and is_map(owner) and is_reference(capability) and is_pid(holder),
-      do: safe_call(coordinator, {:transfer_resume, owner, capability, holder}, :infinity)
+      when is_pid(coordinator) and is_map(owner) and is_reference(capability) and is_pid(holder) do
+    case Process.get(@prepared_transfer_guard_key) do
+      nil ->
+        safe_call(coordinator, {:transfer_resume, owner, capability, holder}, :infinity)
+
+      {^holder, guard, nonce} when is_pid(guard) and is_reference(nonce) ->
+        guarded_transfer_call(coordinator, owner, capability, holder, guard, nonce)
+
+      _malformed_private_marker ->
+        {:error, :resume_activation_holder_mismatch}
+    end
+  end
 
   @impl GenServer
   def init(options) do
@@ -321,12 +338,25 @@ defmodule Loopex.Runtime.SessionCoordinator do
        # reference, holder, and monitor are transient BEAM values and are never
        # proposed to the Store or returned in a refusal.
        prepared: prepared_state(Keyword.get(options, :prepared)),
+       # The one guarded holder transfer whose owner commit has not yet crossed
+       # the manager lifetime guard. It contains only transient pids,
+       # references, monitors, and the private GenServer reply destination; no
+       # member enters durable state, diagnostics, progress, or public events.
+       prepared_transfer: nil,
        superseded: false
      }, {:continue, :acquire_owner}}
   end
 
   @impl GenServer
   def handle_continue(:acquire_owner, state), do: advance_acquisition(state)
+
+  def handle_continue({:reply_prepared_transfer, from, reply}, state) do
+    GenServer.reply(from, reply)
+
+    if state.superseded,
+      do: continue_after_owner_loss(state),
+      else: {:noreply, state}
+  end
 
   @impl GenServer
   def handle_call({:command, supplied_owner, command}, _from, state) do
@@ -346,7 +376,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
             state |> fence_prepared_resume(command) |> commit_command(command)
 
           {:error, :superseded_owner} ->
-            {:reply, {:error, :superseded_owner}, %{state | superseded: true}}
+            {:reply, {:error, :superseded_owner}, superseded_owner(state)}
 
           {:error, :runtime_unavailable} = error ->
             {:reply, error, state}
@@ -408,25 +438,102 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  # Concept: the capability changes hands exactly once per handoff, and this
-  # reply is the acknowledgement that it did.
+  # Concept: the capability changes hands exactly once per handoff. An ordinary
+  # reply is that acknowledgement; a guarded handoff changes lifetime when the
+  # manager guard accepts the installer's forwarded owner fact, and its public
+  # reply follows only after Core records the guard's exact acknowledgement.
   #
   # Technical depth: ADR 0016 makes interrupt installation and holder transfer
   # one serialized handoff. The current holder asks, from its own process, for a
-  # named process to hold the capability instead; the coordinator answers `:ok`
-  # only after it has recorded that process, so a preparer that dies after the
-  # answer leaves a live holder rather than an orphaned capability. The prepared
-  # state is checked exactly as activation and abandonment check it, so a
-  # capability an admitted abort has already fenced cannot be handed on and then
-  # spent behind the abort.
+  # named process to hold the capability instead. An ordinary target is recorded
+  # immediately. A CLI caller with the exact scoped private guard marker takes
+  # one extra internal step: after that guard confirms it has received the
+  # pending handoff, the owner fixes a one-use committed/refused verdict and
+  # waits asynchronously for the guard's acknowledgement before recording the
+  # holder or replying. The coordinator remains free to handle an abort,
+  # supersession, or participant death during that wait. Anything ordered before
+  # the verdict contributes to it; anything ordered after a committed verdict
+  # cannot contradict it, though an abort may still fence the capability. The
+  # prepared state is checked exactly as activation and abandonment check it, so
+  # a capability an admitted abort has already fenced cannot be handed on and
+  # then spent behind the abort.
   def handle_call({:transfer_resume, supplied_owner, capability, holder}, {caller, _tag}, state) do
     case prepared_holder(state, supplied_owner, capability, caller) do
-      {:ok, prepared} ->
+      {:ok, prepared} when is_nil(state.prepared_transfer) ->
         {:reply, :ok, %{state | prepared: held_by(prepared, holder)}}
+
+      {:ok, _prepared} ->
+        {:reply, {:error, :resume_activation_holder_mismatch}, state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  def handle_call(
+        {:transfer_resume_guarded, supplied_owner, capability, holder, guard, nonce, handoff},
+        {caller, _tag} = from,
+        state
+      )
+      when is_pid(holder) and is_pid(guard) and is_reference(nonce) and
+             is_reference(handoff) do
+    case prepared_holder(state, supplied_owner, capability, caller) do
+      {:ok, _prepared} when not is_nil(state.prepared_transfer) ->
+        # A legitimate second request cannot exist: the exact current holder is
+        # blocked awaiting the first. Refuse a private-protocol impostor without
+        # replacing the handoff already carrying authority.
+        signal_guarded_transfer_reply(caller, handoff)
+        {:reply, {:error, :resume_activation_holder_mismatch}, state}
+
+      {:ok, _prepared} ->
+        if Process.alive?(caller) and Process.alive?(holder) and Process.alive?(guard) do
+          prepare = make_ref()
+
+          transfer = %{
+            from: from,
+            installer: caller,
+            supplied_owner: supplied_owner,
+            capability: capability,
+            holder: holder,
+            holder_monitor: prepared_transfer_monitor(holder, :holder),
+            guard: guard,
+            guard_monitor: prepared_transfer_monitor(guard, :guard),
+            nonce: nonce,
+            handoff: handoff,
+            prepare: prepare,
+            commit: nil,
+            verdict: nil
+          }
+
+          send(
+            guard,
+            {:loopex_prepared_owner_prepare, self(), holder, nonce, handoff, prepare}
+          )
+
+          {:noreply, %{state | prepared_transfer: transfer}}
+        else
+          send(
+            guard,
+            {:loopex_prepared_owner_discard, self(), holder, nonce, handoff}
+          )
+
+          signal_guarded_transfer_reply(caller, handoff)
+          {:reply, {:error, :resume_activation_holder_mismatch}, state}
+        end
+
+      {:error, reason} ->
+        signal_guarded_transfer_reply(caller, handoff)
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(
+        {:transfer_resume_guarded, _owner, _capability, _holder, _guard, _nonce, _handoff},
+        {caller, _tag},
+        state
+      ) do
+    signal_guarded_transfer_reply(caller, nil)
+    {:reply, {:error, :resume_activation_holder_mismatch}, state}
   end
 
   def handle_call({:reconciliation_query, supplied_owner}, _from, state) do
@@ -474,13 +581,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # and states the model domain abandoned; the boolean must not suppress
         # those idempotent local actions.
         state
+        |> superseded_owner()
         |> terminate_superseded_effect_free_work()
         |> abandon_open_streams()
       else
         state
       end
 
-    continue_after_owner_loss(%{state | superseded: superseded or state.superseded})
+    state = if superseded or state.superseded, do: superseded_owner(state), else: state
+    continue_after_owner_loss(state)
   end
 
   @impl GenServer
@@ -498,7 +607,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           if ExecutorStream.relay(stream) == relay do
             state
             |> discard_tool_stream(run_id)
-            |> Map.put(:superseded, true)
+            |> superseded_owner()
           else
             state
           end
@@ -540,7 +649,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
             finish_at_deadline(state, run_id)
 
           {:error, :superseded_owner} ->
-            {:noreply, %{state | superseded: true}}
+            {:noreply, superseded_owner(state)}
 
           # Control is gone, so there is nothing left to commit a terminal
           # against. The successor rebuilds this decision from the journal.
@@ -668,6 +777,155 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:noreply, state}
     else
       expire_execute_result_reserve(state, run_id, until)
+    end
+  end
+
+  # Concept: the transfer becomes authoritative only after its manager lifetime
+  # guard has processed the owner's exact commit fact.
+  #
+  # Technical depth: the commit reference, caller handoff reference, and nonce
+  # are transient capabilities for this one handoff. The committed/refused
+  # verdict is fixed before it is sent. An abort or supersession handled while
+  # the guard acknowledgement is in flight therefore orders after that verdict
+  # rather than rewriting it: a committed transfer installs the holder while
+  # preserving any later fence, and a refused one moves nothing. The verdict is
+  # not itself completion. Guard or holder loss before its acknowledgement makes
+  # the lifetime handoff unproved and fails the public call without relabelling
+  # the owner's committed/refused fact. Only the exact acknowledgement can
+  # complete the blocked public call.
+  def handle_info(
+        {:loopex_prepared_transfer_installer_lost, guard, installer, holder, nonce, handoff},
+        %{prepared_transfer: transfer} = state
+      )
+      when is_map(transfer) do
+    case transfer do
+      %{
+        guard: ^guard,
+        installer: ^installer,
+        holder: ^holder,
+        nonce: ^nonce,
+        handoff: ^handoff
+      } ->
+        send(guard, {:loopex_prepared_owner_discard, self(), holder, nonce, handoff})
+
+        state
+        |> abandon_prepared_transfer_installer()
+        |> fail_prepared_transfer_participant()
+        |> continue_after_owner_loss()
+
+      _stale ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:loopex_prepared_transfer_installer_lost, _guard, _installer, _holder, _nonce, _handoff},
+        state
+      ),
+      do: {:noreply, state}
+
+  def handle_info(
+        {:loopex_prepared_transfer_guard_ready, guard, holder, nonce, handoff, prepare},
+        %{prepared_transfer: transfer} = state
+      )
+      when is_map(transfer) do
+    case transfer do
+      %{
+        guard: ^guard,
+        holder: ^holder,
+        nonce: ^nonce,
+        handoff: ^handoff,
+        prepare: ^prepare,
+        commit: nil,
+        verdict: nil
+      } ->
+        commit = make_ref()
+        verdict = prepared_transfer_verdict(state, transfer)
+
+        send(
+          transfer.installer,
+          {:loopex_prepared_owner_verdict, self(), guard, holder, nonce, handoff, commit, verdict}
+        )
+
+        {:noreply, %{state | prepared_transfer: %{transfer | commit: commit, verdict: verdict}}}
+
+      _stale_or_duplicate ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:loopex_prepared_transfer_guard_ready, _guard, _holder, _nonce, _handoff, _prepare},
+        state
+      ),
+      do: {:noreply, state}
+
+  def handle_info(
+        {:loopex_prepared_owner_verdict_ack, guard, holder, nonce, handoff, commit, verdict},
+        %{prepared_transfer: transfer} = state
+      )
+      when is_map(transfer) do
+    case transfer do
+      %{
+        guard: ^guard,
+        holder: ^holder,
+        nonce: ^nonce,
+        handoff: ^handoff,
+        commit: ^commit,
+        verdict: ^verdict,
+        from: from
+      } ->
+        case verdict do
+          :committed ->
+            next = clear_prepared_transfer(state, keep_guard?: true)
+            prepared = held_by_guarded(next.prepared, holder, guard, transfer.guard_monitor)
+
+            {:noreply, %{next | prepared: prepared},
+             {:continue, {:reply_prepared_transfer, from, :ok}}}
+
+          {:refused, reason} ->
+            next = clear_prepared_transfer(state)
+
+            {:noreply, next, {:continue, {:reply_prepared_transfer, from, {:error, reason}}}}
+        end
+
+      _stale ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(
+        {:loopex_prepared_owner_verdict_ack, _guard, _holder, _nonce, _handoff, _commit,
+         _verdict},
+        state
+      ),
+      do: {:noreply, state}
+
+  def handle_info({tag, reference, :process, _pid, _reason}, state)
+      when tag in [
+             :prepared_transfer_holder_down,
+             :prepared_transfer_guard_down
+           ] do
+    case state.prepared_transfer do
+      %{holder_monitor: ^reference} ->
+        state
+        |> fail_prepared_transfer_participant()
+        |> continue_after_owner_loss()
+
+      %{guard_monitor: ^reference} ->
+        if is_pid(state.prepared_transfer.holder) do
+          Process.exit(state.prepared_transfer.holder, :kill)
+        end
+
+        state
+        |> fail_prepared_transfer_participant()
+        |> continue_after_owner_loss()
+
+      _other when tag == :prepared_transfer_guard_down ->
+        {:noreply, lose_prepared_transfer_guard(state, reference)}
+
+      _stale ->
+        {:noreply, state}
     end
   end
 
@@ -1223,14 +1481,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
         else
           {:error, :superseded_owner} ->
             {:reply, {:error, {:superseded_after_commit, proposal.reply}},
-             %{state | superseded: true}}
+             superseded_owner(state)}
 
           {:error, reason} ->
             {:reply, {:error, reason}, state}
         end
 
       {:not_committed, reason} when reason in [:stale_owner_epoch, :stale_owner_incarnation_id] ->
-        {:reply, {:error, :superseded_owner}, %{state | superseded: true}}
+        {:reply, {:error, :superseded_owner}, superseded_owner(state)}
 
       {:not_committed, reason} ->
         {:reply, {:error, reason}, state}
@@ -1292,7 +1550,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         end
 
       {:error, :superseded_owner} ->
-        {:noreply, %{state | superseded: true}}
+        {:noreply, superseded_owner(state)}
 
       # Control is gone. Pending work stays pending rather than being abandoned
       # under a supersession that no successor ever claimed.
@@ -2182,7 +2440,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         # recovers the open attempt conservatively; this owner settles nothing.
         state
         |> discard_provider_worker(run_id, task)
-        |> Map.put(:superseded, true)
+        |> superseded_owner()
         |> continue_after_owner_loss()
 
       {:error, :runtime_unavailable} ->
@@ -2266,7 +2524,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
           {:error, reason}
           when reason in [:stale_owner_epoch, :stale_owner_incarnation_id, :superseded_owner] ->
-            continue_after_owner_loss(%{state | superseded: true})
+            continue_after_owner_loss(superseded_owner(state))
 
           {:error, reason} ->
             {:stop, {:model_attempt_failed, reason}, state}
@@ -2348,7 +2606,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       when reason in [:stale_owner_epoch, :stale_owner_incarnation_id, :superseded_owner] ->
         state
         |> discard_model_stream(run_id)
-        |> Map.put(:superseded, true)
+        |> superseded_owner()
         |> continue_after_owner_loss()
 
       {:error, reason} ->
@@ -2449,7 +2707,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # verdict behind it.
   defp refuse_model_termination(state, reason)
        when reason in [:stale_owner_epoch, :stale_owner_incarnation_id, :superseded_owner],
-       do: continue_after_owner_loss(%{state | superseded: true})
+       do: continue_after_owner_loss(superseded_owner(state))
 
   defp refuse_model_termination(state, reason),
     do: {:stop, {:model_termination_failed, reason}, state}
@@ -2584,7 +2842,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           {:error, :superseded_owner} ->
             state
             |> discard_model_stream(run_id)
-            |> Map.put(:superseded, true)
+            |> superseded_owner()
 
           {:error, _reason} ->
             discard_model_stream(state, run_id)
@@ -2667,7 +2925,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         report_refused_progress(state, run_id, stream)
 
       {:error, :superseded_owner} ->
-        %{state | superseded: true}
+        superseded_owner(state)
 
       {:error, :runtime_unavailable} ->
         # A diagnostic is transient projection too. Without a successful owner
@@ -2695,7 +2953,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           {:error, :superseded_owner} ->
             state
             |> discard_tool_stream(run_id)
-            |> Map.put(:superseded, true)
+            |> superseded_owner()
 
           {:error, _reason} ->
             discard_tool_stream(state, run_id)
@@ -2825,13 +3083,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # naming them cannot retain a coordinator whose work is finished; leaving them
   # unnamed is what let a wait be invisible to the reaper.
   defp continue_after_owner_loss(state) do
+    state = if state.superseded, do: superseded_owner(state), else: state
+
     settled =
       map_size(state.in_flight) == 0 and
         map_size(state.pending_cleanup) == 0 and
         map_size(state.executor_reserves) == 0 and
         map_size(state.model_reserves) == 0 and
         map_size(state.streams) == 0 and
-        is_nil(state.pending_fault)
+        is_nil(state.pending_fault) and
+        is_nil(state.prepared_transfer)
 
     if state.superseded and settled,
       do: {:stop, :normal, state},
@@ -4224,7 +4485,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         next =
           state
           |> discard_tool_stream(run_id)
-          |> Map.put(:superseded, true)
+          |> superseded_owner()
 
         {:superseded, next}
 
@@ -4265,7 +4526,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp retain_terminal_operation_fact(state, proposal) do
     case commit_internal_result(state, proposal) do
       {:ok, next, :current_owner} -> {:ok, next}
-      {:ok, next, {:owner_lost, _reason}} -> {:retained, %{next | superseded: true}}
+      {:ok, next, {:owner_lost, _reason}} -> {:retained, superseded_owner(next)}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -4384,11 +4645,113 @@ defmodule Loopex.Runtime.SessionCoordinator do
          capability: capability,
          holder: holder,
          monitor: nil,
+         guard: nil,
+         guard_monitor: nil,
          state: :prepared,
          recovered: MapSet.new()
        }
 
   defp prepared_state(_absent), do: nil
+
+  defp prepared_transfer_monitor(process, :holder),
+    do: :erlang.monitor(:process, process, [{:tag, :prepared_transfer_holder_down}])
+
+  defp prepared_transfer_monitor(process, :guard),
+    do: :erlang.monitor(:process, process, [{:tag, :prepared_transfer_guard_down}])
+
+  defp abandon_prepared_transfer_installer(
+         %{
+           prepared_transfer: %{installer: installer},
+           prepared: %{holder: installer, state: :prepared} = prepared
+         } = state
+       ),
+       do: %{state | prepared: %{prepared | state: :abandoned}}
+
+  defp abandon_prepared_transfer_installer(state), do: state
+
+  defp prepared_transfer_verdict(state, transfer) do
+    case prepared_holder(
+           state,
+           transfer.supplied_owner,
+           transfer.capability,
+           transfer.installer
+         ) do
+      {:ok, _prepared} -> :committed
+      {:error, reason} -> {:refused, reason}
+    end
+  end
+
+  defp fail_prepared_transfer_participant(%{prepared_transfer: transfer} = state) do
+    reply =
+      case transfer.verdict do
+        :committed -> {:error, :resume_activation_holder_mismatch}
+        {:refused, reason} -> {:error, reason}
+        nil -> {:error, :resume_activation_holder_mismatch}
+      end
+
+    if is_nil(transfer.verdict),
+      do: signal_guarded_transfer_reply(transfer.installer, transfer.handoff)
+
+    GenServer.reply(transfer.from, reply)
+
+    state
+    |> clear_prepared_transfer()
+  end
+
+  defp clear_prepared_transfer(state, options \\ [])
+
+  defp clear_prepared_transfer(%{prepared_transfer: nil} = state, _options), do: state
+
+  defp clear_prepared_transfer(%{prepared_transfer: transfer} = state, options) do
+    monitors = [transfer.holder_monitor]
+
+    monitors =
+      if Keyword.get(options, :keep_guard?, false),
+        do: monitors,
+        else: [transfer.guard_monitor | monitors]
+
+    Enum.each(monitors, &Process.demonitor(&1, [:flush]))
+
+    %{state | prepared_transfer: nil}
+  end
+
+  defp superseded_owner(%{prepared_transfer: %{verdict: nil} = transfer} = state) do
+    send(
+      transfer.guard,
+      {:loopex_prepared_owner_discard, self(), transfer.holder, transfer.nonce, transfer.handoff}
+    )
+
+    signal_guarded_transfer_reply(transfer.installer, transfer.handoff)
+    GenServer.reply(transfer.from, {:error, :superseded_owner})
+
+    state
+    |> clear_prepared_transfer()
+    |> Map.put(:superseded, true)
+  end
+
+  defp superseded_owner(state), do: Map.put(state, :superseded, true)
+
+  defp signal_guarded_transfer_reply(installer, handoff)
+       when is_pid(installer) and is_reference(handoff),
+       do: send(installer, {:loopex_prepared_transfer_direct_reply, self(), handoff})
+
+  defp signal_guarded_transfer_reply(_installer, _handoff), do: :ok
+
+  defp lose_prepared_transfer_guard(
+         %{prepared: %{guard_monitor: reference, holder: holder} = prepared} = state,
+         reference
+       ) do
+    Process.exit(holder, :kill)
+    _ = prepared.monitor && Process.demonitor(prepared.monitor, [:flush])
+    settled = if prepared.state == :prepared, do: :abandoned, else: prepared.state
+
+    %{
+      state
+      | prepared: %{prepared | monitor: nil, guard: nil, guard_monitor: nil, state: settled}
+    }
+  end
+
+  defp lose_prepared_transfer_guard(state, _reference), do: state
 
   # Concept: recording who holds the capability now, and watching them.
   #
@@ -4399,11 +4762,36 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # handoff is dropped with its message flushed, so a superseded holder's death
   # cannot invalidate the capability the current one is holding.
   defp held_by(prepared, holder) do
+    prepared = release_prepared_guard(prepared)
     _ = prepared.monitor && Process.demonitor(prepared.monitor, [:flush])
 
     monitor = :erlang.monitor(:process, holder, [{:tag, :prepared_holder_down}])
     %{prepared | holder: holder, monitor: monitor}
   end
+
+  defp held_by_guarded(prepared, holder, guard, guard_monitor) do
+    prepared = release_prepared_guard(prepared)
+    _ = prepared.monitor && Process.demonitor(prepared.monitor, [:flush])
+
+    monitor = :erlang.monitor(:process, holder, [{:tag, :prepared_holder_down}])
+
+    %{
+      prepared
+      | holder: holder,
+        monitor: monitor,
+        guard: guard,
+        guard_monitor: guard_monitor
+    }
+  end
+
+  defp release_prepared_guard(%{guard: guard, guard_monitor: monitor} = prepared)
+       when is_pid(guard) and is_reference(monitor) do
+    Process.demonitor(monitor, [:flush])
+    send(guard, {:loopex_prepared_guard_released, self()})
+    %{prepared | guard: nil, guard_monitor: nil}
+  end
+
+  defp release_prepared_guard(prepared), do: prepared
 
   # Concept: exactly which work this preparation is holding back.
   #
@@ -4646,6 +5034,98 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     encoded = :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
     namespace <> "_" <> binary_part(encoded, 0, 40)
+  end
+
+  # Concept: an ordinary holder transfer keeps its established path. Only the
+  # current holder that scoped the interrupt installer's exact private marker
+  # around the public facade call selects the guarded owner/manager handoff.
+  #
+  # Technical depth: the request signal is sent before the same caller tells
+  # its guard that the transfer is pending. If the caller dies between those two
+  # sends, the guard's already-existing installer monitor ends the holder; if it
+  # dies afterwards, BEAM signal ordering guarantees the pending notice reaches
+  # that guard before the caller's `DOWN`. The owner sends its exact verdict to
+  # this caller, which forwards it to the guard. Verdict and later caller exit
+  # are therefore signals from one sender: death before forwarding cannot be
+  # mistaken for completion, while forwarding before death establishes the
+  # lifetime handoff at the guard. The coordinator never blocks on either
+  # participant: it retains the call destination and answers only after the
+  # guard's matching acknowledgement. None of the pids or references crosses a
+  # durable or public plane.
+  defp guarded_transfer_call(coordinator, owner, capability, holder, guard, nonce) do
+    handoff = make_ref()
+    coordinator_ref = Process.monitor(coordinator)
+
+    try do
+      request =
+        :gen_server.send_request(
+          coordinator,
+          {:transfer_resume_guarded, owner, capability, holder, guard, nonce, handoff}
+        )
+
+      send(
+        guard,
+        {:loopex_prepared_transfer_pending, self(), coordinator, holder, nonce, handoff}
+      )
+
+      await_guarded_transfer(
+        request,
+        coordinator,
+        coordinator_ref,
+        holder,
+        guard,
+        nonce,
+        handoff
+      )
+    catch
+      :exit, _reason -> {:error, :session_unavailable}
+    after
+      Process.demonitor(coordinator_ref, [:flush])
+    end
+  end
+
+  defp await_guarded_transfer(
+         request,
+         coordinator,
+         coordinator_ref,
+         holder,
+         guard,
+         nonce,
+         handoff
+       ) do
+    receive do
+      {:loopex_prepared_owner_verdict, ^coordinator, ^guard, ^holder, ^nonce, ^handoff, commit,
+       verdict}
+      when is_reference(commit) and
+             (verdict == :committed or
+                (is_tuple(verdict) and tuple_size(verdict) == 2 and
+                   elem(verdict, 0) == :refused and is_atom(elem(verdict, 1)))) ->
+        send(
+          guard,
+          {:loopex_prepared_owner_verdict, coordinator, holder, nonce, handoff, commit, verdict}
+        )
+
+        :ok
+
+      {:loopex_prepared_transfer_direct_reply, ^coordinator, ^handoff} ->
+        :ok
+
+      {:DOWN, ^coordinator_ref, :process, ^coordinator, _reason} ->
+        :ok
+    end
+
+    # The explicit monitor wakes this protocol even if no private verdict can
+    # arrive. The request carries its own monitor/alias; consuming that exact
+    # response here is what prevents an opaque late request message from
+    # leaking into the caller's mailbox after the coordinator is gone.
+    receive_guarded_transfer_response(request)
+  end
+
+  defp receive_guarded_transfer_response(request) do
+    case :gen_server.receive_response(request, :infinity) do
+      {:reply, reply} -> reply
+      {:error, _reason} -> {:error, :session_unavailable}
+    end
   end
 
   # Concept: every caller states how long it will wait; none inherits a bound it

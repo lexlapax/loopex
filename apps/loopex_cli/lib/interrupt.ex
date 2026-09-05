@@ -80,6 +80,13 @@ defmodule LoopexCli.Interrupt do
   @backstop_note "loopex: stopping did not finish in time; this run's own command " <>
                    "processes were killed"
 
+  # Trusted private transient coordination shared with the Core transfer entry.
+  # It is installed only in the exact current activation holder around the
+  # existing public facade call and is never returned, journalled, or projected.
+  # The marker selects the guarded implementation lane but grants no authority:
+  # Core independently revalidates the holder and capability at its decision.
+  @prepared_transfer_guard_key {Loopex.ResumeActivation, :prepared_transfer_guard_v1}
+
   @doc """
   ## Concept
 
@@ -213,21 +220,33 @@ defmodule LoopexCli.Interrupt do
   # would turn that truthful installation refusal into an untrappable death of
   # the public caller. This ready-acknowledged one-way guard instead monitors the
   # exact installer and kills the holder if it goes, while holder loss merely
-  # ends the guard. It exists until the session owner acknowledges the prepared
-  # capability transfer and a second acknowledged handoff below moves lifetime
-  # responsibility wholly to the manager guard.
+  # ends the guard. The holder also monitors this exact guard, so concurrent
+  # loss of the manager guard and session owner cannot leave the holder orphaned.
+  # It exists until the session owner and guard acknowledge the prepared
+  # capability transfer together.
   defp prepare_holder(activation) do
     installer = self()
     holder = spawn(fn -> hold(activation) end)
+    nonce = make_ref()
     ready = make_ref()
 
     {guard, guard_monitor} =
-      spawn_monitor(fn -> guard_pending_holder(holder, installer, ready) end)
+      spawn_monitor(fn -> guard_pending_holder(holder, installer, nonce, ready) end)
 
     receive do
       {^ready, ^guard} ->
-        Process.demonitor(guard_monitor, [:flush])
-        {:ok, %{holder: holder, lifetime_guard: guard}}
+        holder_ready = make_ref()
+        send(holder, {:loopex_prepared_holder_guard, installer, guard, holder_ready})
+
+        receive do
+          {^holder_ready, ^holder} ->
+            Process.demonitor(guard_monitor, [:flush])
+            {:ok, %{holder: holder, lifetime_guard: guard, transfer_nonce: nonce}}
+
+          {:DOWN, ^guard_monitor, :process, ^guard, reason} ->
+            release(holder)
+            {:error, {:prepared_holder_installer_guard_failed, reason}}
+        end
 
       {:DOWN, ^guard_monitor, :process, ^guard, reason} ->
         release(holder)
@@ -235,7 +254,7 @@ defmodule LoopexCli.Interrupt do
     end
   end
 
-  defp guard_pending_holder(holder, installer, ready) do
+  defp guard_pending_holder(holder, installer, nonce, ready) do
     installer_ref = Process.monitor(installer)
     holder_ref = Process.monitor(holder)
     send(installer, {ready, self()})
@@ -252,7 +271,8 @@ defmodule LoopexCli.Interrupt do
           installer,
           installer_ref,
           signal_server,
-          signal_server_ref
+          signal_server_ref,
+          nonce
         )
 
       {:DOWN, ^installer_ref, :process, ^installer, _reason} ->
@@ -269,13 +289,30 @@ defmodule LoopexCli.Interrupt do
          installer,
          installer_ref,
          signal_server,
-         signal_server_ref
+         signal_server_ref,
+         nonce
        ) do
     receive do
-      {:loopex_prepared_lifetime_transfer, ^installer, tag} ->
-        Process.demonitor(installer_ref, [:flush])
-        send(installer, {tag, self()})
-        guard_installed_holder(holder, holder_ref, signal_server, signal_server_ref)
+      {:loopex_prepared_owner_discard, coordinator, ^holder, ^nonce, handoff}
+      when is_pid(coordinator) and is_reference(handoff) ->
+        Process.exit(holder, :kill)
+
+      {:loopex_prepared_transfer_pending, ^installer, coordinator, ^holder, ^nonce, handoff}
+      when is_pid(coordinator) and is_reference(handoff) ->
+        coordinator_ref = Process.monitor(coordinator)
+
+        guard_pending_owner_prepare(
+          holder,
+          holder_ref,
+          installer,
+          installer_ref,
+          signal_server,
+          signal_server_ref,
+          coordinator,
+          coordinator_ref,
+          nonce,
+          handoff
+        )
 
       {:DOWN, ^installer_ref, :process, ^installer, _reason} ->
         Process.exit(holder, :kill)
@@ -288,9 +325,172 @@ defmodule LoopexCli.Interrupt do
     end
   end
 
-  defp guard_installed_holder(holder, holder_ref, signal_server, signal_server_ref) do
+  defp guard_pending_owner_prepare(
+         holder,
+         holder_ref,
+         installer,
+         installer_ref,
+         signal_server,
+         signal_server_ref,
+         coordinator,
+         coordinator_ref,
+         nonce,
+         handoff
+       ) do
     receive do
+      {:loopex_prepared_owner_discard, ^coordinator, ^holder, ^nonce, ^handoff} ->
+        Process.exit(holder, :kill)
+
+      {:loopex_prepared_owner_prepare, ^coordinator, ^holder, ^nonce, ^handoff, prepare}
+      when is_reference(prepare) ->
+        send(
+          coordinator,
+          {:loopex_prepared_transfer_guard_ready, self(), holder, nonce, handoff, prepare}
+        )
+
+        guard_pending_owner_verdict(
+          holder,
+          holder_ref,
+          installer,
+          installer_ref,
+          signal_server,
+          signal_server_ref,
+          coordinator,
+          coordinator_ref,
+          nonce,
+          handoff
+        )
+
+      {:DOWN, ^installer_ref, :process, ^installer, _reason} when is_reference(installer_ref) ->
+        Process.exit(holder, :kill)
+
       {:DOWN, ^signal_server_ref, :process, ^signal_server, _reason} ->
+        Process.exit(holder, :kill)
+
+      {:DOWN, ^coordinator_ref, :process, ^coordinator, _reason} ->
+        Process.exit(holder, :kill)
+
+      {:DOWN, ^holder_ref, :process, ^holder, _reason} ->
+        :ok
+    end
+  end
+
+  defp guard_pending_owner_verdict(
+         holder,
+         holder_ref,
+         installer,
+         installer_ref,
+         signal_server,
+         signal_server_ref,
+         coordinator,
+         coordinator_ref,
+         nonce,
+         handoff
+       ) do
+    receive do
+      {:loopex_prepared_owner_discard, ^coordinator, ^holder, ^nonce, ^handoff} ->
+        Process.exit(holder, :kill)
+
+      {:loopex_prepared_owner_verdict, ^coordinator, ^holder, ^nonce, ^handoff, commit,
+       :committed}
+      when is_reference(commit) ->
+        if installer_ref, do: Process.demonitor(installer_ref, [:flush])
+
+        send(
+          coordinator,
+          {:loopex_prepared_owner_verdict_ack, self(), holder, nonce, handoff, commit, :committed}
+        )
+
+        guard_installed_holder(
+          holder,
+          holder_ref,
+          signal_server,
+          signal_server_ref,
+          coordinator,
+          coordinator_ref
+        )
+
+      {:loopex_prepared_owner_verdict, ^coordinator, ^holder, ^nonce, ^handoff, commit,
+       {:refused, reason} = verdict}
+      when is_reference(commit) and is_atom(reason) ->
+        Process.exit(holder, :kill)
+
+        send(
+          coordinator,
+          {:loopex_prepared_owner_verdict_ack, self(), holder, nonce, handoff, commit, verdict}
+        )
+
+        :ok
+
+      {:DOWN, ^installer_ref, :process, ^installer, _reason} when is_reference(installer_ref) ->
+        send(
+          coordinator,
+          {:loopex_prepared_transfer_installer_lost, self(), installer, holder, nonce, handoff}
+        )
+
+        guard_pending_installer_loss(
+          holder,
+          holder_ref,
+          signal_server,
+          signal_server_ref,
+          coordinator,
+          coordinator_ref,
+          nonce,
+          handoff
+        )
+
+      {:DOWN, ^signal_server_ref, :process, ^signal_server, _reason} ->
+        Process.exit(holder, :kill)
+
+      {:DOWN, ^coordinator_ref, :process, ^coordinator, _reason} ->
+        Process.exit(holder, :kill)
+
+      {:DOWN, ^holder_ref, :process, ^holder, _reason} ->
+        :ok
+    end
+  end
+
+  defp guard_pending_installer_loss(
+         holder,
+         holder_ref,
+         signal_server,
+         signal_server_ref,
+         coordinator,
+         coordinator_ref,
+         nonce,
+         handoff
+       ) do
+    receive do
+      {:loopex_prepared_owner_discard, ^coordinator, ^holder, ^nonce, ^handoff} ->
+        Process.exit(holder, :kill)
+
+      {:DOWN, ^signal_server_ref, :process, ^signal_server, _reason} ->
+        Process.exit(holder, :kill)
+
+      {:DOWN, ^coordinator_ref, :process, ^coordinator, _reason} ->
+        Process.exit(holder, :kill)
+
+      {:DOWN, ^holder_ref, :process, ^holder, _reason} ->
+        :ok
+    end
+  end
+
+  defp guard_installed_holder(
+         holder,
+         holder_ref,
+         signal_server,
+         signal_server_ref,
+         coordinator,
+         coordinator_ref
+       ) do
+    receive do
+      {:loopex_prepared_guard_released, ^coordinator} ->
+        :ok
+
+      {:DOWN, ^signal_server_ref, :process, ^signal_server, _reason} ->
+        Process.exit(holder, :kill)
+
+      {:DOWN, ^coordinator_ref, :process, ^coordinator, _reason} ->
         Process.exit(holder, :kill)
 
       {:DOWN, ^holder_ref, :process, ^holder, _reason} ->
@@ -300,20 +500,40 @@ defmodule LoopexCli.Interrupt do
 
   # Concept: the process that holds the capability and presents it to the owner.
   #
-  # Technical depth: it does one thing, so there is nothing it can be blocked by
-  # except the presentation it was asked to make. It carries the activation
-  # rather than accepting one per request, so the only capability it can ever
-  # present is the one the handoff moved to it. It answers every presentation and
-  # keeps holding: one-use is the owner's own state machine to enforce, and a
-  # holder that forgot the capability after a refusal would leave a caller no way
-  # to give up something the owner still records as prepared.
+  # Technical depth: before accepting presentations it monitors the exact
+  # one-way lifetime guard that created it and acknowledges that relationship to
+  # the installer. The guard already monitors the holder. Either participant's
+  # loss therefore ends the other side of the transient authority even if the
+  # session owner disappears at the same instant. The holder then does one thing,
+  # so there is nothing it can be blocked by except the presentation it was asked
+  # to make. It carries the activation rather than accepting one per request, so
+  # the only capability it can ever present is the one the handoff moved to it.
+  # It answers every presentation and keeps holding: one-use is the owner's own
+  # state machine to enforce, and forgetting after a refusal would leave a caller
+  # no way to give up something the owner still records as prepared.
   defp hold(activation) do
+    receive do
+      {:loopex_prepared_holder_guard, installer, guard, tag}
+      when is_pid(installer) and is_pid(guard) and is_reference(tag) ->
+        guard_ref = Process.monitor(guard)
+        send(installer, {tag, self()})
+        hold(activation, guard, guard_ref)
+
+      :loopex_prepared_release ->
+        :ok
+    end
+  end
+
+  defp hold(activation, guard, guard_ref) do
     receive do
       {:loopex_prepared_presentation, caller, tag, request} ->
         send(caller, {tag, present(request, activation)})
-        hold(activation)
+        hold(activation, guard, guard_ref)
 
       :loopex_prepared_release ->
+        :ok
+
+      {:DOWN, ^guard_ref, :process, ^guard, _reason} ->
         :ok
     end
   end
@@ -337,31 +557,10 @@ defmodule LoopexCli.Interrupt do
     receive do
       {^tag, ^guard} ->
         Process.demonitor(tag, [:flush])
-
-        if Process.alive?(holder),
-          do: :ok,
-          else: {:error, :prepared_activation_holder_lost}
+        :ok
 
       {:DOWN, ^tag, :process, ^guard, reason} ->
         {:error, {:prepared_holder_guard_failed, reason}}
-    end
-  end
-
-  defp transfer_holder_lifetime(%{holder: holder, lifetime_guard: guard})
-       when is_pid(holder) and is_pid(guard) do
-    tag = Process.monitor(guard)
-    send(guard, {:loopex_prepared_lifetime_transfer, self(), tag})
-
-    receive do
-      {^tag, ^guard} ->
-        Process.demonitor(tag, [:flush])
-
-        if Process.alive?(holder),
-          do: :ok,
-          else: {:error, :prepared_activation_holder_lost}
-
-      {:DOWN, ^tag, :process, ^guard, _reason} ->
-        {:error, :prepared_activation_holder_lost}
     end
   end
 
@@ -377,16 +576,34 @@ defmodule LoopexCli.Interrupt do
        )
        when is_pid(holder) and is_pid(signal_server) do
     result =
-      with :ok <- Loopex.transfer_resume(activation, holder),
-           :ok <- transfer_holder_lifetime(holder_lifetime) do
-        :ok
-      end
+      with_prepared_transfer_guard(holder_lifetime, fn ->
+        Loopex.transfer_resume(activation, holder)
+      end)
 
     if result != :ok do
       discard_failed_prepared_holder(signal_server, activation, holder)
     end
 
     result
+  end
+
+  defp with_prepared_transfer_guard(
+         %{holder: holder, lifetime_guard: guard, transfer_nonce: nonce},
+         operation
+       )
+       when is_pid(holder) and is_pid(guard) and is_reference(nonce) and
+              is_function(operation, 0) do
+    absent = make_ref()
+    previous = Process.get(@prepared_transfer_guard_key, absent)
+    Process.put(@prepared_transfer_guard_key, {holder, guard, nonce})
+
+    try do
+      operation.()
+    after
+      if previous === absent,
+        do: Process.delete(@prepared_transfer_guard_key),
+        else: Process.put(@prepared_transfer_guard_key, previous)
+    end
   end
 
   defp discard_failed_prepared_holder(signal_server, activation, holder) do
@@ -459,18 +676,22 @@ defmodule LoopexCli.Interrupt do
   start it. What is bounded here is nothing, and what settles the race with a
   signal is the owner's fence rather than a deadline.
 
-  The capability is not forgotten here. One use is the owner's own state machine
-  to enforce, and it does: a second presentation is refused as spent, abandoned,
-  or fenced, in the owner's words rather than in words about what this module
-  happens to still remember. Keeping it is also what leaves a caller able to
-  give up a capability whose activation was refused for a reason that settled
-  nothing.
+  One use is the owner's own state machine to enforce, and it does: success or a
+  refusal as spent, abandoned, or fenced settles the capability and releases the
+  holder after that exact answer has crossed it. A refusal that settles nothing
+  keeps the holder, which leaves a caller able to try again or give the
+  capability up instead of turning an unavailable owner into permanent loss.
   """
   @spec activate_prepared(term()) :: {:ok, binary()} | {:error, term()}
   def activate_prepared(activation) do
     case holder(activation) do
-      {:ok, holder} -> ask(holder, :activate)
-      {:error, reason} -> {:error, reason}
+      {:ok, holder} ->
+        reply = ask(holder, :activate)
+        if settled_prepared_reply?(reply), do: release(holder)
+        reply
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -493,12 +714,24 @@ defmodule LoopexCli.Interrupt do
   @spec abandon_prepared(term()) :: :ok | {:error, term()}
   def abandon_prepared(activation) do
     with {:ok, holder} <- holder(activation) do
-      case ask(holder, :abandon) do
-        :ok -> release(holder)
-        refusal -> refusal
-      end
+      reply = ask(holder, :abandon)
+      if settled_prepared_reply?(reply), do: release(holder)
+      reply
     end
   end
+
+  defp settled_prepared_reply?({:ok, _session_id}), do: true
+  defp settled_prepared_reply?(:ok), do: true
+
+  defp settled_prepared_reply?({:error, reason})
+       when reason in [
+              :resume_activation_spent,
+              :resume_activation_abandoned,
+              :resume_activation_fenced
+            ],
+       do: true
+
+  defp settled_prepared_reply?(_unsettled), do: false
 
   @doc """
   ## Concept

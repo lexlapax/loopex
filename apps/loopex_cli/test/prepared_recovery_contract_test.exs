@@ -15,6 +15,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   alias LoopexCli.Render
 
   @grace 7_311
+  @prepared_transfer_guard_key {Loopex.ResumeActivation, :prepared_transfer_guard_v1}
 
   setup do
     on_exit(fn ->
@@ -314,8 +315,13 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert assert_refused(invoke(Loopex, :activate_resume, [activation])) ==
              :resume_activation_holder_mismatch
 
+    [holder] =
+      for %{activation: ^activation, holder: holder} <- interrupt_handler_states(), do: holder
+
+    holder_monitor = Process.monitor(holder)
     assert {:ok, session_id} = invoke(Interrupt, :activate_prepared, [activation])
     assert session_id == fixture.session_id
+    assert_receive {:DOWN, ^holder_monitor, :process, ^holder, _reason}, 1_000
     assert await_dispatch_count(fixture.model, 1)
     assert run_terminal(fixture, 10_000)["outcome"] == "completed"
 
@@ -792,31 +798,41 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   # earlier event-manager swap without a caller-controlled product seam.
   test "installer death after handler installation but before owner acknowledgement ends its holder" do
     fixture = recovered_fixture("pre-ack-installer-death", :active)
-
-    assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
-               fixture.state_root,
-               fixture.runtime,
-               fixture.session_id,
-               "prepare-pre-ack-installer-death"
-             ])
-
-    coordinator = coordinator_of(fixture.runtime)
-    :erlang.suspend_process(coordinator)
     parent = self()
 
     {installer, installer_monitor} =
       spawn_monitor(fn ->
-        send(
-          parent,
-          {:pre_ack_installer_result,
-           invoke(Interrupt, :install_prepared, [
-             fixture.attachment,
-             @grace,
-             activation
-           ])}
-        )
+        result =
+          case invoke(Loopex, :prepare_resume_known_session, [
+                 fixture.state_root,
+                 fixture.runtime,
+                 fixture.session_id,
+                 "prepare-pre-ack-installer-death"
+               ]) do
+            {:ok, {:prepared, activation}} = preparation ->
+              send(parent, {:pre_ack_installer_prepared, self(), activation})
+
+              with :ok <- await_install_permission(),
+                   :ok <-
+                     invoke(Interrupt, :install_prepared, [
+                       fixture.attachment,
+                       @grace,
+                       activation
+                     ]) do
+                preparation
+              end
+
+            other ->
+              other
+          end
+
+        send(parent, {:pre_ack_installer_result, result})
       end)
+
+    assert_receive {:pre_ack_installer_prepared, ^installer, activation}, 5_000
+    coordinator = coordinator_of(fixture.runtime)
+    :erlang.suspend_process(coordinator)
+    send(installer, :install_prepared)
 
     try do
       assert await_handler_terminal(installer),
@@ -828,13 +844,43 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
       holder_monitor = Process.monitor(holder)
 
+      assert {{:dictionary, @prepared_transfer_guard_key}, {^holder, guard, nonce}} =
+               Process.info(installer, {:dictionary, @prepared_transfer_guard_key})
+
+      assert is_pid(guard) and is_reference(nonce)
+      :erlang.suspend_process(guard)
+
       assert queued_transfer?(coordinator, activation.capability, holder),
              "the installer never reached the unacknowledged owner transfer"
 
+      :erlang.resume_process(coordinator)
+
+      assert queued_owner_prepare?(guard, coordinator, holder, nonce),
+             "Core did not retain and prepare the exact guarded request"
+
+      :erlang.suspend_process(coordinator)
+      :erlang.resume_process(guard)
+
+      assert queued_guard_ready?(coordinator, guard, holder, nonce),
+             "the guard did not make the retained request ready to decide"
+
+      :erlang.suspend_process(guard)
+      :erlang.suspend_process(installer)
+      :erlang.resume_process(coordinator)
+
+      assert {:ok, :committed} =
+               queued_installer_owner_verdict(installer, coordinator, guard, holder, nonce),
+             "the owner did not put its exact verdict to the installer"
+
       Process.exit(installer, :kill)
       assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :killed}, 1_000
-      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
       refute_receive {:pre_ack_installer_result, _result}, 0
+
+      # Core's verdict is not the manager lifetime acknowledgement. The dead
+      # installer never forwarded it, so its DOWN reaches the guard without an
+      # earlier same-sender verdict and the guard fails the handoff closed.
+      :erlang.resume_process(guard)
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
     after
       if Process.alive?(installer), do: Process.exit(installer, :kill)
       if suspended?(coordinator), do: :erlang.resume_process(coordinator)
@@ -843,6 +889,545 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     assert await_settled_capability(activation, :resume_activation_abandoned),
            "the dead unacknowledged installer left the capability prepared"
+  end
+
+  # Concept: losing the session owner during a guarded handoff leaves neither a
+  # holder nor private request residue in the installer.
+  #
+  # Technical depth: the guarded call carries both an explicit coordinator
+  # monitor, which wakes the protocol, and the opaque monitor/alias created by
+  # `:gen_server.send_request/2`. Returning on the first DOWN without consuming
+  # the request's own response leaves an implementation-detail message in the
+  # command process mailbox. The real owner is stopped with the request queued;
+  # an empty mailbox after refusal proves both pieces were consumed.
+  test "owner loss during guarded transfer consumes its request and ends the holder" do
+    fixture = recovered_fixture("guarded-owner-loss", :active)
+    parent = self()
+
+    {installer, installer_monitor} =
+      spawn_monitor(fn ->
+        result =
+          case invoke(Loopex, :prepare_resume_known_session, [
+                 fixture.state_root,
+                 fixture.runtime,
+                 fixture.session_id,
+                 "prepare-guarded-owner-loss"
+               ]) do
+            {:ok, {:prepared, activation}} ->
+              send(parent, {:guarded_owner_loss_prepared, self(), activation})
+
+              with :ok <- await_install_permission() do
+                invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
+              end
+
+            other ->
+              other
+          end
+
+        Process.sleep(50)
+
+        send(
+          parent,
+          {:guarded_owner_loss_result, self(), result, Process.info(self(), :messages)}
+        )
+      end)
+
+    assert_receive {:guarded_owner_loss_prepared, ^installer, activation}, 5_000
+    coordinator = coordinator_of(fixture.runtime)
+    coordinator_monitor = Process.monitor(coordinator)
+    :erlang.suspend_process(coordinator)
+    send(installer, :install_prepared)
+
+    try do
+      assert await_handler_terminal(installer),
+             "the guarded handoff did not install its successor handler"
+
+      [holder] =
+        for %{activation: ^activation, holder: holder} <- interrupt_handler_states(), do: holder
+
+      holder_monitor = Process.monitor(holder)
+
+      assert queued_transfer?(coordinator, activation.capability, holder),
+             "the installer never sent the guarded owner request"
+
+      Process.exit(coordinator, :kill)
+      assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator, :killed}, 1_000
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, _reason}, 1_000
+
+      assert_receive {:guarded_owner_loss_result, ^installer, {:error, :session_unavailable},
+                      {:messages, []}},
+                     5_000
+
+      assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :normal}, 1_000
+    after
+      if Process.alive?(installer), do: Process.exit(installer, :kill)
+
+      if Process.alive?(coordinator) and suspended?(coordinator),
+        do: :erlang.resume_process(coordinator)
+    end
+  end
+
+  # Concept: the owner's transfer acknowledgement and the manager guard's
+  # lifetime acceptance are one fact. There is no acknowledged holder still
+  # tied to the transient installer.
+  #
+  # Technical depth: the coordinator is held until the successor handler and
+  # its exact manager guard are ready. The guard is then suspended while the
+  # public transfer reaches the owner. A reply in that interval would recreate
+  # the former post-owner-ack/pre-lifetime-transfer gap. The owner must instead
+  # leave the call pending until its own commit fact has crossed the guard; once
+  # the call returns, killing the installer cannot take the acknowledged holder
+  # with it.
+  test "a committed guarded transfer survives installer death while a later abort only fences activation" do
+    fixture = recovered_fixture("guarded-owner-ack", :active)
+    parent = self()
+    before = length(Loopex.AgentLoopTestModel.dispatched(fixture.model))
+
+    {installer, installer_monitor} =
+      spawn_monitor(fn ->
+        result =
+          case invoke(Loopex, :prepare_resume_known_session, [
+                 fixture.state_root,
+                 fixture.runtime,
+                 fixture.session_id,
+                 "prepare-guarded-owner-ack"
+               ]) do
+            {:ok, {:prepared, activation}} = preparation ->
+              send(parent, {:guarded_owner_prepared, self(), activation})
+
+              with :ok <- await_install_permission(),
+                   :ok <-
+                     invoke(Interrupt, :install_prepared, [
+                       fixture.attachment,
+                       @grace,
+                       activation
+                     ]) do
+                preparation
+              end
+
+            other ->
+              other
+          end
+
+        send(parent, {:guarded_owner_install_result, self(), result})
+
+        receive do
+          :installer_may_exit -> :ok
+        end
+      end)
+
+    assert_receive {:guarded_owner_prepared, ^installer, activation}, 5_000
+    coordinator = coordinator_of(fixture.runtime)
+    :erlang.suspend_process(coordinator)
+    send(installer, :install_prepared)
+
+    try do
+      assert await_handler_terminal(installer),
+             "the prepared successor handler was not installed"
+
+      [holder] =
+        for %{activation: ^activation, holder: holder} <- interrupt_handler_states(),
+            do: holder
+
+      assert {{:dictionary, @prepared_transfer_guard_key}, {^holder, guard, nonce}} =
+               Process.info(installer, {:dictionary, @prepared_transfer_guard_key})
+
+      assert is_pid(guard) and is_reference(nonce)
+      :erlang.suspend_process(guard)
+
+      try do
+        :erlang.resume_process(coordinator)
+
+        assert queued_owner_prepare?(guard, coordinator, holder, nonce),
+               "Core did not prepare the exact guard after retaining the request"
+
+        :erlang.suspend_process(coordinator)
+        :erlang.resume_process(guard)
+
+        assert queued_guard_ready?(coordinator, guard, holder, nonce),
+               "the prepared guard did not make the retained request ready to decide"
+
+        :erlang.suspend_process(guard)
+        :erlang.resume_process(coordinator)
+
+        assert {:ok, :committed} = queued_owner_verdict(guard, coordinator, holder, nonce),
+               "the owner did not put its exact lifetime verdict to the armed guard"
+
+        refute_receive {:guarded_owner_install_result, ^installer, _result}, 250
+
+        assert {:accepted, "abort-after-owner-verdict"} =
+                 Loopex.command(fixture.attachment, %{
+                   type: :abort,
+                   command_id: "abort-after-owner-verdict"
+                 })
+
+        # The installer already forwarded the owner's fact to its suspended
+        # guard, but the public call has not returned. Verdict and this process
+        # exit are signals from the same sender, so the guard must commit the
+        # lifetime in that order rather than erase the queued DOWN or mistake
+        # the later death for a pre-verdict loss.
+        Process.exit(installer, :kill)
+        assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :killed}, 1_000
+        :erlang.resume_process(guard)
+
+        assert await_prepared_holder(coordinator, holder),
+               "the guard discarded a verdict forwarded before installer death"
+
+        assert Process.alive?(holder),
+               "the acknowledged holder retained the installer's temporary lifetime"
+
+        holder_monitor = Process.monitor(holder)
+
+        assert assert_refused(invoke(Interrupt, :activate_prepared, [activation])) ==
+                 :resume_activation_fenced
+
+        assert_receive {:DOWN, ^holder_monitor, :process, ^holder, _reason}, 1_000
+
+        Process.sleep(100)
+        assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == before
+      after
+        if Process.alive?(guard) and suspended?(guard), do: :erlang.resume_process(guard)
+      end
+    after
+      if suspended?(coordinator), do: :erlang.resume_process(coordinator)
+      if Process.alive?(installer), do: Process.exit(installer, :kill)
+      _ = invoke(Loopex, :abandon_resume, [activation])
+    end
+  end
+
+  # Concept: the owner's committed verdict is not enough when the manager
+  # lifetime guard disappears before accepting it.
+  #
+  # Technical depth: the helper stops the exact handoff after Core has fixed and
+  # sent `:committed`, with the guard suspended before it can acknowledge. Guard
+  # loss then kills the proposed holder and makes the public transfer fail. That
+  # failure describes the unproved lifetime handoff; it does not rewrite Core's
+  # already-fixed verdict or move authority away from the installer.
+  test "guard loss after the committed verdict fails the unacknowledged lifetime handoff" do
+    fixture = recovered_fixture("guard-loss-after-verdict", :active)
+    handoff = guarded_transfer_waiting_for_ack(fixture, "guard-loss-after-verdict")
+
+    %{guard: guard, holder: holder, installer: installer, installer_monitor: installer_monitor} =
+      handoff
+
+    guard_monitor = Process.monitor(guard)
+    holder_monitor = Process.monitor(holder)
+
+    try do
+      Process.exit(guard, :kill)
+      assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :killed}, 1_000
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, _reason}, 1_000
+
+      assert_receive {:guarded_handoff_install_result, ^installer,
+                      {:error, :resume_activation_holder_mismatch}},
+                     5_000
+
+      send(installer, {:abandon_after_handoff, self()})
+      assert_receive {:guarded_handoff_abandoned, ^installer, :ok}, 1_000
+      send(installer, :installer_may_exit)
+
+      assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :normal}, 1_000
+    after
+      finish_guarded_transfer_fixture(handoff)
+    end
+  end
+
+  # Concept: owner succession ordered after a committed transfer does not turn
+  # that transfer into a refusal, and it cannot leave the now-stale holder live.
+  #
+  # Technical depth: Core fixes `:committed` while the guard is suspended. The
+  # real supersession handler then marks the owner stale but retains the pending
+  # handoff. Once the guard acknowledges, the installer receives `:ok`; only
+  # afterwards does the ordinary stale-owner reaper stop the coordinator. The
+  # guard observes that exact owner loss and ends the holder, so no transient
+  # capability survives the owner it belonged to.
+  test "supersession after a committed verdict completes then reaps the guarded holder" do
+    fixture = recovered_fixture("supersession-after-verdict", :active)
+    handoff = guarded_transfer_waiting_for_ack(fixture, "supersession-after-verdict")
+
+    %{
+      coordinator: coordinator,
+      guard: guard,
+      holder: holder,
+      installer: installer,
+      installer_monitor: installer_monitor,
+      activation: activation
+    } = handoff
+
+    coordinator_monitor = Process.monitor(coordinator)
+    holder_monitor = Process.monitor(holder)
+
+    try do
+      GenServer.cast(coordinator, {:superseded, "replacement-generation"})
+      assert :sys.get_state(coordinator).superseded
+      :erlang.resume_process(guard)
+
+      assert_receive {:guarded_handoff_install_result, ^installer,
+                      {:ok, {:prepared, ^activation}}},
+                     5_000
+
+      assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator, :normal}, 5_000
+
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, _reason}, 1_000
+
+      assert assert_refused(Loopex.activate_resume(activation)) == :session_unavailable
+      send(installer, :installer_may_exit)
+
+      assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :normal}, 1_000
+    after
+      finish_guarded_transfer_fixture(handoff)
+    end
+  end
+
+  # Concept: a stale owner cannot be kept alive by a guarded transfer whose
+  # lifetime participant disappeared before acknowledgement.
+  #
+  # Technical depth: supersession orders after Core's committed verdict while
+  # the guard is suspended, so the pending transfer remains the coordinator's
+  # final unsettled item. Killing that guard makes the holder disappear and the
+  # transfer fail. The participant-loss branch must then re-run stale-owner
+  # settlement; merely clearing the transfer would strand the superseded
+  # coordinator forever with no work able to complete it.
+  test "supersession reaps a coordinator when its pending transfer guard dies" do
+    fixture = recovered_fixture("supersession-guard-loss", :active)
+    handoff = guarded_transfer_waiting_for_ack(fixture, "supersession-guard-loss")
+
+    %{
+      coordinator: coordinator,
+      guard: guard,
+      holder: holder,
+      installer: installer,
+      installer_monitor: installer_monitor
+    } = handoff
+
+    coordinator_monitor = Process.monitor(coordinator)
+    holder_monitor = Process.monitor(holder)
+
+    try do
+      GenServer.cast(coordinator, {:superseded, "replacement-generation"})
+      assert :sys.get_state(coordinator).superseded
+
+      Process.exit(guard, :kill)
+
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, _reason}, 1_000
+
+      assert_receive {:guarded_handoff_install_result, ^installer,
+                      {:error, :resume_activation_holder_mismatch}},
+                     5_000
+
+      assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator, :normal}, 5_000
+
+      send(installer, :installer_may_exit)
+      assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :normal}, 1_000
+    after
+      finish_guarded_transfer_fixture(handoff)
+    end
+  end
+
+  # Concept: an abort already ordered at the owner wins before a prepared
+  # interrupt handoff and cannot be hidden by installing a new handler.
+  #
+  # Technical depth: the command returns only after the owner has fenced the
+  # capability and retained its admission. Installation still publishes the
+  # successor handler first, then asks for the guarded transfer from the true
+  # current holder. Core revalidates the prepared state before it creates a
+  # pending handoff, so it refuses by the fence's exact name and the installer
+  # removes the unacknowledged holder. No recovered work is dispatched.
+  test "an abort fenced before guarded transfer refuses installation without dispatch" do
+    fixture = recovered_fixture("abort-before-guarded-transfer", :active)
+    before = length(Loopex.AgentLoopTestModel.dispatched(fixture.model))
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-abort-before-guarded-transfer"
+             ])
+
+    assert {:accepted, "abort-before-guarded-transfer"} =
+             Loopex.command(fixture.attachment, %{
+               type: :abort,
+               command_id: "abort-before-guarded-transfer"
+             })
+
+    assert assert_refused(
+             invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, activation])
+           ) == :resume_activation_fenced
+
+    assert assert_refused(invoke(Interrupt, :activate_prepared, [activation])) ==
+             :prepared_activation_not_installed
+
+    assert assert_refused(invoke(Loopex, :activate_resume, [activation])) ==
+             :resume_activation_fenced
+
+    Process.sleep(100)
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == before
+  end
+
+  test "private lifetime markers fail closed while an ordinary holder transfer stays unchanged" do
+    fixture = recovered_fixture("guard-marker-boundary", :active)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-guard-marker-boundary"
+             ])
+
+    parent = self()
+
+    controller = spawn(fn -> transfer_controller_loop(parent, activation) end)
+
+    non_holder_target =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    non_holder_guard =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    {non_holder, non_holder_monitor} =
+      spawn_monitor(fn ->
+        Process.put(
+          @prepared_transfer_guard_key,
+          {non_holder_target, non_holder_guard, make_ref()}
+        )
+
+        send(
+          parent,
+          {:non_holder_guarded_transfer, Loopex.transfer_resume(activation, non_holder_target)}
+        )
+      end)
+
+    malformed_target =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    nonce = make_ref()
+
+    unpaired_guard =
+      spawn(fn ->
+        receive do
+          {:loopex_prepared_transfer_pending, _installer, _coordinator, _holder, _nonce, _handoff} ->
+            :ok
+        end
+      end)
+
+    spoofed_target =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    try do
+      assert_receive {:non_holder_guarded_transfer, {:error, :resume_activation_holder_mismatch}},
+                     1_000
+
+      assert_receive {:DOWN, ^non_holder_monitor, :process, ^non_holder, :normal}, 1_000
+      assert :ok = Loopex.transfer_resume(activation, controller)
+
+      send(controller, {:transfer_to, malformed_target, :malformed})
+      assert_receive {:controller_transfer, {:error, :resume_activation_holder_mismatch}}, 1_000
+
+      send(
+        controller,
+        {:transfer_to, spoofed_target, {spoofed_target, unpaired_guard, nonce}}
+      )
+
+      assert_receive {:controller_transfer, {:error, :resume_activation_holder_mismatch}},
+                     1_000
+
+      send(controller, :abandon)
+      assert_receive {:controller_abandon, :ok}, 1_000
+    after
+      Enum.each(
+        [
+          controller,
+          non_holder,
+          non_holder_target,
+          non_holder_guard,
+          malformed_target,
+          unpaired_guard,
+          spoofed_target
+        ],
+        fn process ->
+          if Process.alive?(process), do: Process.exit(process, :kill)
+        end
+      )
+
+      _ = invoke(Loopex, :abandon_resume, [activation])
+    end
+  end
+
+  # Concept: private protocol input from a legitimate holder cannot keep a
+  # superseded session owner alive.
+  #
+  # Technical depth: the marker selects no authority; Core still validates the
+  # current holder. That holder can nominate a live process which never answers
+  # the private prepare message, just as it can stop making progress itself, but
+  # supersession must cancel the still-undecided transfer, answer the blocked
+  # facade call, and let the stale coordinator reap. This bounds malformed or
+  # same-VM marker misuse without treating a timeout as a verdict.
+  test "an unresponsive private transfer guard cannot retain a superseded coordinator" do
+    fixture = recovered_fixture("unresponsive-transfer-guard", :active)
+
+    assert {:ok, {:prepared, activation}} =
+             invoke(Loopex, :prepare_resume_known_session, [
+               fixture.state_root,
+               fixture.runtime,
+               fixture.session_id,
+               "prepare-unresponsive-transfer-guard"
+             ])
+
+    parent = self()
+    controller = spawn(fn -> transfer_controller_loop(parent, activation) end)
+
+    target =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    guard =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    coordinator = coordinator_of(fixture.runtime)
+    coordinator_monitor = Process.monitor(coordinator)
+
+    try do
+      assert :ok = Loopex.transfer_resume(activation, controller)
+
+      send(controller, {:transfer_to, target, {target, guard, make_ref()}})
+
+      assert await_pending_prepared_transfer(coordinator, controller, target, guard),
+             "Core did not retain the exact guarded request"
+
+      GenServer.cast(coordinator, {:superseded, "replacement-generation"})
+
+      assert_receive {:controller_transfer, {:error, :superseded_owner}}, 1_000
+      assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator, :normal}, 5_000
+    after
+      Enum.each([controller, target, guard], fn process ->
+        if Process.alive?(process), do: Process.exit(process, :kill)
+      end)
+    end
   end
 
   # Concept: installation never publishes a prepared holder during an interval
@@ -855,20 +1440,39 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   # interface without adding a caller-controlled product seam, so their order is
   # locked structurally through parsed Elixir syntax. The serialized function
   # must arm the exact manager, install the successor, complete the owner
-  # handoff, then drain the predecessor. Inside that completion, the owner's
-  # transfer acknowledgement must precede release of the installer lifetime.
+  # handoff, then drain the predecessor. Inside that completion, one scoped
+  # lifetime marker must cover the public owner transfer. Inside Core, the
+  # guarded request must be sent before the installer tells the guard it is
+  # pending, and the public reply must await the guard's exact acknowledgement.
   test "prepared installation arms manager ownership before visibility and transfers lifetime after owner acknowledgement" do
     source = File.read!(Path.expand("../lib/interrupt.ex", __DIR__))
     {:ok, ast} = Code.string_to_quoted(source)
     body = private_function_body!(ast, :do_serialized_install_on, 5)
     handoff_body = private_function_body!(ast, :complete_live_prepared_handoff, 3)
+    unarmed_holder_body = private_function_body!(ast, :hold, 1)
+
+    coordinator_source =
+      File.read!(Path.expand("../../loopex/lib/loopex/runtime/session_coordinator.ex", __DIR__))
+
+    {:ok, coordinator_ast} = Code.string_to_quoted(coordinator_source)
+    guarded_call = private_function_body!(coordinator_ast, :guarded_transfer_call, 6)
+
+    guarded_wait =
+      private_function_body!(coordinator_ast, :await_guarded_transfer, 7)
 
     arm = local_call_line!(body, :arm_holder, 2)
     install = local_call_line!(body, :install_or_replace_handler, 2)
     handoff = local_call_line!(body, :complete_prepared_handoff, 3)
     drain = local_call_line!(body, :await_released_holders, 1)
+    scoped_guard = local_call_line!(handoff_body, :with_prepared_transfer_guard, 2)
     owner_ack = remote_call_line!(handoff_body, Loopex, :transfer_resume, 2)
-    lifetime_transfer = local_call_line!(handoff_body, :transfer_holder_lifetime, 1)
+    request = atom_remote_call_line!(guarded_call, :gen_server, :send_request, 2)
+    pending = local_call_line!(guarded_call, :send, 2)
+    wait = local_call_line!(guarded_call, :await_guarded_transfer, 7)
+    forward = local_call_line!(guarded_wait, :send, 2)
+
+    reply =
+      local_call_line!(guarded_wait, :receive_guarded_transfer_response, 1)
 
     assert arm < install,
            "the prepared holder becomes handler-visible before its exact manager guard is armed"
@@ -879,8 +1483,17 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert handoff < drain,
            "the successor holder remains tied to a drain caller that may die"
 
-    assert owner_ack < lifetime_transfer,
-           "the installer lifetime ends before the session owner acknowledges the holder"
+    assert scoped_guard < owner_ack,
+           "the public owner transfer is no longer covered by the scoped lifetime guard"
+
+    assert request < pending and pending < wait,
+           "the guard can observe installer death without knowing whether Core received the transfer"
+
+    assert forward < reply,
+           "the owner verdict can answer the caller before its manager guard has processed it"
+
+    assert ast_atom_count(unarmed_holder_body, :loopex_prepared_release) == 1,
+           "a guard failure before holder arming leaves the unarmed holder unable to stop"
   end
 
   # Concept: abrupt manager loss while a prepared handoff is being installed
@@ -1442,7 +2055,12 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert :ok =
              invoke(Interrupt, :install_prepared, [fixture.attachment, @grace, abandoned])
 
+    [holder] =
+      for %{activation: ^abandoned, holder: holder} <- interrupt_handler_states(), do: holder
+
+    holder_monitor = Process.monitor(holder)
     assert :ok = invoke(Interrupt, :abandon_prepared, [abandoned])
+    assert_receive {:DOWN, ^holder_monitor, :process, ^holder, _reason}, 1_000
 
     # The owner gave it up, rather than the handler merely forgetting it: a
     # holder mismatch here would mean the abandonment never reached the owner and
@@ -2321,8 +2939,16 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       case Process.info(coordinator, :messages) do
         {:messages, messages} ->
           Enum.any?(messages, fn
-            {:"$gen_call", _from, {:transfer_resume, _owner, ^capability, ^holder}} -> true
-            _other -> false
+            {:"$gen_call", _from, {:transfer_resume, _owner, ^capability, ^holder}} ->
+              true
+
+            {:"$gen_call", _from,
+             {:transfer_resume_guarded, _owner, ^capability, ^holder, guard, nonce, handoff}}
+            when is_pid(guard) and is_reference(nonce) and is_reference(handoff) ->
+              true
+
+            _other ->
+              false
           end)
 
         nil ->
@@ -2334,6 +2960,296 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     else
       Process.sleep(10)
       queued_transfer?(coordinator, capability, holder, attempts - 1)
+    end
+  end
+
+  defp queued_owner_verdict(guard, coordinator, holder, nonce, attempts \\ 300)
+  defp queued_owner_verdict(_guard, _coordinator, _holder, _nonce, 0), do: :error
+
+  defp queued_owner_verdict(guard, coordinator, holder, nonce, attempts) do
+    verdict =
+      case Process.info(guard, :messages) do
+        {:messages, messages} ->
+          Enum.find_value(messages, fn
+            {:loopex_prepared_owner_verdict, ^coordinator, ^holder, ^nonce, handoff, commit,
+             verdict}
+            when is_reference(handoff) and is_reference(commit) and
+                   (verdict == :committed or
+                      (is_tuple(verdict) and tuple_size(verdict) == 2 and
+                         elem(verdict, 0) == :refused)) ->
+              {:ok, verdict}
+
+            _other ->
+              nil
+          end)
+
+        nil ->
+          nil
+      end
+
+    case verdict do
+      {:ok, _verdict} = found ->
+        found
+
+      nil ->
+        Process.sleep(10)
+        queued_owner_verdict(guard, coordinator, holder, nonce, attempts - 1)
+    end
+  end
+
+  defp queued_installer_owner_verdict(
+         installer,
+         coordinator,
+         guard,
+         holder,
+         nonce,
+         attempts \\ 300
+       )
+
+  defp queued_installer_owner_verdict(
+         _installer,
+         _coordinator,
+         _guard,
+         _holder,
+         _nonce,
+         0
+       ),
+       do: :error
+
+  defp queued_installer_owner_verdict(
+         installer,
+         coordinator,
+         guard,
+         holder,
+         nonce,
+         attempts
+       ) do
+    verdict =
+      case Process.info(installer, :messages) do
+        {:messages, messages} ->
+          Enum.find_value(messages, fn
+            {:loopex_prepared_owner_verdict, ^coordinator, ^guard, ^holder, ^nonce, handoff,
+             commit, verdict}
+            when is_reference(handoff) and is_reference(commit) and
+                   (verdict == :committed or
+                      (is_tuple(verdict) and tuple_size(verdict) == 2 and
+                         elem(verdict, 0) == :refused)) ->
+              {:ok, verdict}
+
+            _other ->
+              nil
+          end)
+
+        nil ->
+          nil
+      end
+
+    case verdict do
+      {:ok, _verdict} = found ->
+        found
+
+      nil ->
+        Process.sleep(10)
+
+        queued_installer_owner_verdict(
+          installer,
+          coordinator,
+          guard,
+          holder,
+          nonce,
+          attempts - 1
+        )
+    end
+  end
+
+  defp queued_owner_prepare?(guard, coordinator, holder, nonce, attempts \\ 300)
+  defp queued_owner_prepare?(_guard, _coordinator, _holder, _nonce, 0), do: false
+
+  defp queued_owner_prepare?(guard, coordinator, holder, nonce, attempts) do
+    queued =
+      case Process.info(guard, :messages) do
+        {:messages, messages} ->
+          Enum.any?(messages, fn
+            {:loopex_prepared_owner_prepare, ^coordinator, ^holder, ^nonce, handoff, prepare}
+            when is_reference(handoff) and is_reference(prepare) ->
+              true
+
+            _other ->
+              false
+          end)
+
+        nil ->
+          false
+      end
+
+    if queued do
+      true
+    else
+      Process.sleep(10)
+      queued_owner_prepare?(guard, coordinator, holder, nonce, attempts - 1)
+    end
+  end
+
+  defp queued_guard_ready?(coordinator, guard, holder, nonce, attempts \\ 300)
+  defp queued_guard_ready?(_coordinator, _guard, _holder, _nonce, 0), do: false
+
+  defp queued_guard_ready?(coordinator, guard, holder, nonce, attempts) do
+    queued =
+      case Process.info(coordinator, :messages) do
+        {:messages, messages} ->
+          Enum.any?(messages, fn
+            {:loopex_prepared_transfer_guard_ready, ^guard, ^holder, ^nonce, handoff, prepare}
+            when is_reference(handoff) and is_reference(prepare) ->
+              true
+
+            _other ->
+              false
+          end)
+
+        nil ->
+          false
+      end
+
+    if queued do
+      true
+    else
+      Process.sleep(10)
+      queued_guard_ready?(coordinator, guard, holder, nonce, attempts - 1)
+    end
+  end
+
+  defp await_install_permission do
+    receive do
+      :install_prepared -> :ok
+    end
+  end
+
+  defp guarded_transfer_waiting_for_ack(fixture, label) do
+    parent = self()
+
+    {installer, installer_monitor} =
+      spawn_monitor(fn ->
+        result =
+          case invoke(Loopex, :prepare_resume_known_session, [
+                 fixture.state_root,
+                 fixture.runtime,
+                 fixture.session_id,
+                 "prepare-#{label}"
+               ]) do
+            {:ok, {:prepared, activation}} = preparation ->
+              send(parent, {:guarded_handoff_prepared, self(), activation})
+
+              with :ok <- await_install_permission(),
+                   :ok <-
+                     invoke(Interrupt, :install_prepared, [
+                       fixture.attachment,
+                       @grace,
+                       activation
+                     ]) do
+                preparation
+              end
+
+            other ->
+              other
+          end
+
+        send(parent, {:guarded_handoff_install_result, self(), result})
+
+        receive do
+          :installer_may_exit ->
+            :ok
+
+          {:abandon_after_handoff, caller} ->
+            activation =
+              receive do
+                {:activation_for_cleanup, activation} -> activation
+              end
+
+            send(
+              caller,
+              {:guarded_handoff_abandoned, self(), Loopex.abandon_resume(activation)}
+            )
+        end
+      end)
+
+    assert_receive {:guarded_handoff_prepared, ^installer, activation}, 5_000
+    send(installer, {:activation_for_cleanup, activation})
+    coordinator = coordinator_of(fixture.runtime)
+    :erlang.suspend_process(coordinator)
+    send(installer, :install_prepared)
+
+    assert await_handler_terminal(installer),
+           "the guarded handoff did not install its successor handler"
+
+    [holder] =
+      for %{activation: ^activation, holder: holder} <- interrupt_handler_states(), do: holder
+
+    assert {{:dictionary, @prepared_transfer_guard_key}, {^holder, guard, nonce}} =
+             Process.info(installer, {:dictionary, @prepared_transfer_guard_key})
+
+    assert is_pid(guard) and is_reference(nonce)
+    :erlang.suspend_process(guard)
+    :erlang.resume_process(coordinator)
+
+    assert queued_owner_prepare?(guard, coordinator, holder, nonce),
+           "Core did not retain and prepare the exact guarded request"
+
+    :erlang.suspend_process(coordinator)
+    :erlang.resume_process(guard)
+
+    assert queued_guard_ready?(coordinator, guard, holder, nonce),
+           "the guard did not make the retained request ready to decide"
+
+    :erlang.suspend_process(guard)
+    :erlang.resume_process(coordinator)
+
+    assert {:ok, :committed} = queued_owner_verdict(guard, coordinator, holder, nonce)
+
+    %{
+      fixture: fixture,
+      activation: activation,
+      coordinator: coordinator,
+      guard: guard,
+      holder: holder,
+      installer: installer,
+      installer_monitor: installer_monitor
+    }
+  end
+
+  defp finish_guarded_transfer_fixture(handoff) do
+    if Process.alive?(handoff.guard) and suspended?(handoff.guard),
+      do: :erlang.resume_process(handoff.guard)
+
+    if Process.alive?(handoff.coordinator) and suspended?(handoff.coordinator),
+      do: :erlang.resume_process(handoff.coordinator)
+
+    if Process.alive?(handoff.installer), do: Process.exit(handoff.installer, :kill)
+    if Process.alive?(handoff.holder), do: Process.exit(handoff.holder, :kill)
+    _ = invoke(Loopex, :abandon_resume, [handoff.activation])
+    :ok
+  end
+
+  defp transfer_controller_loop(parent, activation) do
+    receive do
+      {:transfer_to, target, marker} ->
+        absent = make_ref()
+        previous = Process.get(@prepared_transfer_guard_key, absent)
+        Process.put(@prepared_transfer_guard_key, marker)
+
+        result =
+          try do
+            Loopex.transfer_resume(activation, target)
+          after
+            if previous === absent,
+              do: Process.delete(@prepared_transfer_guard_key),
+              else: Process.put(@prepared_transfer_guard_key, previous)
+          end
+
+        send(parent, {:controller_transfer, result})
+        transfer_controller_loop(parent, activation)
+
+      :abandon ->
+        send(parent, {:controller_abandon, Loopex.abandon_resume(activation)})
     end
   end
 
@@ -2359,6 +3275,66 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       Process.sleep(10)
       queued_abort?(coordinator, attempts - 1)
     end
+  end
+
+  defp await_prepared_holder(coordinator, holder, attempts \\ 300)
+  defp await_prepared_holder(_coordinator, _holder, 0), do: false
+
+  defp await_prepared_holder(coordinator, holder, attempts) do
+    case :sys.get_state(coordinator) do
+      %{prepared: %{holder: ^holder, guard: guard}} when is_pid(guard) ->
+        true
+
+      _other ->
+        Process.sleep(10)
+        await_prepared_holder(coordinator, holder, attempts - 1)
+    end
+  catch
+    :exit, _gone -> false
+  end
+
+  defp await_pending_prepared_transfer(
+         coordinator,
+         installer,
+         holder,
+         guard,
+         attempts \\ 300
+       )
+
+  defp await_pending_prepared_transfer(
+         _coordinator,
+         _installer,
+         _holder,
+         _guard,
+         0
+       ),
+       do: false
+
+  defp await_pending_prepared_transfer(coordinator, installer, holder, guard, attempts) do
+    case :sys.get_state(coordinator) do
+      %{
+        prepared_transfer: %{
+          installer: ^installer,
+          holder: ^holder,
+          guard: ^guard,
+          verdict: nil
+        }
+      } ->
+        true
+
+      _other ->
+        Process.sleep(10)
+
+        await_pending_prepared_transfer(
+          coordinator,
+          installer,
+          holder,
+          guard,
+          attempts - 1
+        )
+    end
+  catch
+    :exit, _gone -> false
   end
 
   defp await_handler_terminal(terminal, attempts \\ 300)
@@ -2530,6 +3506,34 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       [] -> flunk("remote call #{inspect(module)}.#{name}/#{arity} was not found")
       _many -> flunk("remote call #{inspect(module)}.#{name}/#{arity} was not unique")
     end
+  end
+
+  defp atom_remote_call_line!(body, module, name, arity) when is_atom(module) do
+    {_body, lines} =
+      Macro.prewalk(body, [], fn
+        {{:., _dot_metadata, [^module, ^name]}, metadata, arguments} = node, lines
+        when is_list(arguments) and length(arguments) == arity ->
+          {node, [Keyword.fetch!(metadata, :line) | lines]}
+
+        node, lines ->
+          {node, lines}
+      end)
+
+    case Enum.uniq(lines) do
+      [line] -> line
+      [] -> flunk("remote call #{inspect(module)}.#{name}/#{arity} was not found")
+      _many -> flunk("remote call #{inspect(module)}.#{name}/#{arity} was not unique")
+    end
+  end
+
+  defp ast_atom_count(ast, expected) when is_atom(expected) do
+    {_ast, count} =
+      Macro.prewalk(ast, 0, fn
+        ^expected = node, count -> {node, count + 1}
+        node, count -> {node, count}
+      end)
+
+    count
   end
 
   defp interrupt_handler_states do
