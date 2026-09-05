@@ -819,41 +819,57 @@ separate governed decisions. Tests added outside M2's frozen gate are evidence
 for the repaired source tree but are not silently promoted into that gate.
 
 **What is true.** The repair range from `24f7f861147caf23103c84f96229204085d83670`
-through `FINAL_SOURCE_CANDIDATE` closes the authority and evidence gaps found
-after the fourth audit. Prepared interrupt installation arms the exact
-signal-manager guard and exposes the handler before transfer; the session
-coordinator alone linearizes that transfer and answers only after the guard has
-processed its commit. Handler replacement installs the successor before
-draining predecessor holders, keeps unfinished drains alive across installer
-death, serializes concurrent replacement, and refuses replacement once an
-interrupt owns its abort and backstop.
+through `bf534bcca59e4533861e22deb7c1278bffa5dad3` closes the authority and
+evidence gaps found after the fourth audit. Prepared interrupt installation arms
+the exact signal-manager guard and exposes the handler before transfer. The session
+coordinator fixes the guarded-path verdict, the installer forwards it to the
+guard, and the guard acknowledges it before the coordinator records the holder
+and answers. Installer death before forwarding fails closed; after forwarding,
+ordered delivery preserves the handoff even if the reply is lost. Ordinary
+`transfer_resume/2` remains an unguarded coordinator transfer. Handler
+replacement installs the successor before draining predecessor holders, keeps
+unfinished drains alive across installer death, serializes concurrent
+replacement, and refuses replacement once an interrupt owns its abort and
+backstop.
 
 Provider dispatch takes Control's final deadline sample next to permit send and
 checks the same committed deadline again in the receiving worker before adapter
 entry. The Store reader used to rebuild that permit is owned by a guardian tied
 to Control's lifetime, and adapter results retain their worker provenance until
-admission. The complete raw usage subtree now passes Store admission before
-normalization; only the unambiguous exact valid input/output pair can be
-salvaged as reported from an otherwise unreadable reply, and private salvage
-rejects cardinality before inspecting a key.
+admission. The complete raw reply now passes Store admission and canonical
+validation before accounting. Nothing from a rejected reply is salvaged as
+reported usage; only an already canonical reply compacted because its complete
+durable settlement does not fit preserves validated reported usage.
 
 The trusted-local executor distinguishes queue and join reservations from the
 one exact operation-owner token, restores open authority after a partial close
 or keeps the root claim when restoration cannot be proved, and uses a second
-serialized permit decision to repeat reconciliation and final validation before
-publishing admission and owner authority under one claim. A reservation made
-before another executor owner dies therefore cannot outrun that owner's
-unresolved durable effect. Missing and oversized job identities are refused
+serialized permit decision to repeat reconciliation after final validation
+before publishing admission and owner authority under one claim. An admission
+that stops after its open entry installs no token and leaves the root
+quarantined. A reservation made before another executor owner dies therefore
+cannot outrun that owner's unresolved durable effect. Missing and oversized job identities are refused
 before ledger or reservation work, filesystem workers are tied to the Local
-authority that admitted them, and a command worker cannot begin after its exact
-execute caller or launch guard is lost.
+authority that admitted them, and a command worker cannot begin or report a
+potentially proved result after its exact execute caller, launch guard, or Local
+owner is lost.
+
+**Frozen-source precedence.** One earlier sentence in the closed M2 Technical
+envelope says that a valid usage pair remains reported when the reply itself is
+unreadable. The same envelope's Outcome 1 instead requires an unreadable or
+malformed live reply to consume the remaining allowance, and accepted ADR 0018
+replaces the provider result/accounting projection with that conservative rule.
+Under the repository's authority order the accepted ADR controls this repair.
+The closed envelope is not edited here, and this record does not pretend the
+older sentence agrees: current code and active guidance follow ADR 0018 and the
+locked outcome.
 
 **Disposition.** Maintainer, 2026-09-04: “Repair and release.” In the repository
 state where `VERSION` remains `0.0.0`, no surface is labelled, and M2 explicitly
 authorizes no package or publication, this instruction authorizes completing
 and integrating the verified source baseline named above. It does not authorize
-a version tag, package build or publication, registry upload, or other public release.
-Those require their own accepted release-bearing decision. M3 inherits the
+a version tag, package build or publication, registry upload, or other public
+release. Those require their own accepted release-bearing decision. M3 inherits the
 obligation to lock the tests added by this repair range, alongside the earlier
 post-closure hotfix tests, before it can claim the corresponding protections.
 Twenty-first recorded override.
