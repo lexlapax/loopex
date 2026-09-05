@@ -362,18 +362,16 @@ defmodule Loopex.Runtime.Control do
   # authoritative.
   #
   # The deadline is checked twice on purpose. The first check refuses an already
-  # expired attempt before Control spends a Store read on it. The second is the
-  # one dispatch linearization depends on: ADR 0018 requires every member of the
-  # authorization to equal its registered state *at the instant of the send*, and
-  # only the last check before the spend can say that about the clock. With the
-  # deadline established once, before the read, an attempt with ten milliseconds
-  # of authority left and a read that took longer than that was still handed a
-  # permit, and the worker -- which deliberately carries no bound of its own --
-  # called the provider after the authority it was dispatched under had expired.
-  # Every other member is immutable for the duration of this serialized handler,
-  # so only time has to be re-established; a refusal here is the same ephemeral
-  # `:deadline_elapsed` the first check gives, and nothing has been sent, so the
-  # coordinator settles it as ADR 0018's exact pre-transport `not_dispatched`.
+  # expired attempt before Control spends a Store read on it. The final helper
+  # samples the clock only after the permit tuple and spent-map update have been
+  # allocated, then sends directly when that sample is still inside the bound.
+  # That removes every controllable check-to-send action from this process, but
+  # a clock read and an Erlang send are not one atomic instruction: Control can
+  # still be preempted between them. The worker therefore applies the same
+  # committed deadline after receiving the permit and immediately before calling
+  # the adapter. A refusal from this helper is exact pre-transport evidence and
+  # settles `not_dispatched`; a refusal at the receiver comes after a possible
+  # send and settles conservatively as `dispatched_or_unknown`.
   def handle_call({:provider_dispatch, binding, authority}, {caller, _tag}, state) do
     with {:ok, session_id} <- provider_binding_session(binding),
          {:ok, entry} <- provider_current_owner(state, session_id, authority, caller),
@@ -381,14 +379,15 @@ defmodule Loopex.Runtime.Control do
          :ok <- provider_worker_ready(authority),
          :ok <- provider_before_deadline(authority),
          :ok <- provider_position_binding(state, session_id, authority, binding),
-         :ok <- provider_attempt_unspent(state, binding),
-         :ok <- provider_before_deadline(authority) do
+         :ok <- provider_attempt_unspent(state, binding) do
       %{worker: worker, permit_reference: reference} = authority
+      permit = {:loopex_provider_permit, reference, binding}
       spent = Map.put(state.spent_attempts, binding, {worker, reference})
 
-      send(worker, {:loopex_provider_permit, reference, binding})
-
-      {:reply, {:ok, :dispatched}, %{state | spent_attempts: spent}}
+      case send_provider_permit_before_deadline(worker, permit, authority) do
+        :ok -> {:reply, {:ok, :dispatched}, %{state | spent_attempts: spent}}
+        {:error, reason} -> {:reply, {:error, reason}, state}
+      end
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -1228,6 +1227,23 @@ defmodule Loopex.Runtime.Control do
   end
 
   defp provider_before_deadline(_authority), do: {:error, :deadline_elapsed}
+
+  # Technical depth: callers allocate the message and the state they will
+  # publish before entering this helper. Its only successful-path actions are
+  # the final clock sample, comparison, and direct send; the receiver-side fence
+  # covers the irreducible scheduler boundary between that sample and the send.
+  defp send_provider_permit_before_deadline(worker, permit, %{deadline: deadline})
+       when is_pid(worker) and is_integer(deadline) do
+    if System.system_time(:millisecond) < deadline do
+      send(worker, permit)
+      :ok
+    else
+      {:error, :deadline_elapsed}
+    end
+  end
+
+  defp send_provider_permit_before_deadline(_worker, _permit, _authority),
+    do: {:error, :deadline_elapsed}
 
   # Concept: the permit names the attempt the journal committed, never the
   # attempt the caller described.

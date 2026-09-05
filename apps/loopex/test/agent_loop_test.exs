@@ -2437,7 +2437,7 @@ defmodule Loopex.AgentLoopTest do
     send(model, :release)
 
     assert await_process_message(coordinator, fn
-             {^reference, {:ok, %{text: "late reply"}}} -> true
+             {^reference, {:loopex_provider_result, {:ok, %{text: "late reply"}}}} -> true
              _other -> false
            end),
            "the model reply was not queued behind the admitted abort"
@@ -2824,8 +2824,11 @@ defmodule Loopex.AgentLoopTest do
     send(model, :release)
 
     assert await_process_message(coordinator, fn
-             {^reference, {:ok, %{text: "late but unretained"}}} -> true
-             _other -> false
+             {^reference, {:loopex_provider_result, {:ok, %{text: "late but unretained"}}}} ->
+               true
+
+             _other ->
+               false
            end)
 
     coordinator_reference = Process.monitor(coordinator)
@@ -3281,8 +3284,11 @@ defmodule Loopex.AgentLoopTest do
     send(model, :release)
 
     assert await_process_message(coordinator, fn
-             {^reference, {:ok, %{text: "late at deadline"}}} -> true
-             _other -> false
+             {^reference, {:loopex_provider_result, {:ok, %{text: "late at deadline"}}}} ->
+               true
+
+             _other ->
+               false
            end)
 
     :ok = :sys.resume(coordinator)

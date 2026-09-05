@@ -43,6 +43,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   @mutation_domain "session"
   @page_size 1_024
+  @provider_result_tag :loopex_provider_result
+  @provider_deadline_tag :loopex_provider_deadline_elapsed
 
   # Concept: an owner that cannot reach the Store waits a while, then says so.
   # It does not wait forever, because the caller that asked for this session is
@@ -2126,15 +2128,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
   #
   # Technical depth: the task's first act is a selective receive for the exact
   # fresh reference and the exact full attempt binding, so a duplicate, stale, or
-  # wrong permit cannot match it and cannot reach the adapter. It carries no
-  # timeout of its own: a bound here would be a dispatch verdict invented out of
-  # scheduling latency, and the coordinator terminates the worker itself
-  # whenever Control refuses.
+  # wrong permit cannot match it and cannot reach the adapter. Once released it
+  # samples the committed deadline immediately before the adapter call. A permit
+  # can arrive or remain queued after Control's final pre-send sample, because a
+  # clock read, send, receive, and function call cannot be one atomic operation;
+  # the receiver fence closes that scheduler gap without inventing another
+  # timeout. Since a permit may already have been sent, its expiry result is
+  # settled conservatively rather than treated as pre-transport proof.
   defp dispatch_provider_attempt(state, work) do
     run_id = work.run_id
     request = work.request
     module = state.model.module
     options = state.model.options
+    deadline = committed_deadline(state, run_id)
     {stream, progress} = model_progress_fun(state, work)
 
     permit_reference = make_ref()
@@ -2144,7 +2150,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       Task.Supervisor.async_nolink(state.owner_workers, fn ->
         receive do
           {:loopex_provider_permit, ^permit_reference, ^binding} ->
-            module.complete(request, options, progress)
+            complete_provider_attempt(module, request, options, progress, deadline)
         end
       end)
 
@@ -2155,7 +2161,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       worker: task.pid,
       permit_reference: permit_reference,
       journal_version: state.durable.journal_version,
-      deadline: committed_deadline(state, run_id)
+      deadline: deadline
     }
 
     state = %{state | streams: Map.put(state.streams, {:model, run_id}, stream)}
@@ -2199,6 +2205,23 @@ defmodule Loopex.Runtime.SessionCoordinator do
         state
         |> discard_provider_worker(run_id, task)
         |> settle_model_attempt(run_id, :not_dispatched)
+    end
+  end
+
+  # Technical depth: every argument and the internal result tag are bound before
+  # the last clock sample. The comparison and call remain separate VM actions,
+  # so this does not claim physical atomicity; together with Control's final
+  # sample it prevents a queued or late-delivered permit from entering the
+  # adapter outside the committed authority. Wrapping ordinary adapter output
+  # keeps an adapter-supplied tuple from forging the internal deadline result.
+  defp complete_provider_attempt(module, request, options, progress, deadline)
+       when is_integer(deadline) do
+    observed = System.system_time(:millisecond)
+
+    if observed < deadline do
+      {@provider_result_tag, module.complete(request, options, progress)}
+    else
+      {@provider_deadline_tag, deadline, observed}
     end
   end
 
@@ -2403,11 +2426,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # not happen. ADR 0018 makes an unexpected refusal of a bounded record the
   # session's unavailability and forbids inventing the settlement, accounting,
   # conversation, or terminal that would have followed it.
-  defp admit_model_deadline(state, run_id) do
+  defp admit_model_deadline(state, run_id),
+    do: admit_model_deadline(state, run_id, System.system_time(:millisecond))
+
+  defp admit_model_deadline(state, run_id, observed) do
     case SessionState.propose_model_termination(
            state.durable,
            run_id,
-           System.system_time(:millisecond)
+           observed
          ) do
       {:ok, proposal} -> commit_internal(state, proposal)
       {:error, _nothing_to_admit} -> {:ok, state}
@@ -3136,7 +3162,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         state = %{state | in_flight: Map.delete(state.in_flight, reference)}
 
         case answer do
-          {:ok, reply} when is_map(reply) ->
+          {:answered, {@provider_result_tag, {:ok, reply}}} when is_map(reply) ->
             settle_model_attempt(state, run_id, {:reply, reply})
 
           _unproved ->
@@ -3898,6 +3924,18 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # operation that would emit it. A generic precheck here creates a
   # check-then-action interval and also makes those final branches impossible to
   # exercise: the precheck answers first and the claimed close never runs.
+  defp dispatch_result(state, :model, run_id, {@provider_result_tag, result}),
+    do: dispatch_current_result(state, :model, run_id, result)
+
+  defp dispatch_result(
+         state,
+         :model,
+         run_id,
+         {@provider_deadline_tag, deadline, observed} = result
+       )
+       when is_integer(deadline) and is_integer(observed) and observed >= deadline,
+       do: dispatch_current_result(state, :model, run_id, result)
+
   defp dispatch_result(state, kind, run_id, result) when kind in [:model, :executor],
     do: dispatch_current_result(state, kind, run_id, result)
 
@@ -3922,6 +3960,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # read only to select the tag and is never carried into the settlement, so a
   # credential-shaped provider error reaches no retained, public, progress,
   # diagnostic, or rendered plane.
+  #
+  # The deadline tuple is not adapter output. It is emitted outside the wrapped
+  # provider-result tag only by the worker's receiver fence, and therefore
+  # carries the exact clock sample that refused the call. A possible permit send
+  # makes its transport conservative even though no adapter invocation occurred.
+  defp accept_model_result(
+         state,
+         run_id,
+         {@provider_deadline_tag, deadline, observed}
+       )
+       when is_integer(deadline) and is_integer(observed) and observed >= deadline do
+    if committed_deadline(state, run_id) == deadline do
+      case admit_model_deadline(state, run_id, observed) do
+        {:ok, next} -> settle_model_attempt(next, run_id, :dispatched_or_unknown)
+        {:error, reason} -> refuse_model_termination(state, reason)
+      end
+    else
+      {:stop, {:model_result_failed, :invalid_provider_deadline}, state}
+    end
+  end
+
   defp accept_model_result(state, run_id, {:ok, reply}) when is_map(reply),
     do: settle_model_attempt(state, run_id, {:reply, reply})
 

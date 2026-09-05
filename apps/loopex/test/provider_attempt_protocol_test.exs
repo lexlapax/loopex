@@ -825,6 +825,69 @@ defmodule Loopex.ProviderAttemptProtocolTest do
            }
   end
 
+  # Concept: a permit sent inside the run's authority cannot make a provider
+  # call when scheduler delay keeps its worker from handling that permit until
+  # after the committed deadline.
+  #
+  # Technical depth: both Control and the worker are frozen before the queued
+  # permit request is released. Control alone is resumed, and its send trace is
+  # the causal proof that the permit linearized before the deadline while the
+  # worker remained unable to consume it. Only after the clock has crossed the
+  # exact committed instant is the worker resumed. The old worker called the
+  # adapter immediately from that receive clause; a receiver-side deadline
+  # fence instead returns an internal expiry result, which the coordinator
+  # admits as deadline truth but accounts as dispatched-or-unknown because a
+  # permit was already possible. No sleep competes with the send or receive.
+  test "a provider worker delayed past the deadline invokes no adapter and settles the sent permit conservatively" do
+    fixture =
+      start(
+        script: [
+          %{text: "must not run", calls: []},
+          %{text: "must not retry", calls: []}
+        ],
+        bounds_deadline_ms: 3_000,
+        bounds_token_budget: 103
+      )
+
+    attempt = queue_provider_permit_request(fixture, "delay the permitted worker")
+    deadline = committed_deadline!(attempt.request_record)
+
+    suspend_process(attempt.coordinator)
+    suspend_process(attempt.worker)
+
+    assert System.system_time(:millisecond) < deadline,
+           "setup outlasted the committed deadline before Control sent the permit"
+
+    resume_process(attempt.control)
+    _permit = await_control_permit(attempt.control, attempt.worker, attempt.binding)
+
+    wait_past_deadline(deadline)
+    resume_process(attempt.worker)
+    await_process_down(attempt.worker)
+
+    assert AgentLoopTestModel.dispatched(fixture.model) == [],
+           "the delayed worker entered the adapter after its committed deadline"
+
+    resume_process(attempt.coordinator)
+
+    finished = await_event(attempt.attachment, "run.finished")
+    assert finished["outcome"] == "bound_reached"
+    assert finished["bound"] == "deadline"
+
+    records = Fixture.records(fixture, attempt.session_id)
+    assert Enum.map(records_of_kind(records, "model_attempt_opened_v1"), & &1["attempt"]) == [1]
+
+    assert [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    assert settlement["transport"] == "dispatched_or_unknown"
+    assert settlement["termination"] == "deadline"
+    assert settlement["next"] == "terminal"
+
+    assert settlement["accounting"] == %{
+             "source" => "estimated",
+             "basis" => "remaining_allowance"
+           }
+  end
+
   test "only exact pre-canary not_dispatched proof opens one retry whose accounting and stream domain stay bound to its attempt" do
     retry =
       start(
@@ -1918,7 +1981,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     for {raw_usage, category} <- [
           {%{}, "missing"},
           {%{input_tokens: 1}, "partial"},
-          {:malformed_usage, "malformed"},
+          {nil, "malformed"},
           {%{input_tokens: -1, output_tokens: 2}, "malformed"},
           {%{input_tokens: "1", output_tokens: 2}, "malformed"},
           {%{input_tokens: @uint64_max + 1, output_tokens: 0}, "uint64_overflow"}
@@ -3388,6 +3451,55 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert projected["tool_calls"] == [at_key]
   end
 
+  # Concept: usage is provider input just like text, identity, and tool calls;
+  # replacing it with a compact accounting classification does not exempt the
+  # raw keys or values from the Store boundary that protects projection.
+  #
+  # Technical depth: each refused arm is closed in every other callback
+  # dimension. The first crosses only the Store identifier ceiling inside the
+  # usage map, while the second crosses only the Store item-byte ceiling with a
+  # value `normalize_usage/1` would otherwise collapse to `malformed`. The
+  # ordinary arm proves that admitting the complete raw callback still retains
+  # a valid reported pair exactly.
+  test "raw usage keys and values pass Store admission before normalization" do
+    request = %{
+      canonical_request_bytes: "canonical-request-bytes",
+      staged_request_digest: String.duplicate("d", 64)
+    }
+
+    raw = adapter_reply(request, [])
+    overlong_key = String.duplicate("k", @identifier_limit + 1)
+
+    assert ProviderAttempt.canonical_reply(
+             Map.put(raw, "usage", %{overlong_key => 1}),
+             request
+           ) == {:error, :unreadable_model_answer}
+
+    oversized_value = String.duplicate("x", @record_limit)
+
+    assert {:error, {:item_too_large, _observed, @record_limit}} =
+             raw
+             |> Map.put("usage", %{"input_tokens" => oversized_value, "output_tokens" => 2})
+             |> Map.drop(["canonical_request_bytes"])
+             |> Store.admit_bounded()
+
+    assert ProviderAttempt.canonical_reply(
+             Map.put(raw, "usage", %{
+               "input_tokens" => oversized_value,
+               "output_tokens" => 2
+             }),
+             request
+           ) == {:error, :unreadable_model_answer}
+
+    assert {:ok, projected} = ProviderAttempt.canonical_reply(raw, request)
+
+    assert projected["usage"] == %{
+             "status" => "reported",
+             "input_tokens" => 3,
+             "output_tokens" => 2
+           }
+  end
+
   # Concept: the ceiling admits the largest answer that fits, and refuses the
   # first one that does not.
   #
@@ -3404,7 +3516,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     }
 
     raw = adapter_reply(request, [])
-    measured = Map.drop(raw, ["usage", "canonical_request_bytes"])
+    measured = Map.drop(raw, ["canonical_request_bytes"])
 
     assert {:ok, base} = Store.admit_bounded(measured)
 
@@ -3420,17 +3532,15 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              {:error, :unreadable_model_answer}
   end
 
-  # Concept: a usage member an adapter actually sent is never read as a member
-  # it never sent.
+  # Concept: a non-plain usage member is an unreadable reply, not a missing
+  # accounting member.
   #
-  # Technical depth: `usage` is deliberately outside the Store admission,
-  # because ADR 0018 combination 1 requires a malformed one to be classified
-  # rather than to refuse an otherwise canonical reply. That exclusion is why
-  # the missing-member marker had to stop being a bare atom: nothing else on
-  # this path would refuse an adapter that literally answers `:absent`. The last
-  # arm pins the exclusion itself, by showing the same atom anywhere the
-  # admission does cover refuses the whole reply.
-  test "an adapter-supplied :absent usage member is malformed, not missing" do
+  # Technical depth: `:absent` remains an internal marker that distinguishes an
+  # omitted member from a supplied term. The Store boundary now sees every raw
+  # usage value before that classification, so an adapter-supplied atom is
+  # refused consistently wherever it appears. An actually omitted member stays
+  # the admitted `partial` accounting cell.
+  test "adapter-supplied non-plain usage and members are unreadable, not malformed or missing" do
     request = %{
       canonical_request_bytes: "canonical-request-bytes",
       staged_request_digest: String.duplicate("d", 64)
@@ -3438,10 +3548,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     raw = adapter_reply(request, [])
 
+    assert ProviderAttempt.canonical_reply(Map.put(raw, "usage", :malformed_usage), request) ==
+             {:error, :unreadable_model_answer}
+
     sentinel = Map.put(raw, "usage", %{"input_tokens" => :absent, "output_tokens" => 10})
 
-    assert {:ok, supplied} = ProviderAttempt.canonical_reply(sentinel, request)
-    assert supplied["usage"] == %{"status" => "unreported", "category" => "malformed"}
+    assert ProviderAttempt.canonical_reply(sentinel, request) ==
+             {:error, :unreadable_model_answer}
 
     assert Store.admit_bounded(%{"input_tokens" => :absent}) == {:error, :invalid_item}
 
