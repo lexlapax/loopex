@@ -106,7 +106,13 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     @impl Loopex.Model
     def complete(request, options, progress \\ nil) do
       progress = progress || Model.discard_progress()
-      Adapter.reply_from_stream(stream_response(options), request, identity(), progress)
+
+      Adapter.reply_from_stream(
+        stream_response(options),
+        request,
+        Keyword.get(options, :identity, identity()),
+        progress
+      )
     end
 
     @doc """
@@ -749,41 +755,81 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
       Shipped.clean_metadata()
       |> Map.put(:headers, [{"x-request-id", "req_openai_synthetic_conformance"}])
 
+    identity = %{Shipped.identity() | provider: "openai"}
+
     assert {:ok, reply} =
              Shipped.complete(
                request(),
-               [chunks: ["acknowledged"], metadata: metadata],
+               [chunks: ["acknowledged"], metadata: metadata, identity: identity],
                Model.discard_progress()
              )
 
     assert reply.provider_response_id == "req_openai_synthetic_conformance"
   end
 
-  test "provider response identifiers are exact bounded header values and never manufactured" do
-    valid_at_ceiling = String.duplicate("r", 256)
+  test "the resolved provider selects only its own account identifier header" do
+    metadata =
+      Shipped.clean_metadata()
+      |> Map.put(:headers, [
+        {"request-id", "req_anthropic_account"},
+        {"x-request-id", "req_openai_account"}
+      ])
 
-    cases = [
-      {[], nil},
-      {[{"request-id", ""}], nil},
-      {[{"REQUEST-ID", "req_anthropic_mixed_case"}], "req_anthropic_mixed_case"},
-      {[{"X-Request-ID", "req_openai_mixed_case"}], "req_openai_mixed_case"},
-      {%{"request-id" => "req_anthropic_map"}, "req_anthropic_map"},
-      {%{"X-Request-ID" => "req_openai_map"}, "req_openai_map"},
-      {%{"request-id" => ["req_anthropic_list_value"]}, "req_anthropic_list_value"},
-      {[{"x-request-id", ["req_openai_list_value"]}], "req_openai_list_value"},
-      {[{"request-id", " Req_MiXeD_exact_bytes "}], " Req_MiXeD_exact_bytes "},
-      {[{"request-id", valid_at_ceiling}], valid_at_ceiling},
-      {[{"request-id", valid_at_ceiling <> "x"}], nil},
-      {[{"request-id", <<255>>}], nil}
-    ]
-
-    for {headers, expected} <- cases do
-      metadata = Shipped.clean_metadata() |> Map.put(:headers, headers)
+    for {provider, expected} <- [
+          {"anthropic", "req_anthropic_account"},
+          {"openai", "req_openai_account"},
+          {"unknown-provider", nil}
+        ] do
+      identity = %{Shipped.identity() | provider: provider}
 
       assert {:ok, reply} =
                Shipped.complete(
                  request(),
-                 [chunks: ["acknowledged"], metadata: metadata],
+                 [chunks: ["acknowledged"], metadata: metadata, identity: identity],
+                 Model.discard_progress()
+               )
+
+      assert reply.provider_response_id == expected
+    end
+  end
+
+  test "provider response identifiers are exact bounded header values and never manufactured" do
+    valid_at_ceiling = String.duplicate("r", 256)
+
+    cases = [
+      {"anthropic", [], nil},
+      {"anthropic", [{"request-id", ""}], nil},
+      {"anthropic", [{"REQUEST-ID", "req_anthropic_mixed_case"}], "req_anthropic_mixed_case"},
+      {"openai", [{"X-Request-ID", "req_openai_mixed_case"}], "req_openai_mixed_case"},
+      {"anthropic", %{"request-id" => "req_anthropic_map"}, "req_anthropic_map"},
+      {"openai", %{"X-Request-ID" => "req_openai_map"}, "req_openai_map"},
+      {"anthropic", %{"request-id" => ["req_anthropic_list_value"]}, "req_anthropic_list_value"},
+      {"openai", [{"x-request-id", ["req_openai_list_value"]}], "req_openai_list_value"},
+      {"anthropic", [{"request-id", " Req_MiXeD_exact_bytes "}], " Req_MiXeD_exact_bytes "},
+      {"anthropic",
+       [
+         {"proxy-request-id", "req_not_an_exact_header"},
+         {"request-id-extra", "req_not_an_exact_header"},
+         {"not-x-request-id", "req_not_an_exact_header"}
+       ], nil},
+      {"openai",
+       [
+         {"not-x-request-id", "req_not_an_exact_header"},
+         {"x-request-id-extra", "req_not_an_exact_header"}
+       ], nil},
+      {"anthropic", [{"request-id", valid_at_ceiling}], valid_at_ceiling},
+      {"anthropic", [{"request-id", valid_at_ceiling <> "x"}], nil},
+      {"anthropic", [{"request-id", <<255>>}], nil}
+    ]
+
+    for {provider, headers, expected} <- cases do
+      metadata = Shipped.clean_metadata() |> Map.put(:headers, headers)
+      identity = %{Shipped.identity() | provider: provider}
+
+      assert {:ok, reply} =
+               Shipped.complete(
+                 request(),
+                 [chunks: ["acknowledged"], metadata: metadata, identity: identity],
                  Model.discard_progress()
                )
 

@@ -628,7 +628,7 @@ defmodule Loopex.LLM.ReqLLM do
     %{
       text: text,
       identity: identity,
-      provider_response_id: provider_request_id(metadata),
+      provider_response_id: provider_request_id(metadata, identity),
       usage: %{
         input_tokens: Map.get(reported, :input_tokens),
         output_tokens: Map.get(reported, :output_tokens)
@@ -915,16 +915,22 @@ defmodule Loopex.LLM.ReqLLM do
   # OpenAI calls it `x-request-id`; both are the identifiers their account and
   # support surfaces use. The attestation declares the concrete form it retained.
   #
-  # A provider that returns no such header yields `nil` rather than a
-  # manufactured substitute, and an evidence claim built from replies carrying
-  # none is refused rather than recorded.
-  defp provider_request_id(metadata) do
+  # The resolved provider chooses the header. A gateway may add unrelated
+  # request identifiers, so preferring whichever recognised spelling happens to
+  # appear first can retain an identifier that does not exist in the provider's
+  # account. An unknown provider has no declared account-header contract here
+  # and therefore yields `nil`. A provider that returns no valid value under its
+  # own header likewise yields `nil` rather than a manufactured substitute, and
+  # an evidence claim built from replies carrying none is refused rather than
+  # recorded.
+  defp provider_request_id(metadata, identity) do
     headers = Map.get(metadata, :headers, [])
 
-    headers
-    |> header("request-id")
-    |> then(&(&1 || header(headers, "x-request-id")))
-    |> bounded_response_id()
+    case Map.get(identity, :provider) do
+      "anthropic" -> headers |> header("request-id") |> bounded_response_id()
+      "openai" -> headers |> header("x-request-id") |> bounded_response_id()
+      _unknown -> nil
+    end
   end
 
   # Concept: a header that cannot be the provider's identifier is an absence
