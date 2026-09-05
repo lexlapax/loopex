@@ -687,7 +687,19 @@ defmodule Loopex.Executor.LocalTest do
 
     assert_receive {:quarantine_waiter_reserved, ^queued_holder}, 5_000
 
-    owner = Task.async(fn -> Local.execute(fixture.executor, owned, owned_grant) end)
+    owner =
+      spawn(fn ->
+        result = Local.execute(fixture.executor, owned, owned_grant)
+        send(parent, {:quarantined_owner_result, self(), result})
+
+        receive do
+          :release_quarantined_owner -> :ok
+        end
+      end)
+
+    on_exit(fn ->
+      if Process.alive?(owner), do: Process.exit(owner, :kill)
+    end)
 
     assert_receive {:quarantine_close_started, owned_job_id, close_worker}, 5_000
     assert owned_job_id == owned.job_id
@@ -703,14 +715,17 @@ defmodule Loopex.Executor.LocalTest do
 
     send(close_worker, {:finish_quarantine_close, owned.job_id})
 
-    assert {:ok, %{outcome: :outcome_unknown, cleanup_confirmation: :unconfirmed}} =
-             Task.await(owner, 15_000)
-
-    assert_receive {:quarantine_waiter_answer, ^queued_holder,
-                    {:error, {:reconciliation_required, 1}}},
+    assert_receive {:quarantined_owner_result, ^owner,
+                    {:ok, %{outcome: :outcome_unknown, cleanup_confirmation: :unconfirmed}}},
                    15_000
 
+    assert_receive {:quarantine_waiter_answer, ^queued_holder, queued_answer}, 15_000
+
+    assert queued_answer == {:error, {:reconciliation_required, 1}},
+           "the queued permit ignored the quarantined operation: #{inspect(queued_answer)}"
+
     refute File.exists?(Path.join(fixture.workspace, "queued-after-quarantine.txt"))
+    send(owner, :release_quarantined_owner)
   end
 
   test "a filesystem worker cannot outlive the Local executor authority that admitted it" do
