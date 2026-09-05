@@ -733,41 +733,34 @@ defmodule Loopex.Executor.LocalTest do
     # captured command group; a blocked caller is not the authority that keeps
     # either effect alive.
     #
-    # Technical depth: `bounded_work/3` once watched only its worker, the lease,
-    # and the deadline. This probe installs the same exact effect-owner identity
-    # `run_reserved/5` installs, blocks a real filesystem-effect worker after it
-    # has started, and kills the executor. A boundary that merely monitors the
-    # worker itself stays blocked; the fallback below then releases it and proves
-    # the escaped write. The guarded boundary answers before that release with a
-    # confirmed owner-loss abandonment, and the killed worker cannot act later.
+    # Technical depth: `run_bounded_tool/6` once selected `bounded_work/3`, which
+    # watched only its worker, the lease, and the deadline. This drives the real
+    # `loopex.write` production path, stopping it at the execution-local barrier
+    # immediately before `File.*`, then kills the executor. A path that still
+    # selects the unguarded boundary stays blocked; the fallback below releases it
+    # and proves the escaped write. The guarded production path answers before
+    # that release with an owner-loss receipt, and the killed worker cannot act
+    # later.
     fixture = fixture("filesystem-owner-loss")
     on_exit(fn -> stop_fixture(fixture) end)
     Process.unlink(fixture.executor)
 
     parent = self()
     target = Path.join(fixture.workspace, "filesystem-owner-loss.txt")
+    {job, grant} = job_and_grant(fixture, "filesystem-owner-loss", "loopex.write")
+    barrier_ref = make_ref()
 
     running =
       Task.async(fn ->
-        lease_monitor = Process.monitor(fixture.lease)
-
-        Local.bounded_work(
-          fn ->
-            send(parent, {:filesystem_worker_ready, self()})
-
-            receive do
-              :continue_after_owner_loss ->
-                File.write!(target, "escaped")
-                :written
-            end
-          end,
-          10_000,
-          {lease_monitor, fixture.lease},
-          fixture.executor
+        Local.execute(
+          fixture.executor,
+          job,
+          grant,
+          filesystem_effect_barrier: {parent, barrier_ref}
         )
       end)
 
-    assert_receive {:filesystem_worker_ready, effect_worker}, 2_000
+    assert_receive {^barrier_ref, :filesystem_worker_ready, effect_worker}, 2_000
     executor_monitor = Process.monitor(fixture.executor)
     Process.exit(fixture.executor, :kill)
     assert_receive {:DOWN, ^executor_monitor, :process, _executor, :killed}, 2_000
@@ -778,13 +771,20 @@ defmodule Loopex.Executor.LocalTest do
           answer
 
         nil ->
-          send(effect_worker, :continue_after_owner_loss)
+          send(effect_worker, {barrier_ref, :continue})
           Task.await(running, 2_000)
       end
 
-    send(effect_worker, :continue_after_owner_loss)
+    send(effect_worker, {barrier_ref, :continue})
 
-    assert result == {:abandoned, :effect_owner_lost, true, :none}
+    assert {:ok,
+            %{
+              outcome: :outcome_unknown,
+              cleanup_confirmation: :unconfirmed,
+              output: output
+            }} = result
+
+    assert output =~ "Local executor authority was lost"
     refute File.exists?(target), "the filesystem worker acted after its Local owner died"
   end
 
@@ -911,9 +911,7 @@ defmodule Loopex.Executor.LocalTest do
     {:ok, tool} = Local.tool(tool_id)
     now = System.system_time(:millisecond)
 
-    arguments =
-      %{"relative_path" => "#{label}.txt", "content" => "bytes-#{label}"}
-      |> maybe_delay(tool_id)
+    arguments = tool_arguments(label, tool_id)
 
     fields = %{
       protocol_version: 1,
@@ -949,6 +947,14 @@ defmodule Loopex.Executor.LocalTest do
 
   defp maybe_delay(arguments, "loopex.demo.wait_write"), do: Map.put(arguments, "delay_ms", 5_000)
   defp maybe_delay(arguments, _tool), do: arguments
+
+  defp tool_arguments(label, "loopex.write"),
+    do: %{"path" => "#{label}.txt", "content" => "bytes-#{label}"}
+
+  defp tool_arguments(label, tool_id) do
+    %{"relative_path" => "#{label}.txt", "content" => "bytes-#{label}"}
+    |> maybe_delay(tool_id)
+  end
 
   defp wrong(:attempt, grant), do: grant.attempt + 1
   defp wrong(:expiry, _grant), do: System.system_time(:millisecond) - 1

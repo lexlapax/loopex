@@ -2690,7 +2690,7 @@ defmodule Loopex.Executor.Local do
          _tool,
          workspace,
          %{kind: kind} = arguments,
-         _options,
+         options,
          lease,
          deadline,
          limits,
@@ -2703,7 +2703,7 @@ defmodule Loopex.Executor.Local do
     if remaining <= 0 do
       {{:failed, "the effective deadline passed before this tool began"}, 0}
     else
-      {run_bounded_tool(workspace, arguments, remaining, lease, limits), 0}
+      {run_bounded_tool(workspace, arguments, remaining, lease, limits, options), 0}
     end
   end
 
@@ -2743,9 +2743,12 @@ defmodule Loopex.Executor.Local do
   #
   # The mechanics of the wait live in `bounded_work/3`, which the two retentions
   # that follow the effect use as well.
-  defp run_bounded_tool(workspace, arguments, remaining, lease, limits) do
+  defp run_bounded_tool(workspace, arguments, remaining, lease, limits, options) do
     case bounded_work(
-           fn -> filesystem_effect(workspace, arguments, limits) end,
+           fn ->
+             filesystem_effect_barrier(options)
+             filesystem_effect(workspace, arguments, limits)
+           end,
            remaining,
            lease,
            effect_owner()
@@ -2764,6 +2767,27 @@ defmodule Loopex.Executor.Local do
 
       {:abandoned, :bound_reached, stopped, _late} ->
         abandoned(:deadline, arguments, stopped)
+    end
+  end
+
+  # Concept: a case can stop the real filesystem path at its exact effect edge.
+  #
+  # Technical depth: ordinary files offer no deterministic way to block between
+  # guarded-worker creation and `File.*`. This optional execution-local message
+  # barrier runs inside that same worker immediately before the real effect;
+  # production callers omit it. It executes no supplied function, substitutes no
+  # effect, and enters no job, receipt, ledger record, or public result.
+  defp filesystem_effect_barrier(options) do
+    case Keyword.get(options, :filesystem_effect_barrier) do
+      {recipient, barrier_ref} when is_pid(recipient) and is_reference(barrier_ref) ->
+        send(recipient, {barrier_ref, :filesystem_worker_ready, self()})
+
+        receive do
+          {^barrier_ref, :continue} -> :ok
+        end
+
+      _absent ->
+        :ok
     end
   end
 
