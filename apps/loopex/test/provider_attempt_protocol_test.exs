@@ -2145,6 +2145,57 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert_remaining_allowance(fixture, session_id, token_budget)
   end
 
+  test "an unreadable reply reports usage only from the exact closed valid pair" do
+    token_budget = 13
+
+    for {label, raw_usage, expected_accounting} <- [
+          {"exact", %{input_tokens: 3, output_tokens: 2},
+           %{"source" => "reported", "input_tokens" => 3, "output_tokens" => 2}},
+          {"extra", %{input_tokens: 3, output_tokens: 2, billing_tier: "priority"},
+           %{"source" => "estimated", "basis" => "remaining_allowance"}},
+          {"missing", %{input_tokens: 3},
+           %{"source" => "estimated", "basis" => "remaining_allowance"}},
+          {"invalid", %{input_tokens: -1, output_tokens: 2},
+           %{"source" => "estimated", "basis" => "remaining_allowance"}}
+        ] do
+      fixture =
+        start(
+          script: [
+            %{
+              text: "usage salvage #{label}",
+              calls: [],
+              usage: raw_usage,
+              reply_overrides: %{
+                identity: %{provider: nil, model: "scripted:v1", endpoint: "in-process"}
+              }
+            }
+          ],
+          bounds_token_budget: token_budget
+        )
+
+      {session_id, attachment, {:accepted, "prompt-1"}} =
+        Fixture.run(fixture, "classify unreadable usage #{label}")
+
+      assert await_event(attachment, "run.finished")["outcome"] == "failed"
+
+      [settlement] =
+        fixture
+        |> Fixture.records(session_id)
+        |> records_of_kind("model_attempt_settled_v1")
+
+      assert settlement["result"] == %{
+               "kind" => "error",
+               "category" => "unreadable_model_answer"
+             }
+
+      assert settlement["accounting"] == expected_accounting
+
+      if expected_accounting["source"] == "estimated" do
+        assert_remaining_allowance(fixture, session_id, token_budget)
+      end
+    end
+  end
+
   test "recovery settles an unresolved open without redispatch and never reuses or closes the dead predecessor stream" do
     fixture =
       start(

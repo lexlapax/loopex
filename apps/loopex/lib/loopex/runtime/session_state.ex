@@ -1124,8 +1124,9 @@ defmodule Loopex.Runtime.SessionState do
 
   defp raw_reply_usage(raw) when is_map(raw) and not is_struct(raw) do
     with {:ok, usage} <- unambiguous_raw_usage(raw),
-         true <- normalized_keys_unique?(usage) do
-      ProviderAttempt.normalize_usage(usage)
+         true <- closed_raw_usage_shape?(usage),
+         %{"status" => "reported"} = reported <- ProviderAttempt.normalize_usage(usage) do
+      reported
     else
       _ambiguous_or_absent -> nil
     end
@@ -1139,9 +1140,10 @@ defmodule Loopex.Runtime.SessionState do
   # Technical depth: canonical reply admission normalises atom keys to their
   # binary spelling and refuses collisions. Settlement may still recover an
   # otherwise valid usage pair when another reply member is unreadable, but it
-  # must apply that same ambiguity boundary to the raw `usage` member and every
-  # key inside it. Returning no usable pair selects the conservative remaining-
-  # allowance accounting cell below.
+  # must apply that same ambiguity boundary and closed two-key shape to the raw
+  # `usage` member. An extra, missing, colliding, or invalid member returns no
+  # usable pair and selects the conservative remaining-allowance accounting cell
+  # below.
   defp unambiguous_raw_usage(raw) do
     case {Map.fetch(raw, :usage), Map.fetch(raw, "usage")} do
       {{:ok, _atom_usage}, {:ok, _binary_usage}} -> :ambiguous
@@ -1151,25 +1153,18 @@ defmodule Loopex.Runtime.SessionState do
     end
   end
 
-  defp normalized_keys_unique?(usage) when is_map(usage) and not is_struct(usage) do
-    usage
-    |> Map.keys()
-    |> Enum.reduce_while(MapSet.new(), fn key, seen ->
-      normalized = if is_atom(key), do: Atom.to_string(key), else: key
+  defp closed_raw_usage_shape?(usage) when is_map(usage) and not is_struct(usage) do
+    normalized_keys =
+      usage
+      |> Map.keys()
+      |> Enum.map(fn key -> if is_atom(key), do: Atom.to_string(key), else: key end)
+      |> MapSet.new()
 
-      if MapSet.member?(seen, normalized) do
-        {:halt, false}
-      else
-        {:cont, MapSet.put(seen, normalized)}
-      end
-    end)
-    |> case do
-      false -> false
-      %MapSet{} -> true
-    end
+    map_size(usage) == 2 and
+      normalized_keys == MapSet.new(["input_tokens", "output_tokens"])
   end
 
-  defp normalized_keys_unique?(_usage), do: true
+  defp closed_raw_usage_shape?(_usage), do: false
 
   defp attempt_accounting("not_dispatched", _usage),
     do: %{"source" => "none", "basis" => "not_dispatched"}
