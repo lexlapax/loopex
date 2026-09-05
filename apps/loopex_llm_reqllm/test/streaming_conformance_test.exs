@@ -767,6 +767,8 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
       {[{"request-id", ""}], nil},
       {[{"REQUEST-ID", "req_anthropic_mixed_case"}], "req_anthropic_mixed_case"},
       {[{"X-Request-ID", "req_openai_mixed_case"}], "req_openai_mixed_case"},
+      {%{"request-id" => "req_anthropic_map"}, "req_anthropic_map"},
+      {%{"X-Request-ID" => "req_openai_map"}, "req_openai_map"},
       {[{"request-id", valid_at_ceiling}], valid_at_ceiling},
       {[{"request-id", valid_at_ceiling <> "x"}], nil},
       {[{"request-id", <<255>>}], nil}
