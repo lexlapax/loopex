@@ -996,10 +996,11 @@ defmodule Loopex.LLM.ReqLLM do
         {:cont, {:ok, [ReqLLM.Context.assistant(text) | acc]}}
 
       calls ->
-        # The provider's encoder accepts a plain map with the arguments already
-        # decoded, so nothing here has to encode JSON. That matters: the ADR 0002
-        # floor has neither `:json` nor `JSON`, and adding an encoder to reach a
-        # provider would be an external dependency this edge is not permitted.
+        # ReqLLM's public context constructor normalizes the provider-neutral
+        # maps into its ToolCall shape before a provider encoder sees them. The
+        # arguments stay decoded here: the dependency owns its own wire encoding,
+        # and this adapter needs no second JSON implementation to reach a
+        # provider.
         rendered =
           Enum.map(calls, fn call ->
             %{
@@ -1011,8 +1012,7 @@ defmodule Loopex.LLM.ReqLLM do
 
         parts = if text in [nil, ""], do: [], else: [ReqLLM.Message.ContentPart.text(text)]
 
-        {:cont,
-         {:ok, [%ReqLLM.Message{role: :assistant, content: parts, tool_calls: rendered} | acc]}}
+        {:cont, {:ok, [ReqLLM.Context.assistant(parts, tool_calls: rendered) | acc]}}
     end
   end
 

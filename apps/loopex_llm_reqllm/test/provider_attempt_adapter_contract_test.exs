@@ -8,10 +8,18 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptCanaryAdapter do
     observer = Application.fetch_env!(:loopex_llm_reqllm, :provider_attempt_canary_observer)
     send(observer, {:provider_transport_canary, self(), request.method, request.host})
 
-    case Application.fetch_env!(:loopex_llm_reqllm, :provider_attempt_canary_mode) do
+    mode = Application.fetch_env!(:loopex_llm_reqllm, :provider_attempt_canary_mode)
+
+    if mode == :capture_closed_port do
+      body = ReqLLM.Streaming.Fixtures.canonical_json_from_finch_request(request)
+      send(observer, {:provider_transport_body, self(), body})
+    end
+
+    case mode do
       mode
       when mode in [
              :closed_port,
+             :capture_closed_port,
              :http_error,
              :malformed_response,
              :incomplete_stream,
@@ -45,6 +53,96 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
 
   alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.Model
+
+  test "committed assistant tool history is normalized before provider encoding" do
+    variable = Adapter.credential_variable()
+    previous_credential = System.get_env(variable)
+    previous_adapter = Application.get_env(:req_llm, :finch_request_adapter)
+    previous_observer = Application.get_env(:loopex_llm_reqllm, :provider_attempt_canary_observer)
+    previous_port = Application.get_env(:loopex_llm_reqllm, :provider_attempt_closed_port)
+    previous_mode = Application.get_env(:loopex_llm_reqllm, :provider_attempt_canary_mode)
+    closed_port = reserve_closed_port()
+
+    Application.put_env(
+      :req_llm,
+      :finch_request_adapter,
+      Loopex.LLM.ReqLLM.ProviderAttemptCanaryAdapter
+    )
+
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_canary_observer, self())
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_closed_port, closed_port)
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_canary_mode, :capture_closed_port)
+
+    try do
+      System.put_env(variable, "credential-shaped-canary-secret")
+
+      {:ok, request} =
+        Model.request(
+          "openai:gpt-4-turbo-2024-04-09",
+          [
+            %{"role" => "user", "content" => "read the file"},
+            %{
+              "role" => "assistant",
+              "content" => "I will read it.",
+              "tool_calls" => [
+                %{
+                  "tool_call_id" => "call_MiXeD_123",
+                  "tool_id" => "loopex.read",
+                  "arguments" => %{"path" => "README.md"}
+                }
+              ]
+            },
+            %{
+              "role" => "tool",
+              "tool_call_id" => "call_MiXeD_123",
+              "content" => "file contents"
+            }
+          ],
+          sampling: %{"max_tokens" => 1},
+          deadline: System.system_time(:millisecond) + 2_000
+        )
+
+      assert Adapter.complete(request, [], Model.discard_progress()) ==
+               {:error, {:dispatched_or_unknown, "model_call_failed"}}
+
+      assert_receive {:provider_transport_body, _worker, body}, 5_000
+
+      assistant = Enum.find(body["messages"], &(&1["role"] == "assistant"))
+
+      assert %{
+               "tool_calls" => [
+                 %{
+                   "id" => "call_MiXeD_123",
+                   "type" => "function",
+                   "function" => %{"name" => "read", "arguments" => arguments}
+                 }
+               ]
+             } = assistant
+
+      assert Jason.decode!(arguments) == %{"path" => "README.md"}
+    after
+      restore_env(variable, previous_credential)
+      restore_application_env(:req_llm, :finch_request_adapter, previous_adapter)
+
+      restore_application_env(
+        :loopex_llm_reqllm,
+        :provider_attempt_canary_observer,
+        previous_observer
+      )
+
+      restore_application_env(
+        :loopex_llm_reqllm,
+        :provider_attempt_closed_port,
+        previous_port
+      )
+
+      restore_application_env(
+        :loopex_llm_reqllm,
+        :provider_attempt_canary_mode,
+        previous_mode
+      )
+    end
+  end
 
   test "the shipped adapter declares not_dispatched only before its transport canary and ambiguity after it" do
     variable = Adapter.credential_variable()
