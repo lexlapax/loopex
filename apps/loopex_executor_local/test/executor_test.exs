@@ -26,7 +26,6 @@ defmodule Loopex.Executor.LocalTest do
   test "each missing and wrong grant binding is refused before process start" do
     fixture = fixture("negative-bindings")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "negative", "loopex.demo.write")
 
     # The refusal wears the tag that says it preceded the effect. That is the
     # half of this case's name a bare reason cannot carry: `refused before
@@ -34,15 +33,25 @@ defmodule Loopex.Executor.LocalTest do
     # make it is the executor that did or did not start something. A caller
     # reading these bare would be inferring it.
     for field <- Executor.required_grant_bindings() do
+      {missing_job, missing_grant} =
+        job_and_grant(fixture, "negative-missing-#{field}", "loopex.demo.write")
+
       assert {:error, {:refused_before_effect, {:missing_binding, ^field}}} =
-               Local.execute(fixture.executor, job, Map.delete(grant, field))
+               Local.execute(fixture.executor, missing_job, Map.delete(missing_grant, field))
+
+      {wrong_job, wrong_grant} =
+        job_and_grant(fixture, "negative-wrong-#{field}", "loopex.demo.write")
 
       assert {:error, {:refused_before_effect, {:binding_mismatch, ^field}}} =
-               Local.execute(fixture.executor, job, Map.put(grant, field, wrong(field, grant)))
+               Local.execute(
+                 fixture.executor,
+                 wrong_job,
+                 Map.put(wrong_grant, field, wrong(field, wrong_grant))
+               )
     end
 
     assert %{dispatches: %{}} = Local.stats(fixture.executor)
-    refute File.exists?(Path.join(fixture.workspace, "negative.txt"))
+    assert File.ls!(fixture.workspace) == []
   end
 
   test "only an explicit host-policy allow decision can issue or widen a grant" do
@@ -321,6 +330,48 @@ defmodule Loopex.Executor.LocalTest do
            "the open effect did not become unresolved after its last exact holder released"
   end
 
+  test "a same-digest admission joins before a duplicate caller's grant is revalidated" do
+    # Concept: once durable truth says an effect may have begun, a later caller's
+    # stale grant cannot turn that operation back into a proved pre-effect
+    # refusal.
+    #
+    # Technical depth: the old permit path validated the duplicate first, tried
+    # to write a refusal over the admission, ignored the ledger conflict, and
+    # returned the refusal tag anyway. This case installs the exact admission,
+    # then presents a deliberately invalid grant through the real permit
+    # boundary. The matching marker must decide `:join` before ephemeral grant
+    # validation, and the admission record must remain the durable answer.
+    fixture = fixture("admission-before-revalidation")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "admission-before-revalidation", "loopex.demo.write")
+    {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+
+    assert :ok =
+             Ledger.with_claim(prepared, fn ->
+               Ledger.admit(
+                 prepared,
+                 Ledger.marker(job),
+                 Ledger.open_entry(job, "executor-local")
+               )
+             end)
+
+    assert {:ok, placement} = GenServer.call(fixture.executor, {:reserve, job}, 10_000)
+    reservation_ref = Map.fetch!(placement, :reservation_ref)
+    stale_grant = Map.put(grant, :expiry, 0)
+
+    assert {:ok, %{decision: :join}} =
+             GenServer.call(
+               fixture.executor,
+               {:permit, job, stale_grant, reservation_ref},
+               10_000
+             )
+
+    assert {:ok, %{ledger_kind: "local_effect_admission_v1"}} =
+             Ledger.read_marker(prepared, job.job_id)
+
+    GenServer.cast(fixture.executor, {:release, job.job_id, reservation_ref})
+  end
+
   test "a live join waiter does not impersonate an effect owner after that owner dies" do
     # Concept: a caller waiting to join one admitted operation is not evidence
     # that this executor still owns the effect. If the actual effect owner dies,
@@ -583,6 +634,145 @@ defmodule Loopex.Executor.LocalTest do
     end
   end
 
+  test "a queued permit cannot ignore an operation whose settlement became quarantined" do
+    # Concept: once an operation stops being live and its open authority remains,
+    # an already-queued unrelated permit must see the quarantine before it can
+    # start another effect.
+    #
+    # Technical depth: settlement runs in the caller while permits serialize in
+    # the executor. The close seam holds A's root claim as B's permit queues, then
+    # fails without removing A's open entry. If A's owner token survives until a
+    # later release cast, B runs first and excludes that open entry as though A
+    # were still live. Removing the exact owner token when settlement begins
+    # makes the open entry visible to B's first post-claim reconciliation.
+    parent = self()
+
+    close = fn _ledger, job_id ->
+      send(parent, {:quarantine_close_started, job_id, self()})
+
+      receive do
+        {:finish_quarantine_close, ^job_id} -> {:error, :forced_close_failure}
+      end
+    end
+
+    fixture = fixture("queued-permit-after-quarantine", open_authority_close: close)
+    on_exit(fn -> stop_fixture(fixture) end)
+
+    {owned, owned_grant} =
+      job_and_grant(fixture, "quarantined-owner", "loopex.demo.write")
+
+    {queued, queued_grant} =
+      job_and_grant(fixture, "queued-after-quarantine", "loopex.demo.write")
+
+    queued_holder =
+      spawn(fn ->
+        {:ok, placement} = GenServer.call(fixture.executor, {:reserve, queued}, 10_000)
+        reservation_ref = Map.fetch!(placement, :reservation_ref)
+        send(parent, {:quarantine_waiter_reserved, self()})
+
+        receive do
+          :request_quarantined_permit ->
+            send(parent, {:quarantine_waiter_calling, self()})
+
+            answer =
+              GenServer.call(
+                fixture.executor,
+                {:permit, queued, queued_grant, reservation_ref},
+                15_000
+              )
+
+            send(parent, {:quarantine_waiter_answer, self(), answer})
+        end
+      end)
+
+    assert_receive {:quarantine_waiter_reserved, ^queued_holder}, 5_000
+
+    owner = Task.async(fn -> Local.execute(fixture.executor, owned, owned_grant) end)
+
+    assert_receive {:quarantine_close_started, owned_job_id, close_worker}, 5_000
+    assert owned_job_id == owned.job_id
+
+    send(queued_holder, :request_quarantined_permit)
+    assert_receive {:quarantine_waiter_calling, ^queued_holder}, 2_000
+
+    # Give the holder a scheduler turn to enter its synchronous call. The
+    # executor either has that call queued or has already taken it and is waiting
+    # for the root claim held by A; both establish the ordering this case needs.
+    Process.sleep(25)
+    refute_received {:quarantine_waiter_answer, ^queued_holder, _answer}
+
+    send(close_worker, {:finish_quarantine_close, owned.job_id})
+
+    assert {:ok, %{outcome: :outcome_unknown, cleanup_confirmation: :unconfirmed}} =
+             Task.await(owner, 15_000)
+
+    assert_receive {:quarantine_waiter_answer, ^queued_holder,
+                    {:error, {:reconciliation_required, 1}}},
+                   15_000
+
+    refute File.exists?(Path.join(fixture.workspace, "queued-after-quarantine.txt"))
+  end
+
+  test "a filesystem worker cannot outlive the Local executor authority that admitted it" do
+    # Concept: losing the Local hand ends a filesystem worker just as it ends a
+    # captured command group; a blocked caller is not the authority that keeps
+    # either effect alive.
+    #
+    # Technical depth: `bounded_work/3` once watched only its worker, the lease,
+    # and the deadline. This probe installs the same exact effect-owner identity
+    # `run_reserved/5` installs, blocks a real filesystem-effect worker after it
+    # has started, and kills the executor. A boundary that merely monitors the
+    # worker itself stays blocked; the fallback below then releases it and proves
+    # the escaped write. The guarded boundary answers before that release with a
+    # confirmed owner-loss abandonment, and the killed worker cannot act later.
+    fixture = fixture("filesystem-owner-loss")
+    on_exit(fn -> stop_fixture(fixture) end)
+    Process.unlink(fixture.executor)
+
+    parent = self()
+    target = Path.join(fixture.workspace, "filesystem-owner-loss.txt")
+
+    running =
+      Task.async(fn ->
+        lease_monitor = Process.monitor(fixture.lease)
+
+        Local.bounded_work(
+          fn ->
+            send(parent, {:filesystem_worker_ready, self()})
+
+            receive do
+              :continue_after_owner_loss ->
+                File.write!(target, "escaped")
+                :written
+            end
+          end,
+          10_000,
+          {lease_monitor, fixture.lease},
+          fixture.executor
+        )
+      end)
+
+    assert_receive {:filesystem_worker_ready, effect_worker}, 2_000
+    executor_monitor = Process.monitor(fixture.executor)
+    Process.exit(fixture.executor, :kill)
+    assert_receive {:DOWN, ^executor_monitor, :process, _executor, :killed}, 2_000
+
+    result =
+      case Task.yield(running, 2_000) do
+        {:ok, answer} ->
+          answer
+
+        nil ->
+          send(effect_worker, :continue_after_owner_loss)
+          Task.await(running, 2_000)
+      end
+
+    send(effect_worker, :continue_after_owner_loss)
+
+    assert result == {:abandoned, :effect_owner_lost, true, :none}
+    refute File.exists?(target), "the filesystem worker acted after its Local owner died"
+  end
+
   test "a reserve blocked by a held claim is answered inside its own bound" do
     fixture = fixture("reservation-claim")
     on_exit(fn -> stop_fixture(fixture) end)
@@ -613,7 +803,7 @@ defmodule Loopex.Executor.LocalTest do
     assert :absent = Local.receipt(fixture.executor, job.job_id)
   end
 
-  defp fixture(label) do
+  defp fixture(label, extra \\ []) do
     root =
       Path.join(
         System.tmp_dir!(),
@@ -631,11 +821,13 @@ defmodule Loopex.Executor.LocalTest do
 
     {:ok, executor} =
       Local.start_link(
-        identity: "executor-local",
-        epoch: 7,
-        fencing_token: fence,
-        workspace_leases: %{lease_id => lease},
-        ledger_root: ledger
+        [
+          identity: "executor-local",
+          epoch: 7,
+          fencing_token: fence,
+          workspace_leases: %{lease_id => lease},
+          ledger_root: ledger
+        ] ++ extra
       )
 
     %{

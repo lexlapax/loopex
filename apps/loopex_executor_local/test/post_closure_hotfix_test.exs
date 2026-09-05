@@ -289,6 +289,44 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
              "terminal truth reversed"
   end
 
+  test "receipt lookup refuses every malformed member of the complete open-authority snapshot" do
+    # Concept: one valid terminal cannot hide malformed authority elsewhere on
+    # the same trusted root, and a non-record at its own open identity is not
+    # absence.
+    #
+    # Technical depth: receipt lookup once reduced the open plane to
+    # `File.regular?(target)`. A directory at this job's open path therefore made
+    # a retained completion look final, while a malformed unrelated tail was not
+    # read at all. Produce one real final receipt, then drive both shapes. The
+    # decision must validate one complete bounded snapshot under the root claim
+    # before returning that receipt.
+    root = workspace()
+    ledger = ledger_root()
+    {executor, lease_id} = executor_on(root, ledger, cleanup_grace_ms: 2_000)
+    job_id = "complete-snapshot-#{System.unique_integer([:positive])}"
+
+    assert {:ok, retained} =
+             run(root, "loopex.write", %{"path" => "snapshot.txt", "content" => "complete"}, %{
+               executor: executor,
+               lease_id: lease_id,
+               job_id: job_id,
+               cleanup_grace_ms: 2_000
+             })
+
+    assert retained.outcome == :completed
+    open_directory = Path.join(ledger, "open")
+    own_open = Path.join(open_directory, digest(job_id))
+    File.mkdir!(own_open)
+
+    assert {:error, {:ledger_unavailable, _reason}} = Local.receipt(executor, job_id)
+
+    File.rmdir!(own_open)
+    unrelated_open = Path.join(open_directory, digest("unrelated-malformed-open"))
+    File.write!(unrelated_open, "not a canonical open-authority record")
+
+    assert {:error, {:ledger_unavailable, _reason}} = Local.receipt(executor, job_id)
+  end
+
   test "a failed close after a durable unlink keeps the receipt non-final and the root quarantined" do
     # Concept: losing the open entry is not proof that its effect settled. A
     # close operation that removed the entry but failed before it could report a

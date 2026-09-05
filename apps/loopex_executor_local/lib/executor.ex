@@ -1153,47 +1153,91 @@ defmodule Loopex.Executor.Local do
   end
 
   defp validate_and_permit(state, job, grant, reservation_ref, caller) do
-    case final_prestart_validation(state, job, grant) do
-      {:ok, tool, lease_pid, workspace, arguments} ->
-        case reconcile_and_permit_marker(state, job, reservation_ref, caller) do
-          {:ok, admission} ->
-            {:ok,
-             %{
-               decision: {:admitted, admission},
-               tool: tool,
-               lease_pid: lease_pid,
-               workspace: workspace,
-               arguments: arguments
-             }}
+    case permit_marker_decision(state, job, reservation_ref, caller) do
+      :new ->
+        validate_new_permit(state, job, grant, reservation_ref, caller)
 
-          :join ->
-            {:ok,
-             %{
-               decision: :join,
-               tool: tool,
-               lease_pid: lease_pid,
-               workspace: workspace,
-               arguments: arguments
-             }}
+      :join ->
+        {:ok,
+         %{
+           decision: :join,
+           tool: nil,
+           lease_pid: nil,
+           workspace: nil,
+           arguments: nil
+         }}
 
-          {:error, reason} ->
-            {:error, reason}
-        end
-
-      {:error, {:refused_before_effect, reason} = refusal} ->
-        publish_refusal(state, job, reason)
-        {:error, refusal}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  defp reconcile_and_permit_marker(state, job, reservation_ref, caller) do
+  # Concept: durable identity is decided before ephemeral start validation.
+  #
+  # Technical depth: a same-digest admission already proves that one effect may
+  # have begun. Revalidating the duplicate caller's current grant or lease first
+  # let a now-expired duplicate report `refused_before_effect`; the ledger
+  # correctly refused to overwrite its admission, but that conflict was ignored.
+  # Under the root claim, resolve the existing marker first. Only true absence
+  # reaches validation for a new effect; a matching admission joins, a refusal
+  # replays, and a conflicting digest conflicts.
+  defp permit_marker_decision(state, job, reservation_ref, caller) do
     if reservation_owned?(state, job.job_id, reservation_ref, caller) do
       case reconcile(state.ledger, resolved_jobs(state, job.job_id)) do
-        nil -> admit_under_claim(state, job, reservation_ref, caller)
+        nil -> existing_marker_decision(state, job)
         quarantine -> {:error, quarantine}
       end
     else
       refused_before_effect(:effect_start_authority_unavailable)
+    end
+  end
+
+  defp existing_marker_decision(state, job) do
+    case Ledger.read_marker(state.ledger, job.job_id) do
+      :absent ->
+        :new
+
+      {:ok, record} ->
+        cond do
+          record["canonical_request_digest"] != job.canonical_request_digest ->
+            {:error, :job_id_conflict}
+
+          Map.get(record, :ledger_kind) == Ledger.refusal_kind() ->
+            {:error, {:refused_before_effect, refusal_reason(record)}}
+
+          true ->
+            :join
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp validate_new_permit(state, job, grant, reservation_ref, caller) do
+    case final_prestart_validation(state, job, grant) do
+      {:ok, tool, lease_pid, workspace, arguments} ->
+        if reservation_owned?(state, job.job_id, reservation_ref, caller) do
+          case open_admission(state, job, reservation_ref, caller) do
+            {:ok, admission} ->
+              {:ok,
+               %{
+                 decision: {:admitted, admission},
+                 tool: tool,
+                 lease_pid: lease_pid,
+                 workspace: workspace,
+                 arguments: arguments
+               }}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
+        else
+          refused_before_effect(:effect_start_authority_unavailable)
+        end
+
+      {:error, {:refused_before_effect, reason} = refusal} ->
+        refusal_result(state, job, reason, refusal)
     end
   end
 
@@ -1209,8 +1253,8 @@ defmodule Loopex.Executor.Local do
   # form, and handing them back as a replay would report a completion that is
   # about to reverse. An entry with no receipt is this exact request already
   # admitted somewhere, which ADR 0016 requires to be joined rather than refused,
-  # so the caller is reserved and `admit_under_claim/4` resolves it from the
-  # marker into a join. Only the true absence starts a new effect.
+  # so the caller is reserved and the permit decision resolves its marker into a
+  # join. Only the true absence starts a new effect.
   defp settled_or_reserved(state, job, job_id) do
     case final_receipt(state.ledger, state.ledger_root, job_id) do
       {:ok, receipt} ->
@@ -1566,6 +1610,14 @@ defmodule Loopex.Executor.Local do
   # the open entry exactly where it is, so the quarantine stands and the caller is
   # told `{:receipt_not_retained, reason}`.
   defp settle_receipt(placement, job, receipt, lease) do
+    # The effect has answered; its open entry is now settling, not live authority
+    # that may be excluded from another job's reconciliation. Remove the exact
+    # owner token before waiting for the root claim. Otherwise a permit already
+    # queued in the executor can run before this caller's later release cast and
+    # mistake a failed/quarantined settlement for an active operation it may
+    # ignore.
+    forget_operation_owner(placement.inflight_table, job.job_id, placement.reservation_ref)
+
     case Ledger.with_claim(
            placement.ledger,
            fn -> publish_settlement(placement, job, receipt, lease) end,
@@ -1792,37 +1844,6 @@ defmodule Loopex.Executor.Local do
     }
   end
 
-  # Concept: one serialized decision about whether this exact request may begin.
-  #
-  # Technical depth: the claim orders admission against another executor's
-  # admission, against a refusal, and against a peer's reconciliation read. Inside
-  # it the two independent fences are checked against one paired clock sample: the
-  # wall instant against the job's immutable `effective_job_deadline`, and the
-  # derived monotonic action deadline under checked arithmetic. A sample that
-  # cannot produce a finite action deadline is unavailable authority, never
-  # permission.
-  defp admit_under_claim(state, job, reservation_ref, caller) do
-    case Ledger.read_marker(state.ledger, job.job_id) do
-      :absent ->
-        open_admission(state, job, reservation_ref, caller)
-
-      {:ok, record} ->
-        cond do
-          record["canonical_request_digest"] != job.canonical_request_digest ->
-            {:error, :job_id_conflict}
-
-          Map.get(record, :ledger_kind) == Ledger.refusal_kind() ->
-            {:error, {:refused_before_effect, refusal_reason(record)}}
-
-          true ->
-            :join
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
   # Concept: the deadline is derived from one sample, and the permit is decided
   # by another taken immediately before it.
   #
@@ -1851,8 +1872,7 @@ defmodule Loopex.Executor.Local do
       {:ok, %{wall: wall, monotonic: monotonic, action: action, observed_at_ms: wall}}
     else
       {:error, {:refused_before_effect, reason}} ->
-        publish_refusal(state, job, reason)
-        {:error, {:refused_before_effect, reason}}
+        refusal_result(state, job, reason, {:refused_before_effect, reason})
 
       {:error, reason} ->
         {:error, reason}
@@ -1942,6 +1962,14 @@ defmodule Loopex.Executor.Local do
   # stays in the same serialized decision. A reason outside the sixteen admitted codes is not journaled: a
   # record no reader can interpret is not proof of anything, and the caller still
   # receives its truthful pre-effect answer.
+  defp refusal_result(state, job, reason, refusal) do
+    case publish_refusal(state, job, reason) do
+      :ok -> {:error, refusal}
+      :not_recordable -> {:error, refusal}
+      {:error, ledger_reason} -> {:error, {:refusal_not_retained, ledger_reason}}
+    end
+  end
+
   defp publish_refusal(state, job, reason) do
     {code, field} =
       case reason do
@@ -1951,10 +1979,10 @@ defmodule Loopex.Executor.Local do
 
     case durable_refusal(job, code, field) do
       {:ok, refusal} -> Ledger.refuse(state.ledger, refusal)
-      :error -> :ok
+      :error -> :not_recordable
     end
   rescue
-    _malformed_job -> :ok
+    _malformed_job -> :not_recordable
   end
 
   # Concept: a refusal binds the exact request it refused, so a request whose own
@@ -2306,6 +2334,136 @@ defmodule Loopex.Executor.Local do
     )
   end
 
+  @doc false
+  @spec bounded_work((-> term()), non_neg_integer(), {reference(), pid()}, pid()) ::
+          {:done, term()}
+          | {:stopped, term()}
+          | {:abandoned, :workspace_lease_lost | :effect_owner_lost | :bound_reached, boolean(),
+             :none | {:late, term()}}
+  def bounded_work(work, bound, {monitor, lease_pid}, owner)
+      when is_function(work, 0) and is_integer(bound) and bound >= 0 and is_pid(owner) do
+    parent = self()
+    tag = make_ref()
+    owner_tag = make_ref()
+
+    {worker, reference} =
+      spawn_monitor(fn ->
+        send(parent, {tag, guarded_bounded_work(work, owner, parent, owner_tag)})
+      end)
+
+    await_guarded_bounded_work_result(
+      worker,
+      reference,
+      tag,
+      owner_tag,
+      monitor,
+      lease_pid,
+      System.monotonic_time(:millisecond) + bound
+    )
+  end
+
+  # Concept: an effect worker cannot outlive the Local authority that admitted
+  # it, even if the process waiting for its result disappears too.
+  #
+  # Technical depth: the general retention boundary deliberately remains
+  # `bounded_work/3`: a caller holding already-produced evidence may finish
+  # retaining it after the Local server disappears. Filesystem effects use the
+  # guarded four-argument form. The shell path has a launch-owned guard,
+  # but a filesystem worker survived an abrupt executor death until its file call
+  # returned or the deadline elapsed. A guardian now monitors the exact Local
+  # owner before spawning the effect and links the effect to itself. Owner loss
+  # kills and confirms the linked effect; deadline or lease abandonment kills the
+  # guardian, whose untrappable linked exit also kills the effect. The result is
+  # accepted only while the owner is still alive, so a queued result cannot turn
+  # an already-observed owner loss into completion.
+  defp guarded_bounded_work(work, owner, caller, owner_tag) do
+    Process.flag(:trap_exit, true)
+    owner_monitor = Process.monitor(owner)
+    caller_monitor = Process.monitor(caller)
+    guardian = self()
+
+    if Process.alive?(owner) do
+      {effect, effect_monitor} =
+        :erlang.spawn_opt(
+          fn -> send(guardian, {owner_tag, :result, work.()}) end,
+          [:link, :monitor]
+        )
+
+      await_guarded_bounded_work(
+        effect,
+        effect_monitor,
+        owner,
+        owner_monitor,
+        caller,
+        caller_monitor,
+        owner_tag
+      )
+    else
+      Process.demonitor(owner_monitor, [:flush])
+      Process.demonitor(caller_monitor, [:flush])
+      {:loopex_effect_owner_lost, owner_tag, true}
+    end
+  end
+
+  defp await_guarded_bounded_work(
+         effect,
+         effect_monitor,
+         owner,
+         owner_monitor,
+         caller,
+         caller_monitor,
+         owner_tag
+       ) do
+    receive do
+      {^owner_tag, :result, result} ->
+        if Process.alive?(owner) and Process.alive?(caller) do
+          Process.unlink(effect)
+          Process.demonitor(effect_monitor, [:flush])
+          Process.demonitor(owner_monitor, [:flush])
+          Process.demonitor(caller_monitor, [:flush])
+          {:loopex_bounded_result, owner_tag, result}
+        else
+          stopped = stop_guarded_effect(effect, effect_monitor)
+          Process.demonitor(owner_monitor, [:flush])
+          Process.demonitor(caller_monitor, [:flush])
+          {:loopex_effect_owner_lost, owner_tag, stopped}
+        end
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+        stopped = stop_guarded_effect(effect, effect_monitor)
+        Process.demonitor(caller_monitor, [:flush])
+        {:loopex_effect_owner_lost, owner_tag, stopped}
+
+      {:DOWN, ^caller_monitor, :process, ^caller, _reason} ->
+        stopped = stop_guarded_effect(effect, effect_monitor)
+        Process.demonitor(owner_monitor, [:flush])
+        {:loopex_effect_owner_lost, owner_tag, stopped}
+
+      {^owner_tag, :abandon, cause} ->
+        stopped = stop_guarded_effect(effect, effect_monitor)
+        Process.demonitor(owner_monitor, [:flush])
+        Process.demonitor(caller_monitor, [:flush])
+        {:loopex_bounded_abandoned, owner_tag, cause, stopped}
+
+      {:DOWN, ^effect_monitor, :process, ^effect, reason} ->
+        Process.demonitor(owner_monitor, [:flush])
+        Process.demonitor(caller_monitor, [:flush])
+        {:loopex_bounded_worker_stopped, owner_tag, reason}
+    end
+  end
+
+  defp stop_guarded_effect(effect, effect_monitor) do
+    Process.exit(effect, :kill)
+
+    receive do
+      {:DOWN, ^effect_monitor, :process, ^effect, _reason} -> true
+    after
+      @abandon_confirmation_ms ->
+        Process.demonitor(effect_monitor, [:flush])
+        false
+    end
+  end
+
   # Concept: one allowance, spent in slices, refreshed by nothing.
   #
   # Technical depth: an admitted cleanup period spans the whole positive unsigned
@@ -2354,6 +2512,94 @@ defmodule Loopex.Executor.Local do
       end
 
     {:abandoned, cause, stopped, late}
+  end
+
+  defp await_guarded_bounded_work_result(
+         worker,
+         reference,
+         tag,
+         owner_tag,
+         monitor,
+         lease_pid,
+         deadline
+       ) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {^tag, {:loopex_bounded_result, ^owner_tag, result}} ->
+        Process.demonitor(reference, [:flush])
+        {:done, result}
+
+      {^tag, {:loopex_effect_owner_lost, ^owner_tag, stopped}} ->
+        Process.demonitor(reference, [:flush])
+        {:abandoned, :effect_owner_lost, stopped, :none}
+
+      {^tag, {:loopex_bounded_worker_stopped, ^owner_tag, reason}} ->
+        Process.demonitor(reference, [:flush])
+        {:stopped, reason}
+
+      {:DOWN, ^reference, :process, ^worker, reason} ->
+        {:stopped, reason}
+
+      {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
+        abandon_guarded_worker(
+          :workspace_lease_lost,
+          worker,
+          reference,
+          tag,
+          owner_tag
+        )
+    after
+      min(remaining, @timer_slice_ms) ->
+        if System.monotonic_time(:millisecond) >= deadline,
+          do: abandon_guarded_worker(:bound_reached, worker, reference, tag, owner_tag),
+          else:
+            await_guarded_bounded_work_result(
+              worker,
+              reference,
+              tag,
+              owner_tag,
+              monitor,
+              lease_pid,
+              deadline
+            )
+    end
+  end
+
+  defp abandon_guarded_worker(cause, worker, reference, tag, owner_tag) do
+    send(worker, {owner_tag, :abandon, cause})
+
+    receive do
+      {^tag, {:loopex_bounded_abandoned, ^owner_tag, ^cause, stopped}} ->
+        Process.demonitor(reference, [:flush])
+        {:abandoned, cause, stopped, :none}
+
+      {^tag, {:loopex_bounded_result, ^owner_tag, result}} ->
+        Process.demonitor(reference, [:flush])
+        {:abandoned, cause, true, {:late, result}}
+
+      {^tag, {:loopex_effect_owner_lost, ^owner_tag, stopped}} ->
+        Process.demonitor(reference, [:flush])
+        {:abandoned, :effect_owner_lost, stopped, :none}
+
+      {^tag, {:loopex_bounded_worker_stopped, ^owner_tag, _reason}} ->
+        Process.demonitor(reference, [:flush])
+        {:abandoned, cause, true, :none}
+
+      {:DOWN, ^reference, :process, ^worker, _reason} ->
+        {:abandoned, cause, false, :none}
+    after
+      @abandon_confirmation_ms ->
+        Process.exit(worker, :kill)
+
+        receive do
+          {:DOWN, ^reference, :process, ^worker, _reason} -> :ok
+        after
+          @abandon_confirmation_ms -> Process.demonitor(reference, [:flush])
+        end
+
+        {:abandoned, cause, false, :none}
+    end
   end
 
   # Concept: a lease lost while the receipt was being written leaves the effect
@@ -2501,7 +2747,8 @@ defmodule Loopex.Executor.Local do
     case bounded_work(
            fn -> filesystem_effect(workspace, arguments, limits) end,
            remaining,
-           lease
+           lease,
+           effect_owner()
          ) do
       {:done, result} ->
         result
@@ -2511,6 +2758,9 @@ defmodule Loopex.Executor.Local do
 
       {:abandoned, :workspace_lease_lost, stopped, _late} ->
         abandoned(:workspace_lease_lost, arguments, stopped)
+
+      {:abandoned, :effect_owner_lost, stopped, _late} ->
+        abandoned(:effect_owner_lost, arguments, stopped)
 
       {:abandoned, :bound_reached, stopped, _late} ->
         abandoned(:deadline, arguments, stopped)
@@ -2537,6 +2787,7 @@ defmodule Loopex.Executor.Local do
 
   defp abandoned_outcome(_cause, _arguments, false), do: :outcome_unknown
   defp abandoned_outcome(:workspace_lease_lost, _arguments, true), do: :outcome_unknown
+  defp abandoned_outcome(:effect_owner_lost, _arguments, true), do: :outcome_unknown
   defp abandoned_outcome(:deadline, %{kind: :read}, true), do: :failed
   defp abandoned_outcome(:deadline, _arguments, true), do: :outcome_unknown
 
@@ -2545,6 +2796,7 @@ defmodule Loopex.Executor.Local do
       case cause do
         :deadline -> "the effective deadline passed while this tool was running"
         :workspace_lease_lost -> "the workspace lease was lost while this tool was running"
+        :effect_owner_lost -> "the Local executor authority was lost while this tool was running"
       end
 
     stop_text =
@@ -4739,9 +4991,18 @@ defmodule Loopex.Executor.Local do
   # Only neither present is the one true absence, and only a receipt whose entry
   # is gone is final.
   defp final_receipt(ledger, root, job_id) do
+    case Ledger.open_snapshot(ledger) do
+      {:ok, entries} -> final_receipt_from_snapshot(root, job_id, entries)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp final_receipt_from_snapshot(root, job_id, entries) do
+    open? = Enum.any?(entries, &(&1["job_id"] == job_id))
+
     case read_receipt(root, job_id) do
       {:ok, receipt} ->
-        if Ledger.open?(ledger, job_id), do: {:error, :effect_settling}, else: {:ok, receipt}
+        if open?, do: {:error, :effect_settling}, else: {:ok, receipt}
 
       # An entry with no receipt that this instance's exact live owner table does
       # not prove is unresolved. That is different from `effect_in_flight`, the
@@ -4750,7 +5011,7 @@ defmodule Loopex.Executor.Local do
       # prepared resume ends the run `outcome_unknown` on the former and leaves
       # the latter to its executor.
       :absent ->
-        if Ledger.open?(ledger, job_id), do: {:error, :effect_unresolved}, else: :absent
+        if open?, do: {:error, :effect_unresolved}, else: :absent
 
       {:error, reason} ->
         {:error, reason}
