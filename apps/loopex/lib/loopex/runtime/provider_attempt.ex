@@ -701,11 +701,17 @@ defmodule Loopex.Runtime.ProviderAttempt do
   # bytes and passed; and the key check admitted any binary, so a 257-byte key
   # the Store refuses still reached projection. M2's row-one obligation is that
   # "every raw model-reply candidate first satisfies the Store's plain-data,
-  # depth, item, and byte ceilings", and the only thing that satisfies the
-  # Store's ceilings is the Store: the raw answer is handed to
-  # `Loopex.Store.admit_bounded/1` and its verdict is this one. Every refusal
-  # becomes ADR 0018 combination 5's `unreadable_model_answer`, the one
-  # category this boundary may report.
+  # depth, item, and byte ceilings", so the raw answer is measured by the
+  # Store's own item admission, `Loopex.Store.admit_bounded/1`, with the two
+  # members below excluded. That measure is a pre-filter, not the record
+  # verdict: the retained settlement carries the record's kind and the
+  # normalized usage besides, so a reply measuring just under the ceiling here
+  # can still be a record the Store refuses, and whether the whole record fits
+  # is decided afterwards by the session state's settlement fit, which compacts
+  # a reply that does not fit into the same category. What this admission adds
+  # is that no reply is projected before its bytes, depth, members, and keys
+  # have been measured. Every refusal becomes ADR 0018 combination 5's
+  # `unreadable_model_answer`, the one category this boundary may report.
   #
   # Two root members stay outside that admission, because neither is retained as
   # supplied and each is already closed.

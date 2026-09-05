@@ -247,8 +247,9 @@ Ownership can move while work is in flight, and the design assumes it will. A
 superseded coordinator can never newly commit, its ephemeral refusals are its own
 to retain only while it is still authoritative, and it stops only once every
 in-flight call, open stream, executor reserve, and model reserve it owns has
-settled and every pending cleanup has either settled or been closed as
-abandoned. A cleanup whose model worker the supersession itself terminated is
+settled, every pending cleanup has either settled or been closed as
+abandoned, and no fault hook is still pending. A cleanup whose model worker
+the supersession itself terminated is
 closed that way at once, since a superseded owner commits nothing, while an
 executor cleanup keeps its worker alive until it answers, so a superseded owner
 lives exactly as long as that effectful work does.

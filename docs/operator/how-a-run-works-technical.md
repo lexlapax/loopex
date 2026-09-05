@@ -229,7 +229,9 @@ part of installing its interrupt handler: from then on a holder process the
 handler owns holds it, and a preparer that dies afterwards takes nothing with
 it. It has four states — prepared, spent, abandoned, fenced — and only *spent*
 schedules anything. `resume` installs the interrupt handler sized by the period
-this session committed, hands the capability to its holder, and asks that
+this session committed (a period the sizing formula refuses would leave a fixed
+ten-second backstop, and no such period can be committed), hands the
+capability to its holder, and asks that
 holder to spend it, waiting without a bound; the handler keeps handling signals
 while it waits. `cancel` never spends it: it admits the abort
 while the work is still held. An abort fences the capability *before* its store

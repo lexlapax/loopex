@@ -273,6 +273,10 @@ defmodule Loopex.Executor.LocalTest do
 
     assert {:error, {:ledger_unavailable, :root_claim_held}} = result
     assert elapsed < 9_000, "the caller waited #{elapsed} ms instead of being answered"
+
+    assert elapsed >= 4_500,
+           "the server answered after #{elapsed} ms without spending its claim wait"
+
     Task.await(holder, 10_000)
     assert :absent = Local.receipt(fixture.executor, job.job_id)
   end

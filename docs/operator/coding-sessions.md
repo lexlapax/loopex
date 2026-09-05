@@ -417,7 +417,9 @@ emulator on `SIGTERM` immediately, which would race the abort the command
 submits and end the process before the run could commit what it observed. Owning
 termination means owning the case where cleanup never finishes. One checked
 formula derives the command backstop from the session's committed cleanup
-period, receipt-retention share, and terminal reserve. The command arms it once,
+period, receipt-retention share, and terminal reserve; a period that formula
+cannot size would leave the handler's fixed ten-second backstop in place, and
+the session refuses to commit such a period. The command arms it once,
 extends it once after durable abort admission, and never treats expiry as a
 cleanup verdict. If it expires, it halts the process with status `130` while
 watching the terminal that installed it, so a terminal that already reported
