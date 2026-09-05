@@ -759,6 +759,33 @@ defmodule Loopex.LLM.ReqLLM.StreamingConformanceTest do
     assert reply.provider_response_id == "req_openai_synthetic_conformance"
   end
 
+  test "provider response identifiers are exact bounded header values and never manufactured" do
+    valid_at_ceiling = String.duplicate("r", 256)
+
+    cases = [
+      {[], nil},
+      {[{"request-id", ""}], nil},
+      {[{"REQUEST-ID", "req_anthropic_mixed_case"}], "req_anthropic_mixed_case"},
+      {[{"X-Request-ID", "req_openai_mixed_case"}], "req_openai_mixed_case"},
+      {[{"request-id", valid_at_ceiling}], valid_at_ceiling},
+      {[{"request-id", valid_at_ceiling <> "x"}], nil},
+      {[{"request-id", <<255>>}], nil}
+    ]
+
+    for {headers, expected} <- cases do
+      metadata = Shipped.clean_metadata() |> Map.put(:headers, headers)
+
+      assert {:ok, reply} =
+               Shipped.complete(
+                 request(),
+                 [chunks: ["acknowledged"], metadata: metadata],
+                 Model.discard_progress()
+               )
+
+      assert reply.provider_response_id == expected
+    end
+  end
+
   test "a reply the provider's own builder cannot assemble is an error and never a completion with no tool calls" do
     # A builder failure used to become `nil`, and `nil` became empty text and no
     # tool calls -- the exact reply shape that means "the model asked for nothing
