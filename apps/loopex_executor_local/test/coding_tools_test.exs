@@ -4805,9 +4805,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     # The command cannot report its own status after KILL takes the complete
     # group, including the guard. Cleanup nevertheless has two positive facts:
-    # KILL was sent while the exact Port guard was live, and a later ps found the
-    # captured group empty. A direct-child status is mandatory for ordinary
-    # release, not for forced cancellation's cleanup truth.
+    # KILL was sent over the exact live Port channel to its token-bound guard,
+    # and a later ps found the captured group empty. A direct-child status is
+    # mandatory for ordinary release, not for forced cancellation's cleanup truth.
     assert Local.cancel(executor, job_id) == {:ok, :cleaned}
     assert {:ok, killed} = Task.await(running, 5_000)
     assert killed.outcome == :cancelled

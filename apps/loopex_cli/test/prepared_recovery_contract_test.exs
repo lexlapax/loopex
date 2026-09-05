@@ -708,14 +708,14 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   # Concept: a prepared holder cannot survive the process that is still trying
   # to make it reachable from an interrupt handler.
   #
-  # Technical depth: the production installation lock holds the installer
-  # before it can select a signal manager or install a handler. Process tracing
-  # observes the real holder it spawns without adding a product seam. Killing
-  # the installer there must make its one-way lifetime guard take that holder
-  # down; otherwise a death before the handler swap can strand the same
-  # unguarded process. Once the owner acknowledges the handoff, the separate
-  # preparer- and manager-loss cases prove that the holder has transferred away
-  # from this temporary lifetime instead.
+  # Technical depth: process tracing follows the installer's first child and
+  # requires that lifetime guard itself to create the holder. That topology is
+  # the proof that there is no holder-spawn-before-guard interval. The production
+  # installation lock then holds the installer before it can select a signal
+  # manager or install a handler. Killing the installer there must make the
+  # guard take its exact holder down. Once the owner acknowledges the handoff,
+  # the separate preparer- and manager-loss cases prove that the holder has
+  # transferred away from this temporary lifetime instead.
   test "installer death before handler installation cannot leave its prepared holder alive" do
     fixture = recovered_fixture("pre-install-installer-death", :active)
 
@@ -762,12 +762,15 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
         end
       end)
 
-    assert 1 = :erlang.trace(installer, true, [:procs])
+    assert 1 = :erlang.trace(installer, true, [:procs, :set_on_spawn])
     installer_monitor = Process.monitor(installer)
     send(installer, :install)
 
-    assert_receive {:trace, ^installer, :spawn, holder, _entry}, 5_000
+    assert_receive {:trace, ^installer, :spawn, guard, _entry}, 5_000
+    assert_receive {:trace, ^guard, :spawn, holder, _entry}, 5_000
+    assert is_pid(guard)
     assert is_pid(holder)
+    guard_monitor = Process.monitor(guard)
     holder_monitor = Process.monitor(holder)
 
     try do
@@ -777,10 +780,12 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       Process.exit(installer, :kill)
       assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :killed}, 1_000
       assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
+      assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :normal}, 1_000
       refute_receive {:pre_install_installer_result, _result}, 0
     after
       send(lock_owner, :release_handler_install_lock)
       if Process.alive?(installer), do: Process.exit(installer, :kill)
+      if Process.alive?(guard), do: Process.exit(guard, :kill)
       if Process.alive?(holder), do: Process.exit(holder, :kill)
       _ = invoke(Loopex, :abandon_resume, [activation])
     end
@@ -1438,17 +1443,21 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   # acknowledgement; the manager-loss cases prove the completed handoff. The
   # few BEAM reductions between calls cannot be paused through a public
   # interface without adding a caller-controlled product seam, so their order is
-  # locked structurally through parsed Elixir syntax. The serialized function
-  # must arm the exact manager, install the successor, complete the owner
-  # handoff, then drain the predecessor. Inside that completion, one scoped
-  # lifetime marker must cover the public owner transfer. Inside Core, the
-  # guarded request must be sent before the installer tells the guard it is
-  # pending, and the public reply must await the guard's exact acknowledgement.
+  # locked structurally through parsed Elixir syntax. Before installation, the
+  # guard must monitor the installer before creating a linked-and-monitored
+  # holder, and that holder must monitor the guard before acknowledging it. The
+  # serialized function must then arm the exact manager, install the successor,
+  # complete the owner handoff, and drain the predecessor. Inside that
+  # completion, one scoped lifetime marker must cover the public owner transfer.
+  # Inside Core, the guarded request must be sent before the installer tells the
+  # guard it is pending, and the public reply must await the guard's exact
+  # acknowledgement.
   test "prepared installation arms manager ownership before visibility and transfers lifetime after owner acknowledgement" do
     source = File.read!(Path.expand("../lib/interrupt.ex", __DIR__))
     {:ok, ast} = Code.string_to_quoted(source)
     body = private_function_body!(ast, :do_serialized_install_on, 5)
     handoff_body = private_function_body!(ast, :complete_live_prepared_handoff, 3)
+    pending_guard_body = private_function_body!(ast, :guard_pending_holder, 4)
     unarmed_holder_body = private_function_body!(ast, :hold, 1)
 
     coordinator_source =
@@ -1473,6 +1482,24 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     reply =
       local_call_line!(guarded_wait, :receive_guarded_transfer_response, 1)
+
+    installer_monitor = remote_call_line!(pending_guard_body, Process, :monitor, 1)
+    holder_spawn = atom_remote_call_line!(pending_guard_body, :erlang, :spawn_opt, 2)
+
+    [_holder_fun, holder_options] =
+      atom_remote_call_arguments!(pending_guard_body, :erlang, :spawn_opt, 2)
+
+    holder_guard_monitor = remote_call_line!(unarmed_holder_body, Process, :monitor, 1)
+    holder_ready = local_call_line!(unarmed_holder_body, :send, 2)
+
+    assert installer_monitor < holder_spawn,
+           "the capability holder can exist before its guard monitors the installer"
+
+    assert holder_options == [:link, :monitor],
+           "the holder is not linked and monitored atomically at creation"
+
+    assert holder_guard_monitor < holder_ready,
+           "the holder acknowledges readiness before monitoring its lifetime guard"
 
     assert arm < install,
            "the prepared holder becomes handler-visible before its exact manager guard is armed"
@@ -1501,13 +1528,14 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   # holder.
   #
   # Technical depth: an isolated signal manager is suspended before the
-  # installer enters. The queued first event-manager call proves the exact
-  # manager guard was armed and installation had not completed. Killing that
-  # manager makes the guard kill the holder. A direct temporary link from holder
-  # to installer would propagate the same `:killed` exit into the public caller;
-  # the one-way pre-install guard must instead let it return the documented
-  # installation refusal. This establishes the pre-transfer edge without a
-  # product hook or a scheduler race.
+  # installer enters. Descendant tracing distinguishes the installer's lifetime
+  # guard from the holder that guard creates. The queued first event-manager call
+  # proves the exact manager guard was armed and installation had not completed.
+  # Killing that manager makes the guard kill the holder. A direct temporary link
+  # from holder to installer would propagate the same `:killed` exit into the
+  # public caller; the one-way pre-install guard must instead let it return the
+  # documented installation refusal. This establishes the pre-transfer edge
+  # without a product hook or a scheduler race.
   test "manager loss before lifetime transfer refuses installation without killing its caller" do
     fixture = recovered_fixture("pre-transfer-manager-loss", :active)
 
@@ -1545,12 +1573,14 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
         end
       end)
 
-    assert 1 = :erlang.trace(installer, true, [:procs])
+    assert 1 = :erlang.trace(installer, true, [:procs, :set_on_spawn])
     installer_monitor = Process.monitor(installer)
     manager_monitor = Process.monitor(isolated_manager)
     send(installer, :install)
 
-    assert_receive {:trace, ^installer, :spawn, holder, _entry}, 5_000
+    assert_receive {:trace, ^installer, :spawn, guard, _entry}, 5_000
+    assert_receive {:trace, ^guard, :spawn, holder, _entry}, 5_000
+    guard_monitor = Process.monitor(guard)
     holder_monitor = Process.monitor(holder)
 
     try do
@@ -1560,6 +1590,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       Process.exit(isolated_manager, :kill)
       assert_receive {:DOWN, ^manager_monitor, :process, ^isolated_manager, :killed}, 1_000
       assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
+      assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :normal}, 1_000
 
       assert_receive {:pre_transfer_installer_result,
                       {:error, :prepared_activation_not_installed}},
@@ -1568,6 +1599,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       assert_receive {:DOWN, ^installer_monitor, :process, ^installer, :normal}, 1_000
     after
       if Process.alive?(installer), do: Process.exit(installer, :kill)
+      if Process.alive?(guard), do: Process.exit(guard, :kill)
       if Process.alive?(holder), do: Process.exit(holder, :kill)
 
       case Process.whereis(:erl_signal_server) do
@@ -3521,6 +3553,24 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     case Enum.uniq(lines) do
       [line] -> line
+      [] -> flunk("remote call #{inspect(module)}.#{name}/#{arity} was not found")
+      _many -> flunk("remote call #{inspect(module)}.#{name}/#{arity} was not unique")
+    end
+  end
+
+  defp atom_remote_call_arguments!(body, module, name, arity) when is_atom(module) do
+    {_body, argument_lists} =
+      Macro.prewalk(body, [], fn
+        {{:., _dot_metadata, [^module, ^name]}, _metadata, arguments} = node, argument_lists
+        when is_list(arguments) and length(arguments) == arity ->
+          {node, [arguments | argument_lists]}
+
+        node, argument_lists ->
+          {node, argument_lists}
+      end)
+
+    case argument_lists do
+      [arguments] -> arguments
       [] -> flunk("remote call #{inspect(module)}.#{name}/#{arity} was not found")
       _many -> flunk("remote call #{inspect(module)}.#{name}/#{arity} was not unique")
     end

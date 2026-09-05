@@ -229,15 +229,20 @@ prompt admitted after you decided is not silenced by a decision that predates it
 **Activation is a one-use capability.** It is runtime-local, non-serializable,
 and usable only by its current holder; it never enters a record, an event, a
 snapshot, a progress item, or a diagnostic. The holder is the process that asked
-for the preparation until `resume` installs its signal-manager guard and visible
-handler, then asks the session coordinator to hand the capability to the exact
-guarded holder. The coordinator decides the handoff and sends its verdict to the
-installer; the installer forwards it to the guard, and the coordinator records
-the holder and returns `:ok` only after that guard acknowledges it. Installer
-death before forwarding fails closed. After forwarding, ordered delivery makes
-the handoff independent of the installer even if its reply is lost. Manager,
-coordinator, or holder loss ends the exact authority rather than authorizing a
-substitute. The capability has four states — prepared, spent, abandoned, fenced
+for the preparation until `resume` starts a temporary lifetime guard. That guard
+monitors the installer before creating a linked and monitored holder, waits for
+the holder to acknowledge its own guard monitor, and only then unlinks the pair
+into a one-way lifetime. `resume` then arms that guard against the exact signal
+manager, installs the visible handler, and asks the session coordinator to hand
+the capability to that exact guarded holder. The coordinator decides the handoff
+and sends its verdict to the installer; the installer forwards it to the guard,
+and the coordinator records the holder and returns `:ok` only after that guard
+acknowledges it.
+Installer death before holder readiness or before verdict forwarding fails
+closed. After forwarding, ordered delivery makes the handoff independent of the
+installer even if its reply is lost. Manager, coordinator, or holder loss ends
+the exact authority rather than authorizing a substitute. The capability has
+four states — prepared, spent, abandoned, fenced
 — and only *spent* schedules anything. `resume` installs the interrupt handler sized by the period
 this session committed (a period the sizing formula refuses would leave a fixed
 ten-second backstop, and no such period can be committed), hands the
@@ -317,9 +322,14 @@ asserted.
 Provider failures are bounded before they can carry it anywhere. Every error from
 the provider call is classified to `model_call_failed`, and the diagnostic text
 kept internally has the credential's bytes substituted out *before* it is
-truncated. Every raise, throw, and exit under that call is caught, and the call
-runs in a monitored worker so a crash that arrives as a link signal is contained
-too. An interrupted stream is an error, never a partial reply.
+truncated. Before Control is asked to authorize the attempt, the coordinator
+starts a dormant lifetime guard under the owner generation's private supervisor.
+The exact permitted worker asks that guard to create a linked callback. Catchable
+failures are normalized inside the callback;
+the guard traps asynchronous linked exits, cannot finish before the callback, and
+stops it if the worker or coordinator ends. Every terminal path awaits that
+guard, and abrupt owner loss cannot advance to a successor while the supervisor
+is still stopping it. An interrupted stream is an error, never a partial reply.
 
 The shipped composition selects `anthropic:claude-haiku-4-5` and resolves its
 endpoint from the adapter's bundled catalog, without a network call and without

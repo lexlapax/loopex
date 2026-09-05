@@ -867,7 +867,7 @@ defmodule Loopex.AgentLoopTest do
   defp admit_abort_before_queued_model_result(fixture, attachment, model, command_id) do
     coordinator = coordinator_of(fixture.runtime)
 
-    [{reference, {:model, run_id, _worker}}] =
+    [{reference, {:model, run_id, _worker, _provider_tree}}] =
       coordinator
       |> :sys.get_state()
       |> Map.fetch!(:in_flight)
@@ -2405,7 +2405,7 @@ defmodule Loopex.AgentLoopTest do
 
     coordinator = coordinator_of(fixture.runtime)
 
-    [{reference, {:model, run_id, _worker}}] =
+    [{reference, {:model, run_id, _worker, _provider_tree}}] =
       coordinator
       |> :sys.get_state()
       |> Map.fetch!(:in_flight)
@@ -2632,7 +2632,10 @@ defmodule Loopex.AgentLoopTest do
     coordinator_state = :sys.get_state(coordinator)
     workers = coordinator_state.owner_workers
 
-    [{_reference, {:model, run_id, ^model}}] = Map.to_list(coordinator_state.in_flight)
+    [{_reference, {:model, run_id, permit_worker, _provider_tree}}] =
+      Map.to_list(coordinator_state.in_flight)
+
+    refute permit_worker == model
 
     :ok = :sys.suspend(workers)
 
@@ -2657,16 +2660,16 @@ defmodule Loopex.AgentLoopTest do
       end)
 
     assert await_process_message(workers, fn
-             {:"$gen_call", _from, {:terminate_child, ^model}} -> true
+             {:"$gen_call", _from, {:terminate_child, ^permit_worker}} -> true
              _other -> false
            end),
            "the coordinator never asked its real supervisor to stop the model worker"
 
     {:messages, messages} = Process.info(workers, :messages)
 
-    {:"$gen_call", from, {:terminate_child, ^model}} =
+    {:"$gen_call", from, {:terminate_child, ^permit_worker}} =
       Enum.find(messages, fn
-        {:"$gen_call", _from, {:terminate_child, ^model}} -> true
+        {:"$gen_call", _from, {:terminate_child, ^permit_worker}} -> true
         _other -> false
       end)
 
@@ -2793,7 +2796,7 @@ defmodule Loopex.AgentLoopTest do
 
     coordinator = coordinator_of(fixture.runtime)
 
-    [{reference, {:model, _run_id, _worker}}] =
+    [{reference, {:model, _run_id, _worker, _provider_tree}}] =
       coordinator
       |> :sys.get_state()
       |> Map.fetch!(:in_flight)
@@ -3262,7 +3265,8 @@ defmodule Loopex.AgentLoopTest do
     run_id = coordinator_state.durable.active_run_id
     deadline = get_in(coordinator_state.durable.pending_work, [run_id, :request, :deadline])
 
-    [{reference, {:model, ^run_id, _worker}}] = Map.to_list(coordinator_state.in_flight)
+    [{reference, {:model, ^run_id, _worker, _provider_tree}}] =
+      Map.to_list(coordinator_state.in_flight)
 
     :ok = :sys.suspend(coordinator)
 
@@ -4614,6 +4618,11 @@ defmodule Loopex.AgentLoopTest do
     predecessor_state = :sys.get_state(predecessor)
 
     assert [{{:model, _run_id}, stream}] = Map.to_list(predecessor_state.streams)
+
+    [{_reference, {:model, _run_id, permit_worker, _provider_tree}}] =
+      Map.to_list(predecessor_state.in_flight)
+
+    refute permit_worker == model
     relay = stream.relay
     relay_reference = Process.monitor(relay)
     workers = predecessor_state.owner_workers
@@ -4627,7 +4636,7 @@ defmodule Loopex.AgentLoopTest do
       GenServer.cast(predecessor, {:superseded, "replacement-generation"})
 
       assert await_process_message(workers, fn
-               {:"$gen_call", {^predecessor, _tag}, {:terminate_child, ^model}} -> true
+               {:"$gen_call", {^predecessor, _tag}, {:terminate_child, ^permit_worker}} -> true
                _other -> false
              end),
              "the notified predecessor never tried to terminate its model worker"

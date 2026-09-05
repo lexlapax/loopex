@@ -664,7 +664,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {nil, _remaining} ->
         {:noreply, state}
 
-      {{:model, run_id, _pid}, remaining} ->
+      {{:model, run_id, _pid, _tree}, remaining} ->
         Process.demonitor(reference, [:flush])
         dispatch_result(%{state | in_flight: remaining}, :model, run_id, result)
 
@@ -943,7 +943,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # dispatched-or-unknown: it is charged, enters no conversation, and never
       # retries. Stopping the session here instead would leave the run with no
       # ending at all.
-      {{:model, run_id, _pid}, remaining} ->
+      {{:model, run_id, _pid, tree}, remaining} ->
+        stop_provider_tree(tree)
         settle_model_attempt(%{state | in_flight: remaining}, run_id, :dispatched_or_unknown)
 
       # A cleanup worker that died told this coordinator nothing, which is
@@ -2401,17 +2402,34 @@ defmodule Loopex.Runtime.SessionCoordinator do
     options = state.model.options
     deadline = committed_deadline(state, run_id)
     {stream, progress} = model_progress_fun(state, work)
+    coordinator = self()
 
     permit_reference = make_ref()
+    provider_reference = make_ref()
     binding = attempt_binding(state, work)
+
+    {:ok, guard} =
+      Task.Supervisor.start_child(state.owner_workers, fn ->
+        guard_provider_call(coordinator, provider_reference)
+      end)
 
     task =
       Task.Supervisor.async_nolink(state.owner_workers, fn ->
         receive do
           {:loopex_provider_permit, ^permit_reference, ^binding} ->
-            complete_provider_attempt(module, request, options, progress, deadline)
+            complete_provider_attempt(
+              guard,
+              provider_reference,
+              module,
+              request,
+              options,
+              progress,
+              deadline
+            )
         end
       end)
+
+    send(guard, {:loopex_provider_guard_bind, provider_reference, coordinator, task.pid})
 
     authority = %{
       runtime_id: state.runtime_id,
@@ -2424,7 +2442,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
     }
 
     state = %{state | streams: Map.put(state.streams, {:model, run_id}, stream)}
-    state = put_in_flight(state, task.ref, {:model, run_id, task.pid})
+
+    state =
+      put_in_flight(
+        state,
+        task.ref,
+        {:model, run_id, task.pid, %{guard: guard, reference: provider_reference}}
+      )
 
     # Technical depth: recorded before the call rather than after its reply,
     # because the reply is exactly what a lost Control answer does not deliver.
@@ -2473,32 +2497,250 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # sample it prevents a queued or late-delivered permit from entering the
   # adapter outside the committed authority. Wrapping ordinary adapter output
   # keeps an adapter-supplied tuple from forging the internal deadline result.
-  defp complete_provider_attempt(module, request, options, progress, deadline)
+  defp complete_provider_attempt(
+         guard,
+         provider_reference,
+         module,
+         request,
+         options,
+         progress,
+         deadline
+       )
        when is_integer(deadline) do
     observed = System.system_time(:millisecond)
 
     if Bounds.deadline_reached?(observed, deadline) do
+      stop_provider_guard(guard, provider_reference, self())
       {@provider_deadline_tag, deadline, observed}
     else
-      {@provider_result_tag, call_provider(module, request, options, progress)}
+      {@provider_result_tag,
+       call_provider(guard, provider_reference, module, request, options, progress)}
     end
   end
 
   # Concept: an adapter failure becomes one private, fixed runtime result before
   # any task machinery can render the adapter's reason.
   #
-  # Technical depth: `Task.Supervised` logs uncaught errors, throws, and exits
-  # with their raw reasons before this coordinator can normalize the resulting
-  # `DOWN`. Catching them inside the provider worker prevents credential-shaped
-  # third-party data from entering that diagnostic plane. The fixed result does
-  # not carry the reason and deliberately cannot forge the one exact
+  # Technical depth: `Task.Supervised` logs uncaught errors, throws, exits, and
+  # asynchronous linked-exit reasons before this coordinator can normalize its
+  # `DOWN`. The coordinator therefore creates and retains a plain lifetime guard
+  # before it asks Control for a permit. The supervised worker's first act stays
+  # the exact selective permit receive; only afterwards does it ask that guard to
+  # create the linked callback. Catchable callback failures are normalized inside
+  # the callback; an external linked exit kills only it and is reduced by the
+  # guard without ever becoming the supervised Task's exit reason. The guard does
+  # not finish before its callback, so every terminal path can synchronously stop
+  # the one retained pid and thereby prove the whole provider tree is gone. The
+  # fixed result carries no raw reason and deliberately cannot forge the one exact
   # `not_dispatched` shape; `accept_model_result/3` therefore settles it
   # dispatched-or-unknown without retrying.
-  defp call_provider(module, request, options, progress) do
+  defp call_provider(guard, reference, module, request, options, progress) do
+    guard_monitor = Process.monitor(guard)
+
+    send(
+      guard,
+      {:loopex_provider_guard_start, reference, self(), module, request, options, progress}
+    )
+
+    receive do
+      {:loopex_provider_guard_result, ^reference, ^guard, result} ->
+        await_process_down(guard, guard_monitor)
+        result
+
+      {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
+        {:error, :provider_call_failed}
+    end
+  end
+
+  defp guard_provider_call(coordinator, reference) do
+    Process.flag(:trap_exit, true)
+    coordinator_monitor = Process.monitor(coordinator)
+
+    receive do
+      {:loopex_provider_guard_bind, ^reference, ^coordinator, owner} when is_pid(owner) ->
+        owner_monitor = Process.monitor(owner)
+
+        await_provider_start(
+          owner,
+          owner_monitor,
+          coordinator,
+          coordinator_monitor,
+          reference
+        )
+
+      {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
+        :ok
+
+      {:EXIT, _owner_workers, _reason} ->
+        :ok
+    end
+  end
+
+  defp await_provider_start(owner, owner_monitor, coordinator, coordinator_monitor, reference) do
+    receive do
+      {:loopex_provider_guard_start, ^reference, ^owner, module, request, options, progress} ->
+        guard = self()
+
+        callback =
+          spawn_link(fn ->
+            result = normalize_provider_call(module, request, options, progress)
+            send(guard, {:loopex_provider_callback_result, reference, self(), result})
+          end)
+
+        await_provider_callback(
+          owner,
+          owner_monitor,
+          coordinator,
+          coordinator_monitor,
+          callback,
+          reference
+        )
+
+      {:loopex_provider_tree_stop, ^reference, stop, ^owner} when is_reference(stop) ->
+        acknowledge_provider_stop(owner, stop)
+
+      {:loopex_provider_tree_stop, ^reference, stop, ^coordinator} when is_reference(stop) ->
+        acknowledge_provider_stop(coordinator, stop)
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+        :ok
+
+      {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
+        :ok
+
+      {:EXIT, _owner_workers, _reason} ->
+        :ok
+    end
+  end
+
+  defp normalize_provider_call(module, request, options, progress) do
     try do
       module.complete(request, options, progress)
     catch
       _kind, _reason -> {:error, :provider_call_failed}
+    end
+  end
+
+  defp await_provider_callback(
+         owner,
+         owner_monitor,
+         coordinator,
+         coordinator_monitor,
+         callback,
+         reference
+       ) do
+    receive do
+      {:loopex_provider_callback_result, ^reference, ^callback, result} ->
+        await_provider_callback_exit(
+          owner,
+          owner_monitor,
+          coordinator,
+          coordinator_monitor,
+          callback,
+          reference,
+          result
+        )
+
+      {:EXIT, ^callback, _reason} ->
+        send(
+          owner,
+          {:loopex_provider_guard_result, reference, self(), {:error, :provider_call_failed}}
+        )
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+        stop_linked_provider_callback(callback)
+
+      {:loopex_provider_tree_stop, ^reference, stop, ^owner} when is_reference(stop) ->
+        stop_registered_provider_callback(owner, callback, stop)
+
+      {:loopex_provider_tree_stop, ^reference, stop, ^coordinator} when is_reference(stop) ->
+        stop_registered_provider_callback(coordinator, callback, stop)
+
+      {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
+        stop_linked_provider_callback(callback)
+
+      {:EXIT, _owner_workers, _reason} ->
+        stop_linked_provider_callback(callback)
+    end
+  end
+
+  defp await_provider_callback_exit(
+         owner,
+         owner_monitor,
+         coordinator,
+         coordinator_monitor,
+         callback,
+         reference,
+         result
+       ) do
+    receive do
+      {:EXIT, ^callback, :normal} ->
+        send(owner, {:loopex_provider_guard_result, reference, self(), result})
+
+      {:EXIT, ^callback, _reason} ->
+        send(
+          owner,
+          {:loopex_provider_guard_result, reference, self(), {:error, :provider_call_failed}}
+        )
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+        stop_linked_provider_callback(callback)
+
+      {:loopex_provider_tree_stop, ^reference, stop, ^owner} when is_reference(stop) ->
+        stop_registered_provider_callback(owner, callback, stop)
+
+      {:loopex_provider_tree_stop, ^reference, stop, ^coordinator} when is_reference(stop) ->
+        stop_registered_provider_callback(coordinator, callback, stop)
+
+      {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
+        stop_linked_provider_callback(callback)
+
+      {:EXIT, _owner_workers, _reason} ->
+        stop_linked_provider_callback(callback)
+    end
+  end
+
+  defp stop_registered_provider_callback(requester, callback, stop) do
+    stop_linked_provider_callback(callback)
+    acknowledge_provider_stop(requester, stop)
+  end
+
+  defp acknowledge_provider_stop(requester, stop),
+    do: send(requester, {:loopex_provider_tree_stopped, stop, self()})
+
+  defp stop_linked_provider_callback(callback) do
+    Process.exit(callback, :kill)
+
+    receive do
+      {:EXIT, ^callback, _reason} -> :ok
+    end
+  end
+
+  defp stop_provider_tree(nil), do: :ok
+
+  defp stop_provider_tree(%{guard: guard, reference: reference})
+       when is_pid(guard) and is_reference(reference) do
+    stop_provider_guard(guard, reference, self())
+  end
+
+  defp stop_provider_guard(guard, reference, requester) do
+    guard_monitor = Process.monitor(guard)
+    stop = make_ref()
+    send(guard, {:loopex_provider_tree_stop, reference, stop, requester})
+
+    guard_down =
+      receive do
+        {:loopex_provider_tree_stopped, ^stop, ^guard} -> false
+        {:DOWN, ^guard_monitor, :process, ^guard, _reason} -> true
+      end
+
+    unless guard_down, do: await_process_down(guard, guard_monitor)
+    :ok
+  end
+
+  defp await_process_down(process, monitor) do
+    receive do
+      {:DOWN, ^monitor, :process, ^process, _reason} -> :ok
     end
   end
 
@@ -2524,8 +2766,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # cleared, and the domain it would have produced into discarded without a
   # closure, because nothing was ever emitted into it.
   defp discard_provider_worker(state, run_id, task) do
+    tree =
+      case Map.get(state.in_flight, task.ref) do
+        {:model, ^run_id, pid, tree} when pid == task.pid -> tree
+        _absent -> nil
+      end
+
     _ = Task.Supervisor.terminate_child(state.owner_workers, task.pid)
     _ = take_worker_result(task.ref)
+    stop_provider_tree(tree)
 
     state
     |> Map.put(:in_flight, Map.delete(state.in_flight, task.ref))
@@ -3028,9 +3277,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # it truthfully.
   defp terminate_superseded_effect_free_work(state) do
     Enum.reduce(state.in_flight, state, fn
-      {reference, {:model, run_id, pid}}, next ->
+      {reference, {:model, run_id, pid, tree}}, next ->
         _ = Task.Supervisor.terminate_child(next.owner_workers, pid)
         _ = take_worker_result(reference)
+        stop_provider_tree(tree)
 
         next
         |> Map.update!(:in_flight, &Map.delete(&1, reference))
@@ -3369,14 +3619,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
         | pending_cleanup: Map.put(state.pending_cleanup, run_id, %{purpose: purpose, model: nil})
       }
 
-      case in_flight_of(state, :model, run_id) do
+      case model_in_flight_of(state, run_id) do
         nil ->
           {:noreply, next} =
             settle_model_attempt(state, run_id, unstarted_attempt_outcome(state, run_id))
 
           {:ok, next}
 
-        {_reference, _pid} ->
+        {_reference, _pid, _tree} ->
           {:ok, arm_model_reserve(state, run_id)}
       end
     end
@@ -3432,13 +3682,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp expire_model_reserve(state, run_id) do
-    case in_flight_of(state, :model, run_id) do
+    case model_in_flight_of(state, run_id) do
       nil ->
         {:noreply, state}
 
-      {reference, pid} ->
+      {reference, pid, tree} ->
         _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
         answer = take_worker_result(reference)
+        stop_provider_tree(tree)
         state = %{state | in_flight: Map.delete(state.in_flight, reference)}
 
         case answer do
@@ -3618,13 +3869,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # not an open attempt, so there is no attempt to charge and nothing a
   # settlement could say; only a stray worker has to be released.
   defp cancel_model_attempt(state, run_id, _purpose) do
-    case in_flight_of(state, :model, run_id) do
+    case model_in_flight_of(state, run_id) do
       nil ->
         {state, :cleaned}
 
-      {reference, pid} ->
+      {reference, pid, tree} ->
         _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
         _ = take_worker_result(reference)
+        stop_provider_tree(tree)
 
         next =
           state
@@ -3700,6 +3952,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp in_flight_of(state, kind, run_id) do
     Enum.find_value(state.in_flight, fn
       {reference, {^kind, ^run_id, pid}} -> {reference, pid}
+      {_reference, _other} -> nil
+    end)
+  end
+
+  defp model_in_flight_of(state, run_id) do
+    Enum.find_value(state.in_flight, fn
+      {reference, {:model, ^run_id, pid, tree}} -> {reference, pid, tree}
       {_reference, _other} -> nil
     end)
   end
@@ -5040,6 +5299,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp in_flight?(state, kind, run_id) do
     Enum.any?(state.in_flight, fn
       {_reference, {^kind, ^run_id, _pid}} -> true
+      {_reference, {^kind, ^run_id, _pid, _metadata}} -> true
       {_reference, _other} -> false
     end)
   end

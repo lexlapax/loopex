@@ -271,6 +271,19 @@ reader, and its successful result is forwarded only after that reader exits. A
 model result likewise retains its worker-provenance wrapper through admission,
 so adapter data cannot impersonate the receiver's private deadline result.
 
+The coordinator also starts and retains a dormant provider lifetime guard under
+the owner generation's private supervisor before Control is asked to authorize
+the attempt. The guard binds the exact permit worker and starts no adapter work
+until that worker receives its permit and asks the guard to create a linked
+callback. Catchable failures normalize inside that callback;
+the trapping guard converts an asynchronous linked exit into the same fixed
+private result. It waits for a successful callback to exit before forwarding the
+result and cannot finish while the callback lives. Every terminal path stops and
+awaits the retained guard; on abrupt owner loss, the generation barrier cannot
+fall until its private supervisor has stopped that guard. Neither worker nor
+coordinator loss therefore leaves detached provider work, and no provider value
+can forge `not_dispatched`.
+
 A conforming adapter may report `not_dispatched` only before it invokes or
 hands bytes to provider transport. The coordinator proves the same fact for one
 window of its own: between the attempt-open commit and the

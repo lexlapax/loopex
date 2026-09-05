@@ -372,10 +372,19 @@ see it.
 A crash inside the provider library is covered by that too. The call the adapter
 makes carries the credential in its arguments, so an error left uncaught there
 could reach the emulator's own crash report with those arguments printed beside
-it. Every raise, throw, and exit under that call is caught and reported as the
-same bounded classification an ordinary provider failure produces, and an
-interrupted stream is an error carrying a bounded, credential-substituted reason
-for all three endings rather than only for a raise.
+it. Before provider authority is requested, the coordinator starts a dormant
+lifetime guard under the owner generation's private supervisor. Only the exact
+worker receiving Control's permit can ask that guard to create the linked adapter
+callback. Catchable raises, throws, and exits are normalized in the callback;
+the guard contains an asynchronous linked exit, cannot finish before its callback,
+and stops that callback if the worker or coordinator ends. Terminal paths await
+the guard, and abrupt owner loss cannot pass the generation barrier while it
+lives. The resulting failure is the same bounded `model_call_failed`
+classification as an ordinary provider failure,
+with no raw provider term or credential reaching a log, journal, public event,
+progress item, diagnostic, or terminal. An interrupted stream remains an error
+carrying a bounded, credential-substituted reason for all three endings rather
+than only for a raise.
 
 ## Related
 

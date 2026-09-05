@@ -237,11 +237,18 @@ by a pure reducer that performs no input or output, so replaying the same record
 in the same order always produces the same state — which is what makes a restart
 a recovery rather than a guess.
 
-**Workers** return evidence and nothing else. A provider call and an executor
-call each run in a supervised task; neither may mutate session state, publish a
-durable fact, or decide its own admission. A worker that dies has produced no
-truth, and the coordinator settles the attempt it opened rather than inheriting a
-claim from a process that is gone.
+**Workers** return evidence and nothing else. An executor call runs in a
+supervised task. A provider operation occupies two sibling children under the
+owner generation's private task supervisor: a dormant guard and the worker that
+waits for the exact permit. Only that permitted worker asks the guard to create
+its linked adapter callback. Terminal paths stop and await the guard, which
+cannot finish before the callback, and abrupt owner loss cannot advance past the
+generation barrier while any of the three lives. Neither worker, guard, nor
+callback may mutate
+session state, publish a durable fact, or decide its own admission. A process
+that dies contributes no raw provider evidence. The guard returns only a fixed
+private failure, which the coordinator settles conservatively for the attempt it
+opened rather than inheriting a claim from a process that is gone.
 
 Ownership can move while work is in flight, and the design assumes it will. A
 superseded coordinator can never newly commit, its ephemeral refusals are its own

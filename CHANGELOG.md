@@ -190,12 +190,18 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
 
 - Replacing the command's interrupt handler could either drop a prepared
   capability presentation or leave an interval with no interrupt coverage. The
-  signal-manager guard is now armed and the handler is visible before the
+  temporary installer-lifetime guard now monitors the installer before it
+  creates the holder. It creates that holder initially linked and monitored,
+  waits for the holder to acknowledge its guard, and only then unlinks the
+  relationship into its one-way lifetime, so no capability-bearing process
+  exists in the former spawn-before-guard interval. That same guard is then
+  armed against the exact signal manager, and the handler is visible before the
   capability transfer begins. On this guarded CLI path the coordinator fixes the
   transfer verdict, the installer forwards it to the exact guard, and the guard
   acknowledges it before the coordinator records the holder and returns `:ok`.
-  Installer death before forwarding fails closed; after forwarding, ordered
-  delivery to the guard preserves the handoff even if the public reply is lost.
+  Installer death before holder readiness or before forwarding fails closed;
+  after forwarding, ordered delivery to the guard preserves the handoff even if
+  the public reply is lost.
   Ordinary `transfer_resume/2` remains an unguarded coordinator transfer whose
   missing reply does not prove refusal. The successor is installed before retired
   holders are drained, unfinished drains survive the installer's death in that
@@ -279,9 +285,11 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
   work live.
 - Prepared recovery kept its one-use capability with the process that prepared
   the owner, so the acknowledged holder transfer ADR 0016 requires did not
-  exist and a preparer's death left nothing any process could present. The
-  handler now hands the capability, at installation, to a holder process it
-  owns: activation and abandonment go through that holder
+  exist and a preparer's death left nothing any process could present. At
+  installation, a temporary guard first binds itself to the installer, creates
+  and handshakes the initially linked holder, and only then makes that holder
+  available to the handler. The handler hands the capability to that holder:
+  activation and abandonment go through it
   (`activate_prepared/1`, `abandon_prepared/1`; `abandon_resume/2` is kept
   and delegates to the holder)
   and wait for the owner without a bound, `install_prepared/3` returns the
@@ -750,8 +758,16 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
 
 - A provider library that crashed inside the streaming call left its error
   uncaught, and the argument list of the frame it crashed on carried the
-  credential, so the VM's own crash report could print it. Every raise, throw,
-  and exit under that call is now caught and reported as the same bounded
+  credential, so the VM's own crash report could print it. The coordinator now
+  starts a dormant lifetime guard under the owner generation's private
+  supervisor before asking Control to authorize the call. Only the exact
+  permitted worker can ask that guard to start a linked callback;
+  catchable raises, throws, and exits are normalized inside the callback, while
+  the guard traps an asynchronous linked exit before it can become the supervised
+  worker's raw reason. The guard cannot finish before its callback, and every
+  terminal path stops and awaits it, and abrupt owner loss cannot release the
+  generation barrier before the guard and callback end, so provider work cannot
+  detach from the attempt. All those failures report the same bounded
   classification the ordinary failure branches produce. An interrupted stream is
   likewise an error for all three endings rather than only for a raise, so a
   progress function or a lazy stream that threw or exited no longer escapes the

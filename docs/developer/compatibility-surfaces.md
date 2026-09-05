@@ -367,11 +367,15 @@ The command's cross-application interrupt entries are `install/1`,
 returns `:ok` or the owner's `{:error, reason}`, `activate_prepared(activation)`,
 and `abandon_prepared(activation)`. Prepared installation binds the handler to
 the attachment and the exact one-use capability and makes a holder process the
-handler owns that capability's acknowledged holder. Its signal-manager guard is
-armed and the handler is visible before public transfer begins. On this private
-CLI path the coordinator fixes the verdict, the installer forwards it to the
-guard, and the guard acknowledges it before the coordinator records the holder
-and returns `:ok`. Installer death before forwarding fails closed; after
+handler owns that capability's acknowledged holder. Before creating it, a
+temporary lifetime guard monitors the installer; it creates the holder linked
+and monitored, waits for the holder's acknowledgement, then unlinks the pair
+into a one-way lifetime. That same guard is armed against the exact signal
+manager, and the handler is visible before public transfer begins. On this
+private CLI path the coordinator fixes the verdict, the installer forwards it to
+the guard, and the guard acknowledges it before the coordinator records the
+holder and returns `:ok`.
+Installer death before holder readiness or before forwarding fails closed; after
 forwarding, ordered delivery makes the handoff independent of the installer even
 if its public reply is lost. Ordinary `transfer_resume/2` has no guard and a
 missing reply does not prove whether its coordinator transfer happened.

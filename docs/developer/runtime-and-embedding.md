@@ -161,6 +161,18 @@ forwarded only after the reader has exited. The adapter's result remains inside
 its worker-provenance wrapper until admission, so its data cannot impersonate
 the receiver's private deadline observation.
 
+Before Control is asked to authorize that permit, the coordinator creates and
+retains a dormant provider lifetime guard under the owner generation's private
+supervisor, bound to the exact permit worker. The guard starts no adapter work
+until that worker receives its permit and asks it to create a linked callback.
+Catchable failures normalize inside the callback;
+the trapping guard reduces asynchronous linked exits to the same fixed private
+failure, waits for a successful callback to exit before forwarding its result,
+and cannot finish while the callback lives. Every terminal path stops and awaits
+the retained guard, and the generation barrier cannot fall during abrupt owner
+loss until that supervisor has stopped it. Worker or coordinator loss therefore
+cannot detach provider work from its attempt.
+
 The adapter's complete raw reply, including every raw usage key and value, must
 pass the Store's bounded plain-data admission and full canonical validation
 before accounting. Store or canonical refusal yields an unreadable result and
@@ -248,13 +260,18 @@ the caller was told it had not got. Neither proposes a Store mutation, so
 waiting commits nothing, and a coordinator that has died refuses through its
 own exit.
 `LoopexCli.Interrupt.install_prepared(attachment, cleanup_ms, activation)`
-arms the signal-manager guard and makes the handler visible before it asks the
-coordinator to hand the capability to a holder process started for that one
-purpose. The coordinator fixes a verdict and sends it to the installer; the
-installer forwards it to the guard, whose exact acknowledgement precedes the
-coordinator recording the holder and replying. It returns `:ok` only after that
-sequence, or returns the owner's refusal; a caller that continues past a refusal
-as though the capability had moved has a defect of its own.
+first starts a temporary lifetime guard. That guard monitors the installer before
+creating the holder linked and monitored, waits for the holder to acknowledge its
+guard monitor, and only then unlinks the pair into a one-way lifetime. There is
+therefore no capability-bearing process in a spawn-before-guard interval. The
+installer then arms that guard against the exact signal manager and makes the
+handler visible before it asks the coordinator to hand the capability to that
+exact holder. The coordinator fixes a verdict and sends it to the installer;
+the installer forwards
+it to the guard, whose exact acknowledgement precedes the coordinator recording
+the holder and replying. It returns `:ok` only after that sequence, or returns the
+owner's refusal; a caller that continues past a refusal as though the capability
+had moved has a defect of its own.
 `LoopexCli.Interrupt.activate_prepared(activation)` and
 `LoopexCli.Interrupt.abandon_prepared(activation)` present the capability from
 that holder and wait for the owner's answer without a bound, as the facade
@@ -264,10 +281,10 @@ blocked signal server could handle no signal, so the holder blocks instead and
 the handler keeps submitting the abort and arming the backstop. A signal's
 abort and an activation still cannot both win, because the owner fences the
 capability on an admitted abort and refuses a later activation as fenced.
-Installer death before forwarding the verdict fails closed. Once it has
-forwarded, same-sender ordering puts the verdict ahead of the installer's `DOWN`
-at the guard, so installer death cannot undo the handoff even if the public reply
-is lost. Loss of the exact manager, coordinator, or holder ends that exact
+Installer death before holder readiness or before forwarding the verdict fails
+closed. Once it has forwarded, same-sender ordering puts the verdict ahead of the
+installer's `DOWN` at the guard, so installer death cannot undo the handoff even
+if its public reply is lost. Loss of the exact manager, coordinator, or holder ends that exact
 authority rather than allowing a different process to infer success. An
 independent guard ends the holder if the signal manager dies without terminating
 its handlers. Orderly replacement installs a successor first, keeps interrupt

@@ -219,50 +219,56 @@ defmodule LoopexCli.Interrupt do
   # Concept: a not-yet-installed holder belongs to its installer and disappears
   # with it.
   #
-  # Technical depth: a direct link is bidirectional. Once the manager guard is
-  # armed, abrupt manager loss kills the holder; a direct holder-installer link
-  # would turn that truthful installation refusal into an untrappable death of
-  # the public caller. This ready-acknowledged one-way guard instead monitors the
-  # exact installer and kills the holder if it goes, while holder loss merely
-  # ends the guard. The holder also monitors this exact guard, so concurrent
-  # loss of the manager guard and session owner cannot leave the holder orphaned.
-  # It exists until the session owner and guard acknowledge the prepared
-  # capability transfer together.
+  # Technical depth: the lifetime guard monitors the installer before it creates
+  # the holder. The holder begins linked to that guard, acknowledges its own
+  # guard monitor, and is only then unlinked, so no capability-bearing process
+  # exists in a spawn-before-guard interval. Once the handshake completes the
+  # relationship is deliberately one-way: abrupt manager or installer loss
+  # makes the guard kill the holder, while holder loss merely ends the guard and
+  # cannot propagate an untrappable exit into the public caller. The holder also
+  # monitors this exact guard, so concurrent loss of the manager guard and
+  # session owner cannot leave it orphaned. It exists until the session owner and
+  # guard acknowledge the prepared capability transfer together.
   defp prepare_holder(activation) do
     installer = self()
-    holder = spawn(fn -> hold(activation) end)
     nonce = make_ref()
     ready = make_ref()
 
     {guard, guard_monitor} =
-      spawn_monitor(fn -> guard_pending_holder(holder, installer, nonce, ready) end)
+      spawn_monitor(fn -> guard_pending_holder(installer, activation, nonce, ready) end)
 
     receive do
-      {^ready, ^guard} ->
-        holder_ready = make_ref()
-        send(holder, {:loopex_prepared_holder_guard, installer, guard, holder_ready})
-
-        receive do
-          {^holder_ready, ^holder} ->
-            Process.demonitor(guard_monitor, [:flush])
-            {:ok, %{holder: holder, lifetime_guard: guard, transfer_nonce: nonce}}
-
-          {:DOWN, ^guard_monitor, :process, ^guard, reason} ->
-            release(holder)
-            {:error, {:prepared_holder_installer_guard_failed, reason}}
-        end
+      {^ready, ^guard, holder} when is_pid(holder) ->
+        Process.demonitor(guard_monitor, [:flush])
+        {:ok, %{holder: holder, lifetime_guard: guard, transfer_nonce: nonce}}
 
       {:DOWN, ^guard_monitor, :process, ^guard, reason} ->
-        release(holder)
         {:error, {:prepared_holder_installer_guard_failed, reason}}
     end
   end
 
-  defp guard_pending_holder(holder, installer, nonce, ready) do
+  defp guard_pending_holder(installer, activation, nonce, ready) do
     installer_ref = Process.monitor(installer)
-    holder_ref = Process.monitor(holder)
-    send(installer, {ready, self()})
+    {holder, holder_ref} = :erlang.spawn_opt(fn -> hold(activation) end, [:link, :monitor])
+    holder_ready = make_ref()
+    send(holder, {:loopex_prepared_holder_guard, self(), holder_ready})
 
+    receive do
+      {^holder_ready, ^holder} ->
+        Process.unlink(holder)
+        send(installer, {ready, self(), holder})
+
+        guard_uninstalled_holder(holder, holder_ref, installer, installer_ref, nonce)
+
+      {:DOWN, ^installer_ref, :process, ^installer, _reason} ->
+        Process.exit(holder, :kill)
+
+      {:DOWN, ^holder_ref, :process, ^holder, _reason} ->
+        :ok
+    end
+  end
+
+  defp guard_uninstalled_holder(holder, holder_ref, installer, installer_ref, nonce) do
     receive do
       {:loopex_prepared_manager_arm, ^installer, signal_server, tag}
       when is_pid(signal_server) ->
@@ -517,10 +523,10 @@ defmodule LoopexCli.Interrupt do
   # no way to give up something the owner still records as prepared.
   defp hold(activation) do
     receive do
-      {:loopex_prepared_holder_guard, installer, guard, tag}
-      when is_pid(installer) and is_pid(guard) and is_reference(tag) ->
+      {:loopex_prepared_holder_guard, guard, tag}
+      when is_pid(guard) and is_reference(tag) ->
         guard_ref = Process.monitor(guard)
-        send(installer, {tag, self()})
+        send(guard, {tag, self()})
         hold(activation, guard, guard_ref)
 
       :loopex_prepared_release ->

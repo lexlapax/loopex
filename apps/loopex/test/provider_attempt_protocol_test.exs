@@ -43,7 +43,41 @@ defmodule Loopex.ProviderAttemptExitModel do
   def complete(request, options, _progress) do
     observer = Keyword.fetch!(options, :observer)
     send(observer, {:provider_attempt_exit_model_called, self(), request})
-    exit(:third_party_model_down)
+
+    receive do
+      :provider_attempt_exit_model_never_returns -> :unreachable
+    end
+  end
+end
+
+defmodule Loopex.ProviderLinkedCredentialFailureModel do
+  @moduledoc false
+
+  @behaviour Loopex.Model
+
+  @credential "provider-credential-shaped-linked-exit-must-stay-private"
+
+  def credential, do: @credential
+
+  @impl Loopex.Model
+  def complete(request, options, _progress) do
+    observer = Keyword.fetch!(options, :observer)
+    callback = self()
+    send(observer, {:provider_linked_credential_model_called, callback, request})
+
+    child =
+      spawn_link(fn ->
+        receive do
+          {:fail_linked_callback, ^callback} ->
+            exit({:provider_credential, @credential})
+        end
+      end)
+
+    send(child, {:fail_linked_callback, callback})
+
+    receive do
+      :provider_linked_credential_model_never_returns -> :unreachable
+    end
   end
 end
 
@@ -163,24 +197,28 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     refute_receive {:holding, _worker}, 0
 
     M1RuntimeTestStore.release(waiter)
-    assert_receive {:holding, worker}, 5_000
+    assert_receive {:holding, callback}, 5_000
 
-    assert_receive {:trace, ^control, :send, permit, ^worker}, 5_000
+    assert_receive {:trace, ^control, :send,
+                    {:loopex_provider_permit, _reference, _binding} = permit, permit_worker},
+                   5_000
+
+    refute callback == permit_worker
     expected_binding = Map.put(attempt_identity(opened), "session_id", session_id)
 
     permit_binding = coherent_attempt_binding!(permit, expected_binding)
     assert permit_binding == expected_binding
 
-    {caller, request} = await_control_request_binding(control, worker, expected_binding)
+    {caller, request} = await_control_request_binding(control, permit_worker, expected_binding)
     assert caller == coordinator_of(fixture.runtime)
     assert coherent_attempt_binding!(request, expected_binding) == expected_binding
 
-    authority = permit_authority!(fixture, session_id, opened, request, worker)
+    authority = permit_authority!(fixture, session_id, opened, request, permit_worker)
 
     assert authority.runtime_id == fixture.runtime_id
     assert authority.session_id == session_id
     assert authority.coordinator == caller
-    assert authority.worker == worker
+    assert authority.worker == permit_worker
     assert authority.owner_epoch > 0
     assert is_binary(authority.owner_incarnation_id)
     assert authority.journal_version > 0
@@ -205,14 +243,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     duplicate_request =
       request
-      |> replace_exact(worker, fresh_worker)
+      |> replace_exact(permit_worker, fresh_worker)
       |> replace_exact(permit_reference, make_ref())
 
     assert {:error, _spent_attempt} = GenServer.call(control, duplicate_request, 5_000)
     refute_receive {:fresh_permit_received, ^fresh_worker, _message}, 0
-    refute_receive {:trace, ^control, :send, _second_permit, ^worker}, 0
+    refute_receive {:trace, ^control, :send, _second_permit, ^permit_worker}, 0
 
-    send(worker, :release)
+    send(callback, :release)
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
     :erlang.trace(control, false, [:all])
@@ -235,15 +273,20 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :erlang.trace(control, true, [:send, :receive])
 
     {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "open once")
-    assert_receive {:holding, worker}, 5_000
-    assert_receive {:trace, ^control, :send, permit, ^worker}, 5_000
+    assert_receive {:holding, callback}, 5_000
+
+    assert_receive {:trace, ^control, :send,
+                    {:loopex_provider_permit, _reference, _binding} = permit, permit_worker},
+                   5_000
+
+    refute callback == permit_worker
 
     records = Fixture.records(fixture, session_id)
     [opened] = Enum.filter(records, &(&1.payload[:kind] == "model_attempt_opened_v1"))
     expected_binding = Map.put(attempt_identity(opened.payload), "session_id", session_id)
     assert coherent_attempt_binding!(permit, expected_binding) == expected_binding
 
-    {caller, request} = await_control_request_binding(control, worker, expected_binding)
+    {caller, request} = await_control_request_binding(control, permit_worker, expected_binding)
     assert caller == coordinator_of(fixture.runtime)
 
     [permit_reference] =
@@ -265,7 +308,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     duplicate_request =
       request
-      |> replace_exact(worker, fresh_worker)
+      |> replace_exact(permit_worker, fresh_worker)
       |> replace_exact(permit_reference, make_ref())
 
     reply_alias = :erlang.alias([:reply])
@@ -273,9 +316,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     assert_receive {[:alias | ^reply_alias], {:error, :provider_attempt_already_permitted}}, 5_000
     refute_receive {:fresh_permit_received, ^fresh_worker, _message}, 0
-    refute_receive {:trace, ^control, :send, _second_permit, ^worker}, 0
+    refute_receive {:trace, ^control, :send, _second_permit, ^permit_worker}, 0
 
-    send(worker, :release)
+    send(callback, :release)
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
     :erlang.trace(control, false, [:all])
@@ -299,15 +342,20 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :erlang.trace(control, true, [:send, :receive])
 
     {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "open once")
-    assert_receive {:holding, worker}, 5_000
-    assert_receive {:trace, ^control, :send, permit, ^worker}, 5_000
+    assert_receive {:holding, callback}, 5_000
+
+    assert_receive {:trace, ^control, :send,
+                    {:loopex_provider_permit, _reference, _binding} = permit, permit_worker},
+                   5_000
+
+    refute callback == permit_worker
 
     records = Fixture.records(fixture, session_id)
     [opened] = Enum.filter(records, &(&1.payload[:kind] == "model_attempt_opened_v1"))
     expected_binding = Map.put(attempt_identity(opened.payload), "session_id", session_id)
     assert coherent_attempt_binding!(permit, expected_binding) == expected_binding
 
-    {caller, request} = await_control_request_binding(control, worker, expected_binding)
+    {caller, request} = await_control_request_binding(control, permit_worker, expected_binding)
     assert caller == coordinator_of(fixture.runtime)
     assert spent_attempt_bindings(control) == [expected_binding]
 
@@ -341,7 +389,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
       tampered_request =
         request
-        |> replace_exact(worker, fresh_worker)
+        |> replace_exact(permit_worker, fresh_worker)
         |> replace_exact(permit_reference, make_ref())
         |> put_elem(1, binding)
 
@@ -353,9 +401,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       assert spent_attempt_bindings(control) == [expected_binding]
     end
 
-    refute_receive {:trace, ^control, :send, _second_permit, ^worker}, 0
+    refute_receive {:trace, ^control, :send, _second_permit, ^permit_worker}, 0
 
-    send(worker, :release)
+    send(callback, :release)
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
     :erlang.trace(control, false, [:all])
@@ -639,8 +687,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         source_attempt.binding
       )
 
-    assert_receive {:holding, source_worker}, 5_000
-    assert source_worker == source_attempt.worker
+    assert_receive {:holding, source_callback}, 5_000
+    refute source_callback == source_attempt.worker
 
     target =
       start(script: [%{text: "target", calls: [], hold: self(), hold_timeout_ms: 30_000}])
@@ -649,7 +697,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     target_worker_pid = target_attempt.worker
 
     send(target_worker_pid, source_permit)
-    refute_receive {:holding, ^target_worker_pid}, 50
+    refute_receive {:holding, _target_callback}, 50
     assert AgentLoopTestModel.dispatched(target.model) == []
 
     target_shaped_permit =
@@ -665,7 +713,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       )
 
     send(target_worker_pid, wrong_permit)
-    refute_receive {:holding, ^target_worker_pid}, 50
+    refute_receive {:holding, _target_callback}, 50
     assert AgentLoopTestModel.dispatched(target.model) == []
 
     suspend_process(target_worker_pid)
@@ -680,15 +728,15 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     send(target_worker_pid, target_permit)
     resume_process(target_worker_pid)
-    assert_receive {:holding, target_worker}, 5_000
-    assert target_worker == target_attempt.worker
+    assert_receive {:holding, target_callback}, 5_000
+    refute target_callback == target_attempt.worker
 
-    send(target_worker, :release)
+    send(target_callback, :release)
 
     assert await_event(target_attempt.attachment, "run.finished")["outcome"] == "completed"
     assert length(AgentLoopTestModel.dispatched(target.model)) == 1
 
-    send(source_worker, :release)
+    send(source_callback, :release)
     assert await_event(source_attempt.attachment, "run.finished")["outcome"] == "completed"
     assert length(AgentLoopTestModel.dispatched(source.model)) == 1
   end
@@ -735,16 +783,50 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
   test "a third-party Model task DOWN after dispatch is ambiguous terminal evidence and never retries" do
     fixture = start(script: [], model_module: Loopex.ProviderAttemptExitModel)
+    attempt = queue_provider_permit_request(fixture, "third-party model task down")
+    worker_monitor = Process.monitor(attempt.worker)
+    resume_process(attempt.control)
 
-    {session_id, attachment, {:accepted, "prompt-1"}} =
-      Fixture.run(fixture, "third-party model task down")
+    assert_receive {:provider_attempt_exit_model_called, callback, _request}, 5_000
+    assert is_pid(callback)
+    guard = provider_guard!(callback)
+    coordinator = attempt.coordinator
+    callback_monitor = Process.monitor(callback)
+    guard_monitor = Process.monitor(guard)
+    assert 1 = :erlang.trace(coordinator, true, [:send])
+    suspend_process(guard)
 
-    assert_receive {:provider_attempt_exit_model_called, worker, _request}, 5_000
-    assert is_pid(worker)
-    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+    try do
+      Process.exit(attempt.worker, :kill)
+      assert_receive {:DOWN, ^worker_monitor, :process, _worker, :killed}, 5_000
+
+      assert_receive {:trace, ^coordinator, :send,
+                      {:loopex_provider_tree_stop, _provider_reference, _stop, ^coordinator},
+                      ^guard},
+                     5_000
+
+      assert Process.alive?(callback)
+
+      refute Enum.any?(
+               Fixture.events(fixture, attempt.session_id),
+               &(public_event_kind(&1) == "run.finished")
+             ),
+             "the terminal committed before the provider callback tree was reaped"
+
+      resume_process(guard)
+      assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :killed}, 5_000
+      assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :normal}, 5_000
+      refute Process.alive?(callback)
+      assert await_event(attempt.attachment, "run.finished")["outcome"] == "failed"
+    after
+      resume_process(guard)
+
+      if Process.alive?(coordinator), do: :erlang.trace(coordinator, false, [:all])
+    end
+
     refute_receive {:provider_attempt_exit_model_called, _other_worker, _request}, 100
 
-    records = Fixture.records(fixture, session_id)
+    records = Fixture.records(fixture, attempt.session_id)
     assert Enum.map(records_of_kind(records, "model_attempt_opened_v1"), & &1["attempt"]) == [1]
     [settlement] = records_of_kind(records, "model_attempt_settled_v1")
     assert settlement["transport"] == "dispatched_or_unknown"
@@ -757,6 +839,55 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              "source" => "estimated",
              "basis" => "remaining_allowance"
            }
+  end
+
+  # Concept: a successful provider reply is not evidence that its process tree
+  # has ended; the runtime crosses that boundary only after both callback and
+  # guard are gone.
+  #
+  # Technical depth: the callback's final send and process exit occupy private
+  # BEAM reductions that no public fixture can suspend causally without adding a
+  # product hook. The surrounding behavior cases prove terminal-path cleanup;
+  # this parsed-AST check locks the three private handoffs: callback result waits
+  # for callback exit, guard result waits for guard DOWN, and only then may the
+  # supervised worker return the value.
+  test "a successful provider result crosses each lifetime boundary only after its process exits" do
+    source =
+      File.read!(Path.expand("../lib/loopex/runtime/session_coordinator.ex", __DIR__))
+
+    {:ok, ast} = Code.string_to_quoted(source)
+    call_provider = private_function_body!(ast, :call_provider, 6)
+    await_callback = private_function_body!(ast, :await_provider_callback, 6)
+    await_callback_exit = private_function_body!(ast, :await_provider_callback_exit, 7)
+
+    guard_result = receive_clause_body!(call_provider, :loopex_provider_guard_result)
+
+    assert [
+             {:await_process_down, _metadata,
+              [{:guard, _guard_metadata, nil}, {:guard_monitor, _monitor_metadata, nil}]},
+             {:result, _result_metadata, nil}
+           ] = block_expressions(guard_result),
+           "the supervised worker can return before its provider guard exits"
+
+    callback_result = receive_clause_body!(await_callback, :loopex_provider_callback_result)
+
+    assert {:await_provider_callback_exit, _metadata, arguments} = callback_result
+    assert length(arguments) == 7
+
+    normal_exit = receive_clause_body!(await_callback_exit, {:EXIT, :normal})
+
+    assert {:send, _metadata,
+            [
+              {:owner, _owner_metadata, nil},
+              {:{}, _tuple_metadata,
+               [
+                 :loopex_provider_guard_result,
+                 {:reference, _reference_metadata, nil},
+                 {:self, _self_metadata, []},
+                 {:result, _reply_metadata, nil}
+               ]}
+            ]} = normal_exit,
+           "the guard does not wait for normal callback exit before forwarding its result"
   end
 
   test "the authoritative origin closes its model stream before a terminal outcome can publish" do
@@ -1727,6 +1858,65 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         refute printable(value) =~ secret,
                "credential-shaped task failure entered the #{plane} plane"
       end
+    end
+  end
+
+  test "a credential-shaped linked Model exit enters no diagnostic retained or public plane" do
+    secret = Loopex.ProviderLinkedCredentialFailureModel.credential()
+
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderLinkedCredentialFailureModel,
+        progress_to: self(),
+        diagnostics_to: self(),
+        bounds_token_budget: 113
+      )
+
+    test_process = self()
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        {session_id, attachment, {:accepted, "prompt-1"}} =
+          Fixture.run(fixture, "keep linked task failure reasons private")
+
+        public_events = await_events_through(attachment, "run.finished")
+        send(test_process, {:provider_linked_failure_result, session_id, public_events})
+        Logger.flush()
+      end)
+
+    assert_receive {:provider_linked_credential_model_called, worker, _request}, 5_000
+    assert is_pid(worker)
+
+    assert_receive {:provider_linked_failure_result, session_id, public_events}, 5_000
+
+    finished = Enum.find(public_events, &(&1.kind == "run.finished"))
+    assert finished["outcome"] == "failed"
+
+    records = Fixture.records(fixture, session_id)
+    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+
+    assert settlement["transport"] == "dispatched_or_unknown"
+    assert settlement["next"] == "terminal"
+
+    assert settlement["result"] == %{
+             "kind" => "error",
+             "category" => "model_call_failed"
+           }
+
+    planes = [
+      diagnostic_log: log,
+      durable: records,
+      durable_public: Fixture.events(fixture, session_id),
+      public: public_events,
+      progress: receive_progress(),
+      diagnostic: receive_diagnostics(),
+      terminal: finished
+    ]
+
+    for {plane, value} <- planes do
+      refute printable(value) =~ secret,
+             "credential-shaped linked exit entered the #{plane} plane"
     end
   end
 
@@ -3035,43 +3225,71 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         attempt.opened["attempt"]
       )
 
-    case {loss, phase} do
-      {:control_death, :before_send} ->
-        Process.exit(attempt.control, :kill)
+    {provider_callback, held_guard} =
+      case {loss, phase} do
+        {:control_death, :before_send} ->
+          Process.exit(attempt.control, :kill)
+          {nil, nil}
 
-      {:control_death, :after_send} ->
-        resume_process(attempt.control)
+        {:control_death, :after_send} ->
+          resume_process(attempt.control)
 
-        _permit =
-          await_control_permit(attempt.control, attempt.worker, attempt.binding)
+          _permit =
+            await_control_permit(attempt.control, attempt.worker, attempt.binding)
 
-        worker = attempt.worker
-        assert_receive {:holding, ^worker}, 5_000
-        Process.exit(attempt.control, :kill)
+          assert_receive {:holding, callback}, 5_000
+          refute callback == attempt.worker
+          Process.exit(attempt.control, :kill)
+          {callback, nil}
 
-      {:lost_reply, :before_send} ->
-        suspend_process(attempt.coordinator)
-        Process.exit(attempt.worker, :kill)
-        await_process_down(attempt.worker)
-        resume_process(attempt.control)
-        await_control_call_consumed(attempt.control, attempt.control_message)
-        worker = attempt.worker
-        control = attempt.control
-        refute_receive {:trace, ^control, :send, _permit, ^worker}, 50
-        Process.exit(attempt.coordinator, :kill)
+        {:lost_reply, :before_send} ->
+          suspend_process(attempt.coordinator)
+          Process.exit(attempt.worker, :kill)
+          await_process_down(attempt.worker)
+          resume_process(attempt.control)
+          await_control_call_consumed(attempt.control, attempt.control_message)
+          worker = attempt.worker
+          control = attempt.control
+          refute_receive {:trace, ^control, :send, _permit, ^worker}, 50
+          Process.exit(attempt.coordinator, :kill)
+          {nil, nil}
 
-      {:lost_reply, :after_send} ->
-        suspend_process(attempt.coordinator)
-        resume_process(attempt.control)
+        {:lost_reply, :after_send} ->
+          suspend_process(attempt.coordinator)
+          resume_process(attempt.control)
 
-        _permit =
-          await_control_permit(attempt.control, attempt.worker, attempt.binding)
+          _permit =
+            await_control_permit(attempt.control, attempt.worker, attempt.binding)
 
-        worker = attempt.worker
-        assert_receive {:holding, ^worker}, 5_000
-        await_control_call_consumed(attempt.control, attempt.control_message)
-        Process.exit(attempt.coordinator, :kill)
-    end
+          assert_receive {:holding, callback}, 5_000
+          refute callback == attempt.worker
+          guard = provider_guard!(callback)
+
+          assert {:links, guard_links} = Process.info(guard, :links)
+          assert {:links, worker_links} = Process.info(attempt.worker, :links)
+
+          shared_supervisors =
+            guard_links
+            |> MapSet.new()
+            |> MapSet.intersection(MapSet.new(worker_links))
+            |> MapSet.to_list()
+
+          assert [owner_workers] = shared_supervisors
+          assert is_pid(owner_workers)
+
+          owner_worker_children = Task.Supervisor.children(owner_workers)
+
+          assert guard in owner_worker_children,
+                 "the provider guard was linked to, but not supervised by, the owner generation"
+
+          assert attempt.worker in owner_worker_children,
+                 "the permitted worker was not supervised by the same owner generation"
+
+          suspend_process(guard)
+          await_control_call_consumed(attempt.control, attempt.control_message)
+          Process.exit(attempt.coordinator, :kill)
+          {callback, guard}
+      end
 
     await_process_down(attempt.coordinator)
     await_process_down(attempt.worker)
@@ -3080,10 +3298,32 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       _new_control = await_restarted_control(fixture.runtime, attempt.control)
     end
 
-    assert {:ok, attempt.session_id} ==
-             Loopex.resume_session(fixture.runtime, attempt.session_id,
-               command_id: "resume-#{label}"
-             )
+    if is_pid(provider_callback) and is_nil(held_guard),
+      do: await_process_down(provider_callback)
+
+    resume =
+      Task.async(fn ->
+        Loopex.resume_session(fixture.runtime, attempt.session_id, command_id: "resume-#{label}")
+      end)
+
+    if is_pid(held_guard) do
+      assert Task.yield(resume, 100) == nil,
+             "a successor advanced while the prior provider guard was still suspended"
+
+      assert Process.alive?(provider_callback)
+
+      refute Enum.any?(
+               Fixture.events(fixture, attempt.session_id),
+               &(public_event_kind(&1) == "run.finished")
+             ),
+             "owner-loss terminal evidence appeared before the provider tree stopped"
+
+      resume_process(held_guard)
+      await_process_down(provider_callback)
+      await_process_down(held_guard)
+    end
+
+    assert {:ok, attempt.session_id} == Task.await(resume, 5_000)
 
     {:ok, resumed} = Loopex.attach(fixture.runtime, attempt.session_id, after_event_sequence: 0)
     finished = await_event(resumed, "run.finished")
@@ -3205,15 +3445,15 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     attempt = queue_provider_permit_request(fixture, "handoff after permit")
     resume_process(attempt.control)
     _permit = await_control_permit(attempt.control, attempt.worker, attempt.binding)
-    worker = attempt.worker
-    assert_receive {:holding, ^worker}, 5_000
+    assert_receive {:holding, callback}, 5_000
+    refute callback == attempt.worker
 
     assert {:ok, attempt.session_id} ==
              Loopex.resume_session(fixture.runtime, attempt.session_id,
                command_id: "resume-after-provider-permit"
              )
 
-    if Process.alive?(worker), do: send(worker, :release)
+    if Process.alive?(callback), do: send(callback, :release)
     await_process_down(attempt.coordinator)
 
     finish_live_handoff(fixture, attempt.session_id)
@@ -3422,14 +3662,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
         resume_process(attempt.control)
         _permit = await_control_permit(attempt.control, attempt.worker, attempt.binding)
-        worker = attempt.worker
 
         # The provider holding is the causal proof that the permit won: a deadline
         # reached before the send makes Control refuse and this message never
         # arrives, which fails here loudly. No wall-clock comparison is made in
         # this process, because one taken after the permit could only fail a
         # correct implementation that had already won.
-        assert_receive {:holding, ^worker}, 5_000
+        assert_receive {:holding, callback}, 5_000
+        refute callback == attempt.worker
 
         wait_past_deadline(deadline)
         resume_process(attempt.coordinator)
@@ -3544,6 +3784,75 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       :ok
     end
   end
+
+  defp provider_guard!(callback) when is_pid(callback) do
+    case Process.info(callback, :links) do
+      {:links, [guard]} when is_pid(guard) ->
+        guard
+
+      {:links, links} ->
+        flunk("provider callback has no single lifetime guard: #{inspect(links)}")
+
+      nil ->
+        flunk("provider callback stopped before its lifetime guard was observed")
+    end
+  end
+
+  defp private_function_body!(ast, name, arity) do
+    {_ast, bodies} =
+      Macro.prewalk(ast, [], fn
+        {:defp, _metadata, [{^name, _head_metadata, arguments}, clauses]} = node, bodies
+        when is_list(arguments) and length(arguments) == arity and is_list(clauses) ->
+          {node, [Keyword.fetch!(clauses, :do) | bodies]}
+
+        node, bodies ->
+          {node, bodies}
+      end)
+
+    case bodies do
+      [body] -> body
+      [] -> flunk("private function #{name}/#{arity} was not found")
+      _many -> flunk("private function #{name}/#{arity} was defined more than once")
+    end
+  end
+
+  defp receive_clause_body!(ast, expected) do
+    {_ast, matches} =
+      Macro.prewalk(ast, [], fn
+        {:->, _metadata, [[pattern], body]} = node, matches ->
+          if receive_pattern_matches?(pattern, expected),
+            do: {node, [body | matches]},
+            else: {node, matches}
+
+        node, matches ->
+          {node, matches}
+      end)
+
+    case matches do
+      [body] -> body
+      [] -> flunk("receive clause #{inspect(expected)} was not found")
+      _many -> flunk("receive clause #{inspect(expected)} was not unique")
+    end
+  end
+
+  defp receive_pattern_matches?(pattern, expected) when is_atom(expected),
+    do: ast_contains_atom?(pattern, expected)
+
+  defp receive_pattern_matches?(pattern, {:EXIT, reason}),
+    do: ast_contains_atom?(pattern, :EXIT) and ast_contains_atom?(pattern, reason)
+
+  defp ast_contains_atom?(ast, expected) do
+    {_ast, found?} =
+      Macro.prewalk(ast, false, fn
+        ^expected = node, _found? -> {node, true}
+        node, found? -> {node, found?}
+      end)
+
+    found?
+  end
+
+  defp block_expressions({:__block__, _metadata, expressions}), do: expressions
+  defp block_expressions(expression), do: [expression]
 
   defp hold_commit_unknown_replay(store, kind, first_waiter, first_transaction) do
     :ok =

@@ -123,6 +123,19 @@ dispatched without making the provider call or minting retry authority. Adapter
 results remain inside their worker-provenance wrapper until admission, so their
 data cannot impersonate that private deadline observation.
 
+The coordinator creates and retains a dormant provider lifetime guard under the
+owner generation's private supervisor before it asks Control to spend that
+identity. The guard binds the exact permit worker but starts no callback until
+that worker receives the exact permit and passes its deadline fence. The worker
+then asks the guard to create a linked adapter callback. Catchable callback
+failures normalize there; the trapping guard reduces asynchronous linked exits
+to the same fixed private failure. A successful result is not forwarded until
+the callback exits normally, and the guard cannot finish while its callback
+lives. Worker, coordinator, deadline, discard, and supersession endings stop and
+await the retained guard. On abrupt owner loss, the owner-group barrier cannot
+finish stopping that private supervisor until the guard has stopped the callback,
+so no provider callback detaches from the attempt it belongs to.
+
 The binding read is bounded at one second and runs in a reader owned by a
 guardian that monitors Control. A timeout or Control death kills and awaits the
 exact reader, while a successful result reaches Control only after the reader is
@@ -471,8 +484,9 @@ Credentials stay on the host side of the line. The reference model adapter reads
 `LOOPEX_PROVIDER_API_KEY`, passes it as a per-request option, and never returns,
 logs, or writes it; no other provider variable is consulted, so a key that
 happens to sit in the operator's environment cannot be spent by accident. Its
-classified failures carry the literal `"model_call_failed"` and no provider term,
-so nothing rides out on the failure plane.
+classified failures carry the literal `"model_call_failed"` and no provider term.
+The callback lifetime guard keeps even an asynchronous linked-exit reason out of
+the supervised task's crash report, so nothing rides out on the failure plane.
 
 ## Where Each Concern Lives
 

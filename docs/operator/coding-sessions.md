@@ -398,16 +398,21 @@ loopex: `loopex resume` continues reading from the durable record
 uses `install(attachment, cleanup_ms)` for an ordinary active run, and
 `install_prepared(attachment, cleanup_ms, activation)` for recovered work that
 must remain paused until the interrupt owner decides whether to activate it.
-`loopex resume` uses the prepared entry: it installs the handler carrying the
-activation, arms its signal-manager guard, and makes the handler visible before
-asking the session coordinator to hand the capability to the holder process the
-handler owns. The coordinator decides the transfer and sends its verdict to the
-installer; the installer forwards it to the exact guard, whose acknowledgement
-precedes the coordinator recording the holder and reporting success. There is no
+`loopex resume` uses the prepared entry. Its installer first starts a temporary
+lifetime guard, which monitors the installer before it creates the holder. The
+holder starts linked and monitored, acknowledges that guard, and is only then
+unlinked into the one-way relationship that makes installer loss kill the holder
+without letting holder loss kill the installer. The command then installs the
+handler carrying the activation, arms that guard against the exact signal
+manager, and makes the handler visible before asking the session coordinator to
+hand the capability to that exact holder. The coordinator decides the transfer
+and sends its verdict to the installer; the installer forwards it to the exact
+guard, whose acknowledgement precedes the coordinator recording the holder and
+reporting success. There is no
 interval in which recovered work is running and the runtime's default handler is
-still the one installed. Installer death before forwarding fails closed. After
-forwarding, ordered delivery makes the handoff independent of the installer even
-if its reply is lost. The command then asks
+still the one installed. Installer death before holder readiness or before
+forwarding fails closed. After forwarding, ordered delivery makes the handoff
+independent of the installer even if its reply is lost. The command then asks
 that holder to start the work and waits for the answer without a bound. The
 signal server itself is never blocked by that wait, so a signal arriving
 meanwhile still submits the ordinary abort and arms the backstop; the abort
