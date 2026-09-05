@@ -289,6 +289,68 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
              "terminal truth reversed"
   end
 
+  test "a failed close after a durable unlink keeps the receipt non-final and the root quarantined" do
+    # Concept: losing the open entry is not proof that its effect settled. A
+    # close operation that removed the entry but failed before it could report a
+    # complete close must leave an equivalent root-wide warning behind.
+    #
+    # Technical depth: the close seam below removes the exact open entry, syncs
+    # the directory that names it, and only then reports failure. That is the
+    # strongest partial-removal state: the deletion itself is durable, so merely
+    # replacing the receipt with its quarantined form leaves a receipt with no
+    # open entry. The read side then mistakes those bytes for final and the
+    # admission scan sees a clean root. The repair must restore the same open
+    # record before releasing the root claim (or retain that claim if it cannot),
+    # so neither this receipt nor an unrelated effect can cross the ambiguity.
+    root = workspace()
+    ledger = ledger_root()
+    parent = self()
+    job_id = "partial-close-#{System.unique_integer([:positive])}"
+    open_path = Path.join([ledger, "open", digest(job_id)])
+
+    partial_close = fn _prepared, ^job_id ->
+      :ok = File.rm(open_path)
+      :ok = sync_directory(Path.dirname(open_path))
+      send(parent, {:durably_unlinked, job_id})
+      {:error, :close_failed_after_durable_unlink}
+    end
+
+    {executor, lease_id} =
+      executor_on(root, ledger,
+        cleanup_grace_ms: 2_000,
+        open_authority_close: partial_close
+      )
+
+    assert {:ok, receipt} =
+             run(root, "loopex.write", %{"path" => "first.txt", "content" => "once"}, %{
+               executor: executor,
+               lease_id: lease_id,
+               job_id: job_id,
+               cleanup_grace_ms: 2_000
+             })
+
+    assert_receive {:durably_unlinked, ^job_id}, 1_000
+    assert receipt.outcome == :outcome_unknown
+    assert receipt.cleanup_confirmation == :unconfirmed
+
+    assert {:error, {:reconciliation_required, 1}} =
+             run(root, "loopex.write", %{"path" => "unrelated.txt", "content" => "forbidden"}, %{
+               executor: executor,
+               lease_id: lease_id,
+               job_id: "after-partial-close-#{System.unique_integer([:positive])}",
+               cleanup_grace_ms: 2_000
+             })
+
+    refute File.exists?(Path.join(root, "unrelated.txt")),
+           "an unrelated effect was admitted after the root lost its quarantine warning"
+
+    assert File.regular?(open_path),
+           "the failed close durably removed the only root warning for this unresolved effect"
+
+    assert Local.receipt(executor, job_id) == {:error, :effect_settling},
+           "the quarantined receipt became final merely because its open entry disappeared"
+  end
+
   # F5
   test "a settlement that cannot remove its open record never reports confirmed cleanup" do
     # Concept: a receipt that says its cleanup is confirmed while this job's open
@@ -977,6 +1039,16 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     started = System.monotonic_time(:millisecond)
     result = work.()
     {System.monotonic_time(:millisecond) - started, result}
+  end
+
+  defp sync_directory(path) do
+    {:ok, directory} = :file.open(String.to_charlist(path), [:raw, :read, :directory])
+
+    try do
+      :file.sync(directory)
+    after
+      :file.close(directory)
+    end
   end
 
   defp digest(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)

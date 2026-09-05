@@ -194,16 +194,6 @@ defmodule Loopex.Executor.LocalTest do
     assert {:ok, ^receipt} = Local.receipt(fixture.executor, job.job_id)
   end
 
-  defp await_absent(lookup, timeout_ms) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-
-    Stream.repeatedly(fn -> lookup.() end)
-    |> Enum.find_value(false, fn
-      :absent -> true
-      _other -> System.monotonic_time(:millisecond) > deadline && :expired
-    end) == true
-  end
-
   defp await_answer(lookup, timeout_ms) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
     await_answer_until(lookup, deadline)
@@ -224,8 +214,8 @@ defmodule Loopex.Executor.LocalTest do
     end
   end
 
-  # Concept: a reservation belongs to the process that asked for it, and does
-  # not outlive that process.
+  # Concept: a pre-admission reservation belongs to the process that asked for
+  # it, does not outlive that process, and does not yet claim an effect in flight.
   #
   # Technical depth: the reserve call used to run under the default five-second
   # bound while the server could spend exactly five seconds waiting for the root
@@ -234,7 +224,7 @@ defmodule Loopex.Executor.LocalTest do
   # outlives the claim wait. The first case kills a reserving caller; the second
   # holds the root claim for longer than the old bound and proves the caller is
   # answered, not exited.
-  test "a reservation dies with the process that asked for it" do
+  test "a pre-admission reservation dies with the process that asked for it" do
     fixture = fixture("reservation-owner")
     on_exit(fn -> stop_fixture(fixture) end)
     {job, _grant} = job_and_grant(fixture, "owner", "loopex.demo.write")
@@ -247,12 +237,196 @@ defmodule Loopex.Executor.LocalTest do
       end)
 
     assert_receive {:reserved, {:ok, _placement}}, 5_000
-    assert {:error, :effect_in_flight} = Local.receipt(fixture.executor, job.job_id)
+    assert await_reservation_count(fixture.executor, job.job_id, 1, 2_000)
+    assert :absent = Local.receipt(fixture.executor, job.job_id)
 
     Process.exit(reserver, :kill)
 
-    assert await_absent(fn -> Local.receipt(fixture.executor, job.job_id) end, 2_000),
+    assert await_reservation_count(fixture.executor, job.job_id, 0, 2_000),
            "the reservation outlived the process that asked for it"
+
+    assert :absent = Local.receipt(fixture.executor, job.job_id)
+  end
+
+  test "same-job join reservations remain exact until each holder releases or dies" do
+    # Concept: several callers may wait to join one durable operation. Finishing
+    # one waiter says nothing about the other live waiters, and none of them
+    # impersonates the operation's effect owner.
+    #
+    # Technical depth: the reservation table used one `job_id => caller` entry
+    # but installed one monitor per call. A later same-job reservation overwrote
+    # the caller, and either `release` or `DOWN` removed the job plus every monitor
+    # carrying that ID. This case obtains three exact reservations, releases one,
+    # kills another, and uses the surviving holder as the observable fact. Each
+    # holder receives an opaque private reference, so cleanup can remove only the
+    # reservation it owns without weakening the durable duplicate-effect fence.
+    # The manually admitted entry has no effect owner in this instance, making
+    # `effect_unresolved` the truthful receipt answer throughout.
+    fixture = fixture("same-job-holders")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, _grant} = job_and_grant(fixture, "same-job-holders", "loopex.demo.write")
+    parent = self()
+
+    assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+
+    assert :ok =
+             Ledger.with_claim(prepared, fn ->
+               Ledger.admit(
+                 prepared,
+                 Ledger.marker(job),
+                 Ledger.open_entry(job, "executor-local")
+               )
+             end)
+
+    holders =
+      for label <- [:released, :dead, :survivor], into: %{} do
+        pid =
+          spawn(fn ->
+            result = GenServer.call(fixture.executor, {:reserve, job})
+            send(parent, {:holder_reserved, label, self(), result})
+            reservation_holder(fixture.executor, job.job_id, label, result, parent)
+          end)
+
+        {label, pid}
+      end
+
+    reservations =
+      for label <- [:released, :dead, :survivor], into: %{} do
+        pid = Map.fetch!(holders, label)
+        assert_receive {:holder_reserved, ^label, ^pid, {:ok, placement}}, 5_000
+        {label, Map.fetch!(placement, :reservation_ref)}
+      end
+
+    assert reservations |> Map.values() |> MapSet.new() |> MapSet.size() == 3
+    assert await_reservation_count(fixture.executor, job.job_id, 3, 2_000)
+    assert {:error, :effect_unresolved} = Local.receipt(fixture.executor, job.job_id)
+
+    send(holders.released, {:release, reservations.released})
+    assert_receive {:holder_released, :released}, 1_000
+    assert await_reservation_count(fixture.executor, job.job_id, 2, 2_000)
+    assert {:error, :effect_unresolved} = Local.receipt(fixture.executor, job.job_id)
+
+    Process.exit(holders.dead, :kill)
+
+    assert await_reservation_count(fixture.executor, job.job_id, 1, 2_000),
+           "the dead holder's reservation was not removed independently"
+
+    assert {:error, :effect_unresolved} = Local.receipt(fixture.executor, job.job_id)
+
+    send(holders.survivor, {:release, reservations.survivor})
+    assert_receive {:holder_released, :survivor}, 1_000
+    assert await_reservation_count(fixture.executor, job.job_id, 0, 2_000)
+
+    assert Local.receipt(fixture.executor, job.job_id) == {:error, :effect_unresolved},
+           "the open effect did not become unresolved after its last exact holder released"
+  end
+
+  test "a live join waiter does not impersonate an effect owner after that owner dies" do
+    # Concept: a caller waiting to join one admitted operation is not evidence
+    # that this executor still owns the effect. If the actual effect owner dies,
+    # the durable open entry becomes unresolved and keeps the root quarantined
+    # even while the join waiter remains alive.
+    #
+    # Technical depth: every caller first receives a reservation token, but only
+    # the token whose `admit/2` publishes the marker and open entry may become an
+    # effect owner. This case holds that owner inside a delayed real tool, keeps
+    # one same-job joiner polling, and exercises release and `DOWN` on two more
+    # join-only tokens before killing the owner. Counting every reservation as
+    # effectful then lies twice: receipt lookup reports `effect_in_flight`, and
+    # reconciliation excludes the open entry so an unrelated effect is admitted.
+    # Exact owner state must instead disappear on that token's `DOWN` without
+    # removing the polling joiner's independent reservation.
+    fixture = fixture("dead-owner-live-joiner")
+    on_exit(fn -> stop_fixture(fixture) end)
+    {job, grant} = job_and_grant(fixture, "dead-owner-live-joiner", "loopex.demo.wait_write")
+    parent = self()
+
+    owner =
+      Task.async(fn -> Local.execute(fixture.executor, job, grant, notify: parent) end)
+
+    assert_receive {:executor_process_started, job_id, "loopex.demo.wait_write", ["PATH"]},
+                   5_000
+
+    assert job_id == job.job_id
+
+    joiner = Task.async(fn -> Local.execute(fixture.executor, job, grant) end)
+
+    released_joiner =
+      spawn(fn ->
+        result = GenServer.call(fixture.executor, {:reserve, job})
+        send(parent, {:holder_reserved, :owner_test_release, self(), result})
+
+        reservation_holder(
+          fixture.executor,
+          job.job_id,
+          :owner_test_release,
+          result,
+          parent
+        )
+      end)
+
+    dead_joiner =
+      spawn(fn ->
+        result = GenServer.call(fixture.executor, {:reserve, job})
+        send(parent, {:holder_reserved, :owner_test_dead, self(), result})
+        reservation_holder(fixture.executor, job.job_id, :owner_test_dead, result, parent)
+      end)
+
+    assert_receive {:holder_reserved, :owner_test_release, ^released_joiner,
+                    {:ok, released_placement}},
+                   5_000
+
+    released_ref = Map.fetch!(released_placement, :reservation_ref)
+
+    assert_receive {:holder_reserved, :owner_test_dead, ^dead_joiner, {:ok, _dead_placement}},
+                   5_000
+
+    try do
+      assert await_reservation_count(fixture.executor, job.job_id, 4, 2_000),
+             "the same-job joiners never obtained independent reservations"
+
+      send(released_joiner, {:release, released_ref})
+      assert_receive {:holder_released, :owner_test_release}, 1_000
+
+      assert await_reservation_count(fixture.executor, job.job_id, 3, 2_000),
+             "releasing one joiner erased another same-job holder"
+
+      assert {:error, :effect_in_flight} = Local.receipt(fixture.executor, job.job_id)
+
+      Process.exit(dead_joiner, :kill)
+
+      assert await_reservation_count(fixture.executor, job.job_id, 2, 2_000),
+             "a joiner's DOWN erased another same-job holder"
+
+      assert {:error, :effect_in_flight} = Local.receipt(fixture.executor, job.job_id)
+
+      _owner_result = Task.shutdown(owner, :brutal_kill)
+
+      assert await_reservation_count(fixture.executor, job.job_id, 1, 2_000),
+             "the dead effect owner's reservation was not removed independently"
+
+      assert Process.alive?(joiner.pid), "the same-job joiner did not remain live"
+
+      {unrelated, unrelated_grant} =
+        job_and_grant(fixture, "after-dead-owner", "loopex.demo.write")
+
+      unrelated_result = Local.execute(fixture.executor, unrelated, unrelated_grant)
+      receipt_result = Local.receipt(fixture.executor, job.job_id)
+
+      assert unrelated_result == {:error, {:reconciliation_required, 1}},
+             "a join-only reservation hid the dead owner's unresolved open authority"
+
+      assert receipt_result == {:error, :effect_unresolved},
+             "the live joiner was reported as the dead operation's effect owner"
+
+      assert {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+      assert Ledger.open?(prepared, job.job_id)
+    after
+      if Process.alive?(owner.pid), do: Task.shutdown(owner, :brutal_kill)
+      if Process.alive?(joiner.pid), do: Task.shutdown(joiner, :brutal_kill)
+      if Process.alive?(released_joiner), do: Process.exit(released_joiner, :kill)
+      if Process.alive?(dead_joiner), do: Process.exit(dead_joiner, :kill)
+    end
   end
 
   test "a reserve blocked by a held claim is answered inside its own bound" do
@@ -260,13 +434,17 @@ defmodule Loopex.Executor.LocalTest do
     on_exit(fn -> stop_fixture(fixture) end)
     {job, grant} = job_and_grant(fixture, "claim", "loopex.demo.write")
     {:ok, prepared} = Ledger.prepare(fixture.ledger, "executor-local", 5_000)
+    parent = self()
 
     holder =
       Task.async(fn ->
-        Ledger.with_claim(prepared, fn -> Process.sleep(6_500) end)
+        Ledger.with_claim(prepared, fn ->
+          send(parent, :reservation_claim_held)
+          Process.sleep(6_500)
+        end)
       end)
 
-    Process.sleep(100)
+    assert_receive :reservation_claim_held, 1_000
     started = System.monotonic_time(:millisecond)
     result = Local.execute(fixture.executor, job, grant)
     elapsed = System.monotonic_time(:millisecond) - started
@@ -315,6 +493,39 @@ defmodule Loopex.Executor.LocalTest do
       lease: lease,
       executor: executor
     }
+  end
+
+  defp reservation_holder(executor, job_id, label, {:ok, _placement}, parent) do
+    receive do
+      {:release, reservation_ref} ->
+        GenServer.cast(executor, {:release, job_id, reservation_ref})
+        _barrier = GenServer.call(executor, :stats)
+        send(parent, {:holder_released, label})
+    end
+  end
+
+  defp reservation_holder(_executor, _job_id, _label, _answer, _parent), do: :ok
+
+  defp await_reservation_count(executor, job_id, expected, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    await_reservation_count_until(executor, job_id, expected, deadline)
+  end
+
+  defp await_reservation_count_until(executor, job_id, expected, deadline) do
+    holders = executor |> :sys.get_state() |> Map.fetch!(:reserved) |> Map.get(job_id)
+
+    count = if match?(%MapSet{}, holders), do: MapSet.size(holders), else: 0
+
+    if count == expected do
+      true
+    else
+      if System.monotonic_time(:millisecond) < deadline do
+        Process.sleep(5)
+        await_reservation_count_until(executor, job_id, expected, deadline)
+      else
+        false
+      end
+    end
   end
 
   defp job_and_grant(fixture, label, tool_id) do

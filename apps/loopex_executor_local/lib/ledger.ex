@@ -43,6 +43,7 @@ defmodule Loopex.Executor.Local.Ledger do
   @max_epoch 115_792_089_237_316_195_423_570_985_008_687_907_853_269_984_665_640_564_039_457_584_007_913_129_639_935
   @max_uint64 18_446_744_073_709_551_615
   @claim_poll_ms 5
+  @retain_claim_tag :loopex_retain_root_claim
 
   # Concept: each record kind has one closed key set, and an unknown key is a
   # record this ledger did not write.
@@ -212,6 +213,11 @@ defmodule Loopex.Executor.Local.Ledger do
   failed, the same fact travels with the exception instead: the original kind and
   stacktrace are preserved and the reason becomes
   `{:root_claim_not_released, reason, original_reason}`.
+
+  A direct `retain_claim/1` result is the one intentional exception: it leaves
+  the claim directory in place and reports `root_claim_retained`. This is the
+  fail-closed answer for an administrative body that cannot prove either its
+  authority warning or its late writer is settled.
   """
   @spec with_claim(prepared(), (-> term()), non_neg_integer()) :: term() | {:error, term()}
   def with_claim(prepared, work, wait_ms \\ 0)
@@ -279,12 +285,18 @@ defmodule Loopex.Executor.Local.Ledger do
         # No retry is attempted and no claim is reaped, because elapsed time is
         # not proof that no late writer survives; the reason names what an
         # operator has to clear.
-        case File.rmdir(path) do
-          :ok ->
-            outcome
+        case outcome do
+          {@retain_claim_tag, reason} ->
+            {:error, {:ledger_unavailable, {:root_claim_retained, reason}}}
 
-          {:error, reason} ->
-            {:error, {:ledger_unavailable, {:root_claim_not_released, reason}}}
+          _release ->
+            case File.rmdir(path) do
+              :ok ->
+                outcome
+
+              {:error, reason} ->
+                {:error, {:ledger_unavailable, {:root_claim_not_released, reason}}}
+            end
         end
 
       {:error, :eexist} when wait_ms > 0 ->
@@ -419,6 +431,9 @@ defmodule Loopex.Executor.Local.Ledger do
   Called only after a matching durable refusal or a receipt whose cleanup is
   confirmed. Anything weaker leaves the entry, and therefore the root, in the
   quarantined state that refuses new effects until an operator reconciles it.
+  Unlink and parent sync are one close: failure after either step is incomplete,
+  and a caller that holds the claim must restore the exact warning or retain the
+  claim rather than treating a missing path as finality.
   """
   @spec close_open(prepared(), binary()) :: :ok | {:error, term()}
   def close_open(%{root: root}, job_id) do
@@ -430,6 +445,51 @@ defmodule Loopex.Executor.Local.Ledger do
       {:error, reason} -> {:error, {:ledger_unavailable, reason}}
     end
   end
+
+  @doc """
+  ## Concept
+
+  Restores the exact open-authority warning when a close did not complete.
+
+  ## Technical depth
+
+  The caller already holds the root claim. An absent entry is republished with
+  the same canonical bytes and file-then-parent sync ordering as admission; an
+  identical entry is already restored. Conflicting or malformed bytes are
+  unavailability rather than something this recovery may overwrite.
+  """
+  @spec restore_open(prepared(), map()) :: :ok | {:error, term()}
+  def restore_open(%{root: root}, open) when is_map(open) do
+    path = open_path(root, Map.get(open, "job_id", ""))
+
+    if Map.get(open, :ledger_kind) == @open_kind and exact_keys?(open) and
+         valid_open_entry?(open) do
+      case read_record(path, [@open_kind]) do
+        :absent -> publish(path, encode(open))
+        {:ok, ^open} -> :ok
+        {:ok, _other} -> {:error, {:ledger_unavailable, :open_authority_changed}}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, {:ledger_unavailable, :malformed_open_entry}}
+    end
+  end
+
+  @doc """
+  ## Concept
+
+  Keeps the current root claim as the last fail-closed warning.
+
+  ## Technical depth
+
+  This value is meaningful only as the direct result of a `with_claim/3` body.
+  The outer claim owner then deliberately leaves its directory in place, so a
+  close whose open record could not be restored cannot turn ambiguity into new
+  effect permission. Claims are already never reaped; the operator clears this
+  one through the same reconciliation procedure as any stranded claim.
+  """
+  @spec retain_claim(term()) :: {:loopex_retain_root_claim, term()}
+  def retain_claim(reason), do: {@retain_claim_tag, reason}
 
   @doc """
   ## Concept

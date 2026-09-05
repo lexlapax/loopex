@@ -1091,13 +1091,16 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     assert {:ok, %{outcome: :completed}} = Task.await(holder, 15_000)
   end
 
-  test "the lease-lost retention path reserves the receipt's own declared retention bound" do
+  test "lease-lost retention opens the declared one-millisecond allowance once and spends its remainder" do
     # ADR 0016 gives one formula for `receipt_retention_ms`, and a committed
     # period of three is exactly where a second derivation by integer division
-    # disagreed with it: every receipt declared one millisecond of retention and
-    # the lease-lost path reserved zero for it. Proving the pure function proves
-    # only the pure function, so this observes the budget the running system
-    # actually hands the retention worker.
+    # disagrees with it: the canonical result is one millisecond while `div/2`
+    # produces zero. Proving the pure function alone proves nothing about the
+    # running path, so this observes both the allowance production opens and the
+    # exact remainder its later lease-lost retention worker receives. That
+    # remainder may truthfully be zero: claim acquisition is an earlier phase of
+    # the same one-millisecond episode, and refreshing the worker to a new
+    # millisecond would violate the contract this case protects.
     grace = 3
     assert {:ok, bounds} = Executor.cancellation_bounds(grace)
     assert bounds.receipt_retention_ms == 1
@@ -1118,9 +1121,23 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     assert :erlang.trace_pattern({Local, :bounded_work, 3}, true, [:local]) == 1
     assert :erlang.trace_pattern({Local, :retain_now, 3}, true, [:local]) == 1
 
+    assert :erlang.trace_pattern(
+             {Local, :receipt_reserve_ms, 1},
+             [{:_, [], [{:return_trace}]}],
+             [:local]
+           ) == 1
+
+    assert :erlang.trace_pattern(
+             {Local, :retention_remaining, 0},
+             [{:_, [], [{:return_trace}]}],
+             [:local]
+           ) == 1
+
     on_exit(fn ->
       _ = :erlang.trace_pattern({Local, :bounded_work, 3}, false, [:local])
       _ = :erlang.trace_pattern({Local, :retain_now, 3}, false, [:local])
+      _ = :erlang.trace_pattern({Local, :receipt_reserve_ms, 1}, false, [:local])
+      _ = :erlang.trace_pattern({Local, :retention_remaining, 0}, false, [:local])
     end)
 
     task =
@@ -1129,7 +1146,12 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
         # first instruction removes any window between arming the trace and the
         # calls it has to see.
         :erlang.trace(self(), true, [:call, {:tracer, parent}])
-        Local.execute(local, request, grant(request), [notify: parent], nil)
+        result = Local.execute(local, request, grant(request), [notify: parent], nil)
+        send(parent, {:retention_finished, self(), result})
+
+        receive do
+          :trace_collected -> result
+        end
       end)
 
     assert_receive {:executor_process_started, "lease-lost-reserve", _tool, _environment}, 5_000
@@ -1140,18 +1162,35 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     # retention this reserve belongs to.
     stop(fixture.lease)
 
-    _ = Task.yield(task, 15_000) || Task.shutdown(task, :brutal_kill)
+    assert_receive {:retention_finished, tracee, result}, 15_000
+    assert tracee == task.pid
+
+    # Task completion and trace messages travel on different signal paths. A
+    # zero-time mailbox drain after observing completion can therefore run before
+    # the trace messages arrive. Keep the tracee alive, request the VM's delivery
+    # barrier, and only then let it exit; every call and return used below is in
+    # this mailbox before `collect_call_trace/0` starts.
+    delivered = :erlang.trace_delivered(tracee)
+    assert_receive {:trace_delivered, ^tracee, ^delivered}, 5_000
+    send(tracee, :trace_collected)
+    assert Task.await(task, 5_000) == result
 
     events = collect_call_trace()
 
-    assert Enum.any?(events, &match?({Local, :retain_now, _arguments}, &1)),
+    assert Enum.any?(events, &match?({:call, Local, :retain_now, _arguments}, &1)),
            "the lease-lost retention path was never reached, so its reserve was not observed"
 
-    reserve = lease_lost_reserve!(events)
+    assert canonical_retention_bound!(events, grace) == bounds.receipt_retention_ms
 
-    assert reserve == bounds.receipt_retention_ms,
-           "the lease-lost retention reserved #{reserve} ms where every receipt for this " <>
-             "period declares #{bounds.receipt_retention_ms} ms"
+    {remaining, reserve} = lease_lost_reserve!(events)
+
+    assert remaining in 0..bounds.receipt_retention_ms,
+           "the shared retention deadline reported #{remaining} ms remaining from a " <>
+             "#{bounds.receipt_retention_ms} ms allowance"
+
+    assert reserve == remaining,
+           "the lease-lost retention reserved #{reserve} ms instead of the shared " <>
+             "deadline's exact #{remaining} ms remainder"
   end
 
   test "a refusal never renames over an admission marker for the same job" do
@@ -1197,26 +1236,54 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     assert replaced["reason"]["code"] == "effective_deadline_reached"
   end
 
-  # The trace is ordered per process, and `retain_now/3` calls `bounded_work/3`
-  # directly, so the first bounded reserve after that entry is the one the
-  # lease-lost retention chose.
-  defp lease_lost_reserve!(events) do
+  defp canonical_retention_bound!(events, grace) do
+    assert Enum.any?(events, &match?({:call, Local, :receipt_reserve_ms, [^grace]}, &1)),
+           "the running settlement never derived its allowance from the canonical formula"
+
     events
-    |> Enum.drop_while(&(not match?({Local, :retain_now, _arguments}, &1)))
     |> Enum.find_value(fn
-      {Local, :bounded_work, [_work, reserve, _lease]} -> {:ok, reserve}
+      {:return, Local, :receipt_reserve_ms, 1, reserve} -> {:ok, reserve}
       _other -> nil
     end)
     |> case do
       {:ok, reserve} -> reserve
-      nil -> flunk("the lease-lost retention entered no bounded work")
+      nil -> flunk("the canonical retention formula returned no observed allowance")
+    end
+  end
+
+  # The trace is ordered per process. Inside `retain_now/3`, production first
+  # reads the shared deadline's remainder and then hands exactly that value to
+  # `bounded_work/3`; zero is valid when the earlier phases spent the sole 1 ms.
+  defp lease_lost_reserve!(events) do
+    after_retain =
+      Enum.drop_while(events, &(not match?({:call, Local, :retain_now, _arguments}, &1)))
+
+    remaining =
+      Enum.find_value(after_retain, fn
+        {:return, Local, :retention_remaining, 0, value} -> {:ok, value}
+        _other -> nil
+      end)
+
+    reserve =
+      Enum.find_value(after_retain, fn
+        {:call, Local, :bounded_work, [_work, value, _lease]} -> {:ok, value}
+        _other -> nil
+      end)
+
+    case {remaining, reserve} do
+      {{:ok, remaining}, {:ok, reserve}} -> {remaining, reserve}
+      {nil, _reserve} -> flunk("the lease-lost retention read no shared deadline remainder")
+      {_remaining, nil} -> flunk("the lease-lost retention entered no bounded work")
     end
   end
 
   defp collect_call_trace(acc \\ []) do
     receive do
       {:trace, _pid, :call, {module, function, arguments}} ->
-        collect_call_trace([{module, function, arguments} | acc])
+        collect_call_trace([{:call, module, function, arguments} | acc])
+
+      {:trace, _pid, :return_from, {module, function, arity}, result} ->
+        collect_call_trace([{:return, module, function, arity, result} | acc])
     after
       0 -> Enum.reverse(acc)
     end

@@ -112,9 +112,9 @@ defmodule Loopex.Executor.Local do
   # up to `@claim_wait_ms` inside the server, and `GenServer.call/2`'s default
   # bound is that same number, so a caller expired exactly as the claim was won:
   # the server then recorded a reservation for a caller that had already exited
-  # and no release ever arrived, and every later lookup of that job answered
-  # `effect_in_flight` for work nobody was doing. The call bound is therefore the
-  # claim wait plus a margin, and the server monitors the caller besides.
+  # and no release ever arrived. The call bound is therefore the claim wait plus
+  # a margin, and the server monitors the caller besides; only the later token
+  # that wins durable admission becomes operation-owner evidence.
   @reserve_call_ms @claim_wait_ms + 5_000
 
   # The longest a receipt lookup waits for another instance's root claim. It is a
@@ -263,11 +263,11 @@ defmodule Loopex.Executor.Local do
     job_id = Map.get(job, :job_id, "")
 
     case GenServer.call(executor, {:reserve, job}, @reserve_call_ms) do
-      {:ok, placement} ->
+      {:ok, %{reservation_ref: reservation_ref} = placement} ->
         try do
           run_reserved(placement, job, grant, options, progress)
         after
-          GenServer.cast(executor, {:release, job_id})
+          GenServer.cast(executor, {:release, job_id, reservation_ref})
         end
 
       {:retained, receipt} ->
@@ -557,6 +557,7 @@ defmodule Loopex.Executor.Local do
   # readable without waiting for the server, and is not dumped anywhere. The key
   # is an atom and every job identity is a binary, so the two cannot collide.
   @ledger_authority_key :loopex_ledger_authority
+  @operation_owner_key :loopex_operation_owner
 
   defp ledger_authority(table) do
     case :ets.lookup(table, @ledger_authority_key) do
@@ -565,6 +566,88 @@ defmodule Loopex.Executor.Local do
     end
   rescue
     ArgumentError -> nil
+  end
+
+  # Concept: one exact reservation token owns an admitted operation; join
+  # waiters remain reservations and never become effect evidence.
+  #
+  # Technical depth: the token is inserted into this executor's private table
+  # while `open_admission/2` still holds the root claim, after the marker and open
+  # entry are durable and before the effect permit returns. A GenServer message
+  # here would either leave an observable open-without-owner gap after claim
+  # release or deadlock behind a receipt call waiting for the claim. The tuple
+  # key cannot collide with binary in-flight job keys or the atom ledger key.
+  # Release and `DOWN` delete the exact `{key, reference}` object, so a joiner's
+  # cleanup cannot erase the owner.
+  defp claim_operation_owner(state, job_id) do
+    key = {@operation_owner_key, job_id}
+    entry = {key, state.reservation_ref}
+
+    case :ets.lookup(state.inflight_table, key) do
+      [^entry] ->
+        :ok
+
+      [] ->
+        if :ets.insert_new(state.inflight_table, entry),
+          do: :ok,
+          else: {:error, {:ledger_unavailable, :operation_owner_unavailable}}
+
+      _other ->
+        {:error, {:ledger_unavailable, :operation_owner_unavailable}}
+    end
+  rescue
+    ArgumentError -> {:error, {:ledger_unavailable, :operation_owner_unavailable}}
+  end
+
+  defp operation_owner?(state, job_id) do
+    key = {@operation_owner_key, job_id}
+
+    case :ets.lookup(state.inflight_table, key) do
+      [{^key, reservation_ref}] -> reservation_held?(state, job_id, reservation_ref)
+      _absent -> false
+    end
+  rescue
+    ArgumentError -> false
+  end
+
+  defp operation_owner?(state, job_id, reservation_ref) do
+    key = {@operation_owner_key, job_id}
+
+    case :ets.lookup(state.inflight_table, key) do
+      [{^key, ^reservation_ref}] -> reservation_held?(state, job_id, reservation_ref)
+      _absent_or_other_owner -> false
+    end
+  rescue
+    ArgumentError -> false
+  end
+
+  defp operation_owner_jobs(state) do
+    :ets.foldl(
+      fn
+        {{@operation_owner_key, job_id}, reservation_ref}, jobs ->
+          if reservation_held?(state, job_id, reservation_ref), do: [job_id | jobs], else: jobs
+
+        _entry, jobs ->
+          jobs
+      end,
+      [],
+      state.inflight_table
+    )
+  rescue
+    ArgumentError -> []
+  end
+
+  defp reservation_held?(state, job_id, reservation_ref) do
+    state.reserved
+    |> Map.get(job_id, MapSet.new())
+    |> MapSet.member?(reservation_ref)
+  end
+
+  defp forget_operation_owner(table, job_id, reservation_ref) do
+    :ets.delete_object(table, {{@operation_owner_key, job_id}, reservation_ref})
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   # Concept: a job's process cleanup is one episode with one instant, opened the
@@ -881,12 +964,14 @@ defmodule Loopex.Executor.Local do
   #
   # `resolved` is the exact set of open entries that are not evidence of anything
   # unresolved: the request being decided, whose own entry means it is already
-  # admitted and must be joined rather than refused, and every job this instance
-  # currently holds reserved, whose entry means work in flight here. Reading a
-  # live entry as an abandoned one would make a root unusable the moment it
-  # carried two concurrent jobs, and would refuse the second instance of the pair
-  # that ADR 0016 requires to join a single operation. Everything else is a peer's
-  # authority this instance cannot resolve, and that is exactly what quarantines.
+  # admitted and must be joined rather than refused, and every operation this
+  # instance actually owns. A join waiter is deliberately absent: after the
+  # operation owner dies, its durable entry must quarantine unrelated work even
+  # while that waiter keeps polling. Reading a live owner's entry as abandoned
+  # would make a root unusable the moment it carried two concurrent jobs and
+  # would refuse the second instance of the pair ADR 0016 requires to join.
+  # Everything else is authority this instance cannot resolve, and that is
+  # exactly what quarantines.
   defp reconcile(ledger, resolved) do
     case Ledger.open_snapshot(ledger) do
       {:ok, entries} ->
@@ -909,26 +994,15 @@ defmodule Loopex.Executor.Local do
   # authority is still on the root is not this job's final answer either.
   #
   # Technical depth: `:absent` is what ends a recovered run `outcome_unknown`,
-  # so a lookup that arrives while the job is reserved here answers
-  # `effect_in_flight` instead. The reservation table is this server's own
-  # state, read without waiting on the job, which runs in its caller. Every other
-  # answer joins a terminal to an open entry, which ADR 0016 clause 7 decides
-  # under the root claim from one bounded snapshot, so a peer's settlement cannot
-  # publish or remove anything between the two reads this answer combines.
+  # so a lookup that arrives while this instance still owns the admitted effect
+  # answers `effect_in_flight` instead. A reservation alone can belong to a join
+  # waiter and is not ownership evidence; only the exact token that won durable
+  # admission enters the operation-owner table. Every other answer joins a
+  # terminal to an open entry, which ADR 0016 clause 7 decides under the root
+  # claim from one bounded snapshot, so a peer's settlement cannot publish or
+  # remove anything between the two reads this answer combines.
   def handle_call({:receipt, job_id}, _from, state) do
-    if Map.has_key?(state.reserved, job_id) do
-      {:reply, {:error, :effect_in_flight}, state}
-    else
-      answer =
-        final_receipt_under_claim(
-          state.ledger,
-          state.ledger_root,
-          job_id,
-          @receipt_claim_wait_ms
-        )
-
-      {:reply, answer, state}
-    end
+    {:reply, local_receipt_under_claim(state, job_id, @receipt_claim_wait_ms), state}
   end
 
   def handle_call(:stats, _from, state),
@@ -944,25 +1018,29 @@ defmodule Loopex.Executor.Local do
   #
   # Technical depth: a quarantined root refuses everything; a retained receipt
   # for this exact request is replayed and a conflicting one refuses; anything
-  # else is reserved to the caller, which then owns the waiting. The reservation
-  # records who holds the job so `stats/1` and the release below describe live
-  # work rather than work this server is performing.
+  # else is reserved to the caller, which then owns the waiting. Each reservation
+  # records its exact live holder so receipt lookup and release below describe
+  # work still held here rather than work this server is performing.
   def handle_call({:reserve, job}, {caller, _tag}, state) do
     job_id = Map.get(job, :job_id, "")
 
     case reserve_decision(state, job, job_id) do
-      # Technical depth: the caller is monitored so that a reservation never
-      # outlives the process it was made for; a release that arrives later is
-      # then the ordinary path, and one that never arrives is answered by the
-      # monitor rather than by a job that reads as in flight forever.
+      # Technical depth: every call gets an opaque reference and its own caller
+      # monitor. Several callers can therefore join one durable job without a
+      # release or `DOWN` for one erasing another. Reservation says only that the
+      # caller is deciding or joining; the admission winner separately installs
+      # the one token that says this instance owns the effect.
       :reserve ->
+        reservation_ref = make_ref()
         monitor = Process.monitor(caller)
+        holders = Map.get(state.reserved, job_id, MapSet.new())
 
-        {:reply, {:ok, placement(state)},
+        {:reply, {:ok, placement(state, reservation_ref)},
          %{
            state
-           | reserved: Map.put(state.reserved, job_id, caller),
-             reservation_monitors: Map.put(state.reservation_monitors, monitor, job_id)
+           | reserved: Map.put(state.reserved, job_id, MapSet.put(holders, reservation_ref)),
+             reservation_monitors:
+               Map.put(state.reservation_monitors, monitor, {job_id, reservation_ref})
          }}
 
       answer ->
@@ -998,7 +1076,7 @@ defmodule Loopex.Executor.Local do
   end
 
   defp resolved_jobs(state, job_id),
-    do: MapSet.new([job_id | Map.keys(state.reserved)])
+    do: MapSet.new([job_id | operation_owner_jobs(state)])
 
   # Concept: this request replays a terminal only where that terminal is final,
   # and joins the one operation where it is not.
@@ -1048,19 +1126,22 @@ defmodule Loopex.Executor.Local do
   # server needs to stay the authority.
   #
   # Technical depth: identity, epoch, fence, leases, ledger root and authority,
-  # clock, artifact store, configured period and probe, plus the in-flight table
-  # and this server's own pid. The reservation map and the dispatch counts stay
-  # here, because they are facts about the executor rather than about the job. It
-  # carries the same member names the serialized state used, so every function
-  # below reads one shape whichever process it runs in.
-  defp placement(state) do
+  # clock, artifact store, configured period and probe, plus the in-flight table,
+  # this server's own pid, and the opaque reference needed to release this one
+  # holder. The reservation and monitor maps and the dispatch counts stay here,
+  # because they are executor-wide facts rather than job placement. The result
+  # otherwise carries the same member names the serialized state used, so every
+  # function below reads one shape whichever process it runs in.
+  defp placement(state, reservation_ref) do
     state
-    |> Map.drop([:reserved, :dispatches])
+    |> Map.drop([:reserved, :reservation_monitors, :dispatches])
     |> Map.put(:executor, self())
+    |> Map.put(:reservation_ref, reservation_ref)
   end
 
   @impl GenServer
-  def handle_cast({:release, job_id}, state), do: {:noreply, drop_reservation(state, job_id)}
+  def handle_cast({:release, job_id, reservation_ref}, state),
+    do: {:noreply, drop_reservation(state, job_id, reservation_ref)}
 
   # Concept: a job is counted as dispatched once it has been durably admitted,
   # never merely because someone asked for it.
@@ -1069,8 +1150,13 @@ defmodule Loopex.Executor.Local do
   # start, so a pre-effect refusal must leave it untouched. The caller reports
   # admission from the process that obtained it, and message order from that one
   # caller keeps the count settled before any answer that reads it.
-  def handle_cast({:admitted, job_id}, state) do
-    {:noreply, update_in(state.dispatches, &Map.update(&1, job_id, 1, fn count -> count + 1 end))}
+  def handle_cast({:admitted, job_id, reservation_ref}, state) do
+    if operation_owner?(state, job_id, reservation_ref) do
+      {:noreply,
+       update_in(state.dispatches, &Map.update(&1, job_id, 1, fn count -> count + 1 end))}
+    else
+      {:noreply, state}
+    end
   end
 
   # Concept: a message that arrives after the job it belongs to is over is
@@ -1087,22 +1173,37 @@ defmodule Loopex.Executor.Local do
       {nil, _monitors} ->
         {:noreply, state}
 
-      {job_id, monitors} ->
-        {:noreply, drop_reservation(%{state | reservation_monitors: monitors}, job_id)}
+      {{job_id, reservation_ref}, monitors} ->
+        {:noreply,
+         drop_reservation(%{state | reservation_monitors: monitors}, job_id, reservation_ref)}
     end
   end
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  defp drop_reservation(state, job_id) do
+  defp drop_reservation(state, job_id, reservation_ref) do
     {gone, monitors} =
-      Enum.split_with(state.reservation_monitors, fn {_monitor, held} -> held == job_id end)
+      Enum.split_with(state.reservation_monitors, fn {_monitor, held} ->
+        held == {job_id, reservation_ref}
+      end)
 
     Enum.each(gone, fn {monitor, _job_id} -> Process.demonitor(monitor, [:flush]) end)
 
+    holders =
+      state.reserved
+      |> Map.get(job_id, MapSet.new())
+      |> MapSet.delete(reservation_ref)
+
+    reserved =
+      if MapSet.size(holders) == 0,
+        do: Map.delete(state.reserved, job_id),
+        else: Map.put(state.reserved, job_id, holders)
+
+    forget_operation_owner(state.inflight_table, job_id, reservation_ref)
+
     %{
       state
-      | reserved: Map.delete(state.reserved, job_id),
+      | reserved: reserved,
         reservation_monitors: Map.new(monitors)
     }
   end
@@ -1273,7 +1374,11 @@ defmodule Loopex.Executor.Local do
   defp admitted_execute(placement, job, tool, lease_pid, workspace, arguments, options, progress) do
     case admit(placement, job) do
       {:ok, admission} ->
-        GenServer.cast(placement.executor, {:admitted, job.job_id})
+        GenServer.cast(
+          placement.executor,
+          {:admitted, job.job_id, placement.reservation_ref}
+        )
+
         lease = {Process.monitor(lease_pid), lease_pid}
         Process.put(:loopex_admission, admission)
 
@@ -1391,11 +1496,49 @@ defmodule Loopex.Executor.Local do
   defp dispose_open_authority(placement, job, retained, lease) do
     if retained.cleanup_confirmation == :confirmed do
       case remove_open_authority(placement, job, lease) do
-        :ok -> {:ok, retained}
-        {:error, _reason} -> quarantine_open_authority(placement, retained, lease)
+        :ok ->
+          {:ok, retained}
+
+        {:unconfirmed, close_reason} ->
+          Ledger.retain_claim({:open_authority_close_unconfirmed, close_reason})
+
+        {:error, close_reason} ->
+          case restore_open_authority(placement, job, lease) do
+            :ok ->
+              quarantine_open_authority(placement, retained, lease)
+
+            {:error, restore_reason} ->
+              Ledger.retain_claim({:open_authority_not_restored, close_reason, restore_reason})
+          end
       end
     else
       {:ok, retained}
+    end
+  end
+
+  # Concept: a close that did not complete leaves the same open warning the
+  # settlement began with.
+  #
+  # Technical depth: unlink and parent sync are separate filesystem actions, and
+  # a bounded callback can finish the first before it fails or is stopped. The
+  # open record is therefore republished under the still-held root claim before
+  # that claim is released. A removal worker not confirmed dead may still unlink
+  # that restored record, so that path retains the claim without racing it.
+  # Recovery is itself bounded by a share of the one retention allowance; if it
+  # cannot be proved, the caller retains the claim instead, because neither a
+  # missing entry nor an uncertain late worker is effect permission.
+  defp restore_open_authority(placement, job, lease) do
+    open = Ledger.open_entry(job, placement.identity)
+
+    case bounded_work(
+           fn -> Ledger.restore_open(placement.ledger, open) end,
+           restoration_bound(),
+           lease
+         ) do
+      {:done, result} -> result
+      {:stopped, reason} -> {:error, {:open_authority_restore_stopped, reason}}
+      {:abandoned, _cause, _stopped, {:late, :ok}} -> :ok
+      {:abandoned, cause, _stopped, _unfinished} -> {:error, cause}
     end
   end
 
@@ -1455,8 +1598,14 @@ defmodule Loopex.Executor.Local do
       )
 
     case removal do
-      {:done, result} ->
-        result
+      {:done, :ok} ->
+        :ok
+
+      {:done, {:error, _reason} = error} ->
+        error
+
+      {:done, other} ->
+        {:error, {:ledger_unavailable, {:invalid_open_authority_close, other}}}
 
       {:abandoned, _cause, _stopped, {:late, :ok}} ->
         :ok
@@ -1464,7 +1613,10 @@ defmodule Loopex.Executor.Local do
       {:stopped, reason} ->
         {:error, {:ledger_unavailable, {:open_authority_removal_stopped, reason}}}
 
-      {:abandoned, cause, _stopped, _unfinished} ->
+      {:abandoned, cause, false, :none} ->
+        {:unconfirmed, {:ledger_unavailable, cause}}
+
+      {:abandoned, cause, _stopped, _finished_or_stopped} ->
         {:error, {:ledger_unavailable, cause}}
     end
   end
@@ -1483,6 +1635,10 @@ defmodule Loopex.Executor.Local do
   @removal_share 2
 
   defp removal_bound, do: div(retention_remaining(), @removal_share)
+
+  @restoration_share 2
+
+  defp restoration_bound, do: div(retention_remaining(), @restoration_share)
 
   # Concept: waiting for the claim is a phase of the settlement too, and it may
   # not spend what the phases after it need.
@@ -1563,7 +1719,9 @@ defmodule Loopex.Executor.Local do
   # action deadline. A backward wall jump between the two therefore cannot extend
   # authority past the monotonic fence, and a forward one expires it by wall
   # truth. Both checks precede the marker, so a job refused here has no admission
-  # to withdraw.
+  # to withdraw. After the durable records, the exact reservation token becomes
+  # the operation owner under the still-held root claim; only then may the one
+  # effect permit return.
   defp open_admission(state, job) do
     with {:ok, wall, monotonic} <- sample(state),
          {:ok, action} <- derive_action_deadline(wall, monotonic, job),
@@ -1573,7 +1731,8 @@ defmodule Loopex.Executor.Local do
              state.ledger,
              Ledger.marker(job),
              Ledger.open_entry(job, state.identity)
-           ) do
+           ),
+         :ok <- claim_operation_owner(state, job.job_id) do
       {:ok, %{wall: wall, monotonic: monotonic, action: action, observed_at_ms: wall}}
     else
       {:error, {:refused_before_effect, reason}} ->
@@ -4465,7 +4624,8 @@ defmodule Loopex.Executor.Local do
   # `:absent` is what ends a recovered run `outcome_unknown` and would admit
   # unrelated effects on a root whose effect never reached a durable terminal. An
   # entry with no receipt is an effect this instance is not settling; whether it
-  # is in flight here is decided by the caller that holds the reservation table.
+  # is in flight here is decided by the caller that holds the operation-owner
+  # table.
   # Only neither present is the one true absence, and only a receipt whose entry
   # is gone is final.
   defp final_receipt(ledger, root, job_id) do
@@ -4483,6 +4643,33 @@ defmodule Loopex.Executor.Local do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # Concept: this instance reports a job in flight only while its exact admitted
+  # operation owner remains live.
+  #
+  # Technical depth: the fast owner check avoids a root-claim wait for active
+  # work. An absent check is repeated inside the claim because admission inserts
+  # its owner token while holding that same claim: if admission wins the ordering,
+  # the second check sees `effect_in_flight`; if this lookup wins, its receipt and
+  # open snapshot is fixed before a later permit can begin. A join-only token
+  # satisfies neither check.
+  defp local_receipt_under_claim(_state, "", _wait), do: :absent
+
+  defp local_receipt_under_claim(state, job_id, wait) do
+    if operation_owner?(state, job_id) do
+      {:error, :effect_in_flight}
+    else
+      Ledger.with_claim(
+        state.ledger,
+        fn ->
+          if operation_owner?(state, job_id),
+            do: {:error, :effect_in_flight},
+            else: final_receipt(state.ledger, state.ledger_root, job_id)
+        end,
+        wait
+      )
     end
   end
 
