@@ -115,7 +115,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     previous_observer = Application.get_env(:loopex_llm_reqllm, :provider_attempt_canary_observer)
     previous_port = Application.get_env(:loopex_llm_reqllm, :provider_attempt_closed_port)
     previous_mode = Application.get_env(:loopex_llm_reqllm, :provider_attempt_canary_mode)
-    rate_limited_port = start_rate_limited_server(self())
+    {rate_limited_server, rate_limited_port} = start_rate_limited_server()
 
     Application.put_env(
       :req_llm,
@@ -141,9 +141,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
       assert Adapter.complete(request, [], Model.discard_progress()) ==
                {:error, {:dispatched_or_unknown, "model_call_failed"}}
 
-      assert_receive {:provider_transport_attempt, _worker}, 5_000
-      refute_receive {:provider_transport_attempt, _worker}, 0
+      assert snapshot_rate_limited_server(rate_limited_server) == 1
     after
+      stop_fixture_server(rate_limited_server)
       restore_env(variable, previous_credential)
       restore_application_env(:req_llm, :finch_request_adapter, previous_adapter)
 
@@ -665,18 +665,31 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     port
   end
 
-  defp start_rate_limited_server(observer) do
+  defp start_rate_limited_server do
     caller = self()
 
-    spawn_link(fn ->
-      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
-      {:ok, {_address, port}} = :inet.sockname(listener)
-      send(caller, {:rate_limited_port, port})
-      serve_rate_limits(listener, observer)
-    end)
+    server =
+      spawn(fn ->
+        {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+        {:ok, {_address, port}} = :inet.sockname(listener)
+        controller = self()
+
+        {acceptor, acceptor_monitor} =
+          spawn_monitor(fn -> serve_rate_limits(listener, controller) end)
+
+        send(caller, {:rate_limited_server, self(), port})
+        control_rate_limited_server(listener, acceptor, acceptor_monitor, 0)
+      end)
+
+    monitor = Process.monitor(server)
 
     receive do
-      {:rate_limited_port, port} -> port
+      {:rate_limited_server, ^server, port} ->
+        Process.demonitor(monitor, [:flush])
+        {server, port}
+
+      {:DOWN, ^monitor, :process, ^server, reason} ->
+        flunk("the rate-limit fixture exited before startup: #{inspect(reason)}")
     after
       5_000 -> flunk("the rate-limit fixture did not start")
     end
@@ -742,11 +755,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     end
   end
 
-  defp serve_rate_limits(listener, observer) do
-    case :gen_tcp.accept(listener, 1_000) do
+  defp serve_rate_limits(listener, controller) do
+    # The request's own deadline bounds this interaction. A fixture-local accept
+    # timer starts before catalog resolution and guardian setup, so it can close
+    # a healthy listener before the adapter has had a chance to connect.
+    case :gen_tcp.accept(listener) do
       {:ok, socket} ->
         _request = :gen_tcp.recv(socket, 0, 1_000)
-        send(observer, {:provider_transport_attempt, self()})
+        send(controller, {:rate_limited_attempt, self()})
 
         :ok =
           :gen_tcp.send(
@@ -755,10 +771,88 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
           )
 
         :gen_tcp.close(socket)
-        serve_rate_limits(listener, observer)
+        serve_rate_limits(listener, controller)
 
-      {:error, :timeout} ->
-        :gen_tcp.close(listener)
+      {:error, :closed} ->
+        :ok
+
+      {:error, reason} ->
+        exit({:rate_limited_accept_failed, reason})
+    end
+  end
+
+  defp control_rate_limited_server(listener, acceptor, acceptor_monitor, attempts) do
+    receive do
+      {:rate_limited_attempt, ^acceptor} ->
+        control_rate_limited_server(listener, acceptor, acceptor_monitor, attempts + 1)
+
+      {:snapshot_and_stop_rate_limited_server, requester, reference}
+      when is_pid(requester) and is_reference(reference) ->
+        :ok = :gen_tcp.close(listener)
+
+        await_rate_limited_acceptor(
+          acceptor,
+          acceptor_monitor,
+          attempts,
+          requester,
+          reference
+        )
+
+      {:DOWN, ^acceptor_monitor, :process, ^acceptor, reason} ->
+        exit({:rate_limited_acceptor_exited, reason})
+    end
+  end
+
+  defp await_rate_limited_acceptor(
+         acceptor,
+         acceptor_monitor,
+         attempts,
+         requester,
+         reference
+       ) do
+    receive do
+      {:rate_limited_attempt, ^acceptor} ->
+        await_rate_limited_acceptor(
+          acceptor,
+          acceptor_monitor,
+          attempts + 1,
+          requester,
+          reference
+        )
+
+      {:DOWN, ^acceptor_monitor, :process, ^acceptor, :normal} ->
+        send(requester, {:rate_limited_server_stopped, reference, self(), attempts})
+
+      {:DOWN, ^acceptor_monitor, :process, ^acceptor, reason} ->
+        exit({:rate_limited_acceptor_exited, reason})
+    end
+  end
+
+  defp snapshot_rate_limited_server(server) when is_pid(server) do
+    reference = make_ref()
+    monitor = Process.monitor(server)
+    send(server, {:snapshot_and_stop_rate_limited_server, self(), reference})
+
+    receive do
+      {:rate_limited_server_stopped, ^reference, ^server, attempts} ->
+        Process.demonitor(monitor, [:flush])
+        attempts
+
+      {:DOWN, ^monitor, :process, ^server, reason} ->
+        flunk("the rate-limit fixture exited before its snapshot: #{inspect(reason)}")
+    after
+      5_000 -> flunk("the rate-limit fixture did not stop after its snapshot")
+    end
+  end
+
+  defp stop_fixture_server(server) when is_pid(server) do
+    monitor = Process.monitor(server)
+    Process.exit(server, :kill)
+
+    receive do
+      {:DOWN, ^monitor, :process, ^server, _reason} -> :ok
+    after
+      1_000 -> flunk("the rate-limit fixture did not stop")
     end
   end
 
