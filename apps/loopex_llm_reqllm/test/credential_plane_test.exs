@@ -415,7 +415,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       end
 
       :ok = :sys.install(registry, {debug_id, debug, :ready})
-      acquisition = Task.async(fn -> CredentialFilter.acquire(@sentinel) end)
+      {acquirer, acquirer_monitor} = start_credential_acquirer(@sentinel)
 
       try do
         assert_receive {:credential_transfer_blocked, ^barrier}, 1_000
@@ -429,7 +429,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
         send(registry, {:release_credential_transfer, barrier})
 
-        case Task.await(acquisition, 2_000) do
+        case await_credential_acquisition(acquirer) do
           {:error, :credential_filter_unavailable} ->
             :ok
 
@@ -440,9 +440,13 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
 
         state = await_clean_registry(registry)
         assert {:idle, state.epoch} == :persistent_term.get(@activity_key)
+
+        send(acquirer, :credential_acquirer_stop)
+        assert_receive {:DOWN, ^acquirer_monitor, :process, ^acquirer, :normal}, 1_000
       after
         send(registry, {:release_credential_transfer, barrier})
-        _ = Task.shutdown(acquisition, :brutal_kill)
+        Process.exit(acquirer, :kill)
+        Process.demonitor(acquirer_monitor, [:flush])
         _ = :sys.remove(registry, debug_id)
         :ok = remove_primary_filter(@filter_id)
         :ok = :logger.add_primary_filter(@filter_id, expected_filter)
@@ -471,21 +475,26 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       end
 
       :ok = :sys.install(registry, {debug_id, debug, :ready})
-      acquisition = Task.async(fn -> CredentialFilter.acquire(@sentinel) end)
+      {acquirer, acquirer_monitor} = start_credential_acquirer(@sentinel)
 
       try do
         assert_receive {:credential_transfer_delayed, ^barrier}, 1_000
 
-        assert {:error, :credential_filter_unavailable} = Task.await(acquisition, 2_000)
+        assert {:error, :credential_filter_unavailable} =
+                 await_credential_acquisition(acquirer)
 
         # The timeout refused acquisition but did not claim cleanup. Releasing
         # the registry lets the keyed cancellation settle the delayed transfer.
         send(registry, {:release_delayed_credential_transfer, barrier})
         state = await_clean_registry(registry)
         assert {:idle, state.epoch} == :persistent_term.get(@activity_key)
+
+        send(acquirer, :credential_acquirer_stop)
+        assert_receive {:DOWN, ^acquirer_monitor, :process, ^acquirer, :normal}, 1_000
       after
         send(registry, {:release_delayed_credential_transfer, barrier})
-        _ = Task.shutdown(acquisition, :brutal_kill)
+        Process.exit(acquirer, :kill)
+        Process.demonitor(acquirer_monitor, [:flush])
         _ = :sys.remove(registry, debug_id)
         reset_credential_plane_if_live()
       end
@@ -918,6 +927,24 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
       :ok -> :ok
       {:error, {:not_found, ^filter_id}} -> :ok
     end
+  end
+
+  defp start_credential_acquirer(credential) do
+    observer = self()
+
+    spawn_monitor(fn ->
+      result = CredentialFilter.acquire(credential)
+      send(observer, {:credential_acquisition_result, self(), result})
+
+      receive do
+        :credential_acquirer_stop -> :ok
+      end
+    end)
+  end
+
+  defp await_credential_acquisition(acquirer) do
+    assert_receive {:credential_acquisition_result, ^acquirer, result}, 2_000
+    result
   end
 
   defp await_registry_restart(previous, attempts \\ 100)
