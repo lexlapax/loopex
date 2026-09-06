@@ -29,6 +29,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   alias Loopex.Conversation
   alias Loopex.Runtime.Control
   alias Loopex.Runtime.ExecutorStream
+  alias Loopex.Runtime.ProviderLifetime
   alias Loopex.Runtime.SessionState
   alias Loopex.Runtime.StreamRelay
   alias Loopex.Executor
@@ -45,6 +46,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @page_size 1_024
   @provider_result_tag :loopex_provider_result
   @provider_deadline_tag :loopex_provider_deadline_elapsed
+  @provider_resource_key {__MODULE__, :provider_resource}
   # Trusted same-VM implementation input from the exact current activation
   # holder, never authority of its own. Core revalidates that holder before and
   # after the private prepare phase. A guard which has not produced an owner
@@ -2545,15 +2547,37 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:loopex_provider_guard_start, reference, self(), module, request, options, progress}
     )
 
+    await_provider_guard(guard, guard_monitor, reference, nil)
+  end
+
+  defp await_provider_guard(guard, guard_monitor, reference, resource) do
     receive do
+      {:loopex_provider_resource_retained, ^reference, ^guard, resource_pid, stop_reference}
+      when is_pid(resource_pid) and is_reference(stop_reference) and is_nil(resource) ->
+        retained = %{
+          pid: resource_pid,
+          monitor: Process.monitor(resource_pid),
+          stop_reference: stop_reference
+        }
+
+        await_provider_guard(guard, guard_monitor, reference, retained)
+
       {:loopex_provider_guard_result, ^reference, ^guard, result} ->
         await_process_down(guard, guard_monitor)
         result
 
       {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
-        {:error, :provider_call_failed}
+        provider_result_after_cleanup(
+          {:error, :provider_call_failed},
+          stop_provider_resource_handle(resource)
+        )
     end
   end
+
+  defp provider_result_after_cleanup(result, :ok), do: result
+
+  defp provider_result_after_cleanup(_result, {:error, :provider_cleanup_unproved}),
+    do: {:error, :provider_call_failed}
 
   defp guard_provider_call(coordinator, reference) do
     Process.flag(:trap_exit, true)
@@ -2587,7 +2611,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {callback, callback_monitor} =
           :erlang.spawn_opt(
             fn ->
-              result = normalize_provider_call(module, request, options, progress)
+              result =
+                normalize_provider_call(
+                  guard,
+                  reference,
+                  module,
+                  request,
+                  options,
+                  progress
+                )
+
               send(guard, {:loopex_provider_callback_result, reference, self(), result})
             end,
             [:link, :monitor]
@@ -2620,11 +2653,97 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp normalize_provider_call(module, request, options, progress) do
-    try do
-      module.complete(request, options, progress)
-    catch
-      _kind, _reason -> {:error, :provider_call_failed}
+  defp normalize_provider_call(guard, reference, module, request, options, progress) do
+    callback = self()
+
+    ProviderLifetime.scoped(
+      fn resource, stop_reference ->
+        register_provider_resource(
+          guard,
+          reference,
+          callback,
+          resource,
+          stop_reference
+        )
+      end,
+      fn ->
+        try do
+          module.complete(request, options, progress)
+        catch
+          _kind, _reason -> {:error, :provider_call_failed}
+        end
+      end
+    )
+  end
+
+  defp register_provider_resource(
+         guard,
+         reference,
+         callback,
+         resource,
+         stop_reference
+       ) do
+    guard_monitor = Process.monitor(guard)
+    registration = make_ref()
+
+    send(
+      guard,
+      {:loopex_provider_resource_register, reference, callback, resource, stop_reference,
+       registration}
+    )
+
+    receive do
+      {:loopex_provider_resource_registered, ^reference, ^registration, ^guard} ->
+        Process.demonitor(guard_monitor, [:flush])
+        :ok
+
+      {:loopex_provider_resource_refused, ^reference, ^registration, ^guard} ->
+        Process.demonitor(guard_monitor, [:flush])
+        {:error, :provider_resource_refused}
+
+      {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
+        {:error, :provider_guard_unavailable}
+    end
+  end
+
+  defp accept_provider_resource(
+         owner,
+         callback,
+         reference,
+         resource,
+         stop_reference,
+         registration
+       ) do
+    key = {@provider_resource_key, reference}
+
+    case Process.get(key) do
+      nil ->
+        monitor = Process.monitor(resource)
+
+        Process.put(key, %{
+          pid: resource,
+          monitor: monitor,
+          stop_reference: stop_reference
+        })
+
+        # The permitted worker receives this before the callback may continue.
+        # Signals from this guard reach that worker in order, so the worker can
+        # still stop the resource if the guard itself dies afterwards.
+        send(
+          owner,
+          {:loopex_provider_resource_retained, reference, self(), resource, stop_reference}
+        )
+
+        send(
+          callback,
+          {:loopex_provider_resource_registered, reference, registration, self()}
+        )
+
+      _already_registered ->
+        send(
+          callback,
+          {:loopex_provider_resource_refused, reference, registration, self()}
+        )
     end
   end
 
@@ -2662,25 +2781,55 @@ defmodule Loopex.Runtime.SessionCoordinator do
         )
 
       {:DOWN, ^callback_monitor, :process, ^callback, _reason} ->
-        send(
+        finish_provider_guard(
           owner,
-          {:loopex_provider_guard_result, reference, self(), {:error, :provider_call_failed}}
+          reference,
+          {:error, :provider_call_failed},
+          stop_provider_resource(reference)
+        )
+
+      {:loopex_provider_resource_register, ^reference, ^callback, resource, stop_reference,
+       registration}
+      when is_pid(resource) and is_reference(stop_reference) and is_reference(registration) ->
+        accept_provider_resource(
+          owner,
+          callback,
+          reference,
+          resource,
+          stop_reference,
+          registration
+        )
+
+        await_provider_callback(
+          owner,
+          owner_monitor,
+          coordinator,
+          coordinator_monitor,
+          callback,
+          callback_monitor,
+          reference
         )
 
       {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
-        stop_provider_callback(callback, callback_monitor)
+        stop_provider_callback_tree(reference, callback, callback_monitor)
 
       {:loopex_provider_tree_stop, ^reference, stop, ^owner} when is_reference(stop) ->
-        stop_registered_provider_callback(owner, callback, callback_monitor, stop)
+        stop_registered_provider_callback(owner, reference, callback, callback_monitor, stop)
 
       {:loopex_provider_tree_stop, ^reference, stop, ^coordinator} when is_reference(stop) ->
-        stop_registered_provider_callback(coordinator, callback, callback_monitor, stop)
+        stop_registered_provider_callback(
+          coordinator,
+          reference,
+          callback,
+          callback_monitor,
+          stop
+        )
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
-        stop_provider_callback(callback, callback_monitor)
+        stop_provider_callback_tree(reference, callback, callback_monitor)
 
       {:EXIT, _owner_workers, _reason} ->
-        stop_provider_callback(callback, callback_monitor)
+        stop_provider_callback_tree(reference, callback, callback_monitor)
     end
   end
 
@@ -2708,34 +2857,62 @@ defmodule Loopex.Runtime.SessionCoordinator do
         )
 
       {:DOWN, ^callback_monitor, :process, ^callback, :normal} ->
-        send(owner, {:loopex_provider_guard_result, reference, self(), result})
+        finish_provider_guard(owner, reference, result, stop_provider_resource(reference))
 
       {:DOWN, ^callback_monitor, :process, ^callback, _reason} ->
-        send(
+        finish_provider_guard(
           owner,
-          {:loopex_provider_guard_result, reference, self(), {:error, :provider_call_failed}}
+          reference,
+          {:error, :provider_call_failed},
+          stop_provider_resource(reference)
         )
 
       {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
-        stop_provider_callback(callback, callback_monitor)
+        stop_provider_callback_tree(reference, callback, callback_monitor)
 
       {:loopex_provider_tree_stop, ^reference, stop, ^owner} when is_reference(stop) ->
-        stop_registered_provider_callback(owner, callback, callback_monitor, stop)
+        stop_registered_provider_callback(owner, reference, callback, callback_monitor, stop)
 
       {:loopex_provider_tree_stop, ^reference, stop, ^coordinator} when is_reference(stop) ->
-        stop_registered_provider_callback(coordinator, callback, callback_monitor, stop)
+        stop_registered_provider_callback(
+          coordinator,
+          reference,
+          callback,
+          callback_monitor,
+          stop
+        )
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
-        stop_provider_callback(callback, callback_monitor)
+        stop_provider_callback_tree(reference, callback, callback_monitor)
 
       {:EXIT, _owner_workers, _reason} ->
-        stop_provider_callback(callback, callback_monitor)
+        stop_provider_callback_tree(reference, callback, callback_monitor)
     end
   end
 
-  defp stop_registered_provider_callback(requester, callback, callback_monitor, stop) do
-    stop_provider_callback(callback, callback_monitor)
-    acknowledge_provider_stop(requester, stop)
+  defp stop_registered_provider_callback(
+         requester,
+         reference,
+         callback,
+         callback_monitor,
+         stop
+       ) do
+    case stop_provider_callback_tree(reference, callback, callback_monitor) do
+      :ok ->
+        acknowledge_provider_stop(requester, stop)
+
+      {:error, :provider_cleanup_unproved} ->
+        send(requester, {:loopex_provider_tree_unproved, stop, self()})
+        exit(:provider_cleanup_unproved)
+    end
+  end
+
+  defp finish_provider_guard(owner, reference, result, :ok) do
+    send(owner, {:loopex_provider_guard_result, reference, self(), result})
+  end
+
+  defp finish_provider_guard(_owner, _reference, _result, {:error, :provider_cleanup_unproved}) do
+    exit(:provider_cleanup_unproved)
   end
 
   defp acknowledge_provider_stop(requester, stop),
@@ -2746,6 +2923,56 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     receive do
       {:DOWN, ^callback_monitor, :process, ^callback, _reason} -> :ok
+    end
+  end
+
+  defp stop_provider_callback_tree(reference, callback, callback_monitor) do
+    stop_provider_callback(callback, callback_monitor)
+    stop_provider_resource(reference)
+  end
+
+  defp stop_provider_resource(reference) do
+    case Process.delete({@provider_resource_key, reference}) do
+      nil ->
+        :ok
+
+      %{pid: resource, monitor: monitor, stop_reference: stop_reference} ->
+        stop_provider_resource_handle(%{
+          pid: resource,
+          monitor: monitor,
+          stop_reference: stop_reference
+        })
+    end
+  end
+
+  defp stop_provider_resource_handle(nil), do: :ok
+
+  defp stop_provider_resource_handle(%{
+         pid: resource,
+         monitor: monitor,
+         stop_reference: stop_reference
+       }) do
+    stop = make_ref()
+    send(resource, {:loopex_provider_resource_stop, stop_reference, stop, self()})
+    await_provider_resource_stop(resource, monitor, stop)
+  end
+
+  defp await_provider_resource_stop(resource, monitor, stop) do
+    receive do
+      {:loopex_provider_resource_stopped, ^stop, ^resource} ->
+        await_provider_resource_exit(resource, monitor)
+
+      {:DOWN, ^monitor, :process, ^resource, :normal} ->
+        :ok
+
+      {:DOWN, ^monitor, :process, ^resource, _unproved_reason} ->
+        {:error, :provider_cleanup_unproved}
+    end
+  end
+
+  defp await_provider_resource_exit(resource, monitor) do
+    receive do
+      {:DOWN, ^monitor, :process, ^resource, _reason} -> :ok
     end
   end
 
@@ -2763,8 +2990,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     guard_down =
       receive do
-        {:loopex_provider_tree_stopped, ^stop, ^guard} -> false
-        {:DOWN, ^guard_monitor, :process, ^guard, _reason} -> true
+        {:loopex_provider_tree_stopped, ^stop, ^guard} ->
+          false
+
+        {:loopex_provider_tree_unproved, ^stop, ^guard} ->
+          raise "provider cleanup was not proved"
+
+        {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
+          true
       end
 
     unless guard_down, do: await_process_down(guard, guard_monitor)

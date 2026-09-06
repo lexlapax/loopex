@@ -131,10 +131,16 @@ then asks the guard to create a linked adapter callback. Catchable callback
 failures normalize there; the trapping guard reduces asynchronous linked exits
 to the same fixed private failure. A successful result is not forwarded until
 the callback exits normally, and the guard cannot finish while its callback
-lives. Worker, coordinator, deadline, discard, and supersession endings stop and
-await the retained guard. On abrupt owner loss, the owner-group barrier cannot
-finish stopping that private supervisor until the guard has stopped the callback,
-so no provider callback detaches from the attempt it belongs to.
+lives. The callback may synchronously register one adapter-private resource
+guardian before releasing provider work; both the guard and permit worker retain
+the stop handle. ReqLLM uses it to own its linked and spawned StreamServer,
+externally supervised transport task, and private descendants to a fixed point,
+with a delivery barrier for every dead tracee. Cleanup acknowledgement is not
+enough: Core also waits for the registered guardian to exit. Worker, coordinator,
+deadline, discard, and supersession endings stop and await both layers. On abrupt
+owner loss, the owner-group barrier cannot finish stopping that private supervisor
+until the callback and registered resource are down, so no provider process
+detaches from the attempt it belongs to.
 
 The binding read is bounded at one second and runs in a reader owned by a
 guardian that monitors Control. A timeout or Control death kills and awaits the
@@ -485,8 +491,13 @@ Credentials stay on the host side of the line. The reference model adapter reads
 logs, or writes it; no other provider variable is consulted, so a key that
 happens to sit in the operator's environment cannot be spent by accident. Its
 classified failures carry the literal `"model_call_failed"` and no provider term.
-The callback lifetime guard keeps even an asynchronous linked-exit reason out of
-the supervised task's crash report, so nothing rides out on the failure plane.
+The adapter registers each live credential behind a permanent primary Logger
+filter before provider work starts. The filter normalizes every supported Logger
+message shape, redacts all occurrences in both message and metadata, and drops an
+event if its registry cannot prove what must be scrubbed. The adapter's private
+group leader refuses direct IO, and the callback/resource lifetime guards keep
+even asynchronous linked-exit reasons and late transport tasks inside the same
+cleanup boundary, so nothing rides out on the failure plane.
 
 ## Where Each Concern Lives
 

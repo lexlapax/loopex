@@ -278,11 +278,16 @@ until that worker receives its permit and asks the guard to create a linked
 callback. Catchable failures normalize inside that callback;
 the trapping guard converts an asynchronous linked exit into the same fixed
 private result. It waits for a successful callback to exit before forwarding the
-result and cannot finish while the callback lives. Every terminal path stops and
-awaits the retained guard; on abrupt owner loss, the generation barrier cannot
-fall until its private supervisor has stopped that guard. Neither worker nor
-coordinator loss therefore leaves detached provider work, and no provider value
-can forge `not_dispatched`.
+result and cannot finish while the callback lives. An adapter can register a
+private resource guardian before it releases provider work; the permit worker
+retains the same stop handle independently. The ReqLLM guardian owns the linked
+and spawned transport tree through per-process trace-delivery barriers, including
+the externally supervised HTTP task and any private descendants, and suppresses
+direct provider IO. It does not acknowledge cleanup until every retained process
+is down. Every terminal path stops and awaits the retained guard and resource;
+on abrupt owner loss, the generation barrier cannot fall until its private
+supervisor has proved both down. Neither worker nor coordinator loss therefore
+leaves detached provider work, and no provider value can forge `not_dispatched`.
 
 A conforming adapter may report `not_dispatched` only before it invokes or
 hands bytes to provider transport. The coordinator proves the same fact for one
@@ -301,6 +306,11 @@ effect that reconciliation can complete safely. A successful reply carries a
 closed provider-neutral identity, normalized usage, tool calls, stream facts,
 response identifier, and the exact staged digest; raw provider structures and
 reasons cross no Core, Store, public, progress, diagnostic, or fixture plane.
+While a provider credential is live, a permanent primary Logger filter reads the
+adapter's private active-credential registry and substitutes every occurrence in
+every supported Logger message and metadata shape. Missing or conflicting filter
+state refuses the call before transport; missing registry state drops the event
+rather than guessing that it is safe.
 
 A settlement is four closed enumerations and one result. `transport` is
 `not_dispatched` or `dispatched_or_unknown`; `termination` is absent, `abort`,

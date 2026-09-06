@@ -84,7 +84,9 @@ defmodule Loopex.LLM.ReqLLM do
 
   @behaviour Loopex.Model
 
+  alias Loopex.LLM.ReqLLM.CredentialFilter
   alias Loopex.Model
+  alias Loopex.Runtime.ProviderLifetime
 
   @credential_variable "LOOPEX_PROVIDER_API_KEY"
 
@@ -425,11 +427,20 @@ defmodule Loopex.LLM.ReqLLM do
   # the provider sends after the content, which is why they are read once the
   # stream is drained rather than beside it.
   defp dispatch(request, context, identity, call_options, credential, progress) do
-    case isolated(fn ->
-           handoff(request, context, identity, call_options, credential, progress)
-         end) do
-      {:ok, reply} -> {:ok, reply}
-      _ambiguous -> {:error, {:dispatched_or_unknown, @call_failed}}
+    case CredentialFilter.isolate_provider_io() do
+      :ok ->
+        case isolated(
+               fn ->
+                 handoff(request, context, identity, call_options, credential, progress)
+               end,
+               credential
+             ) do
+          {:ok, reply} -> {:ok, reply}
+          _ambiguous -> {:error, {:dispatched_or_unknown, @call_failed}}
+        end
+
+      {:error, :credential_filter_unavailable} ->
+        {:error, {:not_dispatched, @call_failed}}
     end
   end
 
@@ -480,30 +491,446 @@ defmodule Loopex.LLM.ReqLLM do
   end
 
   # Concept: a crash inside the provider library is an answer, not the end of the
-  # process that asked.
+  # process that asked, while the provider work still belongs to that caller's
+  # lifetime.
   #
   # Technical depth: the library links its stream server to whoever opens it, so
   # a throw or an exit raised while the request is being built travels back along
   # that link and kills the caller before it can classify anything -- and an
   # attempt whose caller died reports nothing at all, which is the one outcome
-  # ADR 0018 cannot use. The worker is monitored and not linked, so that death
-  # arrives as a `DOWN` this function reads and turns into ambiguity.
+  # ADR 0018 cannot use. A private guardian isolates the worker's exit from the
+  # caller, but registers with the runtime guard before it starts that worker.
+  # Before releasing the worker, the guardian registers the attempt credential
+  # with the logger boundary and traces process creation plus newly created
+  # links in that private subtree. ReqLLM starts its stream server in
+  # the caller's subtree but starts the HTTP task under a shared TaskSupervisor;
+  # the later StreamServer-to-Task link is therefore part of the ownership proof.
+  # Cleanup uses one delivery barrier per dead tracee, not `:all`, because a dead
+  # process is no longer in the latter set and its final spawn trace could arrive
+  # after a global marker. The guardian stops, monitors, and drains every owned
+  # process before it exits; the runtime guard waits for that exit before it can
+  # claim the provider tree stopped.
   #
   # The worker carries no timeout of its own. The transport bound derived from
   # the run's committed deadline is the only bound in this path; a second one
   # invented here would be exactly the undeclared bound that one replaced, and it
   # would fire on a call the run still had time for.
-  defp isolated(call) do
+  defp isolated(call, credential) do
     owner = self()
-    {worker, monitor} = spawn_monitor(fn -> send(owner, {__MODULE__, self(), call.()}) end)
+    reference = make_ref()
+    stop_reference = make_ref()
+
+    {guardian, monitor} =
+      spawn_monitor(fn ->
+        isolated_guardian(owner, reference, stop_reference, call, credential)
+      end)
+
+    case ProviderLifetime.register(guardian, stop_reference) do
+      registration when registration in [:ok, :unmanaged] ->
+        send(guardian, {__MODULE__, :start, reference, self()})
+        await_isolated_guardian(guardian, monitor, reference)
+
+      {:error, _unavailable} ->
+        send(guardian, {__MODULE__, :stop_before_start, reference, self()})
+        await_guardian_exit(guardian, monitor, :provider_call_crashed)
+    end
+  end
+
+  defp await_isolated_guardian(guardian, monitor, reference) do
+    receive do
+      {__MODULE__, ^guardian, ^reference, outcome} ->
+        await_guardian_exit(guardian, monitor, outcome)
+
+      {:DOWN, ^monitor, :process, ^guardian, _reason} ->
+        :provider_call_crashed
+    end
+  end
+
+  defp isolated_guardian(owner, reference, stop_reference, call, credential) do
+    Process.flag(:trap_exit, true)
+    owner_monitor = Process.monitor(owner)
 
     receive do
-      {__MODULE__, ^worker, outcome} ->
-        Process.demonitor(monitor, [:flush])
-        outcome
+      {__MODULE__, :start, ^reference, ^owner} ->
+        case CredentialFilter.acquire(credential) do
+          {:ok, credential_lease} ->
+            try do
+              run_isolated_guardian(
+                owner,
+                owner_monitor,
+                reference,
+                stop_reference,
+                call
+              )
+            after
+              :ok = CredentialFilter.release(credential_lease)
+            end
 
-      {:DOWN, ^monitor, :process, ^worker, _reason} ->
-        :provider_call_crashed
+          {:error, _unavailable} ->
+            send(owner, {__MODULE__, self(), reference, :provider_call_crashed})
+        end
+
+      {__MODULE__, :stop_before_start, ^reference, ^owner} ->
+        :ok
+
+      {:loopex_provider_resource_stop, ^stop_reference, stop, requester}
+      when is_reference(stop) and is_pid(requester) ->
+        acknowledge_resource_stop(requester, stop)
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+        :ok
+    end
+  end
+
+  defp run_isolated_guardian(owner, owner_monitor, reference, stop_reference, call) do
+    guardian = self()
+
+    {worker, worker_monitor} =
+      :erlang.spawn_opt(
+        fn ->
+          # The guardian is a local, credential-silent IO device. Provider code
+          # can neither inherit a remote shell nor write a secret around Logger.
+          true = Process.group_leader(self(), guardian)
+
+          receive do
+            {__MODULE__, :invoke, ^reference, ^guardian} ->
+              outcome = call.()
+              send(guardian, {__MODULE__, :worker_outcome, reference, self(), outcome})
+          end
+        end,
+        [:link, :monitor]
+      )
+
+    resources = put_resource(%{}, worker, worker_monitor)
+
+    case install_provider_trace(worker, guardian) do
+      :ok ->
+        send(worker, {__MODULE__, :invoke, reference, guardian})
+
+        await_isolated_worker(
+          owner,
+          owner_monitor,
+          reference,
+          stop_reference,
+          worker,
+          resources
+        )
+
+      {:error, :trace_unavailable} ->
+        close_untraced_worker(worker, worker_monitor)
+        Process.demonitor(owner_monitor, [:flush])
+        send(owner, {__MODULE__, self(), reference, :provider_call_crashed})
+    end
+  end
+
+  defp install_provider_trace(worker, guardian) do
+    # ReqLLM's Task.Supervisor link exists before its task is linked to the
+    # attempt-owned StreamServer. `:set_on_link` does not traverse that old
+    # link; it starts at the new StreamServer-to-task link and is what lets the
+    # guardian observe private processes the task subsequently links or spawns.
+    with {:tracer, []} <- :erlang.trace_info(:new_processes, :tracer),
+         {:tracer, []} <- :erlang.trace_info(worker, :tracer),
+         1 <-
+           :erlang.trace(worker, true, [
+             :procs,
+             :set_on_link,
+             :set_on_spawn,
+             {:tracer, guardian}
+           ]),
+         {:tracer, ^guardian} <- :erlang.trace_info(worker, :tracer) do
+      :ok
+    else
+      _unavailable -> {:error, :trace_unavailable}
+    end
+  catch
+    _kind, _reason -> {:error, :trace_unavailable}
+  end
+
+  defp await_isolated_worker(
+         owner,
+         owner_monitor,
+         reference,
+         stop_reference,
+         worker,
+         resources
+       ) do
+    receive do
+      {:trace, _parent, :spawn, descendant, _mfa} = event when is_pid(descendant) ->
+        await_isolated_worker(
+          owner,
+          owner_monitor,
+          reference,
+          stop_reference,
+          worker,
+          retain_trace_event(resources, event)
+        )
+
+      {:trace, descendant, :spawned, _parent, _mfa} = event when is_pid(descendant) ->
+        await_isolated_worker(
+          owner,
+          owner_monitor,
+          reference,
+          stop_reference,
+          worker,
+          retain_trace_event(resources, event)
+        )
+
+      {:trace, _source, event, _linked} = trace
+      when event in [:link, :getting_linked] ->
+        await_isolated_worker(
+          owner,
+          owner_monitor,
+          reference,
+          stop_reference,
+          worker,
+          retain_trace_event(resources, trace)
+        )
+
+      {:trace, _resource, :exit, _reason} ->
+        await_isolated_worker(
+          owner,
+          owner_monitor,
+          reference,
+          stop_reference,
+          worker,
+          resources
+        )
+
+      {__MODULE__, :worker_outcome, ^reference, ^worker, outcome} ->
+        close_isolated_resources(resources)
+        Process.demonitor(owner_monitor, [:flush])
+        send(owner, {__MODULE__, self(), reference, outcome})
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+        close_isolated_resources(resources)
+
+      {:DOWN, monitor, :process, resource, _reason} ->
+        case mark_resource_down(resources, resource, monitor) do
+          {:ok, resources} when resource == worker ->
+            close_isolated_resources(resources)
+            Process.demonitor(owner_monitor, [:flush])
+            send(owner, {__MODULE__, self(), reference, :provider_call_crashed})
+
+          {:ok, resources} ->
+            await_isolated_worker(
+              owner,
+              owner_monitor,
+              reference,
+              stop_reference,
+              worker,
+              resources
+            )
+
+          :unknown ->
+            await_isolated_worker(
+              owner,
+              owner_monitor,
+              reference,
+              stop_reference,
+              worker,
+              resources
+            )
+        end
+
+      {:loopex_provider_resource_stop, ^stop_reference, stop, requester}
+      when is_reference(stop) and is_pid(requester) ->
+        close_isolated_resources(resources)
+        acknowledge_resource_stop(requester, stop)
+
+      {:EXIT, ^worker, _reason} ->
+        await_isolated_worker(
+          owner,
+          owner_monitor,
+          reference,
+          stop_reference,
+          worker,
+          resources
+        )
+
+      {:io_request, from, reply_as, _request} when is_pid(from) ->
+        reject_provider_io(from, reply_as)
+
+        await_isolated_worker(
+          owner,
+          owner_monitor,
+          reference,
+          stop_reference,
+          worker,
+          resources
+        )
+    end
+  end
+
+  defp close_untraced_worker(worker, worker_monitor) do
+    Process.exit(worker, :kill)
+
+    receive do
+      {:DOWN, ^worker_monitor, :process, ^worker, _reason} -> :ok
+      {:EXIT, ^worker, _reason} -> close_untraced_worker(worker, worker_monitor)
+    end
+  end
+
+  defp close_isolated_resources(resources) do
+    Enum.each(resources, fn
+      {_resource, %{down?: true}} -> :ok
+      {resource, _state} -> Process.exit(resource, :kill)
+    end)
+
+    resources
+    |> stop_next_resource(MapSet.new())
+    |> then(fn {_resources, _drained} -> :ok end)
+  end
+
+  defp stop_next_resource(resources, drained) do
+    case Enum.find(resources, fn {resource, _state} ->
+           not MapSet.member?(drained, resource)
+         end) do
+      nil ->
+        {resources, drained}
+
+      {resource, _state} ->
+        resources = stop_one_resource(resources, resource)
+        resources = drain_tracee(resources, resource)
+        stop_next_resource(resources, MapSet.put(drained, resource))
+    end
+  end
+
+  defp stop_one_resource(resources, resource) do
+    case Map.fetch!(resources, resource) do
+      %{down?: true} ->
+        resources
+
+      %{monitor: monitor} ->
+        Process.exit(resource, :kill)
+        await_resource_down(resources, resource, monitor)
+    end
+  end
+
+  defp await_resource_down(resources, resource, monitor) do
+    receive do
+      {:DOWN, ^monitor, :process, ^resource, _reason} ->
+        put_in(resources, [resource, :down?], true)
+
+      {:DOWN, other_monitor, :process, other, _reason} ->
+        resources
+        |> maybe_mark_resource_down(other, other_monitor)
+        |> await_resource_down(resource, monitor)
+
+      {:trace, _source, _event, _detail} = event ->
+        resources
+        |> retain_trace_event(event)
+        |> await_resource_down(resource, monitor)
+
+      {:trace, _source, _event, _detail, _mfa} = event ->
+        resources
+        |> retain_trace_event(event)
+        |> await_resource_down(resource, monitor)
+
+      {:EXIT, _linked, _reason} ->
+        await_resource_down(resources, resource, monitor)
+
+      {:io_request, from, reply_as, _request} when is_pid(from) ->
+        reject_provider_io(from, reply_as)
+        await_resource_down(resources, resource, monitor)
+    end
+  end
+
+  defp drain_tracee(resources, tracee) do
+    delivered = :erlang.trace_delivered(tracee)
+    await_trace_delivery(resources, tracee, delivered)
+  end
+
+  defp await_trace_delivery(resources, tracee, delivered) do
+    receive do
+      {:trace_delivered, ^tracee, ^delivered} ->
+        resources
+
+      {:DOWN, monitor, :process, resource, _reason} ->
+        resources
+        |> maybe_mark_resource_down(resource, monitor)
+        |> await_trace_delivery(tracee, delivered)
+
+      {:trace, _source, _event, _detail} = event ->
+        resources
+        |> retain_trace_event(event)
+        |> await_trace_delivery(tracee, delivered)
+
+      {:trace, _source, _event, _detail, _mfa} = event ->
+        resources
+        |> retain_trace_event(event)
+        |> await_trace_delivery(tracee, delivered)
+
+      {:EXIT, _linked, _reason} ->
+        await_trace_delivery(resources, tracee, delivered)
+
+      {:io_request, from, reply_as, _request} when is_pid(from) ->
+        reject_provider_io(from, reply_as)
+        await_trace_delivery(resources, tracee, delivered)
+    end
+  end
+
+  defp retain_trace_event(resources, {:trace, _parent, :spawn, resource, _mfa}),
+    do: put_resource(resources, resource)
+
+  defp retain_trace_event(resources, {:trace, resource, :spawned, _parent, _mfa}),
+    do: put_resource(resources, resource)
+
+  defp retain_trace_event(resources, {:trace, left, event, right})
+       when event in [:link, :getting_linked] do
+    # Every such event was emitted because at least one endpoint already
+    # carried this guardian's trace flags. Retain both without consulting
+    # liveness: events from different tracees have no cross-sender ordering, so
+    # a child may already have linked its own child before the event that first
+    # reveals the parent is consumed.
+    resources
+    |> put_resource_if_pid(left)
+    |> put_resource_if_pid(right)
+  end
+
+  defp retain_trace_event(resources, _other), do: resources
+
+  defp put_resource_if_pid(resources, resource) when is_pid(resource),
+    do: put_resource(resources, resource)
+
+  defp put_resource_if_pid(resources, _not_a_pid), do: resources
+
+  defp put_resource(resources, resource) when is_pid(resource) do
+    Map.put_new_lazy(resources, resource, fn ->
+      %{monitor: Process.monitor(resource), down?: false}
+    end)
+  end
+
+  defp put_resource(resources, resource, monitor)
+       when is_pid(resource) and is_reference(monitor) do
+    Map.put_new(resources, resource, %{monitor: monitor, down?: false})
+  end
+
+  defp mark_resource_down(resources, resource, monitor) do
+    case Map.get(resources, resource) do
+      %{monitor: ^monitor} -> {:ok, put_in(resources, [resource, :down?], true)}
+      _unknown -> :unknown
+    end
+  end
+
+  defp maybe_mark_resource_down(resources, resource, monitor) do
+    case mark_resource_down(resources, resource, monitor) do
+      {:ok, updated} -> updated
+      :unknown -> resources
+    end
+  end
+
+  defp reject_provider_io(from, reply_as) do
+    send(from, {:io_reply, reply_as, {:error, :enotsup}})
+  end
+
+  defp acknowledge_resource_stop(requester, stop) do
+    send(requester, {:loopex_provider_resource_stopped, stop, self()})
+  end
+
+  defp await_guardian_exit(guardian, monitor, outcome) do
+    receive do
+      {:DOWN, ^monitor, :process, ^guardian, :normal} -> outcome
+      {:DOWN, ^monitor, :process, ^guardian, _reason} -> :provider_call_crashed
     end
   end
 

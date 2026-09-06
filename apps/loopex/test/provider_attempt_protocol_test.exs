@@ -50,6 +50,73 @@ defmodule Loopex.ProviderAttemptExitModel do
   end
 end
 
+defmodule Loopex.ProviderAttemptRegisteredLifetimeModel do
+  @moduledoc false
+
+  @behaviour Loopex.Model
+
+  alias Loopex.Runtime.ProviderLifetime
+
+  @impl Loopex.Model
+  def complete(request, options, _progress) do
+    observer = Keyword.fetch!(options, :observer)
+    resource_mode = Keyword.get(options, :resource_mode, :hold)
+    return_result? = Keyword.get(options, :return_result, false)
+    callback = self()
+    stop_reference = make_ref()
+
+    resource =
+      spawn(fn ->
+        receive do
+          {:loopex_provider_resource_stop, ^stop_reference, stop, requester}
+          when is_reference(stop) and is_pid(requester) ->
+            send(observer, {:provider_resource_stop_requested, self(), requester, stop})
+
+            case resource_mode do
+              :hold ->
+                receive do
+                  {:release_provider_resource, ^stop} ->
+                    send(requester, {:loopex_provider_resource_stopped, stop, self()})
+                end
+
+              :crash_before_ack ->
+                exit(:provider_resource_cleanup_crashed)
+
+              :ack_then_crash ->
+                send(requester, {:loopex_provider_resource_stopped, stop, self()})
+                send(observer, {:provider_resource_stop_acknowledged, self(), stop})
+
+                receive do
+                  {:release_provider_resource_after_ack, ^stop} ->
+                    exit(:provider_resource_cleanup_crashed)
+                end
+            end
+        end
+      end)
+
+    :ok = ProviderLifetime.register(resource, stop_reference)
+    send(observer, {:provider_resource_registered, callback, resource, request})
+
+    if return_result? do
+      {:ok,
+       %{
+         text: "registered resource completed",
+         identity: %{provider: "scripted", model: request.model, endpoint: "in-process"},
+         usage: %{input_tokens: 1, output_tokens: 1},
+         tool_calls: [],
+         delta_count: 0,
+         streamed: false,
+         canonical_request_bytes: request.canonical_request_bytes,
+         staged_request_digest: request.staged_request_digest
+       }}
+    else
+      receive do
+        :provider_attempt_registered_lifetime_model_never_returns -> :unreachable
+      end
+    end
+  end
+end
+
 defmodule Loopex.ProviderAttemptUnlinkingModel do
   @moduledoc false
 
@@ -883,6 +950,121 @@ defmodule Loopex.ProviderAttemptProtocolTest do
            }
   end
 
+  test "a provider callback tree cannot settle until its registered resource proves cleanup" do
+    fixture = start(script: [], model_module: Loopex.ProviderAttemptRegisteredLifetimeModel)
+    attempt = queue_provider_permit_request(fixture, "registered provider lifetime")
+    worker_monitor = Process.monitor(attempt.worker)
+    resume_process(attempt.control)
+
+    assert_receive {:provider_resource_registered, callback, resource, _request}, 5_000
+    guard = provider_guard!(callback)
+    guard_monitor = Process.monitor(guard)
+    resource_monitor = Process.monitor(resource)
+
+    Process.exit(attempt.worker, :kill)
+    assert_receive {:DOWN, ^worker_monitor, :process, _worker, :killed}, 5_000
+
+    assert_receive {:provider_resource_stop_requested, ^resource, requester, stop}, 5_000
+    assert requester == guard
+    assert Process.alive?(guard)
+
+    refute Enum.any?(
+             Fixture.events(fixture, attempt.session_id),
+             &(public_event_kind(&1) == "run.finished")
+           ),
+           "the terminal committed before the registered provider resource proved cleanup"
+
+    send(resource, {:release_provider_resource, stop})
+    assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :normal}, 5_000
+    assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :normal}, 5_000
+    assert await_event(attempt.attachment, "run.finished")["outcome"] == "failed"
+  end
+
+  test "a provider guard crash cannot orphan a resource retained by the permitted worker" do
+    fixture = start(script: [], model_module: Loopex.ProviderAttemptRegisteredLifetimeModel)
+    attempt = queue_provider_permit_request(fixture, "provider guard crash")
+    resume_process(attempt.control)
+
+    assert_receive {:provider_resource_registered, callback, resource, _request}, 5_000
+    guard = provider_guard!(callback)
+    guard_monitor = Process.monitor(guard)
+    resource_monitor = Process.monitor(resource)
+
+    Process.exit(guard, :kill)
+    assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :killed}, 5_000
+
+    assert_receive {:provider_resource_stop_requested, ^resource, requester, stop}, 5_000
+    assert requester == attempt.worker
+    assert Process.alive?(resource)
+
+    refute Enum.any?(
+             Fixture.events(fixture, attempt.session_id),
+             &(public_event_kind(&1) == "run.finished")
+           ),
+           "the terminal committed while the independently retained provider resource lived"
+
+    send(resource, {:release_provider_resource, stop})
+    assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :normal}, 5_000
+    assert await_event(attempt.attachment, "run.finished")["outcome"] == "failed"
+  end
+
+  test "a provider resource crash before cleanup proof fails without wedging the coordinator" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptRegisteredLifetimeModel,
+        model_options: [resource_mode: :crash_before_ack, return_result: true]
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "resource crash before cleanup proof")
+
+    assert_receive {:provider_resource_registered, _callback, resource, _request}, 5_000
+    assert_receive {:provider_resource_stop_requested, ^resource, _requester, _stop}, 5_000
+
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+    assert Process.alive?(coordinator_of(fixture.runtime))
+
+    [settlement] =
+      fixture
+      |> Fixture.records(session_id)
+      |> records_of_kind("model_attempt_settled_v1")
+
+    assert settlement["transport"] == "dispatched_or_unknown"
+  end
+
+  test "a provider resource acknowledgement proves cleanup even if its later exit is abnormal" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptRegisteredLifetimeModel,
+        model_options: [resource_mode: :ack_then_crash, return_result: true]
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "resource acknowledges before abnormal exit")
+
+    assert_receive {:provider_resource_registered, _callback, resource, _request}, 5_000
+    resource_monitor = Process.monitor(resource)
+    assert_receive {:provider_resource_stop_requested, ^resource, _requester, stop}, 5_000
+    assert_receive {:provider_resource_stop_acknowledged, ^resource, ^stop}, 5_000
+
+    refute Enum.any?(
+             Fixture.events(fixture, session_id),
+             &(public_event_kind(&1) == "run.finished")
+           ),
+           "the terminal committed after acknowledgement but before the resource exited"
+
+    send(resource, {:release_provider_resource_after_ack, stop})
+
+    assert_receive {:DOWN, ^resource_monitor, :process, ^resource,
+                    :provider_resource_cleanup_crashed},
+                   5_000
+
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
+    assert Process.alive?(coordinator_of(fixture.runtime))
+  end
+
   test "a returning third-party Model cannot unlink around provider lifetime cleanup" do
     fixture =
       start(
@@ -933,19 +1115,20 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   # Technical depth: the callback's final send and process exit occupy private
   # BEAM reductions that no public fixture can suspend causally without adding a
   # product hook. The surrounding behavior cases prove terminal-path cleanup;
-  # this parsed-AST check locks the three private handoffs: callback result waits
-  # for callback exit, guard result waits for guard DOWN, and only then may the
-  # supervised worker return the value.
+  # this parsed-AST check locks the private handoffs: callback result waits for
+  # callback exit and resource cleanup, while the permitted worker independently
+  # retains that cleanup handle and waits for both guard and resource before it
+  # may return the value.
   test "a successful provider result crosses each lifetime boundary only after its process exits" do
     source =
       File.read!(Path.expand("../lib/loopex/runtime/session_coordinator.ex", __DIR__))
 
     {:ok, ast} = Code.string_to_quoted(source)
-    call_provider = private_function_body!(ast, :call_provider, 6)
+    await_guard = private_function_body!(ast, :await_provider_guard, 4)
     await_callback = private_function_body!(ast, :await_provider_callback, 7)
     await_callback_exit = private_function_body!(ast, :await_provider_callback_exit, 8)
 
-    guard_result = receive_clause_body!(call_provider, :loopex_provider_guard_result)
+    guard_result = receive_clause_body!(await_guard, :loopex_provider_guard_result)
 
     assert [
              {:await_process_down, _metadata,
@@ -954,6 +1137,16 @@ defmodule Loopex.ProviderAttemptProtocolTest do
            ] = block_expressions(guard_result),
            "the supervised worker can return before its provider guard exits"
 
+    guard_down = receive_clause_body!(await_guard, :DOWN)
+
+    assert {:provider_result_after_cleanup, _cleanup_metadata,
+            [
+              _fixed_failure,
+              {:stop_provider_resource_handle, _stop_metadata,
+               [{:resource, _resource_metadata, nil}]}
+            ]} = guard_down,
+           "guard death can discard the independently retained provider resource"
+
     callback_result = receive_clause_body!(await_callback, :loopex_provider_callback_result)
 
     assert {:await_provider_callback_exit, _metadata, arguments} = callback_result
@@ -961,18 +1154,15 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     normal_down = receive_clause_body!(await_callback_exit, {:DOWN, :normal})
 
-    assert {:send, _metadata,
+    assert {:finish_provider_guard, _finish_metadata,
             [
               {:owner, _owner_metadata, nil},
-              {:{}, _tuple_metadata,
-               [
-                 :loopex_provider_guard_result,
-                 {:reference, _reference_metadata, nil},
-                 {:self, _self_metadata, []},
-                 {:result, _reply_metadata, nil}
-               ]}
+              {:reference, _reference_metadata, nil},
+              {:result, _reply_metadata, nil},
+              {:stop_provider_resource, _stop_metadata,
+               [{:reference, _cleanup_reference_metadata, nil}]}
             ]} = normal_down,
-           "the guard does not wait for normal callback exit before forwarding its result"
+           "the guard can forward a provider result before its registered resource stops"
   end
 
   test "the authoritative origin closes its model stream before a terminal outcome can publish" do

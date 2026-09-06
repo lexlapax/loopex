@@ -168,10 +168,17 @@ until that worker receives its permit and asks it to create a linked callback.
 Catchable failures normalize inside the callback;
 the trapping guard reduces asynchronous linked exits to the same fixed private
 failure, waits for a successful callback to exit before forwarding its result,
-and cannot finish while the callback lives. Every terminal path stops and awaits
-the retained guard, and the generation barrier cannot fall during abrupt owner
-loss until that supervisor has stopped it. Worker or coordinator loss therefore
-cannot detach provider work from its attempt.
+and cannot finish while the callback lives. An adapter may synchronously register
+one private resource guardian before releasing transport work. ReqLLM uses that
+handle to retain its StreamServer, externally supervised transport task, and
+linked or spawned private descendants; cleanup reaches a trace-delivery fixed
+point and Core waits for the resource process itself to exit, not merely for its
+acknowledgement. Its local group leader refuses direct provider IO, while its
+active-credential Logger filter redacts every occurrence in supported message and
+metadata shapes. Every terminal path stops and awaits both lifetime layers, and
+the generation barrier cannot fall during abrupt owner loss until that supervisor
+has proved them down. Worker or coordinator loss therefore cannot detach provider
+work from its attempt.
 
 The adapter's complete raw reply, including every raw usage key and value, must
 pass the Store's bounded plain-data admission and full canonical validation
