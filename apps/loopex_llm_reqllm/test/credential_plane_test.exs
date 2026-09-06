@@ -30,6 +30,11 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
   @credential_registry Loopex.LLM.ReqLLM.CredentialFilter.Registry
   @credential_supervisor Loopex.LLM.ReqLLM.Application.Supervisor
   @provider_io_sink Loopex.LLM.ReqLLM.ProviderIOSink
+  @filter_id :loopex_req_llm_credential_filter
+  @filter_configuration :loopex_req_llm_v3
+  @activity_key {CredentialFilter, :logger_activity}
+  @provider_io_key {CredentialFilter, :provider_io_originals}
+  @capsule_tag :loopex_req_llm_credential_capsule_v1
 
   setup do
     variable = Adapter.credential_variable()
@@ -206,6 +211,330 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
                  %{level: :info, msg: {:string, second}, meta: %{}},
                  :loopex_req_llm_v3
                )
+    end
+
+    test "metadata redaction replaces every occurrence in one binary" do
+      {:ok, lease} = CredentialFilter.acquire(@sentinel)
+
+      try do
+        filtered =
+          CredentialFilter.filter(
+            %{
+              level: :error,
+              msg: {:string, "safe"},
+              meta: %{safe_diagnostic: "#{@sentinel}|#{@sentinel}"}
+            },
+            @filter_configuration
+          )
+
+        assert get_in(filtered, [:meta, :safe_diagnostic]) ==
+                 "[redacted credential]|[redacted credential]"
+
+        refute inspect(filtered, limit: :infinity, printable_limit: :infinity) =~ @sentinel
+      after
+        CredentialFilter.release(lease)
+      end
+    end
+
+    test "nested metadata map keys are redacted" do
+      {:ok, lease} = CredentialFilter.acquire(@sentinel)
+
+      try do
+        filtered =
+          CredentialFilter.filter(
+            %{
+              level: :error,
+              msg: {:string, "safe"},
+              meta: %{safe_diagnostic: %{@sentinel => :present}}
+            },
+            @filter_configuration
+          )
+
+        assert get_in(filtered, [:meta, :safe_diagnostic]) == %{
+                 "[redacted credential]" => :present
+               }
+
+        refute inspect(filtered, limit: :infinity, printable_limit: :infinity) =~ @sentinel
+      after
+        CredentialFilter.release(lease)
+      end
+    end
+
+    test "one event redacts every distinct overlapping live credential" do
+      first = "sk-loopex-overlap-first-2f9c41"
+      second = "sk-loopex-overlap-second-8ab730"
+      {:ok, first_lease} = CredentialFilter.acquire(first)
+      {:ok, second_lease} = CredentialFilter.acquire(second)
+
+      try do
+        filtered =
+          CredentialFilter.filter(
+            %{
+              level: :error,
+              msg: {:string, "safe"},
+              meta: %{safe_diagnostic: "first=#{first} second=#{second}"}
+            },
+            @filter_configuration
+          )
+
+        rendered = inspect(filtered, limit: :infinity, printable_limit: :infinity)
+        refute rendered =~ first
+        refute rendered =~ second
+        assert length(:binary.matches(rendered, "[redacted credential]")) == 2
+      after
+        CredentialFilter.release(first_lease)
+        CredentialFilter.release(second_lease)
+      end
+    end
+
+    test "owner loss retains its credential until the lease is explicitly released" do
+      observer = self()
+
+      {owner, owner_monitor} =
+        spawn_monitor(fn ->
+          {:ok, lease} = CredentialFilter.acquire(@sentinel)
+          send(observer, {:credential_owner_ready, self(), lease})
+
+          receive do
+            :credential_owner_stop -> :ok
+          end
+        end)
+
+      assert_receive {:credential_owner_ready, ^owner, lease}, 1_000
+
+      try do
+        registry = Process.whereis(@credential_registry)
+        {_owner, registry_monitor} = :sys.get_state(registry).leases[lease]
+
+        Process.exit(owner, :kill)
+        assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}, 1_000
+
+        await_registry_state(fn state ->
+          not Map.has_key?(state.monitors, registry_monitor)
+        end)
+
+        assert {:active, ^registry, _epoch} = :persistent_term.get(@activity_key)
+
+        filtered =
+          CredentialFilter.filter(
+            %{
+              level: :error,
+              msg: {:string, "safe"},
+              meta: %{safe_diagnostic: @sentinel}
+            },
+            @filter_configuration
+          )
+
+        refute filtered in [:ignore, :stop]
+        refute inspect(filtered, limit: :infinity, printable_limit: :infinity) =~ @sentinel
+
+        assert :ok = CredentialFilter.release(lease)
+        state = await_clean_registry(registry)
+        assert {:idle, state.epoch} == :persistent_term.get(@activity_key)
+      after
+        Process.exit(owner, :kill)
+        Process.demonitor(owner_monitor, [:flush])
+        CredentialFilter.release(lease)
+        reset_credential_plane_if_live()
+      end
+    end
+
+    test "missing activity state stops a logger event" do
+      {:ok, lease} = CredentialFilter.acquire(@sentinel)
+      activity = :persistent_term.get(@activity_key)
+
+      try do
+        :persistent_term.erase(@activity_key)
+
+        assert :stop =
+                 CredentialFilter.filter(
+                   %{
+                     level: :error,
+                     msg: {:string, "safe"},
+                     meta: %{safe_diagnostic: @sentinel}
+                   },
+                   @filter_configuration
+                 )
+      after
+        :persistent_term.put(@activity_key, activity)
+        CredentialFilter.release(lease)
+      end
+    end
+
+    test "registry loss with an active lease poisons logging and provider admission" do
+      {:ok, _lease} = CredentialFilter.acquire(@sentinel)
+      {:active, registry, epoch} = :persistent_term.get(@activity_key)
+      monitor = Process.monitor(registry)
+
+      try do
+        Process.exit(registry, :kill)
+        assert_receive {:DOWN, ^monitor, :process, ^registry, :killed}, 1_000
+        restarted = await_registry_restart(registry)
+
+        assert {:poisoned, poisoned_epoch} = :persistent_term.get(@activity_key)
+        assert poisoned_epoch > epoch
+
+        assert :stop =
+                 CredentialFilter.filter(
+                   %{
+                     level: :error,
+                     msg: {:string, "safe"},
+                     meta: %{safe_diagnostic: @sentinel}
+                   },
+                   @filter_configuration
+                 )
+
+        assert {:error, :credential_filter_unavailable} = CredentialFilter.ensure_installed()
+        assert is_pid(restarted)
+      after
+        recover_poisoned_registry()
+      end
+    end
+
+    test "post-transfer filter conflict refuses credential acquisition" do
+      registry = Process.whereis(@credential_registry)
+      observer = self()
+      barrier = make_ref()
+      debug_id = {:credential_transfer_barrier, barrier}
+
+      {@filter_id, expected_filter} =
+        List.keyfind(:logger.get_primary_config().filters, @filter_id, 0)
+
+      debug = fn state, event, _name ->
+        case event do
+          {:in, {:"ETS-TRANSFER", _capsule, _owner, {@capsule_tag, _request, _lease}}} ->
+            send(observer, {:credential_transfer_blocked, barrier})
+
+            receive do
+              {:release_credential_transfer, ^barrier} -> state
+            end
+
+          _other ->
+            state
+        end
+      end
+
+      :ok = :sys.install(registry, {debug_id, debug, :ready})
+      acquisition = Task.async(fn -> CredentialFilter.acquire(@sentinel) end)
+
+      try do
+        assert_receive {:credential_transfer_blocked, ^barrier}, 1_000
+        :ok = remove_primary_filter(@filter_id)
+
+        :ok =
+          :logger.add_primary_filter(
+            @filter_id,
+            {fn event, _configuration -> event end, :conflicting_configuration}
+          )
+
+        send(registry, {:release_credential_transfer, barrier})
+
+        case Task.await(acquisition, 2_000) do
+          {:error, :credential_filter_unavailable} ->
+            :ok
+
+          {:ok, leaked_lease} ->
+            CredentialFilter.release(leaked_lease)
+            flunk("post-transfer verification authorized provider transport")
+        end
+
+        state = await_clean_registry(registry)
+        assert {:idle, state.epoch} == :persistent_term.get(@activity_key)
+      after
+        send(registry, {:release_credential_transfer, barrier})
+        _ = Task.shutdown(acquisition, :brutal_kill)
+        _ = :sys.remove(registry, debug_id)
+        :ok = remove_primary_filter(@filter_id)
+        :ok = :logger.add_primary_filter(@filter_id, expected_filter)
+        reset_credential_plane_if_live()
+      end
+    end
+
+    test "a transfer timeout is cancelled when the delayed capsule reaches the registry" do
+      registry = Process.whereis(@credential_registry)
+      observer = self()
+      barrier = make_ref()
+      debug_id = {:delayed_credential_transfer, barrier}
+
+      debug = fn state, event, _name ->
+        case event do
+          {:in, {:"ETS-TRANSFER", _capsule, _owner, {@capsule_tag, _request, _lease}}} ->
+            send(observer, {:credential_transfer_delayed, barrier})
+
+            receive do
+              {:release_delayed_credential_transfer, ^barrier} -> state
+            end
+
+          _other ->
+            state
+        end
+      end
+
+      :ok = :sys.install(registry, {debug_id, debug, :ready})
+      acquisition = Task.async(fn -> CredentialFilter.acquire(@sentinel) end)
+
+      try do
+        assert_receive {:credential_transfer_delayed, ^barrier}, 1_000
+
+        assert {:error, :credential_filter_unavailable} = Task.await(acquisition, 2_000)
+
+        # The timeout refused acquisition but did not claim cleanup. Releasing
+        # the registry lets the keyed cancellation settle the delayed transfer.
+        send(registry, {:release_delayed_credential_transfer, barrier})
+        state = await_clean_registry(registry)
+        assert {:idle, state.epoch} == :persistent_term.get(@activity_key)
+      after
+        send(registry, {:release_delayed_credential_transfer, barrier})
+        _ = Task.shutdown(acquisition, :brutal_kill)
+        _ = :sys.remove(registry, debug_id)
+        reset_credential_plane_if_live()
+      end
+    end
+
+    test "provider IO isolation restores only after the last credential is released" do
+      {:ok, lease} = CredentialFilter.acquire(@sentinel)
+
+      try do
+        sink = Process.whereis(@provider_io_sink)
+        fallback = Process.group_leader()
+        supervisor = Process.whereis(ReqLLM.Supervisor)
+        task_supervisor = Process.whereis(ReqLLM.TaskSupervisor)
+        originals = :persistent_term.get(@provider_io_key)
+        {^supervisor, supervisor_original} = List.keyfind(originals, supervisor, 0)
+        {^task_supervisor, task_supervisor_original} = List.keyfind(originals, task_supervisor, 0)
+
+        assert {:error, :credential_filter_unavailable} =
+                 CredentialFilter.restore_provider_io(fallback)
+
+        assert {:group_leader, ^sink} =
+                 ReqLLM.Supervisor |> Process.whereis() |> Process.info(:group_leader)
+
+        assert {:group_leader, ^sink} =
+                 ReqLLM.TaskSupervisor |> Process.whereis() |> Process.info(:group_leader)
+
+        assert :ok = CredentialFilter.release(lease)
+        state = await_clean_registry(Process.whereis(@credential_registry))
+        assert {:idle, state.epoch} == :persistent_term.get(@activity_key)
+
+        assert :ok = CredentialFilter.restore_provider_io(fallback)
+
+        expected_supervisor =
+          if Process.alive?(supervisor_original), do: supervisor_original, else: fallback
+
+        expected_task_supervisor =
+          if Process.alive?(task_supervisor_original),
+            do: task_supervisor_original,
+            else: fallback
+
+        assert Process.info(supervisor, :group_leader) ==
+                 {:group_leader, expected_supervisor}
+
+        assert Process.info(task_supervisor, :group_leader) ==
+                 {:group_leader, expected_task_supervisor}
+      after
+        CredentialFilter.release(lease)
+        rebind_provider_io_for_test()
+      end
     end
 
     test "a transport raise after environment rotation is redacted by the real logger pipeline",
@@ -604,6 +933,97 @@ defmodule Loopex.LLM.ReqLLM.CredentialPlaneTest do
         Process.sleep(10)
         await_registry_restart(previous, attempts - 1)
     end
+  end
+
+  defp await_registry_state(predicate, attempts \\ 100)
+
+  defp await_registry_state(_predicate, 0),
+    do: flunk("credential registry did not reach the expected state")
+
+  defp await_registry_state(predicate, attempts) do
+    state = @credential_registry |> Process.whereis() |> :sys.get_state()
+
+    if predicate.(state) do
+      state
+    else
+      Process.sleep(10)
+      await_registry_state(predicate, attempts - 1)
+    end
+  end
+
+  defp await_clean_registry(registry) do
+    await_registry_state(fn state ->
+      state.leases == %{} and
+        state.monitors == %{} and
+        state.transfers == %{} and
+        MapSet.size(state.cancelled_transfers) == 0 and
+        :ets.info(state.credentials, :size) == 0 and
+        match?({:idle, _epoch}, :persistent_term.get(@activity_key, :missing))
+    end)
+    |> tap(fn state ->
+      assert Process.whereis(@credential_registry) == registry
+      assert state.leases == %{}
+      assert state.monitors == %{}
+      assert state.transfers == %{}
+      assert MapSet.size(state.cancelled_transfers) == 0
+      assert :ets.info(state.credentials, :size) == 0
+    end)
+  end
+
+  defp reset_credential_plane_if_live do
+    registry = Process.whereis(@credential_registry)
+
+    case :sys.get_state(registry) do
+      %{
+        credentials: credentials,
+        leases: leases,
+        monitors: monitors,
+        transfers: transfers,
+        cancelled_transfers: cancelled_transfers
+      }
+      when map_size(leases) == 0 and map_size(monitors) == 0 and map_size(transfers) == 0 ->
+        if :ets.info(credentials, :size) == 0 and MapSet.size(cancelled_transfers) == 0 and
+             match?({:idle, _epoch}, :persistent_term.get(@activity_key, :missing)) do
+          :ok
+        else
+          recover_poisoned_registry()
+        end
+
+      _active_or_malformed ->
+        recover_poisoned_registry()
+    end
+  catch
+    _kind, _reason -> recover_poisoned_registry()
+  end
+
+  defp recover_poisoned_registry do
+    epoch =
+      case :persistent_term.get(@activity_key, :missing) do
+        {:poisoned, value} when is_integer(value) -> value
+        {:active, _registry, value} when is_integer(value) -> value
+        {:idle, value} when is_integer(value) -> value
+        _missing_or_malformed -> 0
+      end
+
+    :persistent_term.put(@activity_key, {:idle, epoch})
+    registry = Process.whereis(@credential_registry)
+    monitor = Process.monitor(registry)
+    Process.exit(registry, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^registry, :killed}, 1_000
+    _restarted = await_registry_restart(registry)
+    assert :ok = CredentialFilter.ensure_installed()
+  end
+
+  defp rebind_provider_io_for_test do
+    sink = Process.whereis(@provider_io_sink)
+
+    Enum.each([ReqLLM.Supervisor, ReqLLM.TaskSupervisor], fn name ->
+      process = Process.whereis(name)
+      assert Process.group_leader(process, sink)
+      assert Process.info(process, :group_leader) == {:group_leader, sink}
+    end)
+
+    assert :ok = CredentialFilter.ensure_installed()
   end
 
   # Concept: the same lazy stream the library hands the adapter, with the ending

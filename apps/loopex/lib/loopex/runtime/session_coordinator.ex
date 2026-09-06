@@ -46,6 +46,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @page_size 1_024
   @provider_result_tag :loopex_provider_result
   @provider_deadline_tag :loopex_provider_deadline_elapsed
+  @provider_callback_key {__MODULE__, :provider_callback}
+  @provider_pending_resource_key {__MODULE__, :provider_pending_resource}
   @provider_resource_key {__MODULE__, :provider_resource}
   # Trusted same-VM implementation input from the exact current activation
   # holder, never authority of its own. Core revalidates that holder before and
@@ -2403,6 +2405,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
     module = state.model.module
     options = state.model.options
     deadline = committed_deadline(state, run_id)
+    cleanup_grace_ms = state.durable.cleanup_grace_ms
     {stream, progress} = model_progress_fun(state, work)
     coordinator = self()
 
@@ -2412,7 +2415,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     {:ok, guard} =
       Task.Supervisor.start_child(state.owner_workers, fn ->
-        guard_provider_call(coordinator, provider_reference)
+        guard_provider_call(coordinator, provider_reference, cleanup_grace_ms)
       end)
 
     task =
@@ -2426,7 +2429,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
               request,
               options,
               progress,
-              deadline
+              deadline,
+              cleanup_grace_ms
             )
         end
       end)
@@ -2449,7 +2453,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
       put_in_flight(
         state,
         task.ref,
-        {:model, run_id, task.pid, %{guard: guard, reference: provider_reference}}
+        {:model, run_id, task.pid,
+         %{
+           guard: guard,
+           reference: provider_reference,
+           cleanup_grace_ms: cleanup_grace_ms
+         }}
       )
 
     # Technical depth: recorded before the call rather than after its reply,
@@ -2506,17 +2515,26 @@ defmodule Loopex.Runtime.SessionCoordinator do
          request,
          options,
          progress,
-         deadline
+         deadline,
+         cleanup_grace_ms
        )
-       when is_integer(deadline) do
+       when is_integer(deadline) and is_integer(cleanup_grace_ms) do
     observed = System.system_time(:millisecond)
 
     if Bounds.deadline_reached?(observed, deadline) do
-      stop_provider_guard(guard, provider_reference, self())
+      _ = stop_provider_guard(guard, provider_reference, self(), cleanup_grace_ms)
       {@provider_deadline_tag, deadline, observed}
     else
       {@provider_result_tag,
-       call_provider(guard, provider_reference, module, request, options, progress)}
+       call_provider(
+         guard,
+         provider_reference,
+         module,
+         request,
+         options,
+         progress,
+         cleanup_grace_ms
+       )}
     end
   end
 
@@ -2539,7 +2557,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # deliberately cannot forge the one exact `not_dispatched` shape;
   # `accept_model_result/3` therefore settles it dispatched-or-unknown without
   # retrying.
-  defp call_provider(guard, reference, module, request, options, progress) do
+  defp call_provider(guard, reference, module, request, options, progress, cleanup_grace_ms) do
     guard_monitor = Process.monitor(guard)
 
     send(
@@ -2547,39 +2565,116 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {:loopex_provider_guard_start, reference, self(), module, request, options, progress}
     )
 
-    await_provider_guard(guard, guard_monitor, reference, nil)
+    await_provider_guard(
+      guard,
+      guard_monitor,
+      reference,
+      %{callback: nil, resource: nil},
+      cleanup_grace_ms
+    )
   end
 
-  defp await_provider_guard(guard, guard_monitor, reference, resource) do
+  defp await_provider_guard(guard, guard_monitor, reference, retained, cleanup_grace_ms) do
     receive do
-      {:loopex_provider_resource_retained, ^reference, ^guard, resource_pid, stop_reference}
-      when is_pid(resource_pid) and is_reference(stop_reference) and is_nil(resource) ->
-        retained = %{
+      {:loopex_provider_callback_retained, ^reference, ^guard, callback}
+      when is_pid(callback) and is_nil(retained.callback) ->
+        callback_handle = %{pid: callback, monitor: Process.monitor(callback)}
+
+        await_provider_guard(
+          guard,
+          guard_monitor,
+          reference,
+          %{retained | callback: callback_handle},
+          cleanup_grace_ms
+        )
+
+      {:loopex_provider_resource_offered, ^reference, callback, resource_pid, stop_reference,
+       offer}
+      when is_pid(callback) and is_pid(resource_pid) and is_reference(stop_reference) and
+             is_reference(offer) and is_nil(retained.resource) ->
+        resource_handle = %{
           pid: resource_pid,
           monitor: Process.monitor(resource_pid),
           stop_reference: stop_reference
         }
 
-        await_provider_guard(guard, guard_monitor, reference, retained)
+        send(callback, {:loopex_provider_resource_retained_by_worker, reference, offer, self()})
+
+        await_provider_guard(
+          guard,
+          guard_monitor,
+          reference,
+          %{retained | resource: resource_handle},
+          cleanup_grace_ms
+        )
+
+      {:loopex_provider_resource_offered, ^reference, callback, _resource_pid, _stop_reference,
+       offer}
+      when is_pid(callback) and is_reference(offer) ->
+        send(callback, {:loopex_provider_resource_refused_by_worker, reference, offer, self()})
+        await_provider_guard(guard, guard_monitor, reference, retained, cleanup_grace_ms)
+
+      {:loopex_provider_resource_retained, ^reference, ^guard, resource_pid, stop_reference}
+      when is_pid(resource_pid) and is_reference(stop_reference) ->
+        retained = retain_provider_resource_handle(retained, resource_pid, stop_reference)
+
+        await_provider_guard(guard, guard_monitor, reference, retained, cleanup_grace_ms)
 
       {:loopex_provider_guard_result, ^reference, ^guard, result} ->
-        await_process_down(guard, guard_monitor)
-        result
+        provider_result_after_guard_exit(
+          guard,
+          guard_monitor,
+          reference,
+          result,
+          provider_cleanup_window(cleanup_grace_ms)
+        )
 
       {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
+        cleanup = provider_cleanup_window(cleanup_grace_ms)
+
         provider_result_after_cleanup(
           {:error, :provider_call_failed},
-          stop_provider_resource_handle(resource)
+          combine_provider_cleanup(
+            stop_provider_callback_handle(retained.callback, cleanup),
+            stop_provider_resource_handle(retained.resource, cleanup)
+          )
         )
     end
   end
+
+  defp retain_provider_resource_handle(%{resource: nil} = retained, resource, stop_reference) do
+    %{
+      retained
+      | resource: %{
+          pid: resource,
+          monitor: Process.monitor(resource),
+          stop_reference: stop_reference
+        }
+    }
+  end
+
+  defp retain_provider_resource_handle(retained, _resource, _stop_reference), do: retained
 
   defp provider_result_after_cleanup(result, :ok), do: result
 
   defp provider_result_after_cleanup(_result, {:error, :provider_cleanup_unproved}),
     do: {:error, :provider_call_failed}
 
-  defp guard_provider_call(coordinator, reference) do
+  defp provider_result_after_guard_exit(guard, guard_monitor, reference, result, cleanup) do
+    case await_provider_process_down(guard, guard_monitor, cleanup.cooperative_deadline) do
+      {:ok, :normal} ->
+        result
+
+      {:ok, _reason} ->
+        {:error, :provider_call_failed}
+
+      :timeout ->
+        _ = force_unproved_provider_guard_stop(guard, guard_monitor, reference, cleanup)
+        {:error, :provider_call_failed}
+    end
+  end
+
+  defp guard_provider_call(coordinator, reference, cleanup_grace_ms) do
     Process.flag(:trap_exit, true)
     coordinator_monitor = Process.monitor(coordinator)
 
@@ -2592,7 +2687,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
           owner_monitor,
           coordinator,
           coordinator_monitor,
-          reference
+          reference,
+          cleanup_grace_ms
         )
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
@@ -2603,7 +2699,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp await_provider_start(owner, owner_monitor, coordinator, coordinator_monitor, reference) do
+  defp await_provider_start(
+         owner,
+         owner_monitor,
+         coordinator,
+         coordinator_monitor,
+         reference,
+         cleanup_grace_ms
+       ) do
     receive do
       {:loopex_provider_guard_start, ^reference, ^owner, module, request, options, progress} ->
         guard = self()
@@ -2611,20 +2714,28 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {callback, callback_monitor} =
           :erlang.spawn_opt(
             fn ->
-              result =
-                normalize_provider_call(
-                  guard,
-                  reference,
-                  module,
-                  request,
-                  options,
-                  progress
-                )
+              receive do
+                {:loopex_provider_callback_start, ^reference, ^guard} ->
+                  result =
+                    normalize_provider_call(
+                      owner,
+                      guard,
+                      reference,
+                      module,
+                      request,
+                      options,
+                      progress
+                    )
 
-              send(guard, {:loopex_provider_callback_result, reference, self(), result})
+                  send(guard, {:loopex_provider_callback_result, reference, self(), result})
+              end
             end,
             [:link, :monitor]
           )
+
+        Process.put({@provider_callback_key, reference}, callback)
+        send(owner, {:loopex_provider_callback_retained, reference, guard, callback})
+        send(callback, {:loopex_provider_callback_start, reference, guard})
 
         await_provider_callback(
           owner,
@@ -2633,7 +2744,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
           coordinator_monitor,
           callback,
           callback_monitor,
-          reference
+          reference,
+          cleanup_grace_ms
         )
 
       {:loopex_provider_tree_stop, ^reference, stop, ^owner} when is_reference(stop) ->
@@ -2653,12 +2765,13 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp normalize_provider_call(guard, reference, module, request, options, progress) do
+  defp normalize_provider_call(owner, guard, reference, module, request, options, progress) do
     callback = self()
 
     ProviderLifetime.scoped(
       fn resource, stop_reference ->
         register_provider_resource(
+          owner,
           guard,
           reference,
           callback,
@@ -2677,34 +2790,74 @@ defmodule Loopex.Runtime.SessionCoordinator do
   end
 
   defp register_provider_resource(
+         owner,
          guard,
          reference,
          callback,
          resource,
          stop_reference
        ) do
+    owner_monitor = Process.monitor(owner)
     guard_monitor = Process.monitor(guard)
+    offer = make_ref()
     registration = make_ref()
+    pending_key = {@provider_pending_resource_key, reference}
+    previous = Process.put(pending_key, %{pid: resource, stop_reference: stop_reference})
 
-    send(
-      guard,
-      {:loopex_provider_resource_register, reference, callback, resource, stop_reference,
-       registration}
-    )
+    try do
+      send(
+        owner,
+        {:loopex_provider_resource_offered, reference, callback, resource, stop_reference, offer}
+      )
 
+      case await_provider_worker_retention(owner, owner_monitor, reference, offer) do
+        :ok ->
+          send(
+            guard,
+            {:loopex_provider_resource_register, reference, callback, resource, stop_reference,
+             registration}
+          )
+
+          await_provider_guard_registration(guard, guard_monitor, reference, registration)
+
+        {:error, :provider_resource_refused} = refused ->
+          refused
+      end
+    after
+      Process.demonitor(owner_monitor, [:flush])
+      Process.demonitor(guard_monitor, [:flush])
+      restore_provider_process_value(pending_key, previous)
+    end
+  end
+
+  defp await_provider_worker_retention(owner, owner_monitor, reference, offer) do
+    receive do
+      {:loopex_provider_resource_retained_by_worker, ^reference, ^offer, ^owner} ->
+        :ok
+
+      {:loopex_provider_resource_refused_by_worker, ^reference, ^offer, ^owner} ->
+        {:error, :provider_resource_refused}
+
+      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+        {:error, :provider_resource_refused}
+    end
+  end
+
+  defp await_provider_guard_registration(guard, guard_monitor, reference, registration) do
     receive do
       {:loopex_provider_resource_registered, ^reference, ^registration, ^guard} ->
-        Process.demonitor(guard_monitor, [:flush])
         :ok
 
       {:loopex_provider_resource_refused, ^reference, ^registration, ^guard} ->
-        Process.demonitor(guard_monitor, [:flush])
         {:error, :provider_resource_refused}
 
       {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
         {:error, :provider_guard_unavailable}
     end
   end
+
+  defp restore_provider_process_value(key, nil), do: Process.delete(key)
+  defp restore_provider_process_value(key, previous), do: Process.put(key, previous)
 
   defp accept_provider_resource(
          owner,
@@ -2754,7 +2907,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
          coordinator_monitor,
          callback,
          callback_monitor,
-         reference
+         reference,
+         cleanup_grace_ms
        ) do
     receive do
       {:loopex_provider_callback_result, ^reference, ^callback, result} ->
@@ -2766,7 +2920,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
           callback,
           callback_monitor,
           reference,
-          result
+          result,
+          cleanup_grace_ms
         )
 
       {:EXIT, ^callback, _reason} ->
@@ -2777,7 +2932,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
           coordinator_monitor,
           callback,
           callback_monitor,
-          reference
+          reference,
+          cleanup_grace_ms
         )
 
       {:DOWN, ^callback_monitor, :process, ^callback, _reason} ->
@@ -2785,7 +2941,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
           owner,
           reference,
           {:error, :provider_call_failed},
-          stop_provider_resource(reference)
+          stop_provider_resource(reference, cleanup_grace_ms)
         )
 
       {:loopex_provider_resource_register, ^reference, ^callback, resource, stop_reference,
@@ -2807,14 +2963,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
           coordinator_monitor,
           callback,
           callback_monitor,
-          reference
+          reference,
+          cleanup_grace_ms
         )
 
       {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
-        stop_provider_callback_tree(reference, callback, callback_monitor)
+        stop_unrequested_provider_callback_tree(
+          reference,
+          callback,
+          callback_monitor,
+          cleanup_grace_ms
+        )
 
       {:loopex_provider_tree_stop, ^reference, stop, ^owner} when is_reference(stop) ->
-        stop_registered_provider_callback(owner, reference, callback, callback_monitor, stop)
+        stop_registered_provider_callback(
+          owner,
+          reference,
+          callback,
+          callback_monitor,
+          stop,
+          cleanup_grace_ms
+        )
 
       {:loopex_provider_tree_stop, ^reference, stop, ^coordinator} when is_reference(stop) ->
         stop_registered_provider_callback(
@@ -2822,14 +2991,25 @@ defmodule Loopex.Runtime.SessionCoordinator do
           reference,
           callback,
           callback_monitor,
-          stop
+          stop,
+          cleanup_grace_ms
         )
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
-        stop_provider_callback_tree(reference, callback, callback_monitor)
+        stop_unrequested_provider_callback_tree(
+          reference,
+          callback,
+          callback_monitor,
+          cleanup_grace_ms
+        )
 
       {:EXIT, _owner_workers, _reason} ->
-        stop_provider_callback_tree(reference, callback, callback_monitor)
+        stop_unrequested_provider_callback_tree(
+          reference,
+          callback,
+          callback_monitor,
+          cleanup_grace_ms
+        )
     end
   end
 
@@ -2841,7 +3021,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
          callback,
          callback_monitor,
          reference,
-         result
+         result,
+         cleanup_grace_ms
        ) do
     receive do
       {:EXIT, ^callback, _reason} ->
@@ -2853,25 +3034,43 @@ defmodule Loopex.Runtime.SessionCoordinator do
           callback,
           callback_monitor,
           reference,
-          result
+          result,
+          cleanup_grace_ms
         )
 
       {:DOWN, ^callback_monitor, :process, ^callback, :normal} ->
-        finish_provider_guard(owner, reference, result, stop_provider_resource(reference))
+        finish_provider_guard(
+          owner,
+          reference,
+          result,
+          stop_provider_resource(reference, cleanup_grace_ms)
+        )
 
       {:DOWN, ^callback_monitor, :process, ^callback, _reason} ->
         finish_provider_guard(
           owner,
           reference,
           {:error, :provider_call_failed},
-          stop_provider_resource(reference)
+          stop_provider_resource(reference, cleanup_grace_ms)
         )
 
       {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
-        stop_provider_callback_tree(reference, callback, callback_monitor)
+        stop_unrequested_provider_callback_tree(
+          reference,
+          callback,
+          callback_monitor,
+          cleanup_grace_ms
+        )
 
       {:loopex_provider_tree_stop, ^reference, stop, ^owner} when is_reference(stop) ->
-        stop_registered_provider_callback(owner, reference, callback, callback_monitor, stop)
+        stop_registered_provider_callback(
+          owner,
+          reference,
+          callback,
+          callback_monitor,
+          stop,
+          cleanup_grace_ms
+        )
 
       {:loopex_provider_tree_stop, ^reference, stop, ^coordinator} when is_reference(stop) ->
         stop_registered_provider_callback(
@@ -2879,14 +3078,25 @@ defmodule Loopex.Runtime.SessionCoordinator do
           reference,
           callback,
           callback_monitor,
-          stop
+          stop,
+          cleanup_grace_ms
         )
 
       {:DOWN, ^coordinator_monitor, :process, ^coordinator, _reason} ->
-        stop_provider_callback_tree(reference, callback, callback_monitor)
+        stop_unrequested_provider_callback_tree(
+          reference,
+          callback,
+          callback_monitor,
+          cleanup_grace_ms
+        )
 
       {:EXIT, _owner_workers, _reason} ->
-        stop_provider_callback_tree(reference, callback, callback_monitor)
+        stop_unrequested_provider_callback_tree(
+          reference,
+          callback,
+          callback_monitor,
+          cleanup_grace_ms
+        )
     end
   end
 
@@ -2895,9 +3105,15 @@ defmodule Loopex.Runtime.SessionCoordinator do
          reference,
          callback,
          callback_monitor,
-         stop
+         stop,
+         cleanup_grace_ms
        ) do
-    case stop_provider_callback_tree(reference, callback, callback_monitor) do
+    case stop_provider_callback_tree(
+           reference,
+           callback,
+           callback_monitor,
+           cleanup_grace_ms
+         ) do
       :ok ->
         acknowledge_provider_stop(requester, stop)
 
@@ -2918,97 +3134,357 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp acknowledge_provider_stop(requester, stop),
     do: send(requester, {:loopex_provider_tree_stopped, stop, self()})
 
-  defp stop_provider_callback(callback, callback_monitor) do
+  # Concept: provider cleanup has one configured cooperative period and one
+  # bounded confirmation window. A silent third-party resource cannot pin the
+  # session coordinator forever, and expiry is never upgraded to clean proof.
+  #
+  # Technical depth: the cooperative deadline is the session's committed grace.
+  # The outer deadline is the same checked observation bound Core already
+  # derives from that value. Both are absolute monotonic instants spent in safe
+  # slices, so later phases receive only the remainder. A resource that has not
+  # exited at the cooperative deadline is killed. Its prior acknowledgement
+  # still proves semantic cleanup; without one, even a confirmed forced exit is
+  # unproved because the resource may have owned provider descendants not linked
+  # to itself.
+  defp provider_cleanup_window(cleanup_grace_ms) do
+    {:ok, %{executor_observe_ms: observation_ms}} =
+      Executor.cancellation_bounds(cleanup_grace_ms)
+
+    started = System.monotonic_time(:millisecond)
+
+    %{
+      cooperative_deadline: started + cleanup_grace_ms,
+      observation_deadline: started + observation_ms
+    }
+  end
+
+  defp stop_provider_callback(callback, callback_monitor, cleanup) do
     Process.exit(callback, :kill)
 
-    receive do
-      {:DOWN, ^callback_monitor, :process, ^callback, _reason} -> :ok
+    case await_provider_process_down(callback, callback_monitor, cleanup.observation_deadline) do
+      {:ok, _reason} -> :ok
+      :timeout -> {:error, :provider_cleanup_unproved}
     end
   end
 
-  defp stop_provider_callback_tree(reference, callback, callback_monitor) do
-    stop_provider_callback(callback, callback_monitor)
-    stop_provider_resource(reference)
+  defp stop_provider_callback_handle(nil, _cleanup), do: :ok
+
+  defp stop_provider_callback_handle(%{pid: callback, monitor: monitor}, cleanup) do
+    stop_provider_callback(callback, monitor, cleanup)
   end
 
-  defp stop_provider_resource(reference) do
-    case Process.delete({@provider_resource_key, reference}) do
+  defp stop_provider_callback_tree(
+         reference,
+         callback,
+         callback_monitor,
+         cleanup_grace_ms
+       ) do
+    cleanup = provider_cleanup_window(cleanup_grace_ms)
+    callback_result = stop_provider_callback(callback, callback_monitor, cleanup)
+    resource_result = stop_provider_resource_in_window(reference, cleanup)
+    combine_provider_cleanup(callback_result, resource_result)
+  end
+
+  defp stop_unrequested_provider_callback_tree(
+         reference,
+         callback,
+         callback_monitor,
+         cleanup_grace_ms
+       ) do
+    case stop_provider_callback_tree(
+           reference,
+           callback,
+           callback_monitor,
+           cleanup_grace_ms
+         ) do
+      :ok -> :ok
+      {:error, :provider_cleanup_unproved} -> exit(:provider_cleanup_unproved)
+    end
+  end
+
+  defp combine_provider_cleanup(:ok, :ok), do: :ok
+
+  defp combine_provider_cleanup(_callback, _resource),
+    do: {:error, :provider_cleanup_unproved}
+
+  defp stop_provider_resource(reference, cleanup_grace_ms) do
+    stop_provider_resource_in_window(reference, provider_cleanup_window(cleanup_grace_ms))
+  end
+
+  defp stop_provider_resource_in_window(reference, cleanup) do
+    key = {@provider_resource_key, reference}
+
+    case Process.get(key) do
       nil ->
         :ok
 
-      %{pid: resource, monitor: monitor, stop_reference: stop_reference} ->
-        stop_provider_resource_handle(%{
-          pid: resource,
-          monitor: monitor,
-          stop_reference: stop_reference
-        })
+      %{pid: _resource, monitor: _monitor, stop_reference: _stop_reference} = retained ->
+        result = stop_provider_resource_handle(retained, cleanup)
+        Process.delete(key)
+        result
     end
   end
 
-  defp stop_provider_resource_handle(nil), do: :ok
+  defp stop_provider_resource_handle(nil, _cleanup), do: :ok
 
-  defp stop_provider_resource_handle(%{
-         pid: resource,
-         monitor: monitor,
-         stop_reference: stop_reference
-       }) do
+  defp stop_provider_resource_handle(
+         %{pid: resource, monitor: monitor, stop_reference: stop_reference},
+         cleanup
+       ) do
     stop = make_ref()
     send(resource, {:loopex_provider_resource_stop, stop_reference, stop, self()})
-    await_provider_resource_stop(resource, monitor, stop)
+    await_provider_resource_stop(resource, monitor, stop, cleanup)
   end
 
-  defp await_provider_resource_stop(resource, monitor, stop) do
+  defp await_provider_resource_stop(resource, monitor, stop, cleanup) do
     receive do
       {:loopex_provider_resource_stopped, ^stop, ^resource} ->
-        await_provider_resource_exit(resource, monitor)
-
-      {:DOWN, ^monitor, :process, ^resource, :normal} ->
-        :ok
+        await_provider_resource_exit(resource, monitor, cleanup)
 
       {:DOWN, ^monitor, :process, ^resource, _unproved_reason} ->
         {:error, :provider_cleanup_unproved}
+    after
+      provider_wait_slice(cleanup.cooperative_deadline) ->
+        if provider_deadline_reached?(cleanup.cooperative_deadline) do
+          force_provider_resource_stop(resource, monitor, cleanup, :unproved)
+        else
+          await_provider_resource_stop(resource, monitor, stop, cleanup)
+        end
     end
   end
 
-  defp await_provider_resource_exit(resource, monitor) do
+  defp await_provider_resource_exit(resource, monitor, cleanup) do
     receive do
-      {:DOWN, ^monitor, :process, ^resource, _reason} -> :ok
+      {:DOWN, ^monitor, :process, ^resource, _reason} ->
+        :ok
+    after
+      provider_wait_slice(cleanup.cooperative_deadline) ->
+        if provider_deadline_reached?(cleanup.cooperative_deadline) do
+          force_provider_resource_stop(resource, monitor, cleanup, :acknowledged)
+        else
+          await_provider_resource_exit(resource, monitor, cleanup)
+        end
+    end
+  end
+
+  defp force_provider_resource_stop(resource, monitor, cleanup, proof) do
+    Process.exit(resource, :kill)
+
+    case await_provider_process_down(resource, monitor, cleanup.observation_deadline) do
+      {:ok, _reason} when proof == :acknowledged -> :ok
+      {:ok, _reason} -> {:error, :provider_cleanup_unproved}
+      :timeout -> {:error, :provider_cleanup_unproved}
     end
   end
 
   defp stop_provider_tree(nil), do: :ok
 
-  defp stop_provider_tree(%{guard: guard, reference: reference})
-       when is_pid(guard) and is_reference(reference) do
-    stop_provider_guard(guard, reference, self())
+  defp stop_provider_tree(%{
+         guard: guard,
+         reference: reference,
+         cleanup_grace_ms: cleanup_grace_ms
+       })
+       when is_pid(guard) and is_reference(reference) and is_integer(cleanup_grace_ms) do
+    stop_provider_guard(guard, reference, self(), cleanup_grace_ms)
   end
 
-  defp stop_provider_guard(guard, reference, requester) do
+  defp stop_provider_guard(guard, reference, requester, cleanup_grace_ms) do
+    cleanup = provider_cleanup_window(cleanup_grace_ms)
     guard_monitor = Process.monitor(guard)
     stop = make_ref()
     send(guard, {:loopex_provider_tree_stop, reference, stop, requester})
 
-    guard_down =
-      receive do
-        {:loopex_provider_tree_stopped, ^stop, ^guard} ->
-          false
+    result =
+      await_provider_guard_stop(
+        guard,
+        guard_monitor,
+        reference,
+        stop,
+        cleanup
+      )
 
-        {:loopex_provider_tree_unproved, ^stop, ^guard} ->
-          raise "provider cleanup was not proved"
-
-        {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
-          true
-      end
-
-    unless guard_down, do: await_process_down(guard, guard_monitor)
-    :ok
+    Process.demonitor(guard_monitor, [:flush])
+    result
   end
 
-  defp await_process_down(process, monitor) do
+  defp await_provider_guard_stop(guard, guard_monitor, reference, stop, cleanup) do
     receive do
-      {:DOWN, ^monitor, :process, ^process, _reason} -> :ok
+      {:loopex_provider_tree_stopped, ^stop, ^guard} ->
+        case await_provider_process_down(guard, guard_monitor, cleanup.observation_deadline) do
+          {:ok, :normal} ->
+            :ok
+
+          {:ok, _reason} ->
+            {:error, :provider_cleanup_unproved}
+
+          :timeout ->
+            force_unproved_provider_guard_stop(guard, guard_monitor, reference, cleanup)
+        end
+
+      {:loopex_provider_tree_unproved, ^stop, ^guard} ->
+        _ = await_provider_process_down(guard, guard_monitor, cleanup.observation_deadline)
+        {:error, :provider_cleanup_unproved}
+
+      {:DOWN, ^guard_monitor, :process, ^guard, :normal} ->
+        {:error, :provider_cleanup_unproved}
+
+      {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
+        {:error, :provider_cleanup_unproved}
+    after
+      provider_wait_slice(cleanup.cooperative_deadline) ->
+        if provider_deadline_reached?(cleanup.cooperative_deadline) do
+          force_unproved_provider_guard_stop(guard, guard_monitor, reference, cleanup)
+        else
+          await_provider_guard_stop(guard, guard_monitor, reference, stop, cleanup)
+        end
     end
   end
+
+  defp force_unproved_provider_guard_stop(guard, guard_monitor, reference, cleanup) do
+    targets = provider_guard_force_targets(guard, reference)
+    Process.exit(guard, :kill)
+
+    target_monitors =
+      Enum.map(targets, fn target ->
+        monitor = Process.monitor(target)
+        Process.exit(target, :kill)
+        {target, monitor}
+      end)
+
+    guard_down =
+      await_provider_process_down(guard, guard_monitor, cleanup.observation_deadline)
+
+    targets_down =
+      await_provider_targets_down(target_monitors, cleanup.observation_deadline)
+
+    case {guard_down, targets_down} do
+      {{:ok, _reason}, :ok} ->
+        {:error, :provider_cleanup_unproved}
+
+      _unconfirmed ->
+        exit(:provider_cleanup_unproved)
+    end
+  end
+
+  # Technical depth: the guard owns these handles, but an external force stop
+  # cannot ask a suspended guard to reveal them. Freeze its reductions, then
+  # inspect both already-retained handles and a registration message it has not
+  # reduced yet. Killing the guard alone is insufficient because a provider is
+  # permitted to unlink its callback and its registered resource is deliberately
+  # independent. The snapshot therefore supplies every process this force path
+  # must terminate before it reports unproved cleanup.
+  defp provider_guard_force_targets(guard, reference) do
+    _ = suspend_provider_guard_for_force(guard)
+
+    dictionary_targets =
+      case Process.info(guard, :dictionary) do
+        {:dictionary, dictionary} ->
+          callback =
+            lookup_provider_guard_pid(dictionary, {@provider_callback_key, reference})
+
+          [
+            callback,
+            lookup_provider_resource_pid(dictionary, {@provider_resource_key, reference}),
+            lookup_provider_callback_resource_pid(callback, reference)
+          ]
+
+        nil ->
+          []
+      end
+
+    queued_targets =
+      case Process.info(guard, :messages) do
+        {:messages, messages} ->
+          Enum.flat_map(messages, fn
+            {:loopex_provider_resource_register, ^reference, callback, resource, stop_reference,
+             registration}
+            when is_pid(callback) and is_pid(resource) and is_reference(stop_reference) and
+                   is_reference(registration) ->
+              [callback, resource]
+
+            _other ->
+              []
+          end)
+
+        nil ->
+          []
+      end
+
+    (dictionary_targets ++ queued_targets)
+    |> Enum.filter(&is_pid/1)
+    |> Enum.reject(&(&1 == guard))
+    |> Enum.uniq()
+  end
+
+  defp suspend_provider_guard_for_force(guard) do
+    :erlang.suspend_process(guard)
+  catch
+    :error, :badarg -> false
+  end
+
+  defp lookup_provider_guard_pid(dictionary, key) do
+    case List.keyfind(dictionary, key, 0) do
+      {^key, callback} when is_pid(callback) -> callback
+      _missing -> nil
+    end
+  end
+
+  defp lookup_provider_resource_pid(dictionary, key) do
+    case List.keyfind(dictionary, key, 0) do
+      {^key, %{pid: resource}} when is_pid(resource) -> resource
+      _missing -> nil
+    end
+  end
+
+  defp lookup_provider_callback_resource_pid(callback, reference) when is_pid(callback) do
+    case Process.info(callback, :dictionary) do
+      {:dictionary, dictionary} ->
+        lookup_provider_resource_pid(
+          dictionary,
+          {@provider_pending_resource_key, reference}
+        )
+
+      nil ->
+        nil
+    end
+  end
+
+  defp lookup_provider_callback_resource_pid(_callback, _reference), do: nil
+
+  defp await_provider_targets_down(targets, deadline) do
+    results =
+      Enum.map(targets, fn {target, monitor} ->
+        result = await_provider_process_down(target, monitor, deadline)
+        Process.demonitor(monitor, [:flush])
+        result
+      end)
+
+    if Enum.all?(results, &match?({:ok, _reason}, &1)), do: :ok, else: :timeout
+  end
+
+  defp await_provider_process_down(process, monitor, deadline) do
+    receive do
+      {:DOWN, ^monitor, :process, ^process, reason} ->
+        {:ok, reason}
+    after
+      provider_wait_slice(deadline) ->
+        if provider_deadline_reached?(deadline) do
+          :timeout
+        else
+          await_provider_process_down(process, monitor, deadline)
+        end
+    end
+  end
+
+  defp provider_wait_slice(deadline) do
+    deadline
+    |> Kernel.-(System.monotonic_time(:millisecond))
+    |> max(0)
+    |> min(@timer_slice_ms)
+  end
+
+  defp provider_deadline_reached?(deadline),
+    do: System.monotonic_time(:millisecond) >= deadline
 
   # Concept: the full identity one permit authorizes, and the only shape a
   # blocked worker will accept.
@@ -3955,11 +4431,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
       {reference, pid, tree} ->
         _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
         answer = take_worker_result(reference)
-        stop_provider_tree(tree)
+        cleanup = provider_tree_cleanup(answer, tree)
         state = %{state | in_flight: Map.delete(state.in_flight, reference)}
 
-        case answer do
-          {:answered, {@provider_result_tag, {:ok, reply}}} when is_map(reply) ->
+        case {answer, cleanup} do
+          {{:answered, {@provider_result_tag, {:ok, reply}}}, :ok} when is_map(reply) ->
             settle_model_attempt(state, run_id, {:reply, reply})
 
           _unproved ->
@@ -4141,17 +4617,27 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
       {reference, pid, tree} ->
         _ = Task.Supervisor.terminate_child(state.owner_workers, pid)
-        _ = take_worker_result(reference)
-        stop_provider_tree(tree)
+        answer = take_worker_result(reference)
+        cleanup = provider_tree_cleanup(answer, tree)
 
         next =
           state
           |> Map.put(:in_flight, Map.delete(state.in_flight, reference))
           |> close_current_model_stream(run_id, :abandoned)
 
-        {next, :cleaned}
+        model = if cleanup == :ok, do: :cleaned, else: :unconfirmed
+        {next, model}
     end
   end
+
+  # Technical depth: a wrapped provider result is emitted only after the
+  # permitted worker observed the guard's normal exit, and that guard emits a
+  # result only after its registered resource has stopped. The exact wrapper is
+  # therefore cleanup proof for this private tree. No other task answer has that
+  # meaning, including the receiver-side deadline tag whose stop result is
+  # deliberately conservative.
+  defp provider_tree_cleanup({:answered, {@provider_result_tag, _result}}, _tree), do: :ok
+  defp provider_tree_cleanup(_answer, tree), do: stop_provider_tree(tree)
 
   # Concept: waiting for permission is effect-free work, so stopping it proves
   # there is no host effect to reconcile.

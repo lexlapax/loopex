@@ -43,15 +43,8 @@ defmodule Loopex.LLM.ReqLLM.CredentialFilter do
   @spec acquire(binary()) :: {:ok, reference()} | {:error, :credential_filter_unavailable}
   def acquire(credential) when is_binary(credential) and credential != "" do
     with :ok <- ensure_installed(),
-         {:ok, lease} <- transfer_credential(credential) do
-      case verify_filter_and_registry() do
-        :ok ->
-          {:ok, lease}
-
-        {:error, :credential_filter_unavailable} = unavailable ->
-          _ = registry_call({:release, lease})
-          unavailable
-      end
+         {:ok, lease, registry, request_reference} <- transfer_credential(credential) do
+      finish_credential_transfer(registry, request_reference, lease)
     else
       _unavailable -> {:error, :credential_filter_unavailable}
     end
@@ -60,6 +53,40 @@ defmodule Loopex.LLM.ReqLLM.CredentialFilter do
   end
 
   def acquire(_credential), do: {:error, :credential_filter_unavailable}
+
+  defp finish_credential_transfer(registry, request_reference, lease) do
+    result =
+      try do
+        with :ok <- verify_filter_and_registry(),
+             :ok <-
+               safe_genserver_call(
+                 registry,
+                 {:settle_transfer, request_reference, lease},
+                 @registry_timeout
+               ) do
+          :ok
+        else
+          _unavailable -> {:error, :credential_filter_unavailable}
+        end
+      rescue
+        _error -> {:error, :credential_filter_unavailable}
+      catch
+        _kind, _reason -> {:error, :credential_filter_unavailable}
+      end
+
+    case result do
+      :ok ->
+        {:ok, lease}
+
+      {:error, :credential_filter_unavailable} = unavailable ->
+        # Verification and settlement are one authorization boundary. Even if
+        # the settling call timed out after the registry handled it, this keyed
+        # cancellation remains valid and eventually removes the transferred
+        # credential. A timeout is never interpreted as proof of cleanup.
+        request_transfer_cancellation(registry, request_reference, lease)
+        unavailable
+    end
+  end
 
   @doc false
   @spec isolate_provider_io() :: :ok | {:error, :credential_filter_unavailable}
@@ -118,7 +145,9 @@ defmodule Loopex.LLM.ReqLLM.CredentialFilter do
          epoch: epoch,
          credentials: credentials,
          leases: %{},
-         monitors: %{}
+         monitors: %{},
+         transfers: %{},
+         cancelled_transfers: MapSet.new()
        }}
     else
       {:error, :credential_filter_unavailable} -> {:stop, :credential_filter_unavailable}
@@ -136,26 +165,29 @@ defmodule Loopex.LLM.ReqLLM.CredentialFilter do
 
   def handle_call({:release, lease}, _from, %{mode: :healthy} = state)
       when is_reference(lease) do
-    case Map.pop(state.leases, lease) do
-      {nil, _leases} ->
-        {:reply, :ok, state}
-
-      {{_owner, monitor}, leases} ->
-        Process.demonitor(monitor, [:flush])
-        true = :ets.delete(state.credentials, lease)
-        monitors = Map.delete(state.monitors, monitor)
-        next = advance_activity(%{state | leases: leases, monitors: monitors})
-        {:reply, :ok, next}
-    end
+    {:reply, :ok, release_lease(state, lease)}
   end
 
   def handle_call({:release, _lease}, _from, state) do
     {:reply, {:error, :credential_filter_unavailable}, state}
   end
 
-  def handle_call({:restore_provider_io, fallback}, _from, state) when is_pid(fallback) do
-    result = restore_provider_io_leaders(fallback)
-    {:reply, result, state}
+  def handle_call(
+        {:restore_provider_io, fallback},
+        _from,
+        %{mode: :healthy, credentials: credentials} = state
+      )
+      when is_pid(fallback) do
+    if :ets.info(credentials, :size) == 0 do
+      result = restore_provider_io_leaders(fallback)
+      {:reply, result, state}
+    else
+      {:reply, {:error, :credential_filter_unavailable}, state}
+    end
+  end
+
+  def handle_call({:restore_provider_io, _fallback}, _from, state) do
+    {:reply, {:error, :credential_filter_unavailable}, state}
   end
 
   def handle_call({:sanitize, epoch, event}, _from, %{mode: :healthy} = state)
@@ -175,6 +207,31 @@ defmodule Loopex.LLM.ReqLLM.CredentialFilter do
     {:reply, :stop, state}
   end
 
+  def handle_call(
+        {:settle_transfer, request_reference, lease},
+        {owner, _tag},
+        %{mode: :healthy} = state
+      )
+      when is_reference(request_reference) and is_reference(lease) and is_pid(owner) do
+    case Map.get(state.transfers, request_reference) do
+      %{owner: ^owner, lease: ^lease, status: :pending} = transfer ->
+        transfers =
+          Map.put(state.transfers, request_reference, %{transfer | status: :settled})
+
+        {:reply, :ok, %{state | transfers: transfers}}
+
+      %{owner: ^owner, lease: ^lease, status: :settled} ->
+        {:reply, :ok, state}
+
+      _missing_or_mismatched ->
+        {:reply, {:error, :credential_filter_unavailable}, state}
+    end
+  end
+
+  def handle_call({:settle_transfer, _request_reference, _lease}, _from, state) do
+    {:reply, {:error, :credential_filter_unavailable}, state}
+  end
+
   def handle_call(_unsupported, _from, state) do
     {:reply, {:error, :unsupported}, state}
   end
@@ -185,26 +242,76 @@ defmodule Loopex.LLM.ReqLLM.CredentialFilter do
         state
       )
       when is_reference(request_reference) and is_reference(lease) and is_pid(owner) do
-    case import_credential(capsule, owner, lease, state) do
-      {:ok, next} ->
-        send(owner, {@registry_protocol, self(), request_reference, {:ok, lease}})
-        {:noreply, next}
+    cancellation = {owner, request_reference, lease}
 
-      {:error, next} ->
+    if MapSet.member?(state.cancelled_transfers, cancellation) do
+      delete_registry_capsule(capsule)
+
+      send(
+        owner,
+        {@registry_protocol, self(), request_reference, {:error, :credential_filter_unavailable}}
+      )
+
+      {:noreply,
+       %{state | cancelled_transfers: MapSet.delete(state.cancelled_transfers, cancellation)}}
+    else
+      case import_credential(capsule, owner, request_reference, lease, state) do
+        {:ok, next} ->
+          send(owner, {@registry_protocol, self(), request_reference, {:ok, lease}})
+          {:noreply, next}
+
+        {:error, next} ->
+          send(
+            owner,
+            {@registry_protocol, self(), request_reference,
+             {:error, :credential_filter_unavailable}}
+          )
+
+          {:noreply, next}
+      end
+    end
+  end
+
+  def handle_info(
+        {@registry_protocol, owner, request_reference, {:cancel_transfer, lease}},
+        state
+      )
+      when is_pid(owner) and is_reference(request_reference) and is_reference(lease) do
+    cancellation = {owner, request_reference, lease}
+
+    case Map.get(state.transfers, request_reference) do
+      %{owner: ^owner, lease: ^lease} ->
+        next = release_lease(state, lease)
+
         send(
           owner,
-          {@registry_protocol, self(), request_reference,
-           {:error, :credential_filter_unavailable}}
+          {@registry_protocol, self(), request_reference, {:cancelled, lease}}
         )
 
         {:noreply, next}
+
+      _not_imported_yet ->
+        {:noreply,
+         %{state | cancelled_transfers: MapSet.put(state.cancelled_transfers, cancellation)}}
     end
   end
 
   def handle_info({:DOWN, monitor, :process, _owner, _reason}, state) do
-    # The credential may still exist in a detached provider resource. Retaining
-    # its value for redaction is the only safe conclusion after its owner dies.
-    {:noreply, %{state | monitors: Map.delete(state.monitors, monitor)}}
+    case Map.get(state.monitors, monitor) do
+      nil ->
+        {:noreply, state}
+
+      lease ->
+        if transfer_pending?(state, lease) do
+          # A caller that died before settlement never received an authorized
+          # lease. The request identity makes this pre-return state distinct
+          # from a settled owner loss, whose credential must remain available
+          # for redaction until an explicit release.
+          {:noreply, release_lease(state, lease)}
+        else
+          {:noreply, %{state | monitors: Map.delete(state.monitors, monitor)}}
+        end
+    end
   end
 
   def handle_info(_unknown, state), do: {:noreply, state}
@@ -254,7 +361,7 @@ defmodule Loopex.LLM.ReqLLM.CredentialFilter do
       true =
         :ets.give_away(capsule, registry, {@capsule_tag, request_reference, lease})
 
-      await_credential_transfer(registry, monitor, request_reference)
+      await_credential_transfer(registry, monitor, request_reference, lease)
     after
       delete_owned_capsule(capsule)
     end
@@ -262,16 +369,22 @@ defmodule Loopex.LLM.ReqLLM.CredentialFilter do
     _kind, _reason -> {:error, :credential_filter_unavailable}
   end
 
-  defp await_credential_transfer(registry, monitor, request_reference) do
+  defp await_credential_transfer(registry, monitor, request_reference, lease) do
     receive do
-      {@registry_protocol, ^registry, ^request_reference, response} ->
+      {@registry_protocol, ^registry, ^request_reference, {:ok, ^lease}} ->
         Process.demonitor(monitor, [:flush])
-        response
+        {:ok, lease, registry, request_reference}
+
+      {@registry_protocol, ^registry, ^request_reference,
+       {:error, :credential_filter_unavailable}} ->
+        Process.demonitor(monitor, [:flush])
+        {:error, :credential_filter_unavailable}
 
       {:DOWN, ^monitor, :process, ^registry, _reason} ->
         {:error, :credential_filter_unavailable}
     after
       @registry_timeout ->
+        request_transfer_cancellation(registry, request_reference, lease)
         Process.demonitor(monitor, [:flush])
         {:error, :credential_filter_unavailable}
     end
@@ -285,7 +398,13 @@ defmodule Loopex.LLM.ReqLLM.CredentialFilter do
     _kind, _reason -> :ok
   end
 
-  defp import_credential(capsule, owner, lease, %{mode: :healthy} = state) do
+  defp import_credential(
+         capsule,
+         owner,
+         request_reference,
+         lease,
+         %{mode: :healthy} = state
+       ) do
     result =
       try do
         case :ets.take(capsule, :credential) do
@@ -311,6 +430,14 @@ defmodule Loopex.LLM.ReqLLM.CredentialFilter do
           state
           |> Map.put(:leases, Map.put(state.leases, lease, {owner, monitor}))
           |> Map.put(:monitors, Map.put(state.monitors, monitor, lease))
+          |> Map.put(
+            :transfers,
+            Map.put(state.transfers, request_reference, %{
+              owner: owner,
+              lease: lease,
+              status: :pending
+            })
+          )
           |> advance_activity()
 
         {:ok, next}
@@ -320,9 +447,50 @@ defmodule Loopex.LLM.ReqLLM.CredentialFilter do
     end
   end
 
-  defp import_credential(capsule, _owner, _lease, state) do
+  defp import_credential(capsule, _owner, _request_reference, _lease, state) do
     delete_registry_capsule(capsule)
     {:error, state}
+  end
+
+  defp release_lease(state, lease) do
+    case Map.pop(state.leases, lease) do
+      {nil, _leases} ->
+        state
+
+      {{_owner, monitor}, leases} ->
+        Process.demonitor(monitor, [:flush])
+        true = :ets.delete(state.credentials, lease)
+        monitors = Map.delete(state.monitors, monitor)
+
+        transfers =
+          Map.reject(state.transfers, fn {_request_reference, transfer} ->
+            transfer.lease == lease
+          end)
+
+        advance_activity(%{
+          state
+          | leases: leases,
+            monitors: monitors,
+            transfers: transfers
+        })
+    end
+  end
+
+  defp transfer_pending?(state, lease) do
+    Enum.any?(state.transfers, fn {_request_reference, transfer} ->
+      transfer.lease == lease and transfer.status == :pending
+    end)
+  end
+
+  defp request_transfer_cancellation(registry, request_reference, lease) do
+    send(
+      registry,
+      {@registry_protocol, self(), request_reference, {:cancel_transfer, lease}}
+    )
+
+    :ok
+  catch
+    _kind, _reason -> :ok
   end
 
   defp delete_registry_capsule(capsule) do
