@@ -42,6 +42,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptCanaryAdapter do
       :hold_before_return ->
         receive do
           :provider_attempt_canary_never_returns -> request
+          {:provider_attempt_canary_return, response} -> response
         end
 
       :io_then_malformed ->
@@ -106,7 +107,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
   import ExUnit.CaptureIO
 
   alias Loopex.LLM.ReqLLM, as: Adapter
+  alias Loopex.LLM.ReqLLM.CredentialFilter
   alias Loopex.Model
+  alias Loopex.Runtime.ProviderLifetime
 
   test "one durable model attempt invokes the provider transport exactly once" do
     variable = Adapter.credential_variable()
@@ -658,6 +661,230 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     end
   end
 
+  test "a managed adapter result precedes its retained resource stop acknowledgement" do
+    variable = Adapter.credential_variable()
+    previous_credential = System.get_env(variable)
+    previous_adapter = Application.get_env(:req_llm, :finch_request_adapter)
+    previous_observer = Application.get_env(:loopex_llm_reqllm, :provider_attempt_canary_observer)
+    previous_port = Application.get_env(:loopex_llm_reqllm, :provider_attempt_closed_port)
+    previous_mode = Application.get_env(:loopex_llm_reqllm, :provider_attempt_canary_mode)
+    closed_port = reserve_closed_port()
+
+    Application.put_env(
+      :req_llm,
+      :finch_request_adapter,
+      Loopex.LLM.ReqLLM.ProviderAttemptCanaryAdapter
+    )
+
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_canary_observer, self())
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_closed_port, closed_port)
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_canary_mode, :closed_port)
+
+    try do
+      System.put_env(variable, "credential-shaped-canary-secret")
+
+      {:ok, request} =
+        Model.request(
+          Adapter.default_model(),
+          [%{"role" => "user", "content" => "managed adapter lifetime"}],
+          sampling: %{"max_tokens" => 1},
+          deadline: System.system_time(:millisecond) + 2_000
+        )
+
+      observer = self()
+
+      {caller, caller_monitor} =
+        spawn_monitor(fn ->
+          result =
+            ProviderLifetime.scoped(
+              fn resource, stop_reference ->
+                send(observer, {:managed_adapter_resource, resource, stop_reference})
+                :ok
+              end,
+              fn -> Adapter.complete(request, [], Model.discard_progress()) end
+            )
+
+          send(observer, {:managed_adapter_result, self(), result})
+        end)
+
+      assert_receive {:managed_adapter_resource, resource, stop_reference}, 5_000
+      resource_monitor = Process.monitor(resource)
+
+      try do
+        assert_receive {:provider_transport_canary, _worker, "POST", _provider_host}, 5_000
+
+        assert_receive {:managed_adapter_result, ^caller,
+                        {:error, {:dispatched_or_unknown, "model_call_failed"}}},
+                       5_000
+
+        assert Process.alive?(resource), "the managed adapter resource exited before release"
+        assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 5_000
+
+        credential_registry = Process.whereis(Loopex.LLM.ReqLLM.CredentialFilter.Registry)
+        assert is_pid(credential_registry)
+        assert 1 = :erlang.trace(resource, true, [:send])
+
+        stop = make_ref()
+        send(resource, {:loopex_provider_resource_stop, stop_reference, stop, self()})
+
+        assert_receive {:trace, ^resource, :send, first_stop_message, first_stop_destination},
+                       5_000
+
+        assert {true, true} ==
+                 {
+                   match?({:"$gen_call", _from, {:release, _lease}}, first_stop_message),
+                   first_stop_destination == credential_registry
+                 }
+
+        assert_receive {:trace, ^resource, :send,
+                        {:loopex_provider_resource_stopped, ^stop, ^resource}, stop_destination},
+                       5_000
+
+        assert stop_destination == self()
+        assert_receive {:loopex_provider_resource_stopped, ^stop, ^resource}, 5_000
+
+        assert :ignore ==
+                 CredentialFilter.filter(
+                   %{msg: {:string, "credential filter is idle"}},
+                   :loopex_req_llm_v3
+                 )
+
+        assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :normal}, 5_000
+      after
+        if Process.alive?(caller), do: Process.exit(caller, :kill)
+        if Process.alive?(resource), do: Process.exit(resource, :kill)
+      end
+    after
+      restore_env(variable, previous_credential)
+      restore_application_env(:req_llm, :finch_request_adapter, previous_adapter)
+
+      restore_application_env(
+        :loopex_llm_reqllm,
+        :provider_attempt_canary_observer,
+        previous_observer
+      )
+
+      restore_application_env(
+        :loopex_llm_reqllm,
+        :provider_attempt_closed_port,
+        previous_port
+      )
+
+      restore_application_env(
+        :loopex_llm_reqllm,
+        :provider_attempt_canary_mode,
+        previous_mode
+      )
+    end
+  end
+
+  test "an unmanaged adapter result follows guardian credential cleanup" do
+    variable = Adapter.credential_variable()
+    previous_credential = System.get_env(variable)
+    previous_adapter = Application.get_env(:req_llm, :finch_request_adapter)
+    previous_observer = Application.get_env(:loopex_llm_reqllm, :provider_attempt_canary_observer)
+    previous_port = Application.get_env(:loopex_llm_reqllm, :provider_attempt_closed_port)
+    previous_mode = Application.get_env(:loopex_llm_reqllm, :provider_attempt_canary_mode)
+
+    Application.put_env(
+      :req_llm,
+      :finch_request_adapter,
+      Loopex.LLM.ReqLLM.ProviderAttemptCanaryAdapter
+    )
+
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_canary_observer, self())
+    Application.put_env(:loopex_llm_reqllm, :provider_attempt_canary_mode, :hold_before_return)
+
+    try do
+      System.put_env(variable, "credential-shaped-canary-secret")
+
+      {:ok, request} =
+        Model.request(
+          Adapter.default_model(),
+          [%{"role" => "user", "content" => "unmanaged adapter lifetime"}],
+          sampling: %{"max_tokens" => 1},
+          deadline: System.system_time(:millisecond) + 5_000
+        )
+
+      observer = self()
+
+      {caller, caller_monitor} =
+        spawn_monitor(fn ->
+          result = Adapter.complete(request, [], Model.discard_progress())
+          send(observer, {:unmanaged_adapter_result, self(), result})
+        end)
+
+      assert_receive {:provider_transport_canary, worker, "POST", provider_host}, 5_000
+      guardian = caller |> monitored_processes() |> exactly_one_process!()
+      guardian_monitor = Process.monitor(guardian)
+      credential_registry = Process.whereis(Loopex.LLM.ReqLLM.CredentialFilter.Registry)
+      assert is_pid(credential_registry)
+      assert 1 = :erlang.trace(caller, true, [:receive])
+      assert 1 = :erlang.trace(guardian, true, [:send])
+      :ok = :sys.suspend(credential_registry)
+
+      try do
+        send(worker, {:provider_attempt_canary_return, {:not_a_finch_request, provider_host}})
+
+        assert_receive {:trace, ^guardian, :send,
+                        {Adapter, ^guardian, adapter_reference, adapter_outcome}, ^caller},
+                       5_000
+
+        assert is_reference(adapter_reference)
+        assert adapter_outcome == :provider_call_failed
+
+        assert_receive {:trace, ^guardian, :send, {:"$gen_call", _from, {:release, _lease}},
+                        ^credential_registry},
+                       5_000
+
+        assert_receive {:trace, ^caller, :receive,
+                        {Adapter, ^guardian, ^adapter_reference, ^adapter_outcome}},
+                       5_000
+
+        assert_caller_waiting_for_guardian(
+          caller,
+          caller_monitor,
+          System.monotonic_time(:millisecond) + 500
+        )
+
+        :ok = :sys.resume(credential_registry)
+
+        assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 5_000
+
+        assert_receive {:unmanaged_adapter_result, ^caller,
+                        {:error, {:dispatched_or_unknown, "model_call_failed"}}},
+                       5_000
+
+        assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 5_000
+      after
+        resume_if_suspended(credential_registry)
+        if Process.alive?(caller), do: Process.exit(caller, :kill)
+        if Process.alive?(guardian), do: Process.exit(guardian, :kill)
+      end
+    after
+      restore_env(variable, previous_credential)
+      restore_application_env(:req_llm, :finch_request_adapter, previous_adapter)
+
+      restore_application_env(
+        :loopex_llm_reqllm,
+        :provider_attempt_canary_observer,
+        previous_observer
+      )
+
+      restore_application_env(
+        :loopex_llm_reqllm,
+        :provider_attempt_closed_port,
+        previous_port
+      )
+
+      restore_application_env(
+        :loopex_llm_reqllm,
+        :provider_attempt_canary_mode,
+        previous_mode
+      )
+    end
+  end
+
   defp reserve_closed_port do
     {:ok, socket} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
     {:ok, {_address, port}} = :inet.sockname(socket)
@@ -732,6 +959,44 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
 
   defp exactly_one_process!(processes) do
     flunk("expected exactly one provider guardian, got: #{inspect(processes)}")
+  end
+
+  defp assert_caller_waiting_for_guardian(caller, caller_monitor, deadline) do
+    receive do
+      {:unmanaged_adapter_result, ^caller, result} ->
+        flunk("the unmanaged adapter returned before guardian cleanup: #{inspect(result)}")
+
+      {:DOWN, ^caller_monitor, :process, ^caller, reason} ->
+        flunk("the unmanaged adapter caller exited before guardian cleanup: #{inspect(reason)}")
+    after
+      0 ->
+        case {
+          Process.info(caller, :status),
+          Process.info(caller, :message_queue_len)
+        } do
+          {{:status, :waiting}, {:message_queue_len, 0}} ->
+            :ok
+
+          {nil, nil} ->
+            flunk("the unmanaged adapter caller exited before guardian cleanup")
+
+          state ->
+            if System.monotonic_time(:millisecond) < deadline do
+              Process.sleep(1)
+              assert_caller_waiting_for_guardian(caller, caller_monitor, deadline)
+            else
+              flunk(
+                "the unmanaged adapter caller did not settle at its cleanup barrier: #{inspect(state)}"
+              )
+            end
+        end
+    end
+  end
+
+  defp resume_if_suspended(process) do
+    :sys.resume(process)
+  catch
+    :exit, _reason -> :ok
   end
 
   defp await_transport_close(socket, observer, deadline) do

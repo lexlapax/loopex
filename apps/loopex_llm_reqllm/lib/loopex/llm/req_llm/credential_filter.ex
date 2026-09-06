@@ -102,16 +102,18 @@ defmodule Loopex.LLM.ReqLLM.CredentialFilter do
   end
 
   @doc false
-  @spec release(reference()) :: :ok
+  @spec release(reference()) :: :ok | {:error, :credential_filter_unavailable}
   def release(lease) when is_reference(lease) do
     # A missing acknowledgement deliberately leaves the active generation in
     # place. Losing the owner while a credential might still be live stops logs
     # and future provider attempts rather than silently reopening either plane.
-    _ = registry_call({:release, lease})
-    :ok
+    case registry_call({:release, lease}) do
+      :ok -> :ok
+      _unavailable -> {:error, :credential_filter_unavailable}
+    end
   end
 
-  def release(_lease), do: :ok
+  def release(_lease), do: {:error, :credential_filter_unavailable}
 
   @doc false
   def filter(event, @filter_configuration) when is_map(event) do

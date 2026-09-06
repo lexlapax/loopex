@@ -508,8 +508,9 @@ defmodule Loopex.LLM.ReqLLM do
   # Cleanup uses one delivery barrier per dead tracee, not `:all`, because a dead
   # process is no longer in the latter set and its final spawn trace could arrive
   # after a global marker. The guardian stops, monitors, and drains every owned
-  # process before it exits; the runtime guard waits for that exit before it can
-  # claim the provider tree stopped.
+  # process before it reports the adapter outcome. When a runtime retained the
+  # guardian, the now-empty guardian remains alive until that runtime requests
+  # and observes its correlated stop acknowledgement.
   #
   # The worker carries no timeout of its own. The transport bound derived from
   # the run's committed deadline is the only bound in this path; a second one
@@ -526,9 +527,13 @@ defmodule Loopex.LLM.ReqLLM do
       end)
 
     case ProviderLifetime.register(guardian, stop_reference) do
-      registration when registration in [:ok, :unmanaged] ->
-        send(guardian, {__MODULE__, :start, reference, self()})
-        await_isolated_guardian(guardian, monitor, reference)
+      :ok ->
+        send(guardian, {__MODULE__, :start, reference, self(), :managed})
+        await_isolated_guardian(guardian, monitor, reference, :managed)
+
+      :unmanaged ->
+        send(guardian, {__MODULE__, :start, reference, self(), :unmanaged})
+        await_isolated_guardian(guardian, monitor, reference, :unmanaged)
 
       {:error, _unavailable} ->
         send(guardian, {__MODULE__, :stop_before_start, reference, self()})
@@ -536,10 +541,17 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
-  defp await_isolated_guardian(guardian, monitor, reference) do
+  defp await_isolated_guardian(guardian, monitor, reference, lifetime) do
     receive do
       {__MODULE__, ^guardian, ^reference, outcome} ->
-        await_guardian_exit(guardian, monitor, outcome)
+        case lifetime do
+          :managed ->
+            Process.demonitor(monitor, [:flush])
+            outcome
+
+          :unmanaged ->
+            await_guardian_exit(guardian, monitor, outcome)
+        end
 
       {:DOWN, ^monitor, :process, ^guardian, _reason} ->
         :provider_call_crashed
@@ -551,23 +563,42 @@ defmodule Loopex.LLM.ReqLLM do
     owner_monitor = Process.monitor(owner)
 
     receive do
-      {__MODULE__, :start, ^reference, ^owner} ->
+      {__MODULE__, :start, ^reference, ^owner, lifetime}
+      when lifetime in [:managed, :unmanaged] ->
         case CredentialFilter.acquire(credential) do
           {:ok, credential_lease} ->
-            try do
-              run_isolated_guardian(
-                owner,
-                owner_monitor,
-                reference,
-                stop_reference,
-                call
-              )
-            after
-              :ok = CredentialFilter.release(credential_lease)
-            end
+            stop =
+              try do
+                case run_isolated_guardian(
+                       owner,
+                       owner_monitor,
+                       reference,
+                       stop_reference,
+                       call
+                     ) do
+                  :await_stop when lifetime == :managed ->
+                    await_managed_resource_stop(stop_reference)
+
+                  {:stopped, _requester, _stop} = stopped ->
+                    stopped
+
+                  _finished_or_unmanaged ->
+                    :finished
+                end
+              after
+                :ok = CredentialFilter.release(credential_lease)
+              end
+
+            acknowledge_deferred_resource_stop(stop)
 
           {:error, _unavailable} ->
             send(owner, {__MODULE__, self(), reference, :provider_call_crashed})
+
+            if lifetime == :managed do
+              stop_reference
+              |> await_managed_resource_stop()
+              |> acknowledge_deferred_resource_stop()
+            end
         end
 
       {__MODULE__, :stop_before_start, ^reference, ^owner} ->
@@ -620,6 +651,7 @@ defmodule Loopex.LLM.ReqLLM do
         close_untraced_worker(worker, worker_monitor)
         Process.demonitor(owner_monitor, [:flush])
         send(owner, {__MODULE__, self(), reference, :provider_call_crashed})
+        :await_stop
     end
   end
 
@@ -700,9 +732,11 @@ defmodule Loopex.LLM.ReqLLM do
         close_isolated_resources(resources)
         Process.demonitor(owner_monitor, [:flush])
         send(owner, {__MODULE__, self(), reference, outcome})
+        :await_stop
 
       {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
         close_isolated_resources(resources)
+        :await_stop
 
       {:DOWN, monitor, :process, resource, _reason} ->
         case mark_resource_down(resources, resource, monitor) do
@@ -710,6 +744,7 @@ defmodule Loopex.LLM.ReqLLM do
             close_isolated_resources(resources)
             Process.demonitor(owner_monitor, [:flush])
             send(owner, {__MODULE__, self(), reference, :provider_call_crashed})
+            :await_stop
 
           {:ok, resources} ->
             await_isolated_worker(
@@ -735,7 +770,7 @@ defmodule Loopex.LLM.ReqLLM do
       {:loopex_provider_resource_stop, ^stop_reference, stop, requester}
       when is_reference(stop) and is_pid(requester) ->
         close_isolated_resources(resources)
-        acknowledge_resource_stop(requester, stop)
+        {:stopped, requester, stop}
 
       {:EXIT, ^worker, _reason} ->
         await_isolated_worker(
@@ -760,6 +795,30 @@ defmodule Loopex.LLM.ReqLLM do
         )
     end
   end
+
+  # Concept: a managed provider resource remains present until the runtime that
+  # retained it explicitly releases it.
+  #
+  # Technical depth: the adapter's private descendants are already down. Its
+  # result has either crossed to the callback or its callback owner has died;
+  # exiting in the former case would race that callback's return and turn a
+  # successful call into an unacknowledged resource death. The retaining runtime
+  # owns the bounded wait and the force-stop path, so this process waits for its
+  # correlated stop. Its caller releases the credential lease before sending the
+  # acknowledgement, so that acknowledgement proves both cleanup facts before
+  # the guardian exits.
+  defp await_managed_resource_stop(stop_reference) do
+    receive do
+      {:loopex_provider_resource_stop, ^stop_reference, stop, requester}
+      when is_reference(stop) and is_pid(requester) ->
+        {:stopped, requester, stop}
+    end
+  end
+
+  defp acknowledge_deferred_resource_stop({:stopped, requester, stop}),
+    do: acknowledge_resource_stop(requester, stop)
+
+  defp acknowledge_deferred_resource_stop(:finished), do: :ok
 
   defp close_untraced_worker(worker, worker_monitor) do
     Process.exit(worker, :kill)
