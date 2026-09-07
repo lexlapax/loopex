@@ -595,6 +595,98 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
             backpressure_observer(root, socket, owner, writer, slots, kind, calls)
         end
       end
+
+      # Concept: the actual entry crosses both readiness boundaries itself.
+      # Technical depth: this observer holds only that process, never supplies
+      # a protocol frame, and exports flags rather than socket/process payloads.
+      # The host holds its guardian while each reader position is established,
+      # so a fast dependency startup cannot race credential delivery.
+      def credential_entry(arguments) do
+        root = #{inspect(root)}
+        deadline = arguments |> List.last() |> String.to_integer()
+        codec = Loopex.LLM.ReqLLM.ProviderCodec
+        {entry, _monitor} = spawn_monitor(fn ->
+          receive do
+            :start -> Loopex.LLM.ReqLLM.ProviderWorker.main(arguments)
+          after
+            max(deadline - System.system_time(:millisecond), 0) ->
+              exit(:fixture_deadline)
+          end
+        end)
+
+        publish(root, "credential-entry-held", %{actual_entry_not_started: true})
+        credential_wait(fn -> File.exists?(Path.join(root, "start-entry")) end, deadline)
+        send(entry, :start)
+        credential_wait(fn -> credential_reader?(entry) end, deadline)
+        true = :erlang.suspend_process(entry)
+        true = credential_reader?(entry)
+        {:status, :suspended} = Process.info(entry, :status)
+        [socket] = Enum.filter(Port.list(), fn port ->
+          try do
+            Port.info(port, :connected) == {:connected, entry} and
+              match?({:ok, {:local, _}}, :inet.peername(port))
+          catch
+            _, _ -> false
+          end
+        end)
+        :ok = :inet.setopts(socket, recbuf: 1_024, buffer: 1_024)
+        1 = :erlang.trace_pattern({codec, :send, 3}, true, [:local])
+        1 = :erlang.trace(entry, true, [:call, {:tracer, self()}])
+        publish(root, "bootstrap-reader-held", %{
+          actual_reader_suspended: true, private_socket: true
+        })
+
+        credential_wait(fn -> File.exists?(Path.join(root, "resume-bootstrap")) end, deadline)
+        true = :erlang.resume_process(entry)
+        receive do
+          {:trace, ^entry, :call, {^codec, :send, [^socket, :ready, _identity]}} -> :ok
+        after
+          max(deadline - System.system_time(:millisecond), 0) ->
+            exit(:fixture_deadline)
+        end
+        publish(root, "credential-ready-observed", %{actual_ready_send: true})
+
+        credential_wait(fn ->
+          File.exists?(Path.join(root, "hold-credential-reader"))
+        end, deadline)
+        credential_wait(fn -> credential_reader?(entry) end, deadline)
+        true = :erlang.suspend_process(entry)
+        true = credential_reader?(entry)
+        {:status, :suspended} = Process.info(entry, :status)
+        publish(root, "credential-reader-held", %{
+          actual_reader_suspended: true, actual_ready_send: true,
+          private_socket: true
+        })
+
+        # There is deliberately no release for this reader. Only the real OS
+        # cleanup owner can end this credential-bearing invocation lifetime.
+        Process.sleep(:infinity)
+      catch
+        _, _ ->
+          publish(#{inspect(root)}, "credential-boundary-error", %{setup_failed: true})
+          exit(:credential_boundary_setup_failed)
+      end
+
+      defp credential_reader?(entry) do
+        case Process.info(entry, :current_stacktrace) do
+          {:current_stacktrace, stack} ->
+            Enum.any?(stack, fn
+              {Loopex.LLM.ReqLLM.ProviderCodec, :recv, 2, _} -> true
+              _ -> false
+            end)
+          nil -> false
+        end
+      end
+
+      defp credential_wait(predicate, deadline) do
+        cond do
+          predicate.() -> :ok
+          System.system_time(:millisecond) >= deadline -> exit(:fixture_deadline)
+          true ->
+            Process.sleep(10)
+            credential_wait(predicate, deadline)
+        end
+      end
     end
     Application.put_env(:req_llm, :finch_request_adapter, LoopexProviderFixtureTransport)
     [path | _] = Enum.map(arguments, &List.to_string/1)
@@ -610,6 +702,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         if ready, do: {:halt, nil}, else: (Process.sleep(10); {:cont, nil})
       end)
     end
+    if #{inspect(mode)} == :credential_transfer do
+      LoopexProviderFixtureTransport.credential_entry(Enum.map(arguments, &List.to_string/1))
+    else
     if #{inspect(mode)} in [:credential_sink_loss, :credential_throw,
       :credential_exit, :credential_crash_event] do
       # A fixture-only outer monitor preserves the observation VM after the
@@ -630,6 +725,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       Process.sleep(:infinity)
     else
       Loopex.LLM.ReqLLM.ProviderWorker.main(Enum.map(arguments, &List.to_string/1))
+    end
     end
     """
 
