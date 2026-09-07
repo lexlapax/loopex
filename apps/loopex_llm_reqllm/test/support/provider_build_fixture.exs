@@ -20,7 +20,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
   @launch_keys [:worker_path, :interpreter_path, :worker_sha256, :build_manifest_sha256]
   @wire_modules [
     Loopex.LLM.ReqLLM,
+    Loopex.LLM.ReqLLM.ProviderBridge,
     Loopex.LLM.ReqLLM.ProviderCodec,
+    Loopex.LLM.ReqLLM.ProviderConfiguration,
+    Loopex.LLM.ReqLLM.ProviderLauncher,
+    Loopex.LLM.ReqLLM.ProviderWorker,
+    Loopex.Model,
     Loopex.Runtime.ProviderAttempt
   ]
 
@@ -163,8 +168,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
       name = Atom.to_string(module) <> ".beam"
       [{_path, packaged}] = Enum.filter(entries, &(Path.basename(List.to_string(elem(&1, 0))) == name))
       {^module, loaded, _path} = :code.get_object_code(module)
+      {:ok, {^module, checksum}} = :beam_lib.md5(loaded)
 
-      unless :beam_lib.md5(packaged) == :beam_lib.md5(loaded),
+      unless :beam_lib.md5(packaged) == {:ok, {module, checksum}},
         do: raise("provider companion differs from the loaded #{inspect(module)} boundary")
     end
   end
