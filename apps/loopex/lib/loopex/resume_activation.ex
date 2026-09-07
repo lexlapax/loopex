@@ -139,8 +139,8 @@ defmodule Loopex.ResumeActivation do
 
   Let P be this calling holder, H the receiving holder, G the participant and C
   the coordinator. All four must be distinct local PIDs. N is the supplied fresh
-  correlation reference. Invalid shape or role aliasing returns
-  `{:error, :invalid_resume_handoff}`; any non-local role returns
+  local correlation reference. Invalid shape, non-local correlation or role
+  aliasing returns `{:error, :invalid_resume_handoff}`; any non-local role returns
   `{:error, :non_local_resume_participant}` before liveness checks or mutation.
 
   G knows P/H/N and monitors P/H before H is exposed. This call creates Q and

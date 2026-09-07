@@ -269,8 +269,8 @@ the result unknown to that caller.
 adds a local lifetime participant under
 [ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept). The calling holder,
 receiving holder, participant and coordinator must be distinct local processes;
-correlation is a fresh local reference. Malformed or aliased roles return
-`invalid_resume_handoff`; a non-local role returns
+correlation is a fresh local reference. Malformed or aliased roles and non-local
+correlation references return `invalid_resume_handoff`; a non-local role returns
 `non_local_resume_participant` before liveness checks or mutation. The full
 independently implementable message protocol is documented on
 `Loopex.ResumeActivation.transfer/3` and in
@@ -306,8 +306,8 @@ command reports uncertainty and does not activate or retry speculatively.
 Activation and abandonment presentations wait for exact owner results in the
 holder, while their read-only holder lookup has an independent bounded wait and
 reports unavailable on expiry. A suspended manager is not an absent manager.
-Holder loss during a presentation is unresolved, because stopping a presenter
-cannot withdraw a request already received by the owner.
+Holder or coordinator loss during a presentation is unresolved, because stopping
+a presenter cannot withdraw a request already received by the owner.
 
 The signal manager remains responsive while the holder waits: signals submit
 the ordinary abort asynchronously and arm the configured backstop. Orderly

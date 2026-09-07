@@ -75,9 +75,15 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       assert {:error, :non_local_resume_participant} =
                Loopex.ResumeActivation.transfer(activation, holder, {remote, nonce})
 
+      assert {:error, :non_local_resume_participant} =
+               Loopex.transfer_resume(%{activation | coordinator: remote}, holder, {guard, nonce})
+
+      assert {:error, :invalid_resume_handoff} =
+               Loopex.transfer_resume(activation, holder, {guard, remote_fixture_reference()})
+
       assert ^before_state = :sys.get_state(coordinator).prepared
 
-      Process.put(@prepared_transfer_guard_key, :invalid_ambient_value)
+      Process.put(@prepared_transfer_guard_key, {holder, guard, nonce})
       assert :ok = Loopex.transfer_resume(activation, holder)
       assert :ok = ask_explicit_holder(holder, :abandon)
       assert {:error, :resume_activation_abandoned} = Loopex.activate_resume(activation)
@@ -94,8 +100,14 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
         "ordinary-remote"
       )
 
-    assert :ok = Loopex.transfer_resume(activation, remote_fixture_pid())
-    assert await_settled_capability(activation, :resume_activation_abandoned)
+    Process.put(@prepared_transfer_guard_key, :invalid_ambient_value)
+
+    try do
+      assert :ok = Loopex.transfer_resume(activation, remote_fixture_pid())
+      assert await_settled_capability(activation, :resume_activation_abandoned)
+    after
+      Process.delete(@prepared_transfer_guard_key)
+    end
   end
 
   test "an independent documented participant handles prepare before pending and releases only its relationship" do
@@ -124,7 +136,7 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     guard_monitor = Process.monitor(guard)
 
     try do
-      assert :ok = Loopex.transfer_resume(activation, holder, {guard, nonce})
+      assert :ok = Loopex.ResumeActivation.transfer(activation, holder, {guard, nonce})
       assert_receive {:prepare_received_first, ^guard}, 1_000
       assert_receive {:participant_linearized, ^guard}, 1_000
 
@@ -194,8 +206,25 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
       send(preparer, {:handoff, holder, guard, nonce})
       assert_receive {:participant_linearized, ^guard}, 1_000
 
-      assert %{prepared: %{holder: ^preparer}, prepared_transfer: %{verdict: :committed}} =
-               :sys.get_state(coordinator)
+      assert %{
+               prepared: %{holder: ^preparer},
+               prepared_transfer: %{verdict: :committed} = pending
+             } =
+               before_ack = :sys.get_state(coordinator)
+
+      # Every message is followed by a same-sender state barrier: a wrong
+      # correlation cannot stand in for the participant's withheld acceptance.
+      for {n, q, v, verdict} <- [
+            {make_ref(), pending.handoff, pending.commit, :committed},
+            {nonce, make_ref(), pending.commit, :committed},
+            {nonce, pending.handoff, make_ref(), :committed},
+            {nonce, pending.handoff, pending.commit, {:refused, :resume_activation_fenced}}
+          ] do
+        send(coordinator, {:loopex_prepared_owner_verdict_ack, guard, holder, n, q, v, verdict})
+        observed = :sys.get_state(coordinator)
+        assert observed.prepared_transfer == pending
+        assert observed.prepared == before_ack.prepared
+      end
 
       Process.exit(preparer, :kill)
       assert_receive {:DOWN, ^preparer_monitor, :process, ^preparer, :killed}, 1_000
@@ -209,6 +238,93 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
       drain(attachment)
       assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    after
+      for process <- [preparer, guard, holder],
+          Process.alive?(process),
+          do: Process.exit(process, :kill)
+    end
+  end
+
+  test "an independent participant ignores stale readiness and acknowledges an ordered refusal" do
+    fixture = recovered_fixture("independent-refusal", :admitted)
+
+    {:ok, {:prepared, activation}} =
+      Loopex.prepare_resume_known_session(
+        fixture.state_root,
+        fixture.runtime,
+        fixture.session_id,
+        "independent-refusal"
+      )
+
+    parent = self()
+
+    {preparer, preparer_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          {:handoff, holder, guard, nonce} ->
+            send(
+              parent,
+              {:independent_refusal, Loopex.transfer_resume(activation, holder, {guard, nonce})}
+            )
+        end
+      end)
+
+    assert :ok = Loopex.transfer_resume(activation, preparer)
+
+    {guard, holder, nonce} =
+      LoopexCli.PreparedParticipantFixture.start(
+        preparer,
+        self(),
+        fn -> explicit_holder(activation) end,
+        :hold_ready
+      )
+
+    guard_monitor = Process.monitor(guard)
+    holder_monitor = Process.monitor(holder)
+    coordinator = coordinator_of(fixture.runtime)
+
+    try do
+      send(preparer, {:handoff, holder, guard, nonce})
+      assert_receive {:participant_ready_held, ^guard, ^holder}, 1_000
+      before_ready = :sys.get_state(coordinator)
+      pending = before_ready.prepared_transfer
+      assert %{verdict: nil, commit: nil} = pending
+
+      send(
+        coordinator,
+        {:loopex_prepared_owner_verdict_ack, guard, holder, nonce, pending.handoff, nil, nil}
+      )
+
+      observed = :sys.get_state(coordinator)
+      assert observed.prepared_transfer == pending
+      assert observed.prepared == before_ready.prepared
+
+      for {n, q, t} <- [
+            {make_ref(), pending.handoff, pending.prepare},
+            {nonce, make_ref(), pending.prepare},
+            {nonce, pending.handoff, make_ref()}
+          ] do
+        send(coordinator, {:loopex_prepared_transfer_guard_ready, guard, holder, n, q, t})
+        observed = :sys.get_state(coordinator)
+        assert observed.prepared_transfer == pending
+        assert observed.prepared == before_ready.prepared
+      end
+
+      assert {:accepted, "independent-refusal-abort"} =
+               Loopex.command(fixture.attachment, %{
+                 type: :abort,
+                 command_id: "independent-refusal-abort"
+               })
+
+      send(guard, :release_ready)
+      assert_receive {:participant_refused, ^guard, {:refused, :resume_activation_fenced}}, 1_000
+      assert_receive {:independent_refusal, {:error, :resume_activation_fenced}}, 1_000
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
+      assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :normal}, 1_000
+      assert_receive {:DOWN, ^preparer_monitor, :process, ^preparer, :normal}, 1_000
+      assert %{holder: ^preparer, state: :fenced} = :sys.get_state(coordinator).prepared
+      assert {:error, :resume_activation_fenced} = Loopex.activate_resume(activation)
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
     after
       for process <- [preparer, guard, holder],
           Process.alive?(process),
@@ -488,8 +604,12 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     terminal_bound_ms = bounds.cli_backstop_ms + 2_000
     assert run_terminal(fixture, terminal_bound_ms)["outcome"] in ["cancelled", "outcome_unknown"]
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
-    assert_refused(invoke(Interrupt, :activate_prepared, [activation]))
-    assert_refused(invoke(Loopex, :activate_resume, [activation]))
+
+    assert {:unresolved, :prepared_activation_holder_lost} =
+             invoke(Interrupt, :activate_prepared, [activation])
+
+    assert {:error, :resume_activation_fenced} = invoke(Loopex, :activate_resume, [activation])
+    assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
   end
 
   # Concept: the other half of the same handoff -- the capability the preparer's
@@ -546,9 +666,10 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert await_dispatch_count(fixture.model, 1)
     assert run_terminal(fixture, 10_000)["outcome"] == "completed"
 
-    # Exactly once: the owner records the capability as spent, and it stays spent
-    # by every route.
-    assert_refused(invoke(Interrupt, :activate_prepared, [activation]))
+    # Exactly once: the released holder cannot answer another presentation, and
+    # the coordinator still proves the capability spent with no second dispatch.
+    assert {:unresolved, :prepared_activation_holder_lost} =
+             invoke(Interrupt, :activate_prepared, [activation])
 
     assert assert_refused(invoke(Loopex, :activate_resume, [activation])) ==
              :resume_activation_spent
@@ -650,7 +771,10 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert terminal["outcome"] in ["cancelled", "outcome_unknown", "failed"]
 
     # Whichever won, the capability is settled and the work started at most once.
-    assert_refused(invoke(Interrupt, :activate_prepared, [activation]))
+    assert {:unresolved, :prepared_activation_holder_lost} =
+             invoke(Interrupt, :activate_prepared, [activation])
+
+    assert {:error, ^settled} = invoke(Loopex, :activate_resume, [activation])
     Process.sleep(200)
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) <= before + 1
   end
@@ -1474,121 +1598,91 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == before
   end
 
-  test "private lifetime markers fail closed while an ordinary holder transfer stays unchanged" do
-    fixture = recovered_fixture("guard-marker-boundary", :active)
+  test "explicit handoff refuses malformed and nonholder input and proves participant loss before authorization" do
+    fixture = recovered_fixture("explicit-input-and-loss", :idle)
 
-    assert {:ok, {:prepared, activation}} =
-             invoke(Loopex, :prepare_resume_known_session, [
-               fixture.state_root,
-               fixture.runtime,
-               fixture.session_id,
-               "prepare-guard-marker-boundary"
-             ])
+    {:ok, {:prepared, activation}} =
+      Loopex.prepare_resume_known_session(
+        fixture.state_root,
+        fixture.runtime,
+        fixture.session_id,
+        "explicit-input-and-loss"
+      )
 
     parent = self()
 
-    controller = spawn(fn -> transfer_controller_loop(parent, activation) end)
-
-    non_holder_target =
+    stopper =
       spawn(fn ->
         receive do
-          :stop -> :ok
+          {:participant_ready_held, participant, _holder} ->
+            send(parent, {:participant_ready_before_loss, participant})
+            Process.exit(participant, :kill)
         end
       end)
 
-    non_holder_guard =
-      spawn(fn ->
-        receive do
-          :stop -> :ok
-        end
-      end)
+    {guard, target, nonce} =
+      LoopexCli.PreparedParticipantFixture.start(
+        self(),
+        stopper,
+        fn -> explicit_holder(activation) end,
+        :hold_ready
+      )
 
-    {non_holder, non_holder_monitor} =
-      spawn_monitor(fn ->
-        Process.put(
-          @prepared_transfer_guard_key,
-          {non_holder_target, non_holder_guard, make_ref()}
-        )
-
-        send(
-          parent,
-          {:non_holder_guarded_transfer, Loopex.transfer_resume(activation, non_holder_target)}
-        )
-      end)
-
-    malformed_target =
-      spawn(fn ->
-        receive do
-          :stop -> :ok
-        end
-      end)
-
-    nonce = make_ref()
-
-    unpaired_guard =
-      spawn(fn ->
-        receive do
-          {:loopex_prepared_transfer_pending, _installer, _coordinator, _holder, _nonce, _handoff} ->
-            :ok
-        end
-      end)
-
-    spoofed_target =
-      spawn(fn ->
-        receive do
-          :stop -> :ok
-        end
-      end)
+    target_monitor = Process.monitor(target)
+    guard_monitor = Process.monitor(guard)
 
     try do
-      assert_receive {:non_holder_guarded_transfer, {:error, :resume_activation_holder_mismatch}},
-                     1_000
+      stranger =
+        Task.async(fn ->
+          Loopex.transfer_resume(activation, target, {guard, make_ref()})
+        end)
 
-      assert_receive {:DOWN, ^non_holder_monitor, :process, ^non_holder, :normal}, 1_000
-      assert :ok = Loopex.transfer_resume(activation, controller)
+      assert {:ok, {:error, :resume_activation_holder_mismatch}} = Task.yield(stranger, 1_000)
 
-      send(controller, {:transfer_to, malformed_target, :malformed})
-      assert_receive {:controller_transfer, {:error, :resume_activation_holder_mismatch}}, 1_000
+      for malformed <- [
+            :malformed,
+            {guard},
+            {guard, :not_a_reference},
+            {target, guard, make_ref()},
+            {self(), make_ref()}
+          ] do
+        assert {:error, :invalid_resume_handoff} =
+                 Loopex.transfer_resume(activation, target, malformed)
+      end
 
-      send(
-        controller,
-        {:transfer_to, spoofed_target, {spoofed_target, unpaired_guard, nonce}}
-      )
+      assert Process.alive?(target) and Process.alive?(guard)
 
-      assert_receive {:controller_transfer, {:error, :resume_activation_holder_mismatch}},
-                     1_000
+      assert %{holder: ^parent, state: :prepared} =
+               :sys.get_state(coordinator_of(fixture.runtime)).prepared
 
-      send(controller, :abandon)
-      assert_receive {:controller_abandon, :ok}, 1_000
+      assert {:error, :resume_activation_holder_mismatch} =
+               Loopex.transfer_resume(activation, target, {guard, nonce})
+
+      assert_receive {:participant_ready_before_loss, ^guard}, 1_000
+      assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :killed}, 1_000
+      assert_receive {:DOWN, ^target_monitor, :process, ^target, :killed}, 1_000
+
+      assert %{holder: ^parent, state: :prepared} =
+               :sys.get_state(coordinator_of(fixture.runtime)).prepared
+
+      assert :ok = Loopex.abandon_resume(activation)
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
     after
-      Enum.each(
-        [
-          controller,
-          non_holder,
-          non_holder_target,
-          non_holder_guard,
-          malformed_target,
-          unpaired_guard,
-          spoofed_target
-        ],
-        fn process ->
-          if Process.alive?(process), do: Process.exit(process, :kill)
-        end
-      )
-
-      _ = invoke(Loopex, :abandon_resume, [activation])
+      for process <- [target, guard, stopper],
+          Process.alive?(process),
+          do: Process.exit(process, :kill)
     end
   end
 
   # Concept: private protocol input from a legitimate holder cannot keep a
   # superseded session owner alive.
   #
-  # Technical depth: the marker selects no authority; Core still validates the
+  # Technical depth: the participant selects no authority; Core still validates the
   # current holder. That holder can nominate a live process which never answers
-  # the private prepare message, just as it can stop making progress itself, but
+  # the prepare message, just as it can stop making progress itself, but
   # supersession must cancel the still-undecided transfer, answer the blocked
   # facade call, and let the stale coordinator reap. This bounds malformed or
-  # same-VM marker misuse without treating a timeout as a verdict.
+  # same-VM participant misuse without treating a timeout as a verdict.
   test "an unresponsive private transfer guard cannot retain a superseded coordinator" do
     fixture = recovered_fixture("unresponsive-transfer-guard", :active)
 
@@ -1943,6 +2037,73 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     end
   end
 
+  test "concurrent initial prepared installs claim one real manager with its default handler" do
+    assert_concurrent_initial_install(true)
+  end
+
+  test "concurrent initial prepared installs claim one real manager without its default handler" do
+    assert_concurrent_initial_install(false)
+  end
+
+  test "participant loss ends a blocked presenter before the coordinator can answer" do
+    {fixture, activation, coordinator, presentation, incumbent} =
+      blocked_prepared_presentation("blocked-participant-loss")
+
+    guard = prepared_guard(coordinator, incumbent.holder)
+    guard_monitor = Process.monitor(guard)
+    holder_monitor = Process.monitor(incumbent.holder)
+
+    try do
+      Process.exit(guard, :kill)
+      assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :killed}, 1_000
+      assert_receive {:DOWN, ^holder_monitor, :process, _holder, :killed}, 1_000
+
+      assert {:ok, {:unresolved, :prepared_activation_holder_lost}} =
+               Task.yield(presentation, 1_000)
+
+      assert queued_activation?(coordinator, activation.capability)
+      :erlang.resume_process(coordinator)
+
+      # Holder death cannot retract the already-received presentation. Its
+      # position before the loss signals still spends once, while the caller
+      # honestly received no activation verdict.
+      assert {:error, :resume_activation_spent} = Loopex.activate_resume(activation)
+      assert [state] = interrupt_handler_states()
+      assert state.attachment == incumbent.attachment
+      assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
+    after
+      if suspended?(coordinator), do: :erlang.resume_process(coordinator)
+    end
+  end
+
+  test "coordinator loss ends a blocked presenter and its participant without a holder timeout" do
+    {_fixture, _activation, coordinator, presentation, incumbent} =
+      blocked_prepared_presentation("blocked-coordinator-loss")
+
+    guard = prepared_guard(coordinator, incumbent.holder)
+    holder_monitor = Process.monitor(incumbent.holder)
+    guard_monitor = Process.monitor(guard)
+    coordinator_monitor = Process.monitor(coordinator)
+    :erlang.suspend_process(guard)
+
+    try do
+      Process.exit(coordinator, :kill)
+      assert_receive {:DOWN, ^coordinator_monitor, :process, ^coordinator, :killed}, 1_000
+
+      # Hold the guardian so the Core-unavailable response wins this race. It
+      # still cannot prove non-activation and must not become a refusal.
+      assert {:ok, {:unresolved, :prepared_activation_unavailable}} =
+               Task.yield(presentation, 1_000)
+
+      assert Process.alive?(incumbent.holder)
+      :erlang.resume_process(guard)
+      assert_receive {:DOWN, ^holder_monitor, :process, _holder, :killed}, 1_000
+      assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :normal}, 1_000
+    after
+      if Process.alive?(guard) and suspended?(guard), do: :erlang.resume_process(guard)
+    end
+  end
+
   test "duplicate refusal preserves signal delivery while the incumbent presents" do
     {fixture, activation, coordinator, presentation, incumbent} =
       blocked_prepared_presentation("duplicate-signal")
@@ -2109,7 +2270,10 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     assert assert_refused(invoke(Loopex, :activate_resume, [abandoned])) ==
              :resume_activation_abandoned
 
-    assert_refused(invoke(Interrupt, :activate_prepared, [abandoned]))
+    assert {:unresolved, :prepared_activation_holder_lost} =
+             invoke(Interrupt, :activate_prepared, [abandoned])
+
+    assert {:error, :resume_activation_abandoned} = invoke(Loopex, :activate_resume, [abandoned])
     Process.sleep(100)
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
   end
@@ -2315,6 +2479,99 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     Process.sleep(100)
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == before
+  end
+
+  test "resume preserves an unresolved real handoff without activation or compensating abandonment" do
+    fixture = recovered_fixture("command-unresolved-handoff", :admitted)
+    parent = self()
+
+    command =
+      Task.async(fn ->
+        Process.put(:observed_handoff_calls, [])
+
+        observer = fn module, function, arguments ->
+          Process.put(:observed_handoff_calls, [
+            {module, function} | Process.get(:observed_handoff_calls)
+          ])
+
+          result = apply(module, function, arguments)
+
+          case {module, function, result} do
+            {Loopex, :prepare_resume_known_session, {:ok, {:prepared, activation}}} ->
+              send(parent, {:command_prepared, activation})
+
+            {Loopex, :attach, {:ok, _attachment}} ->
+              send(parent, {:command_attached, self()})
+
+              receive do
+                :continue_installation -> :ok
+              end
+
+            _other ->
+              :ok
+          end
+
+          result
+        end
+
+        Process.put(:"$loopex_cli_facade_observer", observer)
+
+        result =
+          LoopexCli.dispatch(
+            [
+              "resume",
+              fixture.session_id,
+              "--policy",
+              "allow-all",
+              "--state-root",
+              fixture.state_root,
+              "--workspace",
+              fixture.workspace
+            ],
+            runtime_starter: fn _options -> {:ok, fixture.runtime} end
+          )
+
+        {result, Process.get(:observed_handoff_calls)}
+      end)
+
+    command_pid = command.pid
+    assert_receive {:command_prepared, activation}, 5_000
+    assert_receive {:command_attached, ^command_pid}, 5_000
+    coordinator = coordinator_of(fixture.runtime)
+    :erlang.suspend_process(coordinator)
+    send(command_pid, :continue_installation)
+    assert await_handler_terminal(command_pid)
+    [%{holder: holder}] = interrupt_handler_states()
+    {guard, nonce} = explicit_participant(coordinator, activation.capability, holder)
+    holder_monitor = Process.monitor(holder)
+    guard_monitor = Process.monitor(guard)
+
+    try do
+      :erlang.suspend_process(guard)
+      :erlang.resume_process(coordinator)
+      assert queued_owner_prepare?(guard, coordinator, holder, nonce)
+      :erlang.suspend_process(coordinator)
+      :erlang.resume_process(guard)
+      assert queued_guard_ready?(coordinator, guard, holder, nonce)
+      :erlang.suspend_process(guard)
+      :erlang.resume_process(coordinator)
+      assert {:ok, :committed} = queued_owner_verdict(guard, coordinator, holder, nonce)
+
+      Process.exit(guard, :kill)
+      assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :killed}, 1_000
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
+      assert {:ok, {{:error, :resume_handoff_unresolved}, calls}} = Task.yield(command, 5_000)
+      refute {Interrupt, :activate_prepared} in calls
+      refute {Interrupt, :abandon_prepared} in calls
+      refute {Loopex, :abandon_resume} in calls
+      assert {:error, :resume_activation_abandoned} = Loopex.activate_resume(activation)
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+    after
+      if suspended?(coordinator), do: :erlang.resume_process(coordinator)
+      if Process.alive?(guard) and suspended?(guard), do: :erlang.resume_process(guard)
+      if Process.alive?(command_pid), do: Task.shutdown(command, :brutal_kill)
+      for process <- [guard, holder], Process.alive?(process), do: Process.exit(process, :kill)
+    end
   end
 
   test "resume omission recovers the committed cleanup period before active work resumes" do
@@ -2797,6 +3054,142 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     {fixture, activation, coordinator, presentation, incumbent}
   end
 
+  defp prepared_guard(coordinator, holder) do
+    # The coordinator is deliberately suspended. Its guarded-holder monitor is
+    # already installed, and the holder's exact live dependency identifies G
+    # without relying on function names or a process-dictionary selector.
+    assert {:monitors, holder_dependencies} = Process.info(holder, :monitors)
+
+    assert [guard] =
+             for({:process, process} <- holder_dependencies, process != coordinator, do: process)
+
+    assert {:monitors, dependencies} = Process.info(guard, :monitors)
+    assert {:process, coordinator} in dependencies
+    guard
+  end
+
+  defp assert_concurrent_initial_install(with_default?) do
+    candidates =
+      for index <- 1..2 do
+        fixture =
+          recovered_fixture("initial-race-#{with_default?}-#{index}", :admitted,
+            script: [%{text: "one initial installation", calls: []}]
+          )
+
+        {:ok, {:prepared, activation}} =
+          Loopex.prepare_resume_known_session(
+            fixture.state_root,
+            fixture.runtime,
+            fixture.session_id,
+            "initial-race"
+          )
+
+        parent = self()
+
+        {installer, monitor} =
+          spawn_monitor(fn ->
+            receive do
+              :install ->
+                result = Interrupt.install_prepared(fixture.attachment, @grace, activation)
+                send(parent, {:initial_install_result, self(), result})
+            end
+
+            receive do
+              :stop -> :ok
+            end
+          end)
+
+        assert :ok = Loopex.transfer_resume(activation, installer)
+        :erlang.trace(installer, true, [:procs, :send, :set_on_spawn])
+        %{installer: installer, monitor: monitor, fixture: fixture, activation: activation}
+      end
+
+    original = Process.whereis(:erl_signal_server)
+    {:ok, manager} = :gen_event.start()
+
+    # OTP permits repeated handler IDs. Initial installation must remove every
+    # default termination callback, not report success after an arbitrary cap.
+    if with_default? do
+      for _ <- 1..32, do: :gen_event.add_handler(manager, :erl_signal_handler, [])
+    end
+
+    Process.unregister(:erl_signal_server)
+    Process.register(manager, :erl_signal_server)
+    :erlang.suspend_process(manager)
+
+    try do
+      Enum.each(candidates, &send(&1.installer, :install))
+
+      participants =
+        Enum.map(candidates, fn %{installer: installer} = candidate ->
+          assert_receive {:trace, ^installer, :spawn, guard, _entry}, 1_000
+          assert_receive {:trace, ^guard, :spawn, holder, _entry}, 1_000
+          assert_receive {:trace, ^installer, :spawn, observer, _entry}, 1_000
+
+          assert_receive {:trace, ^observer, :send, {_from, _tag, :which_handlers}, ^manager},
+                         1_000
+
+          Map.merge(candidate, %{guard: guard, holder: holder})
+        end)
+
+      # Both reads are already queued before either installer can mutate the
+      # manager, so they receive the same snapshot, including a now-stale default.
+      assert {:messages, messages} = Process.info(manager, :messages)
+      assert Enum.count(messages, &match?({_from, _tag, :which_handlers}, &1)) == 2
+      :erlang.resume_process(manager)
+
+      outcomes =
+        Enum.map(participants, fn %{installer: installer} = candidate ->
+          assert_receive {:initial_install_result, ^installer, result}, 5_000
+          Map.put(candidate, :result, result)
+        end)
+
+      assert Enum.sort(Enum.map(outcomes, & &1.result)) ==
+               Enum.sort([:ok, {:error, :interrupt_already_installed}])
+
+      [winner] = Enum.filter(outcomes, &(&1.result == :ok))
+      [loser] = Enum.filter(outcomes, &(&1.result == {:error, :interrupt_already_installed}))
+
+      assert [Interrupt] = :gen_event.which_handlers(manager)
+
+      assert [%{holder: winning_holder, activation: winning_activation}] =
+               interrupt_handler_states()
+
+      assert winning_holder == winner.holder
+      assert winning_activation == winner.activation
+
+      for process <- [loser.guard, loser.holder] do
+        monitor = Process.monitor(process)
+        assert_receive {:DOWN, ^monitor, :process, ^process, _reason}, 1_000
+      end
+
+      for candidate <- outcomes do
+        send(candidate.installer, :stop)
+        %{monitor: monitor, installer: installer} = candidate
+        assert_receive {:DOWN, ^monitor, :process, ^installer, :normal}, 1_000
+      end
+
+      assert await_settled_capability(loser.activation, :resume_activation_abandoned)
+      assert Process.alive?(winner.holder) and Process.alive?(winner.guard)
+      assert {:ok, winner.fixture.session_id} == Interrupt.activate_prepared(winner.activation)
+      assert run_terminal(winner.fixture, 5_000)["outcome"] == "completed"
+      assert length(Loopex.AgentLoopTestModel.dispatched(winner.fixture.model)) == 1
+      assert Loopex.AgentLoopTestModel.dispatched(loser.fixture.model) == []
+    after
+      if Process.alive?(manager) and suspended?(manager), do: :erlang.resume_process(manager)
+
+      if Process.whereis(:erl_signal_server) == manager,
+        do: Process.unregister(:erl_signal_server)
+
+      if Process.alive?(manager), do: :gen_event.stop(manager)
+      Process.register(original, :erl_signal_server)
+
+      for candidate <- candidates,
+          Process.alive?(candidate.installer),
+          do: Process.exit(candidate.installer, :kill)
+    end
+  end
+
   defp assert_refused_duplicate(fixture, activation) do
     parent = self()
 
@@ -2839,6 +3232,11 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   defp remote_fixture_pid do
     <<131, node_bytes::binary>> = :erlang.term_to_binary(:loopex_remote_fixture@invalid)
     :erlang.binary_to_term(<<131, 88, node_bytes::binary, 0::32, 0::32, 0::32>>)
+  end
+
+  defp remote_fixture_reference do
+    <<131, node_bytes::binary>> = :erlang.term_to_binary(:loopex_remote_fixture@invalid)
+    :erlang.binary_to_term(<<131, 90, 1::16, node_bytes::binary, 0::32, 0::32>>)
   end
 
   defp explicit_participant(coordinator, capability, holder, attempts \\ 300)
@@ -3426,30 +3824,6 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     if Process.alive?(handoff.holder), do: Process.exit(handoff.holder, :kill)
     _ = invoke(Loopex, :abandon_resume, [handoff.activation])
     :ok
-  end
-
-  defp transfer_controller_loop(parent, activation) do
-    receive do
-      {:transfer_to, target, marker} ->
-        absent = make_ref()
-        previous = Process.get(@prepared_transfer_guard_key, absent)
-        Process.put(@prepared_transfer_guard_key, marker)
-
-        result =
-          try do
-            Loopex.transfer_resume(activation, target)
-          after
-            if previous === absent,
-              do: Process.delete(@prepared_transfer_guard_key),
-              else: Process.put(@prepared_transfer_guard_key, previous)
-          end
-
-        send(parent, {:controller_transfer, result})
-        transfer_controller_loop(parent, activation)
-
-      :abandon ->
-        send(parent, {:controller_abandon, Loopex.abandon_resume(activation)})
-    end
   end
 
   defp queued_abort?(coordinator, attempts \\ 300)
