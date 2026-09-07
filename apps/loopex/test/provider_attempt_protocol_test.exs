@@ -404,7 +404,10 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     # the coordinator's own pid as caller, so ownership, position, worker, and
     # deadline all pass and only the spent-identity check can refuse. The reply
     # is routed to an alias this process owns, so the coordinator never sees a
-    # stray message and the exact refusal reason is asserted by name.
+    # stray message and the exact refusal reason is asserted by name. A traced
+    # positive Store read establishes the observer before the duplicate. After
+    # its exact refusal and a trace-delivery barrier, a second read would be
+    # unnecessary work inside Control's runtime-wide serialization point.
     fixture = start(script: [%{text: "done", calls: [], hold: self()}], progress_to: self())
     {:ok, %{control: control}} = Runtime.children(fixture.runtime)
     :erlang.trace(control, true, [:send, :receive])
@@ -448,12 +451,39 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       |> replace_exact(permit_worker, fresh_worker)
       |> replace_exact(permit_reference, make_ref())
 
+    store = fixture.store
+    :erlang.trace(store, true, [:receive])
     reply_alias = :erlang.alias([:reply])
-    send(control, {:"$gen_call", {caller, [:alias | reply_alias]}, duplicate_request})
 
-    assert_receive {[:alias | ^reply_alias], {:error, :provider_attempt_already_permitted}}, 5_000
-    refute_receive {:fresh_permit_received, ^fresh_worker, _message}, 0
-    refute_receive {:trace, ^control, :send, _second_permit, ^permit_worker}, 0
+    try do
+      assert {:ok, [_record]} =
+               Loopex.M1RuntimeTestStore.load_records(store, session_id, 0, 1)
+
+      assert_receive {:trace, ^store, :receive,
+                      {:"$gen_call", _reader, {:load_records, ^session_id, 0, 1}}},
+                     5_000
+
+      baseline_barrier = :erlang.trace_delivered(store)
+      assert_receive {:trace_delivered, ^store, ^baseline_barrier}, 5_000
+
+      send(control, {:"$gen_call", {caller, [:alias | reply_alias]}, duplicate_request})
+
+      assert_receive {[:alias | ^reply_alias], {:error, :provider_attempt_already_permitted}},
+                     5_000
+
+      refusal_barrier = :erlang.trace_delivered(store)
+      assert_receive {:trace_delivered, ^store, ^refusal_barrier}, 5_000
+
+      refute_receive {:trace, ^store, :receive,
+                      {:"$gen_call", _reader, {:load_records, ^session_id, _after, _limit}}},
+                     0
+
+      refute_receive {:fresh_permit_received, ^fresh_worker, _message}, 0
+      refute_receive {:trace, ^control, :send, _second_permit, ^permit_worker}, 0
+    after
+      :erlang.trace(store, false, [:receive])
+      :erlang.unalias(reply_alias)
+    end
 
     send(callback, :release)
     assert await_event(attachment, "run.finished")["outcome"] == "completed"

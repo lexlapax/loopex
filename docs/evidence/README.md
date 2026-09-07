@@ -20,7 +20,7 @@ Evidence is unpaired: it is a log, not a Concept and Technical depth pair.
 | [M0 toolchain matrix](M0-toolchain-matrix.md) | Every gate run of the two locked toolchain pairs, in both orders and each after itself, with the revision they were taken at. |
 | [M1 negative demonstrations](M1-negative-demonstrations.md) | Five required safeguards disabled one at a time, each with its locked selector failure and exact restored artifact digest. |
 | [M2 recorded limitations](M2-recorded-limitations.md) | Known non-conformances carried by M2, each with its reason, observable consequence, and disposing authority. |
-| [M2 source-baseline review follow-up](M2-ff17990-review-followup.md) | Reconstruction of the ff17990 review findings, pending ownership and accounting decisions, and the remaining source/evidence review sequence. |
+| [M2 source-baseline review follow-up](M2-ff17990-review-followup.md) | Complete ff17990 finding reconciliation, accepted repair decisions, scoped implementation evidence, and the remaining final-source review sequence. |
 | [M2 corpus classification](M2-corpus-classification.md) | Retained classification of the post-integration reds into regression, supersession, and test-support defect, behind the tenth recorded override. |
 | [M1 toolchain matrix](M1-toolchain-matrix.md) | Source-candidate metadata, Darwin floor/current and Linux-current M1 captures, and inherited M0 floor/current proofs. |
 | [M2 negative demonstrations](M2-negative-demonstrations.md) | The ordered safeguards required by the active M2 gate, disabled one at a time with each locked selector failure and exact restored artifact digest. |

@@ -3145,10 +3145,16 @@ defmodule Loopex.AgentLoopTest do
   end
 
   test "an oversized valid late reply is retained as bounded error" do
+    observer = self()
+
     {_run_id, events, records, evidence} =
       retain_late_model_evidence(
         %{
-          text: &full_record_boundary_text/1,
+          text: fn request ->
+            text = full_record_boundary_text(request)
+            send(observer, {:oversized_late_reply, request, text})
+            text
+          end,
           calls: [],
           reply_overrides: %{provider_response_id: "req-boundary"}
         },
@@ -3157,10 +3163,41 @@ defmodule Loopex.AgentLoopTest do
 
     assert Enum.find(events, &(&1.kind == "run.finished"))["outcome"] == "cancelled"
 
+    assert_receive {:oversized_late_reply, request, text}, 5_000
+
+    frame = %{
+      run_id: evidence["run_id"],
+      turn_id: evidence["turn_id"],
+      operation_id: evidence["operation_id"],
+      attempt: evidence["attempt"],
+      staged_request_digest: request.staged_request_digest
+    }
+
+    full_settlement =
+      boundary_settlement(frame, request, "abort", "evidence_only", text)
+      |> put_in(["result", "reply", "provider_response_id"], "req-boundary")
+
+    {:ok, _normalized, observed} =
+      Loopex.Store.normalize_and_measure_item(:record, full_settlement)
+
+    assert observed > 65_536
+
     assert evidence["result"] == %{
              "kind" => "error",
              "category" => "unreadable_model_answer",
-             "accounting_evidence" => %{"kind" => "none"}
+             "accounting_evidence" => %{
+               "kind" => "validated_reply_compaction_v1",
+               "usage" => %{"status" => "reported", "input_tokens" => 1, "output_tokens" => 1},
+               "dimension" => "record_bytes",
+               "observed" => observed,
+               "limit" => 65_536
+             }
+           }
+
+    assert evidence["accounting"] == %{
+             "source" => "reported",
+             "input_tokens" => 1,
+             "output_tokens" => 1
            }
 
     assert :erlang.external_size(records) < 65_536

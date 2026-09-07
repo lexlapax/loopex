@@ -364,7 +364,8 @@ defmodule Loopex.Runtime.Control do
   # and the send happen together, so a succession linearizes either entirely
   # before the send or entirely after it. A refusal here is ephemeral: it is the
   # coordinator's to retain durably, and only while that coordinator is still
-  # authoritative.
+  # authoritative. Exact already-spent bindings refuse from local state before
+  # a Store read; re-presenting one cannot spend another serialized read wait.
   #
   # The deadline is checked twice on purpose. The first check refuses an already
   # expired attempt before Control spends a Store read on it. The final helper
@@ -383,8 +384,8 @@ defmodule Loopex.Runtime.Control do
          :ok <- provider_position_current(entry, authority),
          :ok <- provider_worker_ready(authority),
          :ok <- provider_before_deadline(authority, state.wall_clock),
-         :ok <- provider_position_binding(state, session_id, authority, binding),
-         :ok <- provider_attempt_unspent(state, binding) do
+         :ok <- provider_attempt_unspent(state, binding),
+         :ok <- provider_position_binding(state, session_id, authority, binding) do
       %{worker: worker, permit_reference: reference} = authority
       permit = {:loopex_provider_permit, reference, binding}
       spent = Map.put(state.spent_attempts, binding, {worker, reference})
@@ -1276,9 +1277,8 @@ defmodule Loopex.Runtime.Control do
   # read costs one single-row Store page, bounded in both senses by
   # `bounded_position_read/3`, inside Control's serialized handler, which is the
   # price of comparing against durable truth rather than against the argument
-  # being checked. An exact re-presentation still reaches
-  # `provider_attempt_unspent/2` so it keeps reporting that refusal by its own
-  # name.
+  # being checked. An exact already-spent re-presentation is refused by
+  # `provider_attempt_unspent/2` before this read, retaining its own refusal name.
   defp provider_position_binding(state, session_id, %{journal_version: version}, binding)
        when is_integer(version) and version > 0 do
     with {:ok, [%{journal_version: ^version, payload: payload}]} <-

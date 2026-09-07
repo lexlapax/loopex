@@ -442,10 +442,37 @@ defmodule Loopex.ContextAdmissionTest do
              "short-lived-context-owner"
            ])}
         )
+
+        receive do
+          :finish_preparation -> :ok
+        end
       end)
 
+    on_exit(fn ->
+      if Process.alive?(preparer), do: Process.exit(preparer, :kill)
+    end)
+
     assert_receive {:short_lived_preparation, {:ok, {:prepared, activation}}}, 5_000
-    assert_receive {:DOWN, ^preparer_monitor, :process, ^preparer, :normal}, 5_000
+    recovered_owner = coordinator_of(fixture.runtime)
+    :erlang.trace(recovered_owner, true, [:receive])
+
+    try do
+      send(preparer, :finish_preparation)
+      assert_receive {:DOWN, ^preparer_monitor, :process, ^preparer, :normal}, 5_000
+
+      # The test's own DOWN does not order the owner's separate monitor. Observe
+      # the real owner consume its DOWN, then finish that turn before testing
+      # idempotence: a copied capability does not make this caller its holder.
+      assert_receive {:trace, ^recovered_owner, :receive,
+                      {:prepared_holder_down, _owner_monitor, :process, ^preparer, :normal}},
+                     5_000
+
+      assert %{prepared: %{state: :abandoned, holder: ^preparer}} =
+               :sys.get_state(recovered_owner)
+    after
+      if Process.alive?(recovered_owner), do: :erlang.trace(recovered_owner, false, [:receive])
+      send(preparer, :finish_preparation)
+    end
 
     requests_before = Loopex.ContextAdmissionTestModel.requests(fixture.model)
 

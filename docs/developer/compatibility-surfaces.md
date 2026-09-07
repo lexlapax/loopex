@@ -111,6 +111,13 @@ shared-VM fallback or runtime code discovery. The bare-model `complete/2` helper
 now refuses; direct callers use `complete_prompt/3` with explicit configuration.
 The Model callback remains `complete/3`.
 
+`Loopex.LLM.ReqLLM.call_options/3` also remains an exported, unstable helper.
+It takes an explicit credential and returns provider options containing that
+credential; calling it is not protected credential admission. Normal provider
+execution calls it inside the isolated companion after private delivery, not
+in the host callback. A direct caller owns the returned secret-bearing value
+and must not log or retain it in public or durable data.
+
 The sole credential source remains `LOOPEX_PROVIDER_API_KEY`, with a new
 65,536-byte maximum; empty and oversized credentials refuse. Starting or stopping
 the adapter installs no parent Logger filter or credential registry and changes
@@ -120,6 +127,14 @@ existing deadline. Rollback must contain live children and change bridge,
 companion, and launch configuration together; it does not restore unsafe shared
 diagnostics or retry an uncertain invocation. The companion is private
 source-build output, not a separately published package.
+
+The generic Model reply accepts an optional nonempty UTF-8
+`provider_response_id` of at most 256 bytes and retains its bytes unchanged.
+It does not normalize whitespace or Unicode. The historical M2 attestation
+dialect `req_` plus 16–64 ASCII identifier characters is a narrower evidence
+format for those provider records, not the generic Model callback's domain.
+An account-verification record must still satisfy its own declared format;
+generic reply admission alone does not prove account visibility.
 
 **Ports.** Core declares exactly five behaviours: `Loopex.Store`,
 `Loopex.Model`, `Loopex.Executor`, `Loopex.Policy`, and
@@ -177,6 +192,39 @@ closing an entry changes only part of the ledger, the adapter restores the open
 authority before releasing the root claim or retains the claim and quarantines
 the root when restoration cannot be proved. These are current semantics of the
 unstable trusted-local adapter, not new callbacks in the executor port.
+
+The concrete Local start options also include `clock_provider` (a zero-argument
+function returning paired wall and monotonic millisecond instants) and
+`open_authority_close` (a two-argument function replacing `Ledger.close_open/2`).
+The latter receives the prepared ledger and job ID and must answer `:ok` or
+`{:error, reason}`; an invalid answer, failed call, or unfinished bounded removal
+does not prove authority was removed. These are trusted executable host
+configuration, not portable job fields or model-supplied tools.
+
+The private reservation/permit exchange copies Local placement values to the
+trusted executing process. That native map includes the public ETS table ID,
+artifact-store handle and removal callback; it is executable authority within
+the same VM, not a sandbox or a serializable capability. A reservation alone
+does not authorize an effect. Its holder must obtain the separately fenced
+permit. The holder liveness observation and a subsequent death are not one
+atomic operation: no reservation becomes a permit after the relevant loss is
+observed, not a promise that a later death is impossible.
+
+Additional concrete error families include
+`{:ledger_unavailable, :operation_owner_unavailable}`, `:effect_settling`,
+`{:receipt_not_retained, reason}`, `{:receipt_read_failed, reason}`,
+`{:refusal_not_retained, reason}`, and nested settlement/removal or
+`root_claim_retained` details. These remain unstable terms. Only the explicit
+`{:refused_before_effect, reason}` wrapper proves pre-effect refusal; neither
+an unfamiliar error atom nor loss of a reply proves that nothing ran.
+
+Local also exports hidden test-support entries: `stats/1`, `tool/1`,
+`bounded_work/3,4`, `bounded_read_probe/2`, `await_owned_process_start/4`,
+`artifact_retention_result/1`, `launcher_probe_port/1,3`, `launcher_vector/1`,
+`answer_within/3`, and `process_group_answered_empty?/2,3`. `@doc false` hides
+generated documentation, not callability. These are unstable concrete test
+support, not additions to `Loopex.Executor` conformance or supported embedder
+extension points.
 
 The adapter refuses a missing, empty, or larger-than-8,192-byte `job_id` before
 it enters the shared ledger or creates a reservation. That is a constraint of
@@ -420,7 +468,8 @@ value to 8,192; prepared `resume` and `cancel` recover an active run's committed
 value on omission and refuse an explicit conflict before activation or abort.
 The command's cross-application interrupt entries are `install/1`,
 `install/2`, `install_prepared(attachment, cleanup_ms, activation)`, which
-returns `:ok` or the owner's `{:error, reason}`, `activate_prepared(activation)`,
+returns `:ok`, a definitive `{:error, reason}`, or `{:unresolved, reason}`,
+`activate_prepared(activation)`,
 and `abandon_prepared(activation)`. Prepared installation binds the handler to
 the attachment and the exact one-use capability and makes a holder process the
 handler owns that capability's acknowledged holder. Before creating it, a
@@ -428,7 +477,7 @@ temporary lifetime guard monitors the installer; it creates the holder linked
 and monitored, waits for the holder's acknowledgement, then unlinks the pair
 into a one-way lifetime. That same guard is armed against the exact signal
 manager, and the handler is visible before public transfer begins. On this
-private CLI path the coordinator fixes the verdict, the installer forwards it to
+explicit `transfer_resume/3` path the coordinator fixes the verdict, the installer forwards it to
 the guard, and the guard acknowledges it before the coordinator records the
 holder and returns `:ok`.
 Installer death before holder readiness or before forwarding fails closed; after
@@ -436,14 +485,21 @@ forwarding, ordered delivery makes the handoff independent of the installer even
 if its public reply is lost. Ordinary `transfer_resume/2` has no guard and a
 missing reply does not prove whether its coordinator transfer happened.
 Activation and abandonment
-are presented from that holder and wait without a bound; a holder that dies
-without answering is reported as `{:error, :prepared_activation_holder_lost}`,
-and abandonment schedules no recovered work. Orderly handler replacement
-installs the successor before draining every predecessor holder, preserves
-interrupt coverage during that drain, and carries unfinished drains in the
-successor if the installing process dies. Concurrent replacements serialize;
-once an interrupt is active, replacement is refused atomically so the admitted
-abort identity and backstop are not erased. `abandon_resume(attachment,
+are presented from that holder and wait for the owner's exact answer. A lost
+holder or coordinator after a possible presentation is unresolved, not proof
+that the decision failed; read-only holder lookup independently reports
+unavailable on observation expiry. Installation errors may originate in
+configuration, the signal manager, or the owner, and are not all owner refusals.
+Abandonment schedules no recovered work. Under
+[ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept), installation
+atomically claims one handler identity on the exact signal manager. A duplicate
+returns `interrupt_already_installed` and preserves the incumbent attachment,
+holder, abort identity and backstop. There is no dynamic replacement or
+predecessor drain. Orderly removal releases its own holder asynchronously;
+manager and coordinator loss independently end dependent holders, without
+undoing work already activated. Unresolved installation keeps recovery fenced
+and lifetime cleanup active; the command neither activates nor retries it
+speculatively. `abandon_resume(attachment,
 activation)`, the entry ADR 0016 names, is kept and presents the capability
 from the same holder.
 An unrecognised flag is refused rather than

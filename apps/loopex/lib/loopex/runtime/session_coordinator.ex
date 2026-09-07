@@ -439,8 +439,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
       # it changes nothing an operator could be surprised by. Spending is not
       # idempotent in the same way and keeps its refusal, because a caller that
       # abandons what it already activated is asking to undo work that has
-      # already become the session's own.
-      {:error, :resume_activation_abandoned} ->
+      # already become the session's own. Idempotence belongs only to the
+      # recorded holder; automatic abandonment after its death does not grant
+      # a caller holding a copy permission to receive that acknowledgement.
+      {:error, :resume_activation_abandoned} when state.prepared.holder == caller ->
         {:reply, :ok, state}
 
       {:error, reason} ->

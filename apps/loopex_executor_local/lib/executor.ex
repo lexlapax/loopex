@@ -818,8 +818,9 @@ defmodule Loopex.Executor.Local do
     #
     # Technical depth: ADR 0016 requires the wall and monotonic instants used to
     # derive a job's effect-action deadline to come from one sample, so the two
-    # cannot be taken either side of a scheduling gap. This is a reversible edge
-    # seam and enters no job, ledger record, receipt, event, or public API.
+    # cannot be taken either side of a scheduling gap. This is a trusted-local
+    # start option, not a portable Executor port field; it enters no job,
+    # ledger record, receipt or event.
     clock_provider = Keyword.get(options, :clock_provider, &paired_now/0)
 
     # Concept: the one call that removes an open entry, from a place a case can
@@ -829,8 +830,9 @@ defmodule Loopex.Executor.Local do
     # the filesystem offers no way to make either of them slow on demand, so
     # without this seam no case can prove that bound exists rather than merely
     # passing when the unlink is fast. It is the same kind of reversible edge seam
-    # the paired clock is, defaults to `Ledger.close_open/2`, and enters no job,
-    # ledger record, receipt, event, or public API.
+    # the paired clock is and defaults to `Ledger.close_open/2`. The trusted-local
+    # start option carries executable host authority; it enters no job, ledger
+    # record, receipt, event or portable Executor port field.
     open_authority_close = Keyword.get(options, :open_authority_close, &Ledger.close_open/2)
 
     valid =
@@ -1012,8 +1014,8 @@ defmodule Loopex.Executor.Local do
   # reservation-owner `DOWN` messages. While it holds the root claim it verifies
   # the exact live holder, validates the job and grant, re-runs complete root
   # reconciliation at the final boundary, resolves the durable marker, and for new work installs the
-  # operation-owner token. A reservation obtained before another operation died
-  # therefore cannot outrun the unresolved open authority that death leaves.
+  # operation-owner token. No reservation becomes a permit after the relevant
+  # holder loss is observed; a liveness sample is not atomic with a later death.
   # The reply carries only the private values the caller needs after permission;
   # the server never blocks for the duration of the tool.
   def handle_call({:permit, job, grant, reservation_ref}, {caller, _tag}, state) do
@@ -1788,8 +1790,8 @@ defmodule Loopex.Executor.Local do
   # the reason the paired clock is a provider: the outer bound around the unlink
   # and its parent sync is a claim about calls the filesystem offers no way to
   # delay, so without a seam no case can prove the bound is there. It is a
-  # reversible edge seam, defaults to `Ledger.close_open/2`, and enters no job,
-  # ledger record, receipt, event, or public API.
+  # trusted-local start option, defaults to `Ledger.close_open/2`, and enters no
+  # job, ledger record, receipt, event, or portable executor-port value.
   defp remove_open_authority(placement, job) do
     removal =
       bound_only_work_until(

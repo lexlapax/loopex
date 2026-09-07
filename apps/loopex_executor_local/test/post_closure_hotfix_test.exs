@@ -895,45 +895,102 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     # Technical depth: opening the episode lazily inside `spill/5` or
     # `settle_receipt/4` leaves ordinary replies free to spend unbounded
     # preparation time before the clock exists. Both production `run_tool`
-    # clauses therefore open it immediately after the effect result and before
-    # their first normalization/spill or receipt construction. The exact
-    # ordering assertion kills either one-sided deletion and moving the opening
-    # after preparation, while the behavioural sibling below proves later phases
-    # reuse rather than refresh that instant.
-    source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
+    # clauses therefore open it after the actual effect result and before their
+    # first normalization/spill or receipt construction. Observe calls and
+    # returns in the real execute process, not lexical positions in source.
+    # Each path must actually write its file and return a completed receipt.
+    # This is an ordering observation, not a simulated slow-filesystem result;
+    # the sibling below proves later phases reuse the same allowance.
+    traced = [
+      {:run_coding_tool, 10},
+      {:run_owned_process, 10},
+      {:retention_until, 0},
+      {:spill, 5},
+      {:normalize_tool_result, 1},
+      {:receipt, 10}
+    ]
 
-    [_before, coding_clause, demonstration_and_rest] =
-      String.split(source, "  defp run_tool(", parts: 3)
-
-    [demonstration_clause | _rest] =
-      String.split(demonstration_and_rest, "\n  defp progress_identity", parts: 2)
-
-    assert_ordered = fn clause, labels ->
-      offsets =
-        Enum.map(labels, fn label ->
-          case :binary.match(clause, label) do
-            {offset, _size} -> offset
-            :nomatch -> flunk("run_tool clause is missing #{inspect(label)}")
-          end
-        end)
-
-      assert offsets == Enum.sort(offsets),
-             "run_tool settlement order changed for #{inspect(labels)}: #{inspect(offsets)}"
+    for {name, arity} <- traced do
+      assert :erlang.trace_pattern({Local, name, arity}, [{:_, [], [{:return_trace}]}], [:local]) ==
+               1
     end
 
-    assert_ordered.(coding_clause, [
-      "      run_coding_tool(",
-      "    _retention_deadline = retention_until()",
-      "case spill(tool_result",
-      "receipt("
-    ])
+    try do
+      for {tool, arguments, expected} <- [
+            {"loopex.write", %{"path" => "coding.txt", "content" => "coding"},
+             [
+               {:returned, :run_coding_tool},
+               {:called, :retention_until},
+               {:called, :spill},
+               {:called, :receipt}
+             ]},
+            {"loopex.demo.write", %{"relative_path" => "demo.txt", "content" => "demo"},
+             [
+               {:returned, :run_owned_process},
+               {:called, :retention_until},
+               {:called, :normalize_tool_result},
+               {:called, :receipt}
+             ]}
+          ] do
+        root = workspace()
+        {executor, lease_id} = executor_with(root, [])
+        observer = self()
 
-    assert_ordered.(demonstration_clause, [
-      "      run_owned_process(",
-      "    _retention_deadline = retention_until()",
-      "    {outcome, output, _complete} = normalize_tool_result(tool_result)",
-      "receipt("
-    ])
+        {caller, monitor} =
+          spawn_monitor(fn ->
+            observer_monitor = Process.monitor(observer)
+
+            receive do
+              :execute ->
+                result = run(root, tool, arguments, %{executor: executor, lease_id: lease_id})
+                send(observer, {:observed_receipt, self(), result})
+
+                receive do
+                  :observed -> :ok
+                  {:DOWN, ^observer_monitor, :process, ^observer, _reason} -> :ok
+                end
+
+              {:DOWN, ^observer_monitor, :process, ^observer, _reason} ->
+                :ok
+            end
+          end)
+
+        try do
+          assert :erlang.trace(caller, true, [:call, {:tracer, self()}]) == 1
+          send(caller, :execute)
+          assert_receive {:observed_receipt, ^caller, {:ok, receipt}}, 10_000
+          assert receipt.outcome == :completed
+          path = Map.get(arguments, "path") || Map.fetch!(arguments, "relative_path")
+          assert File.read!(Path.join(root, path)) == arguments["content"]
+          barrier = :erlang.trace_delivered(caller)
+          assert_receive {:trace_delivered, ^caller, ^barrier}
+          events = retention_trace(caller, [])
+
+          positions =
+            Enum.map(expected, fn event ->
+              case Enum.find_index(events, &(&1 == event)) do
+                nil -> flunk("#{tool} never emitted #{inspect(event)}: #{inspect(events)}")
+                position -> position
+              end
+            end)
+
+          assert positions == Enum.sort(positions),
+                 "#{tool} prepared a receipt before opening retention: #{inspect(events)}"
+        after
+          if Process.alive?(caller), do: :erlang.trace(caller, false, [:call])
+          send(caller, :observed)
+
+          receive do
+            {:DOWN, ^monitor, :process, ^caller, _reason} -> :ok
+          after
+            1_000 -> Process.exit(caller, :kill)
+          end
+        end
+      end
+    after
+      for {name, arity} <- traced,
+          do: :erlang.trace_pattern({Local, name, arity}, false, [:local])
+    end
   end
 
   test "every retention phase of one settlement draws on one shared allowance" do
@@ -1259,6 +1316,18 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
     assert {"answered\n", 0} =
              Local.answer_within("/bin/sh", ["-c", "sleep 0.05; echo answered"], @max_uint64),
            "a cleanup program bounded by the accepted maximum period reported no answer"
+  end
+
+  defp retention_trace(caller, events) do
+    receive do
+      {:trace, ^caller, :call, {Local, name, _arguments}} ->
+        retention_trace(caller, [{:called, name} | events])
+
+      {:trace, ^caller, :return_from, {Local, name, _arity}, _result} ->
+        retention_trace(caller, [{:returned, name} | events])
+    after
+      0 -> Enum.reverse(events)
+    end
   end
 
   defp run(root, tool_id, arguments, overrides) do

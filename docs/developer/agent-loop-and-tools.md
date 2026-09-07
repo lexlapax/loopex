@@ -379,8 +379,10 @@ than returning `:continue`, because Elixir orders numbers below atoms and
 
 Provider accounting settles atomically with the attempt result. The complete raw
 reply passes Store bounded-plain-data admission before full canonical projection.
-Missing, partial, malformed, negative, non-integer, unsigned-64-overflow, or
-extra-key usage in an otherwise canonical reply is unreported; an extra,
+Missing or partial usage, and Store-admitted values with malformed, negative,
+non-integer or unsigned-64-overflow numeric shapes, are unreported in an
+otherwise canonical reply. Extra usage keys instead reject the reply as
+`unreadable_model_answer`; an extra,
 colliding, non-plain, or invalid sibling that rejects the reply cannot leave its
 usage independently reportable. Every possibly dispatched attempt in either
 class charges exactly the run's remaining cumulative allowance as estimated.

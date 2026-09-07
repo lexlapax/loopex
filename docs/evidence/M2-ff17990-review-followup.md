@@ -15,6 +15,10 @@ It is not a recovered copy of that report, an independent acceptance review,
 or an acceptance disposition. Line references below name the reviewed source;
 later repairs may move them.
 
+The reviewer subsequently restored the original report. The complete-report
+reconciliation below supplements that reconstruction; it does not replace the
+original independent verdict or treat a repair as independently accepted.
+
 The existing repair authorization remains the task scope. Historical override
 21 continues to describe its original range; this follow-up neither extends
 its accepted baseline nor authorizes integration, publication, or a version tag.
@@ -158,6 +162,7 @@ lookup or provider call was performed for this record. The final source and
 evidence checks remain future work; earlier green results are not projected
 onto changed bytes.
 
+<a id="completion-order"></a>
 ### Completion order
 
 The three implementation workstreams are joined on the repair branch. The
@@ -777,3 +782,80 @@ exactly those two explicitly required helpers in `test_ignore_filters`; no
 and warnings-as-errors remains enabled. The passing result includes the applied
 credential migration, the real-entry cleanup-expiry case, and the pre-existing
 retainer-death cases. It is neither a live-provider nor a whole-suite result.
+
+### Restored complete-report reconciliation — 2026-09-07
+
+The restored `FF17990-REVIEW.md` was read completely, including its medium
+findings, previously sound areas and exclusions. Its SHA-256 is
+`59daf51280a1bebc88bf43c305a0103dfb9a2221800fc635f866c48df59a989c`.
+It reviews exact `ff17990453426e129cf0b3f1895ae936f64ff875` against
+`3a729b08ff0ce9f14bca1ef64da04ee96879ac2b`. The external file is not
+repository authority. The following map keeps the complete follow-through
+visible without projecting this branch's results onto its historical source.
+
+| Original item | Follow-through and remaining proof |
+| --- | --- |
+| 1 — authority/evidence does not cover the candidate | ADRs 0019–0021 and the current implementation task authorize these repairs, not integration of an unseen candidate. Override 21 and old attestations remain historical. Final clean source `S`, new three-role provider evidence/account verification, evidence-only child `E`, and exact-SHA independent review are still required. No older gate result supplies that evidence. |
+| 2 — host Logger/IO takeover | ADR 0019's isolated companion replaces the parent-global filter, registry and group-leader ownership. Actual-entry tests exercise host logging, parallel independent invocations, startup failure and child diagnostic containment. The joined 132-case application result and earlier exact-package results above are scoped to their named sources. Backpressure and final-source live/package qualification remain explicit work, not inferred from isolation's architecture. |
+| 3 — guardian survives its retaining owner | Managed cleanup now follows the actual retaining lifetime guard through the post-result wait. Tests distinguish callback return from retainer death and require the genuine guardian/child/namespace to end. The unmanaged cleanup-expiry case also reaches the real entry. Final joined verification remains required. |
+| 4 — hidden public handoff and unused replacement | ADR 0020 introduces explicit `transfer_resume/3`; ordinary `/2` no longer selects behavior from CLI process state. Duplicate initial installation refuses atomically, with no handler-replacement/drain system or global drain lock. The remaining private provider lifetime registrar is invocation-local resource bookkeeping under ADR 0019, not a selector for public transfer. A newly exposed idempotent-abandonment caller check is repaired and described below. |
+| 5 — accounting contradiction and permissive recovery | ADR 0021's versioned retained provenance distinguishes raw refusal from validated settlement compaction. The additive ADR disposition corrects the historical conservative-rule misstatement without rewriting override 21. Production replay validates provenance against accounting; actual Store old-reader control/refusal and protected-provider-to-Core/renderer cases are described above. Final-source rollback evidence is not yet supplied. |
+| 6 — tests overclaim observations | Replacement-only lexical and short-silence verdict tests were removed with that retired behavior. Actual HTTP request counting and retry-path observations now supplement the option assertion. Receipt preparation's lexical-order assertion is being replaced with real execute-process call/return observation. Unconfirmed untrappable-worker-stop branches retain explicitly labelled structural and pure-result checks; these do not claim a real BEAM process survived `:kill`. Adjacent real lease/bound/owner-loss cases remain separate behavioral evidence. The historical wide deadline case did not kill the reviewer's final-clock mutation; the exact-equality case did. No broader mutation claim is carried forward. |
+| 7a — independent caller timeouts over admission | Scoped repair removes the unrelated reserve/permit observation ceilings, retaining job/admission/cancellation authority deadlines. Real queued/held-handler tests distinguish waiting for the decision from a caller timing out while it continues. Their joined results remain to be recorded. This is not a bound on a permanently stalled filesystem. |
+| 7b — unsupported holder liveness can crash Local | The shared liveness predicate now checks the holder's local PID domain before calling `Process.alive?/1`. Ordinary simultaneous local-holder execution remains covered without claiming distributed execution. The owning clone's safe regression batch passes 30 cases; final join remains required. |
+| 7c — host materializes secret-bearing provider options | Normal execution constructs options in the protected child after private credential delivery. Exported `call_options/3` remains callable and returns secret-bearing data to its explicit caller; the compatibility inventory now states that responsibility rather than implying the helper itself protects the caller. |
+| 7d — prepared installer death diverges from documented state | The initial preparation holder is monitored. The joined full suite exposed a further same-state acknowledgement to a different caller; an ordered real-runtime regression now proves holder loss is processed before that call, and the caller-specific idempotence repair preserves the rightful holder's repeated acknowledgement. |
+| 7e — already-spent permit still pages Store | The pure exact-spent-binding check now precedes the bounded Store read. The existing protected case positively witnesses the real Store read protocol and then requires no read for the duplicate, after a trace-delivery barrier. Original ordering fails that assertion; repaired ordering passes. |
+| 8 — undeclared surfaces and liveness overclaim | The compatibility inventory now names trusted-local clock/removal options, native placement authority, exported hidden test-support arities, concrete error families and `call_options/3`. The honest liveness claim is refusal after loss is observed, not atomic knowledge of every later death. Generic response IDs preserve optional nonempty UTF-8 bytes up to 256 bytes; the historical `req_` attestation dialect is a narrower evidence requirement, not the Model callback domain. No generic identifier normalization is introduced. |
+| Fourth-audit minor docs | `install_prepared/3` and the inventory distinguish setup errors, handoff refusals and unresolved answers. The operator Store guidance states the exact same-VM dead-owner exception. Usage guidance now rejects extra keys with the whole reply instead of claiming they canonicalize to unreported usage. |
+
+The complete report's excluded areas are not automatically covered by running
+tests. The independent release reviewer still owns a fresh content review of
+the large agent-loop/prepared corpus and the Ledger/WorkspaceLease boundary.
+The reference fixture now actually builds and validates a same-source companion
+from a cold clone; its deterministic cases and current/floor package evidence
+are recorded above. That closes a configuration uncertainty, not all possible
+reference-client defects. No external provider-account lookup was performed in
+this reconciliation pass.
+
+### First joined whole-suite result and focused repairs
+
+At clean `50191d5c74b8ee343061caeada1037053bd4c3b0`, current-toolchain
+test-environment force compilation with warnings-as-errors passed. The serial
+whole suite, seed `3107`, with all three provider-key variables unset, then
+exited 2: **1,019 passed, two failed, five real-provider cases excluded**.
+By application: protocol 12; Core 524 passed and two failed; provider 132 and
+one excluded; Store 41; executor 158; composition 13; reference 18 and two
+excluded; CLI 121 and two excluded. It is not recorded as a green source.
+
+The first failure was the dead-preparer abandonment assertion. Its former
+preparer exit had no ordering witness for the coordinator's own monitor. The
+strengthened case waits for the actual `prepared_holder_down` receive and a
+subsequent state barrier. Its initial observer used the wrong monitor-message
+shape and failed at setup; correcting that observer produced the substantive
+failure: a different caller received `:ok` from the abandoned state's
+idempotent branch. Restricting that acknowledgement to the recorded holder
+fixes it. The ordered Core case and the late-reply case below pass together;
+the CLI case separately proves repeated same-holder abandonment succeeds while
+another caller is refused.
+
+The second failure was a stale expected `none` provenance in the oversized
+valid late-reply case. The case now independently measures the actual complete
+settlement, requires its exact compaction provenance and retained reported
+usage, and preserves abort precedence and bounded record assertions. This is
+conformance to accepted ADR 0021, not an accounting policy change.
+
+The receipt-preparation ordering case now runs both real effects through
+`Local.execute`, requires their actual file bytes and completed receipts, and
+observes private call/return events in the executing process. Its trace-delivery
+barrier precedes every negative ordering assertion; it no longer reads source
+text. The joined working-tree case passes in 0.4 seconds, seed `3107`. This is
+an execution-order observation, not a slow-filesystem simulation or a new
+timing budget. The unreachable untrappable-stop qualification above remains.
+
+The duplicate-permit regression uses a positive real Store page witness before
+tracing the exact repeated binding. Its strengthened assertion fails with the
+old read-before-spent ordering (2.5 seconds) and passes after the two checks are
+reordered (2.3 seconds). The other ownership, position, worker and deadline
+checks remain in place. These focused greens do not substitute for the next
+clean whole-suite and gate run.

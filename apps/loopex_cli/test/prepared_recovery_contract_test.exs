@@ -597,6 +597,11 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
 
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1
     assert :ok = invoke(Loopex, :abandon_resume, [abandoned])
+    assert :ok = invoke(Loopex, :abandon_resume, [abandoned])
+
+    stranger = Task.async(fn -> invoke(Loopex, :abandon_resume, [abandoned]) end)
+    assert {:error, :resume_activation_abandoned} = Task.await(stranger, 5_000)
+
     assert_refused(invoke(Loopex, :activate_resume, [abandoned]))
     Process.sleep(100)
     assert length(Loopex.AgentLoopTestModel.dispatched(fixture.model)) == 1

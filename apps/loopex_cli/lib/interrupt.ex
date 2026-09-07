@@ -182,7 +182,10 @@ defmodule LoopexCli.Interrupt do
   asynchronously. Ending a holder cannot retract a presentation already received
   by the owner or stop session work whose activation succeeded.
 
-  The handoff's own result is what this returns. A handoff the owner refuses —
+  Once installation reaches handoff, its result is returned unchanged. Earlier
+  configuration, lifetime-setup, signal-manager or duplicate-installation
+  errors are local installation refusals, not claims that the owner refused a
+  handoff it never received. A handoff the owner refuses —
   most often because a signal beat it and the abort already fenced the
   capability, or because this process is not the holder it would have to be —
   releases the unacknowledged holder, clears it from the interrupt handler, and
