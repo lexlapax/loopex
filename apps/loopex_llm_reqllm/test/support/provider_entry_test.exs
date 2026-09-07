@@ -132,6 +132,46 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     Fixture.assert_gone(fixture)
   end
 
+  test "caller death closes the real transport after its dependency-owned HTTP task is unlinked" do
+    fixture = Fixture.new(:unlinked_http)
+    call = Fixture.managed(fixture, Fixture.request(), :unmanaged)
+    caller = call.caller
+    guardian = call.guardian
+
+    assert Fixture.eventually(fn -> Fixture.count(fixture) == 1 end)
+    assert Fixture.transport_events(fixture) == [:connected]
+    File.write!(Fixture.marker(fixture, "unlink-http"), "unlink")
+    assert Fixture.eventually(fn -> Fixture.reached?(fixture, "unlinked-http-proof") end)
+
+    assert Jason.decode!(File.read!(Fixture.marker(fixture, "unlinked-http-proof"))) == %{
+             "server_alive" => true,
+             "http_task_alive" => true,
+             "http_task_supervised" => true,
+             "dependency_link_present_before" => true,
+             "dependency_link_removed" => true
+           }
+
+    assert Fixture.transport_events(fixture) == [:connected]
+    assert Process.alive?(guardian)
+    assert Fixture.alive?(Fixture.pid(fixture))
+    refute_receive {:completed, ^caller, _result}, 0
+
+    Process.exit(caller, :kill)
+    caller_monitor = call.caller_monitor
+    guardian_monitor = call.monitor
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :killed}, 1_000
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 2_500
+
+    assert Fixture.eventually(fn ->
+             Fixture.transport_events(fixture) == [:connected, :closed]
+           end)
+
+    Fixture.assert_gone(fixture)
+    assert Fixture.canaries(fixture) == 1
+    assert [{_request, true}] = Fixture.events(fixture)
+    refute_receive {:completed, ^caller, _result}, 0
+  end
+
   for extra <- [:duplicate_invocation, :unknown_byte] do
     @extra extra
     test "actual worker refuses #{@extra} after its one accepted invocation without redispatch" do

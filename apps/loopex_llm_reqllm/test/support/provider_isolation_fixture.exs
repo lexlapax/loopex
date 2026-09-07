@@ -20,6 +20,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
     File.mkdir!(root)
     {:ok, events} = Agent.start_link(fn -> [] end)
+    {:ok, transport_events} = Agent.start_link(fn -> [] end)
     {:ok, probe_events} = Agent.start_link(fn -> [] end)
     {:ok, probe_listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
     {:ok, {_address, probe_port}} = :inet.sockname(probe_listener)
@@ -29,8 +30,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         case :gen_tcp.accept(probe_listener) do
           {:ok, socket} ->
             Agent.update(probe_events, &[:connected | &1])
-            wait_closed(socket)
-            Agent.update(probe_events, &[:closed | &1])
+            observation = wait_closed(socket)
+            Agent.update(probe_events, &[observation | &1])
 
           {:error, :closed} ->
             :ok
@@ -42,12 +43,16 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
     {:ok, {_address, port}} = :inet.sockname(listener)
     expected = Keyword.get(options, :credential, System.get_env(Adapter.credential_variable()))
-    acceptor = spawn_link(fn -> accept_loop(listener, events, mode, expected) end)
+
+    acceptor =
+      spawn_link(fn -> accept_loop(listener, events, transport_events, mode, expected) end)
+
     if mode == :closed_port, do: :gen_tcp.close(listener)
 
     fixture = %{
       root: root,
       events: events,
+      transport_events: transport_events,
       probe_events: probe_events,
       listener: listener,
       acceptor: acceptor,
@@ -67,6 +72,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       :gen_tcp.close(listener)
       :gen_tcp.close(probe_listener)
       if Process.alive?(events), do: Agent.stop(events)
+      if Process.alive?(transport_events), do: Agent.stop(transport_events)
       if Process.alive?(probe_events), do: Agent.stop(probe_events)
       File.rm_rf!(root)
     end)
@@ -135,6 +141,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   end
 
   def events(fixture), do: Agent.get(fixture.events, &Enum.reverse/1)
+  def transport_events(fixture), do: Agent.get(fixture.transport_events, &Enum.reverse/1)
   def probe_events(fixture), do: Agent.get(fixture.probe_events, &Enum.reverse/1)
   def count(fixture), do: length(events(fixture))
   def marker(fixture, name), do: Path.join(fixture.root, name)
@@ -211,6 +218,46 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
             app not in [:loopex, :loopex_cli, :loopex_composition, :loopex_llm_reqllm]
           end)
         }))
+        if mode == :unlinked_http do
+          # The hook is executing inside the real StreamServer callback. A
+          # separate child-local observer waits for that callback to attach its
+          # real HTTP task, then removes only their dependency-owned link.
+          stream_server = self()
+          spawn(fn ->
+            proof = try do
+              Stream.repeatedly(fn -> File.exists?(Path.join(root, "unlink-http")) end)
+              |> Enum.reduce_while(nil, fn ready, _ ->
+                if ready, do: {:halt, nil}, else: (Process.sleep(10); {:cont, nil})
+              end)
+              state = :sys.get_state(stream_server, 2_000)
+              http_task = state.http_task
+              true = is_pid(http_task) and http_task != stream_server
+              {:initial_call, {Task.Supervised, _function, _arity}} =
+                Process.info(http_task, :initial_call)
+              true = http_task in Task.Supervisor.children(ReqLLM.TaskSupervisor)
+              {:links, links} = Process.info(stream_server, :links)
+              true = http_task in links
+              next = :sys.replace_state(stream_server, fn current ->
+                true = current.http_task == http_task
+                true = Process.unlink(http_task)
+                current
+              end, 2_000)
+              true = next.http_task == http_task
+              {:links, server_links} = Process.info(stream_server, :links)
+              {:links, task_links} = Process.info(http_task, :links)
+              %{
+                server_alive: Process.alive?(stream_server),
+                http_task_alive: Process.alive?(http_task),
+                http_task_supervised: http_task in Task.Supervisor.children(ReqLLM.TaskSupervisor),
+                dependency_link_present_before: true,
+                dependency_link_removed: http_task not in server_links and stream_server not in task_links
+              }
+            catch
+              _, _ -> %{setup_failed: true}
+            end
+            File.write!(Path.join(root, "unlinked-http-proof"), Jason.encode!(proof))
+          end)
+        end
         if mode == :detached_descendant do
           task = Task.Supervisor.async(ReqLLM.TaskSupervisor, fn ->
             receive do: (:begin -> :ok)
@@ -328,33 +375,36 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     ]
   end
 
-  defp accept_loop(listener, events, mode, expected) do
+  defp accept_loop(listener, events, transport_events, mode, expected) do
     case :gen_tcp.accept(listener) do
       {:ok, socket} ->
+        Agent.update(transport_events, &[:connected | &1])
+
         handler =
           spawn_link(fn ->
             receive do
-              {:socket, ^socket} -> serve(socket, events, mode, expected)
+              {:socket, ^socket} -> serve(socket, events, transport_events, mode, expected)
             end
           end)
 
         :ok = :gen_tcp.controlling_process(socket, handler)
         send(handler, {:socket, socket})
-        accept_loop(listener, events, mode, expected)
+        accept_loop(listener, events, transport_events, mode, expected)
 
       {:error, :closed} ->
         :ok
     end
   end
 
-  defp serve(socket, events, mode, expected) do
+  defp serve(socket, events, transport_events, mode, expected) do
     with {:ok, headers, body} <- read_request(socket, "") do
       authorized = is_binary(expected) and String.contains?(headers, expected)
       Agent.update(events, &[{Jason.decode!(body), authorized} | &1])
 
       case mode do
-        mode when mode in [:blocked, :timeout] ->
-          wait_closed(socket)
+        mode when mode in [:blocked, :timeout, :unlinked_http] ->
+          observation = wait_closed(socket)
+          Agent.update(transport_events, &[observation | &1])
 
         :rate_limited ->
           respond(socket, "429 Too Many Requests", "application/json", "{}")
@@ -406,7 +456,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   defp wait_closed(socket) do
     case :gen_tcp.recv(socket, 0, 100) do
       {:error, :timeout} -> wait_closed(socket)
-      _closed -> :ok
+      {:error, :closed} -> :closed
+      _unexpected -> :unexpected_socket_result
     end
   end
 
