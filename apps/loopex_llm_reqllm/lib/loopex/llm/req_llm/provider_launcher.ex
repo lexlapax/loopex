@@ -140,27 +140,33 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
   # Technical depth: the disposable carrier and its independent guard remain in
   # the group created at Port birth. The carrier closes its control descriptors
   # immediately after the fork. Only the guard can consume control or answer it.
+  # Group signals use the shell builtin's explicit `-s SIGNAL -- -PGID` form:
+  # dash rejects `-SIGNAL --`, while omitting `--` misparses the negative PGID.
+  # Keeping actuation in the live shell preserves its birth-group authority.
+  # Wait retries use that shell's trapped-interruption flag: dash loses its job
+  # table in command substitutions. A final status <=128 wins over a concurrent
+  # trap; an untrapped signal exit remains final instead of being retried.
   defp carrier_program do
     ~S"""
     exec </dev/null >/dev/null 2>&1
     guard_program=$1
     shift
-    trap ':' TERM
+    trap 'wait_interrupted=1' TERM
     /bin/sh -c "$guard_program" loopex-provider-guard "$$" "$@" 3<&3 4>&4 &
     guard_pid=$!
     exec 3<&- 4>&-
     while :; do
+      wait_interrupted=0
       wait "$guard_pid"
       status=$?
-      case " $(jobs -p) " in
-        *" $guard_pid "*) ;;
-        *) break ;;
-      esac
+      if [ "$status" -le 128 ] || [ "$wait_interrupted" -eq 0 ]; then
+        break
+      fi
     done
     [ "$status" -eq 0 ] && exit 0
     trap '' TERM
-    kill -TERM -- -"$$" 2>/dev/null
-    kill -KILL -- -"$$" 2>/dev/null
+    kill -s TERM -- -"$$" 2>/dev/null
+    kill -s KILL -- -"$$" 2>/dev/null
     exit 125
     """
   end
@@ -180,8 +186,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
 
     cleanup() {
       remaining=$1 stop_id=$2
-      trap ':' TERM HUP INT PIPE
-      kill -TERM -- -"$group" 2>/dev/null
+      trap 'wait_interrupted=1' TERM HUP INT PIPE
+      kill -s TERM -- -"$group" 2>/dev/null
       if [ "${#remaining}" -gt 3 ]; then
         seconds=${remaining%???}
         millis=${remaining#"$seconds"}
@@ -191,18 +197,19 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
       fi
       (
         stopping=0
-        trap 'stopping=1' TERM HUP INT PIPE
+        trap 'stopping=1; wait_interrupted=1' TERM HUP INT PIPE
         /bin/sleep "$delay" &
         sleeper=$!
         while :; do
+          wait_interrupted=0
           wait "$sleeper"
-          case " $(jobs -p) " in
-            *" $sleeper "*) ;;
-            *) break ;;
-          esac
+          sleeper_status=$?
+          if [ "$sleeper_status" -le 128 ] || [ "$wait_interrupted" -eq 0 ]; then
+            break
+          fi
         done
         [ "$stopping" -eq 1 ] && exit 0
-        kill -KILL -- -"$group" 2>/dev/null
+        kill -s KILL -- -"$group" 2>/dev/null
         exit 125
       ) 3<&- 4>&- &
       timer=$!
@@ -227,14 +234,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
             for (pid in groups) if (groups[pid] == group && !allowed[pid] && !timer_tree[pid] && states[pid] !~ /^Z/) exit 1
             exit 0
           }'; then
-          kill -TERM -- -"$group" 2>/dev/null
+          kill -s TERM -- -"$group" 2>/dev/null
           while :; do
+            wait_interrupted=0
             wait "$timer"
             timer_status=$?
-            case " $(jobs -p) " in
-              *" $timer "*) ;;
-              *) break ;;
-            esac
+            if [ "$timer_status" -le 128 ] || [ "$wait_interrupted" -eq 0 ]; then
+              break
+            fi
           done
           [ "$timer_status" -eq 0 ] || exit 125
           if [ -n "$stop_id" ]; then

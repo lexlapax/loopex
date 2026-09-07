@@ -4767,6 +4767,12 @@ defmodule Loopex.Executor.Local do
   # carrier reports failure without signalling a now-detached numeric group. In
   # command mode the carrier still anchors its own group and may safely terminate
   # that group as its last act after an abnormal guard exit.
+  # Every carrier/guard group signal uses `kill -s SIGNAL -- -PGID`: dash rejects
+  # the shorthand `-SIGNAL --`, and both shells need `--` before a negative PID.
+  # The builtin keeps signal authority in the live shell, without a later helper.
+  # Wait retries use a trapped-interruption flag in that same shell: dash drops
+  # its job table in command substitutions. Preserve a final status <=128 even
+  # beside a trap, and preserve an untrapped signal exit without retrying it.
   defp launch_carrier_script do
     """
     guard_script=$1
@@ -4775,7 +4781,7 @@ defmodule Loopex.Executor.Local do
     shift
     carrier_pid=$$
     mode=$1
-    trap ':' TERM
+    trap 'wait_interrupted=1' TERM
     if [ "$mode" = helper ]; then
       set -m
       sh -c "$guard_script" "$guard_name" "$carrier_pid" "$@" <&0 &
@@ -4787,20 +4793,20 @@ defmodule Loopex.Executor.Local do
     fi
     guard_status=125
     while :; do
+      wait_interrupted=0
       wait "$guard_pid" 2>/dev/null
       guard_status=$?
-      case " $(jobs -p) " in
-        *" $guard_pid "*) ;;
-        *) break ;;
-      esac
+      if [ "$guard_status" -le 128 ] || [ "$wait_interrupted" -eq 0 ]; then
+        break
+      fi
     done
     if [ "$guard_status" -eq 0 ]; then
       exit 0
     fi
     if [ "$mode" != helper ]; then
       trap '' TERM
-      kill -TERM -- -"$carrier_pid" >/dev/null 2>&1
-      kill -KILL -- -"$carrier_pid" >/dev/null 2>&1
+      kill -s TERM -- -"$carrier_pid" >/dev/null 2>&1
+      kill -s KILL -- -"$carrier_pid" >/dev/null 2>&1
     fi
     exit 125
     """
@@ -4841,8 +4847,8 @@ defmodule Loopex.Executor.Local do
     group_id=
     guard_abort() {
       trap '' TERM
-      [ -n "$group_id" ] && kill -TERM -- -"$group_id" >/dev/null 2>&1
-      [ -n "$group_id" ] && kill -KILL -- -"$group_id" >/dev/null 2>&1
+      [ -n "$group_id" ] && kill -s TERM -- -"$group_id" >/dev/null 2>&1
+      [ -n "$group_id" ] && kill -s KILL -- -"$group_id" >/dev/null 2>&1
       exit 125
     }
     trap 'guard_abort' HUP INT PIPE TERM
@@ -4867,7 +4873,7 @@ defmodule Loopex.Executor.Local do
     esac
     (
       trap - HUP INT PIPE
-      trap ':' TERM
+      trap 'wait_interrupted=1' TERM
       if [ "$mode" = command ]; then
         command=$1
         sh -c "$command" 3>&- </dev/null &
@@ -4877,12 +4883,12 @@ defmodule Loopex.Executor.Local do
       command_pid=$!
       command_status=125
       while :; do
+        wait_interrupted=0
         wait "$command_pid"
         command_status=$?
-        case " $(jobs -p) " in
-          *" $command_pid "*) ;;
-          *) break ;;
-        esac
+        if [ "$command_status" -le 128 ] || [ "$wait_interrupted" -eq 0 ]; then
+          break
+        fi
       done
       printf '\\n#{@guard_status}:%s:%s\\n' "$token" "$command_status" >&3
       exit "$command_status"
@@ -4892,14 +4898,14 @@ defmodule Loopex.Executor.Local do
       case "$control" in
         '#{@guard_signal}:'"$token"':TERM')
           trap '' TERM
-          kill -TERM -- -"$group_id" >/dev/null 2>&1
+          kill -s TERM -- -"$group_id" >/dev/null 2>&1
           trap 'guard_abort' TERM
           ;;
         '#{@guard_signal}:'"$token"':KILL')
           if [ "$mode" = helper ]; then
             printf '\n#{@guard_signal_ack}:%s:KILL\n' "$token" >&3
           fi
-          kill -KILL -- -"$group_id" >/dev/null 2>&1
+          kill -s KILL -- -"$group_id" >/dev/null 2>&1
           ;;
         '#{@guard_release}:'"$token")
           wait "$status_pid"

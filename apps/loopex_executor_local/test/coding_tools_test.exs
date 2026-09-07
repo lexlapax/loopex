@@ -4617,13 +4617,18 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              ~r/mode=\$1.*?if \[ "\$mode" = helper \]; then.*?set -m.*?sh -c "\$guard_script" "\$guard_name" "\$carrier_pid" "\$@" <&0 &.*?set \+m.*?else.*?sh -c "\$guard_script" "\$guard_name" "\$carrier_pid" "\$@" <&0 &/s
 
     assert carrier =~
-             ~r/if \[ "\$mode" != helper \]; then.*?kill -TERM -- -"\$carrier_pid".*?kill -KILL -- -"\$carrier_pid"/s,
+             ~r/if \[ "\$mode" != helper \]; then.*?kill -s TERM -- -"\$carrier_pid".*?kill -s KILL -- -"\$carrier_pid"/s,
            "the carrier no longer reaps its still-anchored command group after guard loss"
 
-    refute carrier =~ ~r/guard_group=.*?kill -(?:TERM|KILL) -- -"\$guard_group"/s,
+    refute carrier =~ ~r/guard_group=.*?kill -(?:s )?(?:TERM|KILL) -- -"\$guard_group"/s,
            "the helper carrier signals a detached sampled group after its guard has exited"
 
-    assert carrier =~ ~r/while :; do\n\s+wait "\$guard_pid"/
+    assert carrier =~ ~r/while :; do\n\s+wait_interrupted=0\n\s+wait "\$guard_pid"/
+    assert carrier =~ "trap 'wait_interrupted=1' TERM"
+
+    assert carrier =~
+             ~r/guard_status=\$\?\n\s+if \[ "\$guard_status" -le 128 \] \|\| \[ "\$wait_interrupted" -eq 0 \]; then\n\s+break/
+
     assert script =~ "IFS= read -r init"
     assert script =~ "IFS= read -r permit"
 
@@ -4631,25 +4636,29 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              ~r/carrier_group=\$1.*?if \[ "\$mode" = helper \]; then\s+group_id=\$\$\s+else\s+group_id=\$carrier_group/s
 
     refute script =~ ~r/group_id=\$\(.*?ps /s
-    assert script =~ ~r/while :; do\n\s+wait \"\$command_pid\"/
+    assert script =~ ~r/while :; do\n\s+wait_interrupted=0\n\s+wait \"\$command_pid\"/
     assert script =~ "while IFS= read -r control"
-    assert script =~ ~r/case " \$\(jobs -p\) ".*?\*" \$command_pid "\*\).*?\*\) break/s
-    refute script =~ ~s|kill -0 "$command_pid"|
-    assert script =~ "trap - HUP INT PIPE\n  trap ':' TERM"
 
     assert script =~
-             ~r/'loopex-signal:'"\$token"':TERM'\).*?trap '' TERM.*?kill -TERM -- -"\$group_id".*?trap 'guard_abort' TERM/s,
+             ~r/command_status=\$\?\n\s+if \[ "\$command_status" -le 128 \] \|\| \[ "\$wait_interrupted" -eq 0 \]; then\n\s+break/
+
+    refute script =~ "$(jobs -p)"
+    refute script =~ ~r/kill -(?:0|-?s 0)(?: --)? "\$command_pid"/
+    assert script =~ "trap - HUP INT PIPE\n  trap 'wait_interrupted=1' TERM"
+
+    assert script =~
+             ~r/'loopex-signal:'"\$token"':TERM'\).*?trap '' TERM.*?kill -s TERM -- -"\$group_id".*?trap 'guard_abort' TERM/s,
            "a cooperative group TERM no longer masks an external owner-loss TERM permanently"
 
     assert script =~
-             ~r/'loopex-signal:'"\$token"':KILL'\).*?if \[ "\$mode" = helper \]; then.*?loopex-signal-accepted:%s:KILL.*?kill -KILL -- -"\$group_id"/s,
+             ~r/'loopex-signal:'"\$token"':KILL'\).*?if \[ "\$mode" = helper \]; then.*?loopex-signal-accepted:%s:KILL.*?kill -s KILL -- -"\$group_id"/s,
            "the live guard no longer acknowledges and performs the final group KILL"
 
     assert script =~ "guard_abort"
     assert script =~ "trap 'guard_abort' HUP INT PIPE TERM"
 
     assert script =~
-             ~r/guard_abort\(\) \{\s+trap '' TERM\s+\[ -n "\$group_id" \] && kill -TERM -- -"\$group_id"/,
+             ~r/guard_abort\(\) \{\s+trap '' TERM\s+\[ -n "\$group_id" \] && kill -s TERM -- -"\$group_id"/,
            "the abort trap can recurse on the group TERM it sends itself"
 
     assert script =~ ~r/\*\) guard_abort ;;/
