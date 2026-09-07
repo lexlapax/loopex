@@ -160,8 +160,9 @@ onto changed bytes.
 
 ### Completion order
 
-Current source checkpoint: the three implementation workstreams are joined at
-`749fbe9` (including actual worker-entry checkpoint `5948fc1`). Acceptance of ADRs 0019–0021 is
+The three implementation workstreams are joined on the repair branch. The
+checkpoints below describe completed work, not an assertion about an uncommitted
+or future candidate. Acceptance of ADRs 0019–0021 is
 recorded at `63511ca264ef99e8b93367a9cd671165525e4d4f`. The maintainer separately
 authorized implementing these decisions and preparing release-review evidence.
 The integration branch is `codex/m2-release-repair`. `main`, M2's Closed
@@ -170,11 +171,11 @@ register, accepted gates, and historical dispositions remain unchanged.
 | Work item | State and owner | Completion requirement |
 | --- | --- | --- |
 | Record ADR acceptance | Complete; integrator | Exact-diff independent transition review clear; status and commit-message checks passed |
-| ADR 0019 provider isolation | Actual worker entry joined; nine child-process cases passed at `5948fc1`; authorized legacy-test migration still undergoing execution approval | Preserve the old corpus's surviving guarantees; correct isolated build output, then prove paired CLI build on floor/current and live credential/lifecycle behavior |
-| ADR 0020 explicit handoff | Final worker conformance in progress; expanded file passed 54 cases after a concurrent-installation repair | Join the worker's checkpoint, preserve all thirteen locked names, and complete CLI/Core compatibility checks including simulated terminal-lifetime teardown |
-| ADR 0021 accounting provenance | Joined from `c5c158909773538a3f3237a7a5651f88e62db72f`; 71 focused tests passed | Broader regression, real old-binary refusal, and independent clause-derived mutation evidence remain |
+| ADR 0019 provider isolation | Actual worker entry joined; thirteen child-process cases passed; isolated build-output fix joined at `49d5d5a`; legacy-test migration remains denied by execution approval | Preserve the old corpus's surviving guarantees through the authorized migration, then prove paired CLI build on floor/current and live credential/lifecycle behavior |
+| ADR 0020 explicit handoff | `fd9f269` joined; 112 CLI/handoff cases and 30 separate Core cases passed in its worker | Joined full suite and independent clause-derived mutation evidence; all thirteen locked prepared-recovery names preserved |
+| ADR 0021 accounting provenance | 74 accounting/protocol cases pass with the new lifecycle regressions; genuine old-reader control/refusal proved as described below | Joined full suite, decisive mutation qualification, and final source-bound evidence |
 | Rejoin and conformance | Source rejoined and force compilation warning-free; full conformance pending | Preserve locked names/behavior and byte-bound files; compile and tests serial across clones |
-| Clause-derived mutant hunt | Fresh accounting actor has completed clause analysis and is waiting for the serial execution token | Current claims and corpus, no author diff/history; qualify survivors and repair evidence gaps; independent provider and handoff hunts follow |
+| Clause-derived mutant hunt | Accounting hunt found two focused-corpus survivors and supplied decisive detectors; handoff hunt is running | Current claims and corpus, no author diff/history; qualify survivors and repair evidence gaps; independent provider hunt remains |
 | Final source and live evidence | Pending; integrator | Clean source `S`; full serial checks, literal M2 gate, actual provider/build identity and account verification |
 | Release-review handoff | Pending; independent reviewer | Evidence-only child `E` names final `S` and actual repair range; push checkpoints; no integration or publication inferred |
 
@@ -358,13 +359,46 @@ startup and directs only the private worker's dependency supervisors to its
 protected IO sink. Those nine tests passed at that checkpoint; no package,
 live-provider, whole-suite, or independent-mutation result is implied.
 
-The portable `scripts/provider-accounting-rollback.exs` probe is drafted for
-separate current-writer and genuine old-reader VMs with an on-disk local Store
-and a version-1 positive control. It has not yet been executed. An isolated
-checkout of old binary source `63511ca264ef99e8b93367a9cd671165525e4d4f` is
-prepared; its code still accepts only `model_attempt_settled_v1`. The final
-record must distinguish permitted fenced ownership administration from any
-forbidden semantic work after incompatible replay.
+The portable `scripts/provider-accounting-rollback.exs` probe now passes against
+separate current-writer and genuine old-reader VMs with an on-disk local Store.
+Old source `63511ca264ef99e8b93367a9cd671165525e4d4f` writes version 1 and resumes
+its own version-1 session successfully. Current production at `4913bd0` writes
+version 2; that same old binary refuses it both during direct replay and through
+the facade before readiness. Each reader adds exactly one fenced ownership row,
+no semantic record, no public event, and no model or executor call; existing
+records remain unchanged and the complete pre-read log is retained. Runs use
+Elixir 1.20.3 / OTP 29.0.5, separate credential-free VMs and fresh temporary roots.
+The script itself was being finalized during those checks, so these are focused
+compatibility results rather than final clean-source package evidence.
+
+The first probe failed because its event consumer did not handle `{:error,
+:empty}`. Its initial old-reader refusal was also discarded: the version-1
+positive control exposed a runtime-placement mismatch in the probe. A bounded,
+isolated process-exit trace identified that cause; both writer and reader now
+use the same declared placement. No production check was relaxed. Only the
+subsequent passing positive control and corresponding version-2 refusal count.
+
+The independent accounting hunt attacked the accepted clauses without reading
+the author diff. Clearing the prior termination during reply compaction and
+resetting the version latch at a later prompt each survived the original
+71-case accounting/protocol corpus, formatting and warnings-as-errors compile
+at `5254dff`. They were separately rejected by new probes while unchanged
+production passed them. These are focused-corpus survivors, not whole-suite
+survivor claims. Their three behavioral detectors are now in
+`provider_accounting_lifecycle_test.exs`; the joined accounting/protocol corpus
+passes 74 cases, seed `530542`, in 28.6 seconds. No production repair was needed
+for these two evidence gaps, and no gate lock was advanced.
+
+One new checkpoint had a 75-character title. An explicitly scoped execution
+approval allowed correcting that message and its dependent hashes while proving
+identical source trees, retaining a recovery ref, and leaving every accepted
+candidate untouched. `5948fc1` maps to `90d3419`, `749fbe9` to `952a14d`,
+`692f8f4` to `26beac0`, and `adf5245` to `f4a2d5b`. The repair branch alone was
+updated using an exact-origin force-with-lease; the commit-message check then
+passed. Worker verification named above remains evidence from where it ran,
+not a claim that those commands were rerun after message correction.
+
+### Original repair sequence (historical)
 
 1. Repair the orphaned guardian and test active-call, post-result, and
    descendant-cleanup owner loss.

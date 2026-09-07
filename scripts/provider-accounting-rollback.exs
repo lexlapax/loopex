@@ -81,7 +81,7 @@ defmodule Loopex.AccountingRollbackProbe do
 
     {:ok, runtime} =
       Loopex.start_link(
-        runtime_id: "rollback-#{mode}",
+        runtime_id: "rollback-probe",
         store: store,
         context_token_budget: 8_192,
         cleanup_grace_ms: 250,
@@ -136,24 +136,43 @@ defmodule Loopex.AccountingRollbackProbe do
 
     terminal =
       case Task.yield(observer, 30_000) do
-        {:ok, event} -> event
+        {:ok, event} ->
+          event
+
         nil ->
           Task.shutdown(observer, :brutal_kill)
           flunk("writer terminal observation unavailable after 30 seconds")
       end
+
     assert terminal["outcome"] == "completed"
     assert Agent.get(counter, & &1) == %{model: 1, executor: 0}
     records = records(store, session_id)
     [settlement] = Enum.filter(records, &String.starts_with?(kind(&1), "model_attempt_settled_"))
     assert kind(settlement) == expected_kind
     File.write!(Path.join(root, "session-id"), session_id <> "\n", [:exclusive])
-    IO.puts("ROLLBACK writer=#{expected_kind} ready=true model_calls=1 records=#{length(records)}")
+
+    IO.puts(
+      "ROLLBACK writer=#{expected_kind} ready=true model_calls=1 records=#{length(records)}"
+    )
   end
 
   defp read(runtime, store, counter, root, expected) do
     session_id = root |> Path.join("session-id") |> File.read!() |> String.trim()
     before_records = records(store, session_id)
     before_events = events(store, session_id)
+
+    case {expected,
+          Loopex.Runtime.SessionState.recover(session_id, before_records, before_events)} do
+      {:ready, {:ok, _state}} ->
+        :ok
+
+      {:refused, {:error, _reason}} ->
+        :ok
+
+      {expectation, actual} ->
+        flunk("replay control #{expectation} disagrees: #{inspect(actual)}")
+    end
+
     result = Loopex.resume_session(runtime, session_id, command_id: "reader-resume")
 
     case expected do
@@ -182,21 +201,42 @@ defmodule Loopex.AccountingRollbackProbe do
 
   defp await_terminal(attachment) do
     case Loopex.next_event(attachment) do
-      {:ok, %{kind: "run.finished"} = event} -> event
-      {:ok, _event} -> await_terminal(attachment)
-      other -> flunk("unexpected writer event result: #{inspect(other)}")
+      {:ok, %{kind: "run.finished"} = event} ->
+        event
+
+      {:ok, _event} ->
+        await_terminal(attachment)
+
+      {:error, :empty} ->
+        Process.sleep(10)
+        await_terminal(attachment)
+
+      other ->
+        flunk("unexpected writer event result: #{inspect(other)}")
     end
   end
 
-  defp records(store, session_id), do: pages(store, session_id, :load_records, :journal_version, 0)
+  defp records(store, session_id),
+    do: pages(store, session_id, :load_records, :journal_version, 0)
+
   defp events(store, session_id), do: pages(store, session_id, :load_events, :event_sequence, 0)
 
   defp pages(store, session_id, operation, position_key, position) do
     assert {:ok, page} = apply(Store, operation, [store, session_id, position, 128])
 
     case page do
-      [] -> []
-      _ -> page ++ pages(store, session_id, operation, position_key, Map.fetch!(List.last(page), position_key))
+      [] ->
+        []
+
+      _ ->
+        page ++
+          pages(
+            store,
+            session_id,
+            operation,
+            position_key,
+            Map.fetch!(List.last(page), position_key)
+          )
     end
   end
 
