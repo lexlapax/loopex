@@ -31,14 +31,12 @@ On 2026-09-06 the maintainer approved the initial host-owned protection,
 explicit handoff, and provenance directions for preparing decision proposals.
 The later provider-process selection is recorded below. Neither confirmation
 accepts an ADR, extends override 21, or authorizes integration or publication.
-The contracts below remain subject to exact-candidate review and explicit acceptance.
+That proposal-stage authority is historical. The exact contracts were subsequently
+accepted on 2026-09-07 as recorded below.
 
-These are approved proposal directions, not accepted architecture decisions.
-Their exact contracts, compatibility, recovery, and rollback need proposals before
-dependent implementation. In particular, explicit host ownership alone does
-not resolve the logger failure mode: the proposal must establish how the host
-continues safe diagnostics and recovers protection when the registry or ReqLLM
-supervision restarts.
+The accepted decisions now fix the contracts, compatibility, recovery, and
+rollback. Their implementation and behavioral evidence remain work to perform;
+acceptance is not a claim that provider isolation or either other repair runs.
 
 The maintainer owns these decisions. The recommended directions preserve the
 existing provider dependency and ordinary transfer call while replacing hidden
@@ -54,8 +52,10 @@ must use its governed transaction; this evidence note changes neither.
 The concrete proposals are [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept),
 [ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept), and
 [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept).
-All remain Proposed with empty governance rows. ADR 0021 makes one operator
-cost explicit for acceptance review: an old unreadable-plus-reported settlement
+All three were accepted at proposal `b7f97092f7b6d6661e66bc775fd88195b92b67a0`
+by the [standalone disposition](../developer/agent-context-map.md#disposition-adrs-0019-0021-2026-09-07),
+recorded in transition `63511ca264ef99e8b93367a9cd671165525e4d4f`.
+ADR 0021 makes one operator cost explicit: an old unreadable-plus-reported settlement
 has no recoverable usage provenance, so the new reader refuses that session
 rather than rewriting accounting. These proposals supply no executed conformance
 claim. No product, accepted ADR, plan, gate, or lifecycle bytes move with them.
@@ -110,8 +110,9 @@ not silently completed repairs.
 The companion's startup and cleanup, faithful bounded reply transport, actual
 credential containment, and packaged floor/current behavior are first-implementation
 evidence obligations, not properties this documentation pass has executed.
-Internal source review informs the proposal; independent exact-SHA acceptance
-review and maintainer disposition remain outstanding for all three ADRs.
+Internal source review informed the proposals. The maintainer has now accepted
+all three; an independent exact-diff review found the acceptance transition clean.
+It examined no product implementation and cleared none for integration.
 
 ## Technical depth
 
@@ -160,9 +161,30 @@ onto changed bytes.
 ### Completion order
 
 Current checkpoint: the guardian repair is committed at
-`6fab2f8c117b9618c204ef87324a9c64e21c9fe5`. ADRs 0019, 0020, and 0021 are Proposed;
-their proposal directions are recorded above, not accepted. Dependent
-architecture implementation and final source-bound evidence have not begun.
+`6fab2f8c117b9618c204ef87324a9c64e21c9fe5`; acceptance of ADRs 0019–0021 is
+recorded at `63511ca264ef99e8b93367a9cd671165525e4d4f`. The maintainer separately
+authorized implementing these decisions and preparing release-review evidence.
+The integration branch is `codex/m2-release-repair`. `main`, M2's Closed
+register, accepted gates, and historical dispositions remain unchanged.
+
+| Work item | State and owner | Completion requirement |
+| --- | --- | --- |
+| Record ADR acceptance | Complete; integrator | Exact-diff independent transition review clear; status and commit-message checks passed |
+| ADR 0019 provider isolation | In progress; integrator, codec worker on `codex/provider-private-codec` | Packaged child, explicit launch wiring, private channels, credential and lifecycle behavior; no parent diagnostic takeover |
+| ADR 0020 explicit handoff | Execution approval blocked; `codex/adr0020-implementation` remains clean at acceptance | Explicit participant protocol, initial holder monitoring, atomic duplicate refusal, no replacement/drain subsystem |
+| ADR 0021 accounting provenance | In progress; `codex/adr0021-implementation` | Version-2 production and replay, exact compaction provenance, documented legacy refusal and rollback |
+| Rejoin and conformance | Pending; integrator | Preserve locked names/behavior and byte-bound files; compile and tests serial across clones |
+| Clause-derived mutant hunt | Pending; fresh independent actors | Current claims and corpus, no author diff/history; qualify survivors and repair evidence gaps |
+| Final source and live evidence | Pending; integrator | Clean source `S`; full serial checks, literal M2 gate, actual provider/build identity and account verification |
+| Release-review handoff | Pending; independent reviewer | Evidence-only child `E` names final `S` and actual repair range; push checkpoints; no integration or publication inferred |
+
+Each writer uses its own disposable clone and branch. The integrator owns rejoin
+and the candidate SHA. A single test-lane token covers all Mix/dependency/test
+execution. No in-flight process is terminated merely to checkpoint work. Clone
+paths are temporary execution state, not durable evidence or authoritative source.
+The approval service twice rejected the ADR 0020 public overload/lifetime edit;
+that worker restored its own partial edits and stopped rather than bypassing the
+denial. This is an execution blocker, not withdrawal of recorded ADR acceptance.
 
 1. Repair the orphaned guardian and test active-call, post-result, and
    descendant-cleanup owner loss.
@@ -231,8 +253,9 @@ belongs to a deliberately broken implementation under the prior corpus; it
 is not a green result for the final repaired candidate.
 
 The execution profile permitted writes and local process/socket inspection.
-No real credential was needed. Architecture decisions and final source-bound
-gate, live-provider, and provider-account evidence remain outstanding.
+No real credential was needed. Final source-bound gate, live-provider, and
+provider-account evidence remain outstanding; the three architecture decisions
+are now accepted as noted above.
 
 Before committing the repair, serial repository checks also passed:
 `mix format --check-formatted`,
