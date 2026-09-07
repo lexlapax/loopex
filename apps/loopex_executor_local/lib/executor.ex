@@ -574,6 +574,9 @@ defmodule Loopex.Executor.Local do
     ArgumentError -> []
   end
 
+  # Concept: an unsupported holder is not live local effect authority.
+  # Technical depth: Process.alive?/1 raises for a non-local PID. Refusing that
+  # holder must not terminate the Local owner of other already admitted jobs.
   defp reservation_held?(state, job_id, reservation_ref) do
     held? =
       state.reserved
@@ -582,8 +585,11 @@ defmodule Loopex.Executor.Local do
 
     held? and
       Enum.any?(state.reservation_monitors, fn
-        {_monitor, {^job_id, ^reservation_ref, holder}} -> Process.alive?(holder)
-        _other -> false
+        {_monitor, {^job_id, ^reservation_ref, holder}} ->
+          is_pid(holder) and node(holder) == node() and Process.alive?(holder)
+
+        _other ->
+          false
       end)
   end
 
