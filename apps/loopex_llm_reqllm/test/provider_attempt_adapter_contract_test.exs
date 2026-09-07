@@ -699,7 +699,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
             ProviderLifetime.scoped(
               fn resource, stop_reference ->
                 send(observer, {:managed_adapter_resource, resource, stop_reference})
-                :ok
+                {:managed, observer}
               end,
               fn -> Adapter.complete(request, [], Model.discard_progress()) end
             )
@@ -775,6 +775,180 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
         :provider_attempt_canary_mode,
         previous_mode
       )
+    end
+  end
+
+  test "retaining owner loss after a managed result releases the credential lease" do
+    assert_retaining_owner_loss(:after_result)
+  end
+
+  test "retaining owner loss during a managed call stops transport and releases the credential lease" do
+    assert_retaining_owner_loss(:during_call)
+  end
+
+  test "retaining owner loss during descendant cleanup releases the credential lease" do
+    assert_retaining_owner_loss(:during_cleanup)
+  end
+
+  defp assert_retaining_owner_loss(phase) do
+    variable = Adapter.credential_variable()
+    previous_credential = System.get_env(variable)
+
+    configuration = [
+      {:req_llm, :finch_request_adapter, Loopex.LLM.ReqLLM.ProviderAttemptCanaryAdapter},
+      {:loopex_llm_reqllm, :provider_attempt_canary_observer, self()},
+      {:loopex_llm_reqllm, :provider_attempt_closed_port, reserve_closed_port()},
+      {:loopex_llm_reqllm, :provider_attempt_canary_mode,
+       if(phase == :after_result, do: :closed_port, else: :hold_before_return)}
+    ]
+
+    previous =
+      Enum.map(configuration, fn {app, key, value} ->
+        old = Application.get_env(app, key)
+        Application.put_env(app, key, value)
+        {app, key, old}
+      end)
+
+    {retainer, retainer_monitor} =
+      spawn_monitor(fn ->
+        receive do
+          :finish_retainer -> :ok
+        end
+      end)
+
+    observer = self()
+
+    try do
+      System.put_env(variable, "credential-shaped-canary-secret")
+
+      {:ok, request} =
+        Model.request(
+          Adapter.default_model(),
+          [%{"role" => "user", "content" => "retaining owner loss"}],
+          sampling: %{"max_tokens" => 1},
+          deadline: System.system_time(:millisecond) + 10_000
+        )
+
+      {caller, caller_monitor} =
+        spawn_monitor(fn ->
+          result =
+            ProviderLifetime.scoped(
+              fn resource, stop_reference ->
+                send(observer, {:orphan_check_resource, self(), resource, stop_reference})
+                {:managed, retainer}
+              end,
+              fn -> Adapter.complete(request, [], Model.discard_progress()) end
+            )
+
+          send(observer, {:orphan_check_result, self(), result})
+        end)
+
+      assert_receive {:orphan_check_resource, ^caller, resource, _stop_reference}, 5_000
+      resource_monitor = Process.monitor(resource)
+
+      try do
+        assert_receive {:provider_transport_canary, transport, "POST", _provider_host}, 5_000
+        transport_monitor = Process.monitor(transport)
+
+        if phase == :after_result do
+          assert_receive {:orphan_check_result, ^caller,
+                          {:error, {:dispatched_or_unknown, "model_call_failed"}}},
+                         5_000
+
+          assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 5_000
+        end
+
+        assert Process.alive?(resource)
+        assert {:monitors, monitors} = Process.info(resource, :monitors)
+        assert {:process, retainer} in monitors
+
+        refute :ignore ==
+                 CredentialFilter.filter(
+                   %{msg: {:string, "credential-shaped-canary-secret"}},
+                   :loopex_req_llm_v3
+                 )
+
+        outcome =
+          if phase == :during_cleanup do
+            # Establish the result-before-death ordering in the real guardian's
+            # mailbox. Cleanup must not consume the only evidence of retainer
+            # death and then enter its post-result wait forever.
+            assert :erlang.suspend_process(resource)
+
+            send(
+              transport,
+              {:provider_attempt_canary_return, {:not_a_finch_request, "api.anthropic.com"}}
+            )
+
+            await_queued_message(resource, fn message ->
+              match?({Adapter, :worker_outcome, _reference, _worker, _result}, message)
+            end)
+          end
+
+        Process.exit(retainer, :kill)
+        assert_receive {:DOWN, ^retainer_monitor, :process, ^retainer, :killed}, 5_000
+
+        if phase == :during_cleanup do
+          down =
+            await_queued_message(resource, fn message ->
+              match?({:DOWN, _monitor, :process, ^retainer, :killed}, message)
+            end)
+
+          assert {:messages, messages} = Process.info(resource, :messages)
+
+          assert Enum.find_index(messages, &(&1 == outcome)) <
+                   Enum.find_index(messages, &(&1 == down))
+
+          assert :erlang.resume_process(resource)
+        end
+
+        assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :normal}, 5_000
+        assert_receive {:DOWN, ^transport_monitor, :process, ^transport, _reason}, 5_000
+
+        assert :ignore ==
+                 CredentialFilter.filter(
+                   %{msg: {:string, "host logging after provider owner loss"}},
+                   :loopex_req_llm_v3
+                 )
+
+        if phase != :after_result do
+          assert_receive {:orphan_check_result, ^caller,
+                          {:error, {:dispatched_or_unknown, "model_call_failed"}}},
+                         5_000
+
+          assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 5_000
+        end
+      after
+        if Process.alive?(caller), do: Process.exit(caller, :kill)
+        if Process.alive?(resource), do: Process.exit(resource, :kill)
+      end
+    after
+      if Process.alive?(retainer), do: Process.exit(retainer, :kill)
+      restore_env(variable, previous_credential)
+
+      Enum.each(previous, fn {app, key, value} ->
+        restore_application_env(app, key, value)
+      end)
+    end
+  end
+
+  defp await_queued_message(process, matches) do
+    await_queued_message(process, matches, System.monotonic_time(:millisecond) + 5_000)
+  end
+
+  defp await_queued_message(process, matches, deadline) do
+    assert {:messages, messages} = Process.info(process, :messages)
+
+    case Enum.find(messages, matches) do
+      nil ->
+        assert System.monotonic_time(:millisecond) < deadline,
+               "the suspended guardian did not receive the required ordering message"
+
+        Process.sleep(1)
+        await_queued_message(process, matches, deadline)
+
+      message ->
+        message
     end
   end
 

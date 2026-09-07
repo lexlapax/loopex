@@ -510,7 +510,8 @@ defmodule Loopex.LLM.ReqLLM do
   # after a global marker. The guardian stops, monitors, and drains every owned
   # process before it reports the adapter outcome. When a runtime retained the
   # guardian, the now-empty guardian remains alive until that runtime requests
-  # and observes its correlated stop acknowledgement.
+  # and observes its correlated stop acknowledgement, or its retaining owner
+  # dies. The normally returning callback is not that retaining owner.
   #
   # The worker carries no timeout of its own. The transport bound derived from
   # the run's committed deadline is the only bound in this path; a second one
@@ -527,8 +528,8 @@ defmodule Loopex.LLM.ReqLLM do
       end)
 
     case ProviderLifetime.register(guardian, stop_reference) do
-      :ok ->
-        send(guardian, {__MODULE__, :start, reference, self(), :managed})
+      {:managed, retainer} when is_pid(retainer) ->
+        send(guardian, {__MODULE__, :start, reference, self(), {:managed, retainer}})
         await_isolated_guardian(guardian, monitor, reference, :managed)
 
       :unmanaged ->
@@ -564,7 +565,15 @@ defmodule Loopex.LLM.ReqLLM do
 
     receive do
       {__MODULE__, :start, ^reference, ^owner, lifetime}
-      when lifetime in [:managed, :unmanaged] ->
+      when lifetime == :unmanaged or
+             (is_tuple(lifetime) and tuple_size(lifetime) == 2 and
+                elem(lifetime, 0) == :managed and is_pid(elem(lifetime, 1))) ->
+        retainer_monitor =
+          case lifetime do
+            {:managed, retainer} -> Process.monitor(retainer)
+            :unmanaged -> nil
+          end
+
         case CredentialFilter.acquire(credential) do
           {:ok, credential_lease} ->
             stop =
@@ -574,10 +583,15 @@ defmodule Loopex.LLM.ReqLLM do
                        owner_monitor,
                        reference,
                        stop_reference,
-                       call
+                       call,
+                       retainer_monitor
                      ) do
-                  :await_stop when lifetime == :managed ->
-                    await_managed_resource_stop(stop_reference)
+                  :await_stop when is_reference(retainer_monitor) ->
+                    await_managed_resource_stop(
+                      stop_reference,
+                      elem(lifetime, 1),
+                      retainer_monitor
+                    )
 
                   {:stopped, _requester, _stop} = stopped ->
                     stopped
@@ -594,9 +608,9 @@ defmodule Loopex.LLM.ReqLLM do
           {:error, _unavailable} ->
             send(owner, {__MODULE__, self(), reference, :provider_call_crashed})
 
-            if lifetime == :managed do
+            if is_reference(retainer_monitor) do
               stop_reference
-              |> await_managed_resource_stop()
+              |> await_managed_resource_stop(elem(lifetime, 1), retainer_monitor)
               |> acknowledge_deferred_resource_stop()
             end
         end
@@ -613,7 +627,14 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
-  defp run_isolated_guardian(owner, owner_monitor, reference, stop_reference, call) do
+  defp run_isolated_guardian(
+         owner,
+         owner_monitor,
+         reference,
+         stop_reference,
+         call,
+         retainer_monitor
+       ) do
     guardian = self()
 
     {worker, worker_monitor} =
@@ -644,7 +665,8 @@ defmodule Loopex.LLM.ReqLLM do
           reference,
           stop_reference,
           worker,
-          resources
+          resources,
+          retainer_monitor
         )
 
       {:error, :trace_unavailable} ->
@@ -684,7 +706,8 @@ defmodule Loopex.LLM.ReqLLM do
          reference,
          stop_reference,
          worker,
-         resources
+         resources,
+         retainer_monitor
        ) do
     receive do
       {:trace, _parent, :spawn, descendant, _mfa} = event when is_pid(descendant) ->
@@ -694,7 +717,8 @@ defmodule Loopex.LLM.ReqLLM do
           reference,
           stop_reference,
           worker,
-          retain_trace_event(resources, event)
+          retain_trace_event(resources, event),
+          retainer_monitor
         )
 
       {:trace, descendant, :spawned, _parent, _mfa} = event when is_pid(descendant) ->
@@ -704,7 +728,8 @@ defmodule Loopex.LLM.ReqLLM do
           reference,
           stop_reference,
           worker,
-          retain_trace_event(resources, event)
+          retain_trace_event(resources, event),
+          retainer_monitor
         )
 
       {:trace, _source, event, _linked} = trace
@@ -715,7 +740,8 @@ defmodule Loopex.LLM.ReqLLM do
           reference,
           stop_reference,
           worker,
-          retain_trace_event(resources, trace)
+          retain_trace_event(resources, trace),
+          retainer_monitor
         )
 
       {:trace, _resource, :exit, _reason} ->
@@ -725,7 +751,8 @@ defmodule Loopex.LLM.ReqLLM do
           reference,
           stop_reference,
           worker,
-          resources
+          resources,
+          retainer_monitor
         )
 
       {__MODULE__, :worker_outcome, ^reference, ^worker, outcome} ->
@@ -737,6 +764,10 @@ defmodule Loopex.LLM.ReqLLM do
       {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
         close_isolated_resources(resources)
         :await_stop
+
+      {:DOWN, ^retainer_monitor, :process, _retainer, _reason} ->
+        close_isolated_resources(resources)
+        :finished
 
       {:DOWN, monitor, :process, resource, _reason} ->
         case mark_resource_down(resources, resource, monitor) do
@@ -753,7 +784,8 @@ defmodule Loopex.LLM.ReqLLM do
               reference,
               stop_reference,
               worker,
-              resources
+              resources,
+              retainer_monitor
             )
 
           :unknown ->
@@ -763,7 +795,8 @@ defmodule Loopex.LLM.ReqLLM do
               reference,
               stop_reference,
               worker,
-              resources
+              resources,
+              retainer_monitor
             )
         end
 
@@ -779,7 +812,8 @@ defmodule Loopex.LLM.ReqLLM do
           reference,
           stop_reference,
           worker,
-          resources
+          resources,
+          retainer_monitor
         )
 
       {:io_request, from, reply_as, _request} when is_pid(from) ->
@@ -791,27 +825,40 @@ defmodule Loopex.LLM.ReqLLM do
           reference,
           stop_reference,
           worker,
-          resources
+          resources,
+          retainer_monitor
         )
     end
   end
 
   # Concept: a managed provider resource remains present until the runtime that
-  # retained it explicitly releases it.
+  # retained it explicitly releases it or that retaining owner dies.
   #
   # Technical depth: the adapter's private descendants are already down. Its
   # result has either crossed to the callback or its callback owner has died;
   # exiting in the former case would race that callback's return and turn a
   # successful call into an unacknowledged resource death. The retaining runtime
   # owns the bounded wait and the force-stop path, so this process waits for its
-  # correlated stop. Its caller releases the credential lease before sending the
+  # correlated stop while monitoring that owner, not the callback that normally
+  # exits after returning its result. Owner loss releases the credential lease
+  # and ends this resource without inventing an acknowledgement. Its caller
+  # releases the credential lease before sending the
   # acknowledgement, so that acknowledgement proves both cleanup facts before
   # the guardian exits.
-  defp await_managed_resource_stop(stop_reference) do
+  defp await_managed_resource_stop(stop_reference, retainer, previous_monitor) do
+    # Descendant cleanup drains process DOWN messages, including unrelated ones.
+    # A fresh monitor after that drain re-observes a retainer that died during
+    # cleanup; relying on its earlier, possibly consumed DOWN could strand us.
+    Process.demonitor(previous_monitor, [:flush])
+    retainer_monitor = Process.monitor(retainer)
+
     receive do
       {:loopex_provider_resource_stop, ^stop_reference, stop, requester}
       when is_reference(stop) and is_pid(requester) ->
         {:stopped, requester, stop}
+
+      {:DOWN, ^retainer_monitor, :process, _retainer, _reason} ->
+        :finished
     end
   end
 

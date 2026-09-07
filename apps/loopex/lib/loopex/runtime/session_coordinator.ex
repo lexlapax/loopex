@@ -2846,7 +2846,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp await_provider_guard_registration(guard, guard_monitor, reference, registration) do
     receive do
       {:loopex_provider_resource_registered, ^reference, ^registration, ^guard} ->
-        :ok
+        {:managed, guard}
 
       {:loopex_provider_resource_refused, ^reference, ^registration, ^guard} ->
         {:error, :provider_resource_refused}

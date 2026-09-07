@@ -107,8 +107,9 @@ defmodule Loopex.ProviderAttemptRegisteredLifetimeModel do
       end
     end
 
-    :ok = ProviderLifetime.register(resource, stop_reference)
+    {:managed, retaining_guard} = ProviderLifetime.register(resource, stop_reference)
     send(observer, {:provider_resource_registered, callback, resource, request})
+    send(observer, {:provider_resource_retainer, callback, resource, retaining_guard})
 
     if return_result? do
       if hold_result? do
@@ -1031,6 +1032,40 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :normal}, 5_000
     assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :normal}, 5_000
     assert await_event(attempt.attachment, "run.finished")["outcome"] == "failed"
+  end
+
+  test "provider resource registration names the guard that outlives the callback and requests cleanup" do
+    fixture =
+      start(
+        script: [],
+        model_module: Loopex.ProviderAttemptRegisteredLifetimeModel,
+        model_options: [return_result: true, hold_result: true]
+      )
+
+    {_session_id, attachment, {:accepted, "prompt-1"}} =
+      Fixture.run(fixture, "identify the retaining provider guard")
+
+    assert_receive {:provider_resource_registered, callback, resource, _request}, 5_000
+    assert_receive {:provider_resource_retainer, ^callback, ^resource, retainer}, 5_000
+    assert_receive {:provider_result_ready, ^callback, ^resource}, 5_000
+    callback_monitor = Process.monitor(callback)
+    retainer_monitor = Process.monitor(retainer)
+    resource_monitor = Process.monitor(resource)
+
+    send(callback, {:release_provider_result, callback})
+    assert_receive {:DOWN, ^callback_monitor, :process, ^callback, :normal}, 5_000
+    assert_receive {:provider_resource_stop_requested, ^resource, requester, stop}, 5_000
+
+    # The identity returned at registration must match the independently
+    # observed cleanup sender, not the callback that has already returned.
+    assert retainer == requester
+    refute retainer == callback
+    assert Process.alive?(retainer)
+
+    send(resource, {:release_provider_resource, stop})
+    assert_receive {:DOWN, ^resource_monitor, :process, ^resource, :normal}, 5_000
+    assert_receive {:DOWN, ^retainer_monitor, :process, ^retainer, :normal}, 5_000
+    assert await_event(attachment, "run.finished")["outcome"] == "completed"
   end
 
   test "a provider guard crash cannot orphan a resource retained by the permitted worker" do
