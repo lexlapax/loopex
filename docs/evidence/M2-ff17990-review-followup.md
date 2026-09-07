@@ -176,10 +176,10 @@ register, accepted gates, and historical dispositions remain unchanged.
 | Work item | State and owner | Completion requirement |
 | --- | --- | --- |
 | Record ADR acceptance | Complete; integrator | Exact-diff independent transition review clear; status and commit-message checks passed |
-| ADR 0019 provider isolation | Joined provider application passes 132 cases with one real-provider exclusion, including the approved legacy migrations; current/floor paired package startup and whole-parent-VM loss proved at `faa340f`; cold-build helpers joined through `893cebf` | Finish actual-child backpressure observations, then joined whole-suite and live final-source evidence |
+| ADR 0019 provider isolation | Backpressure and both narrower retainer-loss schedules joined; `d3a39ac` repairs the second whole suite's blocked-progress fixture ordering failure, recorded below; earlier package results remain bound to `faa340f` | Finish two-runtime and process-inspection witnesses, then joined whole-suite and final-source platform/live evidence |
 | ADR 0020 explicit handoff | `fd9f269` joined; 112 CLI/handoff cases and 30 separate Core cases passed in its worker; joined 56-case prepared corpus passes with both independent detectors | Joined full suite; all thirteen locked prepared-recovery names preserved |
 | ADR 0021 accounting provenance | 74 accounting/protocol cases pass with the new lifecycle regressions; genuine old-reader control/refusal and two actual child-provider-to-Core accounting/rendering cases pass as described below | Joined full suite, decisive mutation qualification, and final source-bound evidence |
-| Rejoin and conformance | Source rejoined and force compilation warning-free; full conformance pending | Preserve locked names/behavior and byte-bound files; compile and tests serial across clones |
+| Rejoin and conformance | Source through `a99db63` pushed; force compilation warning-free; second whole suite 1,027 passed, one failed, five live exclusions | Preserve locked names/behavior and byte-bound files; resolve the failure before qualifying the final clean source; compile and tests serial across clones |
 | Clause-derived mutant hunt | Accounting, handoff and provider hunts each found two focused-corpus survivors; their six behavioral detectors now pass | Qualify survivors against a green whole suite and audit the remaining cross-boundary obligations; these focused hunts are not exhaustive clearance |
 | Final source and live evidence | Pending; integrator | Clean source `S`; full serial checks, literal M2 gate, actual provider/build identity and account verification |
 | Release-review handoff | Pending; independent reviewer | Evidence-only child `E` names final `S` and actual repair range; push checkpoints; no integration or publication inferred |
@@ -800,9 +800,9 @@ visible without projecting this branch's results onto its historical source.
 | 3 — guardian survives its retaining owner | Managed cleanup now follows the actual retaining lifetime guard through the post-result wait. Tests distinguish callback return from retainer death and require the genuine guardian/child/namespace to end. The unmanaged cleanup-expiry case also reaches the real entry. Final joined verification remains required. |
 | 4 — hidden public handoff and unused replacement | ADR 0020 introduces explicit `transfer_resume/3`; ordinary `/2` no longer selects behavior from CLI process state. Duplicate initial installation refuses atomically, with no handler-replacement/drain system or global drain lock. The remaining private provider lifetime registrar is invocation-local resource bookkeeping under ADR 0019, not a selector for public transfer. A newly exposed idempotent-abandonment caller check is repaired and described below. |
 | 5 — accounting contradiction and permissive recovery | ADR 0021's versioned retained provenance distinguishes raw refusal from validated settlement compaction. The additive ADR disposition corrects the historical conservative-rule misstatement without rewriting override 21. Production replay validates provenance against accounting; actual Store old-reader control/refusal and protected-provider-to-Core/renderer cases are described above. Final-source rollback evidence is not yet supplied. |
-| 6 — tests overclaim observations | Replacement-only lexical and short-silence verdict tests were removed with that retired behavior. Actual HTTP request counting and retry-path observations now supplement the option assertion. Receipt preparation's lexical-order assertion is being replaced with real execute-process call/return observation. Unconfirmed untrappable-worker-stop branches retain explicitly labelled structural and pure-result checks; these do not claim a real BEAM process survived `:kill`. Adjacent real lease/bound/owner-loss cases remain separate behavioral evidence. The historical wide deadline case did not kill the reviewer's final-clock mutation; the exact-equality case did. No broader mutation claim is carried forward. |
-| 7a — independent caller timeouts over admission | Scoped repair removes the unrelated reserve/permit observation ceilings, retaining job/admission/cancellation authority deadlines. Real queued/held-handler tests distinguish waiting for the decision from a caller timing out while it continues. Their joined results remain to be recorded. This is not a bound on a permanently stalled filesystem. |
-| 7b — unsupported holder liveness can crash Local | The shared liveness predicate now checks the holder's local PID domain before calling `Process.alive?/1`. Ordinary simultaneous local-holder execution remains covered without claiming distributed execution. The owning clone's safe regression batch passes 30 cases; final join remains required. |
+| 6 — tests overclaim observations | Replacement-only lexical and short-silence verdict tests were removed with that retired behavior. Actual HTTP request counting and retry-path observations now supplement the option assertion. Receipt preparation's lexical-order assertion was replaced at `da75851` with real execute-process call/return observation. Unconfirmed untrappable-worker-stop branches retain explicitly labelled structural and pure-result checks; these do not claim a real BEAM process survived `:kill`. Adjacent real lease/bound/owner-loss cases remain separate behavioral evidence. The historical wide deadline case did not kill the reviewer's final-clock mutation; the exact-equality case did. No broader mutation claim is carried forward. |
+| 7a — independent caller timeouts over admission | `950fb08` removes the unrelated reserve/permit observation ceilings, retaining job/admission/cancellation authority deadlines. Real queued/held-handler tests distinguish waiting for the decision from a caller timing out while it continues. Both pass in the 161-case executor lane at `a99db63`. This is not a bound on a permanently stalled filesystem. |
+| 7b — unsupported holder liveness can crash Local | `8336403` checks the holder's local PID domain before calling `Process.alive?/1`. Ordinary simultaneous local-holder execution remains covered without claiming distributed execution. The owning clone's safe regression batch passes 30 cases, and the joined 161-case executor lane passes at `a99db63`. |
 | 7c — host materializes secret-bearing provider options | Normal execution constructs options in the protected child after private credential delivery. Exported `call_options/3` remains callable and returns secret-bearing data to its explicit caller; the compatibility inventory now states that responsibility rather than implying the helper itself protects the caller. |
 | 7d — prepared installer death diverges from documented state | The initial preparation holder is monitored. The joined full suite exposed a further same-state acknowledgement to a different caller; an ordered real-runtime regression now proves holder loss is processed before that call, and the caller-specific idempotence repair preserves the rightful holder's repeated acknowledgement. |
 | 7e — already-spent permit still pages Store | The pure exact-spent-binding check now precedes the bounded Store read. The existing protected case positively witnesses the real Store read protocol and then requires no read for the duplicate, after a trace-delivery barrier. Original ordering fails that assertion; repaired ordering passes. |
@@ -901,3 +901,55 @@ counted as passing evidence here. Provider-specific failed-process-inspection
 and final-source required-platform qualification also remain explicit evidence
 work. The local Docker runtime is installed but was not running at inspection;
 that read-only check is unavailable Linux execution evidence, not a Linux pass.
+
+### Second joined whole-suite result and remaining lifetime witnesses
+
+At clean, pushed `a99db63e46dccd509458126436d0333166c889c7`, force compilation
+of all eight applications with warnings-as-errors passed. The serial whole
+suite, seed `3107`, with `LOOPEX_PROVIDER_API_KEY`, `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY` and `TIDEWAVE_REPL` unset, exited 2: **1,027 passed, one failed,
+five real-provider cases excluded**. By application: protocol 12; Core 526;
+provider 135 passed, one failed and one excluded; Store 41; executor 161;
+composition 13; reference 18 and two excluded; CLI 121 and two excluded.
+The two failures at `50191d5` are absent. This run is not a green source.
+
+The remaining failure is `a blocked progress consumer cannot queue data or
+delay cleanup` in `provider_bridge_test.exs`. After cleanup the expected
+successful 10,000-delta reply instead returned the conservative
+`dispatched_or_unknown` classification. The child's terminal marker records its
+socket send/close, not admission of the terminal by the host guardian. Issuing
+Core stop at that marker can stop the receiver while frames are still in
+transit. A focused original-seed diagnostic passed; that disappearing failure
+does not clear the original run. The repair must establish host-side terminal
+admission before the case demands successful-result preservation, without
+changing its request, cleanup or observation bounds. Its actual changed-case
+focused result passed in 0.5 seconds, seed `3107`, and the repair joined at
+`d3a39ac`. The exact 10,000-delta successful reply and at-most-two queued
+messages remain required. This focused result does not replace the next
+joined-suite check.
+
+The actual-cleanup retainer-loss witness joined at `a99db63`. It establishes
+automatic OS cleanup by observing namespace removal while the actual child is
+still stopped and alive, then loses the retainer. After the child resumes it
+requires the genuine correlated cleanup acknowledgement and normal guardian
+exit. There is no competing Core stop request that could independently end
+the wait. The case passed individually in 10.3 seconds and in this whole-suite
+provider lane. It does not supply the separate credential-transfer schedule.
+
+The credential-transfer witness joined at `05abb07`; its first focused baseline
+passed in 1.1 seconds, seed `3107`, with formatting and warnings-as-errors
+compilation. A test-local observer pauses the real worker entry before its
+credential receive, after the genuine ready frame. The case establishes actual
+socket pending bytes and a real raw writer blocked in `ProviderCodec.send`,
+then loses the retainer. The blocked sender is classified from its actual
+stack as the credential or invocation writer; driver buffering is not
+mislabelled as a blocked credential send. The result is ambiguous, both raw
+helpers die, the guard supplies actual cleanup proof, and no HTTP call occurs.
+No private protocol frame or cleanup acknowledgement is fabricated.
+
+A real two-runtime/adapter-lifecycle isolation witness is being checked in its
+own clone; it is not yet counted as joined evidence. The required Linux host
+`serenity` was unreachable with a
+bounded, non-interactive SSH check (connection timeout). No Linux check passed,
+and no remote state changed. Final-source packaged current/floor/platform,
+live-provider/account, rollback and independent review remain required.
