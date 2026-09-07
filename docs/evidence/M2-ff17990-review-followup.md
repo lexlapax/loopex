@@ -1008,3 +1008,53 @@ The authenticated provider account now renders request-log rows, removing the
 previous UI-access obstacle. No final-source account verification or new live
 attestation is claimed yet. Package/platform, rollback, live/gate and final
 evidence-child verification remain the next execution work.
+
+### Native shell qualification and the resulting portability repair
+
+Native ARM64 Linux qualification exposed two genuine cleanup defects shared by
+the provider and executor guards. Ubuntu dash rejects `kill -TERM -- -PGID`,
+and its command-substitution job table is empty even while a child remains
+alive. Thus the former could fail to signal the owned group, while the latter
+could mistake a trapped, interrupted wait for child completion. Darwin passing
+those paths did not establish Linux conformance. The initial cooperative
+control exceeded its existing bound; after the signal-only repair, a second
+control exited 137 without acknowledgement. Neither is passing evidence.
+
+The repair joined at `4b3d9b6` uses the live shell's builtin
+`kill -s SIGNAL -- -PGID` and a same-shell trapped-interruption flag. A final
+status at or below 128 wins even beside a trap; an untrapped signal exit remains
+final. No numeric-PID liveness sample, external signalling helper, new option,
+authority, timer, protocol or gate change was introduced. The existing
+structural assertions now name that syntax and wait algorithm; their test name,
+behavioral assertions, count and bounds are unchanged. This structural check
+remains distinct from actual process evidence.
+
+The clean worker checkpoint
+`3eda863f2fcd865f7a7d6e1bd65f80c895120a72` passed formatting, forced
+warnings-as-errors compilation, four provider launcher and eight executor
+cases on Darwin, and the same four provider launcher cases on native Linux,
+all with seed `3107`. The exact launcher SHA256 is
+`c90fd6c468dad6549f3540c7f1ca56039fd9a5037aba1227e28303cb4912655b`;
+executor SHA256 is
+`e9477cbbd23fdb658d6092542c579075d2b9240722a76c9770443f0ad4b73bf5`.
+
+A separate actual-guard control received one correlated cleanup acknowledgement,
+exit 0 and Port DOWN, with an empty owned group and removed namespace in 9 ms.
+The fault removed execute permission only from the owned Linux container's
+original `/bin/ps` target. Its inode and digest stayed fixed, other helpers
+were unchanged, literal execution returned EACCES, and a digest-identical copied
+observer could still inspect the owned processes. That run received no cleanup
+acknowledgement through actual exit 137 and Port DOWN; its owned group was empty
+and namespace absent after 2,012 ms, within the unchanged 2,000 ms cooperative
+period plus 100 ms observation allowance. Original ps permissions and identity
+were restored and execution succeeded. Timeout alone was not read as cleanup.
+
+This ran on native Linux ARM64, Elixir 1.20.3 / OTP 29.0.5 / ERTS 17.0.5,
+using image
+`sha256:85f03f17afa2e4c30445d9d461d176e7ef980f5cba7b1c3089a179d52a9381e0`,
+without a JIT workaround. It exercised the actual launcher and a cooperative
+shell worker, not the packaged companion, ReqLLM transport or live provider.
+Native executor-app, final joined suite, package/floor, live-provider/account
+and rollback evidence remain separate pending checks. The failed AMD64
+Rosetta preflight and intermediate native failures are retained, not replaced
+by these narrower successes.
