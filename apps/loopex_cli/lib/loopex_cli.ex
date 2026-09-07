@@ -549,8 +549,9 @@ defmodule LoopexCli do
         {:error, reason}
 
       {:error, :prepared_activation_unavailable} = unavailable ->
-        # The observation ended without a verdict. The queued activation may
-        # still execute: neither retry it nor issue abandonment as compensation.
+        # The holder lookup expired before this presentation was sent. That
+        # observation neither resolves another pending action nor authorizes
+        # retry or compensating abandonment.
         unavailable
 
       {:error, reason} ->

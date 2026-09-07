@@ -161,7 +161,7 @@ onto changed bytes.
 ### Completion order
 
 Current source checkpoint: the three implementation workstreams are joined at
-`909a358fea2ad92baa56234074b7cb53e3ff34cd`. Acceptance of ADRs 0019–0021 is
+`749fbe9` (including actual worker-entry checkpoint `5948fc1`). Acceptance of ADRs 0019–0021 is
 recorded at `63511ca264ef99e8b93367a9cd671165525e4d4f`. The maintainer separately
 authorized implementing these decisions and preparing release-review evidence.
 The integration branch is `codex/m2-release-repair`. `main`, M2's Closed
@@ -170,11 +170,11 @@ register, accepted gates, and historical dispositions remain unchanged.
 | Work item | State and owner | Completion requirement |
 | --- | --- | --- |
 | Record ADR acceptance | Complete; integrator | Exact-diff independent transition review clear; status and commit-message checks passed |
-| ADR 0019 provider isolation | Source joined, including guardian `728b4e3`, build `4045382`, and adapter entry `a1a60d9`; existing-test migration approval blocked | Actual worker-entry conformance, final paired CLI build on floor/current, live credential and lifecycle evidence; no parent diagnostic takeover |
-| ADR 0020 explicit handoff | Source and approved tests joined from `18e7b32`; one obsolete supplementary test remains unchanged after migration denial | Retest joined explicit participant protocol, initial holder monitoring, duplicate refusal, uncertainty, and ordinary `/2` compatibility after authorized fixture migration |
+| ADR 0019 provider isolation | Actual worker entry joined; nine child-process cases passed at `5948fc1`; authorized legacy-test migration still undergoing execution approval | Preserve the old corpus's surviving guarantees; correct isolated build output, then prove paired CLI build on floor/current and live credential/lifecycle behavior |
+| ADR 0020 explicit handoff | Final worker conformance in progress; expanded file passed 54 cases after a concurrent-installation repair | Join the worker's checkpoint, preserve all thirteen locked names, and complete CLI/Core compatibility checks including simulated terminal-lifetime teardown |
 | ADR 0021 accounting provenance | Joined from `c5c158909773538a3f3237a7a5651f88e62db72f`; 71 focused tests passed | Broader regression, real old-binary refusal, and independent clause-derived mutation evidence remain |
 | Rejoin and conformance | Source rejoined and force compilation warning-free; full conformance pending | Preserve locked names/behavior and byte-bound files; compile and tests serial across clones |
-| Clause-derived mutant hunt | Pending; fresh independent actors | Current claims and corpus, no author diff/history; qualify survivors and repair evidence gaps |
+| Clause-derived mutant hunt | Fresh accounting actor has completed clause analysis and is waiting for the serial execution token | Current claims and corpus, no author diff/history; qualify survivors and repair evidence gaps; independent provider and handoff hunts follow |
 | Final source and live evidence | Pending; integrator | Clean source `S`; full serial checks, literal M2 gate, actual provider/build identity and account verification |
 | Release-review handoff | Pending; independent reviewer | Evidence-only child `E` names final `S` and actual repair range; push checkpoints; no integration or publication inferred |
 
@@ -183,8 +183,10 @@ and the candidate SHA. A single test-lane token covers all Mix/dependency/test
 execution. No in-flight process is terminated merely to checkpoint work. Clone
 paths are temporary execution state, not durable evidence or authoritative source.
 The earlier public-overload and socket-write execution denials were resolved by
-the explicit confirmation below. New test-migration denials remain unresolved;
-they are not withdrawal of recorded ADR acceptance and were not bypassed.
+the explicit confirmation below. The maintainer has also explicitly authorized
+the test migrations, as recorded below. The stronger provider-corpus migration
+still requires execution-approval resolution; neither denial nor authorization
+is evidence that its behavioral preservation has been proved.
 
 ### Implementation checkpoint on 2026-09-07
 
@@ -319,7 +321,8 @@ group cessation, unchanged parent diagnostics, and retained cleanup ownership.
 The credential-plane replacement has not been authored. No denied patch was
 applied indirectly or split into smaller edits to bypass the refusal.
 
-Explicit permission for those test migrations is still needed. Their risk is
+At that checkpoint, explicit permission for those test migrations was still
+needed. Their risk is
 losing a surviving behavior while replacing implementation-specific assertions;
 the required safeguard is a claim-by-claim mapping plus actual child-path
 execution and subsequent independent mutation checks. This is not permission to
@@ -327,6 +330,41 @@ edit a locked gate, change a protected name or minimum, skip a required real
 provider path, or manufacture a green suite. Full-suite, final package, fresh
 clause-derived mutants, old-binary replay, live provider/account verification,
 source-bound gate, and release review remain outstanding.
+
+### Test-migration authorization — 2026-09-07
+
+The maintainer answered "Yes" to the exact question: "Do you explicitly
+authorize migrating those existing tests and provider helpers to the accepted
+designs, preserving every locked name, minimum, required real-provider check,
+and surviving behavioral guarantee?" The maintainer then directed completion,
+in-scope repairs, and preparation for review without additional consultation
+unless a new architectural decision appears. This settles the requested test
+migration, not integration or publication, and does not authorize deleting a
+surviving behavior merely because its existing fixture used a retired mechanism.
+
+A fresh inspection of the first provider migration found four preservation gaps:
+the detached-process replacement did not create the original real socket/task
+chain; direct-IO replacement omitted explicit refusal and parent-task usability;
+the retaining-owner cleanup replacement omitted causal queued-result ordering;
+and unmanaged success omitted the blocked-cleanup-before-return schedule. That
+weaker proposed patch remains unapplied. A revised migration must preserve those
+claims through the actual isolated worker, not a compatibility shim for the
+retired registry. The approval refusal was not bypassed.
+
+The joined `5948fc1` checkpoint supplies nine supplemental actual-entry cases,
+including the four preservation schedules above, but does not replace the old
+adapter corpus. It also disables workspace dotenv loading before dependency
+startup and directs only the private worker's dependency supervisors to its
+protected IO sink. Those nine tests passed at that checkpoint; no package,
+live-provider, whole-suite, or independent-mutation result is implied.
+
+The portable `scripts/provider-accounting-rollback.exs` probe is drafted for
+separate current-writer and genuine old-reader VMs with an on-disk local Store
+and a version-1 positive control. It has not yet been executed. An isolated
+checkout of old binary source `63511ca264ef99e8b93367a9cd671165525e4d4f` is
+prepared; its code still accepts only `model_attempt_settled_v1`. The final
+record must distinguish permitted fenced ownership administration from any
+forbidden semantic work after incompatible replay.
 
 1. Repair the orphaned guardian and test active-call, post-result, and
    descendant-cleanup owner loss.

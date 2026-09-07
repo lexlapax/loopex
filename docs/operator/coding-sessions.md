@@ -35,8 +35,12 @@ cd ~/code/my-project
 ~/code/loopex/apps/loopex_cli/bin/loopex run --policy allow-all "add a changelog entry for the parser fix"
 ```
 
-The build writes a self-contained `loopex` escript beside the application, and
-`bin/loopex` is a small launcher that runs it. **Run the launcher, not the
+The build writes the `loopex` escript beside the application and also builds its
+private `loopex_provider` companion under `_build/prod`, recording the companion's
+absolute interpreter/path and digests in the command. Keep that companion at its
+configured path; copying only the command does not relocate the provider. The
+source checkout must be clean for this identity-bound build. `bin/loopex` is a
+small launcher that runs the command. **Run the launcher, not the
 escript.** The emulator reserves `SIGINT` for its own break handler and refuses
 to hand it to a signal handler at all, so a `Ctrl-C` delivered straight to the
 escript ends the operating-system process without stopping the run through the
@@ -45,8 +49,12 @@ that was mid-write stays mid-write, and nothing is reported. The launcher traps
 the interrupt outside the emulator and forwards the stop the escript already
 knows how to make. Copy the pair together, keeping the launcher's
 `../loopex` layout, or point `LOOPEX_ESCRIPT` at the escript and put the launcher
-anywhere on your `PATH`. It reads the provider credential from
-`LOOPEX_PROVIDER_API_KEY`.
+anywhere on your `PATH`; this moves only command startup, not the companion's
+embedded location. The reference adapter reads the provider credential from
+`LOOPEX_PROVIDER_API_KEY` after its isolated child is ready. Empty credentials or
+values above 65,536 bytes refuse. A missing or mismatched companion refuses
+instead of running provider code inside the command's VM. Embedders can supply
+different explicit companion paths; runtime never searches a workspace for one.
 
 `--policy` is required and has no default. Nothing runs a tool until you have
 named the authority that governs it; see

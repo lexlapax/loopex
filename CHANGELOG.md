@@ -19,6 +19,18 @@ the exact document set its milestone must update.
 
 ## [Unreleased]
 
+Post-closure repair work on `codex/m2-release-repair` implements accepted ADRs
+0019–0021 and remains subject to exact-source verification and independent
+release review. The provider uses a separately built private OS process instead
+of taking over the embedding VM's diagnostics. Interactive recovery presents an
+explicit local participant rather than selecting behavior through process-local
+state. New provider settlements carry version-2 accounting provenance; an old
+reader cannot resume a session containing that version, and ambiguous legacy
+reported accounting is refused rather than rewritten. Operator setup and
+rollback implications are documented in the
+[compatibility inventory](docs/developer/compatibility-surfaces.md#concept).
+This entry does not publish a package or certify the unfinished evidence.
+
 The next milestone, `M3` (kernel consolidation), is being opened gate-first on
 branch `m3`, where its plan pair and red gate live until acceptance; the headless
 session-protocol draft is retained there as `M4`. Nothing about either is on

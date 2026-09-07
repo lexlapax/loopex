@@ -123,8 +123,9 @@ defmodule Loopex.LLM.ReqLLM do
 
   `delta_count` and `streamed` are the attempt-private evidence `Loopex.Model`
   requires of every reply: what this adapter emitted and whether it streamed at
-  all. They belong to the type because the coordinator closes the attempt's
-  progress domain with them.
+  all. These producer facts survive private-channel backpressure unchanged.
+  The coordinator's transient domain closes with its own accepted-item count,
+  which can be smaller when the best-effort channel dropped a delta.
   """
   @type reply :: %{
           text: String.t(),

@@ -56,6 +56,12 @@ embedded runtime beneath it and run the complete source-tree loop, or use the
 [developer embedding guide](docs/developer/runtime-and-embedding.md#concept) to
 understand the composition and commit ordering.
 
+The current repair branch implements the accepted follow-up decisions for a
+private provider process, explicit local recovery handoff, and versioned provider
+accounting. Its validation and release-review work remain in progress; see the
+[repair task list](docs/evidence/M2-ff17990-review-followup.md#completion-order).
+Those changes are not a publication or a claim that this branch has integrated.
+
 The [roadmap](docs/roadmap.md#concept) is non-normative capability guidance;
 [CHANGELOG.md](CHANGELOG.md) records what changed.
 

@@ -73,7 +73,7 @@ so nothing has welded two surfaces together by shipping them in one artifact.
 `next_event/1`, `snapshot/1`, `attachment_status/1`, `progress/2`,
 `diagnostic/2`, `session_status/2`, `reconciliation_query/1`, `reconcile/2`,
 `prepare_resume_session/3`, `prepare_resume_known_session/4`,
-`activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `state_root/0`,
+`activate_resume/1`, `abandon_resume/1`, `transfer_resume/2`, `transfer_resume/3`, `state_root/0`,
 `runtime_placement_id/1`, `track_session/3`, `list_sessions/1`, and `version/0`.
 Prepared resume entries return an opaque one-use activation capability; neither
 preparation nor handler installation schedules recovered work. `activate_resume/1`
@@ -89,6 +89,37 @@ start options are part of this surface, including
 `:diagnostics_to`, `:cleanup_grace_ms`, and the required positive
 `:context_token_budget`. Direct Runtime callers choose that context value;
 Runtime supplies no default.
+
+[ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept) adds the explicit
+three-argument prepared handoff: it names a local receiving holder and its
+local lifetime participant. Ordinary `transfer_resume/2` keeps its PID domain
+and no longer reads a CLI-written process-dictionary selector. The new entry
+distinguishes a definitive refusal from loss after a possible handoff. The CLI
+refuses duplicate handler installation atomically instead of replacing/draining
+the incumbent. Missing decision replies do not authorize retries, abandonment,
+or activation; read-only holder observations remain bounded. These are
+unreleased source/behavior changes, not new portable or durable data.
+
+**Reference provider launch.**
+[ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) requires one
+private companion process per invocation and explicit adapter options:
+`worker_path`, `interpreter_path`, `worker_sha256`, and
+`build_manifest_sha256`. Unmanaged calls additionally supply the validated
+`cleanup_grace_ms`; managed calls use Core's retained value. Missing, malformed,
+or mismatched configuration refuses before credential delivery, with no
+shared-VM fallback or runtime code discovery. The bare-model `complete/2` helper
+now refuses; direct callers use `complete_prompt/3` with explicit configuration.
+The Model callback remains `complete/3`.
+
+The sole credential source remains `LOOPEX_PROVIDER_API_KEY`, with a new
+65,536-byte maximum; empty and oversized credentials refuse. Starting or stopping
+the adapter installs no parent Logger filter or credential registry and changes
+no parent group leader. Provider-side raw diagnostics are unavailable rather
+than forwarded for secret-dependent scrubbing. Companion startup consumes the
+existing deadline. Rollback must contain live children and change bridge,
+companion, and launch configuration together; it does not restore unsafe shared
+diagnostics or retry an uncertain invocation. The companion is private
+source-build output, not a separately published package.
 
 **Ports.** Core declares exactly five behaviours: `Loopex.Store`,
 `Loopex.Model`, `Loopex.Executor`, `Loopex.Policy`, and
@@ -366,6 +397,8 @@ option. It passes `:project_manifest` and `:project_decision` through to the
 runtime, and hands `:cleanup_grace_ms` to the session and the executor together
 so a run's ending cannot report a period its cleanup did not run under.
 `:process_probe` reaches the executor alone, which is where that option belongs.
+`:provider_launch` carries the host's explicit companion configuration opaquely
+to the reference model adapter; no default worker is discovered.
 It names four concrete implementations, so an embedder that
 depends on it transitively acquires the reference adapters and their external
 dependency whether or not every one is used. An embedder who wants a different
