@@ -1,3 +1,5 @@
+Code.require_file("../../../loopex_llm_reqllm/test/support/provider_build_fixture.exs", __DIR__)
+
 defmodule Loopex.ReferenceClientTraceChild do
   alias Loopex.Executor.Local
   alias Loopex.ReferenceClient

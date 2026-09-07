@@ -1,3 +1,5 @@
+Code.require_file("../../../loopex_llm_reqllm/test/support/provider_build_fixture.exs", __DIR__)
+
 defmodule Loopex.ReferenceClientTestModel do
   @behaviour Loopex.Model
 
@@ -82,6 +84,8 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
         )
       end)
 
+    {model_options, sampling_options} = model_configuration(model_module, model_options, root)
+
     workspace = Path.join(root, "workspace")
     ledger = Path.join(root, "executor-ledger")
     store_path = Path.join(root, "store.log")
@@ -152,7 +156,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       model: %{
         module: model_module,
         model: model_spec(model_module),
-        options: Keyword.put_new(model_options, :max_tokens, 256)
+        options: model_options
       },
       executor: %{
         module: Keyword.get(options, :executor_module, Local),
@@ -171,6 +175,7 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
       fault_to: Keyword.get(options, :fault_to)
     ]
 
+    runtime_options = runtime_options ++ sampling_options
     {:ok, client} = ReferenceClient.start(runtime_options)
 
     %{
@@ -353,6 +358,18 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
 
   defp model_spec(Loopex.LLM.ReqLLM), do: Loopex.LLM.ReqLLM.default_model()
   defp model_spec(_module), do: "deterministic:test"
+
+  # Concept: real calls use the trusted companion, with sampling owned by Core.
+  # Technical depth: build before Store/executor startup; demo-only tool inputs
+  # never enter the adapter's closed launch options. The deterministic branch
+  # retains its existing options and max_tokens default without a build.
+  defp model_configuration(Loopex.LLM.ReqLLM, options, root) do
+    launch = Loopex.LLM.ReqLLM.ProviderBuildFixture.options!(root)
+    {launch, [sampling: %{"max_tokens" => Keyword.get(options, :max_tokens, 256)}]}
+  end
+
+  defp model_configuration(_module, options, _root),
+    do: {Keyword.put_new(options, :max_tokens, 256), []}
 
   defp load_pages(loader, position, accumulated) do
     case loader.(position) do
