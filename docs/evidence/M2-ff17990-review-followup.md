@@ -19,7 +19,7 @@ The existing repair authorization remains the task scope. Historical override
 21 continues to describe its original range; this follow-up neither extends
 its accepted baseline nor authorizes integration, publication, or a version tag.
 
-### Decisions awaiting the maintainer
+### Repair directions and remaining decisions
 
 | Decision | Recommended direction | Alternative and consequence |
 | --- | --- | --- |
@@ -27,8 +27,13 @@ its accepted baseline nor authorizes integration, publication, or a version tag.
 | Prepared recovery handoff | Make the lifetime participant explicit on the public transfer boundary, retaining the ordinary two-argument call. Remove unused dynamic handler replacement and refuse duplicate initial installation atomically. | Ordinary transfer with a CLI-only guard is smaller, but cannot independently observe idle coordinator death through today's facade. That option must explicitly narrow immediate dependent-holder cleanup. Keeping replacement retains a state machine with no command caller and requires bounded, behaviorally proved draining. |
 | Compacted provider accounting | Preserve ADR 0018's distinction. Malformed or pre-validation unreadable replies use estimated remaining allowance. A validated reply compacted only because its settlement cannot fit preserves reported usage. Introduce versioned retained provenance so replay can validate which case occurred and the exact retained usage. | Estimating every unreadable result is smaller but supersedes ADR 0018 combination 5 and loses known reported figures. Retaining today's permissive validator leaves the accounting claim without retained provenance. |
 
-These are proposed directions, not accepted decisions. Their exact contracts,
-compatibility, recovery, and rollback obligations need an ADR proposal before
+On 2026-09-06 the maintainer approved these three recommended directions for
+preparing decision proposals. That confirmation does not accept an ADR, extend
+override 21, or authorize integration or publication. The contracts below
+remain subject to exact-candidate review and explicit acceptance.
+
+These are approved proposal directions, not accepted architecture decisions.
+Their exact contracts, compatibility, recovery, and rollback need proposals before
 dependent implementation. In particular, explicit host ownership alone does
 not resolve the logger failure mode: the proposal must establish how the host
 continues safe diagnostics and recovers protection when the registry or ReqLLM
@@ -44,6 +49,47 @@ silently consume records it cannot validate. Each chosen contract needs its
 compatibility inventory, conformance tests, and exact-SHA review updated.
 Changing an accepted ADR or locked gate, if the selected option requires it,
 must use its governed transaction; this evidence note changes neither.
+
+The concrete proposals are [ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept)
+and [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept).
+Both remain Proposed with empty governance rows. ADR 0021 makes one operator
+cost explicit for acceptance review: an old unreadable-plus-reported settlement
+has no recoverable usage provenance, so the new reader refuses that session
+rather than rewriting accounting. These proposals supply no executed conformance
+claim. No product, accepted ADR, plan, gate, or lifecycle bytes move with them.
+
+<a id="provider-protection-choice"></a>
+### Provider protection: one additional ownership choice
+
+Host ownership alone did not settle diagnostic lifetime. The pinned ReqLLM
+implementation starts streaming work under a shared task supervisor and emits
+raw inspected failures. Worker death and trace delivery do not prove that OTP's
+asynchronous logging queues have drained. A credential registry's failure must
+not make unrelated host logging unavailable, but discarding its protection too
+soon can expose delayed reports. The reference is trusted same-VM code, not a
+sandbox against other host code.
+
+| Option | Operator consequence | Stability, modularity, extensibility, and transaction cost |
+| --- | --- | --- |
+| Separate host-owned provider process — recommended | Host logger stays untouched. Provider-process loss refuses or conservatively settles that attempt; replacement can serve later work after exact cleanup. | Stronger process/diagnostic boundary and replaceable host composition, but adds bounded versioned framing, credential handoff, launch/package layout, child crash-output containment, and cleanup evidence. Same OS account is not an OS sandbox. ADR 0019 must settle those contracts before implementation; integration requires new process/live-provider and exact-source evidence. |
+| Explicit same-VM protected diagnostic lifetime | Suppress raw provider diagnostics using stable non-secret origin identity; retain that policy beyond calls. A non-replaceable protection origin lost during the VM's lifetime requires VM restart, or a separately bounded retired-origin policy requires restart when its capacity is exhausted. | Smaller provider-call change but couples every shared ReqLLM user to one host diagnostic policy. Requires complete origin classification across task, supervisor, and application-exit reports, plus group-leader/application-lifecycle proof. Registry and ordinary provider-supervisor restart must not require poisoning unrelated logs. This is additional behavior, not implied by host opt-in; it needs disposition and exact OTP-floor/current evidence before an acceptance-ready proposal. |
+| Change the provider dependency boundary | Keep in-process embedding only if owned task placement and safe diagnostics can be proved end to end. | Changes dependency/floor and adapter conformance evidence; a supervisor option alone does not contain generic OTP reports. This is a separate dependency decision, not a smaller undocumented repair. |
+
+The source investigation inspected ReqLLM's pinned streaming client and installed
+OTP 29 Logger, logger proxy, process/supervisor reports, and application cleanup.
+Application-exit reports can originate outside the provider's group leader;
+ordinary task or process metadata alone is not a complete classifier. The
+same-VM option is therefore a design direction requiring that proof, not a
+claim that a pure filter is already sufficient. No secret-retaining tombstone
+collection or node-wide logging blackout is accepted by this record.
+
+Any option changing an already locked provider role or evidence artifact must
+enumerate that change and use the holder's Closed-gate generation transaction;
+being locked does not remove that option. Supplemental repair checks can be
+added without silently changing the lock. The two other proposals can progress
+independently, but final integration evidence waits for provider protection.
+The remaining effort is at least a proposal/review round and an implementation/
+evidence round; no calendar completion or clean outcome is claimed in advance.
 
 ## Technical depth
 
@@ -90,6 +136,11 @@ evidence checks remain future work; earlier green results are not projected
 onto changed bytes.
 
 ### Completion order
+
+Current checkpoint: the guardian repair is committed at
+`6fab2f8c117b9618c204ef87324a9c64e21c9fe5`. ADRs 0020 and 0021 are Proposed;
+0019 is reserved pending the provider-protection choice above. Dependent
+architecture implementation and final source-bound evidence have not begun.
 
 1. Repair the orphaned guardian and test active-call, post-result, and
    descendant-cleanup owner loss.

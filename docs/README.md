@@ -60,6 +60,8 @@ pairing, link, review, code-documentation, and enforcement contracts.
 | 0016 — configured cancellation observation | [Decision](adr/0016-configured-cancellation-observation.md#concept) | [Technical depth](adr/0016-configured-cancellation-observation-technical.md#technical-depth) |
 | 0017 — durable context and record admission budgets | [Decision](adr/0017-durable-context-admission-budget.md#concept) | [Technical depth](adr/0017-durable-context-admission-budget-technical.md#technical-depth) |
 | 0018 — provider attempt authority and recovery | [Decision](adr/0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](adr/0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
+| 0020 — explicit prepared handoff (Proposed) | [Decision](adr/0020-explicit-prepared-handoff.md#concept) | [Technical depth](adr/0020-explicit-prepared-handoff-technical.md#technical-depth) |
+| 0021 — compacted provider-accounting provenance (Proposed) | [Decision](adr/0021-compacted-provider-accounting-provenance.md#concept) | [Technical depth](adr/0021-compacted-provider-accounting-provenance-technical.md#technical-depth) |
 
 An ADR pair is one decision. Its status and governance record live in the
 Concept file and bind both files when accepted.
