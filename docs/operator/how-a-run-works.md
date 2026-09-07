@@ -294,6 +294,14 @@ not blocked by the failed one.
 refuses against a live owner and tells you which process to talk to, rather than
 reconciling a session out from under something still running.
 
+Provider settlements now retain version-2 accounting evidence. A validated
+answer omitted because its complete record exceeds Store limits keeps its known
+usage; an unreadable raw answer consumes estimated remaining allowance. That
+evidence is private and adds no conversation or rendered field. Sessions with
+ambiguous old unreadable reported accounting cannot resume under the new reader.
+Stop all owners and back up the complete state before rollback: the prior binary
+can resume only histories containing no version-2 settlement.
+
 <a id="concept-run-safe"></a>
 ## What Makes This Safe, and What It Does Not Claim
 

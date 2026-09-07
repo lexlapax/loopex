@@ -235,7 +235,8 @@ kinds its replay filter accepts:
 | `deadline_staging_failed_v1` | A request whose derived deadline could not be staged: the clock domain or the overflow that refused it. |
 | `model_request_committed` | The exact staged request bytes, its `staged_request_digest`, the applied steer, and the context receipt. |
 | `model_attempt_opened_v1` | `run_id`, `turn_id`, `operation_id`, `attempt`, `staged_request_digest`. |
-| `model_attempt_settled_v1` | Those five plus `transport`, `termination`, `conversation`, `next`, `result`, `accounting`. |
+| `model_attempt_settled_v2` | Those five plus `transport`, `termination`, `conversation`, `next`, `result`, `accounting`; unreadable results retain explicit accounting evidence. |
+| `model_attempt_settled_v1` | Legacy settlement with the same root keys; accepted only before the first version-2 settlement and without ambiguous unreadable reported accounting. |
 | `model_termination_admitted_v1` | Those five plus `cause`, `deadline`, `observed`. |
 | `effect_intent_committed` | The tool operation's intent, durable before dispatch. |
 | `executor_receipt_committed` | The receipt matched against the dispatched job. |
@@ -246,6 +247,24 @@ kinds its replay filter accepts:
 `executor_receipt_candidate` is not committed. It is the kind a projected receipt
 is validated under so an oversized or non-plain receipt becomes a truthful
 unproven outcome rather than an exception that kills the owner.
+
+Version-2 unreadable results carry either exact `accounting_evidence: {kind:
+none}` or `validated_reply_compaction_v1` with normalized `usage`, `dimension`,
+`observed`, and `limit`. Bytes retain the Store-normalized full settlement's
+exact external-term size above 65,536; depth retains the first rejected depth,
+13 against 12. Reported accounting equals both retained usage members. The live
+writer measures the actual full verdict, including its next action, before
+compacting, and preflights the compact record and terminal independently.
+
+Replay validates those retained relations without rebuilding the discarded
+reply or contacting a provider. A terminal settlement and its exact consecutive
+`run_terminal_committed` apply accounting, conversation, and outbox effects
+together; an incomplete or mismatched pair refuses recovery. Unknown commits
+re-present the already normalized transaction and its original identity.
+Legacy unreadable reported accounting refuses specifically as
+`ambiguous_legacy_provider_accounting`. The complete shapes and compatibility
+boundary are in
+[ADR 0021](../adr/0021-compacted-provider-accounting-provenance-technical.md#technical-adr-0021-decision).
 
 Public event kinds are `run.started`, `run.finished`, `user.message_appended`,
 `assistant.message_appended`, `tool.started`, `tool.finished`, `steer.resolved`,
@@ -285,7 +304,7 @@ sequenceDiagram
     W->>M: complete with request, options, progress only while current
     M-->>W: complete reply, or a classified failure
     W-->>S: attempt evidence
-    S->>ST: model_attempt_settled_v1 plus assistant.message_appended
+    S->>ST: model_attempt_settled_v2 plus assistant.message_appended
     ST-->>S: committed
     S->>P: decide for the head tool call
     P-->>S: allow with context, or a closed deny category

@@ -489,7 +489,7 @@ defmodule Loopex.Audit3RepairsTest do
   defp settlements(fixture, session_id) do
     fixture
     |> Fixture.records(session_id)
-    |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+    |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
     |> Enum.map(&{&1.payload["attempt"], &1.payload["transport"], &1.payload["termination"]})
   end
 
