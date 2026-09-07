@@ -80,12 +80,8 @@ defmodule LoopexCli.Interrupt do
   @backstop_note "loopex: stopping did not finish in time; this run's own command " <>
                    "processes were killed"
 
-  # Trusted private transient coordination shared with the Core transfer entry.
-  # It is installed only in the exact current activation holder around the
-  # existing public facade call and is never returned, journalled, or projected.
-  # The marker selects the guarded implementation lane but grants no authority:
-  # Core independently revalidates the holder and capability at its decision.
-  @prepared_transfer_guard_key {Loopex.ResumeActivation, :prepared_transfer_guard_v1}
+  @observation_ms 1_000
+  @manager_claim {__MODULE__, :installed}
 
   @doc """
   ## Concept
@@ -180,15 +176,11 @@ defmodule LoopexCli.Interrupt do
   lifetime before the guard acknowledges the owner, so installer death after
   that point cannot undo the handoff even if the public reply is lost. Installer
   death before forwarding still fails closed, while abrupt manager loss cannot
-  strand a holder. Orderly replacement
-  installs its successor first, completes its prepared handoff, then drains
-  every predecessor holder before reporting success, and retains that drain in
-  the live handler if the installer dies. Concurrent replacements serialize
-  behind the same obligation. Once a stop has begun, replacement is refused
-  atomically so its abort identity and backstop cannot be erased. If a retired
-  holder has already presented the one-use capability, the owner decides that
-  presentation first; if it is still prepared when the holder ends, the owner's
-  monitor permanently pauses it.
+  strand a holder. Each manager atomically admits one initial installation;
+  duplicates return `interrupt_already_installed` and preserve its holder, abort
+  identity and backstop. Orderly removal releases only that handler's holder
+  asynchronously. Ending a holder cannot retract a presentation already received
+  by the owner or stop session work whose activation succeeded.
 
   The handoff's own result is what this returns. A handoff the owner refuses —
   most often because a signal beat it and the abort already fenced the
@@ -196,11 +188,12 @@ defmodule LoopexCli.Interrupt do
   releases the unacknowledged holder, clears it from the interrupt handler, and
   names the owner's refusal. The handler remains live to carry an abort already
   in flight or accept a later signal, but advertises no holder the owner refused.
-  A caller that discards that answer and continues as though the capability had
-  moved is the caller's defect, not a silence here.
+  An unresolved handoff is returned unchanged. Its cleanup relationship stays
+  active and recovered work stays fenced; callers must report uncertainty and
+  cannot activate or retry installation as though no transfer happened.
   """
   @spec install_prepared(Loopex.Attachment.t(), pos_integer(), term()) ::
-          :ok | {:error, term()}
+          :ok | {:error, term()} | {:unresolved, atom()}
   def install_prepared(attachment, cleanup_grace_ms, activation) do
     with {:ok, holder_lifetime} <- prepare_holder(activation) do
       holder = holder_lifetime.holder
@@ -212,6 +205,9 @@ defmodule LoopexCli.Interrupt do
         {:error, reason} ->
           release(holder)
           {:error, reason}
+
+        {:unresolved, _reason} = unresolved ->
+          unresolved
       end
     end
   end
@@ -220,12 +216,11 @@ defmodule LoopexCli.Interrupt do
   # with it.
   #
   # Technical depth: the lifetime guard monitors the installer before it creates
-  # the holder. The holder begins linked to that guard, acknowledges its own
-  # guard monitor, and is only then unlinked, so no capability-bearing process
-  # exists in a spawn-before-guard interval. Once the handshake completes the
-  # relationship is deliberately one-way: abrupt manager or installer loss
-  # makes the guard kill the holder, while holder loss merely ends the guard and
-  # cannot propagate an untrappable exit into the public caller. The holder also
+  # the holder. The holder stays linked to the guard so even guard loss while a
+  # presentation blocks ends that owned holder immediately. The guard traps
+  # exits and monitors the holder; no link reaches the public caller. Thus no
+  # capability-bearing process exists in a spawn-before-guard interval and no
+  # holder failure can propagate an exit into the public installer. The holder also
   # monitors this exact guard, so concurrent loss of the manager guard and
   # session owner cannot leave it orphaned. It exists until the session owner and
   # guard acknowledge the prepared capability transfer together.
@@ -248,6 +243,7 @@ defmodule LoopexCli.Interrupt do
   end
 
   defp guard_pending_holder(installer, activation, nonce, ready) do
+    Process.flag(:trap_exit, true)
     installer_ref = Process.monitor(installer)
     {holder, holder_ref} = :erlang.spawn_opt(fn -> hold(activation) end, [:link, :monitor])
     holder_ready = make_ref()
@@ -255,7 +251,6 @@ defmodule LoopexCli.Interrupt do
 
     receive do
       {^holder_ready, ^holder} ->
-        Process.unlink(holder)
         send(installer, {ready, self(), holder})
 
         guard_uninstalled_holder(holder, holder_ref, installer, installer_ref, nonce)
@@ -303,10 +298,6 @@ defmodule LoopexCli.Interrupt do
          nonce
        ) do
     receive do
-      {:loopex_prepared_owner_discard, coordinator, ^holder, ^nonce, handoff}
-      when is_pid(coordinator) and is_reference(handoff) ->
-        Process.exit(holder, :kill)
-
       {:loopex_prepared_transfer_pending, ^installer, coordinator, ^holder, ^nonce, handoff}
       when is_pid(coordinator) and is_reference(handoff) ->
         coordinator_ref = Process.monitor(coordinator)
@@ -372,6 +363,11 @@ defmodule LoopexCli.Interrupt do
         )
 
       {:DOWN, ^installer_ref, :process, ^installer, _reason} when is_reference(installer_ref) ->
+        send(
+          coordinator,
+          {:loopex_prepared_transfer_installer_lost, self(), installer, holder, nonce, handoff}
+        )
+
         Process.exit(holder, :kill)
 
       {:DOWN, ^signal_server_ref, :process, ^signal_server, _reason} ->
@@ -417,7 +413,9 @@ defmodule LoopexCli.Interrupt do
           signal_server,
           signal_server_ref,
           coordinator,
-          coordinator_ref
+          coordinator_ref,
+          nonce,
+          handoff
         )
 
       {:loopex_prepared_owner_verdict, ^coordinator, ^holder, ^nonce, ^handoff, commit,
@@ -438,40 +436,6 @@ defmodule LoopexCli.Interrupt do
           {:loopex_prepared_transfer_installer_lost, self(), installer, holder, nonce, handoff}
         )
 
-        guard_pending_installer_loss(
-          holder,
-          holder_ref,
-          signal_server,
-          signal_server_ref,
-          coordinator,
-          coordinator_ref,
-          nonce,
-          handoff
-        )
-
-      {:DOWN, ^signal_server_ref, :process, ^signal_server, _reason} ->
-        Process.exit(holder, :kill)
-
-      {:DOWN, ^coordinator_ref, :process, ^coordinator, _reason} ->
-        Process.exit(holder, :kill)
-
-      {:DOWN, ^holder_ref, :process, ^holder, _reason} ->
-        :ok
-    end
-  end
-
-  defp guard_pending_installer_loss(
-         holder,
-         holder_ref,
-         signal_server,
-         signal_server_ref,
-         coordinator,
-         coordinator_ref,
-         nonce,
-         handoff
-       ) do
-    receive do
-      {:loopex_prepared_owner_discard, ^coordinator, ^holder, ^nonce, ^handoff} ->
         Process.exit(holder, :kill)
 
       {:DOWN, ^signal_server_ref, :process, ^signal_server, _reason} ->
@@ -491,11 +455,16 @@ defmodule LoopexCli.Interrupt do
          signal_server,
          signal_server_ref,
          coordinator,
-         coordinator_ref
+         coordinator_ref,
+         nonce,
+         handoff
        ) do
     receive do
       {:loopex_prepared_guard_released, ^coordinator} ->
         :ok
+
+      {:loopex_prepared_owner_discard, ^coordinator, ^holder, ^nonce, ^handoff} ->
+        Process.exit(holder, :kill)
 
       {:DOWN, ^signal_server_ref, :process, ^signal_server, _reason} ->
         Process.exit(holder, :kill)
@@ -581,40 +550,18 @@ defmodule LoopexCli.Interrupt do
     do: complete_live_prepared_handoff(holder_lifetime, activation, signal_server)
 
   defp complete_live_prepared_handoff(
-         %{holder: holder} = holder_lifetime,
+         %{holder: holder, lifetime_guard: guard, transfer_nonce: nonce},
          activation,
          signal_server
        )
        when is_pid(holder) and is_pid(signal_server) do
-    result =
-      with_prepared_transfer_guard(holder_lifetime, fn ->
-        Loopex.transfer_resume(activation, holder)
-      end)
+    result = Loopex.transfer_resume(activation, holder, {guard, nonce})
 
-    if result != :ok do
+    if match?({:error, _reason}, result) do
       discard_failed_prepared_holder(signal_server, activation, holder)
     end
 
     result
-  end
-
-  defp with_prepared_transfer_guard(
-         %{holder: holder, lifetime_guard: guard, transfer_nonce: nonce},
-         operation
-       )
-       when is_pid(holder) and is_pid(guard) and is_reference(nonce) and
-              is_function(operation, 0) do
-    absent = make_ref()
-    previous = Process.get(@prepared_transfer_guard_key, absent)
-    Process.put(@prepared_transfer_guard_key, {holder, guard, nonce})
-
-    try do
-      operation.()
-    after
-      if previous === absent,
-        do: Process.delete(@prepared_transfer_guard_key),
-        else: Process.put(@prepared_transfer_guard_key, previous)
-    end
   end
 
   defp discard_failed_prepared_holder(signal_server, activation, holder) do
@@ -652,7 +599,7 @@ defmodule LoopexCli.Interrupt do
         reply
 
       {:DOWN, ^tag, :process, ^holder, _reason} ->
-        {:error, :prepared_activation_holder_lost}
+        {:unresolved, :prepared_activation_holder_lost}
     end
   end
 
@@ -680,12 +627,11 @@ defmodule LoopexCli.Interrupt do
 
   The handler names the holder for exactly the activation installed with it, so
   this entry cannot present a capability that never crossed this boundary, and
-  the holder presents the one it was handed. Both waits are unbounded, matching
-  the owner's own `:infinity` bound on the same three decisions: the messages
-  that carry them are not withdrawn when a caller stops waiting, so an expiring
-  wait would answer that the work had not started while the owner went on to
-  start it. What is bounded here is nothing, and what settles the race with a
-  signal is the owner's fence rather than a deadline.
+  the holder presents the one it was handed. The read-only manager lookup is
+  bounded and reports unavailable on expiry. The presentation itself waits for
+  an exact decision without a deadline: its message cannot be withdrawn by a
+  timeout. Holder loss while presenting is unresolved, never failed activation.
+  The owner's fence decides ordering with a signal.
 
   One use is the owner's own state machine to enforce, and it does: success or a
   refusal as spent, abandoned, or fenced settles the capability and releases the
@@ -693,7 +639,7 @@ defmodule LoopexCli.Interrupt do
   keeps the holder, which leaves a caller able to try again or give the
   capability up instead of turning an unavailable owner into permanent loss.
   """
-  @spec activate_prepared(term()) :: {:ok, binary()} | {:error, term()}
+  @spec activate_prepared(term()) :: {:ok, binary()} | {:error, term()} | {:unresolved, atom()}
   def activate_prepared(activation) do
     case holder(activation) do
       {:ok, holder} ->
@@ -722,7 +668,7 @@ defmodule LoopexCli.Interrupt do
   answer, and its monitor of a holder that is now gone changes nothing it has
   not already decided.
   """
-  @spec abandon_prepared(term()) :: :ok | {:error, term()}
+  @spec abandon_prepared(term()) :: :ok | {:error, term()} | {:unresolved, atom()}
   def abandon_prepared(activation) do
     with {:ok, holder} <- holder(activation) do
       reply = ask(holder, :abandon)
@@ -758,230 +704,149 @@ defmodule LoopexCli.Interrupt do
   entry exists so that the accepted decision's named surface stays true rather
   than being retired by a changelog line.
   """
-  @spec abandon_resume(Loopex.Attachment.t(), term()) :: :ok | {:error, term()}
+  @spec abandon_resume(Loopex.Attachment.t(), term()) ::
+          :ok | {:error, term()} | {:unresolved, atom()}
   def abandon_resume(_attachment, activation), do: abandon_prepared(activation)
 
   # Concept: which process holds this exact capability now.
   #
   # Technical depth: the handler answers from its manager's own process, and the
   # answer is a lookup rather than a session call, so the signal server is never
-  # held for longer than it takes to read one map. `:infinity` is therefore
-  # honest here for the same reason the owner uses it: the only way this call
-  # does not return is a manager that is gone, and `:gen_event` reports that as
-  # an exit rather than as a wait. Every other absence -- no handler of this
+  # held for longer than it takes to read one map. A suspended live manager is
+  # unavailable after the bounded observation; that is not proof of absence or
+  # of a mutation's result. Every definitive absence -- no handler of this
   # module, a handler carrying a different activation, a handler that crashed --
   # comes back as a value and reads as nothing installed for this capability.
   defp holder(activation) do
     request = {:prepared_holder, activation}
 
-    case :gen_event.call(:erl_signal_server, __MODULE__, request, :infinity) do
+    case :gen_event.call(:erl_signal_server, __MODULE__, request, @observation_ms) do
       {:ok, holder} when is_pid(holder) -> {:ok, holder}
       _absent -> {:error, :prepared_activation_not_installed}
     end
   catch
-    :exit, _no_manager -> {:error, :prepared_activation_not_installed}
+    :exit, _unavailable -> {:error, :prepared_activation_unavailable}
   end
 
-  @handler_install_resource {__MODULE__, :handler_install}
-
-  defp do_install(attachment, grace_ms, activation, holder) do
-    lock = {@handler_install_resource, self()}
-
-    case :global.trans(
-           lock,
-           fn -> do_serialized_install(attachment, grace_ms, activation, holder) end,
-           [node()]
-         ) do
-      :aborted -> {:error, :prepared_activation_not_installed}
-      result -> result
-    end
-  end
-
-  # Concept: one installer completes its predecessor drain before another can
-  # replace the successor it installed.
-  #
-  # Technical depth: the event manager serializes one call, but replacement is
-  # a two-process transaction: atomically swap the live handler, then wait
-  # outside the manager for its prior holders. A local global lock spans both
-  # phases. Without it, a second caller can replace the new holder-free handler
-  # and report success while the first caller still waits for an older prepared
-  # presentation. The requester pid makes the lock owner exact; the resource
-  # name is shared by every installer in this VM. Process death releases the
-  # lock, while the live handler retains the unfinished drain obligation for the
-  # next installer rather than losing it with the caller.
-  defp do_serialized_install(attachment, grace_ms, activation, holder) do
+  defp do_install(attachment, grace_ms, activation, holder_lifetime) do
     case Process.whereis(:erl_signal_server) do
-      signal_server when is_pid(signal_server) ->
-        do_serialized_install_on(signal_server, attachment, grace_ms, activation, holder)
+      manager when is_pid(manager) ->
+        install_on(manager, attachment, grace_ms, activation, holder_lifetime)
 
       nil ->
         {:error, :prepared_activation_not_installed}
     end
   end
 
-  defp do_serialized_install_on(
-         signal_server,
-         attachment,
-         grace_ms,
-         activation,
-         holder_lifetime
-       ) do
-    Enum.each(@signals, fn signal ->
-      try do
-        :os.set_signal(signal, :handle)
-      rescue
-        _unsupported -> :ok
-      end
-    end)
-
-    holder = prepared_holder(holder_lifetime)
-
+  # Concept: installation claims one handler in the exact manager that owns
+  # signal delivery. Concurrent candidates cannot replace the incumbent.
+  #
+  # Technical depth: init/1 performs the claim in the manager's serialized turn.
+  # The default handler is swapped during initial installation so signal
+  # coverage remains continuous. A stale handler snapshot cannot grant a second
+  # claim. Session calls and participant waits occur only in the installer.
+  defp install_on(manager, attachment, grace_ms, activation, holder_lifetime) do
     state = %{
       attachment: attachment,
       terminal: self(),
       grace_ms: grace_ms,
       activation: activation,
-      holder: holder
+      holder: prepared_holder(holder_lifetime)
     }
 
-    with :ok <- arm_holder(holder_lifetime, signal_server),
-         {:ok, retiring_holders} <- install_or_replace_handler(signal_server, state),
-         :ok <- complete_prepared_handoff(holder_lifetime, activation, signal_server) do
-      # The handler and its exact manager guard are both live, and the session
-      # owner has acknowledged the holder. From here the holder belongs to them
-      # rather than to the transient installer, including while an inherited
-      # predecessor drain remains outstanding.
-      # The Loopex handler is already live here, so removing any remaining
-      # emulator handler never creates an interrupt-coverage gap.
-      remove_handlers(signal_server, :erl_signal_handler)
-      await_released_holders(retiring_holders)
-      acknowledge_released_holders(signal_server, retiring_holders)
-      {:ok, signal_server}
-    else
-      {:error, _reason} = error -> error
+    with :ok <- arm_holder(holder_lifetime, manager),
+         {:ok, handlers} <- observe_handlers(manager),
+         :ok <- install_handler(manager, handlers, state) do
+      Enum.each(@signals, fn signal ->
+        try do
+          :os.set_signal(signal, :handle)
+        rescue
+          _unsupported -> :ok
+        end
+      end)
+
+      remove_default_handlers(manager)
+
+      case complete_prepared_handoff(holder_lifetime, activation, manager) do
+        :ok -> {:ok, manager}
+        result -> result
+      end
     end
   catch
-    # An emulator with no signal server cannot be asked to hold anything, and
-    # `:gen_event` says so by exiting the caller rather than by answering. It is
-    # an installation that did not happen, which is exactly what this returns.
-    :exit, _no_signal_server -> {:error, :prepared_activation_not_installed}
+    :exit, _lost_mutation_result -> {:unresolved, :resume_handoff_unresolved}
   end
 
   defp prepared_holder(nil), do: nil
   defp prepared_holder(%{holder: holder}) when is_pid(holder), do: holder
 
-  # Concept: installing a successor never leaves an interrupt without a
-  # handler, even when the predecessor is still finishing a presentation.
-  #
-  # Technical depth: `gen_event:swap_handler/3` terminates and initializes under
-  # one serialized manager operation. The successor is therefore installed
-  # before this caller waits for the predecessor holder returned by
-  # `terminate/2`. On first installation the emulator's default handler is
-  # swapped atomically for the Loopex handler; when neither exists, adding the
-  # Loopex handler is the first available coverage. The termination result is
-  # transferred through `init/1` and retained by the live successor until every
-  # holder is observed down. If the installing process dies while it waits, a
-  # later swap carries the same obligation forward instead of reporting success
-  # around an older presentation. Replacement of an existing Loopex handler is
-  # requested through that handler's own callback so checking for an in-flight
-  # abort and swapping are one event-manager action. A process already stopping
-  # keeps its abort identity and backstop; an install cannot erase them in the
-  # gap between a separate check and swap.
-  defp install_or_replace_handler(signal_server, state) do
-    handlers = :gen_event.which_handlers(signal_server)
-
-    result =
-      cond do
-        __MODULE__ in handlers ->
-          :gen_event.call(
-            signal_server,
-            __MODULE__,
-            {:replace_handler, state},
-            :infinity
-          )
-
-        :erl_signal_handler in handlers ->
-          :gen_event.swap_handler(
-            signal_server,
-            {:erl_signal_handler, :loopex_handler_installed},
-            {__MODULE__, state}
-          )
-
-        true ->
-          :gen_event.add_handler(signal_server, __MODULE__, state)
-      end
-
-    case result do
-      :ok -> {:ok, retiring_holders(signal_server)}
-      {:error, _reason} = error -> error
-      _refused -> {:error, :prepared_activation_not_installed}
-    end
-  end
-
-  defp retiring_holders(signal_server) do
-    case :gen_event.call(signal_server, __MODULE__, :retiring_holders, :infinity) do
-      holders when is_list(holders) -> Enum.filter(holders, &is_pid/1)
-      _none -> []
-    end
-  end
-
-  defp acknowledge_released_holders(_signal_server, []), do: :ok
-
-  defp acknowledge_released_holders(signal_server, holders) do
-    :gen_event.call(
-      signal_server,
-      __MODULE__,
-      {:acknowledge_released_holders, holders},
-      :infinity
-    )
-  end
-
-  # Concept: taking over termination means leaving nothing behind that can still
-  # end the process on its own, including a prepared holder from the handler
-  # being replaced, without ever dropping interrupt coverage.
-  #
-  # Technical depth: `:gen_event` identifies a handler by module and admits the
-  # same module more than once, so one deletion removes one instance and any
-  # others keep receiving every signal. A single surviving default handler is
-  # enough to stop the emulator before the abort this module submits can commit
-  # what it observed, which is exactly the race installation exists to remove.
-  # Removal therefore repeats while the module is still listed, bounded so a
-  # manager that refuses deletion cannot spin here. Handler replacement itself
-  # uses the manager's atomic swap rather than this deletion loop. The live
-  # successor receives every unfinished predecessor holder and the installing
-  # process waits for them outside the signal server, so signals continue to
-  # reach the successor throughout an unbounded presentation drain. The live
-  # state keeps those holders until their deaths are acknowledged, which makes
-  # the drain survive an installer that dies while waiting.
-  @max_handler_instances 16
-
-  defp remove_handlers(signal_server, module, attempts \\ @max_handler_instances)
-  defp remove_handlers(_signal_server, _module, 0), do: :ok
-
-  defp remove_handlers(signal_server, module, attempts) do
-    if module in :gen_event.which_handlers(signal_server) do
-      signal_server
-      |> :gen_event.delete_handler(module, [])
-      |> await_released_holder()
-
-      remove_handlers(signal_server, module, attempts - 1)
+  defp install_handler(manager, handlers, state) do
+    if :erl_signal_handler in handlers do
+      :gen_event.swap_handler(
+        manager,
+        {:erl_signal_handler, :loopex_handler_installed},
+        {__MODULE__, state}
+      )
     else
-      :ok
+      :gen_event.add_handler(manager, __MODULE__, state)
     end
   end
 
-  defp await_released_holder({:loopex_prepared_holder, holder}) when is_pid(holder) do
-    monitor = Process.monitor(holder)
+  # which_handlers/1 has no timeout argument. Its owned observation worker
+  # bounds only this read; no installation or session mutation runs there.
+  defp observe_handlers(manager) do
+    observer = self()
+    tag = make_ref()
+
+    {worker, monitor} =
+      :erlang.spawn_opt(
+        fn ->
+          result =
+            try do
+              {:ok, :gen_event.which_handlers(manager)}
+            catch
+              :exit, _manager_lost -> {:error, :prepared_activation_unavailable}
+            end
+
+          send(observer, {tag, result})
+        end,
+        [:link, :monitor]
+      )
 
     receive do
-      {:DOWN, ^monitor, :process, ^holder, _reason} -> :ok
+      {^tag, result} ->
+        Process.unlink(worker)
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^worker, _reason} ->
+        {:error, :prepared_activation_unavailable}
+    after
+      @observation_ms ->
+        Process.unlink(worker)
+        Process.exit(worker, :kill)
+
+        receive do
+          {:DOWN, ^monitor, :process, ^worker, _reason} -> :ok
+        end
+
+        receive do
+          {^tag, _late_observation} -> :ok
+        after
+          0 -> :ok
+        end
+
+        {:error, :prepared_activation_unavailable}
     end
   end
 
-  defp await_released_holder(_ordinary_handler), do: :ok
+  defp remove_default_handlers(manager, remaining \\ 16)
+  defp remove_default_handlers(_manager, 0), do: :ok
 
-  defp await_released_holders(holders) do
-    Enum.each(holders, &await_released_holder({:loopex_prepared_holder, &1}))
+  defp remove_default_handlers(manager, remaining) do
+    case :gen_event.delete_handler(manager, :erl_signal_handler, []) do
+      {:error, :module_not_found} -> :ok
+      _removed -> remove_default_handlers(manager, remaining - 1)
+    end
   end
 
   defp backstop_ms(cleanup_grace_ms) do
@@ -1017,59 +882,37 @@ defmodule LoopexCli.Interrupt do
   def grace_ms, do: @grace_ms
 
   @impl :gen_event
-  def init({state, previous}) when is_map(state) do
-    retiring_holders =
-      case previous do
-        {:loopex_prepared_holders, holders} when is_list(holders) ->
-          Enum.filter(holders, &is_pid/1)
+  def init({state, _previous}) when is_map(state), do: init(state)
 
-        {:loopex_prepared_holder, holder} when is_pid(holder) ->
-          [holder]
+  def init(state) when is_map(state) do
+    case Process.get(@manager_claim) do
+      nil ->
+        claim = make_ref()
+        Process.put(@manager_claim, claim)
 
-        _none ->
-          []
-      end
+        {:ok,
+         %{abort: nil, backstop: nil, activation: nil, holder: nil}
+         |> Map.merge(state)
+         |> Map.put(:claim, claim)}
 
-    {:ok,
-     %{abort: nil, backstop: nil, activation: nil, holder: nil}
-     |> Map.merge(state)
-     |> Map.put(:retiring_holders, retiring_holders)}
+      _incumbent ->
+        {:error, :interrupt_already_installed}
+    end
   end
 
-  def init(state) when is_map(state),
-    do:
-      {:ok,
-       Map.merge(
-         %{abort: nil, backstop: nil, activation: nil, holder: nil, retiring_holders: []},
-         state
-       )}
-
-  def init(state), do: {:ok, state}
-
-  # Concept: a handler that goes takes its holder with it.
+  # Concept: orderly removal retires only this installation and releases its
+  # holder without blocking delivery of other signals.
   #
-  # Technical depth: orderly deletion queues release without blocking the signal
-  # server and returns the exact holder so a replacing caller can wait for its
-  # death outside that server. A holder already inside a presentation answers it
-  # before stopping. Abrupt manager loss runs no callback, so the holder's
-  # independent guard covers that route.
+  # Technical depth: the matching claim lives only in the manager. Abrupt
+  # manager loss destroys it and is independently observed by the participant.
   @impl :gen_event
   def terminate(_reason, state) when is_map(state) do
-    retiring_holders = Map.get(state, :retiring_holders, [])
+    if Map.get(state, :claim) == Process.get(@manager_claim),
+      do: Process.delete(@manager_claim)
 
-    holders =
-      case Map.get(state, :holder) do
-        holder when is_pid(holder) ->
-          :ok = release(holder)
-          [holder | retiring_holders]
-
-        _none ->
-          retiring_holders
-      end
-
-    case Enum.uniq(holders) do
-      [] -> :ok
-      holders -> {:loopex_prepared_holders, holders}
+    case Map.get(state, :holder) do
+      holder when is_pid(holder) -> release(holder)
+      _none -> :ok
     end
   end
 
@@ -1128,14 +971,6 @@ defmodule LoopexCli.Interrupt do
   # presents it is presenting the owner's own acknowledged holder, and a caller
   # that never had one gets no route to the capability at all.
   @impl :gen_event
-  def handle_call({:replace_handler, _replacement}, %{abort: %{}} = state) do
-    {:ok, {:error, :interrupt_already_stopping}, state}
-  end
-
-  def handle_call({:replace_handler, replacement}, state) when is_map(replacement) do
-    {:swap_handler, :ok, :loopex_handler_replaced, state, __MODULE__, replacement}
-  end
-
   def handle_call(
         {:prepared_holder, activation},
         %{activation: activation, holder: holder} = state
@@ -1162,21 +997,6 @@ defmodule LoopexCli.Interrupt do
 
   def handle_call({:discard_failed_prepared_holder, _activation, _holder}, state),
     do: {:ok, :ok, state}
-
-  def handle_call(:retiring_holders, state) do
-    {:ok, Map.get(state, :retiring_holders, []), state}
-  end
-
-  def handle_call({:acknowledge_released_holders, released}, state) when is_list(released) do
-    released = MapSet.new(Enum.reject(released, &Process.alive?/1))
-
-    remaining =
-      state
-      |> Map.get(:retiring_holders, [])
-      |> Enum.reject(&MapSet.member?(released, &1))
-
-    {:ok, :ok, Map.put(state, :retiring_holders, remaining)}
-  end
 
   def handle_call(_request, state), do: {:ok, :ok, state}
 
