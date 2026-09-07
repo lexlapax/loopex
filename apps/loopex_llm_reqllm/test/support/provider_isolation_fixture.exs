@@ -255,10 +255,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
             catch
               _, _ -> %{setup_failed: true}
             end
-            File.write!(Path.join(root, "unlinked-http-proof"), Jason.encode!(proof))
+            File.write!(Path.join(root, "unlinked-http-proof.pending"), Jason.encode!(proof))
+            File.rename!(Path.join(root, "unlinked-http-proof.pending"), Path.join(root, "unlinked-http-proof"))
           end)
         end
-        if mode == :detached_descendant do
+        if mode in [:detached_descendant, :detached_descendant_malformed] do
           task = Task.Supervisor.async(ReqLLM.TaskSupervisor, fn ->
             receive do: (:begin -> :ok)
             owner = self()
@@ -289,6 +290,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           File.write!(Path.join(root, "detached-proof"), Jason.encode!(proof))
         end
         if mode in [:hold_before_return, :hold_before_error, :descendant] do
+          {:group_leader, local_leader} = Process.info(self(), :group_leader)
+          File.write!(Path.join(root, "pre-return-proof.pending"), Jason.encode!(%{
+            stream_server_alive: Process.alive?(self()),
+            local_group_leader: node(local_leader) == node()
+          }))
+          File.rename!(Path.join(root, "pre-return-proof.pending"), Path.join(root, "pre-return-proof"))
           if mode == :descendant do
             spawn(fn ->
               Port.open({:spawn_executable, ~c"/bin/sh"}, [
@@ -302,7 +309,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
             if ready, do: {:halt, :ready}, else: (Process.sleep(10); {:cont, nil})
           end)
         end
-        if mode == :diagnostics do
+        if mode in [:diagnostics, :diagnostics_malformed] do
           key = Enum.find_value(request.headers, fn {name, value} ->
             if String.downcase(name) in ["x-api-key", "authorization"], do: value
           end)
@@ -333,6 +340,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           :throw -> throw(:synthetic_provider_failure)
           :exit -> exit(:synthetic_provider_failure)
           :malformed_return -> {:not_a_finch_request, request.host}
+          :diagnostics_malformed -> {:not_a_finch_request, request.host}
+          :detached_descendant_malformed -> {:not_a_finch_request, request.host}
           :tagged_not_dispatched -> {:error, {:not_dispatched, "model_call_failed"}}
           _ -> %{request | scheme: :http, host: "127.0.0.1", port: #{port}, path: "/", query: nil}
         end

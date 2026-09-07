@@ -132,6 +132,58 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     Fixture.assert_gone(fixture)
   end
 
+  test "diagnostics remain refused and contained after an actual malformed dependency return" do
+    fixture = Fixture.new(:diagnostics_malformed)
+    logger_before = :logger.get_primary_config()
+
+    log =
+      capture_log(fn ->
+        assert capture_io(fn ->
+                 call = Fixture.managed(fixture)
+                 caller = call.caller
+
+                 assert_receive {:completed, ^caller,
+                                 {:error, {:dispatched_or_unknown, "model_call_failed"}}},
+                                5_000
+
+                 assert Jason.decode!(File.read!(Fixture.marker(fixture, "io-results"))) ==
+                          %{"direct" => "refused", "supervised" => "refused"}
+
+                 assert Process.alive?(call.guardian)
+                 assert Fixture.alive?(Fixture.pid(fixture))
+                 File.write!(Fixture.marker(fixture, "release-diagnostics"), "release")
+
+                 assert Fixture.eventually(fn ->
+                          Fixture.reached?(fixture, "delayed-diagnostics")
+                        end)
+
+                 Fixture.stop(call)
+               end) == ""
+
+        Logger.error("parent-after-malformed-return")
+      end)
+
+    refute log =~ "synthetic-entry-credential-canary"
+    assert log =~ "parent-after-malformed-return"
+    assert :logger.get_primary_config() == logger_before
+    assert Fixture.canaries(fixture) == 1
+    assert Fixture.count(fixture) == 0
+    Fixture.assert_gone(fixture)
+  end
+
+  test "unmanaged malformed return closes the detached real socket before returning" do
+    fixture = Fixture.new(:detached_descendant_malformed)
+    assert Fixture.complete(fixture) == {:error, {:dispatched_or_unknown, "model_call_failed"}}
+
+    assert Jason.decode!(File.read!(Fixture.marker(fixture, "detached-proof"))) ==
+             %{"session_dead" => true, "task_dead" => true, "socket_alive" => true}
+
+    assert Fixture.eventually(fn -> Fixture.probe_events(fixture) == [:connected, :closed] end)
+    Fixture.assert_gone(fixture)
+    assert Fixture.canaries(fixture) == 1
+    assert Fixture.count(fixture) == 0
+  end
+
   test "caller death closes the real transport after its dependency-owned HTTP task is unlinked" do
     fixture = Fixture.new(:unlinked_http)
     call = Fixture.managed(fixture, Fixture.request(), :unmanaged)
@@ -169,6 +221,32 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     Fixture.assert_gone(fixture)
     assert Fixture.canaries(fixture) == 1
     assert [{_request, true}] = Fixture.events(fixture)
+    refute_receive {:completed, ^caller, _result}, 0
+  end
+
+  test "caller loss before the actual request adapter returns stops pre-HTTP work" do
+    fixture = Fixture.new(:hold_before_return)
+    call = Fixture.managed(fixture, Fixture.request(), :unmanaged)
+    caller = call.caller
+    guardian = call.guardian
+
+    assert Fixture.eventually(fn -> Fixture.reached?(fixture, "pre-return-proof") end)
+
+    assert Jason.decode!(File.read!(Fixture.marker(fixture, "pre-return-proof"))) ==
+             %{"stream_server_alive" => true, "local_group_leader" => true}
+
+    assert Fixture.canaries(fixture) == 1
+    assert Fixture.count(fixture) == 0
+    assert Fixture.transport_events(fixture) == []
+    refute_receive {:completed, ^caller, _result}, 0
+
+    Process.exit(caller, :kill)
+    caller_monitor = call.caller_monitor
+    guardian_monitor = call.monitor
+    assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :killed}, 1_000
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 2_500
+    Fixture.assert_gone(fixture)
+    assert Fixture.count(fixture) == 0
     refute_receive {:completed, ^caller, _result}, 0
   end
 
