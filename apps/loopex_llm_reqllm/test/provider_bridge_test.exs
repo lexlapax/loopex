@@ -292,7 +292,28 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
     assert_receive {:registered, guardian, stop_reference}, 1_000
     assert_receive :progress_blocked, 5_000
-    assert eventually(fn -> File.regular?(Path.join(root, "terminal")) end, 5_000)
+
+    # Concept: cleanup must not depend on releasing the blocked consumer, but
+    # this success assertion starts only after the host admits the real result.
+    # Technical depth: the child's send/close marker does not fence the host's
+    # one-frame receiver. Observe the actual result queued behind the callback
+    # before requesting stop; otherwise cancellation may correctly win first.
+    assert eventually(
+             fn ->
+               {:messages, messages} = Process.info(caller, :messages)
+
+               File.regular?(Path.join(root, "terminal")) and
+                 Enum.any?(messages, fn
+                   {:provider_result, _reference, ^guardian, {:ok, %{delta_count: 10_000}}} ->
+                     true
+
+                   _other ->
+                     false
+                 end)
+             end,
+             5_000
+           )
+
     assert {:message_queue_len, pending} = Process.info(caller, :message_queue_len)
     assert pending <= 2
     stop = make_ref()
