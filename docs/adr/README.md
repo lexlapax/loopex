@@ -28,6 +28,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0016 | Configured cancellation observation | Accepted | [Decision](0016-configured-cancellation-observation.md#concept) | [Technical depth](0016-configured-cancellation-observation-technical.md#technical-depth) |
 | 0017 | Durable context and record admission budgets | Accepted | [Decision](0017-durable-context-admission-budget.md#concept) | [Technical depth](0017-durable-context-admission-budget-technical.md#technical-depth) |
 | 0018 | Provider attempt authority and recovery | Accepted | [Decision](0018-provider-attempt-authority-and-recovery.md#concept) | [Technical depth](0018-provider-attempt-authority-and-recovery-technical.md#technical-depth) |
+| 0019 | Host-owned provider protection | Proposed | [Decision](0019-host-owned-provider-protection.md#concept) | [Technical depth](0019-host-owned-provider-protection-technical.md#technical-depth) |
 | 0020 | Explicit prepared handoff | Proposed | [Decision](0020-explicit-prepared-handoff.md#concept) | [Technical depth](0020-explicit-prepared-handoff-technical.md#technical-depth) |
 | 0021 | Compacted provider-accounting provenance | Proposed | [Decision](0021-compacted-provider-accounting-provenance.md#concept) | [Technical depth](0021-compacted-provider-accounting-provenance-technical.md#technical-depth) |
 
@@ -84,14 +85,18 @@ attempt and owner-loss retry clauses it names in ADR 0010, ADR 0011, and ADR
 acceptance does not itself amend the M2 plan pair or gate, authorize dependent
 implementation, close M2, or authorize integration or release.
 
-0020 and 0021 are post-closure repair proposals, not accepted M2 prerequisites.
+0019, 0020, and 0021 are post-closure repair proposals, not accepted M2 prerequisites.
+0019 proposes a host-owned, one-invocation provider process and private companion
+build so the adapter no longer changes parent VM diagnostic machinery. Its
+explicit worker configuration and new credential-size ceiling are proposed
+compatibility changes, not existing obligations or accepted implementation.
 0020 makes the local prepared-handoff participant explicit and replaces unused
 handler replacement with atomic duplicate refusal. 0021 proposes versioned
 compact accounting evidence while preserving ADR 0018's reported-usage rule and
-explicitly refusing ambiguous legacy records. Neither changes M2's Closed state,
-locked gate, or integration authority. Number 0019 is reserved for provider
-protection; the [remaining ownership decision](../evidence/M2-ff17990-review-followup.md#provider-protection-choice)
-must be settled before that pair is proposed.
+explicitly refusing ambiguous legacy records. None changes M2's Closed state,
+locked gate, or integration authority. The
+[repair follow-up](../evidence/M2-ff17990-review-followup.md#provider-protection-choice)
+records the authorized proposal directions and outstanding acceptance/evidence.
 
 0004 and 0005 are both parked. They designed correction paths for a defect
 found in an accepted plan, then the defect that prompted them turned out to be

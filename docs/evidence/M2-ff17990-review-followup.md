@@ -23,14 +23,15 @@ its accepted baseline nor authorizes integration, publication, or a version tag.
 
 | Decision | Recommended direction | Alternative and consequence |
 | --- | --- | --- |
-| Provider credentials and diagnostics | Make protection explicitly host-owned. Adapter application startup must not modify the host logger or shared ReqLLM process group leaders. The reference composition selects protection explicitly; failed protection refuses provider admission and has a tested recovery path. Same-VM ReqLLM users share the host's chosen diagnostic policy. | A separate provider process isolates credential-bearing ReqLLM work, diagnostics, and IO from the host VM's logging machinery. It gives a stronger embedding boundary but adds framing, startup, packaging, cancellation, and real-provider proof. A dependency change would need owned task supervision and safe diagnostics, not just a new supervisor option. |
+| Provider credentials and diagnostics | Make protection explicitly host-owned. The subsequent proposal direction selects one separate provider process per invocation, leaving parent logging and shared ReqLLM group leaders untouched. Missing protection refuses admission; replacement cannot retry an uncertain call. | Same-VM protection couples shared ReqLLM users to a diagnostic lifetime policy that still needs proof. Process isolation adds framing, startup, companion build/configuration, cancellation, and real-provider evidence. A dependency change would need owned task supervision and safe diagnostics, not just a new supervisor option. |
 | Prepared recovery handoff | Make the lifetime participant explicit on the public transfer boundary, retaining the ordinary two-argument call. Remove unused dynamic handler replacement and refuse duplicate initial installation atomically. | Ordinary transfer with a CLI-only guard is smaller, but cannot independently observe idle coordinator death through today's facade. That option must explicitly narrow immediate dependent-holder cleanup. Keeping replacement retains a state machine with no command caller and requires bounded, behaviorally proved draining. |
 | Compacted provider accounting | Preserve ADR 0018's distinction. Malformed or pre-validation unreadable replies use estimated remaining allowance. A validated reply compacted only because its settlement cannot fit preserves reported usage. Introduce versioned retained provenance so replay can validate which case occurred and the exact retained usage. | Estimating every unreadable result is smaller but supersedes ADR 0018 combination 5 and loses known reported figures. Retaining today's permissive validator leaves the accounting claim without retained provenance. |
 
-On 2026-09-06 the maintainer approved these three recommended directions for
-preparing decision proposals. That confirmation does not accept an ADR, extend
-override 21, or authorize integration or publication. The contracts below
-remain subject to exact-candidate review and explicit acceptance.
+On 2026-09-06 the maintainer approved the initial host-owned protection,
+explicit handoff, and provenance directions for preparing decision proposals.
+The later provider-process selection is recorded below. Neither confirmation
+accepts an ADR, extends override 21, or authorizes integration or publication.
+The contracts below remain subject to exact-candidate review and explicit acceptance.
 
 These are approved proposal directions, not accepted architecture decisions.
 Their exact contracts, compatibility, recovery, and rollback need proposals before
@@ -50,16 +51,17 @@ compatibility inventory, conformance tests, and exact-SHA review updated.
 Changing an accepted ADR or locked gate, if the selected option requires it,
 must use its governed transaction; this evidence note changes neither.
 
-The concrete proposals are [ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept)
-and [ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept).
-Both remain Proposed with empty governance rows. ADR 0021 makes one operator
+The concrete proposals are [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept),
+[ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept), and
+[ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept).
+All remain Proposed with empty governance rows. ADR 0021 makes one operator
 cost explicit for acceptance review: an old unreadable-plus-reported settlement
 has no recoverable usage provenance, so the new reader refuses that session
 rather than rewriting accounting. These proposals supply no executed conformance
 claim. No product, accepted ADR, plan, gate, or lifecycle bytes move with them.
 
 <a id="provider-protection-choice"></a>
-### Provider protection: one additional ownership choice
+### Provider protection: selected proposal direction
 
 Host ownership alone did not settle diagnostic lifetime. The pinned ReqLLM
 implementation starts streaming work under a shared task supervisor and emits
@@ -90,6 +92,26 @@ added without silently changing the lock. The two other proposals can progress
 independently, but final integration evidence waits for provider protection.
 The remaining effort is at least a proposal/review round and an implementation/
 evidence round; no calendar completion or clean outcome is claimed in advance.
+
+On 2026-09-07 the maintainer answered "Go" to developing the separate-provider-
+process proposal. This authorizes drafting ADR 0019, not accepting its exact
+contracts or implementing them. The resulting pair selects one non-distributed
+provider BEAM per invocation, a private companion escript in the existing
+adapter application, and explicit host launch paths. It introduces a proposed
+65,536-byte credential limit for private post-bootstrap handoff; the current
+adapter has no such product ceiling, and the harness's limit is not its basis.
+No key enters the launch environment. The Model callback, Core permit,
+accounting authority, and application count remain unchanged by the proposal.
+The pair also makes direct callers migrate to an options-taking helper, gives
+standalone calls an explicit cleanup period, and keeps guard control on a pipe
+separate from the single-use local data socket. These are proposed contracts,
+not silently completed repairs.
+
+The companion's startup and cleanup, faithful bounded reply transport, actual
+credential containment, and packaged floor/current behavior are first-implementation
+evidence obligations, not properties this documentation pass has executed.
+Internal source review informs the proposal; independent exact-SHA acceptance
+review and maintainer disposition remain outstanding for all three ADRs.
 
 ## Technical depth
 
@@ -138,13 +160,14 @@ onto changed bytes.
 ### Completion order
 
 Current checkpoint: the guardian repair is committed at
-`6fab2f8c117b9618c204ef87324a9c64e21c9fe5`. ADRs 0020 and 0021 are Proposed;
-0019 is reserved pending the provider-protection choice above. Dependent
+`6fab2f8c117b9618c204ef87324a9c64e21c9fe5`. ADRs 0019, 0020, and 0021 are Proposed;
+their proposal directions are recorded above, not accepted. Dependent
 architecture implementation and final source-bound evidence have not begun.
 
 1. Repair the orphaned guardian and test active-call, post-result, and
    descendant-cleanup owner loss.
-2. Settle the three directions above and accept the required ADR proposals.
+2. Independently review the three ADR proposals at their exact candidate and
+   obtain explicit maintainer acceptance before dependent implementation.
 3. Implement the agreed boundaries, installer-lifetime consistency, local-PID
    refusal, and behavioral test replacements.
 4. Run clause-based mutants in disposable clones and the relevant conformance
