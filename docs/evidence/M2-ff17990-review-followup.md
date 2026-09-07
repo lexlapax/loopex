@@ -172,10 +172,10 @@ register, accepted gates, and historical dispositions remain unchanged.
 | --- | --- | --- |
 | Record ADR acceptance | Complete; integrator | Exact-diff independent transition review clear; status and commit-message checks passed |
 | ADR 0019 provider isolation | Actual worker entry joined; thirteen child-process cases passed; isolated build-output fix joined at `49d5d5a`; legacy-test migration remains denied by execution approval | Preserve the old corpus's surviving guarantees through the authorized migration, then prove paired CLI build on floor/current and live credential/lifecycle behavior |
-| ADR 0020 explicit handoff | `fd9f269` joined; 112 CLI/handoff cases and 30 separate Core cases passed in its worker | Joined full suite and independent clause-derived mutation evidence; all thirteen locked prepared-recovery names preserved |
+| ADR 0020 explicit handoff | `fd9f269` joined; 112 CLI/handoff cases and 30 separate Core cases passed in its worker; joined 56-case prepared corpus passes with both independent detectors | Joined full suite; all thirteen locked prepared-recovery names preserved |
 | ADR 0021 accounting provenance | 74 accounting/protocol cases pass with the new lifecycle regressions; genuine old-reader control/refusal proved as described below | Joined full suite, decisive mutation qualification, and final source-bound evidence |
 | Rejoin and conformance | Source rejoined and force compilation warning-free; full conformance pending | Preserve locked names/behavior and byte-bound files; compile and tests serial across clones |
-| Clause-derived mutant hunt | Accounting hunt found two focused-corpus survivors and supplied decisive detectors; handoff hunt is running | Current claims and corpus, no author diff/history; qualify survivors and repair evidence gaps; independent provider hunt remains |
+| Clause-derived mutant hunt | Accounting and handoff hunts each found two focused-corpus survivors and supplied decisive detectors; independent provider lifecycle hunt is preparing | Current claims and corpus, no author diff/history; qualify survivors and repair evidence gaps |
 | Final source and live evidence | Pending; integrator | Clean source `S`; full serial checks, literal M2 gate, actual provider/build identity and account verification |
 | Release-review handoff | Pending; independent reviewer | Evidence-only child `E` names final `S` and actual repair range; push checkpoints; no integration or publication inferred |
 
@@ -476,3 +476,27 @@ Before committing the repair, serial repository checks also passed:
 `MIX_ENV=test mix compile --force --warnings-as-errors`,
 `mix loopex.docs_check` (611 covered entries), and `mix loopex.status`.
 These checks do not stand in for the still-outstanding final gate and review.
+
+### Explicit-handoff clause hunt — 2026-09-07
+
+A fresh independent actor read ADR 0020 and the current handoff implementation,
+not its author diff or history, at `f4a2d5b3ee0ff4fd7bc2eb588e5b66e62bd546b2`.
+Two minimal mutations each passed the original 54-case prepared-recovery corpus
+with seed `3107`, whole-repository formatting, and forced warnings-as-errors
+compilation on Elixir 1.20.3 / OTP 29.0.5. Neither is a whole-suite-qualified
+survivor, because the provider-test migration still prevents that qualification.
+
+| Deliberate fault | Independent behavioral detector |
+| --- | --- |
+| Remove the committed-but-unresolved participant-loss abandonment | Keep the original preparer alive and do not abandon on its behalf. After participant loss returns unresolved, that same process presents the capability through the public activation API. Unchanged production refuses with `resume_activation_abandoned`; the mutant activates and returns success. |
+| Replace the exact participant-PID match on a verdict acknowledgement with a PID-shape check | Retain the genuine pending handoff, then send wrong-participant and wrong-holder acknowledgements with the exact nonce, handoff and commit references. A following system request from the same sender proves processing. Unchanged production preserves the pending state until the actual participant acknowledges; the mutant commits the wrong participant's acknowledgement. |
+
+Both separate detector cases passed on unchanged production and failed their
+respective mutations. The hunt restored all production bytes, confirmed their
+source hash, and left no executing test VM. The two detector bodies are added to
+`prepared_recovery_contract_test.exs` without changing any existing selector,
+minimum, gate or production byte. The joined prepared-recovery corpus passes all
+56 cases in 25.0 seconds with seed `3107` and warnings-as-errors. Its first format
+check caught a detector-only line wrap after renaming the probe message; that
+was formatted before testing. The original implementation already honors both
+requirements.

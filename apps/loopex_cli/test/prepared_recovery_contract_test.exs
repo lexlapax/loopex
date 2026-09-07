@@ -28,6 +28,136 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     :ok
   end
 
+  test "unresolved participant loss permanently fences a surviving original preparer" do
+    fixture = recovered_fixture("unresolved-live-preparer", :admitted)
+
+    {:ok, {:prepared, activation}} =
+      Loopex.prepare_resume_known_session(
+        fixture.state_root,
+        fixture.runtime,
+        fixture.session_id,
+        "unresolved-live-preparer"
+      )
+
+    parent = self()
+
+    preparer =
+      spawn(fn ->
+        receive do
+          {:handoff, holder, guard, nonce} ->
+            answer = Loopex.transfer_resume(activation, holder, {guard, nonce})
+            send(parent, {:handoff_probe_answer, self(), answer})
+            explicit_holder(activation)
+        end
+      end)
+
+    assert :ok = Loopex.transfer_resume(activation, preparer)
+
+    {guard, holder, nonce} =
+      LoopexCli.PreparedParticipantFixture.start(
+        preparer,
+        self(),
+        fn -> explicit_holder(activation) end,
+        :hold_ack
+      )
+
+    guard_monitor = Process.monitor(guard)
+    holder_monitor = Process.monitor(holder)
+    coordinator = coordinator_of(fixture.runtime)
+
+    try do
+      send(preparer, {:handoff, holder, guard, nonce})
+      assert_receive {:participant_linearized, ^guard}, 1_000
+
+      assert %{prepared_transfer: %{verdict: :committed}} = :sys.get_state(coordinator)
+      Process.exit(guard, :kill)
+      assert_receive {:DOWN, ^guard_monitor, :process, ^guard, :killed}, 1_000
+      assert_receive {:DOWN, ^holder_monitor, :process, ^holder, :killed}, 1_000
+
+      assert_receive {:handoff_probe_answer, ^preparer,
+                      {:unresolved, :resume_handoff_unresolved}},
+                     1_000
+
+      assert Process.alive?(preparer)
+
+      # The original holder stays alive and has not abandoned. Only the loss
+      # path's own fence can prevent this public presentation from starting work.
+      assert {:error, :resume_activation_abandoned} = ask_explicit_holder(preparer, :activate)
+      assert Loopex.AgentLoopTestModel.dispatched(fixture.model) == []
+    after
+      for process <- [preparer, guard, holder],
+          Process.alive?(process),
+          do: Process.exit(process, :kill)
+    end
+  end
+
+  test "mismatched participant and holder acknowledgements cannot record a handoff" do
+    fixture = recovered_fixture("ack-role-identity", :idle)
+
+    {:ok, {:prepared, activation}} =
+      Loopex.prepare_resume_known_session(
+        fixture.state_root,
+        fixture.runtime,
+        fixture.session_id,
+        "ack-role-identity"
+      )
+
+    parent = self()
+
+    preparer =
+      spawn(fn ->
+        receive do
+          {:handoff, holder, guard, nonce} ->
+            answer = Loopex.transfer_resume(activation, holder, {guard, nonce})
+            send(parent, {:handoff_probe_answer, self(), answer})
+            explicit_holder(activation)
+        end
+      end)
+
+    assert :ok = Loopex.transfer_resume(activation, preparer)
+
+    {guard, holder, nonce} =
+      LoopexCli.PreparedParticipantFixture.start(
+        preparer,
+        self(),
+        fn -> explicit_holder(activation) end,
+        :hold_ack
+      )
+
+    coordinator = coordinator_of(fixture.runtime)
+
+    try do
+      send(preparer, {:handoff, holder, guard, nonce})
+      assert_receive {:participant_linearized, ^guard}, 1_000
+      before_ack = :sys.get_state(coordinator)
+      pending = before_ack.prepared_transfer
+      assert %{verdict: :committed} = pending
+
+      for {ack_guard, ack_holder} <- [{self(), holder}, {guard, self()}] do
+        send(
+          coordinator,
+          {:loopex_prepared_owner_verdict_ack, ack_guard, ack_holder, nonce, pending.handoff,
+           pending.commit, :committed}
+        )
+
+        # The system request follows the mismatched message from the same
+        # sender, proving it was consumed before this state was observed.
+        observed = :sys.get_state(coordinator)
+        assert observed.prepared_transfer == pending
+        assert observed.prepared == before_ack.prepared
+      end
+
+      send(guard, :acknowledge)
+      assert_receive {:handoff_probe_answer, ^preparer, :ok}, 1_000
+      assert %{holder: ^holder, guard: ^guard} = :sys.get_state(coordinator).prepared
+      assert :ok = ask_explicit_holder(holder, :abandon)
+    after
+      for process <- [preparer, guard, holder],
+          Process.alive?(process),
+          do: Process.exit(process, :kill)
+    end
+  end
+
   test "explicit handoff validates local distinct roles while ordinary transfer ignores ambient markers" do
     fixture = recovered_fixture("explicit-roles", :idle)
 
