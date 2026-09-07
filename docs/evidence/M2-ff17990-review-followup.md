@@ -171,9 +171,9 @@ register, accepted gates, and historical dispositions remain unchanged.
 | Work item | State and owner | Completion requirement |
 | --- | --- | --- |
 | Record ADR acceptance | Complete; integrator | Exact-diff independent transition review clear; status and commit-message checks passed |
-| ADR 0019 provider isolation | Joined isolated-provider corpus passes 49 cases; current/floor paired package startup and whole-parent-VM loss proved at `faa340f`; approved legacy-contract migration passes 14 cases | Complete remaining legacy tests/helpers; finish actual-child, concurrency and cleanup-boundary coverage, live credential/lifecycle behavior and final source evidence |
+| ADR 0019 provider isolation | Joined provider application passes 132 cases with one real-provider exclusion, including the approved legacy migrations; current/floor paired package startup and whole-parent-VM loss proved at `faa340f`; cold-build helpers joined through `893cebf` | Finish actual-child backpressure observations, then joined whole-suite and live final-source evidence |
 | ADR 0020 explicit handoff | `fd9f269` joined; 112 CLI/handoff cases and 30 separate Core cases passed in its worker; joined 56-case prepared corpus passes with both independent detectors | Joined full suite; all thirteen locked prepared-recovery names preserved |
-| ADR 0021 accounting provenance | 74 accounting/protocol cases pass with the new lifecycle regressions; genuine old-reader control/refusal proved as described below | Joined full suite, decisive mutation qualification, and final source-bound evidence |
+| ADR 0021 accounting provenance | 74 accounting/protocol cases pass with the new lifecycle regressions; genuine old-reader control/refusal and two actual child-provider-to-Core accounting/rendering cases pass as described below | Joined full suite, decisive mutation qualification, and final source-bound evidence |
 | Rejoin and conformance | Source rejoined and force compilation warning-free; full conformance pending | Preserve locked names/behavior and byte-bound files; compile and tests serial across clones |
 | Clause-derived mutant hunt | Accounting, handoff and provider hunts each found two focused-corpus survivors; their six behavioral detectors now pass | Qualify survivors against a green whole suite and audit the remaining cross-boundary obligations; these focused hunts are not exhaustive clearance |
 | Final source and live evidence | Pending; integrator | Clean source `S`; full serial checks, literal M2 gate, actual provider/build identity and account verification |
@@ -187,9 +187,9 @@ The earlier public-overload and socket-write execution denials were resolved by
 the explicit confirmation below. The maintainer has also explicitly authorized
 the test migrations, as recorded below. The independently preservation-reviewed
 provider-contract migration subsequently received execution approval and passed
-all fourteen cases. The remaining legacy files and cold-build helpers are still
-in implementation; neither approval nor one passing file proves that migration
-complete.
+all fourteen cases. The remaining legacy files and cold-build helpers have now
+joined, and the complete provider application passes as recorded below. That
+application result does not substitute for the joined eight-application suite.
 
 ### Implementation checkpoint on 2026-09-07
 
@@ -663,3 +663,117 @@ its exact existing selector passed (one case, 1.2 seconds). These are current
 toolchain, credential-free working-tree results. The new observations do not
 simulate a power failure, exercise the accepted path-race limitation, or claim
 floor/whole-suite verification not yet run.
+
+The three-file cold-provider fixture migration is joined through `893cebf`.
+Its final independently owned source, `6a806548a7decb0b5283692d30c1fe3d535c24bb`,
+passed formatting, automatic-root cleanup on missing offline input, a fresh
+ordinary Mix build (4,768 ms, verified reuse 221 ms), and a fresh standalone
+build without a Mix project stack (4,485 ms, reuse 239 ms). Both manifests bound
+that exact source. The unchanged reference-client corpus passed 18 cases with
+two real-provider exclusions, seed `3107`, in 3.6 seconds. No owned process
+remained. Earlier first-image environment and closed-stdin observations passed
+at `41f10aa`; they are not re-labelled as runs at the cleanup child. The helper
+copies admitted offline inputs into the caller's owned root and invokes the
+actual companion build; it does not replace a provider call. No live call or
+joined whole-suite result is implied by these fixture checks.
+
+The supplemental CLI accounting file exercises a real protected worker and
+loopback HTTP response through the adapter, Core, durable replay and terminal
+renderer. An overlarge raw reply must retain explicit `none` and charge the
+remaining 256-token allowance as estimated. A raw-admissible tool reply whose
+full settlement exceeds depth 12 must instead retain the exact compaction
+provenance and reported usage 37 + 11; it dispatches no discarded tool. Both
+cases require one observed authenticated POST, exact durable accounting, worker
+cleanup, and absence of private provenance fields from public events, traced
+coordinator diagnostics, conversation, stdout and stderr.
+
+Those two working-tree cases passed in 3.4 seconds, seed `3107`, with
+warnings-as-errors after joining HTTP-body support at `41b3691`. The initial
+observer used a string `kind` instead of the Store record's atom key and
+captured stdout alone while failures render on stderr; that setup failed and
+was corrected before the passing result. No production byte changed to satisfy
+either case. This is synthetic-transport boundary evidence, not live-provider,
+floor, final-source, or full-suite evidence. The original credential-plane
+corpus remains untouched while its separately preserved draft is verified.
+
+The subsequent test-honesty read identified a label-only privacy assertion:
+removing the provenance map's `kind` could leave its other fields undetected.
+The cases now require no diagnostic for these two ordinary failed runs and also
+exclude the provenance members from the observed planes. The stronger pair
+passed in 3.6 seconds. This integrated test does not independently locate the
+raw-refusal guard: Worker and Core both perform admission. Removing only one
+guard is not a proved survivor or kill here; do not credit the test as a
+mutation of that specific site.
+
+### Credential corpus migration preservation
+
+The independently reviewed draft was subsequently applied through the normal
+execution-approval path. Its 24 cases first passed separately in 54.4 seconds,
+seed `3107`. The original SHA-256 was
+`ec42519c38b146a23ed242682fbf2525da04185a45450c55897bbb4cc14d2a0a`;
+the applied draft was
+`1cf3990bb1d7b4b5087d7de4b224c5cbf124652a8dee7f1dc5cf96724987db75`.
+No locked selector, minimum, real-provider tag or accepted artifact changed.
+The original explicit-value scrubbing tests remain separate and unchanged.
+
+The map below retains the original local case names; C01–C24 are adjacent
+markers in the new corpus. Existing describe prefixes remain. Names asserting
+retired registry or redaction behavior are replaced with truthful operational
+names, not preserved as false compatibility claims.
+
+| ID | Original local case name | Surviving observation |
+| --- | --- | --- |
+| C01 | `a progress function that throws ends the drain as a bounded interruption` | Same category and binary bound, fixed safe failure detail |
+| C02 | `a progress function that exits ends the drain as a bounded interruption` | Separate exit path with the same bound |
+| C03 | `a provider error echoing the key is substituted before it is returned` | Fixed failure independent of ambient-key rotation/removal |
+| C04 | `the credential registry is supervised and an inactive restart recovers` | Actual parent supervisor restart, independent child and usable host logs/group leaders |
+| C05 | `an inactive credential filter never waits on the registry` | Host logging succeeds while actual provider bootstrap is held |
+| C06 | `the credential registry protocol never returns active credentials` | Actual guardian traffic through cleanup, with an acknowledged trace-delivery barrier |
+| C07 | `credential generations reject stale events and retain overlapping leases` | Wrong control cannot stop another retained invocation |
+| C08 | `metadata redaction replaces every occurrence in one binary` | Repeated key in actual child metadata remains private |
+| C09 | `nested metadata map keys are redacted` | A credential used as a nested metadata key remains private |
+| C10 | `one event redacts every distinct overlapping live credential` | Two concurrently live synthetic keys in one actual child event |
+| C11 | `owner loss retains its credential until the lease is explicitly released` | Abrupt callback loss does not release a different live retainer |
+| C12 | `missing activity state stops a logger event` | Actual protected sink loss, exact killed witness and contained failure |
+| C13 | `registry loss with an active lease poisons logging and provider admission` | Failed child cannot poison sibling work or host logging |
+| C14 | `post-transfer filter conflict refuses credential acquisition` | Actual invalid bootstrap refuses disclosure and dispatch |
+| C15 | `a transfer timeout is cancelled when the delayed capsule reaches the registry` | Expired delayed entry cannot later disclose or relaunch |
+| C16 | `provider IO isolation restores only after the last credential is released` | Cleaning one child cannot release the other's direct/supervised IO protection |
+| C17 | `a transport raise after environment rotation is redacted by the real logger pipeline` | Actual request-key-bearing raise after child environment rotation |
+| C18 | `ordinary and split logger messages redact every active credential` | Actual ordinary and split child Logger inputs remain private |
+| C19 | `all Logger message forms and metadata use the active credential registry` | Actual string/chardata, format/args and report/metadata inputs |
+| C20 | `a provider request adapter that throws cannot put the credential in a stream-server crash report` | Actual throw, StreamServer termination and bounded failure |
+| C21 | `a provider request adapter that exits cannot put the credential in a stream-server crash report` | Separately executed exit and termination path |
+| C22 | `the crash-report filter retains diagnostics and redacts the event's own credential` | Actual report containing its own request credential remains private |
+| C23 | `the filter redacts an actual stream-server termination event` | Exact actual StreamServer and abnormal entry death, not a fabricated report |
+| C24 | `a conflicting credential filter refuses before provider transport` | Unrelated host filter remains unchanged and has no isolated-provider admission authority |
+
+ADR 0019 expressly retires five mechanisms/representations: parent-global
+filter and group-leader ownership; host-visible rewritten raw diagnostics;
+registry/ETS credential transfer; callback-owned rather than retaining-owner
+lifetime; and node-global poisoned admission/logging. The operational
+guarantees above are not waived. In particular C13/C24 now assert independence,
+not the opposite historical behavior.
+
+The initial draft run passed 20 of 24 cases but failed four fault witnesses.
+Those failures exposed observer teardown, not evidence of successful
+containment. The final fault fixtures monitor the real worker entry without
+altering its production links, install observers before explicit fault release,
+and require exact sink/StreamServer and abnormal worker death within the
+original remaining request deadline. A suspended guardian is resumed in
+`after`; no replacement result or cleanup acknowledgement is supplied. The
+observer exports bounded booleans, never the raw child exit reason it observes.
+The final preservation review and successful draft execution are distinct
+evidence; neither supplies independent release acceptance.
+
+The joined provider application then passed 132 cases with one real-provider
+exclusion, seed `3107`, in 129.8 seconds; the ordinary application-level
+`mix test --seed 3107 --warnings-as-errors` command exited 0. Credentials were
+unset. The preceding explicit-directory run had also passed 132 cases, but
+exited 1 because current Mix warned about the two new `.exs` support modules.
+That earlier execution is not recorded as green. The application now names
+exactly those two explicitly required helpers in `test_ignore_filters`; no
+`*_test.exs`, case, selector, tag, or test policy is excluded by this repair,
+and warnings-as-errors remains enabled. The passing result includes the applied
+credential migration, the real-entry cleanup-expiry case, and the pre-existing
+retainer-death cases. It is neither a live-provider nor a whole-suite result.
