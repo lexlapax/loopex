@@ -859,3 +859,45 @@ old read-before-spent ordering (2.5 seconds) and passes after the two checks are
 reordered (2.3 seconds). The other ownership, position, worker and deadline
 checks remain in place. These focused greens do not substitute for the next
 clean whole-suite and gate run.
+
+### Joined medium repairs and provider backpressure
+
+The safe holder-domain repair joined at `8336403` with ordinary local-holder
+preservation coverage. The two independent caller observation ceilings were
+removed at `950fb08`. Its two controlled public `Local.execute` cases first
+failed at the original 10/15-second `GenServer.call` timeouts (25.1 seconds,
+seed `3107`), then both passed in 25.1 seconds after the repair. The separate
+ordinary executor corpus passed 29 cases in 18.9 seconds. Formatting and
+warnings-as-errors compilation passed in the owning clone. Actual job and
+cleanup authority bounds did not change; the tests do not reproduce a slow
+filesystem or promise a response from an indefinitely stalled host kernel.
+
+Provider backpressure checkpoints joined at `e5bf3cd` and `b4968ce`. The actual
+worker first fills its driver buffer, then its real writer blocks, while the
+ReqLLM producer completes 513 deltas and the full 33,280-byte reply. The test
+requires one pending delta and notification plus the independent terminal;
+after releasing the receiver, the complete reply and producer count survive.
+Replacing the slot's insert-once operation with replacement made the assertion
+observe 511 queued notifications rather than one. Restoring exact production
+bytes restored the green baseline; this is a focused regression demonstration,
+not a whole-suite survivor claim.
+
+The three-case file also proves a committed deadline cleans up while the writer
+is blocked, and channel destruction after an admitted delta cannot turn the
+queued full reply into a successful short reply. All three passed in 13.2
+seconds with seed `3107`, formatting and warnings-as-errors compilation. Stop
+requests use the already captured absolute cleanup/observation deadlines; no
+fresh post-result allowance or fabricated protocol reply supplies the proof.
+The channel-loss case does not claim deliberate byte truncation of a terminal
+already on the wire. These are real-worker, synthetic-HTTP observations, not
+live-provider or self-contained-package evidence.
+
+The restored-report self-audit additionally identified two narrower lifetime
+schedules needing positive witnesses: retainer death during credential transfer
+and after OS cleanup actually begins. Existing tests covered deadline during
+credential transfer and terminal-before-retainer ordering, respectively, not
+those exact schedules. Supplementary cases are being prepared; they are not
+counted as passing evidence here. Provider-specific failed-process-inspection
+and final-source required-platform qualification also remain explicit evidence
+work. The local Docker runtime is installed but was not running at inspection;
+that read-only check is unavailable Linux execution evidence, not a Linux pass.

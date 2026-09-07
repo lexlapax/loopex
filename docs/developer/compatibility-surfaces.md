@@ -210,6 +210,13 @@ permit. The holder liveness observation and a subsequent death are not one
 atomic operation: no reservation becomes a permit after the relevant loss is
 observed, not a promise that a later death is impossible.
 
+Reserve and permit callers wait for that serialized decision or server exit;
+they do not impose separate 10/15-second observation ceilings that can expire
+while admission continues. This does not widen the job's effect deadline or
+convert missing replies into authority. A stalled host filesystem can still
+prevent the server answering; this wait is not a promise of bounded host-disk
+latency.
+
 Additional concrete error families include
 `{:ledger_unavailable, :operation_owner_unavailable}`, `:effect_settling`,
 `{:receipt_not_retained, reason}`, `{:receipt_read_failed, reason}`,
