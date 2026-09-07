@@ -269,6 +269,21 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
     assert_receive {:DOWN, ^monitor, :process, ^producer, _reason}, 1_000
   end
 
+  test "a timeout beyond the VM timer domain receives a complete frame" do
+    {sender, receiver} = socket_pair()
+    payload = terminal(%{"text" => "complete"})
+
+    producer =
+      spawn_link(fn ->
+        Process.sleep(20)
+        :ok = ProviderCodec.send(sender, :terminal, payload)
+      end)
+
+    assert {:ok, :terminal, ^payload} = ProviderCodec.recv(receiver, Integer.pow(2, 80))
+    monitor = Process.monitor(producer)
+    assert_receive {:DOWN, ^monitor, :process, ^producer, _reason}, 1_000
+  end
+
   defp identity_fields, do: %{"nonce" => @nonce, "staged_request_digest" => @digest}
   defp terminal(reply), do: Map.merge(identity_fields(), %{"status" => "reply", "reply" => reply})
 

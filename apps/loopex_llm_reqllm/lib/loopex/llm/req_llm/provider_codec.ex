@@ -45,6 +45,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodec do
   @semantic_bytes 65_536
   @envelope_bytes 4_096
   @fragment_bytes 4_096
+  @receive_slice_ms 3_600_000
   @max_depth 13
   @max_members 1_024
   @max_key_bytes 256
@@ -158,12 +159,16 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodec do
     else
       amount = min(remaining, @fragment_bytes)
 
-      case :gen_tcp.recv(socket, amount, timeout) do
+      # Concept: a distant declared deadline remains usable by the socket.
+      # Technical depth: each VM timer is capped independently of the caller's
+      # integer deadline. A slice timeout retains the accumulated bytes and
+      # the original deadline; the next iteration spends only what remains.
+      case :gen_tcp.recv(socket, amount, min(timeout, @receive_slice_ms)) do
         {:ok, bytes} when is_binary(bytes) and byte_size(bytes) == amount ->
           receive_bytes(socket, remaining - amount, deadline, [bytes | chunks])
 
         {:error, :timeout} ->
-          {:error, :timeout}
+          receive_bytes(socket, remaining, deadline, chunks)
 
         {:error, :closed} ->
           {:error, :closed}
