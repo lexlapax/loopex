@@ -2654,11 +2654,20 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # other spawn exists.
     source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
 
-    spawns =
-      source
-      |> String.split(~r/^\s*Port\.open\(\s*$/m)
-      |> Enum.drop(1)
-      |> Enum.map(&(&1 |> String.split(~r/^\s*\)\s*$/m) |> hd()))
+    # Count syntax nodes, not line layout: an extra one-line Port.open must not
+    # disappear from this structural inventory. The primitive spelling is
+    # counted too, so replacing the wrapper cannot bypass the same inventory.
+    {_source_ast, spawns} =
+      Macro.prewalk(Code.string_to_quoted!(source), [], fn
+        {{:., _, [{:__aliases__, _, [:Port]}, :open]}, _, [_, _]} = call, found ->
+          {call, [call | found]}
+
+        {{:., _, [:erlang, :open_port]}, _, [_, _]} = call, found ->
+          {call, [call | found]}
+
+        node, found ->
+          {node, found}
+      end)
 
     assert length(spawns) == 1,
            "this executor now opens #{length(spawns)} ports; every one of them is an image the " <>
@@ -2671,7 +2680,10 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "the job launcher no longer derives the option list whose environment the " <>
              "production-path probe observes"
 
-    assert Enum.count(spawns, &String.contains?(&1, "++ options")) == 1,
+    assert Enum.count(spawns, fn
+             {{:., _, _}, _, [_program, {:++, _, [_arguments, {:options, _, _}]}]} -> true
+             _other -> false
+           end) == 1,
            "the single launch port no longer receives the production option list"
 
     assert source =~

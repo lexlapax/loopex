@@ -171,7 +171,7 @@ register, accepted gates, and historical dispositions remain unchanged.
 | Work item | State and owner | Completion requirement |
 | --- | --- | --- |
 | Record ADR acceptance | Complete; integrator | Exact-diff independent transition review clear; status and commit-message checks passed |
-| ADR 0019 provider isolation | Joined isolated-provider corpus passes 49 cases; current/floor paired package startup and whole-parent-VM loss proved at `faa340f`; legacy-test migration remains denied by execution approval | Preserve the old corpus's surviving guarantees through the authorized migration; finish actual-child, concurrency and cleanup-boundary coverage, live credential/lifecycle behavior and final source evidence |
+| ADR 0019 provider isolation | Joined isolated-provider corpus passes 49 cases; current/floor paired package startup and whole-parent-VM loss proved at `faa340f`; approved legacy-contract migration passes 14 cases | Complete remaining legacy tests/helpers; finish actual-child, concurrency and cleanup-boundary coverage, live credential/lifecycle behavior and final source evidence |
 | ADR 0020 explicit handoff | `fd9f269` joined; 112 CLI/handoff cases and 30 separate Core cases passed in its worker; joined 56-case prepared corpus passes with both independent detectors | Joined full suite; all thirteen locked prepared-recovery names preserved |
 | ADR 0021 accounting provenance | 74 accounting/protocol cases pass with the new lifecycle regressions; genuine old-reader control/refusal proved as described below | Joined full suite, decisive mutation qualification, and final source-bound evidence |
 | Rejoin and conformance | Source rejoined and force compilation warning-free; full conformance pending | Preserve locked names/behavior and byte-bound files; compile and tests serial across clones |
@@ -185,9 +185,11 @@ execution. No in-flight process is terminated merely to checkpoint work. Clone
 paths are temporary execution state, not durable evidence or authoritative source.
 The earlier public-overload and socket-write execution denials were resolved by
 the explicit confirmation below. The maintainer has also explicitly authorized
-the test migrations, as recorded below. The stronger provider-corpus migration
-still requires execution-approval resolution; neither denial nor authorization
-is evidence that its behavioral preservation has been proved.
+the test migrations, as recorded below. The independently preservation-reviewed
+provider-contract migration subsequently received execution approval and passed
+all fourteen cases. The remaining legacy files and cold-build helpers are still
+in implementation; neither approval nor one passing file proves that migration
+complete.
 
 ### Implementation checkpoint on 2026-09-07
 
@@ -622,8 +624,11 @@ repair: the fixture records `request.method`, and cases assert the actual value.
 Independent comparison of the revised legacy-contract proposal confirmed all
 twelve original names, the same two additions and unchanged earlier assertions,
 with eleven added method assertions. The normal execution-approval path then
-permitted applying that exact proposal. Its formatting and joined execution are
-still pending; the other legacy migrations are not silently treated as complete.
+permitted applying that exact proposal. Formatting and its fourteen cases then
+passed with warnings-as-errors, seed `3107`, in 36.2 seconds. The ten post-latch
+failure modes, real socket/task cleanup, explicit IO refusal, queue ordering and
+actual method observations all executed. No test name or locked minimum was
+removed; the other legacy migrations are not silently treated as complete.
 
 Three additional bridge cases exercise a refused second connection after actual
 bootstrap, well-formed wrong nonce/build readiness before credential delivery,
@@ -632,3 +637,29 @@ cases pass in 12.4 seconds, seed `3107`, with warnings-as-errors. This is the
 bridge plus a deliberately controlled socket peer, not proof of actual child
 producer backpressure or live-provider behavior. No gate minimum or selector
 name was changed by these additions.
+
+Two additive executor observations now exercise public `Local.execute` and
+`Local.receipt` instead of inferring durability or preflight from source text.
+They bind successful file opens to exact receipt paths, observe successful file
+sync before rename and parent-directory sync afterward, and read back the public
+receipt. They also observe an actual at-limit read and require zero target
+open/read calls for an oversized input. Trace delivery uses acknowledged barriers
+for exact processes and descendants, not a quiet-mailbox delay.
+
+The isolated final two-case baseline passed with warnings-as-errors, seed `3107`.
+Deleting only receipt-file sync and adding only an eager read before preflight
+each failed its new behavioral assertion, while the corresponding existing
+locked case still passed individually. These are selective detector results,
+not whole-suite survivors: the sync deletion also produced a compiler warning.
+The initial read observer missed current OTP's `read_file/2`; the final observer
+traces both exported arities, and the eager-read mutation then failed. A temporary
+path-alias setup error was fixed before that final baseline. No production repair
+was required for these two gaps.
+
+After joining at `2f11245`, both new cases and the existing first-image case passed
+together (three cases, 1.8 seconds). The executor's universal direct-spawn
+inventory was separately strengthened from line-layout matching to syntax nodes;
+its exact existing selector passed (one case, 1.2 seconds). These are current
+toolchain, credential-free working-tree results. The new observations do not
+simulate a power failure, exercise the accepted path-race limitation, or claim
+floor/whole-suite verification not yet run.
