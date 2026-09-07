@@ -12,10 +12,18 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   # supplies literal synthetic transport configuration and a test manifest.
   # This is process conformance, never evidence of a self-contained package.
   def new(mode \\ :reply, options \\ []) do
-    root = Path.join(System.tmp_dir!(), "loopex-provider-isolation-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "loopex-provider-isolation-#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir!(root)
     {:ok, events} = Agent.start_link(fn -> [] end)
-    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}, reuseaddr: true])
+
+    {:ok, listener} =
+      :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}, reuseaddr: true])
+
     {:ok, {_address, port}} = :inet.sockname(listener)
     expected = Keyword.get(options, :credential, System.get_env(Adapter.credential_variable()))
     acceptor = spawn_link(fn -> accept_loop(listener, events, mode, expected) end)
@@ -35,10 +43,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   end
 
   def request(options \\ []) do
-    {:ok, request} = Model.request(Keyword.get(options, :model, Adapter.default_model()),
-      Keyword.get(options, :messages, [%{"role" => "user", "content" => "hello"}]),
-      sampling: %{"max_tokens" => 64},
-      deadline: System.system_time(:millisecond) + Keyword.get(options, :deadline_ms, 10_000))
+    {:ok, request} =
+      Model.request(
+        Keyword.get(options, :model, Adapter.default_model()),
+        Keyword.get(options, :messages, [%{"role" => "user", "content" => "hello"}]),
+        sampling: %{"max_tokens" => 64},
+        deadline: System.system_time(:millisecond) + Keyword.get(options, :deadline_ms, 10_000)
+      )
+
     request
   end
 
@@ -47,23 +59,42 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
   def managed(fixture, request \\ request(), retainer \\ self()) do
     observer = self()
-    {caller, caller_monitor} = spawn_monitor(fn ->
-      result = ProviderLifetime.scoped(fn guardian, stop_reference ->
-        send(observer, {:registered, self(), guardian, stop_reference})
-        {:managed, retainer, 2_000}
-      end, fn -> complete(fixture, request) end)
-      send(observer, {:completed, self(), result})
-    end)
+
+    {caller, caller_monitor} =
+      spawn_monitor(fn ->
+        result =
+          ProviderLifetime.scoped(
+            fn guardian, stop_reference ->
+              send(observer, {:registered, self(), guardian, stop_reference})
+              {:managed, retainer, 2_000}
+            end,
+            fn -> complete(fixture, request) end
+          )
+
+        send(observer, {:completed, self(), result})
+      end)
+
     assert_receive {:registered, ^caller, guardian, stop_reference}, 1_000
-    %{caller: caller, caller_monitor: caller_monitor, guardian: guardian,
-      monitor: Process.monitor(guardian), stop_reference: stop_reference}
+
+    %{
+      caller: caller,
+      caller_monitor: caller_monitor,
+      guardian: guardian,
+      monitor: Process.monitor(guardian),
+      stop_reference: stop_reference
+    }
   end
 
   def stop(call) do
     stop = make_ref()
     deadline = System.monotonic_time(:millisecond) + 2_000
-    send(call.guardian, {:loopex_provider_resource_stop, call.stop_reference, stop,
-      self(), deadline, deadline + 100})
+
+    send(
+      call.guardian,
+      {:loopex_provider_resource_stop, call.stop_reference, stop, self(), deadline,
+       deadline + 100}
+    )
+
     guardian = call.guardian
     monitor = call.monitor
     assert_receive {:loopex_provider_resource_stopped, ^stop, ^guardian}, 2_000
@@ -75,12 +106,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   def marker(fixture, name), do: Path.join(fixture.root, name)
   def reached?(fixture, name), do: File.regular?(marker(fixture, name))
   def release(fixture), do: File.write!(marker(fixture, "release"), "release")
+
   def canaries(fixture) do
     case File.read(marker(fixture, "canary")) do
       {:ok, content} -> length(String.split(content, "\n", trim: true))
       {:error, :enoent} -> 0
     end
   end
+
   def pid(fixture), do: fixture |> marker("pid") |> File.read!() |> String.to_integer()
   def namespace(fixture), do: fixture |> marker("namespace") |> File.read!()
 
@@ -102,17 +135,28 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
   defp await(fun, deadline) do
     cond do
-      fun.() -> true
-      System.monotonic_time(:millisecond) >= deadline -> false
-      true -> Process.sleep(10); await(fun, deadline)
+      fun.() ->
+        true
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        false
+
+      true ->
+        Process.sleep(10)
+        await(fun, deadline)
     end
   end
 
   defp write_worker(root, mode, port) do
-    manifest = %{"source" => "synthetic-process-fixture", "version" => "fixture",
+    manifest = %{
+      "source" => "synthetic-process-fixture",
+      "version" => "fixture",
       "dependency_lock_sha256" => String.duplicate("0", 64),
       "packaged_input_sha256" => String.duplicate("1", 64),
-      "elixir" => System.version(), "otp" => ProviderWorker.otp_version()}
+      "elixir" => System.version(),
+      "otp" => ProviderWorker.otp_version()
+    }
+
     source = """
     defmodule Loopex.LLM.ReqLLM.ProviderBuildIdentity do
       def manifest, do: #{inspect(manifest)}
@@ -170,8 +214,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     if #{inspect(mode)} == :hold_before_entry, do: Process.sleep(:infinity)
     Loopex.LLM.ReqLLM.ProviderWorker.main(Enum.map(arguments, &List.to_string/1))
     """
+
     paths = :io_lib.format(~c"~tp", [:code.get_path()]) |> IO.iodata_to_binary()
     script = Path.join(root, "worker.escript")
+
     File.write!(script, """
     #!/usr/bin/env escript
     %%! +S 2:2 +SDcpu 1 +SDio 1 +A 2
@@ -181,25 +227,36 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       'Elixir.Code':eval_string(base64:decode("#{Base.encode64(source)}"), [{arguments, Arguments}]),
       ok.
     """)
+
     {:ok, digest} = ProviderConfiguration.file_digest(script)
-    [worker_path: script, interpreter_path: Path.join(List.to_string(:code.root_dir()), "bin/escript"),
+
+    [
+      worker_path: script,
+      interpreter_path: Path.join(List.to_string(:code.root_dir()), "bin/escript"),
       worker_sha256: digest,
-      build_manifest_sha256: :crypto.hash(:sha256, :erlang.term_to_binary(manifest, [:deterministic])) |> Base.encode16(case: :lower),
-      cleanup_grace_ms: 2_000]
+      build_manifest_sha256:
+        :crypto.hash(:sha256, :erlang.term_to_binary(manifest, [:deterministic]))
+        |> Base.encode16(case: :lower),
+      cleanup_grace_ms: 2_000
+    ]
   end
 
   defp accept_loop(listener, events, mode, expected) do
     case :gen_tcp.accept(listener) do
       {:ok, socket} ->
-        handler = spawn_link(fn ->
-          receive do
-            {:socket, ^socket} -> serve(socket, events, mode, expected)
-          end
-        end)
+        handler =
+          spawn_link(fn ->
+            receive do
+              {:socket, ^socket} -> serve(socket, events, mode, expected)
+            end
+          end)
+
         :ok = :gen_tcp.controlling_process(socket, handler)
         send(handler, {:socket, socket})
         accept_loop(listener, events, mode, expected)
-      {:error, :closed} -> :ok
+
+      {:error, :closed} ->
+        :ok
     end
   end
 
@@ -207,16 +264,31 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     with {:ok, headers, body} <- read_request(socket, "") do
       authorized = is_binary(expected) and String.contains?(headers, expected)
       Agent.update(events, &[{Jason.decode!(body), authorized} | &1])
+
       case mode do
-        mode when mode in [:blocked, :timeout] -> wait_closed(socket)
-        :rate_limited -> respond(socket, "429 Too Many Requests", "application/json", "{}")
-        :http_error -> respond(socket, "500 Internal Server Error", "application/json", "{}")
-        :malformed_response -> respond(socket, "200 OK", "application/json", "{not-json")
-        :incomplete_stream -> respond(socket, "200 OK", "text/event-stream", "data: {\"type\":\"message_start\"")
-        :closed_port -> :ok
-        _ -> respond(socket, "200 OK", "text/event-stream", stream_body())
+        mode when mode in [:blocked, :timeout] ->
+          wait_closed(socket)
+
+        :rate_limited ->
+          respond(socket, "429 Too Many Requests", "application/json", "{}")
+
+        :http_error ->
+          respond(socket, "500 Internal Server Error", "application/json", "{}")
+
+        :malformed_response ->
+          respond(socket, "200 OK", "application/json", "{not-json")
+
+        :incomplete_stream ->
+          respond(socket, "200 OK", "text/event-stream", "data: {\"type\":\"message_start\"")
+
+        :closed_port ->
+          :ok
+
+        _ ->
+          respond(socket, "200 OK", "text/event-stream", stream_body())
       end
     end
+
     :gen_tcp.close(socket)
   end
 
@@ -225,6 +297,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       [headers, body] ->
         [_, length] = Regex.run(~r/content-length:\s*(\d+)/i, headers)
         read_body(socket, headers, body, String.to_integer(length))
+
       [_partial] ->
         case :gen_tcp.recv(socket, 0, 5_000) do
           {:ok, more} -> read_request(socket, bytes <> more)
@@ -235,6 +308,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
   defp read_body(_socket, headers, body, length) when byte_size(body) >= length,
     do: {:ok, headers, binary_part(body, 0, length)}
+
   defp read_body(socket, headers, body, length) do
     case :gen_tcp.recv(socket, 0, 5_000) do
       {:ok, more} -> read_body(socket, headers, body <> more, length)
@@ -249,17 +323,44 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     end
   end
 
-  defp respond(socket, status, type, body), do: :gen_tcp.send(socket,
-    "HTTP/1.1 #{status}\r\ncontent-type: #{type}\r\ncontent-length: #{byte_size(body)}\r\nrequest-id: req-fixture-001\r\nconnection: close\r\n\r\n#{body}")
+  defp respond(socket, status, type, body),
+    do:
+      :gen_tcp.send(
+        socket,
+        "HTTP/1.1 #{status}\r\ncontent-type: #{type}\r\ncontent-length: #{byte_size(body)}\r\nrequest-id: req-fixture-001\r\nconnection: close\r\n\r\n#{body}"
+      )
 
   defp stream_body do
     [
-      %{"type" => "message_start", "message" => %{"id" => "msg_fixture", "type" => "message", "role" => "assistant", "model" => "claude-haiku-4-5", "content" => [], "usage" => %{"input_tokens" => 4, "output_tokens" => 0}}},
-      %{"type" => "content_block_start", "index" => 0, "content_block" => %{"type" => "text", "text" => ""}},
-      %{"type" => "content_block_delta", "index" => 0, "delta" => %{"type" => "text_delta", "text" => "loopex"}},
+      %{
+        "type" => "message_start",
+        "message" => %{
+          "id" => "msg_fixture",
+          "type" => "message",
+          "role" => "assistant",
+          "model" => "claude-haiku-4-5",
+          "content" => [],
+          "usage" => %{"input_tokens" => 4, "output_tokens" => 0}
+        }
+      },
+      %{
+        "type" => "content_block_start",
+        "index" => 0,
+        "content_block" => %{"type" => "text", "text" => ""}
+      },
+      %{
+        "type" => "content_block_delta",
+        "index" => 0,
+        "delta" => %{"type" => "text_delta", "text" => "loopex"}
+      },
       %{"type" => "content_block_stop", "index" => 0},
-      %{"type" => "message_delta", "delta" => %{"stop_reason" => "end_turn", "stop_sequence" => nil}, "usage" => %{"output_tokens" => 2}},
+      %{
+        "type" => "message_delta",
+        "delta" => %{"stop_reason" => "end_turn", "stop_sequence" => nil},
+        "usage" => %{"output_tokens" => 2}
+      },
       %{"type" => "message_stop"}
-    ] |> Enum.map_join(fn event -> "event: #{event["type"]}\ndata: #{Jason.encode!(event)}\n\n" end)
+    ]
+    |> Enum.map_join(fn event -> "event: #{event["type"]}\ndata: #{Jason.encode!(event)}\n\n" end)
   end
 end

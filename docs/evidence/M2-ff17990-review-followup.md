@@ -160,8 +160,8 @@ onto changed bytes.
 
 ### Completion order
 
-Current checkpoint: the guardian repair is committed at
-`6fab2f8c117b9618c204ef87324a9c64e21c9fe5`; acceptance of ADRs 0019–0021 is
+Current source checkpoint: the three implementation workstreams are joined at
+`909a358fea2ad92baa56234074b7cb53e3ff34cd`. Acceptance of ADRs 0019–0021 is
 recorded at `63511ca264ef99e8b93367a9cd671165525e4d4f`. The maintainer separately
 authorized implementing these decisions and preparing release-review evidence.
 The integration branch is `codex/m2-release-repair`. `main`, M2's Closed
@@ -170,10 +170,10 @@ register, accepted gates, and historical dispositions remain unchanged.
 | Work item | State and owner | Completion requirement |
 | --- | --- | --- |
 | Record ADR acceptance | Complete; integrator | Exact-diff independent transition review clear; status and commit-message checks passed |
-| ADR 0019 provider isolation | Configuration and codec joined; guardian checkpoint separate; worker/build wiring still draft | Packaged child, explicit launch wiring, private channels, credential and lifecycle behavior; no parent diagnostic takeover |
-| ADR 0020 explicit handoff | Execution approval blocked; `codex/adr0020-implementation` remains clean at acceptance | Explicit participant protocol, initial holder monitoring, atomic duplicate refusal, no replacement/drain subsystem |
+| ADR 0019 provider isolation | Source joined, including guardian `728b4e3`, build `4045382`, and adapter entry `a1a60d9`; existing-test migration approval blocked | Actual worker-entry conformance, final paired CLI build on floor/current, live credential and lifecycle evidence; no parent diagnostic takeover |
+| ADR 0020 explicit handoff | Source and approved tests joined from `18e7b32`; one obsolete supplementary test remains unchanged after migration denial | Retest joined explicit participant protocol, initial holder monitoring, duplicate refusal, uncertainty, and ordinary `/2` compatibility after authorized fixture migration |
 | ADR 0021 accounting provenance | Joined from `c5c158909773538a3f3237a7a5651f88e62db72f`; 71 focused tests passed | Broader regression, real old-binary refusal, and independent clause-derived mutation evidence remain |
-| Rejoin and conformance | Pending; integrator | Preserve locked names/behavior and byte-bound files; compile and tests serial across clones |
+| Rejoin and conformance | Source rejoined and force compilation warning-free; full conformance pending | Preserve locked names/behavior and byte-bound files; compile and tests serial across clones |
 | Clause-derived mutant hunt | Pending; fresh independent actors | Current claims and corpus, no author diff/history; qualify survivors and repair evidence gaps |
 | Final source and live evidence | Pending; integrator | Clean source `S`; full serial checks, literal M2 gate, actual provider/build identity and account verification |
 | Release-review handoff | Pending; independent reviewer | Evidence-only child `E` names final `S` and actual repair range; push checkpoints; no integration or publication inferred |
@@ -182,11 +182,15 @@ Each writer uses its own disposable clone and branch. The integrator owns rejoin
 and the candidate SHA. A single test-lane token covers all Mix/dependency/test
 execution. No in-flight process is terminated merely to checkpoint work. Clone
 paths are temporary execution state, not durable evidence or authoritative source.
-The approval service twice rejected the ADR 0020 public overload/lifetime edit;
-that worker restored its own partial edits and stopped rather than bypassing the
-denial. This is an execution blocker, not withdrawal of recorded ADR acceptance.
+The earlier public-overload and socket-write execution denials were resolved by
+the explicit confirmation below. New test-migration denials remain unresolved;
+they are not withdrawal of recorded ADR acceptance and were not bypassed.
 
 ### Implementation checkpoint on 2026-09-07
+
+This earlier checkpoint predates the execution confirmation and source rejoin.
+Its described working-tree and branch state is historical, not the current task
+list above.
 
 The repair branch carries the accounting implementation, configuration validation
 (`f628131`), and private codec through merge `cc28caa`. These are pushed, not
@@ -252,6 +256,77 @@ committed deadline?" Both workstreams may resume within that scope. This
 confirmation does not remove the committed deadline, permit termination of
 unowned processes, change an accepted ADR or gate, or authorize integration,
 tagging, or publication. Execution success and behavior remain to be proved.
+
+### Source rejoin and test-migration stop — 2026-09-07
+
+The separate provider-process guardian and archive-bound build were joined, then
+the adapter was routed through the companion bridge and the retired parent
+Logger registry/application hook and IO sink were removed. The explicit handoff
+and its approved test changes are also joined. At source `909a358`, a serial
+credential-free `mix compile --force --warnings-as-errors` passed across all eight
+applications. Two preliminary compilations refused real join-time warnings: an
+unreachable adapter branch was removed, and the CLI's new unresolved-result
+branch became reachable when the matching handoff implementation was joined.
+Those refusals were not suppressed or presented as passing runs.
+
+The joined Core provider protocol and accounting corpora first passed 69 of 71
+cases. The two failures were an obsolete four-member private cleanup-message
+expectation and a source-inspection lookup of the resource-registration helper's
+old arity. The test now observes the added cleanup window, additionally checks
+both integer deadlines and their order, and inspects arity seven without removing
+any of its lifetime-ordering assertions. After that edit, the same two files and
+seed `530542` passed all 71 cases in 28.7 seconds. This result belongs to the
+post-rejoin test-fix worktree, not to an unchanged retry of `909a358` and not to a
+whole suite. Formatting, compiled-documentation coverage (616 covered entries),
+and commit-message checks also passed. No live credential was used, and no
+test-lane process was left running at the checkpoint.
+
+Focused worker evidence belongs to each worker's exact checkpoint, not to this
+joined source:
+
+- Guardian `728b4e3`: 15 real-process/local-escript cases passed, seed `3107`,
+  and warnings-as-errors compilation passed. Saturated-output testing exposed
+  an implicit 180-second socket-close drain; production now stops its owned
+  sender/receiver and uses abortive close. The strict correlated process-death
+  assertion was preserved, not relaxed to accept a normal exit.
+- Build `4045382`: nine focused checks passed, and a clean companion build
+  independently verified both archive inputs and the literal manifest. This
+  does not prove the final joined worker, the actual CLI alias, a copied package,
+  or the floor toolchain. Both exact floor installations were located but not
+  executed for this checkpoint.
+- Handoff `18e7b32`: final formatting and warnings-as-errors compilation passed.
+  Twelve selected cases passed earlier in that workstream; subsequent helper
+  cleanup and supplementary-test adaptations still require retesting. All
+  thirteen locked prepared-recovery names remain exact.
+- Fixture `429a4b4`: new provider-process support only, subsequently formatted by
+  the integrator. It has not been compiled as a test fixture or executed. It is
+  not package evidence.
+
+The approval service blocked migration of the supplementary test named
+`private lifetime markers fail closed while an ordinary holder transfer stays
+unchanged`, despite the accepted removal of its hidden selector. Its body and
+helper remain unchanged. Five other obsolete replacement/drain cases were
+replaced only after a claim-preserving five-case duplicate-refusal mapping was
+approved.
+
+The same service blocked the adapter-contract rewrite and the explicit-launch
+helper migrations because they alter existing protected test execution paths.
+All five original adapter test files remain untouched. The proposed migration
+keeps the exact M0/M1/M2 protected names, real-provider tags, ten classified
+post-canary modes, minima, and refusal/identity assertions; it moves observations
+from the retired same-VM credential registry to actual child entry, transport,
+group cessation, unchanged parent diagnostics, and retained cleanup ownership.
+The credential-plane replacement has not been authored. No denied patch was
+applied indirectly or split into smaller edits to bypass the refusal.
+
+Explicit permission for those test migrations is still needed. Their risk is
+losing a surviving behavior while replacing implementation-specific assertions;
+the required safeguard is a claim-by-claim mapping plus actual child-path
+execution and subsequent independent mutation checks. This is not permission to
+edit a locked gate, change a protected name or minimum, skip a required real
+provider path, or manufacture a green suite. Full-suite, final package, fresh
+clause-derived mutants, old-binary replay, live provider/account verification,
+source-bound gate, and release review remain outstanding.
 
 1. Repair the orphaned guardian and test active-call, post-result, and
    descendant-cleanup owner loss.

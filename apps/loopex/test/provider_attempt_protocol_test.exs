@@ -930,10 +930,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       assert_receive {:DOWN, ^worker_monitor, :process, _worker, :killed}, 5_000
 
       assert_receive {:trace, ^coordinator, :send,
-                      {:loopex_provider_tree_stop, _provider_reference, _stop, ^coordinator},
-                      ^guard},
+                      {:loopex_provider_tree_stop, _provider_reference, _stop, ^coordinator,
+                       cleanup}, ^guard},
                      5_000
 
+      assert map_size(cleanup) == 2
+      assert is_integer(cleanup.cooperative_deadline)
+      assert is_integer(cleanup.observation_deadline)
+      assert cleanup.observation_deadline >= cleanup.cooperative_deadline
       assert Process.alive?(callback)
 
       refute Enum.any?(
@@ -1483,7 +1487,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     await_guard = private_function_body!(ast, :await_provider_guard, 5)
     await_callback = private_function_body!(ast, :await_provider_callback, 8)
     await_callback_exit = private_function_body!(ast, :await_provider_callback_exit, 9)
-    register_resource = private_function_body!(ast, :register_provider_resource, 6)
+    register_resource = private_function_body!(ast, :register_provider_resource, 7)
     result_after_guard = private_function_body!(ast, :provider_result_after_guard_exit, 5)
     cleanup_window = private_function_body!(ast, :provider_cleanup_window, 1)
 
