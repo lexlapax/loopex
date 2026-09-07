@@ -109,23 +109,6 @@ defmodule Loopex.Executor.Local do
   # sharing one root, is capped by the job's own deadline, and never becomes
   # permission: only the holder releases the claim.
   @claim_wait_ms 5_000
-  # Concept: the call that asks for a reservation must outlive the wait the
-  # server may spend answering it.
-  #
-  # Technical depth: `handle_call({:reserve, job})` waits for the root claim for
-  # up to `@claim_wait_ms` inside the server, and `GenServer.call/2`'s default
-  # bound is that same number, so a caller expired exactly as the claim was won:
-  # the server then recorded a reservation for a caller that had already exited
-  # and no release ever arrived. The call bound is therefore the claim wait plus
-  # a margin, and the server monitors the caller besides; only the later token
-  # that wins durable admission becomes operation-owner evidence.
-  @reserve_call_ms @claim_wait_ms + 5_000
-
-  # The permit call performs the final validation and may then spend the root
-  # claim wait. Its caller bound outlives both bounded waits; if the caller still
-  # dies during durable publication, the final live-holder check withholds the
-  # effect permit and leaves the open authority unresolved rather than runnable.
-  @permit_call_ms @reserve_call_ms + 5_000
 
   # The longest a receipt lookup waits for another instance's root claim. It is a
   # fraction of the admission ceiling because `receipt/2` is a `GenServer.call`
@@ -277,7 +260,13 @@ defmodule Loopex.Executor.Local do
     progress = progress || Executor.discard_progress()
     job_id = Map.get(job, :job_id, "")
 
-    case GenServer.call(executor, {:reserve, job}, @reserve_call_ms) do
+    # Concept: admission returns the owner's actual decision to its waiting caller.
+    #
+    # Technical depth: queueing and ledger IO have no summed bound here, so an
+    # unrelated observation timeout cannot stand in for that decision. The root
+    # claim wait, job deadline, and live-owner fences still bound permission;
+    # waiting grants no extra effect authority, and server exit still ends the call.
+    case GenServer.call(executor, {:reserve, job}, :infinity) do
       {:ok, %{reservation_ref: reservation_ref} = placement} ->
         try do
           run_reserved(placement, job, grant, options, progress)
@@ -1505,11 +1494,16 @@ defmodule Loopex.Executor.Local do
     :ok
   end
 
+  # Concept: the caller observes the actual permit decision after publication.
+  #
+  # Technical depth: as with reservation, waiting does not extend the job's
+  # deadline or bypass final validation. If the holder dies during publication,
+  # the final live-holder check still withholds the effect permit.
   defp request_effect_permit(placement, job, grant) do
     GenServer.call(
       placement.executor,
       {:permit, job, grant, placement.reservation_ref},
-      @permit_call_ms
+      :infinity
     )
   end
 
