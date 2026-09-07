@@ -5,7 +5,7 @@
 
 Technical depth: [Process ownership and conformance](0019-host-owned-provider-protection-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-07
 - **Decision owner:** Maintainer
 
@@ -19,7 +19,7 @@ against the host, native code, or another process with that account's authority.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adrs-0019-0021-2026-09-07) | candidate `b7f97092f7b6d6661e66bc775fd88195b92b67a0`; concept `sha256:b743931ccc7435ad4a90973ee6b623fea2afa1133ecaf8733a10a0512605f9dc`; technical `sha256:26ea8ac60e6f4a006018afdd4ffe24308b4e2184c67e175d9cd555a268030c6f` |
 
 <a id="concept-adr-0019-context"></a>
 ## Context

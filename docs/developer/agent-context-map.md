@@ -1442,3 +1442,50 @@ the same candidate.
 **Scope of this record.** It closes `M2` and authorizes integration of the
 milestone branch to `main` by merge, preserving every bound candidate. It
 authorizes no release, tag, or publication.
+
+<a id="disposition-adrs-0019-0021-2026-09-07"></a>
+## ADRs 0019–0021 Acceptance and Repair Implementation
+
+On 2026-09-07 the maintainer explicitly accepted all three ADR pairs at candidate
+`b7f97092f7b6d6661e66bc775fd88195b92b67a0` and separately directed implementation,
+testing, and preparation for release review. The acceptance binds these Proposed
+bytes, not a later edited decision:
+
+| ADR | Concept SHA-256 | Technical depth SHA-256 |
+| --- | --- | --- |
+| 0019 | `b743931ccc7435ad4a90973ee6b623fea2afa1133ecaf8733a10a0512605f9dc` | `26ea8ac60e6f4a006018afdd4ffe24308b4e2184c67e175d9cd555a268030c6f` |
+| 0020 | `cbaee4ffc0a96658e42d769f5467501ab23d5d42dd09d0ac15a7919d8d329370` | `ee44044c2daece3bc74a7f89ddf549a97f579e19d5ae16ffb630e2500239f8fb` |
+| 0021 | `ce25d99eb282c732a16d938d2385a7d75dffb30a9099183a8340a03b8a607bd4` | `7041508edcaeaa53a39647cf524fc489470f46dba08c5dfff462c297e5f010d3` |
+
+ADR 0019 accepts the separate, host-owned one-invocation provider process,
+explicit companion configuration and direct-call migration, bounded credential
+handoff, and lifetime/evidence requirements. ADR 0020 accepts the explicit local
+prepared-handoff participant and atomic duplicate installation refusal. ADR 0021
+accepts versioned compact-accounting provenance and its narrow legacy-history
+refusal. These are three accepted decisions, not a claim their implementation
+is already conformant.
+
+**Accounting correction.** Override 21's blanket-conservative description does
+not state ADR 0018 combination 5 correctly. A raw-admitted, validated reply
+whose complete settlement does not fit preserves its complete reported usage;
+prevalidation unreadable input has no such evidence and estimates the remaining
+allowance. ADR 0021 preserves that policy and changes only its named record,
+validation, and legacy-compatibility clauses. The historical override and accepted
+ADR 0018 bytes remain unmodified; their earlier source ranges are not extended.
+
+**Implementation scope.** The current instruction authorizes these post-closure
+repairs and their documentation, conformance, mutation, and source-bound live
+evidence on `codex/m2-release-repair`, notwithstanding the generic Closed-register
+capsule's planning-only projection. Preserve M2's Closed state and its accepted
+plan/gate history. This does not waive a required gate, authorize changing its
+locked bytes, or dispose of an unresolved blocking finding. A required gate
+change still needs its own holder transaction and explicit acceptance.
+
+**Transition scope.** Within each ADR pair the acceptance commit changes only
+the Concept status and governance row; Technical depth bytes are unchanged.
+The same commit updates the two ADR indexes and this one new disposition, not
+an earlier disposition. It changes no product, plan, gate, or lifecycle bytes.
+Independent exact-diff review remains required before integration. The separate
+implementation instruction grants no tag, publication, final release approval,
+or approval of an unseen integration candidate. Final source and evidence must
+be offered for release review before those decisions.

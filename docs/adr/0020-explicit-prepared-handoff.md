@@ -5,7 +5,7 @@
 
 Technical depth: [Handoff ownership and evidence](0020-explicit-prepared-handoff-technical.md#technical-depth).
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-06
 - **Decision owner:** Maintainer
 
@@ -17,7 +17,7 @@ cancellation contract. It adds no durable record or general ownership framework.
 
 | Decision | Authority | Authority evidence | Bound bytes |
 | --- | --- | --- | --- |
-| Acceptance | — | — | — |
+| Acceptance | Maintainer | [disposition](../developer/agent-context-map.md#disposition-adrs-0019-0021-2026-09-07) | candidate `b7f97092f7b6d6661e66bc775fd88195b92b67a0`; concept `sha256:cbaee4ffc0a96658e42d769f5467501ab23d5d42dd09d0ac15a7919d8d329370`; technical `sha256:ee44044c2daece3bc74a7f89ddf549a97f579e19d5ae16ffb630e2500239f8fb` |
 
 <a id="concept-adr-0020-context"></a>
 ## Context
