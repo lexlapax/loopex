@@ -284,6 +284,35 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
     assert_receive {:DOWN, ^monitor, :process, ^producer, _reason}, 1_000
   end
 
+  test "received terminal nesting is bounded independently of encoder rejection" do
+    legal = Enum.reduce(1..11, nil, fn _, child -> [child] end)
+    assert {:ok, _cost} = Store.admit_bounded(%{"nested" => legal})
+    assert {:error, _reason} = Store.admit_bounded(%{"nested" => [legal]})
+
+    candidate = %{
+      "nonce" => String.duplicate("a", 64),
+      "staged_request_digest" => String.duplicate("b", 64),
+      "status" => "reply",
+      "reply" => %{"nested" => legal}
+    }
+
+    assert {:ok, frame} = ProviderCodec.encode(:terminal, candidate)
+    <<prefix::binary-size(4), _length::32, body::binary>> = frame
+    key = <<0, 6::16, "nested">>
+    assert length(:binary.matches(body, key)) == 1
+    deeper = :binary.replace(body, key, key <> <<6, 1::16>>)
+    over_depth = <<prefix::binary, byte_size(deeper)::32, deeper::binary>>
+
+    {sender, receiver} = socket_pair()
+
+    # Bypass only encoding of the invalid candidate. The parent receives a
+    # correctly framed, otherwise valid reply over its actual AF_UNIX codec.
+    assert :ok = :gen_tcp.send(sender, frame <> over_depth)
+    assert {:ok, :terminal, ^candidate} = ProviderCodec.recv(receiver, 1_000)
+    assert {:error, :invalid_frame} = ProviderCodec.recv(receiver, 1_000)
+    assert {:error, :invalid_frame} = ProviderCodec.decode(over_depth)
+  end
+
   defp identity_fields, do: %{"nonce" => @nonce, "staged_request_digest" => @digest}
   defp terminal(reply), do: Map.merge(identity_fields(), %{"status" => "reply", "reply" => reply})
 

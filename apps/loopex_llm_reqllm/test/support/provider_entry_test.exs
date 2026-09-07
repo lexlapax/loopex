@@ -24,6 +24,40 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     :ok
   end
 
+  test "retainer death after actual callback delivery ends the retained provider lifetime" do
+    fixture = Fixture.new()
+    {retainer, retainer_monitor} = spawn_monitor(fn -> receive do: (:stop -> :ok) end)
+    call = Fixture.managed(fixture, Fixture.request(), retainer)
+    caller = call.caller
+    guardian = call.guardian
+    caller_monitor = call.caller_monitor
+    guardian_monitor = call.monitor
+
+    try do
+      assert_receive {:completed, ^caller, {:ok, reply}}, 5_000
+      assert reply.text == "loopex"
+      assert_receive {:DOWN, ^caller_monitor, :process, ^caller, :normal}, 1_000
+      assert Process.alive?(guardian)
+      assert Fixture.alive?(Fixture.pid(fixture))
+      assert File.dir?(Fixture.namespace(fixture))
+
+      # The callback has returned and its process is gone. Only the independently
+      # monitored retainer can now cause this real provider tree to be cleaned.
+      Process.exit(retainer, :kill)
+      assert_receive {:DOWN, ^retainer_monitor, :process, ^retainer, :killed}, 1_000
+      assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :normal}, 2_500
+      Fixture.assert_gone(fixture)
+      assert Fixture.canaries(fixture) == 1
+      assert Fixture.count(fixture) == 1
+    after
+      # On assertion failure the guardian still accepts its exact Core stop request;
+      # that path cleans only the invocation this detector owns.
+      if Process.alive?(guardian), do: Fixture.stop(call)
+      if Process.alive?(caller), do: Process.exit(caller, :kill)
+      if Process.alive?(retainer), do: Process.exit(retainer, :kill)
+    end
+  end
+
   test "actual protected worker preserves the complete loopback reply and is gone before unmanaged success" do
     fixture = Fixture.new()
     request = Fixture.request()

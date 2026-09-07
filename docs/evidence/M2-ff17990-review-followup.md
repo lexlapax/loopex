@@ -171,11 +171,11 @@ register, accepted gates, and historical dispositions remain unchanged.
 | Work item | State and owner | Completion requirement |
 | --- | --- | --- |
 | Record ADR acceptance | Complete; integrator | Exact-diff independent transition review clear; status and commit-message checks passed |
-| ADR 0019 provider isolation | Actual worker entry joined; thirteen child-process cases passed; isolated build-output fix joined at `49d5d5a`; legacy-test migration remains denied by execution approval | Preserve the old corpus's surviving guarantees through the authorized migration, then prove paired CLI build on floor/current and live credential/lifecycle behavior |
+| ADR 0019 provider isolation | Joined isolated-provider corpus passes 49 cases; current/floor paired package startup proved at `faa340f`; legacy-test migration remains denied by execution approval | Preserve the old corpus's surviving guarantees through the authorized migration; whole-parent-VM loss, live credential/lifecycle behavior and final source evidence remain |
 | ADR 0020 explicit handoff | `fd9f269` joined; 112 CLI/handoff cases and 30 separate Core cases passed in its worker; joined 56-case prepared corpus passes with both independent detectors | Joined full suite; all thirteen locked prepared-recovery names preserved |
 | ADR 0021 accounting provenance | 74 accounting/protocol cases pass with the new lifecycle regressions; genuine old-reader control/refusal proved as described below | Joined full suite, decisive mutation qualification, and final source-bound evidence |
 | Rejoin and conformance | Source rejoined and force compilation warning-free; full conformance pending | Preserve locked names/behavior and byte-bound files; compile and tests serial across clones |
-| Clause-derived mutant hunt | Accounting and handoff hunts each found two focused-corpus survivors and supplied decisive detectors; independent provider lifecycle hunt is preparing | Current claims and corpus, no author diff/history; qualify survivors and repair evidence gaps |
+| Clause-derived mutant hunt | Accounting, handoff and provider hunts each found two focused-corpus survivors; their six behavioral detectors now pass | Qualify survivors against a green whole suite and audit the remaining cross-boundary obligations; these focused hunts are not exhaustive clearance |
 | Final source and live evidence | Pending; integrator | Clean source `S`; full serial checks, literal M2 gate, actual provider/build identity and account verification |
 | Release-review handoff | Pending; independent reviewer | Evidence-only child `E` names final `S` and actual repair range; push checkpoints; no integration or publication inferred |
 
@@ -500,3 +500,46 @@ minimum, gate or production byte. The joined prepared-recovery corpus passes all
 check caught a detector-only line wrap after renaming the probe message; that
 was formatted before testing. The original implementation already honors both
 requirements.
+
+### Provider clause hunt and joined detectors — 2026-09-07
+
+An independent actor read ADR 0019's lifecycle and codec requirements and current
+production, not the author history or diff, at
+`faa340f0343e4d46d89aefd9663e66248f464fc3`. Restricting retainer-death handling to
+the interval before callback delivery and deleting the decoder's nesting guard
+each survived the existing 47-case isolated-provider corpus, formatting and
+forced warnings-as-errors compilation. Separate behavioral cases passed on
+unchanged production and rejected those faults. These are focused-corpus
+survivors, not whole-suite-qualified survivors or newly found production bugs.
+
+The first detector waits for a successful actual worker reply and normal
+callback-process exit, then kills the independent retainer and requires guardian,
+worker and namespace cessation. The second sends a valid boundary-depth terminal
+and then a correctly framed over-depth terminal through the actual local socket
+receiver, bypassing only the encoder's rejection of invalid input. It therefore
+proves the decoder's independent responsibility instead of testing the encoder
+twice. The two additions leave every existing name, minimum and gate byte intact.
+The joined five-file provider corpus passes 49 cases, seed `3107`, in 30.2 seconds
+with warnings-as-errors. All commands exclude ambient provider credentials and
+use synthetic local transport only.
+
+### Integrated self-audit required before release-review handoff
+
+The maintainer explicitly required a thorough self-audit on 2026-09-07 after
+repeated audit/repair cycles. Finishing individual findings is not the handoff
+criterion. No final source, evidence child or review-ready verdict may be claimed
+until the following integrated checks are settled:
+
+| Area | Required proof before handoff |
+| --- | --- |
+| Contract and composition | Map every ADR 0019–0021 requirement and the inherited release obligations to current production and real entry paths; reconcile direct adapter, embedded runtime, CLI, recovery child and cold gate configuration |
+| Correctness and lifetime | Exercise ownership loss before, during and after work; unresolved handoff fences; exact cleanup acknowledgements; whole-parent-VM death; accounting/recovery across real Store versions |
+| Test honesty | Preserve each surviving legacy guarantee; prove the actual observed values instead of literals or setup failures; close known mutation gaps and distinguish structural-only protection from behavioral evidence |
+| Security and public impact | Check first-image and delayed diagnostics, credential and raw-reply boundaries, host isolation and concurrency, and every changed helper/configuration contract against operator and compatibility documentation |
+| Portability and rollback | Run the supported toolchains and actual build pair outside the checkout; retain measured cost, source/artifact identity and genuine old-reader controls; disclose unavailable evidence without calling it a pass |
+| Final verification and records | Freeze clean source `S`, run whole-suite/repository/gate/live lanes serially, retain account and source-bound evidence in child `E`, review the evidence-only edge, and push before requesting independent release review |
+
+Remaining implementation or evidence defects are repaired before that handoff.
+Any newly required architecture decision still goes to the maintainer; neither
+this task list nor a green command supplies acceptance, integration or publication
+authority. Execution-approval refusals remain visible and are not bypassed.
