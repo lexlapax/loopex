@@ -42,6 +42,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
              true <- bootstrap == bootstrap(nonce, manifest_digest),
              {:ok, _started} <- Application.ensure_all_started(:req_llm),
              true <- no_core_applications?(),
+             :ok <- protect_dependency_io(),
              :ok <- ProviderCodec.send(socket, :ready, bootstrap),
              {:ok, :credential, %{"nonce" => ^nonce, "credential" => credential}} <-
                ProviderCodec.recv(socket, remaining(deadline)),
@@ -70,6 +71,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
     with true <- System.get_env("ERL_CRASH_DUMP") == "/dev/null",
          true <- System.get_env("ERL_CRASH_DUMP_SECONDS") == "0",
          true <- no_core_applications?() do
+      # Concept: a coding workspace cannot configure provider bootstrap.
+      # Technical depth: ReqLLM startup and LLMDB's optional dotenv loader
+      # default to enabling workspace files. Set their worker-local policy
+      # before dependencies start, preserving it across application loading.
+      Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
+      Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
       sink = spawn_link(fn -> io_sink() end)
       true = Process.group_leader(self(), sink)
       :ok = :logger.set_primary_config(:level, :none)
@@ -82,6 +89,23 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
   defp no_core_applications? do
     Application.started_applications()
     |> Enum.all?(fn {application, _, _} -> application not in @forbidden_apps end)
+  end
+
+  # Concept: every provider task in this fresh child inherits private IO policy
+  # before readiness permits a credential to enter the VM.
+  # Technical depth: OTP application startup uses an application-master group
+  # leader, not the entry process's leader. Bind only the child-local ReqLLM
+  # supervisors to the entry's sink so externally supervised transport tasks
+  # inherit it as well. No host process or shared supervisor is reachable here.
+  defp protect_dependency_io do
+    sink = Process.group_leader()
+
+    if Enum.all?([Elixir.ReqLLM.Supervisor, Elixir.ReqLLM.TaskSupervisor], fn name ->
+         case Process.whereis(name) do
+           pid when is_pid(pid) -> Process.group_leader(pid, sink)
+           nil -> false
+         end
+       end), do: :ok, else: :error
   end
 
   defp manifest_matches(expected) do
