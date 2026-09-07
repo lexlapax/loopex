@@ -134,6 +134,74 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     Process.exit(caller, :kill)
   end
 
+  test "after bootstrap the provider namespace refuses a second client", %{
+    root: root,
+    request: request
+  } do
+    {caller, guardian, stop_reference} = registered_call(request, worker(root, :stall_ready))
+    send(caller, :continue)
+    assert eventually(fn -> File.regular?(Path.join(root, "booted")) end, 5_000)
+    namespace = File.read!(Path.join(root, "namespace"))
+
+    # Receipt of bootstrap proves that the first connection was accepted; the
+    # second connect must now be refused by the actual closed listener, not
+    # merely receive no application reply before an arbitrary wait expires.
+    assert {:error, :econnrefused} =
+             :gen_tcp.connect({:local, namespace <> "/data"}, 0, [
+               :binary,
+               active: false,
+               packet: :raw
+             ])
+
+    refute File.exists?(Path.join(root, "credential-size"))
+    stop_registered(guardian, stop_reference)
+    assert_receive {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}}, 1_000
+    refute process_alive?(child_pid(root))
+    refute File.exists?(namespace)
+  end
+
+  test "well formed readiness from another invocation never receives the credential", %{
+    root: root,
+    request: request
+  } do
+    for field <- ["nonce", "build_manifest_sha256"] do
+      case_root = Path.join(root, field)
+      File.mkdir!(case_root)
+
+      assert {:error, {:not_dispatched, "model_call_failed"}} =
+               ProviderBridge.complete(
+                 request,
+                 worker(case_root, {:wrong_ready, field}),
+                 Model.discard_progress()
+               )
+
+      refute File.exists?(Path.join(case_root, "credential-size"))
+      refute process_alive?(child_pid(case_root))
+      refute File.exists?(File.read!(Path.join(case_root, "namespace")))
+    end
+  end
+
+  test "well formed dispatch and reply bindings cannot cross invocation identities", %{
+    root: root,
+    request: request
+  } do
+    for phase <- [:dispatch, :terminal], field <- ["nonce", "staged_request_digest"] do
+      case_root = Path.join(root, "#{phase}-#{field}")
+      File.mkdir!(case_root)
+
+      assert {:error, {:dispatched_or_unknown, "model_call_failed"}} =
+               ProviderBridge.complete(
+                 request,
+                 worker(case_root, {:wrong_binding, phase, field}),
+                 Model.discard_progress()
+               )
+
+      assert File.read!(Path.join(case_root, "credential-size")) == "29"
+      refute process_alive?(child_pid(case_root))
+      refute File.exists?(File.read!(Path.join(case_root, "namespace")))
+    end
+  end
+
   test "credential limits are checked after readiness and before invocation", %{
     root: root,
     request: request
@@ -432,7 +500,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
         if ready, do: {:halt, :ready}, else: (Process.sleep(10); {:cont, :waiting})
       end)
     end
-    :ok = ProviderCodec.send(socket, :ready, bootstrap)
+    ready = case mode do
+      {:wrong_ready, field} -> Map.put(bootstrap, field, String.duplicate("0", 64))
+      _ -> bootstrap
+    end
+    :ok = ProviderCodec.send(socket, :ready, ready)
     File.write!(Path.join(root, "ready"), "ready")
     if mode == :stall_writes, do: Process.sleep(:infinity)
     case ProviderCodec.recv(socket, 5_000) do
@@ -443,7 +515,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
         {:ok, :invocation, invocation} = ProviderCodec.recv(socket, 5_000)
         true = invocation["request"].deadline == String.to_integer(deadline)
         binding = %{"nonce" => nonce, "staged_request_digest" => invocation["staged_request_digest"]}
-        :ok = ProviderCodec.send(socket, :dispatch_started, binding)
+        dispatch = case mode do
+          {:wrong_binding, :dispatch, field} -> Map.put(binding, field, String.duplicate("0", 64))
+          _ -> binding
+        end
+        :ok = ProviderCodec.send(socket, :dispatch_started, dispatch)
+        if match?({:wrong_binding, :dispatch, _}, mode), do: Process.sleep(:infinity)
         if mode == :echo_credential do
           :ok = ProviderCodec.send(socket, :credential, %{"nonce" => nonce, "credential" => key})
           Process.sleep(:infinity)
@@ -461,6 +538,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
         terminal = if mode == :unreadable,
           do: Map.put(binding, "status", "unreadable"),
           else: Map.merge(binding, %{"status" => "reply", "reply" => reply})
+        terminal = case mode do
+          {:wrong_binding, :terminal, field} -> Map.put(terminal, field, String.duplicate("0", 64))
+          _ -> terminal
+        end
         :ok = ProviderCodec.send(socket, :terminal, terminal)
         if mode == :duplicate, do: ProviderCodec.send(socket, :terminal, terminal)
         :gen_tcp.close(socket)

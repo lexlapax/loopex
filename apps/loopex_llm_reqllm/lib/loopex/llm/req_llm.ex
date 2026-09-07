@@ -105,16 +105,12 @@ defmodule Loopex.LLM.ReqLLM do
 
   `provider_response_id` is the provider's own identifier for the response, taken
   from the provider's per-call request identifier header (`request-id` or
-  `x-request-id`). It is the one field in a reply that a deterministic adapter
-  cannot invent, because it exists in the provider's account and can be looked up
-  there. That is what makes it the anchor of the milestone's real-call evidence,
-  and it is `nil` wherever the provider supplied none rather than being filled in
-  with a plausible value.
-
-  A streamed call cannot carry the provider's assembled *message* identifier: the
-  library keeps only usage from the provider's opening event and discards the
-  rest. The per-call request identifier survives streaming and is the identifier
-  the provider's own account and support surface use, so it is the one retained.
+  `x-request-id`), not an assembled message identifier. It is `nil` wherever the
+  provider supplied none rather than being filled in with a plausible value.
+  The field and its spelling alone do not prove a provider call: a deterministic
+  adapter can fabricate an identifier. Retained real-call evidence needs the
+  separate provider-account or support lookup required by its evidence contract;
+  an unavailable lookup remains unavailable evidence.
 
   `staged_request_digest` names the request bytes core committed before this
   dispatch. It is spelled the way the reply this adapter actually returns spells
@@ -251,9 +247,10 @@ defmodule Loopex.LLM.ReqLLM do
   what the producer emitted, not what a particular consumer received; Core owns
   the accepted count and closure of its separate transient stream domain.
 
-  The stream is consumed once. Usage and the per-call request identifier come
-  from the metadata the provider sends after the content, so they are read once
-  the stream is drained rather than beside it.
+  The stream is consumed once. Usage and the per-call request identifier are read
+  from completed stream metadata after the content has drained. That ordering
+  describes this adapter's read, not when the provider originally sent each
+  metadata field.
 
   A stream that failed, was cut off, or produced a reply that could not be
   assembled is `{:error, {:dispatched_or_unknown, "model_call_failed"}}` instead
@@ -265,7 +262,7 @@ defmodule Loopex.LLM.ReqLLM do
   core committed, a message it cannot render, an absent credential, a model it
   cannot resolve, a tool definition it will not send, a deadline already spent —
   is `{:error, {:not_dispatched, "model_call_failed"}}`, and every one of those
-  refusals happens before the provider library is called.
+  refusals happens before provider transport is entered.
   """
   @impl Loopex.Model
   @spec complete(Model.request(), keyword(), Model.progress_fun()) ::

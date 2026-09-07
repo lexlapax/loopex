@@ -171,7 +171,7 @@ register, accepted gates, and historical dispositions remain unchanged.
 | Work item | State and owner | Completion requirement |
 | --- | --- | --- |
 | Record ADR acceptance | Complete; integrator | Exact-diff independent transition review clear; status and commit-message checks passed |
-| ADR 0019 provider isolation | Joined isolated-provider corpus passes 49 cases; current/floor paired package startup proved at `faa340f`; legacy-test migration remains denied by execution approval | Preserve the old corpus's surviving guarantees through the authorized migration; whole-parent-VM loss, live credential/lifecycle behavior and final source evidence remain |
+| ADR 0019 provider isolation | Joined isolated-provider corpus passes 49 cases; current/floor paired package startup and whole-parent-VM loss proved at `faa340f`; legacy-test migration remains denied by execution approval | Preserve the old corpus's surviving guarantees through the authorized migration; finish actual-child, concurrency and cleanup-boundary coverage, live credential/lifecycle behavior and final source evidence |
 | ADR 0020 explicit handoff | `fd9f269` joined; 112 CLI/handoff cases and 30 separate Core cases passed in its worker; joined 56-case prepared corpus passes with both independent detectors | Joined full suite; all thirteen locked prepared-recovery names preserved |
 | ADR 0021 accounting provenance | 74 accounting/protocol cases pass with the new lifecycle regressions; genuine old-reader control/refusal proved as described below | Joined full suite, decisive mutation qualification, and final source-bound evidence |
 | Rejoin and conformance | Source rejoined and force compilation warning-free; full conformance pending | Preserve locked names/behavior and byte-bound files; compile and tests serial across clones |
@@ -543,3 +543,92 @@ Remaining implementation or evidence defects are repaired before that handoff.
 Any newly required architecture decision still goes to the maintainer; neither
 this task list nor a green command supplies acceptance, integration or publication
 authority. Execution-approval refusals remain visible and are not bypassed.
+
+### Exact package and whole-parent loss proof — 2026-09-07
+
+Clean source `faa340f0343e4d46d89aefd9663e66248f464fc3` was built and checked in
+two isolated roots on Darwin 25.6.0 arm64, using Elixir 1.20.3 / OTP 29.0.5 and
+the Elixir 1.17.0 / OTP 26.0 floor. Each real CLI build alias produced its companion
+and embedded matching launch configuration in an external Mix build root.
+Independent archive inspection compared actual input entries, manifest, executable
+digests, source, toolchain and lock identity. Both source checkouts ended clean,
+without checkout-local `_build` directories.
+
+| SHA-256 identity | Current | Floor |
+| --- | --- | --- |
+| Manifest | `97302b1ca7c48c3858b4f094184fcc0956da6078b49ca28f902d3a8c544268ca` | `c712a4d859c6247b77bc2e4170a4aac235fd3b5c53ed9a7c0827abf4f2e4d707` |
+| Companion | `34373052d142b5f3dfbad5d75dcfc4e13b2db006e9233bd2a4c71a2f8cadc90c` | `9d0d7aa87ffa014068a39436fe83edc53be91f2a6d74249dea71d9eaf6a4e1ba` |
+| Command | `228988679a49feb897ce82d4f80493aaca09ce7fc5df5c62d43d544a51f99e44` | `027f4897e59b9342ccc1f7dbd6b0f2ca7a85f6ad917e22479c107df63146b0b9` |
+
+The unchanged companions reached protected readiness outside the checkout with
+development and malformed dotenv files. Archive-only model lookup resolved the
+default Anthropic model without checkout `priv` paths. Separate interpreter
+wrappers observed control descriptors 3 and 4 closed **before** executing the
+configured interpreter. Canonical-interpreter runs completed correlated cleanup;
+the copied CLI listed an empty state root successfully. No remote application
+inventory was collected: application isolation is supported here by readiness
+passing the packaged worker's own no-Core/application check, not an independent
+enumeration of every child application.
+
+An external observer then killed a separate, witnessed parent BEAM after actual
+protected readiness. Before the kill it recorded carrier ancestry and the guard's
+PID, creation identity, group and executable; it proved that same independent
+guard survived parent exit 137 and then removed the namespace and live group
+members. Cleanup was observed after 121708 microseconds on current and 123080 on
+floor. No normal stop frame supplied those outcomes. No credential, invocation or
+provider call occurred in any of these package checks.
+
+Canonical ready samples were 385720–389638 microseconds on current and
+469661–503161 on floor; sampled worker RSS was approximately 103 MiB and
+95–97 MiB respectively. These are individual local observations, not a benchmark,
+new allowance or general deadline proof. Startup remains inside the invocation
+deadline. Linux, active-transport whole-host death, live-provider behavior and
+any later source/artifact are not proved by these runs.
+
+Unsuccessful observer/prerequisite attempts were not counted as product evidence:
+model lookup before dependency startup; a Darwin process-name mismatch in the RSS
+sampler; an incorrect direct-parent assumption before fault injection; and a
+current-toolchain Hex archive used under OTP 26. The corrected observers and
+existing floor-specific Mix home resolved these. Pinned dependency warnings were
+retained, not described as a warning-free complete gate. All VMs ended and no
+owned worker/guard or invocation namespace remained.
+
+The witness report and logs were retained during execution under
+`/private/tmp/loopex-package-proof.MnbwrM`,
+`/private/tmp/loopex-package-current.ntTuH8`, and
+`/private/tmp/loopex-package-floor.V4duJT`. The parent-death observer digest is
+`sha256:a8acae5c2e7cf4901bc54ca8cf69dd0dfb52a35815a465ac8f995f31838ae3fe`.
+These temporary paths locate supporting execution material; this source-bound
+summary does not make their continued existence a project prerequisite.
+
+### Cross-boundary self-audit repairs — 2026-09-07
+
+The broader ADR 0020 inspection found a production defect outside the earlier
+handoff detectors: `Runtime.finish_attachment/4` waited for Dispatcher creation
+but imposed an ordinary five-second timeout on Control's mutating finalization.
+The caller could receive `runtime_unavailable` and the queued call could still
+install the attachment afterward. A new regression observes the actual queued
+finalization, holds Control beyond that timeout, and then requires the exact
+attachment result, usable command routing and idempotent reattachment. Before
+the repair it failed with `{:ok, {:error, :runtime_unavailable}}` in 5.7 seconds.
+The finalization now waits for Control's actual result, as the accepted ADR
+requires. The full 14-case session-lifecycle corpus passes in 21.3 seconds, seed
+`3107`, with warnings-as-errors. This is focused working-tree repair evidence,
+not a final exact-SHA gate result.
+
+A separate preservation review found that the provider fixture wrote a literal
+`POST` instead of the observed request method. `d8ba357` joins the support-only
+repair: the fixture records `request.method`, and cases assert the actual value.
+Independent comparison of the revised legacy-contract proposal confirmed all
+twelve original names, the same two additions and unchanged earlier assertions,
+with eleven added method assertions. The normal execution-approval path then
+permitted applying that exact proposal. Its formatting and joined execution are
+still pending; the other legacy migrations are not silently treated as complete.
+
+Three additional bridge cases exercise a refused second connection after actual
+bootstrap, well-formed wrong nonce/build readiness before credential delivery,
+and wrong invocation bindings at dispatch and terminal. All fourteen bridge
+cases pass in 12.4 seconds, seed `3107`, with warnings-as-errors. This is the
+bridge plus a deliberately controlled socket peer, not proof of actual child
+producer backpressure or live-provider behavior. No gate minimum or selector
+name was changed by these additions.
