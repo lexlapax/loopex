@@ -18,7 +18,7 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
         app: nil,
         main_module: Loopex.LLM.ReqLLM.ProviderWorker,
         name: :loopex_provider,
-        path: "../../_build/#{Mix.env()}/loopex_provider",
+        path: provider_path(),
         emu_args: "+S 2:2 +SDcpu 1 +SDio 1 +A 2"
       ],
       aliases: ["escript.build": ["loopex.provider.build"]],
@@ -28,6 +28,18 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
 
   def application do
     [extra_applications: []]
+  end
+
+  # Concept: companion artifacts stay inside the caller's isolated build root.
+  # Technical depth: project/0 is still being evaluated here, so supply the
+  # ordinary build configuration explicitly instead of recursively asking for
+  # it. The floor requires build_per_environment; Mix applies root/path and
+  # target overrides with exactly the same rules as ordinary compilation.
+  defp provider_path do
+    [build_path: "../../_build", build_per_environment: true]
+    |> Mix.Project.build_path()
+    |> Path.expand()
+    |> Path.join("loopex_provider")
   end
 
   # Concept: the reference model adapter named in the vision. It depends outward

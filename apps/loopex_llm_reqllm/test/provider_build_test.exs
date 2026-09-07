@@ -5,6 +5,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildTest do
   alias Loopex.LLM.ReqLLM.ProviderConfiguration
 
   @identity "Elixir.Loopex.LLM.ReqLLM.ProviderBuildIdentity.beam"
+  @project_source Path.expand("../mix.exs", __DIR__)
+  @project_fixture Loopex.ProviderBuildPathFixture
 
   setup do
     root =
@@ -54,6 +56,61 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildTest do
       shadow = entries ++ [{"other/priv/" <> @identity, "ordinary archived input"}]
       refute Build.packaged_input_digest(archive!(root, shadow)) == baseline
     end
+  end
+
+  test "companion output honors Mix build isolation and target on the floor", %{root: root} do
+    previous = Map.new(["MIX_BUILD_ROOT", "MIX_BUILD_PATH"], &{&1, System.get_env(&1)})
+    target = Mix.target()
+
+    on_exit(fn ->
+      for {name, value} <- previous do
+        if value, do: System.put_env(name, value), else: System.delete_env(name)
+      end
+
+      Mix.target(target)
+      :code.purge(@project_fixture)
+      :code.delete(@project_fixture)
+    end)
+
+    @project_source
+    |> File.read!()
+    |> String.replace(
+      "defmodule Loopex.LLM.ReqLLM.MixProject do",
+      "defmodule #{@project_fixture} do"
+    )
+    |> String.replace("  use Mix.Project\n", "")
+    |> Code.compile_string(@project_source)
+
+    File.cd!(Path.dirname(@project_source), fn ->
+      for target <- [:host, :provider_build_test],
+          {build_root, build_path} <- [
+            {nil, nil},
+            {Path.join(root, "isolated"), nil},
+            {"../../relative-build", nil},
+            {Path.join(root, "ignored"), Path.join(root, "exact")},
+            {nil, "../../relative-exact"}
+          ] do
+        Mix.target(target)
+
+        for {name, value} <- [{"MIX_BUILD_ROOT", build_root}, {"MIX_BUILD_PATH", build_path}] do
+          if value, do: System.put_env(name, value), else: System.delete_env(name)
+        end
+
+        configuration = apply(@project_fixture, :project, [])
+
+        expected =
+          configuration
+          |> Keyword.put(:build_per_environment, true)
+          |> Mix.Project.build_path()
+          |> Path.expand()
+          |> Path.join("loopex_provider")
+
+        assert configuration[:escript][:path] == expected
+      end
+    end)
+
+    refute File.exists?(Path.join(root, "isolated"))
+    refute File.exists?(Path.join(root, "exact"))
   end
 
   test "missing or ambiguous build identity refuses", %{root: root} do

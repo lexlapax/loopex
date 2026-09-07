@@ -33,6 +33,7 @@ defmodule LoopexCli.MixProject do
     root = Path.expand("../..", __DIR__)
     {source, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: root)
     adapter = Path.expand("../loopex_llm_reqllm", __DIR__)
+    build_path = Mix.Project.build_path() |> Path.expand()
     elixir_bin = Path.expand("../../bin", List.to_string(:code.lib_dir(:elixir)))
     mix = Path.expand("../../bin/mix", List.to_string(:code.lib_dir(:mix)))
     command = Path.join(elixir_bin, "elixir")
@@ -43,6 +44,9 @@ defmodule LoopexCli.MixProject do
         env: [
           {"MIX_ENV", Atom.to_string(Mix.env())},
           {"MIX_TARGET", Atom.to_string(Mix.target())},
+          # Preserve the effective path across the child project's different
+          # working directory, including a relative MIX_BUILD_ROOT override.
+          {"MIX_BUILD_PATH", build_path},
           {"PATH",
            Path.join(List.to_string(:code.root_dir()), "bin") <>
              ":" <>
@@ -56,7 +60,7 @@ defmodule LoopexCli.MixProject do
 
     Mix.shell().info(output)
     unless status == 0, do: Mix.raise("provider companion build refused")
-    configuration = Path.expand("../../_build/#{Mix.env()}/loopex_provider.launch", __DIR__)
+    configuration = Path.join(build_path, "loopex_provider.launch")
     previous = System.get_env("LOOPEX_BUILD_PROVIDER_CONFIG")
     System.put_env("LOOPEX_BUILD_PROVIDER_CONFIG", configuration)
 
