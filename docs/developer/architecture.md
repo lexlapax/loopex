@@ -126,6 +126,14 @@ emits nothing, returns the same reply, and is conformant. Fixed by
 [ADR 0010](../adr/0010-provider-continuation-and-context-staging.md#concept) and
 [ADR 0011](../adr/0011-session-input-algebra-and-streaming.md#concept).
 
+Provider accounting preserves the validated reply's usage even when its full
+settlement cannot fit the Store. That compact record retains the normalized
+usage and the exact byte or depth refusal observation; rejected raw replies
+retain no validated evidence and consume estimated remaining allowance. New
+settlements use version 2. Replay accepts an unambiguous version-1 prefix, then
+version 2 exclusively, under
+[ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept).
+
 **Executor** is the authority and effect-start boundary. It defines one
 transport-neutral job, the host-grant bindings an executor revalidates
 immediately before an effect, and the cancellation callback. It also declares,

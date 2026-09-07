@@ -53,7 +53,7 @@ turn's reply settles. Nothing on this table is published from a mutation reply.
 | Prompt admitted | `prompt_admitted_v2` — command digest, run id, content, the run's bounds and context ceiling | `user.message_appended`, echoed as `> ...` |
 | Request staged | `model_request_committed` (canonical request bytes and their digest, applied steer, context receipt) **and** `model_attempt_opened_v1`, one transaction | `run.started`, on the first turn only |
 | Model called | nothing | streamed text, transient |
-| Reply settled | `model_attempt_settled_v1` | `assistant.message_appended` |
+| Reply settled | `model_attempt_settled_v2` | `assistant.message_appended` |
 | Tool authorized | `effect_intent_committed` — the whole executor job **and** the host grant | `tool.started` |
 | Tool finished | `executor_receipt_committed` | `tool.finished` with the outcome and any artifact references |
 | Tool never ran | `tool_result_committed` | `tool.finished` carrying the reason, so a started call always finishes |
@@ -207,6 +207,17 @@ never halted after the fact.
 Concept: [Where resume and cancel pick up](how-a-run-works.md#concept-run-again).
 
 What a crash costs depends on which record had landed.
+
+New writers settle every attempt with `model_attempt_settled_v2`, including an
+already open version-1 attempt, without redispatch. A version-1 prefix remains
+readable except `unreadable_model_answer` with reported accounting, which fails
+as `ambiguous_legacy_provider_accounting`. A later version-1 settlement after
+version 2 is invalid history. Neither reader rewrites committed accounting or
+reconstructs missing provenance. The old reader refuses version 2 before owner
+readiness and semantic work; fenced ownership administration may already have
+committed. Rollback therefore requires stopped owners and a complete backup,
+and supports only histories without version 2. See
+[ADR 0021](../adr/0021-compacted-provider-accounting-provenance-technical.md#technical-adr-0021-consequences).
 
 | Crashed at | What survives | What resume does |
 | --- | --- | --- |

@@ -926,7 +926,7 @@ defmodule Loopex.AgentLoopTest do
     records = Fixture.records(fixture, session_id)
 
     assert [%{payload: evidence}] =
-             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     {run_id, events, records, evidence}
   end
@@ -955,7 +955,7 @@ defmodule Loopex.AgentLoopTest do
         "next" => "terminal",
         "result" => %{"kind" => "reply", "reply" => reply},
         "accounting" => %{"source" => "reported", "input_tokens" => 1, "output_tokens" => 1},
-        kind: "model_attempt_settled_v1"
+        kind: "model_attempt_settled_v2"
       })
 
     text
@@ -1017,7 +1017,7 @@ defmodule Loopex.AgentLoopTest do
     assert [%{payload: evidence}] =
              fixture
              |> Fixture.records(session_id)
-             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     {events, evidence}
   end
@@ -1121,7 +1121,7 @@ defmodule Loopex.AgentLoopTest do
         }
       },
       "accounting" => %{"source" => "reported", "input_tokens" => 1, "output_tokens" => 1},
-      kind: "model_attempt_settled_v1"
+      kind: "model_attempt_settled_v2"
     }
   end
 
@@ -1308,7 +1308,7 @@ defmodule Loopex.AgentLoopTest do
     assert job.validated_arguments == %{"threshold" => 0.5}
 
     assert Enum.any?(Fixture.records(fixture, session_id), fn record ->
-             record.payload[:kind] == "model_attempt_settled_v1" and
+             record.payload[:kind] == "model_attempt_settled_v2" and
                get_in(record.payload, ["result", "reply", "tool_calls", Access.at(0), "arguments"]) ==
                  %{
                    "threshold" => 0.5
@@ -1923,7 +1923,7 @@ defmodule Loopex.AgentLoopTest do
     attempts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
       |> Enum.map(& &1.payload["attempt"])
 
     # Numbered by the run rather than by whichever owner observed them, and never
@@ -1955,7 +1955,7 @@ defmodule Loopex.AgentLoopTest do
     final_attempts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
       |> Enum.map(& &1.payload["attempt"])
 
     assert final_attempts == [1, 2]
@@ -2068,7 +2068,7 @@ defmodule Loopex.AgentLoopTest do
     abandoned =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     assert Enum.map(abandoned, & &1.payload["attempt"]) == [1]
 
@@ -2364,7 +2364,7 @@ defmodule Loopex.AgentLoopTest do
       fixture
       |> Fixture.records(session_id)
       |> Enum.find(
-        &(&1.payload[:kind] == "model_attempt_settled_v1" and
+        &(&1.payload[:kind] == "model_attempt_settled_v2" and
             get_in(&1.payload, ["result", "reply", "text"]) == "AUTHORITATIVE")
       )
 
@@ -2471,7 +2471,7 @@ defmodule Loopex.AgentLoopTest do
     assert assistants == []
 
     assert [%{payload: evidence}] =
-             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     assert evidence["run_id"] == run_id
     assert evidence["attempt"] == 1
@@ -2554,18 +2554,18 @@ defmodule Loopex.AgentLoopTest do
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
         other.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
     send(in_time_model, :release)
 
     assert_receive {:record_held_before_linearization, result_waiter, _store,
-                    "model_attempt_settled_v1", transaction},
+                    "model_attempt_settled_v2", transaction},
                    5_000
 
     assert Enum.map(transaction.records, &(Map.get(&1, :kind) || Map.get(&1, "kind"))) == [
-             "model_attempt_settled_v1",
+             "model_attempt_settled_v2",
              "run_terminal_committed"
            ]
 
@@ -2599,7 +2599,7 @@ defmodule Loopex.AgentLoopTest do
     [result_record, terminal_record] =
       records
       |> Enum.filter(
-        &(&1.payload[:kind] in ["model_attempt_settled_v1", "run_terminal_committed"])
+        &(&1.payload[:kind] in ["model_attempt_settled_v2", "run_terminal_committed"])
       )
 
     assert terminal_record.journal_version == result_record.journal_version + 1
@@ -2705,7 +2705,7 @@ defmodule Loopex.AgentLoopTest do
     records = Fixture.records(fixture, session_id)
 
     assert [%{payload: evidence}] =
-             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     assert evidence["run_id"] == run_id
     assert evidence["attempt"] == 1
@@ -2747,7 +2747,7 @@ defmodule Loopex.AgentLoopTest do
     assert [%{payload: evidence}] =
              Enum.filter(
                records,
-               &(&1.payload[:kind] == "model_attempt_settled_v1" and &1.payload["attempt"] == 2)
+               &(&1.payload[:kind] == "model_attempt_settled_v2" and &1.payload["attempt"] == 2)
              )
 
     assert evidence["run_id"] == run_id
@@ -2757,7 +2757,7 @@ defmodule Loopex.AgentLoopTest do
 
     stale_records =
       Enum.map(records, fn
-        %{payload: %{kind: "model_attempt_settled_v1"} = payload} = record ->
+        %{payload: %{kind: "model_attempt_settled_v2"} = payload} = record ->
           %{record | payload: Map.put(payload, "attempt", 1)}
 
         record ->
@@ -2791,7 +2791,7 @@ defmodule Loopex.AgentLoopTest do
     :ok =
       M1RuntimeTestStore.refuse_next_record(
         fixture.store,
-        "model_attempt_settled_v1"
+        "model_attempt_settled_v2"
       )
 
     coordinator = coordinator_of(fixture.runtime)
@@ -2857,7 +2857,7 @@ defmodule Loopex.AgentLoopTest do
 
     records = Fixture.records(fixture, session_id)
 
-    refute Enum.any?(records, &(&1.payload[:kind] == "model_attempt_settled_v1")),
+    refute Enum.any?(records, &(&1.payload[:kind] == "model_attempt_settled_v2")),
            "the Store refusal did not reach the settlement transaction this case names"
 
     refute Enum.any?(records, &(&1.payload[:kind] == "run_terminal_committed")),
@@ -2889,7 +2889,7 @@ defmodule Loopex.AgentLoopTest do
     records = Fixture.records(fixture, session_id)
 
     assert [%{payload: evidence}] =
-             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     assert evidence["run_id"] == run_id
     assert evidence["termination"] == "abort"
@@ -2943,11 +2943,12 @@ defmodule Loopex.AgentLoopTest do
     assert [%{payload: evidence}] =
              fixture
              |> Fixture.records(session_id)
-             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     assert evidence["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
   end
 
@@ -2968,7 +2969,8 @@ defmodule Loopex.AgentLoopTest do
 
     assert evidence["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
 
     refute :erlang.term_to_binary(records) =~ secret
@@ -2993,7 +2995,7 @@ defmodule Loopex.AgentLoopTest do
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
 
     assert records
-           |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+           |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
            |> Enum.map(
              &{&1.payload["attempt"], &1.payload["transport"],
               get_in(&1.payload, ["result", "category"])}
@@ -3019,7 +3021,7 @@ defmodule Loopex.AgentLoopTest do
     exhausted_records = Fixture.records(exhausted, exhausted_session)
 
     assert exhausted_records
-           |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+           |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
            |> Enum.map(&{&1.payload["attempt"], &1.payload["transport"]}) ==
              [{1, "not_dispatched"}, {2, "dispatched_or_unknown"}]
 
@@ -3065,7 +3067,8 @@ defmodule Loopex.AgentLoopTest do
 
     assert evidence["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
 
     assert evidence["conversation"] == "none"
@@ -3094,7 +3097,8 @@ defmodule Loopex.AgentLoopTest do
 
     assert evidence["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
   end
 
@@ -3114,7 +3118,8 @@ defmodule Loopex.AgentLoopTest do
 
       assert evidence["result"] == %{
                "kind" => "error",
-               "category" => "unreadable_model_answer"
+               "category" => "unreadable_model_answer",
+               "accounting_evidence" => %{"kind" => "none"}
              }
     end
   end
@@ -3134,7 +3139,8 @@ defmodule Loopex.AgentLoopTest do
 
     assert evidence["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
   end
 
@@ -3153,7 +3159,8 @@ defmodule Loopex.AgentLoopTest do
 
     assert evidence["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
 
     assert :erlang.external_size(records) < 65_536
@@ -3206,9 +3213,22 @@ defmodule Loopex.AgentLoopTest do
       assert evidence["termination"] == termination
       assert evidence["conversation"] == "none"
 
+      {:ok, _normalized, observed} =
+        Loopex.Store.normalize_and_measure_item(
+          :record,
+          boundary_settlement(frame, request, termination, "evidence_only", text)
+        )
+
       assert evidence["result"] == %{
                "kind" => "error",
-               "category" => "unreadable_model_answer"
+               "category" => "unreadable_model_answer",
+               "accounting_evidence" => %{
+                 "kind" => "validated_reply_compaction_v1",
+                 "usage" => %{"status" => "reported", "input_tokens" => 1, "output_tokens" => 1},
+                 "dimension" => "record_bytes",
+                 "observed" => observed,
+                 "limit" => 65_536
+               }
              },
              "#{termination}: the settlement that could not fit was not compacted"
 
@@ -3305,7 +3325,7 @@ defmodule Loopex.AgentLoopTest do
     assert [%{payload: evidence}] =
              fixture
              |> Fixture.records(session_id)
-             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     assert evidence["termination"] == "deadline"
     assert evidence["result"]["kind"] == "reply"
@@ -4087,7 +4107,7 @@ defmodule Loopex.AgentLoopTest do
         [%{text: "answer", calls: [], deltas: ["partial"], hold: parent}],
         progress_to: self(),
         before_prompt: fn store ->
-          :ok = M1RuntimeTestStore.refuse_next_record(store, "model_attempt_settled_v1")
+          :ok = M1RuntimeTestStore.refuse_next_record(store, "model_attempt_settled_v2")
         end
       )
 
@@ -4113,7 +4133,7 @@ defmodule Loopex.AgentLoopTest do
 
     refute fixture.session_id
            |> then(&Fixture.records(fixture, &1))
-           |> Enum.any?(&(&1.payload[:kind] == "model_attempt_settled_v1")),
+           |> Enum.any?(&(&1.payload[:kind] == "model_attempt_settled_v2")),
            "the Store refusal did not reach the model-result transaction this case names"
   end
 
@@ -4577,7 +4597,7 @@ defmodule Loopex.AgentLoopTest do
     assert [%{payload: settlement}] =
              fixture
              |> Fixture.records(session_id)
-             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     assert settlement["attempt"] == 1
     assert settlement["termination"] == "owner_loss"
@@ -4796,7 +4816,7 @@ defmodule Loopex.AgentLoopTest do
     assert [%{payload: settlement}] =
              fixture
              |> Fixture.records(session_id)
-             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     assert settlement["attempt"] == 1
     assert settlement["termination"] == "owner_loss"
@@ -4935,7 +4955,7 @@ defmodule Loopex.AgentLoopTest do
     attempts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
       |> Enum.map(& &1.payload["attempt"])
 
     assert attempts == [1],
@@ -5032,7 +5052,7 @@ defmodule Loopex.AgentLoopTest do
     records = Fixture.records(fixture, session_id)
 
     assert [%{payload: settlement}] =
-             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v1"))
+             Enum.filter(records, &(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     assert settlement["attempt"] == 1
     assert settlement["conversation"] == "none"
@@ -5181,7 +5201,7 @@ defmodule Loopex.AgentLoopTest do
     assert [%{payload: settlement}] =
              fixture
              |> Fixture.records(session_id)
-             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     assert settlement["attempt"] == 1
     assert settlement["termination"] == "owner_loss"
@@ -5289,7 +5309,7 @@ defmodule Loopex.AgentLoopTest do
     attempts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
       |> Enum.map(& &1.payload["attempt"])
 
     assert attempts == [1]
@@ -5298,7 +5318,7 @@ defmodule Loopex.AgentLoopTest do
     assert [%{payload: settlement}] =
              fixture
              |> Fixture.records(session_id)
-             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+             |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
 
     assert settlement["attempt"] == 1
     assert settlement["termination"] == "owner_loss"
@@ -5327,7 +5347,7 @@ defmodule Loopex.AgentLoopTest do
     :ok =
       M1RuntimeTestStore.delay_after_record(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
@@ -5355,7 +5375,7 @@ defmodule Loopex.AgentLoopTest do
 
     send(model, :release)
 
-    assert_receive {:record_linearized, result_waiter, _store, "model_attempt_settled_v1",
+    assert_receive {:record_linearized, result_waiter, _store, "model_attempt_settled_v2",
                     :session_journal_commit, {:committed, _tx_id, _receipt}},
                    5_000
 
@@ -5398,13 +5418,13 @@ defmodule Loopex.AgentLoopTest do
 
     records = Fixture.records(fixture, session_id)
 
-    assert Enum.count(records, &(&1.payload[:kind] == "model_attempt_settled_v1")) == 1
+    assert Enum.count(records, &(&1.payload[:kind] == "model_attempt_settled_v2")) == 1
 
     # ADR 0018: an attempt has exactly one settlement, so what a retained result
     # must not carry is a termination, not the settlement record itself.
     refute Enum.any?(
              records,
-             &(&1.payload[:kind] == "model_attempt_settled_v1" and
+             &(&1.payload[:kind] == "model_attempt_settled_v2" and
                  &1.payload["termination"] != nil)
            )
   end
@@ -5456,7 +5476,7 @@ defmodule Loopex.AgentLoopTest do
 
     assert Enum.count(
              Fixture.records(fixture, session_id),
-             &(&1.payload[:kind] == "model_attempt_settled_v1")
+             &(&1.payload[:kind] == "model_attempt_settled_v2")
            ) == 1,
            "the case reached Control before the model result was durable"
 
@@ -5501,7 +5521,7 @@ defmodule Loopex.AgentLoopTest do
     # must not carry is a termination, not the settlement record itself.
     refute Enum.any?(
              records,
-             &(&1.payload[:kind] == "model_attempt_settled_v1" and
+             &(&1.payload[:kind] == "model_attempt_settled_v2" and
                  &1.payload["termination"] != nil)
            )
   end
@@ -6771,7 +6791,7 @@ defmodule Loopex.AgentLoopTest do
     counts =
       fixture
       |> Fixture.records(session_id)
-      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v1"))
+      |> Enum.filter(&(&1.payload[:kind] == "model_attempt_settled_v2"))
       |> Enum.map(&get_in(&1.payload, ["result", "reply", "delta_count"]))
 
     assert Enum.all?(counts, &(is_nil(&1) or (is_integer(&1) and &1 >= 0))),

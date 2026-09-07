@@ -738,14 +738,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :ok =
       M1RuntimeTestStore.delay_after_record(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
     {session_id, _attachment, {:accepted, "prompt-1"}} =
       Fixture.run(fixture, "settlement page boundary")
 
-    assert_receive {:record_linearized, waiter, _store, "model_attempt_settled_v1", _transition,
+    assert_receive {:record_linearized, waiter, _store, "model_attempt_settled_v2", _transition,
                     {:committed, _tx_id, receipt}},
                    5_000
 
@@ -761,17 +761,9 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     event_prefix = events_before_receipt(retained_events, receipt)
 
-    assert {:ok, settlement_only} =
+    assert {:error, :incomplete_model_attempt_settlement_pair} =
              SessionState.recover(session_id, settlement_prefix, event_prefix)
 
-    [pending_terminal] = SessionState.pending_work(settlement_only)
-    assert pending_terminal.stage == "model_attempt_pending_terminal"
-
-    settlement = List.last(settlement_prefix).payload
-    run_id = settlement["run_id"]
-    {_declared, charged} = SessionState.accounting(settlement_only, run_id)
-    assert charged == %{tokens: 0, source: nil}
-    refute Enum.any?(SessionState.elements(settlement_only, run_id), &assistant_element?/1)
     refute Enum.any?(event_prefix, &(public_event_kind(&1) == "run.finished"))
     refute Enum.any?(receive_progress(), &(&1.kind == :model_stream_closed))
 
@@ -793,8 +785,8 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     recovery_pages = receive_record_pages()
     assert Enum.all?(recovery_pages, fn {_after_version, rows} -> length(rows) <= 1 end)
 
-    assert consecutive_page_kinds(recovery_pages, "model_attempt_settled_v1") == [
-             "model_attempt_settled_v1",
+    assert consecutive_page_kinds(recovery_pages, "model_attempt_settled_v2") == [
+             "model_attempt_settled_v2",
              "run_terminal_committed"
            ]
 
@@ -897,7 +889,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, attempt.session_id)
     opens = records_of_kind(records, "model_attempt_opened_v1")
-    settlements = records_of_kind(records, "model_attempt_settled_v1")
+    settlements = records_of_kind(records, "model_attempt_settled_v2")
 
     assert Enum.map(opens, & &1["attempt"]) == [1, 2]
     assert Enum.map(settlements, & &1["attempt"]) == [1, 2]
@@ -959,7 +951,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, attempt.session_id)
     assert Enum.map(records_of_kind(records, "model_attempt_opened_v1"), & &1["attempt"]) == [1]
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert settlement["transport"] == "dispatched_or_unknown"
     assert settlement["termination"] == nil
     assert settlement["conversation"] == "none"
@@ -994,7 +986,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [settlement] =
       fixture
       |> Fixture.records(attempt.session_id)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert settlement["transport"] == "dispatched_or_unknown"
 
@@ -1116,7 +1108,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [settlement] =
       fixture
       |> Fixture.records(session_id)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert settlement["transport"] == "dispatched_or_unknown"
   end
@@ -1141,7 +1133,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [settlement] =
       fixture
       |> Fixture.records(session_id)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert settlement["transport"] == "dispatched_or_unknown"
 
@@ -1225,7 +1217,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [settlement] =
       fixture
       |> Fixture.records(session_id)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert settlement["transport"] == "dispatched_or_unknown"
   end
@@ -1261,7 +1253,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [settlement] =
       fixture
       |> Fixture.records(session_id)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert settlement["termination"] == "abort"
     assert settlement["transport"] == "dispatched_or_unknown"
@@ -1344,7 +1336,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
                      10_000
 
       assert Enum.map(transaction.records, &record_kind/1) == [
-               "model_attempt_settled_v1",
+               "model_attempt_settled_v2",
                "run_terminal_committed"
              ]
 
@@ -1884,7 +1876,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     records = Fixture.records(fixture, attempt.session_id)
     assert Enum.map(records_of_kind(records, "model_attempt_opened_v1"), & &1["attempt"]) == [1]
 
-    assert [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    assert [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert settlement["transport"] == "dispatched_or_unknown"
     assert settlement["termination"] == "deadline"
     assert settlement["next"] == "terminal"
@@ -1932,7 +1924,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(retry, session_id)
     opens = records_of_kind(records, "model_attempt_opened_v1")
-    settlements = records_of_kind(records, "model_attempt_settled_v1")
+    settlements = records_of_kind(records, "model_attempt_settled_v2")
 
     assert Enum.map(opens, & &1["attempt"]) == [1, 2, 1]
 
@@ -2027,7 +2019,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
                & &1["attempt"]
              ) == [1]
 
-      [no_retry_settlement] = records_of_kind(no_retry_records, "model_attempt_settled_v1")
+      [no_retry_settlement] = records_of_kind(no_retry_records, "model_attempt_settled_v2")
       assert no_retry_settlement["transport"] == "dispatched_or_unknown"
 
       assert no_retry_settlement["accounting"] == %{
@@ -2061,7 +2053,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     records = Fixture.records(fixture, session_id)
     assert records_of_kind(records, "model_termination_admitted_v1") == []
 
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
 
     assert settlement["transport"] == "dispatched_or_unknown"
     assert settlement["termination"] == nil
@@ -2097,7 +2089,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, session_id)
     opens = records_of_kind(records, "model_attempt_opened_v1")
-    settlements = records_of_kind(records, "model_attempt_settled_v1")
+    settlements = records_of_kind(records, "model_attempt_settled_v2")
 
     assert Enum.map(opens, & &1["attempt"]) == [1, 2]
     assert Enum.map(settlements, & &1["attempt"]) == [1, 2]
@@ -2126,7 +2118,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     end
 
     second_settlement_index =
-      record_index(records, "model_attempt_settled_v1", &(&1["attempt"] == 2))
+      record_index(records, "model_attempt_settled_v2", &(&1["attempt"] == 2))
 
     terminal_index = record_index(records, "run_terminal_committed", fn _ -> true end)
     assert terminal_index == second_settlement_index + 1
@@ -2136,7 +2128,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     for {label, invalid_records} <- [
           {"attempt-open extra key", add_payload_key(records, "model_attempt_opened_v1")},
-          {"settlement extra key", add_payload_key(records, "model_attempt_settled_v1")}
+          {"settlement extra key", add_payload_key(records, "model_attempt_settled_v2")}
         ] do
       assert {:error, _invalid_exact_schema} =
                SessionState.recover(
@@ -2205,7 +2197,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, session_id)
     assert records_of_kind(records, "model_termination_admitted_v1") == []
-    assert records_of_kind(records, "model_attempt_settled_v1") == []
+    assert records_of_kind(records, "model_attempt_settled_v2") == []
     assert records_of_kind(records, "run_terminal_committed") == []
   end
 
@@ -2291,7 +2283,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     records = Fixture.records(fixture, session_id)
     assert [opened] = records_of_kind(records, "model_attempt_opened_v1")
     assert opened["attempt"] == 1
-    assert [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    assert [settlement] = records_of_kind(records, "model_attempt_settled_v2")
 
     assert settlement["transport"] == "not_dispatched"
     assert settlement["accounting"] == %{"source" => "none", "basis" => "not_dispatched"}
@@ -2366,7 +2358,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     records = Fixture.records(fixture, session_id)
     events = Fixture.events(fixture, session_id)
 
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert settlement["termination"] == "abort"
     assert settlement["conversation"] == "evidence_only"
     assert settlement["result"]["kind"] == "reply"
@@ -2421,7 +2413,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
         assert settlement["result"] == %{
                  "kind" => "error",
-                 "category" => "unreadable_model_answer"
+                 "category" => "unreadable_model_answer",
+                 "accounting_evidence" => %{
+                   "kind" => "validated_reply_compaction_v1",
+                   "usage" => reply["usage"],
+                   "dimension" => "record_bytes",
+                   "observed" => target,
+                   "limit" => @record_limit
+                 }
                }
 
         assert settlement["accounting"] == %{
@@ -2455,7 +2454,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       fixture |> Fixture.records(session_id) |> records_of_kind("model_request_committed")
 
     [settlement] =
-      fixture |> Fixture.records(session_id) |> records_of_kind("model_attempt_settled_v1")
+      fixture |> Fixture.records(session_id) |> records_of_kind("model_attempt_settled_v2")
 
     [dispatched_request] = AgentLoopTestModel.dispatched(fixture.model)
     durable_reply = settlement["result"]["reply"]
@@ -2501,7 +2500,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
 
     records = Fixture.records(fixture, session_id)
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
 
     assert settlement["result"] == %{
              "kind" => "error",
@@ -2585,7 +2584,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       assert finished["outcome"] == "failed"
 
       records = Fixture.records(fixture, session_id)
-      [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+      [settlement] = records_of_kind(records, "model_attempt_settled_v2")
 
       assert settlement["transport"] == "dispatched_or_unknown"
       assert settlement["next"] == "terminal"
@@ -2645,7 +2644,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert finished["outcome"] == "failed"
 
     records = Fixture.records(fixture, session_id)
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
 
     assert settlement["transport"] == "dispatched_or_unknown"
     assert settlement["next"] == "terminal"
@@ -2735,14 +2734,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :ok =
       M1RuntimeTestStore.delay_after_record(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
     {session_id, attachment, {:accepted, "prompt-1"}} =
       Fixture.run(fixture, "retain retry open")
 
-    assert_receive {:record_linearized, settlement_waiter, _store, "model_attempt_settled_v1",
+    assert_receive {:record_linearized, settlement_waiter, _store, "model_attempt_settled_v2",
                     _transition, {:committed, _settlement_tx_id, _settlement_receipt}},
                    5_000
 
@@ -2819,7 +2818,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
@@ -2827,11 +2826,11 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       Fixture.run(fixture, "retain continue settlement")
 
     assert_receive {:record_held_before_linearization, first_waiter, _store,
-                    "model_attempt_settled_v1", first_transaction},
+                    "model_attempt_settled_v2", first_transaction},
                    5_000
 
     assert [settlement] = first_transaction.records
-    assert record_kind(settlement) == "model_attempt_settled_v1"
+    assert record_kind(settlement) == "model_attempt_settled_v2"
     assert settlement["conversation"] == "canonical"
     assert settlement["next"] == "continue"
 
@@ -2844,7 +2843,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     replay_waiter =
       hold_commit_unknown_replay(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         first_waiter,
         first_transaction
       )
@@ -2864,7 +2863,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     settlements =
       fixture
       |> Fixture.records(session_id)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert Enum.count(settlements, &(&1 == settlement)) == 1
   end
@@ -2885,7 +2884,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
@@ -2893,13 +2892,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       Fixture.run(fixture, "retain terminal settlement")
 
     assert_receive {:record_held_before_linearization, first_waiter, _store,
-                    "model_attempt_settled_v1", first_transaction},
+                    "model_attempt_settled_v2", first_transaction},
                    5_000
 
     assert [settlement, terminal] = first_transaction.records
 
     assert Enum.map(first_transaction.records, &record_kind/1) == [
-             "model_attempt_settled_v1",
+             "model_attempt_settled_v2",
              "run_terminal_committed"
            ]
 
@@ -2917,7 +2916,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     replay_waiter =
       hold_commit_unknown_replay(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         first_waiter,
         first_transaction
       )
@@ -2930,7 +2929,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, session_id)
 
-    assert Enum.count(records_of_kind(records, "model_attempt_settled_v1"), &(&1 == settlement)) ==
+    assert Enum.count(records_of_kind(records, "model_attempt_settled_v2"), &(&1 == settlement)) ==
              1
 
     assert Enum.count(records_of_kind(records, "run_terminal_committed"), &(&1 == terminal)) == 1
@@ -2953,7 +2952,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :ok =
       M1RuntimeTestStore.hold_next_record_before_linearization(
         exact.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
@@ -2961,11 +2960,11 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       Fixture.run(exact, request_text)
 
     assert_receive {:record_held_before_linearization, exact_waiter, _store,
-                    "model_attempt_settled_v1", exact_transaction},
+                    "model_attempt_settled_v2", exact_transaction},
                    5_000
 
     assert Enum.map(exact_transaction.records, &record_kind/1) == [
-             "model_attempt_settled_v1",
+             "model_attempt_settled_v2",
              "run_terminal_committed"
            ]
 
@@ -2980,7 +2979,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert {:error, :no_active_run} = Task.await(result_first_abort, 5_000)
     exact_records = Fixture.records(exact, exact_session)
     [request] = records_of_kind(exact_records, "model_request_committed")
-    [settlement] = records_of_kind(exact_records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(exact_records, "model_attempt_settled_v2")
 
     assert settlement["accounting"] == %{
              "source" => "reported",
@@ -3016,11 +3015,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [unreadable_settlement] =
       unreadable
       |> Fixture.records(unreadable_session)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert unreadable_settlement["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
 
     assert unreadable_settlement["accounting"] == %{
@@ -3056,11 +3056,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [malformed_settlement] =
       malformed
       |> Fixture.records(malformed_session)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert malformed_settlement["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
 
     assert malformed_settlement["accounting"] == %{
@@ -3115,11 +3116,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       [extra_settlement] =
         extra_key
         |> Fixture.records(extra_session)
-        |> records_of_kind("model_attempt_settled_v1")
+        |> records_of_kind("model_attempt_settled_v2")
 
       assert extra_settlement["result"] == %{
                "kind" => "error",
-               "category" => "unreadable_model_answer"
+               "category" => "unreadable_model_answer",
+               "accounting_evidence" => %{"kind" => "none"}
              }
 
       assert extra_settlement["accounting"] == %{
@@ -3144,7 +3146,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [ambiguous_settlement] =
       ambiguous
       |> Fixture.records(ambiguous_session)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert ambiguous_settlement["accounting"] == %{
              "source" => "estimated",
@@ -3192,7 +3194,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     settlement_transactions =
       traced_transactions(commit_unknown.store)
       |> Enum.filter(fn transaction ->
-        Enum.any?(transaction.records, &(record_kind(&1) == "model_attempt_settled_v1"))
+        Enum.any?(transaction.records, &(record_kind(&1) == "model_attempt_settled_v2"))
       end)
 
     assert [first_presentation, second_presentation | _rest] = settlement_transactions
@@ -3201,12 +3203,78 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert length(
              commit_unknown
              |> Fixture.records(unknown_session)
-             |> records_of_kind("model_attempt_settled_v1")
+             |> records_of_kind("model_attempt_settled_v2")
            ) == 1
 
     assert_abort_first_ordering()
     assert_deadline_first_ordering()
     assert_late_error_ordering()
+  end
+
+  test "compacted v2 commit-unknown preserves exact provenance transaction bytes and never runs discarded tools" do
+    call = %{
+      "id" => "compacted-call",
+      "name" => "write",
+      "arguments" => structural_arguments(:depth, 7)
+    }
+
+    fixture =
+      start(
+        script: [
+          %{text: "discarded", calls: [call], usage: %{input_tokens: 37, output_tokens: 11}}
+        ]
+      )
+
+    :ok =
+      M1RuntimeTestStore.hold_next_record_before_linearization(
+        fixture.store,
+        "model_attempt_settled_v2",
+        self()
+      )
+
+    {session_id, attachment, {:accepted, "prompt-1"}} = Fixture.run(fixture, "compact once")
+
+    assert_receive {:record_held_before_linearization, waiter, _store, "model_attempt_settled_v2",
+                    transaction},
+                   5_000
+
+    [settlement, terminal] = transaction.records
+
+    assert settlement["result"]["accounting_evidence"] == %{
+             "kind" => "validated_reply_compaction_v1",
+             "usage" => %{"status" => "reported", "input_tokens" => 37, "output_tokens" => 11},
+             "dimension" => "record_depth",
+             "observed" => 13,
+             "limit" => 12
+           }
+
+    assert settlement["conversation"] == "none"
+    assert settlement["next"] == "terminal"
+    assert terminal["outcome"] == "failed"
+
+    replay_waiter =
+      hold_commit_unknown_replay(fixture.store, "model_attempt_settled_v2", waiter, transaction)
+
+    refute Enum.any?(available_events(attachment), &(&1.kind == "run.finished"))
+    M1RuntimeTestStore.release(replay_waiter)
+    assert await_event(attachment, "run.finished")["outcome"] == "failed"
+    assert Loopex.AgentLoopTestExecutor.jobs(fixture.executor) == []
+    assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
+
+    assert records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v2") == [
+             settlement
+           ]
+
+    events = Fixture.events(fixture, session_id)
+    refute inspect(events) =~ "accounting_evidence"
+
+    assert {:ok, recovered} =
+             SessionState.recover(session_id, Fixture.records(fixture, session_id), events)
+
+    assert elem(SessionState.accounting(recovered, settlement["run_id"]), 1) == %{
+             tokens: 48,
+             source: :reported
+           }
   end
 
   # Concept: usage rejected as part of an unreadable provider reply cannot be
@@ -3246,11 +3314,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     [settlement] =
       fixture
       |> Fixture.records(session_id)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert settlement["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
 
     assert settlement["accounting"] == %{
@@ -3287,11 +3356,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert await_event(attachment, "run.finished")["outcome"] == "failed"
 
     [settlement] =
-      records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v1")
+      records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v2")
 
     assert settlement["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
 
     assert settlement["accounting"] == %{
@@ -3331,11 +3401,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert await_event(attachment, "run.finished")["outcome"] == "failed"
 
     [settlement] =
-      records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v1")
+      records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v2")
 
     assert settlement["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
 
     assert settlement["accounting"] == %{
@@ -3377,11 +3448,12 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert await_event(attachment, "run.finished")["outcome"] == "failed"
 
     [settlement] =
-      records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v1")
+      records_of_kind(Fixture.records(fixture, session_id), "model_attempt_settled_v2")
 
     assert settlement["result"] == %{
              "kind" => "error",
-             "category" => "unreadable_model_answer"
+             "category" => "unreadable_model_answer",
+             "accounting_evidence" => %{"kind" => "none"}
            }
 
     assert settlement["accounting"] == %{
@@ -3426,7 +3498,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert length(AgentLoopTestModel.dispatched(fixture.model)) == 1
 
     records = Fixture.records(fixture, session_id)
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert Enum.map(records_of_kind(records, "model_attempt_opened_v1"), & &1["attempt"]) == [1]
     assert settlement["transport"] == "dispatched_or_unknown"
     assert settlement["termination"] == "owner_loss"
@@ -3454,7 +3526,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              public_event_kind(event) == "assistant.message_appended"
            end)
 
-    settlement_index = record_index(records, "model_attempt_settled_v1", fn _ -> true end)
+    settlement_index = record_index(records, "model_attempt_settled_v2", fn _ -> true end)
     terminal_index = record_index(records, "run_terminal_committed", fn _ -> true end)
     assert terminal_index == settlement_index + 1
 
@@ -3519,7 +3591,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert await_event(attachment, "run.finished")["outcome"] == "completed"
 
     records = Fixture.records(fixture, session_id)
-    [settlement | _later] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement | _later] = records_of_kind(records, "model_attempt_settled_v2")
     assert %{"kind" => "reply", "reply" => reply} = settlement["result"]
 
     assert reply["text"] == text
@@ -3618,7 +3690,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
              "#{label}: a reply after a possible send was retried"
 
       records = Fixture.records(fixture, session_id)
-      [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+      [settlement] = records_of_kind(records, "model_attempt_settled_v2")
       assert settlement["transport"] == "dispatched_or_unknown"
       assert %{"kind" => "error"} = settlement["result"]
 
@@ -3884,14 +3956,14 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     :ok =
       M1RuntimeTestStore.delay_after_record(
         fixture.store,
-        "model_attempt_settled_v1",
+        "model_attempt_settled_v2",
         self()
       )
 
     {session_id, _attachment, {:accepted, "prompt-1"}} =
       Fixture.run(fixture, "retry across succession")
 
-    assert_receive {:record_linearized, settlement_waiter, _store, "model_attempt_settled_v1",
+    assert_receive {:record_linearized, settlement_waiter, _store, "model_attempt_settled_v2",
                     _transition, {:committed, _tx_id, _receipt}},
                    5_000
 
@@ -3943,7 +4015,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       provider_calls: length(AgentLoopTestModel.dispatched(fixture.model)),
       finished: finished,
       opens: records_of_kind(records, "model_attempt_opened_v1"),
-      settlements: records_of_kind(records, "model_attempt_settled_v1")
+      settlements: records_of_kind(records, "model_attempt_settled_v2")
     }
   end
 
@@ -4084,7 +4156,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       provider_calls: length(AgentLoopTestModel.dispatched(fixture.model)),
       finished: finished,
       opens: records_of_kind(records, "model_attempt_opened_v1"),
-      settlements: records_of_kind(records, "model_attempt_settled_v1"),
+      settlements: records_of_kind(records, "model_attempt_settled_v2"),
       progress: receive_progress(),
       predecessor_domain: predecessor_domain
     }
@@ -4219,7 +4291,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       provider_calls: length(AgentLoopTestModel.dispatched(fixture.model)),
       finished: finished,
       opens: records_of_kind(records, "model_attempt_opened_v1"),
-      settlements: records_of_kind(records, "model_attempt_settled_v1")
+      settlements: records_of_kind(records, "model_attempt_settled_v2")
     }
   end
 
@@ -4439,7 +4511,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       provider_calls: length(AgentLoopTestModel.dispatched(fixture.model)),
       finished: finished,
       opens: records_of_kind(records, "model_attempt_opened_v1"),
-      settlements: records_of_kind(records, "model_attempt_settled_v1")
+      settlements: records_of_kind(records, "model_attempt_settled_v2")
     }
   end
 
@@ -5311,7 +5383,16 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         )
 
       expected =
-        if MapSet.member?(valid, cell), do: :ok, else: {:error, :invalid_attempt_settlement}
+        cond do
+          not MapSet.member?(valid, cell) ->
+            {:error, :invalid_attempt_settlement}
+
+          result_tag == :unreadable and accounting_tag in [:reported_pair, :reported_other] ->
+            {:error, :ambiguous_legacy_provider_accounting}
+
+          true ->
+            :ok
+        end
 
       assert ProviderAttempt.validate_settled(record) == expected,
              "settlement cell #{inspect(cell)} expected #{inspect(expected)}"
@@ -5496,7 +5577,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     calls = Map.fetch!(reply, "tool_calls")
 
     %{
-      "kind" => "model_attempt_settled_v1",
+      "kind" => "model_attempt_settled_v2",
       "run_id" => "run_" <> String.duplicate("r", 30),
       "turn_id" => "turn_" <> String.duplicate("t", 30),
       "operation_id" => "model-operation_" <> String.duplicate("o", 23),
@@ -5547,7 +5628,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     assert %{payload: settlement} =
              await_record(fixture, session_id, fn record ->
-               record_kind(record.payload) == "model_attempt_settled_v1"
+               record_kind(record.payload) == "model_attempt_settled_v2"
              end)
 
     settlement
@@ -5581,9 +5662,23 @@ defmodule Loopex.ProviderAttemptProtocolTest do
         assert settlement["result"]["kind"] == "reply"
         assert settlement["result"]["reply"]["tool_calls"] == [call]
       else
+        evidence =
+          if kind == :depth do
+            %{
+              "kind" => "validated_reply_compaction_v1",
+              "usage" => candidate["result"]["reply"]["usage"],
+              "dimension" => "record_depth",
+              "observed" => 13,
+              "limit" => 12
+            }
+          else
+            %{"kind" => "none"}
+          end
+
         assert settlement["result"] == %{
                  "kind" => "error",
-                 "category" => "unreadable_model_answer"
+                 "category" => "unreadable_model_answer",
+                 "accounting_evidence" => evidence
                }
       end
     end
@@ -5691,6 +5786,21 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     ])
 
     case settlement["result"] do
+      %{
+        "kind" => "error",
+        "category" => "unreadable_model_answer",
+        "accounting_evidence" => evidence
+      } = result ->
+        assert_exact_keys(result, ["kind", "category", "accounting_evidence"])
+
+        case evidence do
+          %{"kind" => "none"} ->
+            assert_exact_keys(evidence, ["kind"])
+
+          %{"kind" => "validated_reply_compaction_v1"} ->
+            assert_exact_keys(evidence, ["kind", "usage", "dimension", "observed", "limit"])
+        end
+
       %{"kind" => "error"} = result ->
         assert_exact_keys(result, ["kind", "category"])
 
@@ -5760,7 +5870,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       Enum.map_reduce(records, false, fn record, removed ->
         payload = record.payload
 
-        if not removed and record_kind(payload) == "model_attempt_settled_v1" and
+        if not removed and record_kind(payload) == "model_attempt_settled_v2" and
              payload["run_id"] == first_run_id and payload["attempt"] == 1 do
           {nil, true}
         else
@@ -5814,7 +5924,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
   end
 
   defp retry_at_the_attempt_limit(records) do
-    limit_index = record_index(records, "model_attempt_settled_v1", &(&1["attempt"] == 2))
+    limit_index = record_index(records, "model_attempt_settled_v2", &(&1["attempt"] == 2))
 
     records
     |> Enum.take(limit_index + 1)
@@ -5828,7 +5938,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
       Enum.map_reduce(records, false, fn record, changed? ->
         payload = record.payload
 
-        if not changed? and record_kind(payload) == "model_attempt_settled_v1" and
+        if not changed? and record_kind(payload) == "model_attempt_settled_v2" and
              select.(payload) do
           {%{record | payload: rewrite.(payload)}, true}
         else
@@ -5844,7 +5954,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     Enum.map(records, fn record ->
       payload = record.payload
 
-      if record_kind(payload) in ["model_attempt_opened_v1", "model_attempt_settled_v1"] and
+      if record_kind(payload) in ["model_attempt_opened_v1", "model_attempt_settled_v2"] and
            payload["run_id"] == run_id and Map.has_key?(replacements, payload["attempt"]) do
         %{
           record
@@ -5885,7 +5995,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     settlements =
       fixture
       |> Fixture.records(session_id)
-      |> records_of_kind("model_attempt_settled_v1")
+      |> records_of_kind("model_attempt_settled_v2")
 
     assert [reported, estimated] = settlements
 
@@ -5916,7 +6026,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert {:ok, recovered} =
              SessionState.recover(session_id, records, Fixture.events(fixture, session_id))
 
-    [settlement | _rest] = records_of_kind(Enum.reverse(records), "model_attempt_settled_v1")
+    [settlement | _rest] = records_of_kind(Enum.reverse(records), "model_attempt_settled_v2")
     run_id = settlement["run_id"]
     {declared, charged} = SessionState.accounting(recovered, run_id)
 
@@ -5971,13 +6081,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, session_id)
     abort_index = record_index(records, "command_admitted", &(&1["command_type"] == "abort"))
-    settlement_index = record_index(records, "model_attempt_settled_v1", fn _ -> true end)
+    settlement_index = record_index(records, "model_attempt_settled_v2", fn _ -> true end)
     terminal_index = record_index(records, "run_terminal_committed", fn _ -> true end)
 
     assert abort_index < settlement_index
     assert terminal_index == settlement_index + 1
 
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert settlement["termination"] == "abort"
     assert settlement["conversation"] == "evidence_only"
     assert settlement["next"] == "terminal"
@@ -6032,13 +6142,13 @@ defmodule Loopex.ProviderAttemptProtocolTest do
 
     records = Fixture.records(fixture, session_id)
     deadline_index = record_index(records, "model_termination_admitted_v1", fn _ -> true end)
-    settlement_index = record_index(records, "model_attempt_settled_v1", fn _ -> true end)
+    settlement_index = record_index(records, "model_attempt_settled_v2", fn _ -> true end)
     terminal_index = record_index(records, "run_terminal_committed", fn _ -> true end)
 
     assert deadline_index < settlement_index
     assert terminal_index == settlement_index + 1
 
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert settlement["termination"] == "deadline"
     assert settlement["conversation"] == "evidence_only"
     assert settlement["next"] == "terminal"
@@ -6105,7 +6215,7 @@ defmodule Loopex.ProviderAttemptProtocolTest do
     assert await_event(attachment, "run.finished")["outcome"] == "cancelled"
 
     records = Fixture.records(fixture, session_id)
-    [settlement] = records_of_kind(records, "model_attempt_settled_v1")
+    [settlement] = records_of_kind(records, "model_attempt_settled_v2")
     assert settlement["termination"] == "abort"
     assert settlement["conversation"] == "none"
     assert settlement["next"] == "terminal"

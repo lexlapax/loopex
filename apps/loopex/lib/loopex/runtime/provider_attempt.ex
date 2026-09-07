@@ -13,7 +13,9 @@ defmodule Loopex.Runtime.ProviderAttempt do
   records retain.
 
   Fixed by
-  [ADR 0018](../../../../docs/adr/0018-provider-attempt-authority-and-recovery.md#concept).
+  [ADR 0018](../../../../docs/adr/0018-provider-attempt-authority-and-recovery.md#concept)
+  and its versioned accounting provenance in
+  [ADR 0021](../../../../docs/adr/0021-compacted-provider-accounting-provenance.md#concept).
 
   ## Technical depth
 
@@ -31,7 +33,8 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
 
   @opened_kind "model_attempt_opened_v1"
-  @settled_kind "model_attempt_settled_v1"
+  @settled_kind "model_attempt_settled_v2"
+  @legacy_settled_kind "model_attempt_settled_v1"
   @termination_kind "model_termination_admitted_v1"
 
   @opened_keys ["run_id", "turn_id", "operation_id", "attempt", "staged_request_digest"]
@@ -292,10 +295,16 @@ defmodule Loopex.Runtime.ProviderAttempt do
   """
   @spec validate_settled(map()) :: :ok | {:error, term()}
   def validate_settled(record) when is_map(record) do
-    with :ok <- exact_keys(record, @settled_keys),
+    with kind when kind in [@legacy_settled_kind, @settled_kind] <-
+           Map.get(record, :kind, Map.get(record, "kind")),
+         :ok <- exact_keys(record, @settled_keys),
          :ok <- validate_identity(record),
-         :ok <- validate_verdict(record) do
+         :ok <- validate_verdict(record, kind),
+         :ok <- legacy_accounting(record, kind) do
       :ok
+    else
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :invalid_attempt_settlement}
     end
   end
 
@@ -434,7 +443,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
   # ones, because the record is also the migration boundary: a member added by a
   # later version must fail the exact key set above, not slip through a
   # permissive branch here.
-  defp validate_verdict(record) do
+  defp validate_verdict(record, kind) do
     transport = record["transport"]
     termination = record["termination"]
     conversation = record["conversation"]
@@ -446,7 +455,7 @@ defmodule Loopex.Runtime.ProviderAttempt do
          true <- termination in [nil, "abort", "deadline", "owner_loss"],
          true <- conversation in ["canonical", "evidence_only", "none"],
          true <- next in ["retry", "continue", "terminal"],
-         :ok <- validate_result(result),
+         :ok <- validate_result(result, kind),
          :ok <- validate_accounting(accounting),
          :ok <-
            validate_combination(
@@ -465,8 +474,8 @@ defmodule Loopex.Runtime.ProviderAttempt do
     end
   end
 
-  defp validate_result(%{"kind" => "reply", "reply" => reply} = result)
-       when map_size(result) == 2 do
+  defp validate_result(%{"kind" => "reply", "reply" => reply} = result, _kind)
+       when map_size(result) == 2 and is_map(reply) and map_size(reply) == 8 do
     with :ok <- exact_keys(reply, @reply_keys),
          {:ok, _identity} <- reply_identity(Map.get(reply, "identity")),
          {:ok, _calls} <- reply_tool_calls(Map.get(reply, "tool_calls")),
@@ -483,12 +492,67 @@ defmodule Loopex.Runtime.ProviderAttempt do
     end
   end
 
-  defp validate_result(%{"kind" => "error", "category" => category} = result)
-       when map_size(result) == 2 and
-              category in ["model_call_failed", "unreadable_model_answer"],
+  defp validate_result(%{"kind" => "error", "category" => "model_call_failed"} = result, _kind)
+       when map_size(result) == 2,
        do: :ok
 
-  defp validate_result(_result), do: {:error, :invalid_attempt_settlement}
+  defp validate_result(
+         %{"kind" => "error", "category" => "unreadable_model_answer"} = result,
+         @legacy_settled_kind
+       )
+       when map_size(result) == 2,
+       do: :ok
+
+  defp validate_result(
+         %{
+           "kind" => "error",
+           "category" => "unreadable_model_answer",
+           "accounting_evidence" => evidence
+         } = result,
+         @settled_kind
+       )
+       when map_size(result) == 3,
+       do: validate_accounting_evidence(evidence)
+
+  defp validate_result(_result, _kind), do: {:error, :invalid_attempt_settlement}
+
+  defp validate_accounting_evidence(%{"kind" => "none"} = evidence)
+       when map_size(evidence) == 1,
+       do: :ok
+
+  defp validate_accounting_evidence(
+         %{
+           "kind" => "validated_reply_compaction_v1",
+           "usage" => usage,
+           "dimension" => dimension,
+           "observed" => observed,
+           "limit" => limit
+         } = evidence
+       )
+       when map_size(evidence) == 5 do
+    with :ok <- validate_usage_shape(usage),
+         true <- uint64?(observed) and uint64?(limit),
+         true <-
+           (dimension == "record_bytes" and limit == 65_536 and observed > limit) or
+             (dimension == "record_depth" and limit == 12 and observed == 13) do
+      :ok
+    else
+      _other -> {:error, :invalid_attempt_settlement}
+    end
+  end
+
+  defp validate_accounting_evidence(_evidence), do: {:error, :invalid_attempt_settlement}
+
+  defp legacy_accounting(
+         %{
+           "result" => %{"kind" => "error", "category" => "unreadable_model_answer"},
+           "accounting" => %{"source" => "reported"}
+         },
+         @legacy_settled_kind
+       ),
+       do: {:error, :ambiguous_legacy_provider_accounting}
+
+  defp legacy_accounting(_record, _kind), do: :ok
 
   defp validate_usage_shape(
          %{"status" => "reported", "input_tokens" => i, "output_tokens" => o} = u
@@ -562,9 +626,9 @@ defmodule Loopex.Runtime.ProviderAttempt do
   #
   # A reply's accounting is `reported` exactly when the reply carries complete
   # reported usage, which combination 1 fixes and `reported_matches?/2` then
-  # ties to the exact figures. Combination 5 is the one cell with a choice:
-  # compaction removed the reply the numbers came from, so the record can no
-  # longer say whether usage was available, and both sources stay admissible.
+  # ties to the exact figures. ADR 0021 additionally ties a compact reply's
+  # accounting to its retained usage. Legacy unreadable reported pairs reach
+  # their specific ambiguity refusal only after the old cell is validated.
   defp settlement_cell(attempt, "not_dispatched", termination, %{
          "kind" => "error",
          "category" => "model_call_failed"
@@ -607,6 +671,24 @@ defmodule Loopex.Runtime.ProviderAttempt do
 
   defp settlement_cell(_attempt, "dispatched_or_unknown", termination, %{
          "kind" => "error",
+         "category" => "unreadable_model_answer",
+         "accounting_evidence" => evidence
+       })
+       when termination in [nil, "abort", "deadline"] do
+    source =
+      case evidence do
+        %{"kind" => "validated_reply_compaction_v1", "usage" => %{"status" => "reported"}} ->
+          "reported"
+
+        _other ->
+          "estimated"
+      end
+
+    {:ok, "none", "terminal", [source]}
+  end
+
+  defp settlement_cell(_attempt, "dispatched_or_unknown", termination, %{
+         "kind" => "error",
          "category" => "unreadable_model_answer"
        })
        when termination in [nil, "abort", "deadline"],
@@ -628,21 +710,22 @@ defmodule Loopex.Runtime.ProviderAttempt do
       }
   end
 
-  # Concept: the compact unreadable answer is the one result that may carry
-  # reported usage without a retained reply to show it against.
-  #
-  # Technical depth: ADR 0018 combination 5 says the compacted record
-  # "preserves complete reported usage when available", and compaction is
-  # exactly what removed the reply those numbers came from. Refusing the pair
-  # here would make a record Core itself built self-invalid and cost the run its
-  # verdict over an answer the provider did charge for. The licence is narrow on
-  # purpose: `model_call_failed` names an attempt with no readable answer at
-  # all, keeps combination 3's estimated remaining allowance, and still has no
-  # way to claim a reported figure.
   defp reported_matches?(
-         %{"kind" => "error", "category" => "unreadable_model_answer"},
-         _accounting
+         %{
+           "accounting_evidence" => %{"kind" => "validated_reply_compaction_v1", "usage" => usage}
+         },
+         accounting
        ),
+       do: reported_matches?(%{"kind" => "reply", "reply" => %{"usage" => usage}}, accounting)
+
+  # Concept: legacy ambiguity is named separately from malformed history.
+  # Technical depth: only the exact two-key v1 result reaches this branch;
+  # `legacy_accounting/2` refuses it after validating the old combination.
+  defp reported_matches?(
+         %{"kind" => "error", "category" => "unreadable_model_answer"} = result,
+         _accounting
+       )
+       when map_size(result) == 2,
        do: true
 
   defp reported_matches?(_result, _accounting), do: false
@@ -729,7 +812,8 @@ defmodule Loopex.Runtime.ProviderAttempt do
   # and uint64-overflow members still reach `normalize_usage/1` and keep ADR
   # 0018's exact accounting classifications. A non-plain raw term is an
   # unreadable reply before projection like the same term in every other field.
-  defp admitted_raw_reply(reply) do
+  @doc false
+  def admitted_raw_reply(reply) do
     with :ok <- admitted_echoed_request(reply) do
       case Loopex.Store.admit_bounded(Map.drop(reply, @unmeasured_reply_keys)) do
         {:ok, _bytes} -> :ok
