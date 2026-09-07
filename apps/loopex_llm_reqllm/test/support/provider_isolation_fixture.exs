@@ -20,6 +20,22 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
     File.mkdir!(root)
     {:ok, events} = Agent.start_link(fn -> [] end)
+    {:ok, probe_events} = Agent.start_link(fn -> [] end)
+    {:ok, probe_listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, {_address, probe_port}} = :inet.sockname(probe_listener)
+
+    probe =
+      spawn_link(fn ->
+        case :gen_tcp.accept(probe_listener) do
+          {:ok, socket} ->
+            Agent.update(probe_events, &[:connected | &1])
+            wait_closed(socket)
+            Agent.update(probe_events, &[:closed | &1])
+
+          {:error, :closed} ->
+            :ok
+        end
+      end)
 
     {:ok, listener} =
       :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}, reuseaddr: true])
@@ -29,13 +45,29 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     acceptor = spawn_link(fn -> accept_loop(listener, events, mode, expected) end)
     if mode == :closed_port, do: :gen_tcp.close(listener)
 
-    fixture = %{root: root, events: events, listener: listener, acceptor: acceptor, mode: mode}
-    launch = write_worker(root, mode, port)
+    fixture = %{
+      root: root,
+      events: events,
+      probe_events: probe_events,
+      listener: listener,
+      acceptor: acceptor,
+      mode: mode,
+      paused: Keyword.get(options, :paused, false)
+    }
+
+    launch = write_worker(root, mode, port, probe_port)
+
+    if mode == :dotenv do
+      File.write!(Path.join(root, ".env"), "LOOPEX_DOTENV_CANARY=loaded\nTIDEWAVE_REPL=true\n")
+    end
 
     ExUnit.Callbacks.on_exit(fn ->
       if Process.alive?(acceptor), do: Process.exit(acceptor, :kill)
+      if Process.alive?(probe), do: Process.exit(probe, :kill)
       :gen_tcp.close(listener)
+      :gen_tcp.close(probe_listener)
       if Process.alive?(events), do: Agent.stop(events)
+      if Process.alive?(probe_events), do: Agent.stop(probe_events)
       File.rm_rf!(root)
     end)
 
@@ -66,7 +98,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           ProviderLifetime.scoped(
             fn guardian, stop_reference ->
               send(observer, {:registered, self(), guardian, stop_reference})
-              {:managed, retainer, 2_000}
+              if fixture.paused, do: receive(do: (:continue -> :ok))
+              if retainer == :unmanaged, do: :unmanaged, else: {:managed, retainer, 2_000}
             end,
             fn -> complete(fixture, request) end
           )
@@ -102,6 +135,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   end
 
   def events(fixture), do: Agent.get(fixture.events, &Enum.reverse/1)
+  def probe_events(fixture), do: Agent.get(fixture.probe_events, &Enum.reverse/1)
   def count(fixture), do: length(events(fixture))
   def marker(fixture, name), do: Path.join(fixture.root, name)
   def reached?(fixture, name), do: File.regular?(marker(fixture, name))
@@ -147,7 +181,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     end
   end
 
-  defp write_worker(root, mode, port) do
+  defp write_worker(root, mode, port, probe_port) do
     manifest = %{
       "source" => "synthetic-process-fixture",
       "version" => "fixture",
@@ -168,7 +202,46 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         root = #{inspect(root)}
         mode = #{inspect(mode)}
         File.write!(Path.join(root, "canary"), "POST\\n", [:append])
-        if mode in [:hold_before_return, :descendant] do
+        File.write!(Path.join(root, "startup"), Jason.encode!(%{
+          dotenv_absent: System.get_env("LOOPEX_DOTENV_CANARY") == nil,
+          tidewave_absent: System.get_env("TIDEWAVE_REPL") == nil,
+          req_dotenv_disabled: Application.get_env(:req_llm, :load_dotenv) == false,
+          db_dotenv_disabled: Application.get_env(:llm_db, :load_dotenv) == false,
+          no_core: Enum.all?(Application.started_applications(), fn {app, _, _} ->
+            app not in [:loopex, :loopex_cli, :loopex_composition, :loopex_llm_reqllm]
+          end)
+        }))
+        if mode == :detached_descendant do
+          task = Task.Supervisor.async(ReqLLM.TaskSupervisor, fn ->
+            receive do: (:begin -> :ok)
+            owner = self()
+            session = spawn_link(fn ->
+              socket = spawn(fn ->
+                {:ok, connection} = :gen_tcp.connect({127, 0, 0, 1}, #{probe_port}, [:binary, active: false], 2_000)
+                send(owner, {:socket_open, self()})
+                :gen_tcp.recv(connection, 0, :infinity)
+              end)
+              send(owner, {:session_socket, self(), socket})
+              receive do: (:finish -> :ok)
+            end)
+            monitor = Process.monitor(session)
+            receive do
+              {:session_socket, ^session, socket} ->
+                receive do: ({:socket_open, ^socket} -> :ok)
+                send(session, :finish)
+                receive do: ({:DOWN, ^monitor, :process, ^session, :normal} -> :ok)
+                %{session_dead: not Process.alive?(session), socket_alive: Process.alive?(socket)}
+            end
+          end)
+          task_monitor = Process.monitor(task.pid)
+          task_pid = task.pid
+          send(task_pid, :begin)
+          proof = Task.await(task, 2_000)
+          receive do: ({:DOWN, ^task_monitor, :process, ^task_pid, :normal} -> :ok)
+          proof = Map.put(proof, :task_dead, not Process.alive?(task_pid))
+          File.write!(Path.join(root, "detached-proof"), Jason.encode!(proof))
+        end
+        if mode in [:hold_before_return, :hold_before_error, :descendant] do
           if mode == :descendant do
             spawn(fn ->
               Port.open({:spawn_executable, ~c"/bin/sh"}, [
@@ -186,13 +259,26 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           key = Enum.find_value(request.headers, fn {name, value} ->
             if String.downcase(name) in ["x-api-key", "authorization"], do: value
           end)
+          io_result = fn ->
+            try do IO.write(key); :written rescue ArgumentError -> :refused end
+          end
+          direct = io_result.()
+          supervised = ReqLLM.TaskSupervisor |> Task.Supervisor.async(io_result) |> Task.await(1_000)
+          File.write!(Path.join(root, "io-results"), Jason.encode!(%{direct: direct, supervised: supervised}))
           for action <- [fn -> IO.write(key) end, fn -> IO.write(:stderr, key) end,
             fn -> Logger.error(key, diagnostic: %{key => key}) end,
             fn -> :logger.error(~c"~ts", [key]) end] do
             try do action.() catch _, _ -> :ok end
           end
           spawn(fn -> raise key end)
-          spawn(fn -> Process.sleep(100); Logger.error(key) end)
+          spawn(fn ->
+            Stream.repeatedly(fn -> File.exists?(Path.join(root, "release-diagnostics")) end)
+            |> Enum.reduce_while(nil, fn ready, _ ->
+              if ready, do: {:halt, nil}, else: (Process.sleep(10); {:cont, nil})
+            end)
+            Logger.error(key)
+            File.write!(Path.join(root, "delayed-diagnostics"), "attempted")
+          end)
           File.write!(Path.join(root, "diagnostics"), "attempted")
         end
         case mode do
@@ -210,6 +296,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     File.write!(#{inspect(Path.join(root, "pid"))}, System.pid())
     File.write!(#{inspect(Path.join(root, "namespace"))}, Path.dirname(path))
     File.write!(#{inspect(Path.join(root, "entry-env"))}, inspect(Enum.sort(Map.keys(System.get_env()))))
+    if #{inspect(mode)} == :dotenv, do: File.cd!(#{inspect(root)})
     if #{inspect(mode)} == :pre_entry_crash, do: System.halt(71)
     if #{inspect(mode)} == :hold_before_entry, do: Process.sleep(:infinity)
     Loopex.LLM.ReqLLM.ProviderWorker.main(Enum.map(arguments, &List.to_string/1))
@@ -272,7 +359,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         :rate_limited ->
           respond(socket, "429 Too Many Requests", "application/json", "{}")
 
-        :http_error ->
+        mode when mode in [:http_error, :hold_before_error] ->
           respond(socket, "500 Internal Server Error", "application/json", "{}")
 
         :malformed_response ->
