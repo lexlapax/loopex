@@ -75,8 +75,110 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
     end
   end
 
+  test "the committed deadline stops an actually blocked child writer through independent cleanup" do
+    {fixture, request, call, receiver, _socket} = start_blocked()
+    receiver_monitor = Process.monitor(receiver)
+    cooperative = System.monotonic_time(:millisecond) + remaining(request) + 2_000
+    observation = cooperative + 100
+    caller = call.caller
+
+    # The suffix stays unreleased: neither HTTP completion nor private-socket
+    # drainage can unblock the real writer before the committed deadline.
+    assert_receive {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
+                   until(cooperative)
+
+    assert System.system_time(:millisecond) >= request.deadline
+    assert_receive {:DOWN, ^receiver_monitor, :process, ^receiver, :killed}, until(cooperative)
+    stop_at(call, cooperative, observation)
+    assert_one_transport(fixture)
+
+    assert Fixture.eventually(
+             fn ->
+               Fixture.transport_events(fixture) ==
+                 [:connected, :prefix_sent, :writer_fill_sent, :closed]
+             end,
+             until(observation)
+           )
+
+    Fixture.assert_gone(fixture)
+  end
+
+  test "channel loss after admitted progress rejects the full terminal queued behind a blocked child writer" do
+    request = Fixture.request()
+
+    fixture =
+      Fixture.new(:backpressure,
+        stream_prelude: sse(opening() ++ [delta("p")]),
+        stream_parts:
+          {sse([delta(String.duplicate("a", @head_bytes))]), sse([delta("b")]),
+           sse(List.duplicate(delta("b"), @tail_count - 2) ++ ending())},
+        paused: true
+      )
+
+    {call, receiver, socket} = start_observed(fixture, request)
+    Fixture.release(fixture)
+
+    assert_receive {:forwarded_delta, %{kind: :text_delta, content_index: 0, text: "p"}},
+                   remaining(request)
+
+    assert :erlang.suspend_process(receiver)
+
+    try do
+      File.write!(Fixture.marker(fixture, "begin-pressure"), "release")
+      block_writer(fixture, request, 2)
+      File.write!(Fixture.marker(fixture, "continue-stream"), "release")
+      proof = await_proof(fixture, "backpressure-complete", request)
+      assert proof["writer_in_send"] and proof["producer_waiting_terminal"]
+      assert proof["terminal_messages"] == 1
+      assert proof["producer_delta_count"] == @tail_count + 1
+      assert proof["terminal_text_bytes"] == @head_bytes + @tail_count
+
+      cooperative = System.monotonic_time(:millisecond) + 2_000
+      observation = cooperative + 100
+      :ok = :gen_tcp.close(socket)
+      assert Port.info(socket) == nil
+      assert :erlang.resume_process(receiver)
+      caller = call.caller
+
+      assert_receive {:completed, ^caller,
+                      {:error, {:dispatched_or_unknown, "model_call_failed"}}},
+                     until(cooperative)
+
+      assert forwarded_deltas([]) == []
+      stop_at(call, cooperative, observation)
+      assert_one_transport(fixture)
+
+      assert Fixture.eventually(
+               fn ->
+                 Fixture.transport_events(fixture) ==
+                   [
+                     :connected,
+                     :prelude_sent,
+                     :prefix_sent,
+                     :writer_fill_sent,
+                     :suffix_sent,
+                     :closed
+                   ]
+               end,
+               until(observation)
+             )
+
+      Fixture.assert_gone(fixture)
+    after
+      resume_if_suspended(receiver)
+    end
+  end
+
   defp start_blocked(request \\ Fixture.request()) do
     fixture = Fixture.new(:backpressure, stream_parts: stream_parts(), paused: true)
+    {call, receiver, socket} = start_observed(fixture, request)
+    assert :erlang.suspend_process(receiver)
+    Fixture.release(fixture)
+    block_writer(fixture, request, 1)
+    {fixture, request, call, receiver, socket}
+  end
+
+  defp start_observed(fixture, request) do
     observer = self()
 
     call =
@@ -102,20 +204,21 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
       end)
 
     :ok = :inet.setopts(socket, recbuf: 1_024, buffer: 1_024)
-    assert :erlang.suspend_process(receiver)
-    Fixture.release(fixture)
+    {call, receiver, socket}
+  end
+
+  defp block_writer(fixture, request, buffered_calls) do
     buffered = await_proof(fixture, "backpressure-buffered", request)
     assert buffered["pending_bytes"] > 0
     refute buffered["writer_in_send"]
-    assert buffered["actual_send_calls"] == 1
+    assert buffered["actual_send_calls"] == buffered_calls
     assert buffered["slot_items"] == 0
     File.write!(Fixture.marker(fixture, "fill-writer"), "release")
     proof = await_proof(fixture, "backpressure-blocked", request)
     assert proof["pending_bytes"] > 0
     assert proof["writer_in_send"]
     assert proof["kind"] == "delta"
-    assert proof["actual_send_calls"] == 2
-    {fixture, request, call, receiver, socket}
+    assert proof["actual_send_calls"] == buffered_calls + 1
   end
 
   defp local_socket?(port) do
@@ -140,6 +243,23 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
 
   defp remaining(request), do: max(request.deadline - System.system_time(:millisecond), 0)
 
+  defp until(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  defp stop_at(call, cooperative, observation) do
+    stop = make_ref()
+    guardian = call.guardian
+    monitor = call.monitor
+
+    send(
+      guardian,
+      {:loopex_provider_resource_stop, call.stop_reference, stop, self(), cooperative,
+       observation}
+    )
+
+    assert_receive {:loopex_provider_resource_stopped, ^stop, ^guardian}, until(cooperative)
+    assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, until(observation)
+  end
+
   defp resume_if_suspended(pid) do
     if Process.info(pid, :status) == {:status, :suspended}, do: :erlang.resume_process(pid)
   end
@@ -159,7 +279,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
   end
 
   defp stream_parts do
-    opening = [
+    {sse(opening() ++ [delta(String.duplicate("a", @head_bytes))]), sse([delta("b")]),
+     sse(List.duplicate(delta("b"), @tail_count - 1) ++ ending())}
+  end
+
+  defp opening do
+    [
       %{
         "type" => "message_start",
         "message" => %{
@@ -175,11 +300,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
         "type" => "content_block_start",
         "index" => 0,
         "content_block" => %{"type" => "text", "text" => ""}
-      },
-      delta(String.duplicate("a", @head_bytes))
+      }
     ]
+  end
 
-    ending = [
+  defp ending do
+    [
       %{"type" => "content_block_stop", "index" => 0},
       %{
         "type" => "message_delta",
@@ -188,8 +314,6 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
       },
       %{"type" => "message_stop"}
     ]
-
-    {sse(opening), sse([delta("b")]), sse(List.duplicate(delta("b"), @tail_count - 1) ++ ending)}
   end
 
   defp delta(text),

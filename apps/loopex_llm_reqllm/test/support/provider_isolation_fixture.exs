@@ -46,7 +46,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
     response_body =
       if mode == :backpressure,
-        do: {root, Keyword.fetch!(options, :stream_parts)},
+        do: {root, Keyword.get(options, :stream_prelude), Keyword.fetch!(options, :stream_parts)},
         else: Keyword.get(options, :response_body)
 
     acceptor =
@@ -549,7 +549,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
               # The first send may return after filling the driver's bounded
               # queue. Release the next real HTTP delta only after observing
               # that queue; its write must then encounter the busy socket.
-              if pending > 0 and not in_send and kind == :delta and calls == 1 and
+              if pending > 0 and not in_send and kind == :delta and
                    :ets.info(slots, :size) == 0 and
                    not File.exists?(Path.join(root, "backpressure-buffered")) do
                 publish(root, "backpressure-buffered", %{pending_bytes: pending,
@@ -749,17 +749,24 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     end
   end
 
-  defp serve_backpressure(socket, events, {root, {prefix, fill, suffix}}) do
-    size = byte_size(prefix) + byte_size(fill) + byte_size(suffix)
+  defp serve_backpressure(socket, events, {root, prelude, {prefix, fill, suffix}}) do
+    parts = [{"fill-writer", fill, :writer_fill_sent}, {"continue-stream", suffix, :suffix_sent}]
+
+    {first, event, parts} =
+      if is_binary(prelude),
+        do: {prelude, :prelude_sent, [{"begin-pressure", prefix, :prefix_sent} | parts]},
+        else: {prefix, :prefix_sent, parts}
+
+    size = byte_size(first) + Enum.sum(Enum.map(parts, fn {_, bytes, _} -> byte_size(bytes) end))
 
     :ok =
       :gen_tcp.send(
         socket,
         "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: #{size}\r\nrequest-id: req-fixture-001\r\nconnection: close\r\n\r\n" <>
-          prefix
+          first
       )
 
-    Agent.update(events, &[:prefix_sent | &1])
+    Agent.update(events, &[event | &1])
     server = self()
     reader = spawn_link(fn -> send(server, {:peer_closed, self(), wait_closed(socket)}) end)
 
@@ -767,7 +774,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       socket,
       reader,
       root,
-      [{"fill-writer", fill, :writer_fill_sent}, {"continue-stream", suffix, :suffix_sent}],
+      parts,
       events
     )
   end
