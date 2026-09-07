@@ -42,7 +42,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
   """
   def options!(root) when is_binary(root) do
     unless Path.type(root) == :absolute,
-           do: raise("provider build requires an owned root outside the checkout")
+      do: raise("provider build requires an owned root outside the checkout")
 
     root = Path.expand(root)
 
@@ -121,7 +121,13 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
     {output, status} =
       System.cmd(
         "/bin/sh",
-        ["-c", "exec \"$1\" \"$2\" loopex.provider.build </dev/null", "provider-build", elixir, mix],
+        [
+          "-c",
+          "exec \"$1\" \"$2\" loopex.provider.build </dev/null",
+          "provider-build",
+          elixir,
+          mix
+        ],
         cd: Path.join(@source_root, "apps/loopex_llm_reqllm"),
         env: Map.to_list(environment),
         stderr_to_stdout: true
@@ -166,7 +172,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderBuildFixture do
 
     for module <- @wire_modules do
       name = Atom.to_string(module) <> ".beam"
-      [{_path, packaged}] = Enum.filter(entries, &(Path.basename(List.to_string(elem(&1, 0))) == name))
+
+      [{_path, packaged}] =
+        Enum.filter(entries, &(Path.basename(List.to_string(elem(&1, 0))) == name))
+
       {^module, loaded, _path} = :code.get_object_code(module)
       {:ok, {^module, checksum}} = :beam_lib.md5(loaded)
 
