@@ -1157,10 +1157,10 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   # Concept: a handler that goes away leaves the recovered work paused for good
   # rather than paused with nobody able to say so.
   #
-  # Technical depth: installing again removes the previous handler, and the
-  # removed handler used to drop its copy of the activation while the owner went
-  # on recording the old holder. The capability stayed `:prepared`, no live
-  # process could present it, and nothing would ever settle it -- a session
+  # Technical depth: explicit handler removal used to drop its copy of the
+  # activation while the owner went on recording the old holder. The capability
+  # stayed `:prepared`, no live process could present it, and nothing would ever
+  # settle it -- a session
   # paused with no remaining move for the operator. The holder the owner
   # acknowledged is stopped with the handler now, and the owner's monitor of it
   # is what turns removal into a permanent, truthful abandonment.
@@ -1190,9 +1190,9 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
   #
   # Technical depth: process tracing follows the installer's first child and
   # requires that lifetime guard itself to create the holder. That topology is
-  # the proof that there is no holder-spawn-before-guard interval. The production
-  # installation lock then holds the installer before it can select a signal
-  # manager or install a handler. Killing the installer there must make the
+  # the proof that there is no holder-spawn-before-guard interval. Suspending the
+  # real signal manager holds installation after the guard is armed but before
+  # a handler can be installed. Killing the installer there must make the
   # guard take its exact holder down. Once the owner acknowledges the handoff,
   # the separate preparer- and manager-loss cases prove that the holder has
   # transferred away from this temporary lifetime instead.
@@ -1602,15 +1602,15 @@ defmodule LoopexCli.PreparedRecoveryContractTest do
     end
   end
 
-  # Concept: owner succession ordered after a committed transfer does not turn
-  # that transfer into a refusal, and it cannot leave the now-stale holder live.
+  # Concept: owner succession during a possibly delivered handoff produces an
+  # unresolved answer, not a refusal, and cannot leave the stale holder live.
   #
   # Technical depth: Core fixes `:committed` while the guard is suspended. The
   # real supersession handler then marks the owner stale but retains the pending
-  # handoff. Once the guard acknowledges, the installer receives `:ok`; only
-  # afterwards does the ordinary stale-owner reaper stop the coordinator. The
-  # guard observes that exact owner loss and ends the holder, so no transient
-  # capability survives the owner it belonged to.
+  # handoff. Its lifetime acknowledgement cannot make the superseded owner
+  # current again: the installer receives the unresolved classification and the
+  # stale-owner reaper stops the coordinator. The guard observes that exact owner
+  # loss and ends the holder, so no transient capability survives its owner.
   test "supersession after possible handoff reports unresolved and reaps the guarded holder" do
     fixture = recovered_fixture("supersession-after-verdict", :active)
     handoff = guarded_transfer_waiting_for_ack(fixture, "supersession-after-verdict")

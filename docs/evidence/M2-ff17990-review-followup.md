@@ -176,11 +176,11 @@ register, accepted gates, and historical dispositions remain unchanged.
 | Work item | State and owner | Completion requirement |
 | --- | --- | --- |
 | Record ADR acceptance | Complete; integrator | Exact-diff independent transition review clear; status and commit-message checks passed |
-| ADR 0019 provider isolation | Backpressure and both narrower retainer-loss schedules joined; `d3a39ac` repairs the second whole suite's blocked-progress fixture ordering failure, recorded below; earlier package results remain bound to `faa340f` | Finish two-runtime and process-inspection witnesses, then joined whole-suite and final-source platform/live evidence |
-| ADR 0020 explicit handoff | `fd9f269` joined; 112 CLI/handoff cases and 30 separate Core cases passed in its worker; joined 56-case prepared corpus passes with both independent detectors | Joined full suite; all thirteen locked prepared-recovery names preserved |
-| ADR 0021 accounting provenance | 74 accounting/protocol cases pass with the new lifecycle regressions; genuine old-reader control/refusal and two actual child-provider-to-Core accounting/rendering cases pass as described below | Joined full suite, decisive mutation qualification, and final source-bound evidence |
-| Rejoin and conformance | Source through `a99db63` pushed; force compilation warning-free; second whole suite 1,027 passed, one failed, five live exclusions | Preserve locked names/behavior and byte-bound files; resolve the failure before qualifying the final clean source; compile and tests serial across clones |
-| Clause-derived mutant hunt | Accounting, handoff and provider hunts each found two focused-corpus survivors; their six behavioral detectors now pass | Qualify survivors against a green whole suite and audit the remaining cross-boundary obligations; these focused hunts are not exhaustive clearance |
+| ADR 0019 provider isolation | Actual two-runtime, pre-entry failure, backpressure and both narrower retainer-loss witnesses joined; 138 provider cases pass in the whole suite at `47948df` | Complete process-inspection and final-source package/platform/live evidence; earlier packages remain bound to their own sources |
+| ADR 0020 explicit handoff | Joined Core and CLI lanes pass at `47948df`; all thirteen locked prepared-recovery names preserved | Final-source checks and independent content review; stale test comments corrected without changing behavior |
+| ADR 0021 accounting provenance | Joined Core/CLI lanes pass at `47948df`; genuine old-reader control/refusal and actual child-provider accounting/rendering proofs remain source-scoped below | Final-source rollback and independent review; no old-source result is projected onto the final candidate |
+| Rejoin and conformance | Clean `47948df`: zero compile warnings, 1,031 passed, zero failed, five live exclusions; `810f44c` subsequently strengthens one existing cleanup-receipt witness | Final clean source selection and serial qualification; no locked name, minimum, bound artifact or production byte changed in the witness repair |
+| Clause-derived mutant hunt | The six earlier focused survivors have behavioral detectors; the restored-report content audit found and repaired a cleanup-adopter witness gap | The newest mutation was not executed after action-review refusal; no mutation kill or whole-suite survivor is claimed for it; independent review remains required |
 | Final source and live evidence | Pending; integrator | Clean source `S`; full serial checks, literal M2 gate, actual provider/build identity and account verification |
 | Release-review handoff | Pending; independent reviewer | Evidence-only child `E` names final `S` and actual repair range; push checkpoints; no integration or publication inferred |
 
@@ -953,3 +953,58 @@ own clone; it is not yet counted as joined evidence. The required Linux host
 bounded, non-interactive SSH check (connection timeout). No Linux check passed,
 and no remote state changed. Final-source packaged current/floor/platform,
 live-provider/account, rollback and independent review remain required.
+
+### Third joined whole suite and restored-report content audit
+
+At clean, pushed `47948df3253171d74ee7fa591fcc2bdcbc7db38b`, test-environment
+force compilation of all eight applications with warnings-as-errors passed.
+The serial whole suite, seed `3107`, then exited 0: **1,031 passed, zero failed,
+five real-provider cases excluded**. Application counts were protocol 12,
+Core 526, provider 138 plus one excluded, Store 41, executor 161, composition
+13, reference 18 plus two excluded, and CLI 122 plus two excluded. All three
+provider credential variables and `TIDEWAVE_REPL` were unset. This run resolves
+the two preceding whole-suite failures on their repaired source; it does not
+erase those failures or claim that the source stayed unchanged afterwards.
+
+The real two-runtime witness at `314b4bc` holds both actual protected entries
+before HTTP, fails one invocation, and then completes and replays the other.
+It observes host Logger configuration, ordinary logs and unrelated group
+leaders across adapter start/stop. It does not claim simultaneous active HTTP.
+The actual pre-entry crash witness at `47948df` first establishes a successful
+worker/HTTP positive control for its credential-read observer, then requires
+zero credential reads and transports after a child exits before entry. Both
+cases pass in the joined suite. Neither is a direct observation of the first
+OS image's complete environment or final-source live-provider evidence.
+
+The restored report's omitted Ledger and WorkspaceLease bodies were read,
+along with the reference-client fixture changes and the changed high-risk
+agent-loop/prepared-recovery cases. The reference's real session still binds
+exact request/result identities and file effects; its recovery fixture still
+uses an untrappable runtime-tree kill and retained receipts without redispatch.
+The real loopback 429 server counts received HTTP requests and continues
+accepting requests: it is separate evidence from the injected retry callback
+and option-literal checks. This was a self-audit, not an independent release
+review or an exhaustive assertion about every line of the large corpora.
+
+That content audit found a test-witness gap: the malformed receipt case's
+cancellation fixture could release its worker before cleanup reserved the
+result, allowing the ordinary result path to satisfy the assertions. The
+test-only repair joined at `810f44c`. It suspends the real worker, observes
+the cancellation answer and its exact abort reserve, then positively observes
+that worker's bound malformed receipt in the coordinator's mailbox before
+adoption resumes. Every original outcome/closure/record assertion, selector
+name and timing bound remains. Its clean worker commit
+`5d7bc2f54929b4afb5b385726b0c0d08de2e2d1c` passes the focused case in 3.2
+seconds with seed `3107`, formatting and force compilation with
+warnings-as-errors. The proposed production mutation was refused by action
+review before any write; it was not executed or retried. No mutation kill,
+survivor or product defect is inferred from that unavailable experiment.
+
+Native Linux qualification is in progress. The first AMD64 toolchain preflight
+failed in the Docker-on-ARM Rosetta path before any Loopex process ran. Native
+ARM64 sibling images preserve the exact accepted pair and avoid changing JIT
+protection; metadata and a prepared build do not count as a Linux pass.
+The authenticated provider account now renders request-log rows, removing the
+previous UI-access obstacle. No final-source account verification or new live
+attestation is claimed yet. Package/platform, rollback, live/gate and final
+evidence-child verification remain the next execution work.
