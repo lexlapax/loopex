@@ -245,6 +245,28 @@ estimated even when the rejected raw reply contains a plausible pair. Reported
 usage survives only when the entire canonical reply validates and the later
 complete-settlement size preflight alone requires a compact unreadable result.
 
+[ADR 0021](../adr/0021-compacted-provider-accounting-provenance.md#concept)
+versions that distinction. New writers retain `model_attempt_settled_v2`;
+unreadable results carry either no validated accounting evidence or the exact
+normalized usage and Store byte/depth overage observed for the full settlement.
+Reported accounting must equal that retained usage in both members. This is a
+private journal change, not a new public reply or terminal field.
+
+The reader accepts an unambiguous version-1 prefix, followed by version 2, and
+refuses a version-1 settlement after that cutover. A legacy unreadable result
+with reported accounting now refuses as
+`ambiguous_legacy_provider_accounting`: it is neither rewritten nor silently
+charged as estimated. A version-2 settlement can close an existing version-1
+attempt without another provider call. Unknown versions refuse.
+
+Rollback therefore requires stopping owners and preserving a complete backup.
+An older binary cannot resume a history containing version 2; there is no
+in-place migration or hot-upgrade promise. Ownership acquisition may still
+write fenced administration before replay refuses, so this is not a promise of
+zero writes. Readiness and recovered semantic work require successful replay
+through the committed head. The exact old-binary execution proof remains a
+release-review evidence obligation, not something a schema comparison proves.
+
 **Store port.** An append failure gains one pair of reasons and one changed
 consequence. The local Store holds the log *file* rather than its path: it
 records the file's device and inode at start-up and re-reads the path once its
@@ -280,7 +302,8 @@ nothing it can act on.
 `owner_advanced`, `prompt_admitted_v2`, the other input-command admissions and
 `command_admission_refused_v1`, `model_request_committed`,
 `model_attempt_opened_v1`, `model_termination_admitted_v1`,
-`model_attempt_settled_v1`, `context_admission_refused_v1`,
+`model_attempt_settled_v2` (and readable legacy `model_attempt_settled_v1`),
+`context_admission_refused_v1`,
 `deadline_staging_failed_v1`, `effect_intent_committed`,
 `executor_receipt_committed`, `tool_result_committed`,
 `outcome_unknown_committed`, and `run_terminal_committed`. The model-attempt

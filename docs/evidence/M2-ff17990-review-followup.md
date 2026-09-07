@@ -170,9 +170,9 @@ register, accepted gates, and historical dispositions remain unchanged.
 | Work item | State and owner | Completion requirement |
 | --- | --- | --- |
 | Record ADR acceptance | Complete; integrator | Exact-diff independent transition review clear; status and commit-message checks passed |
-| ADR 0019 provider isolation | In progress; integrator, codec worker on `codex/provider-private-codec` | Packaged child, explicit launch wiring, private channels, credential and lifecycle behavior; no parent diagnostic takeover |
+| ADR 0019 provider isolation | Configuration and codec joined; guardian checkpoint separate; worker/build wiring still draft | Packaged child, explicit launch wiring, private channels, credential and lifecycle behavior; no parent diagnostic takeover |
 | ADR 0020 explicit handoff | Execution approval blocked; `codex/adr0020-implementation` remains clean at acceptance | Explicit participant protocol, initial holder monitoring, atomic duplicate refusal, no replacement/drain subsystem |
-| ADR 0021 accounting provenance | In progress; `codex/adr0021-implementation` | Version-2 production and replay, exact compaction provenance, documented legacy refusal and rollback |
+| ADR 0021 accounting provenance | Joined from `c5c158909773538a3f3237a7a5651f88e62db72f`; 71 focused tests passed | Broader regression, real old-binary refusal, and independent clause-derived mutation evidence remain |
 | Rejoin and conformance | Pending; integrator | Preserve locked names/behavior and byte-bound files; compile and tests serial across clones |
 | Clause-derived mutant hunt | Pending; fresh independent actors | Current claims and corpus, no author diff/history; qualify survivors and repair evidence gaps |
 | Final source and live evidence | Pending; integrator | Clean source `S`; full serial checks, literal M2 gate, actual provider/build identity and account verification |
@@ -185,6 +185,62 @@ paths are temporary execution state, not durable evidence or authoritative sourc
 The approval service twice rejected the ADR 0020 public overload/lifetime edit;
 that worker restored its own partial edits and stopped rather than bypassing the
 denial. This is an execution blocker, not withdrawal of recorded ADR acceptance.
+
+### Implementation checkpoint on 2026-09-07
+
+The repair branch carries the accounting implementation, configuration validation
+(`f628131`), and private codec through merge `cc28caa`. These are pushed, not
+integration or release candidates. The separate pushed branch
+`codex/provider-process-guardian` retains
+`31ccf5a40b2c8efe041dc0e4d4f7aba63fa0f045`. Its private Core registration/stop
+message changes must join the matching adapter and fixture migration; merging
+them into the still-active old adapter path alone would break that path.
+
+The guardian's independent checkout passed warnings-as-errors compilation and
+11 real-process/local-escript tests, seed `3107`, with the integrator's codec
+and configuration supplied as test-only support. Those support copies were
+excluded from its five-file commit. Its final process inventory found no owned
+carrier, guard, or fixture worker left alive. The codec has 15 passing tests,
+including local sockets and receive slicing for a `2^80` timeout. Configuration
+validation has four passing cases. The joined accounting/protocol corpus passed
+71 cases with seed `530542` in 28.7 seconds, credential-free and serially.
+These are separate focused checks, not one whole-suite or packaged-provider pass.
+
+The execution approval service also rejected changing the bridge's socket-write
+primitive to `:infinity`. The intended finite operation bound belongs to the
+independently responsive guardian, which stops the raw writer and closes the
+socket at the committed deadline; `:infinity` would remove only the primitive's
+smaller timer-domain constraint. The denied edit did not land in the guardian
+checkpoint. Its original finite primitive remains and has not been proved for
+the full accepted deadline domain. A smaller hidden timeout was not substituted.
+This execution decision needs explicit resolution before that path is complete.
+
+The integrator's uncommitted worker/build drafts remain in the repair checkout:
+`provider_worker.ex`, `provider_build_identity.ex`, the provider build task,
+adapter and CLI Mix files, CLI `provider_launch.ex`, and adapter/composition/CLI
+wiring. A first force compile exposed a generated-manifest type warning and a
+compile-time attribute syntax error; both were fixed, and the next
+warnings-as-errors compile passed. Those drafts are not pushed or behaviorally
+validated. In particular, the old VM-global adapter protection is still active;
+the new child entry is not a claim that it has been removed. The draft contains
+the same socket-write design awaiting approval and must not be silently treated
+as an accepted execution workaround.
+
+Remaining provider work is concrete: reject an unexpected credential frame in
+the raw receiver before it can reach the guardian; wire the adapter to the new
+bridge; remove old diagnostic ownership and replace its implementation-specific
+tests with actual process observables; prove the worker's one-invocation latch;
+derive the build-input manifest from exact archive paths/bytes; prove CLI config
+refresh and floor/current packaged execution; then run real-provider evidence.
+The build draft's basename-only input inventory is not a package-equivalence
+proof. No live key was used for the focused checks above.
+
+After the two execution approval blocks are resolved, complete ADR 0020 in its
+own workstream, join the implementations, run the broader suites serially, and
+perform the independent mutant hunt before freezing source `S`. The old-binary
+replay proof, exact-source gate, account lookup, evidence-only child `E`, and
+release review all remain outstanding. No test-lane process is intentionally
+left running across this checkpoint.
 
 1. Repair the orphaned guardian and test active-call, post-result, and
    descendant-cleanup owner loss.
