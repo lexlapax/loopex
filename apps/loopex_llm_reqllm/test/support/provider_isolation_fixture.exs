@@ -43,7 +43,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
     {:ok, {_address, port}} = :inet.sockname(listener)
     expected = Keyword.get(options, :credential, System.get_env(Adapter.credential_variable()))
-    response_body = Keyword.get(options, :response_body)
+
+    response_body =
+      if mode == :backpressure,
+        do: {root, Keyword.fetch!(options, :stream_parts)},
+        else: Keyword.get(options, :response_body)
 
     acceptor =
       spawn_link(fn ->
@@ -99,7 +103,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   def complete(fixture, request \\ request(), progress \\ Model.discard_progress()),
     do: Adapter.complete(request, fixture.options, progress)
 
-  def managed(fixture, request \\ request(), retainer \\ self()) do
+  def managed(
+        fixture,
+        request \\ request(),
+        retainer \\ self(),
+        progress \\ Model.discard_progress()
+      ) do
     observer = self()
 
     {caller, caller_monitor} =
@@ -111,7 +120,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
               if fixture.paused, do: receive(do: (:continue -> :ok))
               if retainer == :unmanaged, do: :unmanaged, else: {:managed, retainer, 2_000}
             end,
-            fn -> complete(fixture, request) end
+            fn -> complete(fixture, request, progress) end
           )
 
         send(observer, {:completed, self(), result})
@@ -225,6 +234,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
             app not in [:loopex, :loopex_cli, :loopex_composition, :loopex_llm_reqllm]
           end)
         }))
+        if mode == :backpressure, do: observe_backpressure(root)
         if mode == :unlinked_http do
           # The hook is executing inside the real StreamServer callback. A
           # separate child-local observer waits for that callback to attach its
@@ -296,7 +306,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           proof = Map.put(proof, :task_dead, not Process.alive?(task_pid))
           File.write!(Path.join(root, "detached-proof"), Jason.encode!(proof))
         end
-        if mode in [:hold_before_return, :hold_before_error, :descendant] do
+        if mode in [:hold_before_return, :hold_before_error, :descendant, :backpressure] do
           {:group_leader, local_leader} = Process.info(self(), :group_leader)
           File.write!(Path.join(root, "pre-return-proof.pending"), Jason.encode!(%{
             stream_server_alive: Process.alive?(self()),
@@ -473,6 +483,118 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           if ready, do: {:halt, nil}, else: (Process.sleep(10); {:cont, nil})
         end)
       end
+
+      # Concept: this child-only observer never changes admission or calls a
+      # producer callback; the real ReqLLM stream does that.
+      # Technical depth: exported witnesses contain counts, flags, frame kinds,
+      # and stack-function identities, never frames or raw process state.
+      defp observe_backpressure(root) do
+        worker = Loopex.LLM.ReqLLM.ProviderWorker
+        codec = Loopex.LLM.ReqLLM.ProviderCodec
+        [slots] = Enum.filter(:ets.all(), &(:ets.info(&1, :name) == worker))
+        owner = :ets.info(slots, :owner)
+        {:links, links} = Process.info(owner, :links)
+        [writer] = Enum.filter(links, fn pid ->
+          is_pid(pid) and Process.info(pid, :current_function) ==
+            {:current_function, {worker, :write_frames, 5}}
+        end)
+        [socket] = Enum.filter(Port.list(), fn port ->
+          try do
+            Port.info(port, :connected) == {:connected, owner} and
+              match?({:ok, {:local, _}}, :inet.peername(port))
+          catch
+            _, _ -> false
+          end
+        end)
+        :ok = :inet.setopts(socket, sndbuf: 1_024, high_watermark: 1_024, low_watermark: 512)
+        observer = spawn(fn ->
+          Process.monitor(writer)
+          receive do
+            :observe -> backpressure_observer(root, socket, owner, writer, slots, nil, 0)
+          end
+        end)
+        1 = :erlang.trace_pattern({codec, :send, 3}, true, [:local])
+        1 = :erlang.trace(writer, true, [:call, {:tracer, observer}])
+        send(observer, :observe)
+        publish(root, "backpressure-ready", %{actual_writer: true, private_socket: true})
+      catch
+        _, _ ->
+          publish(root, "backpressure-error", %{setup_failed: true})
+          exit(:backpressure_fixture_setup_failed)
+      end
+
+      defp backpressure_observer(root, socket, owner, writer, slots, kind, calls) do
+        receive do
+          {:trace, ^writer, :call,
+            {Loopex.LLM.ReqLLM.ProviderCodec, :send, [^socket, next_kind, _payload]}} ->
+            backpressure_observer(root, socket, owner, writer, slots, next_kind, calls + 1)
+          {:DOWN, _, :process, ^writer, _} -> :ok
+        after
+          10 ->
+            try do
+              {:ok, [send_pend: pending]} = :inet.getstat(socket, [:send_pend])
+              info = Process.info(writer, [:current_stacktrace, :messages])
+              in_send = Enum.any?(info[:current_stacktrace], fn
+                {Loopex.LLM.ReqLLM.ProviderCodec, :send, 3, _} -> true
+                _ -> false
+              end)
+              publish(root, "backpressure-observation", %{
+                pending_bytes: pending, writer_in_send: in_send,
+                actual_send_calls: calls, kind: if(kind, do: Atom.to_string(kind), else: nil),
+                slot_items: :ets.info(slots, :size), mailbox_count: length(info[:messages]),
+                stack: Enum.map(info[:current_stacktrace], fn {module, function, arity, _} ->
+                  Atom.to_string(module) <> "." <> Atom.to_string(function) <> "/" <> Integer.to_string(arity)
+                end)
+              })
+              # The first send may return after filling the driver's bounded
+              # queue. Release the next real HTTP delta only after observing
+              # that queue; its write must then encounter the busy socket.
+              if pending > 0 and not in_send and kind == :delta and calls == 1 and
+                   :ets.info(slots, :size) == 0 and
+                   not File.exists?(Path.join(root, "backpressure-buffered")) do
+                publish(root, "backpressure-buffered", %{pending_bytes: pending,
+                  writer_in_send: false, actual_send_calls: calls, slot_items: 0})
+              end
+              if pending > 0 and in_send and kind in [:delta, :terminal] do
+                if not File.exists?(Path.join(root, "backpressure-blocked")) do
+                  publish(root, "backpressure-blocked", %{pending_bytes: pending,
+                    writer_in_send: true, kind: Atom.to_string(kind), actual_send_calls: calls})
+                end
+                messages = info[:messages]
+                terminals = for {:terminal, result} <- messages, do: result
+                case terminals do
+                  [%{"status" => "reply", "reply" => reply}] ->
+                    {:current_stacktrace, owner_stack} = Process.info(owner, :current_stacktrace)
+                    waiting_terminal = Enum.any?(owner_stack, fn
+                      {Loopex.LLM.ReqLLM.ProviderWorker, :await_terminal, 2, _} -> true
+                      _ -> false
+                    end)
+                    if waiting_terminal and not File.exists?(Path.join(root, "backpressure-complete")) do
+                      progress_messages = Enum.count(messages, &(&1 == :progress_ready))
+                      publish(root, "backpressure-complete", %{
+                        pending_bytes: pending, writer_in_send: true,
+                        producer_waiting_terminal: true,
+                        slot_items: :ets.info(slots, :size),
+                        delta_items: length(:ets.lookup(slots, :delta)),
+                        progress_notifications: progress_messages,
+                        terminal_messages: length(terminals),
+                        other_messages: length(messages) - progress_messages - length(terminals),
+                        producer_delta_count: reply.delta_count,
+                        terminal_text_bytes: byte_size(reply.text)
+                      })
+                    end
+                  _ -> :ok
+                end
+              end
+            catch
+              _, _ ->
+                if Process.alive?(writer) and not File.exists?(Path.join(root, "backpressure-error")) do
+                  publish(root, "backpressure-error", %{observation_failed: true})
+                end
+            end
+            backpressure_observer(root, socket, owner, writer, slots, kind, calls)
+        end
+      end
     end
     Application.put_env(:req_llm, :finch_request_adapter, LoopexProviderFixtureTransport)
     [path | _] = Enum.map(arguments, &List.to_string/1)
@@ -565,6 +687,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       Agent.update(events, &[{Jason.decode!(body), authorized} | &1])
 
       case mode do
+        :backpressure ->
+          serve_backpressure(socket, transport_events, response_body)
+
         mode when mode in [:blocked, :timeout, :unlinked_http] ->
           observation = wait_closed(socket)
           Agent.update(transport_events, &[observation | &1])
@@ -621,6 +746,50 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       {:error, :timeout} -> wait_closed(socket)
       {:error, :closed} -> :closed
       _unexpected -> :unexpected_socket_result
+    end
+  end
+
+  defp serve_backpressure(socket, events, {root, {prefix, fill, suffix}}) do
+    size = byte_size(prefix) + byte_size(fill) + byte_size(suffix)
+
+    :ok =
+      :gen_tcp.send(
+        socket,
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: #{size}\r\nrequest-id: req-fixture-001\r\nconnection: close\r\n\r\n" <>
+          prefix
+      )
+
+    Agent.update(events, &[:prefix_sent | &1])
+    server = self()
+    reader = spawn_link(fn -> send(server, {:peer_closed, self(), wait_closed(socket)}) end)
+
+    await_stream_release(
+      socket,
+      reader,
+      root,
+      [{"fill-writer", fill, :writer_fill_sent}, {"continue-stream", suffix, :suffix_sent}],
+      events
+    )
+  end
+
+  defp await_stream_release(_socket, reader, _root, [], events) do
+    receive do
+      {:peer_closed, ^reader, observation} -> Agent.update(events, &[observation | &1])
+    end
+  end
+
+  defp await_stream_release(socket, reader, root, [{marker, bytes, event} | rest] = parts, events) do
+    receive do
+      {:peer_closed, ^reader, observation} -> Agent.update(events, &[observation | &1])
+    after
+      10 ->
+        if File.exists?(Path.join(root, marker)) do
+          :ok = :gen_tcp.send(socket, bytes)
+          Agent.update(events, &[event | &1])
+          await_stream_release(socket, reader, root, rest, events)
+        else
+          await_stream_release(socket, reader, root, parts, events)
+        end
     end
   end
 
