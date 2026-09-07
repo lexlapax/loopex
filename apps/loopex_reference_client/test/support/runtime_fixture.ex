@@ -84,7 +84,8 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
         )
       end)
 
-    {model_options, sampling_options} = model_configuration(model_module, model_options, root)
+    {model_options, sampling_options} =
+      model_configuration(model_module, model_options, root, not Keyword.has_key?(options, :root))
 
     workspace = Path.join(root, "workspace")
     ledger = Path.join(root, "executor-ledger")
@@ -363,12 +364,23 @@ defmodule Loopex.ReferenceClientRuntimeFixture do
   # Technical depth: build before Store/executor startup; demo-only tool inputs
   # never enter the adapter's closed launch options. The deterministic branch
   # retains its existing options and max_tokens default without a build.
-  defp model_configuration(Loopex.LLM.ReqLLM, options, root) do
-    launch = Loopex.LLM.ReqLLM.ProviderBuildFixture.options!(root)
-    {launch, [sampling: %{"max_tokens" => Keyword.get(options, :max_tokens, 256)}]}
+  defp model_configuration(Loopex.LLM.ReqLLM, options, root, owns_root?) do
+    # Technical depth: an automatically named root has no outer cleanup owner
+    # until start/4 returns. Exclusive creation makes pre-resource failure
+    # cleanup safe; explicit trace roots remain their caller's responsibility.
+    if owns_root?, do: File.mkdir!(root)
+
+    try do
+      launch = Loopex.LLM.ReqLLM.ProviderBuildFixture.options!(root)
+      {launch, [sampling: %{"max_tokens" => Keyword.get(options, :max_tokens, 256)}]}
+    rescue
+      error ->
+        if owns_root?, do: File.rm_rf!(root)
+        reraise error, __STACKTRACE__
+    end
   end
 
-  defp model_configuration(_module, options, _root),
+  defp model_configuration(_module, options, _root, _owns_root?),
     do: {Keyword.put_new(options, :max_tokens, 256), []}
 
   defp load_pages(loader, position, accumulated) do
