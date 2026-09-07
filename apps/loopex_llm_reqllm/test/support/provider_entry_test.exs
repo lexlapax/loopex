@@ -417,6 +417,75 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     assert Fixture.count(fixture) == 1
   end
 
+  test "an actual successful unmanaged reply becomes ambiguous when its cleanup period expires unproved" do
+    fixture = Fixture.new(:hold_before_return, paused: true)
+    call = Fixture.managed(fixture, Fixture.request(), :unmanaged)
+    guardian = call.guardian
+    caller = call.caller
+    :erlang.trace(guardian, true, [:receive, {:tracer, self()}])
+    send(caller, :continue)
+
+    assert_receive {:trace, ^guardian, :receive,
+                    {:provider_frame, _, {:ok, :dispatch_started, _}}},
+                   5_000
+
+    assert :erlang.suspend_process(guardian)
+    pid = Fixture.pid(fixture)
+
+    try do
+      Fixture.release(fixture)
+
+      # The real receiver permits one frame at a time. Acknowledge the actual
+      # preceding delta once so it can read the terminal while the guardian
+      # remains causally unable to start cleanup. No frame is fabricated.
+      assert {:provider_frame, receiver, {:ok, :delta, %{"payload" => %{text: "loopex"}}}} =
+               queued_message(guardian, &match?({:provider_frame, _, {:ok, :delta, _}}, &1))
+
+      send(receiver, :next)
+
+      assert {:provider_frame, _, {:ok, :terminal, %{"status" => "reply", "reply" => reply}}} =
+               queued_message(guardian, &match?({:provider_frame, _, {:ok, :terminal, _}}, &1))
+
+      assert reply.text == "loopex"
+      assert Fixture.methods(fixture) == ["POST"]
+      assert [{_request, true}] = Fixture.events(fixture)
+      assert {_, 0} = System.cmd("/bin/kill", ["-STOP", Integer.to_string(pid)])
+      started = System.monotonic_time(:millisecond)
+      assert :erlang.resume_process(guardian)
+      refute_receive {:completed, ^caller, _}, 100
+
+      assert_receive {:completed, ^caller,
+                      {:error, {:dispatched_or_unknown, "model_call_failed"}}},
+                     2_500
+
+      assert System.monotonic_time(:millisecond) - started >=
+               Keyword.fetch!(fixture.options, :cleanup_grace_ms)
+
+      monitor = call.monitor
+      assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 500
+      barrier = :erlang.trace_delivered(guardian)
+      assert_receive {:trace_delivered, ^guardian, ^barrier}, 1_000
+
+      refute_receive {:trace, ^guardian, :receive,
+                      {_port, {:data, {:eol, "cleanup_complete:" <> _}}}},
+                     0
+
+      Fixture.assert_gone(fixture)
+    after
+      if Process.info(guardian, :status) == {:status, :suspended},
+        do: :erlang.resume_process(guardian)
+
+      # Never leave a stopped fixture process if an assertion fails before the
+      # birth-owned watchdog's group KILL. Continuing is not cleanup proof.
+      if Fixture.alive?(pid) do
+        assert {_, 0} = System.cmd("/bin/kill", ["-CONT", Integer.to_string(pid)])
+      end
+    end
+
+    assert Fixture.canaries(fixture) == 1
+    assert Fixture.count(fixture) == 1
+  end
+
   defp queued_message(guardian, predicate) do
     assert Fixture.eventually(fn ->
              case Process.info(guardian, :messages) do

@@ -1,7 +1,10 @@
+Code.require_file("support/provider_isolation_fixture.exs", __DIR__)
+
 defmodule Loopex.LLM.ReqLLM.RealModelLaneTest do
   use ExUnit.Case, async: false
 
   alias Loopex.LLM.ReqLLM
+  alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
   alias Loopex.Model
 
   defmodule Deterministic do
@@ -45,10 +48,25 @@ defmodule Loopex.LLM.ReqLLM.RealModelLaneTest do
     variable = ReqLLM.credential_variable()
     previous = System.get_env(variable)
     System.delete_env(variable)
+    synthetic = "synthetic-model-conformance-credential"
+    fixture = Fixture.new(:reply, credential: synthetic)
 
     try do
-      assert ReqLLM.complete(request, [], Model.discard_progress()) ==
+      assert ReqLLM.complete(request, fixture.options, Model.discard_progress()) ==
                {:error, {:not_dispatched, "model_call_failed"}}
+
+      assert Fixture.canaries(fixture) == 0
+      assert Fixture.count(fixture) == 0
+      Fixture.assert_gone(fixture)
+      System.put_env(variable, synthetic)
+      assert {:ok, provider} = ReqLLM.complete(request, fixture.options, Model.discard_progress())
+      assert provider.text == "loopex"
+      assert plain_reply?(provider)
+      assert provider.canonical_request_bytes == request.canonical_request_bytes
+      assert provider.staged_request_digest == request.staged_request_digest
+      assert Fixture.methods(fixture) == ["POST"]
+      assert [{_body, true}] = Fixture.events(fixture)
+      Fixture.assert_gone(fixture)
 
       for adapter <- [Deterministic, ReqLLM],
           field <- [:canonical_request_bytes, :staged_request_digest] do
@@ -65,7 +83,10 @@ defmodule Loopex.LLM.ReqLLM.RealModelLaneTest do
             Deterministic -> {:error, :canonical_model_request_mismatch}
           end
 
-        assert adapter.complete(changed, [], Model.discard_progress()) == expected
+        options = if adapter == ReqLLM, do: fixture.options, else: []
+        assert adapter.complete(changed, options, Model.discard_progress()) == expected
+        assert Fixture.methods(fixture) == ["POST"]
+        assert Fixture.count(fixture) == 1
       end
     after
       if previous, do: System.put_env(variable, previous)

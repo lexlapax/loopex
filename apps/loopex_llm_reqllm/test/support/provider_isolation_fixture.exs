@@ -60,7 +60,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       listener: listener,
       acceptor: acceptor,
       mode: mode,
-      paused: Keyword.get(options, :paused, false)
+      paused: Keyword.get(options, :paused, false),
+      hold_caller: Keyword.get(options, :hold_caller, false)
     }
 
     launch = write_worker(root, mode, port, probe_port)
@@ -114,6 +115,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           )
 
         send(observer, {:completed, self(), result})
+        if fixture.hold_caller, do: receive(do: (:finish_callback -> :ok))
       end)
 
     assert_receive {:registered, ^caller, guardian, stop_reference}, 1_000
@@ -335,10 +337,21 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
             |> Enum.reduce_while(nil, fn ready, _ ->
               if ready, do: {:halt, nil}, else: (Process.sleep(10); {:cont, nil})
             end)
+            delayed_direct = io_result.()
+            delayed_supervised = ReqLLM.TaskSupervisor |> Task.Supervisor.async(io_result) |> Task.await(1_000)
+            File.write!(Path.join(root, "delayed-io-results"), Jason.encode!(%{
+              direct: delayed_direct, supervised: delayed_supervised
+            }))
             Logger.error(key)
             File.write!(Path.join(root, "delayed-diagnostics"), "attempted")
           end)
           File.write!(Path.join(root, "diagnostics"), "attempted")
+        end
+        if mode in [:credential_metadata_repeated, :credential_metadata_key,
+          :credential_overlap, :credential_ordinary_split, :credential_forms,
+          :credential_report, :credential_raise, :credential_throw,
+          :credential_exit, :credential_crash_event, :credential_sink_loss] do
+          credential_probe(mode, request, root)
         end
         case mode do
           :raise -> raise "synthetic provider failure"
@@ -351,6 +364,115 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           _ -> %{request | scheme: :http, host: "127.0.0.1", port: #{port}, path: "/", query: nil}
         end
       end
+
+      # Only this protected child holds diagnostic inputs and raw DOWN reasons.
+      # Host markers acknowledge actual calls with bounded, non-secret values.
+      defp credential_probe(mode, request, root) do
+        key = Enum.find_value(request.headers, fn {name, value} ->
+          if String.downcase(name) == "x-api-key", do: value
+        end)
+        true = is_binary(key) and byte_size(key) > 0
+        split = div(byte_size(key), 2)
+        <<left::binary-size(split), right::binary>> = key
+        report = %{
+          label: {:gen_server, :terminate},
+          last_message: {:start_http, ReqLLM.Providers.Anthropic, :model, :context,
+            [api_key: key], ReqLLM.Finch},
+          reason: {:provider_library_throw_after_handoff, key}
+        }
+
+        actions = case mode do
+          :credential_metadata_repeated ->
+            :logger.error("safe", %{safe_diagnostic: key <> "|" <> key})
+            ["metadata_repeated"]
+          :credential_metadata_key ->
+            :logger.error("safe", %{safe_diagnostic: %{key => :present}})
+            ["metadata_key"]
+          :credential_overlap ->
+            true = String.ends_with?(key, "-first")
+            other = String.replace_suffix(key, "-first", "-second")
+            true = other != key
+            :logger.error("safe", %{safe_diagnostic: "first=" <> key <> " second=" <> other})
+            ["two_distinct_credentials_one_event"]
+          :credential_ordinary_split ->
+            ordinary = "ordinary credential=" <> key <> " repeated=" <> key
+            chardata = ["split credential=", left, right, " repeated=", key]
+            :logger.error(ordinary)
+            :logger.error(chardata)
+            ["ordinary_repeated", "split_repeated"]
+          :credential_forms ->
+            :logger.error(["safe-string ", left, right, " repeated ", key])
+            :logger.error(~c"safe-format ~ts~ts", [left, right], %{safe_diagnostic: key})
+            :logger.error(%{reason: {:safe_report, key}}, %{safe_diagnostic: %{key => key}})
+            ["string_chardata", "format_args_metadata", "report_metadata_key"]
+          :credential_report ->
+            :logger.error(report)
+            ["request_credential_report"]
+          :credential_sink_loss ->
+            sink = Process.group_leader()
+            caller = self()
+            observer = spawn(fn ->
+              monitor = Process.monitor(sink)
+              send(caller, {:sink_observer_ready, self()})
+              receive do
+                {:DOWN, ^monitor, :process, ^sink, reason} ->
+                  publish(root, "credential-probe", %{
+                    actions: ["sink_loss"], key_present: true,
+                    sink_down: true, sink_reason_killed: reason == :killed
+                  })
+              end
+            end)
+            receive do: ({:sink_observer_ready, ^observer} -> :ok)
+            await_fault_release(root)
+            Process.exit(sink, :kill)
+            Process.sleep(:infinity)
+          ending when ending in [:credential_raise, :credential_throw,
+            :credential_exit, :credential_crash_event] ->
+            true = System.get_env("LOOPEX_PROVIDER_API_KEY") == nil
+            System.put_env("LOOPEX_PROVIDER_API_KEY", "rotated-after-request-construction")
+            publish(root, "credential-probe", %{actions: [Atom.to_string(ending)],
+              key_present: true, environment_rotated: true})
+            if ending != :credential_raise do
+              observe_termination(self(), key, root)
+              await_fault_release(root)
+            end
+            case ending do
+              :credential_raise -> raise "req_llm_transport_raised_after_handoff " <> key
+              :credential_exit -> exit({:provider_library_exit_after_handoff, key})
+              _ -> throw({:provider_library_throw_after_handoff, key})
+            end
+        end
+        publish(root, "credential-probe", %{actions: actions, key_present: true})
+      end
+
+      defp observe_termination(stream_server, key, root) do
+        observer = spawn(fn ->
+          monitor = Process.monitor(stream_server)
+          send(stream_server, {:termination_observer_ready, self()})
+          receive do
+            {:DOWN, ^monitor, :process, ^stream_server, reason} ->
+              rendered = inspect(reason, limit: :infinity, printable_limit: :infinity)
+              publish(root, "termination-proof", %{
+                actual_stream_server_down: true,
+                credential_in_reason: String.contains?(rendered, key)
+              })
+          end
+        end)
+        receive do: ({:termination_observer_ready, ^observer} -> :ok)
+      end
+
+      defp publish(root, name, proof) do
+        File.write!(Path.join(root, name <> ".pending"), Jason.encode!(proof))
+        File.rename!(Path.join(root, name <> ".pending"), Path.join(root, name))
+      end
+
+      defp await_fault_release(root) do
+        publish(root, "fault-ready", %{observer_installed: true})
+        Stream.repeatedly(fn -> File.exists?(Path.join(root, "release-fault")) end)
+        |> Enum.reduce_while(nil, fn ready, _ ->
+          if ready, do: {:halt, nil}, else: (Process.sleep(10); {:cont, nil})
+        end)
+      end
     end
     Application.put_env(:req_llm, :finch_request_adapter, LoopexProviderFixtureTransport)
     [path | _] = Enum.map(arguments, &List.to_string/1)
@@ -360,7 +482,33 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     if #{inspect(mode)} == :dotenv, do: File.cd!(#{inspect(root)})
     if #{inspect(mode)} == :pre_entry_crash, do: System.halt(71)
     if #{inspect(mode)} == :hold_before_entry, do: Process.sleep(:infinity)
-    Loopex.LLM.ReqLLM.ProviderWorker.main(Enum.map(arguments, &List.to_string/1))
+    if #{inspect(mode)} == :delayed_entry do
+      Stream.repeatedly(fn -> File.exists?(#{inspect(Path.join(root, "release"))}) end)
+      |> Enum.reduce_while(nil, fn ready, _ ->
+        if ready, do: {:halt, nil}, else: (Process.sleep(10); {:cont, nil})
+      end)
+    end
+    if #{inspect(mode)} in [:credential_sink_loss, :credential_throw,
+      :credential_exit, :credential_crash_event] do
+      # A fixture-only outer monitor preserves the observation VM after the
+      # actual entry dies through its UNCHANGED sink/dependency links. It has
+      # no private credential frame and exports neither its raw DOWN reason
+      # nor a substitute Worker result or cleanup ACK.
+      {entry, monitor} = spawn_monitor(fn ->
+        Loopex.LLM.ReqLLM.ProviderWorker.main(Enum.map(arguments, &List.to_string/1))
+      end)
+      receive do
+        {:DOWN, ^monitor, :process, ^entry, reason} ->
+          path = #{inspect(Path.join(root, "entry-down"))}
+          File.write!(path <> ".pending", Jason.encode!(%{
+            worker_down: true, abnormal: reason != :normal
+          }))
+          File.rename!(path <> ".pending", path)
+      end
+      Process.sleep(:infinity)
+    else
+      Loopex.LLM.ReqLLM.ProviderWorker.main(Enum.map(arguments, &List.to_string/1))
+    end
     """
 
     paths = :io_lib.format(~c"~tp", [:code.get_path()]) |> IO.iodata_to_binary()
