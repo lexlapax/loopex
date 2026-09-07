@@ -6882,10 +6882,11 @@ defmodule Loopex.AgentLoopTest do
     refute Enum.any?(tool_closures, &(&1.disposition == :complete)),
            "a malformed receipt was published as a completed tool stream"
 
-    # The same validation order governs a receipt that arrives while an abort is
-    # settling the executor worker. This is a different production branch: the
-    # ordinary result handler never sees the answer, and cleanup adopts it from
-    # the worker mailbox after host cancellation returns.
+    # The same validation order governs a receipt adopted after cancellation
+    # answers. Hold the real executor worker until cleanup opens its matching
+    # reserve, then hold the coordinator until that worker's exact malformed
+    # receipt is queued. The ordinary result handler cannot consume it first;
+    # neither a scheduling sleep nor an absent receipt proves this boundary.
     cleanup =
       start_with_executor(
         AgentLoopAnsweringExecutor,
@@ -6895,10 +6896,74 @@ defmodule Loopex.AgentLoopTest do
         progress_to: self()
       )
 
-    assert_receive {:executor_receipt_held, _worker}, 5_000
+    assert_receive {:executor_receipt_held, worker}, 5_000
 
-    assert {:accepted, "abort-1"} =
-             Loopex.command(cleanup.attachment, %{type: :abort, command_id: "abort-1"})
+    coordinator = coordinator_of(cleanup.runtime)
+    [job] = AgentLoopAnsweringExecutor.jobs(cleanup.executor)
+    run_id = job.run_id
+    job_id = job.job_id
+
+    [{executor_reference, {:executor, ^run_id, ^worker}}] =
+      coordinator |> :sys.get_state() |> Map.fetch!(:in_flight) |> Map.to_list()
+
+    release_suspensions = fn ->
+      if Process.alive?(worker) do
+        try do
+          :erlang.resume_process(worker)
+        catch
+          :error, :badarg -> :ok
+        end
+      end
+
+      if Process.alive?(coordinator) do
+        :erlang.trace(coordinator, false, [:receive])
+
+        try do
+          :sys.resume(coordinator)
+        catch
+          :exit, _already_stopped -> :ok
+        end
+      end
+    end
+
+    on_exit(release_suspensions)
+    assert :erlang.suspend_process(worker)
+    assert :erlang.trace(coordinator, true, [:receive]) == 1
+
+    try do
+      assert {:accepted, "abort-1"} =
+               Loopex.command(cleanup.attachment, %{type: :abort, command_id: "abort-1"})
+
+      assert_receive {:trace, ^coordinator, :receive, {_cleanup_reference, {:ok, :cleaned}}},
+                     5_000,
+                     "cancellation did not answer while the receipt worker was held"
+
+      :erlang.trace(coordinator, false, [:receive])
+      :ok = :sys.suspend(coordinator)
+
+      assert %{
+               in_flight: %{^executor_reference => {:executor_reserve, ^run_id, ^worker}},
+               executor_reserves: %{
+                 ^run_id => %{
+                   reference: ^executor_reference,
+                   pid: ^worker,
+                   purpose: :abort,
+                   host: :cleaned
+                 }
+               }
+             } = :sys.get_state(coordinator),
+             "the matching cleanup receipt reserve was not open before releasing the worker"
+
+      assert :erlang.resume_process(worker)
+
+      assert await_process_message(coordinator, fn
+               {^executor_reference, {:ok, %{job_id: ^job_id, progress_count: -1}}} -> true
+               _other -> false
+             end),
+             "the malformed receipt never reached its cleanup adopter's mailbox"
+    after
+      release_suspensions.()
+    end
 
     cleanup_events = drain(cleanup.attachment)
     cleanup_finished = Enum.find(cleanup_events, &(&1.kind == "run.finished"))
