@@ -512,6 +512,7 @@ defmodule LoopexCli do
     case Interrupt.install_prepared(attachment, grace_ms, activation) do
       :ok -> start_recovered_work(attachment, activation)
       {:error, reason} -> refuse_handoff(reason, activation)
+      {:unresolved, reason} -> {:error, reason}
     end
   end
 
@@ -543,6 +544,14 @@ defmodule LoopexCli do
     case activate(activation) do
       {:ok, _session_id} ->
         Render.stream(attachment)
+
+      {:unresolved, reason} ->
+        {:error, reason}
+
+      {:error, :prepared_activation_unavailable} = unavailable ->
+        # The observation ended without a verdict. The queued activation may
+        # still execute: neither retry it nor issue abandonment as compensation.
+        unavailable
 
       {:error, reason} ->
         _ = facade(Interrupt, :abandon_prepared, [activation])

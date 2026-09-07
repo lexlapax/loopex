@@ -35,7 +35,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
              {:local, path},
              0,
              [:binary, active: false, packet: :raw],
-             remaining(deadline)
+             :infinity
            ) do
       try do
         with {:ok, :bootstrap, bootstrap} <- ProviderCodec.recv(socket, remaining(deadline)),
@@ -127,6 +127,36 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
     }
 
   defp invoke(socket, nonce, request, credential, deadline) do
+    owner = self()
+    input_guard = spawn_link(fn -> refuse_further_input(socket, owner, deadline) end)
+
+    try do
+      invoke_once(socket, nonce, request, credential, deadline)
+    after
+      # Concept: one accepted invocation consumes the channel's entire input
+      # authority. The input observer belongs only to this worker and is stopped
+      # before the worker closes its own socket after a terminal write.
+      Process.unlink(input_guard)
+      Process.exit(input_guard, :kill)
+    end
+  end
+
+  defp refuse_further_input(socket, owner, deadline) do
+    # Read only a single byte: a duplicate, any unknown frame, or parent loss
+    # invalidates the one-use channel. Never parse or forward another credential
+    # and never turn this observation into another provider invocation.
+    case :gen_tcp.recv(socket, 1, min(remaining(deadline), 3_600_000)) do
+      {:error, :timeout} ->
+        if remaining(deadline) > 0,
+          do: refuse_further_input(socket, owner, deadline),
+          else: Process.exit(owner, :kill)
+
+      _data_or_channel_loss ->
+        Process.exit(owner, :kill)
+    end
+  end
+
+  defp invoke_once(socket, nonce, request, credential, deadline) do
     # A separate bounded writer may block on its one in-flight frame. The host
     # guardian enforces the committed deadline and owns OS cleanup, so this is
     # not an independent transport timeout or an unbounded producer mailbox.

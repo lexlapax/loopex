@@ -2,91 +2,49 @@ defmodule Loopex.LLM.ReqLLM do
   @moduledoc """
   ## Concept
 
-  The reference model adapter. It maps one canonical model request onto ReqLLM
-  and maps the provider's answer back to plain data, which is the whole of
-  outcome 7: proving a real model call completes *from the adapter application*
-  rather than from core.
+  The reference model adapter runs each provider invocation in one host-owned
+  companion BEAM. The parent maps a committed request and transient progress
+  onto a bounded private channel; provider dependencies and credentials stay in
+  the child. Starting this adapter never changes parent Logger configuration,
+  application group leaders, or a shared ReqLLM supervisor.
 
-  Two directions are kept clean. Nothing about Loopex sessions, operations,
-  durability, or policy appears here — the caller passes a model identity and a
-  prompt and receives text, identity, and usage. Nothing about ReqLLM, Req,
-  Finch, or a provider's wire format leaves this module: `ReqLLM` structs are
-  accepted and read here and never returned, so a host or a later core boundary
-  sees only bounded serializable maps and strings.
+  Hosts supply the trusted interpreter, worker artifact, and matching digests
+  explicitly. Missing configuration refuses before dispatch. The sole credential
+  source remains `LOOPEX_PROVIDER_API_KEY`; the launcher excludes it from the
+  first image, and a short-lived host sender reads it only after child readiness.
 
-  A stream that did not finish is a failure and not a shorter answer. A provider
-  that emits some text and then loses its connection, is rate limited, or stops
-  mid tool call has produced no assistant message, so this adapter returns an
-  error and the coordinator abandons that attempt. It never hands back the
-  fragment that did arrive as though the model had said it and stopped.
-
-  The credential arrives only from the `LOOPEX_PROVIDER_API_KEY` environment
-  variable, is handed to ReqLLM as a per-request option, and is never returned,
-  logged, or written anywhere. No other provider variable is consulted, so a key
-  that happens to sit in the operator's environment cannot be spent by this lane
-  by accident.
-
-  A failure says one more thing than that it failed: whether the provider was
-  reached at all. This adapter refuses locally — no credential, a request it will
-  not send, a model it cannot resolve, a deadline already spent — before it hands
-  anything to the provider library, and only those refusals are reported as
-  `not_dispatched`. From the handoff onward every ending is
-  `dispatched_or_unknown`, including the endings that look local: a library
-  error, an unfinished stream, a timeout, a crash, or a library result that calls
-  itself undispatched. The caller may open a second attempt on the first kind and
-  must never open one on the second, so this classification is what stands
-  between an ambiguous attempt and a second bill.
-
-  Neither classified failure carries a reason. Both carry the literal
-  `"model_call_failed"`, so no provider term, credential, or tenant identifier
-  rides out of this module on the failure plane at all.
+  A complete reply crosses as bounded plain data. Partial streams, lost replies,
+  channel failures after possible request delivery, and unproved cleanup never
+  become successful short answers or permission to retry.
 
   ## Technical depth
 
-  `ReqLLM` here is the top-level library module `Elixir.ReqLLM`; Elixir resolves
-  aliases from the root, so the trailing segment of this module's own name does
-  not shadow it.
+  `complete/3` uses the configured bridge. `complete_prompt/3` builds a bounded
+  standalone request and requires the same explicit launch configuration plus a
+  cleanup period. The legacy bare-model `complete/2` has no such configuration
+  and always refuses; there is no shared-VM fallback or ambient worker discovery.
 
-  The credential is passed as `api_key:` on the call rather than through
-  `ReqLLM.put_key/2` or ReqLLM's own environment lookup. A per-request option is
-  scoped to the one request, leaves no value in application environment for
-  another process to read, and — because ReqLLM's key resolution prefers the
-  explicit option — removes any path by which a differently named provider
-  variable already present in the environment could satisfy the call instead.
+  The companion starts ReqLLM only after protected entry and performs one
+  `ReqLLM.stream_text/3` handoff with dependency retry disabled. A proved local
+  pre-transport refusal is `{:error, {:not_dispatched, "model_call_failed"}}`.
+  From possible invocation delivery onward, uncertainty is
+  `{:error, {:dispatched_or_unknown, "model_call_failed"}}`; no raw provider
+  reason leaves the child. An unreadable raw reply uses the Core-owned admission
+  rule, not a lossy bridge reconstruction.
 
-  Model identity is resolved through `ReqLLM.model/1`, which reads the bundled
-  LLMDB catalog with no network access and no credential. That resolution is
-  therefore usable as an ordinary untagged test: it proves the pinned reference
-  model spec still names a real catalog entry without spending a token. The
-  endpoint recorded is the catalog's base URL when it carries one and the
-  provider module's default otherwise, which is an endpoint *class* — a
-  non-secret host, never a credentialed URL.
+  Catalog lookup and already-open stream conversion remain ordinary adapter
+  utilities. They neither launch a worker nor acquire a credential. The latter
+  suppresses failure details rather than reading an ambient secret to redact
+  them. `scrub_error/2` remains an explicit-value utility, not credential access.
 
-  Provider failures are reduced to a bounded, scrubbed string rather than passed
-  through as a term. A provider error can carry request context, so the raw term
-  is inspected with hard limits and the credential value is substituted out
-  before it can reach a caller, a report, or an operator's terminal. The gate
-  runner redacts its captured output as well; these are two independent planes
-  and each needs its own containment.
-
-  The classification boundary is one position in the code: the
-  `ReqLLM.stream_text/3` call in `dispatch/6`. Everything above it is computed
-  from the committed request, the environment, and the bundled catalog, with no
-  transport constructed and no bytes handed over. Everything from that call
-  onward is ambiguous by construction, which is why the tag is decided by where
-  the adapter stands and never by reading the value that came back — a library
-  that answers `not_dispatched` after invocation is answering about its own last
-  step, not about the handoff that already happened.
-
-  `complete/2` builds its own request and is classified the same way, so a caller
-  holding no committed request still learns whether its attempt was spent.
+  The private worker build, host configuration, and cleanup protocol are defined
+  by ADR 0019. They change no Model callback, Core permit, or accounting authority.
   """
 
   @behaviour Loopex.Model
 
-  alias Loopex.LLM.ReqLLM.CredentialFilter
+  alias Loopex.LLM.ReqLLM.{ProviderBridge, ProviderConfiguration}
   alias Loopex.Model
-  alias Loopex.Runtime.ProviderLifetime
 
   @credential_variable "LOOPEX_PROVIDER_API_KEY"
 
@@ -96,7 +54,7 @@ defmodule Loopex.LLM.ReqLLM do
   #
   # Technical depth: an operator whose credential belongs elsewhere overrides
   # the spec at the call site rather than editing this constant, because
-  # `complete/2` takes the spec as an argument.
+  # `complete_prompt/3` takes the spec as an argument.
   @default_model "anthropic:claude-haiku-4-5"
 
   # Concept: one short answer is all the outcome needs; a ceiling keeps the
@@ -239,31 +197,45 @@ defmodule Loopex.LLM.ReqLLM do
   @doc """
   ## Concept
 
-  Builds and dispatches one request from a bare model name and prompt.
+  The legacy bare-model convenience entry refuses without host configuration.
 
   ## Technical depth
 
-  A convenience for callers that hold no committed request, used by the
-  credential-free adapter lane. It declares its own sampling bound explicitly,
-  because there is no default anywhere and a request without one is refused.
-
-  A request this function could not even build is a refusal before any handoff,
-  so it is classified `not_dispatched` like every other local refusal rather than
-  reported in a second shape only this arity uses.
+  Use `complete_prompt/3` with explicit worker paths, digests, and cleanup
+  period. This arity cannot infer those choices or fall back to an unsafe
+  shared-VM invocation.
   """
-  @spec complete(String.t(), String.t()) ::
-          {:ok, reply()}
-          | {:error, {:not_dispatched, String.t()}}
-          | {:error, {:dispatched_or_unknown, String.t()}}
-  def complete(model_spec, prompt) when is_binary(model_spec) and is_binary(prompt) do
+  @spec complete(String.t(), String.t()) :: {:error, {:not_dispatched, String.t()}}
+  def complete(model_spec, prompt) when is_binary(model_spec) and is_binary(prompt),
+    do: {:error, {:not_dispatched, @call_failed}}
+
+  @doc """
+  ## Concept
+
+  Builds and dispatches one request with explicit host-owned provider protection.
+
+  ## Technical depth
+
+  Standalone callers supply the same launch options as the Model callback and
+  an explicit cleanup period. The request uses a 64-token output allowance and
+  a 60-second deadline. A managed runtime instead supplies its own committed
+  request, deadline, and cleanup period through `complete/3`.
+  """
+  @spec complete_prompt(String.t(), String.t(), keyword()) ::
+          {:ok, reply()} | {:error, {:not_dispatched | :dispatched_or_unknown, String.t()}}
+  def complete_prompt(model_spec, prompt, options)
+      when is_binary(model_spec) and is_binary(prompt) and is_list(options) do
     case Model.request(model_spec, [%{"role" => "user", "content" => prompt}],
            sampling: %{"max_tokens" => @max_tokens},
            deadline: System.system_time(:millisecond) + 60_000
          ) do
-      {:ok, request} -> complete(request, [], Model.discard_progress())
+      {:ok, request} -> complete(request, options, Model.discard_progress())
       _refused -> {:error, {:not_dispatched, @call_failed}}
     end
   end
+
+  def complete_prompt(_model_spec, _prompt, _options),
+    do: {:error, {:not_dispatched, @call_failed}}
 
   @doc """
   ## Concept
@@ -272,11 +244,11 @@ defmodule Loopex.LLM.ReqLLM do
 
   ## Technical depth
 
-  This adapter streams. Every chunk the provider sends is emitted through
-  `progress` as it arrives and accumulated at the same time, so the reply this
-  returns is assembled from exactly the chunks the deltas carried and replays
-  them byte for byte. `delta_count` is what was emitted and `streamed` is true,
-  so the coordinator closes that attempt's domain with a truthful count.
+  This adapter streams. The child accumulates the complete reply and offers
+  deltas through a bounded, lossy progress channel. A saturated reader can miss
+  deltas without shortening that reply or blocking cleanup. `delta_count` names
+  what the producer emitted, not what a particular consumer received; Core owns
+  the accepted count and closure of its separate transient stream domain.
 
   The stream is consumed once. Usage and the per-call request identifier come
   from the metadata the provider sends after the content, so they are read once
@@ -301,14 +273,16 @@ defmodule Loopex.LLM.ReqLLM do
           | {:error, {:dispatched_or_unknown, String.t()}}
   def complete(request, options, progress)
       when is_map(request) and is_list(options) and is_function(progress, 1) do
-    case staged(request) do
-      {:ok, context, identity, call_options, credential} ->
-        dispatch(request, context, identity, call_options, credential, progress)
-
-      _refused ->
-        {:error, {:not_dispatched, @call_failed}}
+    with {:ok, configuration} <- ProviderConfiguration.validate(options),
+         :ok <- Model.validate_request(request) do
+      ProviderBridge.complete(request, configuration, progress)
+    else
+      _refused -> {:error, {:not_dispatched, @call_failed}}
     end
   end
+
+  def complete(_request, _options, _progress),
+    do: {:error, {:not_dispatched, @call_failed}}
 
   # Concept: the private companion makes one provider invocation after its
   # protected channel is ready. No parent credential registry participates.
@@ -353,25 +327,6 @@ defmodule Loopex.LLM.ReqLLM do
     _class, _reason -> :refused
   end
 
-  # Concept: everything one call needs, gathered while a refusal is still
-  # provably a refusal.
-  #
-  # Technical depth: each step reads the committed request, the environment, or
-  # the bundled catalog. None of them constructs a transport or hands a byte to
-  # one, which is what entitles their failures to the `not_dispatched` tag; the
-  # transport bound belongs here for the same reason, because a deadline already
-  # spent is discovered before the call rather than during it.
-  defp staged(request) do
-    with :ok <- Model.validate_request(request),
-         {:ok, context} <- context_of(request),
-         {:ok, credential} <- credential(),
-         {:ok, identity} <- identity(request.model),
-         {:ok, tools} <- provider_tools(Model.model_facing_tools(request)),
-         {:ok, call_options} <- call_options(request, credential, tools) do
-      {:ok, context, identity, call_options, credential}
-    end
-  end
-
   # Concept: the run's own deadline bounds the transport, rather than a number
   # this adapter never declared.
   #
@@ -385,11 +340,9 @@ defmodule Loopex.LLM.ReqLLM do
   #
   # The remaining time on the committed deadline is what goes to the transport,
   # so the transport bound is the run's bound. It cannot outlast the deadline
-  # because it is derived from it, and it cannot cut a call short of the
-  # deadline either. A deadline already reached yields the floor rather than a
-  # negative or zero timeout, because a call dispatched at all is owed a bounded
-  # attempt to fail in; the coordinator, not this adapter, decides that a run
-  # past its deadline stops.
+  # because it is derived from it. A deadline already reached refuses before
+  # handoff rather than supplying a negative or zero library timeout. The
+  # coordinator still owns the run-terminal decision.
   #
   # ReqLLM's own retry loop is disabled. Core owns retry authority and issues a
   # new one-use permit only after an exact pre-transport refusal; letting the
@@ -445,48 +398,6 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
-  # Concept: the credential is read here and nowhere else, and an absent or
-  # empty value is an absence rather than a call with a blank key.
-  defp credential do
-    case System.get_env(@credential_variable) do
-      value when is_binary(value) and value != "" -> {:ok, value}
-      _absent -> {:error, {:credential_unset, @credential_variable}}
-    end
-  end
-
-  # Concept: the answer reaches the operator as the provider produces it.
-  #
-  # Technical depth: this adapter used to call the non-streaming form and declare
-  # `streamed: false` with no deltas, which the port admits as conformant. It was
-  # conformant and it was also the reason nothing an operator ran ever streamed,
-  # while the runtime, the stream domains, their closure items and the terminal
-  # all carried the path.
-  #
-  # The stream is consumed exactly once. Every chunk is emitted through the
-  # progress function the coordinator supplied — closed over that attempt's
-  # stream domain — and accumulated at the same time, so the reply this returns
-  # is assembled from the same chunks the deltas carried and replays them byte
-  # for byte. Usage and the provider's response identifier come from the metadata
-  # the provider sends after the content, which is why they are read once the
-  # stream is drained rather than beside it.
-  defp dispatch(request, context, identity, call_options, credential, progress) do
-    case CredentialFilter.isolate_provider_io() do
-      :ok ->
-        case isolated(
-               fn ->
-                 handoff(request, context, identity, call_options, credential, progress)
-               end,
-               credential
-             ) do
-          {:ok, reply} -> {:ok, reply}
-          _ambiguous -> {:error, {:dispatched_or_unknown, @call_failed}}
-        end
-
-      {:error, :credential_filter_unavailable} ->
-        {:error, {:not_dispatched, @call_failed}}
-    end
-  end
-
   # Concept: the position that decides the classification. Above it a refusal is
   # a refusal; from here on the only provable fact is that the request bytes were
   # handed over.
@@ -516,11 +427,8 @@ defmodule Loopex.LLM.ReqLLM do
   # rather than reporting the reason keeps the same bounded classification the
   # branches below already produce.
   #
-  # This does not make `isolated/1` redundant. A `try` catches only what is
-  # raised inside this process's own call stack; the exit signal the library's
-  # linked stream server sends is delivered to the process rather than to this
-  # frame, and it is still the monitored worker that turns that death into an
-  # answer.
+  # The companion's OS lifetime owns linked dependency deaths; the host bridge
+  # classifies loss of that child as uncertainty without receiving a crash term.
   defp handoff(request, context, identity, call_options, credential, progress) do
     case ReqLLM.stream_text(request.model, context, call_options) do
       {:ok, response} -> drain(response, request, identity, progress, credential)
@@ -531,556 +439,6 @@ defmodule Loopex.LLM.ReqLLM do
   catch
     _thrown -> :provider_call_failed
     :exit, _reason -> :provider_call_failed
-  end
-
-  # Concept: a crash inside the provider library is an answer, not the end of the
-  # process that asked, while the provider work still belongs to that caller's
-  # lifetime.
-  #
-  # Technical depth: the library links its stream server to whoever opens it, so
-  # a throw or an exit raised while the request is being built travels back along
-  # that link and kills the caller before it can classify anything -- and an
-  # attempt whose caller died reports nothing at all, which is the one outcome
-  # ADR 0018 cannot use. A private guardian isolates the worker's exit from the
-  # caller, but registers with the runtime guard before it starts that worker.
-  # Before releasing the worker, the guardian registers the attempt credential
-  # with the logger boundary and traces process creation plus newly created
-  # links in that private subtree. ReqLLM starts its stream server in
-  # the caller's subtree but starts the HTTP task under a shared TaskSupervisor;
-  # the later StreamServer-to-Task link is therefore part of the ownership proof.
-  # Cleanup uses one delivery barrier per dead tracee, not `:all`, because a dead
-  # process is no longer in the latter set and its final spawn trace could arrive
-  # after a global marker. The guardian stops, monitors, and drains every owned
-  # process before it reports the adapter outcome. When a runtime retained the
-  # guardian, the now-empty guardian remains alive until that runtime requests
-  # and observes its correlated stop acknowledgement, or its retaining owner
-  # dies. The normally returning callback is not that retaining owner.
-  #
-  # The worker carries no timeout of its own. The transport bound derived from
-  # the run's committed deadline is the only bound in this path; a second one
-  # invented here would be exactly the undeclared bound that one replaced, and it
-  # would fire on a call the run still had time for.
-  defp isolated(call, credential) do
-    owner = self()
-    reference = make_ref()
-    stop_reference = make_ref()
-
-    {guardian, monitor} =
-      spawn_monitor(fn ->
-        isolated_guardian(owner, reference, stop_reference, call, credential)
-      end)
-
-    case ProviderLifetime.register(guardian, stop_reference) do
-      {:managed, retainer} when is_pid(retainer) ->
-        send(guardian, {__MODULE__, :start, reference, self(), {:managed, retainer}})
-        await_isolated_guardian(guardian, monitor, reference, :managed)
-
-      :unmanaged ->
-        send(guardian, {__MODULE__, :start, reference, self(), :unmanaged})
-        await_isolated_guardian(guardian, monitor, reference, :unmanaged)
-
-      {:error, _unavailable} ->
-        send(guardian, {__MODULE__, :stop_before_start, reference, self()})
-        await_guardian_exit(guardian, monitor, :provider_call_crashed)
-    end
-  end
-
-  defp await_isolated_guardian(guardian, monitor, reference, lifetime) do
-    receive do
-      {__MODULE__, ^guardian, ^reference, outcome} ->
-        case lifetime do
-          :managed ->
-            Process.demonitor(monitor, [:flush])
-            outcome
-
-          :unmanaged ->
-            await_guardian_exit(guardian, monitor, outcome)
-        end
-
-      {:DOWN, ^monitor, :process, ^guardian, _reason} ->
-        :provider_call_crashed
-    end
-  end
-
-  defp isolated_guardian(owner, reference, stop_reference, call, credential) do
-    Process.flag(:trap_exit, true)
-    owner_monitor = Process.monitor(owner)
-
-    receive do
-      {__MODULE__, :start, ^reference, ^owner, lifetime}
-      when lifetime == :unmanaged or
-             (is_tuple(lifetime) and tuple_size(lifetime) == 2 and
-                elem(lifetime, 0) == :managed and is_pid(elem(lifetime, 1))) ->
-        retainer_monitor =
-          case lifetime do
-            {:managed, retainer} -> Process.monitor(retainer)
-            :unmanaged -> nil
-          end
-
-        case CredentialFilter.acquire(credential) do
-          {:ok, credential_lease} ->
-            stop =
-              try do
-                case run_isolated_guardian(
-                       owner,
-                       owner_monitor,
-                       reference,
-                       stop_reference,
-                       call,
-                       retainer_monitor
-                     ) do
-                  :await_stop when is_reference(retainer_monitor) ->
-                    await_managed_resource_stop(
-                      stop_reference,
-                      elem(lifetime, 1),
-                      retainer_monitor
-                    )
-
-                  {:stopped, _requester, _stop} = stopped ->
-                    stopped
-
-                  _finished_or_unmanaged ->
-                    :finished
-                end
-              after
-                :ok = CredentialFilter.release(credential_lease)
-              end
-
-            acknowledge_deferred_resource_stop(stop)
-
-          {:error, _unavailable} ->
-            send(owner, {__MODULE__, self(), reference, :provider_call_crashed})
-
-            if is_reference(retainer_monitor) do
-              stop_reference
-              |> await_managed_resource_stop(elem(lifetime, 1), retainer_monitor)
-              |> acknowledge_deferred_resource_stop()
-            end
-        end
-
-      {__MODULE__, :stop_before_start, ^reference, ^owner} ->
-        :ok
-
-      {:loopex_provider_resource_stop, ^stop_reference, stop, requester}
-      when is_reference(stop) and is_pid(requester) ->
-        acknowledge_resource_stop(requester, stop)
-
-      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
-        :ok
-    end
-  end
-
-  defp run_isolated_guardian(
-         owner,
-         owner_monitor,
-         reference,
-         stop_reference,
-         call,
-         retainer_monitor
-       ) do
-    guardian = self()
-
-    {worker, worker_monitor} =
-      :erlang.spawn_opt(
-        fn ->
-          # The guardian is a local, credential-silent IO device. Provider code
-          # can neither inherit a remote shell nor write a secret around Logger.
-          true = Process.group_leader(self(), guardian)
-
-          receive do
-            {__MODULE__, :invoke, ^reference, ^guardian} ->
-              outcome = call.()
-              send(guardian, {__MODULE__, :worker_outcome, reference, self(), outcome})
-          end
-        end,
-        [:link, :monitor]
-      )
-
-    resources = put_resource(%{}, worker, worker_monitor)
-
-    case install_provider_trace(worker, guardian) do
-      :ok ->
-        send(worker, {__MODULE__, :invoke, reference, guardian})
-
-        await_isolated_worker(
-          owner,
-          owner_monitor,
-          reference,
-          stop_reference,
-          worker,
-          resources,
-          retainer_monitor
-        )
-
-      {:error, :trace_unavailable} ->
-        close_untraced_worker(worker, worker_monitor)
-        Process.demonitor(owner_monitor, [:flush])
-        send(owner, {__MODULE__, self(), reference, :provider_call_crashed})
-        :await_stop
-    end
-  end
-
-  defp install_provider_trace(worker, guardian) do
-    # ReqLLM's Task.Supervisor link exists before its task is linked to the
-    # attempt-owned StreamServer. `:set_on_link` does not traverse that old
-    # link; it starts at the new StreamServer-to-task link and is what lets the
-    # guardian observe private processes the task subsequently links or spawns.
-    with {:tracer, []} <- :erlang.trace_info(:new_processes, :tracer),
-         {:tracer, []} <- :erlang.trace_info(worker, :tracer),
-         1 <-
-           :erlang.trace(worker, true, [
-             :procs,
-             :set_on_link,
-             :set_on_spawn,
-             {:tracer, guardian}
-           ]),
-         {:tracer, ^guardian} <- :erlang.trace_info(worker, :tracer) do
-      :ok
-    else
-      _unavailable -> {:error, :trace_unavailable}
-    end
-  catch
-    _kind, _reason -> {:error, :trace_unavailable}
-  end
-
-  defp await_isolated_worker(
-         owner,
-         owner_monitor,
-         reference,
-         stop_reference,
-         worker,
-         resources,
-         retainer_monitor
-       ) do
-    receive do
-      {:trace, _parent, :spawn, descendant, _mfa} = event when is_pid(descendant) ->
-        await_isolated_worker(
-          owner,
-          owner_monitor,
-          reference,
-          stop_reference,
-          worker,
-          retain_trace_event(resources, event),
-          retainer_monitor
-        )
-
-      {:trace, descendant, :spawned, _parent, _mfa} = event when is_pid(descendant) ->
-        await_isolated_worker(
-          owner,
-          owner_monitor,
-          reference,
-          stop_reference,
-          worker,
-          retain_trace_event(resources, event),
-          retainer_monitor
-        )
-
-      {:trace, _source, event, _linked} = trace
-      when event in [:link, :getting_linked] ->
-        await_isolated_worker(
-          owner,
-          owner_monitor,
-          reference,
-          stop_reference,
-          worker,
-          retain_trace_event(resources, trace),
-          retainer_monitor
-        )
-
-      {:trace, _resource, :exit, _reason} ->
-        await_isolated_worker(
-          owner,
-          owner_monitor,
-          reference,
-          stop_reference,
-          worker,
-          resources,
-          retainer_monitor
-        )
-
-      {__MODULE__, :worker_outcome, ^reference, ^worker, outcome} ->
-        close_isolated_resources(resources)
-        Process.demonitor(owner_monitor, [:flush])
-        send(owner, {__MODULE__, self(), reference, outcome})
-        :await_stop
-
-      {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
-        close_isolated_resources(resources)
-        :await_stop
-
-      {:DOWN, ^retainer_monitor, :process, _retainer, _reason} ->
-        close_isolated_resources(resources)
-        :finished
-
-      {:DOWN, monitor, :process, resource, _reason} ->
-        case mark_resource_down(resources, resource, monitor) do
-          {:ok, resources} when resource == worker ->
-            close_isolated_resources(resources)
-            Process.demonitor(owner_monitor, [:flush])
-            send(owner, {__MODULE__, self(), reference, :provider_call_crashed})
-            :await_stop
-
-          {:ok, resources} ->
-            await_isolated_worker(
-              owner,
-              owner_monitor,
-              reference,
-              stop_reference,
-              worker,
-              resources,
-              retainer_monitor
-            )
-
-          :unknown ->
-            await_isolated_worker(
-              owner,
-              owner_monitor,
-              reference,
-              stop_reference,
-              worker,
-              resources,
-              retainer_monitor
-            )
-        end
-
-      {:loopex_provider_resource_stop, ^stop_reference, stop, requester}
-      when is_reference(stop) and is_pid(requester) ->
-        close_isolated_resources(resources)
-        {:stopped, requester, stop}
-
-      {:EXIT, ^worker, _reason} ->
-        await_isolated_worker(
-          owner,
-          owner_monitor,
-          reference,
-          stop_reference,
-          worker,
-          resources,
-          retainer_monitor
-        )
-
-      {:io_request, from, reply_as, _request} when is_pid(from) ->
-        reject_provider_io(from, reply_as)
-
-        await_isolated_worker(
-          owner,
-          owner_monitor,
-          reference,
-          stop_reference,
-          worker,
-          resources,
-          retainer_monitor
-        )
-    end
-  end
-
-  # Concept: a managed provider resource remains present until the runtime that
-  # retained it explicitly releases it or that retaining owner dies.
-  #
-  # Technical depth: the adapter's private descendants are already down. Its
-  # result has either crossed to the callback or its callback owner has died;
-  # exiting in the former case would race that callback's return and turn a
-  # successful call into an unacknowledged resource death. The retaining runtime
-  # owns the bounded wait and the force-stop path, so this process waits for its
-  # correlated stop while monitoring that owner, not the callback that normally
-  # exits after returning its result. Owner loss releases the credential lease
-  # and ends this resource without inventing an acknowledgement. Its caller
-  # releases the credential lease before sending the
-  # acknowledgement, so that acknowledgement proves both cleanup facts before
-  # the guardian exits.
-  defp await_managed_resource_stop(stop_reference, retainer, previous_monitor) do
-    # Descendant cleanup drains process DOWN messages, including unrelated ones.
-    # A fresh monitor after that drain re-observes a retainer that died during
-    # cleanup; relying on its earlier, possibly consumed DOWN could strand us.
-    Process.demonitor(previous_monitor, [:flush])
-    retainer_monitor = Process.monitor(retainer)
-
-    receive do
-      {:loopex_provider_resource_stop, ^stop_reference, stop, requester}
-      when is_reference(stop) and is_pid(requester) ->
-        {:stopped, requester, stop}
-
-      {:DOWN, ^retainer_monitor, :process, _retainer, _reason} ->
-        :finished
-    end
-  end
-
-  defp acknowledge_deferred_resource_stop({:stopped, requester, stop}),
-    do: acknowledge_resource_stop(requester, stop)
-
-  defp acknowledge_deferred_resource_stop(:finished), do: :ok
-
-  defp close_untraced_worker(worker, worker_monitor) do
-    Process.exit(worker, :kill)
-
-    receive do
-      {:DOWN, ^worker_monitor, :process, ^worker, _reason} -> :ok
-      {:EXIT, ^worker, _reason} -> close_untraced_worker(worker, worker_monitor)
-    end
-  end
-
-  defp close_isolated_resources(resources) do
-    Enum.each(resources, fn
-      {_resource, %{down?: true}} -> :ok
-      {resource, _state} -> Process.exit(resource, :kill)
-    end)
-
-    resources
-    |> stop_next_resource(MapSet.new())
-    |> then(fn {_resources, _drained} -> :ok end)
-  end
-
-  defp stop_next_resource(resources, drained) do
-    case Enum.find(resources, fn {resource, _state} ->
-           not MapSet.member?(drained, resource)
-         end) do
-      nil ->
-        {resources, drained}
-
-      {resource, _state} ->
-        resources = stop_one_resource(resources, resource)
-        resources = drain_tracee(resources, resource)
-        stop_next_resource(resources, MapSet.put(drained, resource))
-    end
-  end
-
-  defp stop_one_resource(resources, resource) do
-    case Map.fetch!(resources, resource) do
-      %{down?: true} ->
-        resources
-
-      %{monitor: monitor} ->
-        Process.exit(resource, :kill)
-        await_resource_down(resources, resource, monitor)
-    end
-  end
-
-  defp await_resource_down(resources, resource, monitor) do
-    receive do
-      {:DOWN, ^monitor, :process, ^resource, _reason} ->
-        put_in(resources, [resource, :down?], true)
-
-      {:DOWN, other_monitor, :process, other, _reason} ->
-        resources
-        |> maybe_mark_resource_down(other, other_monitor)
-        |> await_resource_down(resource, monitor)
-
-      {:trace, _source, _event, _detail} = event ->
-        resources
-        |> retain_trace_event(event)
-        |> await_resource_down(resource, monitor)
-
-      {:trace, _source, _event, _detail, _mfa} = event ->
-        resources
-        |> retain_trace_event(event)
-        |> await_resource_down(resource, monitor)
-
-      {:EXIT, _linked, _reason} ->
-        await_resource_down(resources, resource, monitor)
-
-      {:io_request, from, reply_as, _request} when is_pid(from) ->
-        reject_provider_io(from, reply_as)
-        await_resource_down(resources, resource, monitor)
-    end
-  end
-
-  defp drain_tracee(resources, tracee) do
-    delivered = :erlang.trace_delivered(tracee)
-    await_trace_delivery(resources, tracee, delivered)
-  end
-
-  defp await_trace_delivery(resources, tracee, delivered) do
-    receive do
-      {:trace_delivered, ^tracee, ^delivered} ->
-        resources
-
-      {:DOWN, monitor, :process, resource, _reason} ->
-        resources
-        |> maybe_mark_resource_down(resource, monitor)
-        |> await_trace_delivery(tracee, delivered)
-
-      {:trace, _source, _event, _detail} = event ->
-        resources
-        |> retain_trace_event(event)
-        |> await_trace_delivery(tracee, delivered)
-
-      {:trace, _source, _event, _detail, _mfa} = event ->
-        resources
-        |> retain_trace_event(event)
-        |> await_trace_delivery(tracee, delivered)
-
-      {:EXIT, _linked, _reason} ->
-        await_trace_delivery(resources, tracee, delivered)
-
-      {:io_request, from, reply_as, _request} when is_pid(from) ->
-        reject_provider_io(from, reply_as)
-        await_trace_delivery(resources, tracee, delivered)
-    end
-  end
-
-  defp retain_trace_event(resources, {:trace, _parent, :spawn, resource, _mfa}),
-    do: put_resource(resources, resource)
-
-  defp retain_trace_event(resources, {:trace, resource, :spawned, _parent, _mfa}),
-    do: put_resource(resources, resource)
-
-  defp retain_trace_event(resources, {:trace, left, event, right})
-       when event in [:link, :getting_linked] do
-    # Every such event was emitted because at least one endpoint already
-    # carried this guardian's trace flags. Retain both without consulting
-    # liveness: events from different tracees have no cross-sender ordering, so
-    # a child may already have linked its own child before the event that first
-    # reveals the parent is consumed.
-    resources
-    |> put_resource_if_pid(left)
-    |> put_resource_if_pid(right)
-  end
-
-  defp retain_trace_event(resources, _other), do: resources
-
-  defp put_resource_if_pid(resources, resource) when is_pid(resource),
-    do: put_resource(resources, resource)
-
-  defp put_resource_if_pid(resources, _not_a_pid), do: resources
-
-  defp put_resource(resources, resource) when is_pid(resource) do
-    Map.put_new_lazy(resources, resource, fn ->
-      %{monitor: Process.monitor(resource), down?: false}
-    end)
-  end
-
-  defp put_resource(resources, resource, monitor)
-       when is_pid(resource) and is_reference(monitor) do
-    Map.put_new(resources, resource, %{monitor: monitor, down?: false})
-  end
-
-  defp mark_resource_down(resources, resource, monitor) do
-    case Map.get(resources, resource) do
-      %{monitor: ^monitor} -> {:ok, put_in(resources, [resource, :down?], true)}
-      _unknown -> :unknown
-    end
-  end
-
-  defp maybe_mark_resource_down(resources, resource, monitor) do
-    case mark_resource_down(resources, resource, monitor) do
-      {:ok, updated} -> updated
-      :unknown -> resources
-    end
-  end
-
-  defp reject_provider_io(from, reply_as) do
-    send(from, {:io_reply, reply_as, {:error, :enotsup}})
-  end
-
-  defp acknowledge_resource_stop(requester, stop) do
-    send(requester, {:loopex_provider_resource_stopped, stop, self()})
-  end
-
-  defp await_guardian_exit(guardian, monitor, outcome) do
-    receive do
-      {:DOWN, ^monitor, :process, ^guardian, :normal} -> outcome
-      {:DOWN, ^monitor, :process, ^guardian, _reason} -> :provider_call_crashed
-    end
   end
 
   @doc """
@@ -1094,18 +452,15 @@ defmodule Loopex.LLM.ReqLLM do
 
   This is the whole of the adapter's streaming behaviour that needs no network:
   which chunks become which deltas, how the reply is assembled from exactly those
-  chunks, and which endings are failures rather than shorter answers. `dispatch`
-  calls it with the stream ReqLLM opened; the streaming conformance suite calls
-  it with a stream it built itself, so the shipped adapter is judged by the same
-  suite as every other one instead of being exempt for needing a credential.
+  chunks, and which endings are failures rather than shorter answers. Both this
+  helper and the child's transport path call the same drain implementation. The
+  conformance suite supplies an already-open stream and proves conversion, not
+  network dispatch or provider-process cleanup.
 
   The response is a `ReqLLM.StreamResponse` — accepted and read here, never
-  returned. Errors are already bounded and scrubbed, so a caller may report them
-  without inspecting a provider term: every reason is capped at the same byte
-  bound `complete/3` applies, and the credential this adapter would itself call
-  with is substituted out of it. A caller that opened its own stream under some
-  other secret is the only case that cannot be covered, because that value is
-  never one this adapter is told.
+  returned. Failure categories stay bounded; all failure details are replaced
+  by the fixed `"model_call_failed"` literal. This helper reads no credential
+  and cannot know which secret its caller used to open an arbitrary stream.
   """
   @spec reply_from_stream(
           ReqLLM.StreamResponse.t(),
@@ -1115,23 +470,9 @@ defmodule Loopex.LLM.ReqLLM do
         ) :: {:ok, reply()} | {:error, term()}
   def reply_from_stream(response, request, identity, progress)
       when is_map(request) and is_map(identity) and is_function(progress, 1) do
-    drain(response, request, identity, progress, ambient_credential())
-  end
-
-  # Concept: the credential to keep out of a reason, where there is one to keep
-  # out.
-  #
-  # Technical depth: this path passed `nil` unconditionally while the function
-  # documented scrubbed errors, which made the claim true only for a caller that
-  # had no credential set at all. The bound never depended on a secret; only the
-  # substitution does, and the substitution needs a value to look for. This is
-  # the same read `staged/1` makes, so what is substituted is exactly the value
-  # a real call would have been made with, and an unset variable stays `nil` and
-  # leaves the deterministic lane byte-identical.
-  defp ambient_credential do
-    case credential() do
-      {:ok, value} -> value
-      _absent -> nil
+    case drain(response, request, identity, progress, nil) do
+      {:ok, reply} -> {:ok, reply}
+      {:error, {category, _raw_reason}} -> {:error, {category, @call_failed}}
     end
   end
 

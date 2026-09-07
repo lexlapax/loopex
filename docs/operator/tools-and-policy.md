@@ -365,26 +365,29 @@ credential, including the launcher and the executor's own process-management
 helpers. A model-supplied command is then launched through `/usr/bin/env -i`
 with `PATH` as its only variable. The receipt records that constructed downstream
 environment and whether the provider credential was present, so the command-side
-claim is journalled rather than asserted. A provider error is bounded and has the
-credential's bytes substituted out before any caller, report, or terminal can
-see it.
+claim is journalled rather than asserted. A provider failure exposes only its
+dispatch classification and the fixed `model_call_failed` literal, not a provider
+reason containing material that the parent must try to scrub.
 
-A crash inside the provider library is covered by that too. The call the adapter
-makes carries the credential in its arguments, so an error left uncaught there
-could reach the emulator's own crash report with those arguments printed beside
-it. Before provider authority is requested, the coordinator starts a dormant
-lifetime guard under the owner generation's private supervisor. Only the exact
-worker receiving Control's permit can ask that guard to create the linked adapter
-callback. Catchable raises, throws, and exits are normalized in the callback;
-the guard contains an asynchronous linked exit, cannot finish before its callback,
-and stops that callback if the worker or coordinator ends. Terminal paths await
-the guard, and abrupt owner loss cannot pass the generation barrier while it
-lives. The resulting failure is the same bounded `model_call_failed`
-classification as an ordinary provider failure,
-with no raw provider term or credential reaching a log, journal, public event,
-progress item, diagnostic, or terminal. An interrupted stream remains an error
-carrying a bounded, credential-substituted reason for all three endings rather
-than only for a raise.
+The reference adapter runs provider code in one companion BEAM per invocation,
+with crash output, standard output, and standard error suppressed before provider
+startup. Protected entry also suppresses that child's Logger and direct IO. It
+does not install a filter or change a group leader in the embedding VM. The
+credential enters through a private channel only after the worker's protected
+entry and build identity are checked; it is absent from launch arguments and the
+initial process environment. Channel values are bounded plain data, and an
+interrupted stream is a failure rather than a successful partial answer.
+
+The host must supply the trusted interpreter path, companion path, worker digest,
+and manifest digest explicitly. Direct unmanaged calls also supply a cleanup
+period; managed calls use the period retained by Core. Missing configuration
+refuses before dispatch instead of discovering a binary in the workspace or
+falling back to in-process provider execution. The guardian observes the committed
+deadline independently of a blocked provider or socket writer and owns the
+companion's process group until cleanup is proved. A returned reply or closed
+socket alone is not cleanup proof. See
+[ADR 0019](../adr/0019-host-owned-provider-protection.md#concept) for the accepted
+host and private-channel boundaries.
 
 ## Related
 

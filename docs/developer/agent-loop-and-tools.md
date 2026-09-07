@@ -306,11 +306,15 @@ effect that reconciliation can complete safely. A successful reply carries a
 closed provider-neutral identity, normalized usage, tool calls, stream facts,
 response identifier, and the exact staged digest; raw provider structures and
 reasons cross no Core, Store, public, progress, diagnostic, or fixture plane.
-While a provider credential is live, a permanent primary Logger filter reads the
-adapter's private active-credential registry and substitutes every occurrence in
-every supported Logger message and metadata shape. Missing or conflicting filter
-state refuses the call before transport; missing registry state drops the event
-rather than guessing that it is safe.
+The reference adapter isolates provider dependencies and credential-bearing work
+in one host-owned companion BEAM per invocation, as defined by
+[ADR 0019](../adr/0019-host-owned-provider-protection.md#concept). Its protected entry
+suppresses that child's Logger and direct IO before starting ReqLLM; the parent
+installs no credential registry, Logger filter, or shared group-leader change.
+An independent process guardian owns the worker group through result retention
+and cleanup. The private channel carries bounded plain data, not provider
+exceptions or runtime terms. Missing explicit launch configuration refuses before
+dispatch; it never falls back to executing ReqLLM in the embedding VM.
 
 A settlement is four closed enumerations and one result. `transport` is
 `not_dispatched` or `dispatched_or_unknown`; `termination` is absent, `abort`,

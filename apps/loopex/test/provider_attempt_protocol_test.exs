@@ -70,8 +70,11 @@ defmodule Loopex.ProviderAttemptRegisteredLifetimeModel do
     resource =
       spawn(fn ->
         receive do
-          {:loopex_provider_resource_stop, ^stop_reference, stop, requester}
-          when is_reference(stop) and is_pid(requester) ->
+          {:loopex_provider_resource_stop, ^stop_reference, stop, requester, cooperative_deadline,
+           observation_deadline}
+          when is_reference(stop) and is_pid(requester) and
+                 is_integer(cooperative_deadline) and is_integer(observation_deadline) and
+                 cooperative_deadline <= observation_deadline ->
             send(observer, {:provider_resource_stop_requested, self(), requester, stop})
 
             case resource_mode do
@@ -107,7 +110,10 @@ defmodule Loopex.ProviderAttemptRegisteredLifetimeModel do
       end
     end
 
-    {:managed, retaining_guard} = ProviderLifetime.register(resource, stop_reference)
+    {:managed, retaining_guard, cleanup_grace_ms} =
+      ProviderLifetime.register(resource, stop_reference)
+
+    true = is_integer(cleanup_grace_ms) and cleanup_grace_ms > 0
     send(observer, {:provider_resource_registered, callback, resource, request})
     send(observer, {:provider_resource_retainer, callback, resource, retaining_guard})
 

@@ -505,18 +505,19 @@ the lease ends the owned process group or abandons the filesystem effect, and th
 job is retained as unproven rather than complete. Exact duplicate jobs return the
 retained receipt without another start.
 
-Credentials stay on the host side of the line. The reference model adapter reads
-`LOOPEX_PROVIDER_API_KEY`, passes it as a per-request option, and never returns,
-logs, or writes it; no other provider variable is consulted, so a key that
-happens to sit in the operator's environment cannot be spent by accident. Its
-classified failures carry the literal `"model_call_failed"` and no provider term.
-The adapter registers each live credential behind a permanent primary Logger
-filter before provider work starts. The filter normalizes every supported Logger
-message shape, redacts all occurrences in both message and metadata, and drops an
-event if its registry cannot prove what must be scrubbed. The adapter's private
-group leader refuses direct IO, and the callback/resource lifetime guards keep
-even asynchronous linked-exit reasons and late transport tasks inside the same
-cleanup boundary, so nothing rides out on the failure plane.
+Credentials stay at the provider boundary. The reference adapter reads only
+`LOOPEX_PROVIDER_API_KEY`; a short-lived sender materializes it after the
+configured companion has proved its protected entry and build identity. Neither
+the initial process image nor its arguments carry the credential. The companion
+uses it as a per-request option, with child diagnostics suppressed before ReqLLM
+starts. Its classified failures carry the literal `"model_call_failed"` and no
+provider term. The parent installs no primary Logger filter or credential
+registry and changes no application group leader. An independent guardian owns
+the companion's process group, including descendants, until cleanup is proved
+under the existing committed bounds. A terminal channel result alone is not
+cleanup proof. Missing configuration or mismatched worker bytes refuse before
+credential delivery; there is no shared-VM fallback. These boundaries are fixed
+by [ADR 0019](../adr/0019-host-owned-provider-protection.md#concept).
 
 ## Where Each Concern Lives
 
