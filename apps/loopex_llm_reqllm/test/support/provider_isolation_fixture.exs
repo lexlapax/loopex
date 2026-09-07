@@ -43,9 +43,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
 
     {:ok, {_address, port}} = :inet.sockname(listener)
     expected = Keyword.get(options, :credential, System.get_env(Adapter.credential_variable()))
+    response_body = Keyword.get(options, :response_body)
 
     acceptor =
-      spawn_link(fn -> accept_loop(listener, events, transport_events, mode, expected) end)
+      spawn_link(fn ->
+        accept_loop(listener, events, transport_events, mode, expected, response_body)
+      end)
 
     if mode == :closed_port, do: :gen_tcp.close(listener)
 
@@ -386,7 +389,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     ]
   end
 
-  defp accept_loop(listener, events, transport_events, mode, expected) do
+  defp accept_loop(listener, events, transport_events, mode, expected, response_body) do
     case :gen_tcp.accept(listener) do
       {:ok, socket} ->
         Agent.update(transport_events, &[:connected | &1])
@@ -394,20 +397,21 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         handler =
           spawn_link(fn ->
             receive do
-              {:socket, ^socket} -> serve(socket, events, transport_events, mode, expected)
+              {:socket, ^socket} ->
+                serve(socket, events, transport_events, mode, expected, response_body)
             end
           end)
 
         :ok = :gen_tcp.controlling_process(socket, handler)
         send(handler, {:socket, socket})
-        accept_loop(listener, events, transport_events, mode, expected)
+        accept_loop(listener, events, transport_events, mode, expected, response_body)
 
       {:error, :closed} ->
         :ok
     end
   end
 
-  defp serve(socket, events, transport_events, mode, expected) do
+  defp serve(socket, events, transport_events, mode, expected, response_body) do
     with {:ok, headers, body} <- read_request(socket, "") do
       authorized = is_binary(expected) and String.contains?(headers, expected)
       Agent.update(events, &[{Jason.decode!(body), authorized} | &1])
@@ -433,7 +437,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
           :ok
 
         _ ->
-          respond(socket, "200 OK", "text/event-stream", stream_body())
+          respond(socket, "200 OK", "text/event-stream", response_body || stream_body())
       end
     end
 
