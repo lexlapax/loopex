@@ -242,6 +242,17 @@ replay proof, exact-source gate, account lookup, evidence-only child `E`, and
 release review all remain outstanding. No test-lane process is intentionally
 left running across this checkpoint.
 
+### Explicit execution confirmation — 2026-09-07
+
+The maintainer answered "Yes" to this exact follow-up question: "Do you
+explicitly authorize adding the three-argument handoff that stops only its
+owned prepared holder on lifetime loss, and allowing the socket writer to wait
+without a separate timeout while its independent guardian enforces the
+committed deadline?" Both workstreams may resume within that scope. This
+confirmation does not remove the committed deadline, permit termination of
+unowned processes, change an accepted ADR or gate, or authorize integration,
+tagging, or publication. Execution success and behavior remain to be proved.
+
 1. Repair the orphaned guardian and test active-call, post-result, and
    descendant-cleanup owner loss.
 2. Independently review the three ADR proposals at their exact candidate and

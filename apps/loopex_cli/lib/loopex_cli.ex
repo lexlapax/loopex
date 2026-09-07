@@ -867,6 +867,7 @@ defmodule LoopexCli do
           project_manifest: manifest,
           project_decision: decision,
           progress_to: self(),
+          provider_launch: LoopexCli.ProviderLaunch.options(),
           recover_stale_writer: true
         ] ++ cleanup ++ context
       )

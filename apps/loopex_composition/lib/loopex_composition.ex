@@ -171,7 +171,13 @@ defmodule LoopexComposition do
       start_edge(
         Loopex,
         [runtime_id: runtime_id, store: store, policy: policy, executor: executor, tools: tools] ++
-          [model: %{module: ReqLLM, model: ReqLLM.default_model(), options: []}] ++
+          [
+            model: %{
+              module: ReqLLM,
+              model: ReqLLM.default_model(),
+              options: Keyword.get(options, :provider_launch, [])
+            }
+          ] ++
           [active_tools: Enum.map(tools, & &1["tool_id"])] ++
           context_token_budget(options) ++
           Keyword.take(options, @host_supplied)

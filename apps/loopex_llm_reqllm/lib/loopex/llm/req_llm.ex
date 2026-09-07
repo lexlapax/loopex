@@ -310,6 +310,49 @@ defmodule Loopex.LLM.ReqLLM do
     end
   end
 
+  # Concept: the private companion makes one provider invocation after its
+  # protected channel is ready. No parent credential registry participates.
+  # Technical depth: preflight and invocation have separate exception scopes.
+  # Once `started` is called, no dependency result or exception can reclassify
+  # the call as not dispatched. This entry has no production host-VM caller.
+  @doc false
+  def worker_invoke(request, credential, progress, started)
+      when is_binary(credential) and is_function(progress, 1) and is_function(started, 0) do
+    case worker_preflight(request, credential) do
+      {:ok, context, identity, options} ->
+        try do
+          started.()
+
+          case handoff(request, context, identity, options, credential, progress) do
+            {:ok, reply} -> {:ok, reply}
+            _failed -> {:error, {:dispatched_or_unknown, @call_failed}}
+          end
+        rescue
+          _error -> {:error, {:dispatched_or_unknown, @call_failed}}
+        catch
+          _class, _reason -> {:error, {:dispatched_or_unknown, @call_failed}}
+        end
+
+      _refused ->
+        {:error, {:not_dispatched, @call_failed}}
+    end
+  end
+
+  defp worker_preflight(request, credential) do
+    with true <- byte_size(credential) in 1..65_536,
+         :ok <- Model.validate_request(request),
+         {:ok, context} <- context_of(request),
+         {:ok, identity} <- identity(request.model),
+         {:ok, tools} <- provider_tools(Model.model_facing_tools(request)),
+         {:ok, options} <- call_options(request, credential, tools) do
+      {:ok, context, identity, options}
+    end
+  rescue
+    _error -> :refused
+  catch
+    _class, _reason -> :refused
+  end
+
   # Concept: everything one call needs, gathered while a refusal is still
   # provably a refusal.
   #

@@ -14,6 +14,14 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
       lockfile: "../../mix.lock",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
+      escript: [
+        app: nil,
+        main_module: Loopex.LLM.ReqLLM.ProviderWorker,
+        name: :loopex_provider,
+        path: "../../_build/#{Mix.env()}/loopex_provider",
+        emu_args: "+S 2:2 +SDcpu 1 +SDio 1 +A 2"
+      ],
+      aliases: ["escript.build": ["loopex.provider.build"]],
       deps: deps()
     ]
   end
