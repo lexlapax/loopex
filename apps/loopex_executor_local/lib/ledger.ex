@@ -861,10 +861,9 @@ defmodule Loopex.Executor.Local.Ledger do
   # Concept: every member is either the kind marker or a plain string-keyed
   # field.
   #
-  # Technical depth: this is what makes an unknown key refuse. The exact key set
-  # per kind is enforced by the caller's own validation; an extra key of any name
-  # already changes the canonical bytes, and a key that is neither the kind atom
-  # nor a binary is not a shape this ledger writes.
+  # Technical depth: this comparison, not canonical re-encoding alone, refuses
+  # an unknown key. A map with an extra key can still have canonical bytes, so
+  # each kind must match its complete declared key set independently.
   defp exact_keys?(record) do
     case Map.fetch(@kind_keys, Map.get(record, :ledger_kind)) do
       {:ok, keys} -> Enum.sort(Map.keys(record)) == Enum.sort(keys)
@@ -882,11 +881,12 @@ defmodule Loopex.Executor.Local.Ledger do
 
   # Concept: publication is first-writer-wins, and durable before it returns.
   #
-  # Technical depth: exclusive creation without following a symlink is the whole
-  # of the ordering claim, and the file is synced before its parent so a reader
-  # that can see the name can always read complete bytes. The parent sync after
-  # the file sync is the order the retained evidence checks: reversing it makes
-  # the directory entry durable before the bytes it names.
+  # Technical depth: exclusive creation prevents overwriting an existing record.
+  # Successful publication returns only after the complete file and then its
+  # parent are synced. Creation itself exposes the name before writing finishes;
+  # a racing generation reader must refuse incomplete bytes, not treat name
+  # visibility as completed publication. Admission readers additionally hold
+  # the root claim. The retained evidence checks file-before-parent sync order.
   # Concept: a directory this ledger created is not durable until the directory
   # that names it is, and that is true of every level it created.
   #
