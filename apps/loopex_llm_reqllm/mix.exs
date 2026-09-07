@@ -27,7 +27,7 @@ defmodule Loopex.LLM.ReqLLM.MixProject do
   end
 
   def application do
-    [extra_applications: [], mod: {Loopex.LLM.ReqLLM.Application, []}]
+    [extra_applications: []]
   end
 
   # Concept: the reference model adapter named in the vision. It depends outward
