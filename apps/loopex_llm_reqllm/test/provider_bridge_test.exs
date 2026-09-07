@@ -242,6 +242,176 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     send(retainer, :stop)
   end
 
+  test "the writer accepts a committed uint64 deadline without a socket timer overflow", %{
+    root: root,
+    request: request
+  } do
+    {:ok, long_request} =
+      Model.request(request.model, request.messages,
+        sampling: request.sampling,
+        deadline: 18_446_744_073_709_551_615
+      )
+
+    assert {:ok, reply} =
+             ProviderBridge.complete(long_request, worker(root, :reply), Model.discard_progress())
+
+    assert reply.canonical_request_bytes == long_request.canonical_request_bytes
+    refute process_alive?(child_pid(root))
+  end
+
+  test "an echoed credential is rejected inside the raw receiver", %{root: root, request: request} do
+    configuration = worker(root, :echo_credential)
+    {caller, guardian, stop_reference} = registered_call(request, configuration)
+    :erlang.trace(guardian, true, [:receive, {:tracer, self()}])
+    send(caller, :continue)
+
+    assert_receive {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}}, 5_000
+
+    assert_receive {:trace, ^guardian, :receive,
+                    {:provider_frame, _receiver, {:error, :invalid_frame}}},
+                   1_000
+
+    trace_fence(guardian)
+    {:messages, messages} = Process.info(self(), :messages)
+    canary = System.fetch_env!("LOOPEX_PROVIDER_API_KEY")
+
+    assert Enum.all?(messages, fn
+             {:trace, ^guardian, :receive, message} ->
+               :binary.match(:erlang.term_to_binary(message), canary) == :nomatch
+
+             _other ->
+               true
+           end)
+
+    :erlang.trace(guardian, false, [:receive])
+    stop_registered(guardian, stop_reference)
+    refute process_alive?(child_pid(root))
+  end
+
+  test "abrupt guardian death also stops its raw host helpers", %{root: root, request: request} do
+    {caller, guardian, _stop_reference} = registered_call(request, worker(root, :stall_ready))
+    :erlang.trace(guardian, true, [:procs, {:tracer, self()}])
+    send(caller, :continue)
+    assert eventually(fn -> File.regular?(Path.join(root, "booted")) end, 5_000)
+    helpers = traced_children(guardian)
+    assert length(helpers) >= 2
+    monitors = Enum.map(helpers, &{&1, Process.monitor(&1)})
+    guardian_monitor = Process.monitor(guardian)
+    Process.exit(guardian, :kill)
+    assert_receive {:DOWN, ^guardian_monitor, :process, ^guardian, :killed}, 1_000
+
+    for {helper, monitor} <- monitors do
+      assert_receive {:DOWN, ^monitor, :process, ^helper, _reason}, 1_000
+    end
+
+    assert_receive {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}}, 1_000
+    assert eventually(fn -> not process_alive?(child_pid(root)) end, 2_500)
+    refute File.exists?(File.read!(Path.join(root, "namespace")))
+  end
+
+  test "the committed deadline kills a writer blocked by a child that never reads", %{
+    root: root,
+    request: request
+  } do
+    System.put_env("LOOPEX_PROVIDER_API_KEY", String.duplicate("w", 65_536))
+    deadline = System.system_time(:millisecond) + 5_000
+
+    {:ok, bounded_request} =
+      Model.request(request.model, request.messages,
+        sampling: request.sampling,
+        deadline: deadline
+      )
+
+    {caller, guardian, stop_reference} =
+      registered_call(bounded_request, worker(root, :stall_writes))
+
+    :erlang.trace(guardian, true, [:procs, {:tracer, self()}])
+    send(caller, :continue)
+    assert eventually(fn -> File.regular?(Path.join(root, "booted")) end, 2_000)
+    bootstrap_helpers = traced_children(guardian)
+    {:links, links} = Process.info(guardian, :links)
+    sockets = Enum.filter(links, &data_socket?/1)
+    assert [socket] = sockets
+    assert {:ok, [send_timeout: :infinity]} = :inet.getopts(socket, [:send_timeout])
+    assert :ok = :inet.setopts(socket, sndbuf: 1_024)
+    File.write!(Path.join(root, "release-ready"), "ready")
+    assert eventually(fn -> File.regular?(Path.join(root, "ready")) end, 1_000)
+
+    assert eventually(
+             fn ->
+               Enum.any?(traced_children(guardian) -- bootstrap_helpers, &Process.alive?/1)
+             end,
+             1_000
+           )
+
+    [writer] = Enum.filter(traced_children(guardian) -- bootstrap_helpers, &Process.alive?/1)
+    assert {:status, :waiting} = Process.info(writer, :status)
+    monitor = Process.monitor(writer)
+    until = max(deadline - System.system_time(:millisecond), 0) + 1_000
+    assert_receive {:DOWN, ^monitor, :process, ^writer, :killed}, until
+    assert_receive {:completed, {:error, {:dispatched_or_unknown, "model_call_failed"}}}, 1_000
+    stop_registered(guardian, stop_reference)
+    refute process_alive?(child_pid(root))
+    refute File.exists?(Path.join(root, "credential-size"))
+  end
+
+  defp registered_call(request, configuration) do
+    parent = self()
+
+    caller =
+      spawn(fn ->
+        result =
+          ProviderLifetime.scoped(
+            fn guardian, stop_reference ->
+              send(parent, {:registered, guardian, stop_reference})
+
+              receive do
+                :continue -> {:managed, parent, 2_000}
+              end
+            end,
+            fn -> ProviderBridge.complete(request, configuration, Model.discard_progress()) end
+          )
+
+        send(parent, {:completed, result})
+      end)
+
+    assert_receive {:registered, guardian, stop_reference}, 1_000
+    {caller, guardian, stop_reference}
+  end
+
+  defp stop_registered(guardian, stop_reference) do
+    monitor = Process.monitor(guardian)
+    stop = make_ref()
+    until = System.monotonic_time(:millisecond) + 2_000
+
+    send(
+      guardian,
+      {:loopex_provider_resource_stop, stop_reference, stop, self(), until, until + 100}
+    )
+
+    assert_receive {:loopex_provider_resource_stopped, ^stop, ^guardian}, 2_000
+    assert_receive {:DOWN, ^monitor, :process, ^guardian, :normal}, 500
+  end
+
+  defp trace_fence(guardian) do
+    reference = :erlang.trace_delivered(guardian)
+    assert_receive {:trace_delivered, ^guardian, ^reference}, 1_000
+  end
+
+  defp traced_children(guardian) do
+    trace_fence(guardian)
+    {:messages, messages} = Process.info(self(), :messages)
+    for {:trace, ^guardian, :spawn, child, _entry} <- messages, do: child
+  end
+
+  defp data_socket?(port) when is_port(port) do
+    match?({:ok, [_option]}, :inet.getopts(port, [:send_timeout]))
+  catch
+    _kind, _reason -> false
+  end
+
+  defp data_socket?(_process), do: false
+
   defp worker(root, mode) do
     source = """
     alias Loopex.LLM.ReqLLM.ProviderCodec
@@ -253,8 +423,18 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
     {:ok, socket} = :gen_tcp.connect({:local, path}, 0, [:binary, active: false, packet: :raw], 5_000)
     {:ok, :bootstrap, bootstrap} = ProviderCodec.recv(socket, 5_000)
     true = bootstrap == %{"nonce" => nonce, "version" => 1, "build_manifest_sha256" => manifest}
+    File.write!(Path.join(root, "booted"), "ready")
     if mode == :stall_ready, do: Process.sleep(:infinity)
+    if mode == :stall_writes do
+      :ok = :inet.setopts(socket, recbuf: 1_024)
+      Stream.repeatedly(fn -> File.exists?(Path.join(root, "release-ready")) end)
+      |> Enum.reduce_while(:waiting, fn ready, _ ->
+        if ready, do: {:halt, :ready}, else: (Process.sleep(10); {:cont, :waiting})
+      end)
+    end
     :ok = ProviderCodec.send(socket, :ready, bootstrap)
+    File.write!(Path.join(root, "ready"), "ready")
+    if mode == :stall_writes, do: Process.sleep(:infinity)
     case ProviderCodec.recv(socket, 5_000) do
       {:ok, :credential, %{"nonce" => ^nonce, "credential" => key}} ->
         File.write!(Path.join(root, "credential-size"), Integer.to_string(byte_size(key)))
@@ -264,6 +444,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
         true = invocation["request"].deadline == String.to_integer(deadline)
         binding = %{"nonce" => nonce, "staged_request_digest" => invocation["staged_request_digest"]}
         :ok = ProviderCodec.send(socket, :dispatch_started, binding)
+        if mode == :echo_credential do
+          :ok = ProviderCodec.send(socket, :credential, %{"nonce" => nonce, "credential" => key})
+          Process.sleep(:infinity)
+        end
         if mode == :progress do
           delta = Map.put(binding, "payload", %{kind: :text_delta, content_index: 0, text: "x"})
           Enum.each(1..10_000, fn _ -> :ok = ProviderCodec.send(socket, :delta, delta) end)

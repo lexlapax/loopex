@@ -267,10 +267,18 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
       {:ok, socket} ->
         :gen_tcp.close(state.namespace.listener)
 
+        # Concept: the committed invocation deadline, not an additional socket
+        # timer, bounds a write even when the child stops reading.
+        # Technical depth: every send runs in a raw linked and monitored child.
+        # This guardian keeps reducing deadline and lifetime events, kills its
+        # sender and aborts the socket on cleanup; its own abnormal death also
+        # kills those linked helpers. The primitive cannot represent the full
+        # uint64 deadline domain, so it supplies no competing timeout.
         :ok =
           :inet.setopts(socket, [
-            {:send_timeout, remaining(state.deadline)},
-            {:send_timeout_close, true}
+            {:send_timeout, :infinity},
+            {:send_timeout_close, true},
+            {:linger, {true, 0}}
           ])
 
         receiver = start_receiver(socket, state.deadline)
@@ -298,7 +306,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
   defp receive_frame(guardian, socket, deadline) do
     frame =
       try do
-        ProviderCodec.recv(socket, remaining(deadline))
+        socket
+        |> ProviderCodec.recv(remaining(deadline))
+        |> received_frame()
       catch
         _kind, _reason -> {:error, :invalid_frame}
       end
@@ -310,6 +320,20 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
       :stop -> :ok
     end
   end
+
+  # Concept: a child may not echo the credential through an ordinary host
+  # message, even when deliberately exercising a protocol failure.
+  # Technical depth: this check runs inside the raw socket receiver, before it
+  # sends anything to the guardian. Only child-to-host kinds may carry payloads;
+  # every other kind or failure reduces to a closed, atom-only error.
+  defp received_frame({:ok, kind, payload})
+       when kind in [:ready, :dispatch_started, :delta, :terminal],
+       do: {:ok, kind, payload}
+
+  defp received_frame({:error, reason}) when reason in [:closed, :timeout],
+    do: {:error, reason}
+
+  defp received_frame(_rejected), do: {:error, :invalid_frame}
 
   defp start_send(socket, kind, payload) do
     guardian = self()
@@ -500,10 +524,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
   defp port_lost(state), do: loop(state)
 
   defp begin_cleanup(state, request) do
-    close_socket(state.socket)
-    if state.namespace, do: close_socket(state.namespace.listener)
+    # Concept: cleanup must not wait for a child to drain buffered invocation
+    # bytes before it can stop that child.
+    # Technical depth: terminate the owned blocked helpers first. The data
+    # socket's abortive-close setting discards pending output here; ordinary
+    # close may wait on an independent drain timer beyond the committed bound.
     stop_process(state.sender)
     stop_process(state.receiver)
+    close_socket(state.socket)
+    if state.namespace, do: close_socket(state.namespace.listener)
     state = %{state | sender: nil, receiver: nil, socket: nil}
 
     cleanup = state.cleanup || new_cleanup(state, request)
