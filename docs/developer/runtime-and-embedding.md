@@ -255,57 +255,70 @@ transaction never anchors past what its first read may deliver.
 
 Recovery that may race an operator interrupt is deliberately two phase.
 `prepare_resume_session/3` and `prepare_resume_known_session/4` return either a
-replayed result or an opaque one-use activation capability while ordinary work
-remains paused. The caller then invokes `activate_resume/1` or
-`abandon_resume/1`, or hands the capability to another process with
-`transfer_resume/2`, which only the current holder may do. An ordinary transfer
-is fixed when the coordinator records the new holder; it has no destination
-guard, and loss of the caller before the reply leaves the result unknown to that
-caller rather than proving refusal. All three wait for the coordinator's answer
-rather than expiring on a bound: the message carrying either call is not
-withdrawn when its caller stops waiting, so an expired call would report the
-session unavailable while the coordinator went on to spend the very activation
-the caller was told it had not got. Neither proposes a Store mutation, so
-waiting commits nothing, and a coordinator that has died refuses through its
-own exit.
+replayed result or an opaque one-use activation capability while recovered work
+remains paused. The coordinator monitors the initial preparer before returning
+that capability; preparer loss permanently abandons unspent authority. Only the
+current holder may activate, abandon, or transfer it.
+
+`transfer_resume/2` preserves ordinary transfer and its PID domain. The
+coordinator records the new holder before replying. It never selects another
+protocol from ambient process state. Loss of the caller before its reply leaves
+the result unknown to that caller.
+
+`transfer_resume(activation, holder, {participant, correlation})` explicitly
+adds a local lifetime participant under
+[ADR 0020](../adr/0020-explicit-prepared-handoff.md#concept). The calling holder,
+receiving holder, participant and coordinator must be distinct local processes;
+correlation is a fresh local reference. Malformed or aliased roles return
+`invalid_resume_handoff`; a non-local role returns
+`non_local_resume_participant` before liveness checks or mutation. The full
+independently implementable message protocol is documented on
+`Loopex.ResumeActivation.transfer/3` and in
+[the technical decision](../adr/0020-explicit-prepared-handoff-technical.md#technical-adr-0020-decision).
+No CLI implementation or private capability inspection is needed to implement
+that participant.
+
+The participant establishes its preparer, holder and host dependencies before
+the receiving holder becomes reachable. The coordinator prepares one exact
+relationship asynchronously, then sends an authorization through the calling
+holder. Acceptance of the forwarded authorization by the participant is the
+lifetime linearization: it retires the preparer dependency and acknowledges to
+the coordinator. Forwarded authorization and later preparer death are consumed
+in sender order. The coordinator records the acknowledged holder before
+returning `:ok`, preserving every intervening abort or owner fence. Initial
+preparer death cannot revoke a handoff whose participant already accepted it,
+even when the public reply is lost.
+
 `LoopexCli.Interrupt.install_prepared(attachment, cleanup_ms, activation)`
-first starts a temporary lifetime guard. That guard monitors the installer before
-creating the holder linked and monitored, waits for the holder to acknowledge its
-guard monitor, and only then unlinks the pair into a one-way lifetime. There is
-therefore no capability-bearing process in a spawn-before-guard interval. The
-installer then arms that guard against the exact signal manager and makes the
-handler visible before it asks the coordinator to hand the capability to that
-exact holder. The coordinator fixes a verdict and sends it to the installer;
-the installer forwards
-it to the guard, whose exact acknowledgement precedes the coordinator recording
-the holder and replying. It returns `:ok` only after that sequence, or returns the
-owner's refusal; a caller that continues past a refusal as though the capability
-had moved has a defect of its own.
-`LoopexCli.Interrupt.activate_prepared(activation)` and
-`LoopexCli.Interrupt.abandon_prepared(activation)` present the capability from
-that holder and wait for the owner's answer without a bound, as the facade
-entries do; a holder that dies without answering is reported by its own name,
-never as a refusal. The holder is deliberately not the signal server: a
-blocked signal server could handle no signal, so the holder blocks instead and
-the handler keeps submitting the abort and arming the backstop. A signal's
-abort and an activation still cannot both win, because the owner fences the
-capability on an admitted abort and refuses a later activation as fenced.
-Installer death before holder readiness or before forwarding the verdict fails
-closed. Once it has forwarded, same-sender ordering puts the verdict ahead of the
-installer's `DOWN` at the guard, so installer death cannot undo the handoff even
-if its public reply is lost. Loss of the exact manager, coordinator, or holder ends that exact
-authority rather than allowing a different process to infer success. An
-independent guard ends the holder if the signal manager dies without terminating
-its handlers. Orderly replacement installs a successor first, keeps interrupt
-coverage while it waits for every predecessor holder to end, and retains that
-drain in the live handler if the installer itself dies. Concurrent replacements
-serialize behind the same obligation. Once an interrupt has begun, replacement
-is refused atomically so its one abort identity and backstop cannot be erased. A
-presentation that already reached the owner is decided first; otherwise holder
-loss permanently pauses a still-prepared capability.
-The shipped `resume` command routes through that installation and, where the
-owner refuses the activation, gives the capability up through the handler
-before it reports.
+supplies its guard as that participant. The guard monitors the installer before
+creating its linked, monitored holder, and arms the exact signal manager before
+installation exposes the holder. The link also ends a blocked holder if the
+guard dies. Handler installation atomically claims one manager-local identity.
+A duplicate returns `interrupt_already_installed`, disposes its own candidate
+participants, and preserves the incumbent attachment, holder, abort identity
+and backstop. Initial installation maintains signal coverage while removing
+the default termination handler. There is no dynamic replacement or predecessor
+drain.
+
+Installation propagates `:ok`, definitive refusal, or `{:unresolved, reason}`.
+An unresolved result keeps recovery fenced and lifetime cleanup active; the
+command reports uncertainty and does not activate or retry speculatively.
+Activation and abandonment presentations wait for exact owner results in the
+holder, while their read-only holder lookup has an independent bounded wait and
+reports unavailable on expiry. A suspended manager is not an absent manager.
+Holder loss during a presentation is unresolved, because stopping a presenter
+cannot withdraw a request already received by the owner.
+
+The signal manager remains responsive while the holder waits: signals submit
+the ordinary abort asynchronously and arm the configured backstop. Orderly
+handler removal releases its holder asynchronously; abrupt exact-manager or
+coordinator loss independently ends even an idle holder. These losses abandon
+only still-prepared authority. A session whose activation already succeeded
+owns its admitted work and is not terminated by holder cleanup. No transient
+capability, PID, reference, or participant value enters durable or printable
+public data. Rollback terminates the transient command participants before
+restarting a coherent prior composition; it never translates a live capability
+or undoes an admitted activation or abort.
 
 ### Reference Composition
 

@@ -111,16 +111,10 @@ defmodule Loopex.ResumeActivation do
   before receiving that reply, the transfer may still have happened and the
   missing reply is not a refusal.
 
-  The command's prepared-interrupt installer selects a private guarded variant.
-  The coordinator sends its verdict to that installer, the installer forwards it
-  to the signal-manager guard, and the guard acknowledges it before the
-  coordinator records the holder and replies. Installer death before forwarding
-  fails closed. After forwarding, same-sender message ordering makes the guard
-  process the verdict before the installer's `DOWN`, so installer death cannot
-  undo the handoff even if the public reply is lost. In either variant a returned
-  `:ok` proves the holder was recorded. The new holder is monitored, so its own
-  death permanently pauses the recovered work rather than leaving a capability
-  waiting on a process that is gone.
+  This entry never selects a protocol from ambient process state. Its PID domain
+  is unchanged. The initial preparer and every acknowledged holder are monitored;
+  loss permanently abandons an unspent capability. Use `transfer/3` when the new
+  holder also depends on an explicit local lifetime participant.
   """
   @spec transfer(t(), pid()) :: :ok | {:error, term()}
   def transfer(%__MODULE__{} = activation, holder) when is_pid(holder),
@@ -133,4 +127,67 @@ defmodule Loopex.ResumeActivation do
       )
 
   def transfer(_activation, _holder), do: {:error, :invalid_resume_activation}
+
+  @doc """
+  ## Concept
+
+  Transfers the capability to a local holder under an explicit lifetime
+  participant. The participant protects the holder until the coordinator records
+  the handoff, and keeps watching its required dependencies afterwards.
+
+  ## Technical depth
+
+  Let P be this calling holder, H the receiving holder, G the participant and C
+  the coordinator. All four must be distinct local PIDs. N is the supplied fresh
+  correlation reference. Invalid shape or role aliasing returns
+  `{:error, :invalid_resume_handoff}`; any non-local role returns
+  `{:error, :non_local_resume_participant}` before liveness checks or mutation.
+
+  G knows P/H/N and monitors P/H before H is exposed. This call creates Q and
+  sends `{:loopex_prepared_transfer_pending, P, C, H, N, Q}` to G. Independently C
+  creates T and sends `{:loopex_prepared_owner_prepare, C, H, N, Q, T}`. Either
+  message may arrive first. Only after both match and all host dependencies are
+  established does G send
+  `{:loopex_prepared_transfer_guard_ready, G, H, N, Q, T}` to C.
+
+  C creates V and authorizes one verdict, which this calling process forwards as
+  `{:loopex_prepared_owner_verdict, C, H, N, Q, V, verdict}`. The verdict is
+  `:committed` or `{:refused, reason}` with an atom refusal category. On commit G
+  retires P's monitor and sends
+  `{:loopex_prepared_owner_verdict_ack, G, H, N, Q, V, :committed}` to C. On refusal
+  G ends H, sends the same acknowledgement with the refused verdict and exits.
+  Accepting the forwarded commit is the lifetime linearization. G must consume
+  forwarded verdict and P's DOWN in one receive state preserving their sender
+  order; a later P death cannot revoke an accepted commit even if P loses its
+  public reply. Before that acceptance P loss ends H and, once C/Q are known,
+  sends `{:loopex_prepared_transfer_installer_lost, G, P, H, N, Q}` to C.
+
+  Matching `{:loopex_prepared_owner_discard, C, H, N, Q}`, C loss, or required
+  host-dependency loss ends H. H loss ends G. After commit G keeps observing
+  C/H/host dependencies. `{:loopex_prepared_guard_released, C}` retires this
+  relationship without acting on a successor holder. Duplicate and mismatched
+  messages change nothing. Ending H never retracts a submitted presentation or
+  terminates session work whose activation already succeeded.
+
+  C remains responsive throughout. It records H after G's exact acknowledgement
+  and only then returns `:ok`, preserving any intervening abort or owner fence.
+  Definitive refusal proves no transfer. Loss after possible handoff returns
+  `{:unresolved, :resume_handoff_unresolved}`; keep recovery fenced and do not
+  infer non-transfer, failed activation or permission to retry. This call waits
+  for the exact result without a separate timeout. PIDs, references and the
+  opaque capability enter no journal, event, snapshot, progress or diagnostic.
+  """
+  @spec transfer(t(), pid(), {pid(), reference()}) ::
+          :ok | {:error, atom()} | {:unresolved, atom()}
+  def transfer(%__MODULE__{} = activation, holder, participant),
+    do:
+      SessionCoordinator.transfer_resume(
+        activation.coordinator,
+        activation.owner,
+        activation.capability,
+        holder,
+        participant
+      )
+
+  def transfer(_activation, _holder, _participant), do: {:error, :invalid_resume_handoff}
 end

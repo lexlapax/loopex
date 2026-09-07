@@ -55,7 +55,6 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # verdict cannot retain a superseded coordinator; after a verdict, waiting
   # for its exact acknowledgement is the ordinary unbounded two-phase handoff,
   # not an inferred verdict about a live process.
-  @prepared_transfer_guard_key {Loopex.ResumeActivation, :prepared_transfer_guard_v1}
 
   # Concept: an owner that cannot reach the Store waits a while, then says so.
   # It does not wait forever, because the caller that asked for this session is
@@ -229,18 +228,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
   @doc false
   @spec transfer_resume(pid(), owner(), reference(), pid()) :: :ok | {:error, term()}
   def transfer_resume(coordinator, owner, capability, holder)
-      when is_pid(coordinator) and is_map(owner) and is_reference(capability) and is_pid(holder) do
-    case Process.get(@prepared_transfer_guard_key) do
-      nil ->
-        safe_call(coordinator, {:transfer_resume, owner, capability, holder}, :infinity)
+      when is_pid(coordinator) and is_map(owner) and is_reference(capability) and is_pid(holder),
+      do: safe_call(coordinator, {:transfer_resume, owner, capability, holder}, :infinity)
 
-      {^holder, guard, nonce} when is_pid(guard) and is_reference(nonce) ->
-        guarded_transfer_call(coordinator, owner, capability, holder, guard, nonce)
-
-      _malformed_private_marker ->
-        {:error, :resume_activation_holder_mismatch}
+  @doc false
+  @spec transfer_resume(pid(), owner(), reference(), pid(), {pid(), reference()}) ::
+          :ok | {:error, atom()} | {:unresolved, atom()}
+  def transfer_resume(coordinator, owner, capability, holder, {guard, nonce})
+      when is_pid(coordinator) and is_map(owner) and is_reference(capability) and is_pid(holder) and
+             is_pid(guard) and is_reference(nonce) do
+    with :ok <- local_handoff_roles(coordinator, self(), holder, guard) do
+      guarded_transfer_call(coordinator, owner, capability, holder, guard, nonce)
     end
   end
+
+  def transfer_resume(_coordinator, _owner, _capability, _holder, _participant),
+    do: {:error, :invalid_resume_handoff}
 
   @impl GenServer
   def init(options) do
@@ -411,11 +414,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   def handle_call({:activate_resume, supplied_owner, capability}, {caller, _tag}, state) do
     case prepared_holder(state, supplied_owner, capability, caller) do
-      {:ok, prepared} ->
+      {:ok, prepared} when is_nil(state.prepared_transfer) ->
         send(self(), :advance_work)
 
         {:reply, {:ok, state.session_id},
          %{state | prepared: %{prepared | state: :spent}, activation_reconciliation: :owed}}
+
+      {:ok, _prepared} ->
+        {:reply, {:error, :resume_handoff_pending}, state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -450,8 +456,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # Technical depth: ADR 0016 makes interrupt installation and holder transfer
   # one serialized handoff. The current holder asks, from its own process, for a
   # named process to hold the capability instead. An ordinary target is recorded
-  # immediately. A CLI caller with the exact scoped private guard marker takes
-  # one extra internal step: after that guard confirms it has received the
+  # immediately. An explicit lifetime participant takes one extra step: after
+  # that participant confirms it has received the
   # pending handoff, the owner fixes a one-use committed/refused verdict and
   # waits asynchronously for the guard's acknowledgement before recording the
   # holder or replying. The coordinator remains free to handle an abort,
@@ -481,7 +487,11 @@ defmodule Loopex.Runtime.SessionCoordinator do
       )
       when is_pid(holder) and is_pid(guard) and is_reference(nonce) and
              is_reference(handoff) do
-    case prepared_holder(state, supplied_owner, capability, caller) do
+    result =
+      with :ok <- local_handoff_roles(self(), caller, holder, guard),
+           do: prepared_holder(state, supplied_owner, capability, caller)
+
+    case result do
       {:ok, _prepared} when not is_nil(state.prepared_transfer) ->
         # A legitimate second request cannot exist: the exact current holder is
         # blocked awaiting the first. Refuse a private-protocol impostor without
@@ -537,7 +547,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         state
       ) do
     signal_guarded_transfer_reply(caller, nil)
-    {:reply, {:error, :resume_activation_holder_mismatch}, state}
+    {:reply, {:error, :invalid_resume_handoff}, state}
   end
 
   def handle_call({:reconciliation_query, supplied_owner}, _from, state) do
@@ -882,7 +892,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         case verdict do
           :committed ->
             next = clear_prepared_transfer(state, keep_guard?: true)
-            prepared = held_by_guarded(next.prepared, holder, guard, transfer.guard_monitor)
+            prepared = held_by_guarded(next.prepared, transfer)
 
             {:noreply, %{next | prepared: prepared},
              {:continue, {:reply_prepared_transfer, from, :ok}}}
@@ -996,8 +1006,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
   # capability is affected; one already spent, abandoned, or fenced has its
   # answer already.
   def handle_info({:prepared_holder_down, monitor, :process, _pid, _reason}, state) do
-    case state.prepared do
-      %{monitor: ^monitor, state: :prepared} = prepared ->
+    case {state.prepared, state.prepared_transfer} do
+      {%{monitor: ^monitor}, %{verdict: :committed}} ->
+        # The participant consumes the forwarded verdict and the preparer's
+        # DOWN in sender order. This independent monitor cannot decide that race.
+        {:noreply, state}
+
+      {%{monitor: ^monitor}, transfer} when is_map(transfer) ->
+        state
+        |> abandon_prepared_transfer_installer()
+        |> fail_prepared_transfer_participant()
+        |> continue_after_owner_loss()
+
+      {%{monitor: ^monitor, state: :prepared} = prepared, nil} ->
         {:noreply, %{state | prepared: %{prepared | state: :abandoned}}}
 
       _other ->
@@ -5719,9 +5740,10 @@ defmodule Loopex.Runtime.SessionCoordinator do
        do: %{
          capability: capability,
          holder: holder,
-         monitor: nil,
+         monitor: :erlang.monitor(:process, holder, [{:tag, :prepared_holder_down}]),
          guard: nil,
          guard_monitor: nil,
+         guard_relationship: nil,
          state: :prepared,
          recovered: MapSet.new()
        }
@@ -5759,7 +5781,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp fail_prepared_transfer_participant(%{prepared_transfer: transfer} = state) do
     reply =
       case transfer.verdict do
-        :committed -> {:error, :resume_activation_holder_mismatch}
+        :committed -> {:unresolved, :resume_handoff_unresolved}
         {:refused, reason} -> {:error, reason}
         nil -> {:error, :resume_activation_holder_mismatch}
       end
@@ -5768,6 +5790,16 @@ defmodule Loopex.Runtime.SessionCoordinator do
       do: signal_guarded_transfer_reply(transfer.installer, transfer.handoff)
 
     GenServer.reply(transfer.from, reply)
+
+    send(
+      transfer.guard,
+      {:loopex_prepared_owner_discard, self(), transfer.holder, transfer.nonce, transfer.handoff}
+    )
+
+    state =
+      if transfer.verdict == :committed,
+        do: abandon_prepared_transfer_installer(state),
+        else: state
 
     state
     |> clear_prepared_transfer()
@@ -5804,7 +5836,22 @@ defmodule Loopex.Runtime.SessionCoordinator do
     |> Map.put(:superseded, true)
   end
 
-  defp superseded_owner(state), do: Map.put(state, :superseded, true)
+  defp superseded_owner(%{prepared_transfer: transfer} = state) when is_map(transfer) do
+    state |> fail_prepared_transfer_participant() |> Map.put(:superseded, true)
+  end
+
+  defp superseded_owner(state) do
+    if state.prepared && is_pid(state.prepared.guard) do
+      {nonce, handoff} = state.prepared.guard_relationship
+
+      send(
+        state.prepared.guard,
+        {:loopex_prepared_owner_discard, self(), state.prepared.holder, nonce, handoff}
+      )
+    end
+
+    Map.put(state, :superseded, true)
+  end
 
   defp signal_guarded_transfer_reply(installer, handoff)
        when is_pid(installer) and is_reference(handoff),
@@ -5822,7 +5869,14 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
     %{
       state
-      | prepared: %{prepared | monitor: nil, guard: nil, guard_monitor: nil, state: settled}
+      | prepared: %{
+          prepared
+          | monitor: nil,
+            guard: nil,
+            guard_monitor: nil,
+            guard_relationship: nil,
+            state: settled
+        }
     }
   end
 
@@ -5830,10 +5884,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
 
   # Concept: recording who holds the capability now, and watching them.
   #
-  # Technical depth: the preparer is not monitored, because a preparer that dies
-  # before any handoff already leaves a holder no live process can present as.
-  # An acknowledged holder is monitored, because the coordinator answered `:ok`
-  # to it and must therefore know when it is gone. Any monitor from an earlier
+  # Technical depth: preparation installs the initial holder monitor before its
+  # capability is observable. Acknowledged transfers replace it. Any monitor from an earlier
   # handoff is dropped with its message flushed, so a superseded holder's death
   # cannot invalidate the capability the current one is holding.
   defp held_by(prepared, holder) do
@@ -5844,18 +5896,19 @@ defmodule Loopex.Runtime.SessionCoordinator do
     %{prepared | holder: holder, monitor: monitor}
   end
 
-  defp held_by_guarded(prepared, holder, guard, guard_monitor) do
+  defp held_by_guarded(prepared, transfer) do
     prepared = release_prepared_guard(prepared)
     _ = prepared.monitor && Process.demonitor(prepared.monitor, [:flush])
 
-    monitor = :erlang.monitor(:process, holder, [{:tag, :prepared_holder_down}])
+    monitor = :erlang.monitor(:process, transfer.holder, [{:tag, :prepared_holder_down}])
 
     %{
       prepared
-      | holder: holder,
+      | holder: transfer.holder,
         monitor: monitor,
-        guard: guard,
-        guard_monitor: guard_monitor
+        guard: transfer.guard,
+        guard_monitor: transfer.guard_monitor,
+        guard_relationship: {transfer.nonce, transfer.handoff}
     }
   end
 
@@ -5863,7 +5916,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
        when is_pid(guard) and is_reference(monitor) do
     Process.demonitor(monitor, [:flush])
     send(guard, {:loopex_prepared_guard_released, self()})
-    %{prepared | guard: nil, guard_monitor: nil}
+    %{prepared | guard: nil, guard_monitor: nil, guard_relationship: nil}
   end
 
   defp release_prepared_guard(prepared), do: prepared
@@ -6112,9 +6165,8 @@ defmodule Loopex.Runtime.SessionCoordinator do
     namespace <> "_" <> binary_part(encoded, 0, 40)
   end
 
-  # Concept: an ordinary holder transfer keeps its established path. Only the
-  # current holder that scoped the interrupt installer's exact private marker
-  # around the public facade call selects the guarded owner/manager handoff.
+  # Concept: the explicit transfer receives the participant as an argument;
+  # ordinary transfer has no ambient selector or host-specific behavior.
   #
   # Technical depth: the request signal is sent before the same caller tells
   # its guard that the transfer is pending. If the caller dies between those two
@@ -6154,7 +6206,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         handoff
       )
     catch
-      :exit, _reason -> {:error, :session_unavailable}
+      :exit, _reason -> {:unresolved, :resume_handoff_unresolved}
     after
       Process.demonitor(coordinator_ref, [:flush])
     end
@@ -6200,7 +6252,17 @@ defmodule Loopex.Runtime.SessionCoordinator do
   defp receive_guarded_transfer_response(request) do
     case :gen_server.receive_response(request, :infinity) do
       {:reply, reply} -> reply
-      {:error, _reason} -> {:error, :session_unavailable}
+      {:error, _reason} -> {:unresolved, :resume_handoff_unresolved}
+    end
+  end
+
+  defp local_handoff_roles(coordinator, caller, holder, guard) do
+    roles = [coordinator, caller, holder, guard]
+
+    cond do
+      Enum.any?(roles, &(node(&1) != node())) -> {:error, :non_local_resume_participant}
+      length(Enum.uniq(roles)) != 4 -> {:error, :invalid_resume_handoff}
+      true -> :ok
     end
   end
 
