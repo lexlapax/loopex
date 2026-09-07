@@ -5,13 +5,14 @@ defmodule LoopexCli.PreparedParticipantFixture do
   # function. It never inspects the activation or imports the CLI handler.
   def start(preparer, observer, holder_fun, mode \\ :automatic) do
     nonce = make_ref()
+    starter = self()
 
     guard =
       spawn(fn ->
         Process.flag(:trap_exit, true)
         preparer_ref = Process.monitor(preparer)
         {holder, holder_ref} = :erlang.spawn_opt(holder_fun, [:link, :monitor])
-        send(observer, {:participant_started, self(), holder, nonce})
+        send(starter, {:participant_started, self(), holder, nonce})
 
         state = %{
           preparer: preparer,
@@ -35,6 +36,12 @@ defmodule LoopexCli.PreparedParticipantFixture do
             {:loopex_prepared_owner_prepare, coordinator, ^holder, ^nonce, handoff, prepare} ->
               send(observer, {:prepare_received_first, self()})
               loop(%{state | prepare: {coordinator, handoff, prepare}})
+
+            {:DOWN, ^preparer_ref, :process, ^preparer, _reason} ->
+              Process.exit(holder, :kill)
+
+            {:DOWN, ^holder_ref, :process, ^holder, _reason} ->
+              :ok
           end
         else
           loop(state)
@@ -88,9 +95,13 @@ defmodule LoopexCli.PreparedParticipantFixture do
       when state.ready and is_nil(state.verdict) ->
         Process.exit(holder, :kill)
         acknowledge(%{state | verdict: {verdict_ref, verdict}})
+        send(state.observer, {:participant_refused, self(), verdict})
 
       :acknowledge when state.mode == :hold_ack ->
         loop(acknowledge(state))
+
+      :release_ready when state.mode == :await_ready_release ->
+        loop(ready(%{state | mode: :automatic}))
 
       {:loopex_prepared_owner_discard, ^coordinator, ^holder, ^nonce, ^handoff}
       when state.pending ->
@@ -121,6 +132,8 @@ defmodule LoopexCli.PreparedParticipantFixture do
     end
   end
 
+  defp ready(%{mode: :await_ready_release} = state), do: state
+
   defp ready(
          %{
            pending: true,
@@ -130,12 +143,18 @@ defmodule LoopexCli.PreparedParticipantFixture do
            prepare: {coordinator, handoff, prepare}
          } = state
        ) do
-    send(
-      coordinator,
-      {:loopex_prepared_transfer_guard_ready, self(), state.holder, state.nonce, handoff, prepare}
-    )
+    if state.mode == :hold_ready do
+      send(state.observer, {:participant_ready_held, self(), state.holder})
+      %{state | mode: :await_ready_release}
+    else
+      send(
+        coordinator,
+        {:loopex_prepared_transfer_guard_ready, self(), state.holder, state.nonce, handoff,
+         prepare}
+      )
 
-    %{state | ready: true}
+      %{state | ready: true}
+    end
   end
 
   defp ready(state), do: state

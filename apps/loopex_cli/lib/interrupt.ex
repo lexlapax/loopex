@@ -575,8 +575,21 @@ defmodule LoopexCli.Interrupt do
     :exit, _manager_gone -> :ok
   end
 
-  defp present(:activate, activation), do: Loopex.activate_resume(activation)
-  defp present(:abandon, activation), do: Loopex.abandon_resume(activation)
+  defp present(:activate, activation),
+    do: presentation_result(Loopex.activate_resume(activation))
+
+  defp present(:abandon, activation),
+    do: presentation_result(Loopex.abandon_resume(activation))
+
+  # Concept: losing the coordinator while presenting cannot prove that the
+  # submitted mutation was refused.
+  # Technical depth: Core's compatibility entry reports unavailable when its
+  # call loses the owner. The holder may relay that answer before its independent
+  # guardian sees the same loss; both orders remain unresolved at this boundary.
+  defp presentation_result({:error, :session_unavailable}),
+    do: {:unresolved, :prepared_activation_unavailable}
+
+  defp presentation_result(result), do: result
 
   # Concept: asking the holder, with no deadline of this module's invention.
   #
@@ -630,7 +643,11 @@ defmodule LoopexCli.Interrupt do
   the holder presents the one it was handed. The read-only manager lookup is
   bounded and reports unavailable on expiry. The presentation itself waits for
   an exact decision without a deadline: its message cannot be withdrawn by a
-  timeout. Holder loss while presenting is unresolved, never failed activation.
+  timeout. Holder or coordinator loss while presenting is unresolved, never
+  failed activation. A missing coordinator reply reports
+  `{:unresolved, :prepared_activation_unavailable}`; the bounded read-only lookup
+  instead returns `{:error, :prepared_activation_unavailable}` before submitting
+  this presentation.
   The owner's fence decides ordering with a signal.
 
   One use is the owner's own state machine to enforce, and it does: success or a
@@ -781,11 +798,19 @@ defmodule LoopexCli.Interrupt do
 
   defp install_handler(manager, handlers, state) do
     if :erl_signal_handler in handlers do
-      :gen_event.swap_handler(
-        manager,
-        {:erl_signal_handler, :loopex_handler_installed},
-        {__MODULE__, state}
-      )
+      # OTP wraps an init refusal once more on swap than on add. Both paths
+      # expose the same atomic-claim refusal, including a stale default snapshot.
+      case :gen_event.swap_handler(
+             manager,
+             {:erl_signal_handler, :loopex_handler_installed},
+             {__MODULE__, state}
+           ) do
+        {:error, {:error, :interrupt_already_installed}} ->
+          {:error, :interrupt_already_installed}
+
+        result ->
+          result
+      end
     else
       :gen_event.add_handler(manager, __MODULE__, state)
     end
@@ -839,13 +864,10 @@ defmodule LoopexCli.Interrupt do
     end
   end
 
-  defp remove_default_handlers(manager, remaining \\ 16)
-  defp remove_default_handlers(_manager, 0), do: :ok
-
-  defp remove_default_handlers(manager, remaining) do
+  defp remove_default_handlers(manager) do
     case :gen_event.delete_handler(manager, :erl_signal_handler, []) do
       {:error, :module_not_found} -> :ok
-      _removed -> remove_default_handlers(manager, remaining - 1)
+      _removed -> remove_default_handlers(manager)
     end
   end
 

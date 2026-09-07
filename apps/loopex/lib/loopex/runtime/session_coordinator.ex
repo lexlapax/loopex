@@ -237,7 +237,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
   def transfer_resume(coordinator, owner, capability, holder, {guard, nonce})
       when is_pid(coordinator) and is_map(owner) and is_reference(capability) and is_pid(holder) and
              is_pid(guard) and is_reference(nonce) do
-    with :ok <- local_handoff_roles(coordinator, self(), holder, guard) do
+    with :ok <- local_handoff_roles(coordinator, self(), holder, guard, nonce) do
       guarded_transfer_call(coordinator, owner, capability, holder, guard, nonce)
     end
   end
@@ -488,7 +488,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
       when is_pid(holder) and is_pid(guard) and is_reference(nonce) and
              is_reference(handoff) do
     result =
-      with :ok <- local_handoff_roles(self(), caller, holder, guard),
+      with :ok <- local_handoff_roles(self(), caller, holder, guard, nonce),
            do: prepared_holder(state, supplied_owner, capability, caller)
 
     case result do
@@ -878,7 +878,7 @@ defmodule Loopex.Runtime.SessionCoordinator do
         {:loopex_prepared_owner_verdict_ack, guard, holder, nonce, handoff, commit, verdict},
         %{prepared_transfer: transfer} = state
       )
-      when is_map(transfer) do
+      when is_map(transfer) and is_reference(commit) do
     case transfer do
       %{
         guard: ^guard,
@@ -6256,11 +6256,12 @@ defmodule Loopex.Runtime.SessionCoordinator do
     end
   end
 
-  defp local_handoff_roles(coordinator, caller, holder, guard) do
+  defp local_handoff_roles(coordinator, caller, holder, guard, nonce) do
     roles = [coordinator, caller, holder, guard]
 
     cond do
       Enum.any?(roles, &(node(&1) != node())) -> {:error, :non_local_resume_participant}
+      node(nonce) != node() -> {:error, :invalid_resume_handoff}
       length(Enum.uniq(roles)) != 4 -> {:error, :invalid_resume_handoff}
       true -> :ok
     end
