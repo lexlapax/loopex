@@ -70,6 +70,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     assert reply.streamed
     assert reply.delta_count > 0
     assert Fixture.canaries(fixture) == 1
+    assert Fixture.methods(fixture) == ["POST"]
     assert [{_request, true}] = Fixture.events(fixture)
     Fixture.assert_gone(fixture)
   end
@@ -96,6 +97,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderEntryTest do
     assert Fixture.complete(fixture) == {:error, {:dispatched_or_unknown, "model_call_failed"}}
     assert Fixture.canaries(fixture) == 1
     assert Fixture.count(fixture) == 1
+    assert Fixture.methods(fixture) == ["POST"]
     Fixture.assert_gone(fixture)
   end
 

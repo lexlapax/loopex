@@ -148,10 +148,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   def reached?(fixture, name), do: File.regular?(marker(fixture, name))
   def release(fixture), do: File.write!(marker(fixture, "release"), "release")
 
-  def canaries(fixture) do
+  def canaries(fixture), do: length(methods(fixture))
+
+  def methods(fixture) do
     case File.read(marker(fixture, "canary")) do
-      {:ok, content} -> length(String.split(content, "\n", trim: true))
-      {:error, :enoent} -> 0
+      {:ok, content} -> String.split(content, "\n", trim: true)
+      {:error, :enoent} -> []
     end
   end
 
@@ -208,7 +210,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       def call(%Finch.Request{} = request) do
         root = #{inspect(root)}
         mode = #{inspect(mode)}
-        File.write!(Path.join(root, "canary"), "POST\\n", [:append])
+        File.write!(Path.join(root, "canary"), request.method <> "\\n", [:append])
         File.write!(Path.join(root, "startup"), Jason.encode!(%{
           dotenv_absent: System.get_env("LOOPEX_DOTENV_CANARY") == nil,
           tidewave_absent: System.get_env("TIDEWAVE_REPL") == nil,
