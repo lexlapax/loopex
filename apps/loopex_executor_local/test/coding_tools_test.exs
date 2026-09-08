@@ -4579,6 +4579,87 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert output == "answered"
   end
 
+  test "raw and argv commands receive no private supervision descriptors or control input" do
+    root = workspace()
+    ordinary = Path.join(root, "ordinary-descriptor.txt")
+    File.write!(ordinary, "non-secret descriptor control")
+
+    probe = ~S"""
+    third=closed
+    fourth=closed
+    (: <&3) 2>/dev/null && third=open
+    (: <&4) 2>/dev/null && fourth=open
+    input=other
+    [ /dev/fd/0 -ef /dev/null ] && input=null
+    printf 'descriptors:%s:%s;input:%s\n' "$third" "$fourth" "$input"
+    """
+
+    # Concept: descriptor presence is observed without reading control bytes.
+    # Technical depth: ordinary file descriptors are the positive control; the
+    # real raw and argv paths must then expose only their null standard input.
+    assert {"descriptors:open:open;input:null\n", 0} =
+             System.cmd("/bin/sh", [
+               "-c",
+               "exec </dev/null 3<#{shell_path(ordinary)} 4<#{shell_path(ordinary)}\n" <> probe
+             ])
+
+    for arguments <- [%{"command" => probe}, %{"argv" => ["/bin/sh", "-c", probe]}] do
+      assert {:ok, receipt} = run(root, "loopex.bash", arguments)
+      assert receipt.outcome == :completed
+      assert receipt.cleanup_confirmation == :confirmed
+      assert receipt.output == "descriptors:closed:closed;input:null\n"
+    end
+  end
+
+  test "commands and bounded helpers retain their actual distinct supervision groups" do
+    root = workspace()
+
+    probe = ~S"""
+    cursor=$$
+    depth=0
+    while [ "$depth" -lt 4 ]; do
+      row=$(/bin/ps -p "$cursor" -o pid= -o ppid= -o pgid=) || exit 91
+      printf '%s\n' "$row"
+      set -- $row
+      [ "$#" -eq 3 ] || exit 92
+      cursor=$2
+      depth=$((depth + 1))
+    done
+    """
+
+    # Concept: the helper carrier survives outside its guard's final-KILL group.
+    # Technical depth: inspect the live command, status wrapper, guard and
+    # carrier through their actual parent chain; `set -m` returning zero is not
+    # a process-group witness. These observations never authorize a signal.
+    for arguments <- [%{"command" => probe}, %{"argv" => ["/bin/sh", "-c", probe]}] do
+      assert {:ok, receipt} = run(root, "loopex.bash", arguments)
+      assert receipt.outcome == :completed
+      assert receipt.cleanup_confirmation == :confirmed
+
+      [command, status, guard, carrier] = observed_supervision_chain(receipt.output)
+      assert command.parent == status.pid
+      assert status.parent == guard.pid
+      assert guard.parent == carrier.pid
+      assert Enum.all?([command, status, guard, carrier], &(&1.group == carrier.pid))
+    end
+
+    assert {output, 0} = Local.answer_within("/bin/sh", ["-c", probe], 5_000)
+    [command, status, guard, carrier] = observed_supervision_chain(output)
+    assert command.parent == status.pid
+    assert status.parent == guard.pid
+    assert guard.parent == carrier.pid
+    assert Enum.all?([command, status, guard], &(&1.group == guard.pid))
+    assert carrier.group == carrier.pid
+    refute carrier.group == guard.group
+  end
+
+  defp observed_supervision_chain(output) do
+    for row <- String.split(output, "\n", trim: true) do
+      [pid, parent, group] = row |> String.split() |> Enum.map(&String.to_integer/1)
+      %{pid: pid, parent: parent, group: group}
+    end
+  end
+
   test "the launch guard preserves fast command status and remains the only group signal authority" do
     root = workspace()
 
@@ -4614,7 +4695,10 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     script = Enum.at(vector, Enum.find_index(vector, &(&1 == "loopex-port-carrier")) + 1)
 
     assert carrier =~
-             ~r/mode=\$1.*?if \[ "\$mode" = helper \]; then.*?set -m.*?sh -c "\$guard_script" "\$guard_name" "\$carrier_pid" "\$@" <&0 &.*?set \+m.*?else.*?sh -c "\$guard_script" "\$guard_name" "\$carrier_pid" "\$@" <&0 &/s
+             ~r/mode=\$1.*?exec 4<&0.*?if \[ "\$mode" = helper \]; then.*?set -m.*?\/bin\/bash -c "\$guard_script" "\$guard_name" "\$carrier_pid" "\$@" <&4 4<&- &.*?set \+m.*?else.*?\/bin\/bash -c "\$guard_script" "\$guard_name" "\$carrier_pid" "\$@" <&4 4<&- &.*?exec <\/dev\/null 4<&-/s
+
+    assert Enum.at(vector, Enum.find_index(vector, &(&1 == "-c")) - 1) == "/bin/bash"
+    assert script =~ ~S|/bin/sh -c "$command" 3>&- </dev/null &|
 
     assert carrier =~
              ~r/if \[ "\$mode" != helper \]; then.*?kill -s TERM -- -"\$carrier_pid".*?kill -s KILL -- -"\$carrier_pid"/s,

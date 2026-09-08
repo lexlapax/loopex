@@ -4682,8 +4682,8 @@ defmodule Loopex.Executor.Local do
   #
   # `/usr/bin/env` is an absolute path, so it cannot be substituted, and it is
   # the first thing executed. It clears the environment, sets the one `PATH` this
-  # executor chose, and only then resolves the shell or argv command from that
-  # PATH rather than the operator's.
+  # executor chose, and only then starts the fixed internal `/bin/bash`. Raw
+  # commands use `/bin/sh`; argv commands retain the executor's chosen PATH.
   #
   # Concept: the launcher's arguments contain the fixed guard program and command,
   # never the unpredictable token that authenticates its private control frames.
@@ -4709,7 +4709,7 @@ defmodule Loopex.Executor.Local do
     {"/usr/bin/env",
      env_prefix(environment) ++
        [
-         "sh",
+         "/bin/bash",
          "-c",
          launch_carrier_script(),
          "loopex-port-carrier",
@@ -4725,7 +4725,7 @@ defmodule Loopex.Executor.Local do
     {"/usr/bin/env",
      env_prefix(environment) ++
        [
-         "sh",
+         "/bin/bash",
          "-c",
          launch_carrier_script(),
          "loopex-port-carrier",
@@ -4741,7 +4741,7 @@ defmodule Loopex.Executor.Local do
     {"/usr/bin/env",
      env_prefix(environment) ++
        [
-         "sh",
+         "/bin/bash",
          "-c",
          launch_carrier_script(),
          "loopex-port-carrier",
@@ -4767,6 +4767,10 @@ defmodule Loopex.Executor.Local do
   # carrier reports failure without signalling a now-detached numeric group. In
   # command mode the carrier still anchors its own group and may safely terminate
   # that group as its last act after an abnormal guard exit.
+  # Both internal shells use fixed `/bin/bash`, which creates the helper group
+  # without a terminal. Capture control before the asynchronous fork: a shell
+  # may replace that fork's stdin with `/dev/null` before processing `<&0`.
+  # Only the guard retains control input; neither shell retains the extra copy.
   # Every carrier/guard group signal uses `kill -s SIGNAL -- -PGID`: dash rejects
   # the shorthand `-SIGNAL --`, and both shells need `--` before a negative PID.
   # The builtin keeps signal authority in the live shell, without a later helper.
@@ -4781,16 +4785,18 @@ defmodule Loopex.Executor.Local do
     shift
     carrier_pid=$$
     mode=$1
+    exec 4<&0
     trap 'wait_interrupted=1' TERM
     if [ "$mode" = helper ]; then
       set -m
-      sh -c "$guard_script" "$guard_name" "$carrier_pid" "$@" <&0 &
+      /bin/bash -c "$guard_script" "$guard_name" "$carrier_pid" "$@" <&4 4<&- &
       guard_pid=$!
       set +m
     else
-      sh -c "$guard_script" "$guard_name" "$carrier_pid" "$@" <&0 &
+      /bin/bash -c "$guard_script" "$guard_name" "$carrier_pid" "$@" <&4 4<&- &
       guard_pid=$!
     fi
+    exec </dev/null 4<&-
     guard_status=125
     while :; do
       wait_interrupted=0
@@ -4876,7 +4882,7 @@ defmodule Loopex.Executor.Local do
       trap 'wait_interrupted=1' TERM
       if [ "$mode" = command ]; then
         command=$1
-        sh -c "$command" 3>&- </dev/null &
+        /bin/sh -c "$command" 3>&- </dev/null &
       else
         "$@" 3>&- </dev/null &
       fi
