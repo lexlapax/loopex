@@ -147,7 +147,25 @@ defmodule Loopex.Executor.LocalTest do
   test "the workspace lease is held for the job lifetime and loss kills owned work with retained evidence" do
     fixture = fixture("lease-loss")
     on_exit(fn -> stop_fixture(fixture) end)
-    {job, grant} = job_and_grant(fixture, "lease-loss", "loopex.demo.wait_write")
+    {default_job, default_grant} = job_and_grant(fixture, "lease-loss", "loopex.demo.wait_write")
+
+    # Concept: lease loss ends this real job under its own committed period.
+    # Technical depth: the unchanged five-second observation must cover both
+    # cleanup and retention. The default permits five seconds plus 1,250ms of
+    # retention, so this case instead commits 1,000ms plus 250ms. Rebuild the
+    # request and grant; changing the executor's startup default cannot change
+    # an already-digested job. RUN-sent is a post-permit boundary, not a witness
+    # that the demo interpreter has reached its sleep.
+    assert {:ok, job} =
+             default_job
+             |> Map.from_struct()
+             |> Map.put(:cleanup_grace_ms, 1_000)
+             |> Executor.job()
+
+    assert {:ok, grant} =
+             Executor.issue_grant({:host_policy, :allow}, job, default_grant.expiry)
+
+    assert job.cleanup_grace_ms == 1_000
     parent = self()
 
     task =
@@ -171,6 +189,9 @@ defmodule Loopex.Executor.LocalTest do
            "lease-loss cleanup was not proved: #{inspect(receipt)}"
 
     assert receipt.provider_credential_present == false
+    assert receipt.cleanup_grace_ms == 1_000
+    assert receipt.receipt_retention_bound_ms == 250
+    assert receipt.canonical_request_digest == job.canonical_request_digest
 
     # Confirmed cleanup permits the open authority to be removed, so the durable
     # receipt is also the final recovery answer.

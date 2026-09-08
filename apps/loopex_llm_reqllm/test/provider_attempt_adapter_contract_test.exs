@@ -7,6 +7,20 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
   alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
+  # Concept: a completed failing suite reports its seed alongside the refusal.
+  # Technical depth: the authoritative runner owns the verdict and formatter.
+  # This ordinary ExUnit callback reports only its suite-wide failure count and
+  # seed, never a case verdict, reply, credential or exception. A whole-app run
+  # can fail in another file, so the diagnostic does not attribute a failing
+  # case to this module. It neither changes nor substitutes for the result,
+  # and does not cover failures before this module or the suite can finish.
+  ExUnit.after_suite(fn %{failures: failures} ->
+    if failures > 0 do
+      seed = ExUnit.configuration()[:seed]
+      IO.puts(:stderr, "LOOPEX_TEST_DIAGNOSTIC seed=#{seed} suite_failures=#{failures}")
+    end
+  end)
+
   # Concept: ADR 0019 replaces same-VM descendant tracing and credential leases
   # with one owned OS group. The observable ownership, one-dispatch, error, and
   # result-before-cleanup claims remain; the retired registry is not a fake seam.
