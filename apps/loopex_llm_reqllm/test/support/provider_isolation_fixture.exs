@@ -68,12 +68,6 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       hold_caller: Keyword.get(options, :hold_caller, false)
     }
 
-    launch = write_worker(root, mode, port, probe_port)
-
-    if mode == :dotenv do
-      File.write!(Path.join(root, ".env"), "LOOPEX_DOTENV_CANARY=loaded\nTIDEWAVE_REPL=true\n")
-    end
-
     ExUnit.Callbacks.on_exit(fn ->
       if Process.alive?(acceptor), do: Process.exit(acceptor, :kill)
       if Process.alive?(probe), do: Process.exit(probe, :kill)
@@ -84,6 +78,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       if Process.alive?(probe_events), do: Agent.stop(probe_events)
       File.rm_rf!(root)
     end)
+
+    launch = write_worker(root, mode, port, probe_port)
+
+    if mode == :dotenv do
+      File.write!(Path.join(root, ".env"), "LOOPEX_DOTENV_CANARY=loaded\nTIDEWAVE_REPL=true\n")
+    end
 
     Map.put(fixture, :options, launch)
   end
@@ -688,6 +688,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         end
       end
     end
+    defmodule LoopexProviderFixtureEntry do
+    def main(arguments) do
     Application.put_env(:req_llm, :finch_request_adapter, LoopexProviderFixtureTransport)
     [path | _] = Enum.map(arguments, &List.to_string/1)
     File.write!(#{inspect(Path.join(root, "pid"))}, System.pid())
@@ -727,10 +729,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       Loopex.LLM.ReqLLM.ProviderWorker.main(Enum.map(arguments, &List.to_string/1))
     end
     end
+    end
+    end
     """
 
     paths = :io_lib.format(~c"~tp", [:code.get_path()]) |> IO.iodata_to_binary()
     script = Path.join(root, "worker.escript")
+    beams = prepare_worker(root, source, paths)
+    embedded = :io_lib.format(~c"~tp", [beams]) |> IO.iodata_to_binary()
 
     File.write!(script, """
     #!/usr/bin/env escript
@@ -738,7 +744,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
     main(Arguments) ->
       ok = code:add_paths(#{paths}),
       {ok, _} = application:ensure_all_started(elixir),
-      'Elixir.Code':eval_string(base64:decode("#{Base.encode64(source)}"), [{arguments, Arguments}]),
+      lists:foreach(fun({Module, Bytes}) ->
+        {module, Module} = code:load_binary(Module, "fixture.beam", base64:decode(Bytes))
+      end, #{embedded}),
+      'Elixir.LoopexProviderFixtureEntry':main(Arguments),
       ok.
     """)
 
@@ -753,6 +762,75 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
         |> Base.encode16(case: :lower),
       cleanup_grace_ms: 2_000
     ]
+  end
+
+  # Concept: fixture compilation is preparation, not work charged to a model
+  # request. Like the packaged companion, the launched child loads built code.
+  # Technical depth: compile only the synthetic modules in an isolated VM
+  # before request creation. No worker entry, dependency application startup,
+  # model catalog lookup, socket, readiness frame or credential is pre-started.
+  # The actual child still owns all those steps under the unchanged deadline.
+  # The compiler's ten-second fail-stop starts at its main entry and bounds
+  # compilation, not OS bootstrap or immediate response to parent death;
+  # it extends neither request deadlines nor ExUnit timeouts. Root cleanup is
+  # registered first, including for compiler failure.
+  defp prepare_worker(root, source, paths) do
+    preparation = Path.join(root, "prepare.escript")
+
+    compiler = """
+    for {module, bytes} <- Code.compile_string(Base.decode64!("#{Base.encode64(source)}")) do
+      File.write!(Path.join(#{inspect(root)}, Atom.to_string(module) <> ".beam"), bytes)
+    end
+    """
+
+    File.write!(preparation, """
+    #!/usr/bin/env escript
+    %%! +S 2:2 +SDcpu 1 +SDio 1 +A 2
+    main([]) ->
+      spawn(fun() -> receive after 10000 -> erlang:halt(70) end end),
+      ok = code:add_paths(#{paths}),
+      {ok, _} = application:ensure_all_started(elixir),
+      'Elixir.Code':eval_string(base64:decode("#{Base.encode64(compiler)}")),
+      ok.
+    """)
+
+    environment =
+      Loopex.LLM.ReqLLM.ProviderLauncher.spawn_environment()
+      |> Map.new(fn {name, false} -> {List.to_string(name), nil} end)
+      # Preserve the caller's search path, including bootstrap interpreter
+      # shadows. Both launched executables below are nevertheless absolute.
+      |> Map.delete("PATH")
+      |> Map.merge(%{
+        "HOME" => root,
+        "TMPDIR" => root,
+        "ERL_CRASH_DUMP" => "/dev/null",
+        "ERL_CRASH_DUMP_SECONDS" => "0"
+      })
+
+    {output, status} =
+      System.cmd(
+        "/bin/sh",
+        [
+          "-c",
+          "exec \"$1\" \"$2\" </dev/null",
+          "fixture-compile",
+          Path.join(List.to_string(:code.root_dir()), "bin/escript"),
+          preparation
+        ],
+        env: Map.to_list(environment),
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, "synthetic worker compilation failed: #{inspect(output)}"
+
+    for module <- [
+          Loopex.LLM.ReqLLM.ProviderBuildIdentity,
+          LoopexProviderFixtureTransport,
+          LoopexProviderFixtureEntry
+        ] do
+      {module,
+       root |> Path.join(Atom.to_string(module) <> ".beam") |> File.read!() |> Base.encode64()}
+    end
   end
 
   defp accept_loop(listener, events, transport_events, mode, expected, response_body) do

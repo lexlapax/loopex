@@ -428,13 +428,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
     assert eventually(
              fn ->
-               Enum.any?(traced_children(guardian) -- bootstrap_helpers, &Process.alive?/1)
+               case Enum.filter(traced_children(guardian) -- bootstrap_helpers, &Process.alive?/1) do
+                 [writer] -> blocked_in_codec_send?(writer)
+                 _not_one_writer -> false
+               end
              end,
              1_000
            )
 
     [writer] = Enum.filter(traced_children(guardian) -- bootstrap_helpers, &Process.alive?/1)
-    assert {:status, :waiting} = Process.info(writer, :status)
     monitor = Process.monitor(writer)
     until = max(deadline - System.system_time(:millisecond), 0) + 1_000
     assert_receive {:DOWN, ^monitor, :process, ^writer, :killed}, until
@@ -466,6 +468,23 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridgeTest do
 
     assert_receive {:registered, guardian, stop_reference}, 1_000
     {caller, guardian, stop_reference}
+  end
+
+  # Concept: a spawned writer is not yet a blocked writer.
+  # Technical depth: establish the actual send stack and waiting state together
+  # inside the existing setup wait. Observing birth then sampling status races
+  # the runnable process; waiting in an unrelated receive proves no backpressure.
+  defp blocked_in_codec_send?(writer) do
+    case Process.info(writer, [:status, :current_stacktrace]) do
+      [status: :waiting, current_stacktrace: stack] ->
+        Enum.any?(stack, fn
+          {Loopex.LLM.ReqLLM.ProviderCodec, :send, 3, _location} -> true
+          _other_frame -> false
+        end)
+
+      _not_blocked_in_send ->
+        false
+    end
   end
 
   defp stop_registered(guardian, stop_reference) do
