@@ -107,17 +107,30 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
     assert invocation_deadline ==
              System.convert_time_unit(request.deadline, :millisecond, :native) - offset
 
+    assert :erlang.trace(guardian, true, [:send, :monotonic_timestamp]) == 1
     receiver_monitor = Process.monitor(receiver)
     cooperative = System.monotonic_time(:millisecond) + remaining(request) + 2_000
     observation = cooperative + 100
     caller = call.caller
+    expected_error = {:error, {:dispatched_or_unknown, "model_call_failed"}}
 
     # The suffix stays unreleased: neither HTTP completion nor private-socket
     # drainage can unblock the real writer before the committed deadline.
-    assert_receive {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
-                   until(cooperative)
+    assert_receive {:completed, ^caller, ^expected_error}, until(cooperative)
 
-    assert System.monotonic_time() >= invocation_deadline
+    # Timestamp publication by the guardian, not the observer's later mailbox
+    # read. The delivery barrier makes the zero-time trace match causal.
+    result_trace = :erlang.trace_delivered(guardian)
+    assert_receive {:trace_delivered, ^guardian, ^result_trace}, until(cooperative)
+
+    assert_receive {:trace_ts, ^guardian, :send,
+                    {:provider_result, result_reference, ^guardian, ^expected_error}, ^caller,
+                    published_at},
+                   0
+
+    assert is_reference(result_reference)
+    assert is_integer(published_at)
+    assert published_at >= invocation_deadline
     assert_receive {:DOWN, ^receiver_monitor, :process, ^receiver, :killed}, until(cooperative)
     stop_at(call, cooperative, observation)
     assert_one_transport(fixture)
