@@ -206,6 +206,20 @@ authority before releasing the root claim or retains the claim and quarantines
 the root when restoration cannot be proved. These are current semantics of the
 unstable trusted-local adapter, not new callbacks in the executor port.
 
+Local's generation writer and reader enforce ADR 0016's exact lowercase
+64-hex encoding of its positive 256-bit epoch. Earlier development code's
+uppercase rendering was nonconforming; a generation ID containing uppercase
+letters now makes its record unavailable rather than silently rewritten or
+accepted through a legacy decoder. Digits-only encodings already conform. The
+generation digest continues to bind the original stored record, and no encoding
+establishes provenance.
+This restores the existing unreleased contract: M2 promises no installed-store
+compatibility and forbids ledger downgrades or rewrites. Preserve refused roots;
+the [operator recovery procedure](../operator/tools-and-policy.md#operator-tools-reach)
+still requires positive cessation of every old effect authority, or the
+prescribed host reboot, before using a fresh root. No new migration, callback,
+persistent record version or public compatibility guarantee is introduced.
+
 The concrete Local start options also include `clock_provider` (a zero-argument
 function returning paired wall and monotonic millisecond instants) and
 `open_authority_close` (a two-argument function replacing `Ledger.close_open/2`).

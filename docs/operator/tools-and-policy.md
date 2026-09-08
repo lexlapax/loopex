@@ -147,6 +147,17 @@ reboot the host, then use the prior source with a fresh empty root. Stopping onl
 the application is not sufficient. The exact limitation and disposition are
 retained in [M2's evidence record](../evidence/M2-recorded-limitations.md#local-authority-trusted-root).
 
+Generation records use the lowercase hexadecimal identity required by
+[ADR 0016](../adr/0016-configured-cancellation-observation-technical.md#technical-depth).
+Earlier development code could write uppercase letters instead. The repaired
+reader refuses those nonconforming records and leaves the root intact; it does
+not normalize, migrate or rewrite them. A digits-only identity already satisfies
+the encoding rule, and spelling does not establish a root's age or provenance.
+If a root is refused, preserve it and follow the positive-termination and
+fresh-root procedure above. Merely selecting another directory does not end old
+effect authority. This correction grants no permission to delete a root or
+reboot a host.
+
 The quarantine that root can carry is decided when a job is reserved, not once
 when an executor starts, because the root is shared. An open entry stranded by
 any executor using it refuses new effects until the root is reconciled — on an
