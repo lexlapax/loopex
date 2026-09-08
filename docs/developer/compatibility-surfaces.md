@@ -172,7 +172,8 @@ selection option or silent fallback. No callback, journal record, or configurati
 schema changes with this prerequisite. The
 [current implementation disposition](agent-context-map.md#disposition-local-executor-bash-2026-09-07)
 authorizes the change; [ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
-is Proposed, not yet an accepted pair. A host that previously supplied only a
+is Accepted through its [exact-pair disposition](agent-context-map.md#disposition-adr-0022-acceptance-2026-09-08).
+A host that previously supplied only a
 POSIX shell must provide `/bin/bash` or select a different executor before using
 this repaired reference stack.
 

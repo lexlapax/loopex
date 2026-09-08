@@ -2613,10 +2613,10 @@ defmodule Loopex.AgentLoopTest do
     #
     # Technical depth: the real worker supervisor is suspended with its
     # terminate call stably queued, then that call receives its reply while the
-    # held provider task still has not answered. The coordinator must remain in
-    # its result drain until the task's own result or ordered DOWN arrives.
-    # Restoring the old zero-timeout poll makes the public abort return before
-    # the provider is released and fails this case without scheduler timing.
+    # held provider task still has not answered. Releasing that task then proves
+    # its late reply is retained beside the cancelled terminal. The release
+    # precedes awaiting the public abort, so this case does not independently
+    # prove how long the coordinator waits or detect every zero-timeout poll.
     parent = self()
 
     fixture =
