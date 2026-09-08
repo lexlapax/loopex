@@ -1131,3 +1131,84 @@ and `:ok`/`:error` branches. Both exact supported toolchains' whole-repository
 format results, not a qualification of the next source's package or runtime.
 The preceding successful packages and failed floor formatting remain bound to
 `b994bc0`; final qualification must use the new clean source throughout.
+
+### Qualification at 7d1cdde: Darwin passes; Linux executor blocks release
+
+The next clean, pushed source was
+`7d1cdde971221bc86972012cfe86198a4c4d87a8`. This is a qualification
+checkpoint, **not a release-review candidate**. No product, gate, accepted ADR,
+or lifecycle change is carried by this evidence update.
+
+On Darwin current (Elixir 1.20.3 / OTP 29.0.5), forced product compilation with
+warnings-as-errors, format, status, dependency budget, core-only isolation,
+formatter scope, compiled documentation, bootstrap and commit-message checks
+passed. Bootstrap passed 68 cases. The serial credential-free whole suite,
+seed `3107`, ran from 2026-09-08T00:56:18Z to 2026-09-08T01:11:21Z and exited
+0: **1,035 passed, zero failed, five real-provider cases excluded**. Its output
+SHA256 is
+`148a99909d26adfd3b59bccca37c4fc3b945c441e67aaa2d3eea5f5178793ee0`.
+No live-provider or account evidence is inferred from that run.
+
+Both Darwin package lanes, current and floor (Elixir 1.17.0 / OTP 26.0),
+passed all nine phases each: format, forced compilation, actual paired build,
+archive identity, two canonical outside-checkout startup checks, separate
+descriptor observation, copied CLI execution, and owned parent-death cleanup.
+These were forced incremental rebuilds using preserved dependency caches, not
+new cold-build claims. The full report and phase records are retained at
+`/private/tmp/loopex-final-package-proof.nAfHeO/PACKAGE-7d1cdde.md`.
+
+The first native Linux run stopped before product compilation. macOS tar had
+generated AppleDouble metadata entries which GNU tar extracted as extra
+dependency application files. The original archive and failed run remain at
+`/private/tmp/loopex-final-linux-package.2StorO/run-7d1cdde`. A separate archive
+disabled macOS metadata; before compilation its native reader refused any
+AppleDouble entry and verified all 878 regular-file payload hashes against the
+original inputs. No dependency or product source was changed by that correction.
+
+The corrected run used the native ARM64 image recorded above, the exact current
+toolchain, no network or credential, and the image's actual `ubuntu` account
+(UID 1000). Running non-root preserved the meaning of permission-refusal cases.
+Product compilation, package/archive checks, three outside-checkout runs, copied
+CLI execution and all eight provider-launcher cases passed. The ordinary full
+executor application suite then **failed: 91 of 161 passed, 70 failed, exit 2**,
+seed `3107`, in 239.1 seconds. Failures included commands refused before launch
+admission and bounded helpers returning `:no_answer`. This is a product failure,
+not a sandbox refusal, disappearing retry, or passing qualification. Output is
+retained in `run-7d1cdde-portable/logs/executor.log` under the same task root,
+SHA256 `12cf7f841ed9fcc586be3db770180d294d718f50fe5fbefd78bb7415b1c9e5ba`.
+
+Research-only probes independently established two noninteractive Linux shell
+mechanisms behind those failures. With the supplied control frame, dash's
+background `<&0` launch reads EOF; capturing the descriptor before fork preserves
+the frame. Separately, dash's `set -m` returns zero but reports that job control
+is disabled without a terminal: the helper guard remains in its carrier's
+process group. The helper cleanup design requires a distinct guard group so
+the carrier survives helper KILL to relay authenticated acknowledgement and
+exit. An input-only repair therefore cannot preserve that design on this shell.
+Darwin's existing shell passed both corresponding mechanism probes.
+
+Fixed `/bin/bash` as the internal carrier and guard passed the native mechanism
+probe: the guard had its own process group, received the exact control frame,
+and its raw `/bin/sh` command joined that guard group. This proves a mechanism,
+not a repaired production executor or cleanup result. Exact scripts, observations
+and limits are retained at
+`/private/tmp/loopex-executor-shell-portability.86bziR/PROBE-EVIDENCE.md`.
+
+The proposed decision is to require `/bin/bash` only for the reference local
+executor's internal supervision scripts, keeping raw `/bin/sh` command semantics
+and leaving Core and third-party executors independent. This is recommended
+because it preserves the current ownership/protocol with the smallest tested
+mechanism change, but adds a product runtime prerequisite. A POSIX-only solution
+needs a different, separately qualified process-group launcher; sharing the
+helper/carrier group instead requires redesigning acknowledgement and cleanup
+ordering. Restricting the release to Darwin would defer the Linux defect and
+requires explicit scope/coverage disposition. None of those alternatives is
+accepted here. Bash in the development prerequisites does not establish it as
+a product runtime dependency. The ADR procedure pauses dependent implementation
+for the maintainer's choice; no gate weakening or platform waiver is inferred.
+
+After that choice, the affected executor path needs focused and full native and
+Darwin verification before selecting a new final source. Literal live and
+inherited gates, provider-account lookup, real old-reader rollback and the final
+evidence-only review child remain outstanding. The successful Darwin results
+above are not back-projected onto a later source or presented as Linux evidence.
