@@ -28,33 +28,61 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
   # ProviderWorker.main/1. The protected classification case retains its name
   # and every post-canary failure mode. Loopback HTTP is not live-provider or
   # exact-package evidence.
-  setup do
+  setup %{test: case_name} do
     variable = Adapter.credential_variable()
     previous = System.get_env(variable)
     System.put_env(variable, "credential-shaped-canary-secret")
 
     on_exit(fn ->
-      if previous, do: System.put_env(variable, previous), else: System.delete_env(variable)
+      try do
+        if previous, do: System.put_env(variable, previous), else: System.delete_env(variable)
+      catch
+        kind, reason ->
+          stack = __STACKTRACE__
+          Fixture.report_failure(case_name, :credential_restore, stack)
+          :erlang.raise(kind, reason, stack)
+      end
     end)
 
     {:ok, _started} = Application.ensure_all_started(:req_llm)
     parent_state = parent_state()
-    on_exit(fn -> assert parent_state() == parent_state end)
+
+    on_exit(fn ->
+      try do
+        assert parent_state() == parent_state
+      catch
+        kind, reason ->
+          stack = __STACKTRACE__
+          Fixture.report_failure(case_name, :parent_state_cleanup, stack)
+          :erlang.raise(kind, reason, stack)
+      end
+    end)
+
     :ok
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :setup, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  test "one durable model attempt invokes the provider transport exactly once" do
-    fixture = Fixture.new(:rate_limited)
+  test "one durable model attempt invokes the provider transport exactly once", %{test: case_name} do
+    fixture = Fixture.new(:rate_limited, diagnostic_case: case_name)
     assert Fixture.complete(fixture) == {:error, {:dispatched_or_unknown, "model_call_failed"}}
     assert Fixture.canaries(fixture) == 1
     assert Fixture.methods(fixture) == ["POST"]
     assert Fixture.count(fixture) == 1
     assert [{_body, true}] = Fixture.events(fixture)
     Fixture.assert_gone(fixture)
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  test "caller death stops the shipped adapter transport worker" do
-    fixture = Fixture.new(:unlinked_http)
+  test "caller death stops the shipped adapter transport worker", %{test: case_name} do
+    fixture = Fixture.new(:unlinked_http, diagnostic_case: case_name)
     call = Fixture.managed(fixture, Fixture.request(), :unmanaged)
     caller = call.caller
     guardian = call.guardian
@@ -92,10 +120,15 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     assert Fixture.methods(fixture) == ["POST"]
     assert [{_request, true}] = Fixture.events(fixture)
     refute_receive {:completed, ^caller, _result}, 0
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  test "provider direct IO is refused locally instead of leaking or blocking" do
-    fixture = Fixture.new(:diagnostics_malformed)
+  test "provider direct IO is refused locally instead of leaking or blocking", %{test: case_name} do
+    fixture = Fixture.new(:diagnostics_malformed, diagnostic_case: case_name)
 
     output =
       capture_io(fn ->
@@ -127,13 +160,20 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
 
              assert :ok = Task.await(task, 1_000)
            end) == "host-task-usable"
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  test "provider cleanup owns an unlinked socket below an externally supervised task" do
+  test "provider cleanup owns an unlinked socket below an externally supervised task", %{
+    test: case_name
+  } do
     supervisor = Process.whereis(ReqLLM.TaskSupervisor)
     assert is_pid(supervisor)
     assert {:tracer, []} = :erlang.trace_info(supervisor, :tracer)
-    fixture = Fixture.new(:detached_descendant_malformed)
+    fixture = Fixture.new(:detached_descendant_malformed, diagnostic_case: case_name)
     assert Fixture.complete(fixture) == {:error, {:dispatched_or_unknown, "model_call_failed"}}
 
     assert Jason.decode!(File.read!(Fixture.marker(fixture, "detached-proof"))) ==
@@ -146,10 +186,17 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     assert Fixture.count(fixture) == 0
     assert Process.alive?(supervisor)
     assert {:tracer, []} = :erlang.trace_info(supervisor, :tracer)
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  test "caller death stops the stream server before the request adapter returns" do
-    fixture = Fixture.new(:hold_before_return)
+  test "caller death stops the stream server before the request adapter returns", %{
+    test: case_name
+  } do
+    fixture = Fixture.new(:hold_before_return, diagnostic_case: case_name)
     call = Fixture.managed(fixture, Fixture.request(), :unmanaged)
     caller = call.caller
     guardian = call.guardian
@@ -173,10 +220,17 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     Fixture.assert_gone(fixture)
     assert Fixture.count(fixture) == 0
     refute_receive {:completed, ^caller, _result}, 0
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  test "committed assistant tool history reaches OpenAI in its required function-call shape" do
-    fixture = Fixture.new(:http_error)
+  test "committed assistant tool history reaches OpenAI in its required function-call shape", %{
+    test: case_name
+  } do
+    fixture = Fixture.new(:http_error, diagnostic_case: case_name)
 
     request =
       Fixture.request(
@@ -220,10 +274,16 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     assert tool_result["tool_call_id"] == "call_MiXeD_123"
     assert tool_result["content"] == "file contents"
     Fixture.assert_gone(fixture)
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  test "the shipped adapter declares not_dispatched only before its transport canary and ambiguity after it" do
-    before = Fixture.new()
+  test "the shipped adapter declares not_dispatched only before its transport canary and ambiguity after it",
+       %{test: case_name} do
+    before = Fixture.new(:reply, diagnostic_case: case_name)
     System.delete_env(Adapter.credential_variable())
     assert Fixture.complete(before) == {:error, {:not_dispatched, "model_call_failed"}}
     assert Fixture.canaries(before) == 0
@@ -243,7 +303,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
           :malformed_return,
           :tagged_not_dispatched
         ] do
-      fixture = Fixture.new(mode)
+      fixture = Fixture.new(mode, diagnostic_case: case_name)
       result = Fixture.complete(fixture, Fixture.request(deadline_ms: 2_000))
       assert Fixture.canaries(fixture) == 1, "transport latch not entered for #{mode}"
       assert Fixture.methods(fixture) == ["POST"], "wrong transport method for #{mode}"
@@ -252,10 +312,17 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
       assert Fixture.count(fixture) <= 1
       Fixture.assert_gone(fixture)
     end
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  test "a managed adapter result precedes its retained resource stop acknowledgement" do
-    fixture = Fixture.new(:http_error)
+  test "a managed adapter result precedes its retained resource stop acknowledgement", %{
+    test: case_name
+  } do
+    fixture = Fixture.new(:http_error, diagnostic_case: case_name)
     call = Fixture.managed(fixture, Fixture.request(deadline_ms: 2_000))
     caller = call.caller
 
@@ -306,28 +373,60 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
              Enum.find_index(messages, &(&1 == acknowledgement))
 
     Fixture.assert_gone(fixture)
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
   # These historical names retain the existing obligation. Credential retention
   # is now the child OS lifetime, not an emulated parent registry or lease API.
-  test "retaining owner loss after a managed result releases the credential lease" do
-    assert_retainer_loss(:after_result)
+  test "retaining owner loss after a managed result releases the credential lease", %{
+    test: case_name
+  } do
+    assert_retainer_loss(:after_result, case_name)
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  test "retaining owner loss during a managed call stops transport and releases the credential lease" do
-    assert_retainer_loss(:during_call)
-    assert_retainer_loss(:after_transport)
+  test "retaining owner loss during a managed call stops transport and releases the credential lease",
+       %{test: case_name} do
+    assert_retainer_loss(:during_call, case_name)
+    assert_retainer_loss(:after_transport, case_name)
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  test "retaining owner loss during descendant cleanup releases the credential lease" do
-    assert_retainer_loss(:during_cleanup)
+  test "retaining owner loss during descendant cleanup releases the credential lease", %{
+    test: case_name
+  } do
+    assert_retainer_loss(:during_cleanup, case_name)
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  test "retaining owner loss before protected entry stops bootstrap without transport" do
-    assert_retainer_loss(:before_entry)
+  test "retaining owner loss before protected entry stops bootstrap without transport", %{
+    test: case_name
+  } do
+    assert_retainer_loss(:before_entry, case_name)
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  defp assert_retainer_loss(phase) do
+  defp assert_retainer_loss(phase, case_name) do
     mode =
       case phase do
         :before_entry -> :hold_before_entry
@@ -337,7 +436,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
         :after_transport -> :blocked
       end
 
-    fixture = Fixture.new(mode, paused: phase == :during_cleanup)
+    fixture =
+      Fixture.new(mode, paused: phase == :during_cleanup, diagnostic_case: case_name)
+
     {retainer, retainer_monitor} = spawn_monitor(fn -> receive do: (:stop -> :ok) end)
     call = Fixture.managed(fixture, Fixture.request(), retainer)
     guardian = call.guardian
@@ -430,8 +531,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     end
   end
 
-  test "an unmanaged adapter result follows guardian credential cleanup" do
-    fixture = Fixture.new(:hold_before_error, paused: true)
+  test "an unmanaged adapter result follows guardian credential cleanup", %{test: case_name} do
+    fixture = Fixture.new(:hold_before_error, paused: true, diagnostic_case: case_name)
     call = Fixture.managed(fixture, Fixture.request(deadline_ms: 5_000), :unmanaged)
     guardian = call.guardian
     caller = call.caller
@@ -483,10 +584,17 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     Fixture.assert_gone(fixture)
     assert Fixture.count(fixture) == 1
     assert Fixture.methods(fixture) == ["POST"]
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
-  test "killing the provider after one HTTP request never relaunches the attempt" do
-    fixture = Fixture.new(:blocked)
+  test "killing the provider after one HTTP request never relaunches the attempt", %{
+    test: case_name
+  } do
+    fixture = Fixture.new(:blocked, diagnostic_case: case_name)
     call = Fixture.managed(fixture)
     assert Fixture.eventually(fn -> Fixture.count(fixture) == 1 end)
 
@@ -503,6 +611,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
     assert Fixture.canaries(fixture) == 1
     assert Fixture.methods(fixture) == ["POST"]
     assert Fixture.count(fixture) == 1
+  catch
+    kind, reason ->
+      stack = __STACKTRACE__
+      Fixture.report_failure(case_name, :body, stack)
+      :erlang.raise(kind, reason, stack)
   end
 
   defp queued_message(guardian, predicate) do

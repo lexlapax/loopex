@@ -6,6 +6,89 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   alias Loopex.LLM.ReqLLM, as: Adapter
   alias Loopex.{Model, Runtime.ProviderLifetime}
 
+  @diagnostic_cases [
+    :"test one durable model attempt invokes the provider transport exactly once",
+    :"test caller death stops the shipped adapter transport worker",
+    :"test provider direct IO is refused locally instead of leaking or blocking",
+    :"test provider cleanup owns an unlinked socket below an externally supervised task",
+    :"test caller death stops the stream server before the request adapter returns",
+    :"test committed assistant tool history reaches OpenAI in its required function-call shape",
+    :"test the shipped adapter declares not_dispatched only before its transport canary and ambiguity after it",
+    :"test a managed adapter result precedes its retained resource stop acknowledgement",
+    :"test retaining owner loss after a managed result releases the credential lease",
+    :"test retaining owner loss during a managed call stops transport and releases the credential lease",
+    :"test retaining owner loss during descendant cleanup releases the credential lease",
+    :"test retaining owner loss before protected entry stops bootstrap without transport",
+    :"test an unmanaged adapter result follows guardian credential cleanup",
+    :"test killing the provider after one HTTP request never relaunches the attempt"
+  ]
+  @diagnostic_files Map.new(
+                      [
+                        {__ENV__.file, "provider_isolation_fixture.exs"},
+                        {Path.expand("../provider_attempt_adapter_contract_test.exs", __DIR__),
+                         "provider_attempt_adapter_contract_test.exs"}
+                      ],
+                      fn {path, label} -> {String.to_charlist(path), label} end
+                    )
+
+  # Concept: caught test failures can retain a safe source location without
+  # disclosing their reason or replacing the authoritative formatter's verdict.
+  # Technical depth: only this corpus's static case/phase labels and recognized
+  # source locations enter one nonblocking stderr request. No arguments or
+  # exception fields are inspected. Delivery is best-effort; externally killed
+  # ExUnit/test-cleanup timeouts cannot run these catches and are not covered.
+  # This helper never changes the original kind/reason/stack re-raised by callers.
+  def report_failure(case_name, phase, stack)
+      when case_name in @diagnostic_cases and
+             phase in [
+               :body,
+               :setup,
+               :credential_restore,
+               :parent_state_cleanup,
+               :fixture_cleanup
+             ] do
+    {file, line} =
+      Enum.find_value(stack, {"unavailable", 0}, fn
+        {_module, _function, _arity_or_arguments, location} when is_list(location) ->
+          with file when is_binary(file) <-
+                 Map.get(@diagnostic_files, Keyword.get(location, :file)),
+               line when is_integer(line) and line > 0 <- Keyword.get(location, :line) do
+            {file, line}
+          else
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end)
+
+    metadata = [
+      "LOOPEX_TEST_LOCATION case=",
+      Atom.to_string(case_name),
+      " phase=",
+      Atom.to_string(phase),
+      " file=",
+      file,
+      " line=",
+      Integer.to_string(line),
+      "\n"
+    ]
+
+    case Process.whereis(:standard_error) do
+      pid when is_pid(pid) ->
+        send(pid, {:io_request, self(), make_ref(), {:put_chars, :unicode, metadata}})
+
+      _ ->
+        :ok
+    end
+
+    :ok
+  catch
+    _, _ -> :ok
+  end
+
+  def report_failure(_case_name, _phase, _stack), do: :ok
+
   # Concept: these fixtures exercise the public adapter, actual protected worker
   # entry, dependency stream, and controlled HTTP transport in a separate OS VM.
   # Technical depth: the escript loads the test VM's compiled code paths and
@@ -68,15 +151,24 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
       hold_caller: Keyword.get(options, :hold_caller, false)
     }
 
+    diagnostic_case = Keyword.get(options, :diagnostic_case)
+
     ExUnit.Callbacks.on_exit(fn ->
-      if Process.alive?(acceptor), do: Process.exit(acceptor, :kill)
-      if Process.alive?(probe), do: Process.exit(probe, :kill)
-      :gen_tcp.close(listener)
-      :gen_tcp.close(probe_listener)
-      if Process.alive?(events), do: Agent.stop(events)
-      if Process.alive?(transport_events), do: Agent.stop(transport_events)
-      if Process.alive?(probe_events), do: Agent.stop(probe_events)
-      File.rm_rf!(root)
+      try do
+        if Process.alive?(acceptor), do: Process.exit(acceptor, :kill)
+        if Process.alive?(probe), do: Process.exit(probe, :kill)
+        :gen_tcp.close(listener)
+        :gen_tcp.close(probe_listener)
+        if Process.alive?(events), do: Agent.stop(events)
+        if Process.alive?(transport_events), do: Agent.stop(transport_events)
+        if Process.alive?(probe_events), do: Agent.stop(probe_events)
+        File.rm_rf!(root)
+      catch
+        kind, reason ->
+          stack = __STACKTRACE__
+          report_failure(diagnostic_case, :fixture_cleanup, stack)
+          :erlang.raise(kind, reason, stack)
+      end
     end)
 
     launch = write_worker(root, mode, port, probe_port)
