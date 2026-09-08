@@ -268,6 +268,7 @@ defmodule LoopexCli.CodingTaskTest do
 
     runtime_starter = fn options ->
       assert Enum.count(options, fn {key, _value} -> key == :provider_launch end) == 1
+      assert LoopexCli.ProviderLaunch.options() == []
       assert Keyword.fetch!(options, :provider_launch) == LoopexCli.ProviderLaunch.options()
 
       options
