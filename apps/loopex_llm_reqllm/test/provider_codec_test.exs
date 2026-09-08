@@ -269,6 +269,106 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
     assert_receive {:DOWN, ^monitor, :process, ^producer, _reason}, 1_000
   end
 
+  test "delayed header and split payload reads retain one original native deadline" do
+    {sender, receiver} = socket_pair()
+    payload = terminal(%{"text" => :binary.copy("x", 12_000)})
+    assert {:ok, frame} = ProviderCodec.encode(:terminal, payload)
+    <<header::binary-size(8), body::binary>> = frame
+    <<header_prefix::binary-size(7), header_suffix::binary>> = header
+    <<first::binary-size(4_096), second::binary-size(4_096), tail::binary>> = body
+    assert byte_size(tail) in 1..4_096
+    duration_ms = 5_000
+    duration_native = System.convert_time_unit(duration_ms, :millisecond, :native)
+    parent = self()
+    assert :erlang.trace_pattern({ProviderCodec, :receive_bytes, 4}, true, [:local]) == 1
+
+    {reader, monitor} =
+      spawn_monitor(fn ->
+        receive do
+          :read ->
+            send(parent, {:split_receive_answer, self(), ProviderCodec.recv(receiver, duration_ms)})
+        end
+      end)
+
+    on_exit(fn ->
+      :erlang.trace_pattern({ProviderCodec, :receive_bytes, 4}, false, [:local])
+      :gen_tcp.close(sender)
+      :gen_tcp.close(receiver)
+      if Process.alive?(reader), do: Process.exit(reader, :kill)
+    end)
+
+    assert :ok = :gen_tcp.controlling_process(receiver, reader)
+    assert :erlang.trace(reader, true, [:call, {:tracer, self()}]) == 1
+    before_start = System.monotonic_time()
+    observation_deadline = before_start + duration_native
+
+    budget = fn ->
+      max(
+        System.convert_time_unit(
+          observation_deadline - System.monotonic_time(),
+          :native,
+          :millisecond
+        ),
+        0
+      )
+    end
+
+    send(reader, :read)
+
+    assert_receive {:trace, ^reader, :call,
+                    {ProviderCodec, :receive_bytes, [^receiver, 8, original_deadline, []]}},
+                   budget.()
+
+    after_start = System.monotonic_time()
+    assert original_deadline >= before_start + duration_native
+    assert original_deadline <= after_start + duration_native
+    assert :ok = :gen_tcp.send(sender, header_prefix)
+
+    # Concept: parsing the header cannot renew the receive allowance.
+    # Technical depth: withhold its last byte until a positively observed later
+    # native instant. A fresh payload deadline must then differ, even though the
+    # valid frame can still complete. Every observation spends the same five
+    # seconds; no tight elapsed-time ceiling decides the result.
+    release_header = make_ref()
+    Process.send_after(self(), release_header, 1)
+    assert_receive ^release_header, budget.()
+    before_release = System.monotonic_time()
+    assert before_release > original_deadline - duration_native
+    assert before_release < observation_deadline
+    assert :ok = :gen_tcp.send(sender, header_suffix)
+
+    assert_deadline_read(reader, receiver, 0, [header], original_deadline, budget)
+    assert_deadline_read(reader, receiver, byte_size(body), [], original_deadline, budget)
+    assert :ok = :gen_tcp.send(sender, first)
+
+    assert_deadline_read(
+      reader,
+      receiver,
+      byte_size(body) - byte_size(first),
+      [first],
+      original_deadline,
+      budget
+    )
+    assert :ok = :gen_tcp.send(sender, second)
+
+    assert_deadline_read(
+      reader,
+      receiver,
+      byte_size(tail),
+      [second, first],
+      original_deadline,
+      budget
+    )
+    assert :ok = :gen_tcp.send(sender, tail)
+    assert_deadline_read(reader, receiver, 0, [tail, second, first], original_deadline, budget)
+    assert_receive {:split_receive_answer, ^reader, {:ok, :terminal, ^payload}}, budget.()
+    assert_receive {:DOWN, ^monitor, :process, ^reader, :normal}, budget.()
+
+    delivered = :erlang.trace_delivered(reader)
+    assert_receive {:trace_delivered, ^reader, ^delivered}, budget.()
+    refute_receive {:trace, ^reader, :call, {ProviderCodec, :receive_bytes, _arguments}}, 0
+  end
+
   test "the actual socket receive retains its native deadline and cannot report an early timeout" do
     {_sender, receiver} = socket_pair()
     parent = self()
@@ -352,6 +452,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
     assert {:ok, :terminal, ^candidate} = ProviderCodec.recv(receiver, 1_000)
     assert {:error, :invalid_frame} = ProviderCodec.recv(receiver, 1_000)
     assert {:error, :invalid_frame} = ProviderCodec.decode(over_depth)
+  end
+
+  defp assert_deadline_read(reader, receiver, remaining, chunks, deadline, budget) do
+    assert_receive {:trace, ^reader, :call,
+                    {ProviderCodec, :receive_bytes, [^receiver, ^remaining, observed_deadline, ^chunks]}},
+                   budget.()
+
+    assert observed_deadline == deadline
   end
 
   defp identity_fields, do: %{"nonce" => @nonce, "staged_request_digest" => @digest}
