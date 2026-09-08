@@ -696,7 +696,9 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
                "command" => "no_such_command_#{System.unique_integer([:positive])}"
              })
 
-    assert missing =~ "exited with status"
+    # Retain the shell's command-not-found status, not merely a nonzero note.
+    # Mapping 127 to 126 must not turn absence into an execution-permission error.
+    assert missing =~ "[loopex: the command exited with status 127.]"
 
     # Success is unchanged: a command that exited zero is still `:completed` and
     # carries no status note, because a note on every result is noise a model
