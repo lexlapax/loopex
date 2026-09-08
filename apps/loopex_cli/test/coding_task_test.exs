@@ -6,6 +6,7 @@
 # copied for the same reason the command's cases require it.
 Code.require_file("../../loopex/test/support/m1_runtime_helper.exs", __DIR__)
 Code.require_file("../../loopex/test/support/agent_loop_helper.exs", __DIR__)
+Code.require_file("../../loopex_llm_reqllm/test/support/provider_build_fixture.exs", __DIR__)
 Code.require_file("support/demonstration.ex", __DIR__)
 
 defmodule LoopexCli.CodingTaskTest do
@@ -19,6 +20,7 @@ defmodule LoopexCli.CodingTaskTest do
   alias LoopexCli.Demonstration.Evidence
   alias LoopexCli.Policy.AllowAll
   alias LoopexCli.Render
+  alias Loopex.LLM.ReqLLM.ProviderBuildFixture
 
   # Concept: the attended demonstration and the deterministic cases that support
   # it.
@@ -257,6 +259,22 @@ defmodule LoopexCli.CodingTaskTest do
     state_root = Path.join(root, "state")
     on_exit(fn -> File.rm_rf(root) end)
 
+    # Concept: the source-code command demonstration uses the real same-source
+    # companion, with no model, policy, executor or Store substituted.
+    # Technical depth: ordinary gate compilation embeds no provider launch
+    # configuration. This existing host-starter seam replaces only that field;
+    # the paired CLI build and its embedded wiring are proved separately.
+    launch = ProviderBuildFixture.options!(root)
+
+    runtime_starter = fn options ->
+      assert Enum.count(options, fn {key, _value} -> key == :provider_launch end) == 1
+      assert Keyword.fetch!(options, :provider_launch) == LoopexCli.ProviderLaunch.options()
+
+      options
+      |> Keyword.replace!(:provider_launch, launch)
+      |> LoopexComposition.start()
+    end
+
     # Concept: the demonstration asks for the work it claims to demonstrate.
     #
     # Technical depth: role Db's claim names several distinct tools including one
@@ -300,16 +318,19 @@ defmodule LoopexCli.CodingTaskTest do
           {:out,
            capture_io(fn ->
              assert :ok =
-                      LoopexCli.dispatch([
-                        "run",
-                        "--policy",
-                        "shell-allowlist",
-                        "--state-root",
-                        state_root,
-                        "--workspace",
-                        workspace,
-                        prompt
-                      ])
+                      LoopexCli.dispatch(
+                        [
+                          "run",
+                          "--policy",
+                          "shell-allowlist",
+                          "--state-root",
+                          state_root,
+                          "--workspace",
+                          workspace,
+                          prompt
+                        ],
+                        runtime_starter: runtime_starter
+                      )
            end)}
         )
       end)
@@ -424,6 +445,10 @@ defmodule LoopexCli.CodingTaskTest do
   @tag :real_provider
   @tag timeout: 300_000
   test "one real provider call surfaces the provider's own response identifier and reported usage that the deterministic adapter cannot produce" do
+    {root, _workspace} = Demonstration.repository("real-reply")
+    on_exit(fn -> File.rm_rf(root) end)
+    launch = ProviderBuildFixture.options!(root) ++ [cleanup_grace_ms: 2_000]
+
     {:ok, request} =
       Loopex.Model.request(
         Loopex.LLM.ReqLLM.default_model(),
@@ -435,7 +460,7 @@ defmodule LoopexCli.CodingTaskTest do
     assert {:ok, reply} =
              Loopex.LLM.ReqLLM.complete(
                request,
-               [max_tokens: 64],
+               launch,
                Loopex.Model.discard_progress()
              )
 
