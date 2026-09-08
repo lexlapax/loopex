@@ -1212,3 +1212,371 @@ Darwin verification before selecting a new final source. Literal live and
 inherited gates, provider-account lookup, real old-reader rollback and the final
 evidence-only review child remain outstanding. The successful Darwin results
 above are not back-projected onto a later source or presented as Linux evidence.
+
+<a id="final-source-274afa1"></a>
+### Repair-source qualification checkpoint: inherited M0 blocks release — 2026-09-07
+
+This is a blocked evidence checkpoint, not a finished release-review candidate.
+The completed product checks below do not override the literal M0 refusal.
+M1/M2 final-source gates and the new provider-account lookup are not yet run.
+
+Source `S` is `274afa171a118faebdf98575ac74094cea811617`, on
+`codex/m2-release-repair`. Its full repair range against unchanged integrated
+`main` `3a729b08ff0ce9f14bca1ef64da04ee96879ac2b` is 125 commits,
+100 files, 29,359 additions and 3,033 deletions. This record names the complete
+range, not merely override21's historical endpoint or FF17990's earlier source.
+The current maintainer repair task, accepted ADRs0019–0021 and the separately
+recorded internal-Bash implementation decision authorize the work. They do not
+accept this unseen source for integration, tag, publication or a public freeze.
+
+ADR 0022 remains Proposed. Its implementation choice was explicitly approved;
+its exact-pair acceptance must still be recorded through the ADR procedure.
+At S, independently computed whole-file SHA-256 digests are concept
+`d76b4996903e60a99bffcc35d31a0b0226f7123ce502b7e9a54ee7a8cd303edd` and
+technical `5822d3fc93548a7d3c707fb82fc1d62d1a9932d9668c8d6e28defb28fda23467`.
+These hash the exact canonical bytes, as `Markdown.digest/1` does; they are not
+plan-envelope digests. Neither an acceptance row nor a disposition for unseen
+ADR bytes is supplied by this evidence.
+
+The source is clean and pushed; main is unchanged. Frozen plan/gate/vision
+bytes and all six M2-bound artifacts remain byte-identical to main. Historical
+attestations and dispositions remain historical, not re-labelled as this run.
+
+#### The native Linux failure and approved repair
+
+The 7d1cdde failure above is preserved. At b5de5ae0f749236d29c4b46fa3fe72696e4f1035,
+the fixed internal Bash carrier/guard, preserved private input and descriptor
+closure passed the complete executor corpus:163 cases on nativeLinux in137.9s
+and Darwin in140.7s, seed3107, no failures or exclusions. Both platforms passed
+format and forced warnings-as-errors product compilation. Darwin's initial
+sandbox TCP refusal is retained separately from the permitted run.
+
+The two new benign observations failed on the prior production launcher at
+actual command admission and passed with the repair. That initial red does not
+claim the later helper assertion was reached on broken production. Actual
+parent-chain/PGID observations now distinguish command and helper topology;
+ordinary-file FD controls prove descriptor presence detection without reading
+private input or tokens. The source-spelling topology assertion remains labelled
+structural. Raw commands use /bin/sh; argv remains literal; only Local's internal
+scripts require /bin/bash. Darwin Bash3.2.57 and nativeLinux Bash5.2.21 are the
+observed versions, not an assertion of every Bash version's qualification.
+
+3e38afd0902e7644c2833c6000b9dc9449c9aa65 added a finite ordinary exit200
+regression that passes through raw, argv and actual helper calls on both hosts.
+It did not change production. The earlier163-case results are not represented
+as full164-case results of that child. Final S whole-suite/native results belong
+in the table below.
+
+An independent clause-derived reliability check at S ran the complete coding
+tools file:71 passed,68.8s. Replacing only the collector's stored status with
+min(status,128) produced70passes/1failure,68.8s, exit2. The genuine raw command's
+entered output survived but named128 instead of200. That is not a setup failure.
+The compound case stops on its raw assertion, so no separate argv/helper mutant
+failure is claimed. The clone was restored clean and force-WAE/format checked;
+no whole-suite survivor or comprehensive mutation-completeness claim is made.
+Baseline log:a3134b5aeb51770cba70454ad57407220cbd4463358e95d01108f16a39d5a227.
+Mutant log:861ae6fa1381267d0007cfa4a5551231025f7e658e1d90db62cd390787a43730.
+
+#### Exact-S executable results
+
+The workspace-write execution profile and disposable writable roots were
+explicitly permitted. The reviewed tracked source stayed clean. VM, build and
+test lanes ran serially. Normal checks used actual `/Users/spuri` HOME,
+Elixir 1.20.3 / OTP 29.0.5, `+S 4:4 +SDcpu 2 +SDio 2`, a private incremental
+dependency/build cache, and fresh state. No credential entered these checks.
+The cache is disclosed; these are not cold-build claims.
+
+| Command at S | Result | Output SHA-256 |
+| --- | --- | --- |
+| `mix compile --force --warnings-as-errors` | Exit 0, no product warnings | `a6cfc0a3781ca0f1d5a6b81784436cc43aab233e7cb4436deba4009f49e7b156` |
+| `mix format --check-formatted` | Exit 0, empty output | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| `mix loopex.deps_budget` | Exit 0 | `afd19a5ac98446e7ac7567baf3c06d8e74e030617bf1e577d421806d438a6d55` |
+| `mix loopex.core_only` | Exit 0 | `811b369c191ab6d9e7bd380926b304dc83e81a9233490ef6e7577108a7cd645f` |
+| `mix loopex.format_scope` | Exit 0, 206 files | `bd85449fdee6d67a9dd9730841abc753df3b84ad89f68310add71e5a248b86e5` |
+| `mix loopex.docs_check` | Exit 0 | `37d12aeb83756e32b7885e842038161bd0e739eff506925a6a0f83c8ae11e071` |
+| `bash scripts/check-commit-messages.sh` | Exit 0 | `13d41fe6da4d9ec8113c008a0fdd565598dd9b5416f64319127d2b428e32ca19` |
+| `mix hex.audit` | Exit 0; no retired or security-advisory packages reported | `25ce35312da15695b9ab9e466ebdba2c1460f780ca6a14e164646fee228030d6` |
+| `mix loopex.status` | Exit 0; status check passed | `2bde8a90a81179a725541af673d41ae58ba2fe7412c7c71baabe135c933638c4` |
+| `bash scripts/check-bootstrap.sh` | Exit 0; 68 passed, seed 407192 | `370adc74fba7dcaed393e8f4aa0663517d9b77cd067784cc681613c2049ab78d` |
+| `mix test --seed 3107 --warnings-as-errors` | Exit 0; 1,038 passed, zero failed, five real-provider cases excluded | `e337d734790fc1318bc23e2ed6c350919fdeea29257fbec92b1d6b47021dcf07` |
+
+Normal checks ran 2026-09-08 02:24:59–02:52:48 UTC. The whole suite's own
+window was 02:38:42–02:52:48 UTC. Its per-app counts are protocol 12; Core 526;
+provider 142 plus one excluded; Store 41; executor 164; composition 13;
+reference client 18 plus two excluded; CLI 122 plus two excluded. The excluded
+real-provider cases are not called a credential-fed whole-suite pass.
+
+Logs and command/tee exit records are under
+`/private/tmp/loopex-release-final.2KbJvS/logs`; task driver SHA-256 is
+`58a4ddf5415fdfb0e1fb042f417f93a368da9150fe2b93187a4248865151db01`.
+Additional package/rollback lanes are under
+`/private/tmp/loopex-next-final-validation.W8BV0B`; literal inherited gates use
+`/private/tmp/loopex-final-inherited.29bYFK`.
+
+Selected raw logs, exit records, task drivers and process-reaping traces were
+also copied outside temporary storage to
+`/Users/spuri/loopex-reviews/M2-274afa1-qualification-2026-09-07`.
+This is a partial diagnostic archive, not a complete offline replay bundle:
+dependency/build caches, journal state, packaged executables and raw private
+control-token records are not copied. The source is retained in Git and the
+artifact/log hashes below remain the identity of the original observations.
+The selected text and this record were checked for the actual used provider
+credential literal with a read-only parser that reports only filenames on a
+match; it was absent. This does not claim detection of every encoding or every
+possible secret.
+
+#### Exact-S packages and platform observations
+
+Current and floor Darwin package runs each passed all nine phases: format,
+forced warnings-as-errors product compilation, paired CLI/companion build,
+archive identity, canonical outside-checkout startup, malformed outside dotenv,
+entry-descriptor observation, copied CLI execution outside the checkout, and
+whole-parent VM death. They used private incremental caches and actual HOME.
+Current is Elixir 1.20.3 / OTP 29.0.5; floor is Elixir 1.17.0 / OTP 26.0.
+Both used `+S 2:2 +SDcpu 1 +SDio 1 +A 2`.
+
+| Artifact SHA-256 at S | Darwin current | Darwin floor |
+| --- | --- | --- |
+| Companion bytes | `d90565a6bd765a48d4e1f14763b9554bec575c204939c15232bfef555de594a2` | `e097928823658e7efc4c82380e00d584b7251ea04217fb932ec4075df7df436b` |
+| Manifest file bytes | `538f5d56fba9a784158eb4699f7130b09a266162d9deffde4f8e5f06c663d26c` | `4e180f635e492b601e1e8360d795ef713c74685e3e825fa858b6e3b72b7981fe` |
+| Launch configuration bytes | `b5042bc149f2db0e6f47ff0bc3be28a9f208febecf9e72bba2b36b532d9077a0` | `2b5df06b48c905e92d81e7c590defd415058cb90c10bb7375cb88b51788acae0` |
+| CLI bytes | `56e17735e656cce9465550df1f3bb580b021518f1ccc8824fdb1185074bb52f8` | `316d01b389bc50a091c35f833e56be5ed4c7a2369298e6a9fa517fd51ec22207` |
+
+Archive verification recomputed every packaged-input hash, loaded the identity
+from the archive's own BEAM, and compared the actual CLI's embedded launch
+configuration. The configuration's *deterministic manifest-term* digests are
+`2fd67989d7814f754664e85ee4cce51b6fd2461d6944a5ff1e9931cd2209a7f0`
+and `44fa8795416c33e6ab9d8f9ee0e1eed8c11b75594b8466fe6d35ec370d15a456`;
+they are deliberately distinct from the manifest file-byte hashes above.
+Archive logs hash to `3cd8f0f81633e7c52ea16b8387131afe9e616e65126c8986e2b90aa8c5346325`
+and `76d8978b30ccccbb541659d1cedccc92b26ee5445dea69b37c6553374b9a4348`.
+
+The actual protected-ready whole-parent-death probes observed exit 137, zero
+normal stop commands, zero live birth-group members and removed namespaces;
+cleanup observations were 116,863 and 119,882 microseconds. Their logs hash to
+`9d1379798b05bb2f8597bdd7a1d609381d4ba3f8468f6936aeecb4df88f84404`
+and `31d71981ef799a27f433f26d755516da560878fe62dd66b07a02106a797eb209`.
+These are one-run observations, not a peak-latency guarantee or every possible
+active-transport death schedule. Package probes sent zero credential/invocation
+frames; they do not supply the final-source live-transport proof still missing
+below.
+
+The first final-S native lane passed the package/outside checks and all eight
+Launcher cases, then failed the complete executor corpus: 149/164 passed,
+15 failed, 186.8 seconds, seed 3107, exit 2. It ran 02:55:51–02:59:00 UTC;
+the failure log SHA-256 is
+`ef305a4e749007865d47195b6fd37c028cf98edb4c213679477b38e3901f7fcb`.
+The result is retained under the original native root and is not called green.
+
+Inspection found a material process-parent difference from the earlier b5de5ae
+qualification: the earlier lane launched its unprivileged Bash driver directly;
+the combined package driver made `runuser` PID 1. The production process-table
+rule intentionally counts every returned PID/PGID row. It does not treat an
+unreaped zombie as an empty group.
+
+A serial, same-source diagnostic exercised the actual existing cases at
+`coding_tools_test.exs:1419` and `:3738` with the same image, unprivileged user,
+HOME, seed, scheduler settings and copied native build. Its two launch commands
+differed only by Docker's `--init`. Without it both cases failed in 10.9 seconds;
+process snapshots showed `runuser` as PID 1 and persistent orphan `Z`/`Zs` rows
+in the tested process groups, including Bash, sh and sleep. With init both
+unchanged cases passed in 6.6 seconds and the final process table contained only
+init, runuser, the driver and its observer. This is a demonstrated changed
+reaping environment, not a same-environment retry presented as a pass. No product
+comparison, test assertion, selector or time bound was altered.
+
+The diagnostic is under `/private/tmp/loopex-native-cleanup-diagnosis.nKpcSF`.
+Harness SHA-256: `b63286cf0be3e64fe291345ce6221bdfd02fce53bb20b83aae939811f2146339`.
+No-init test/process-trace hashes:
+`022d0db3b2fab7c8c0fdbaec87a9f21e12ddffee926d6baacab08710c3a8325c` /
+`676d46a1d911863daf193202b7edfc6d2be4fa722c58c9d578386f3cca5f6ba2`.
+With-init hashes:
+`2e5dee0af2e658d4d2abb643e3c28456edd0c76c2f6cff349f8e219e4f8c3b94` /
+`3cf91c15607646146faa2f39da499e5a5dee9ae1df6958580949138d661c0a31`.
+The diagnostic proves this boundary for those two cases, not fifteen independent
+causal traces or a claim that Local cleans unreaped process-table entries.
+
+The complete fresh native `--init` lane passed, using original source and
+container-side scripts unchanged, under
+`/private/tmp/loopex-final-native-init.aIpjKm`. Native ARM64 image:
+`sha256:85f03f17afa2e4c30445d9d461d176e7ef980f5cba7b1c3089a179d52a9381e0`.
+All VM/build/test commands ran as existing ubuntu UID 1000 with actual
+`HOME=/home/ubuntu`, no terminal or network, Elixir 1.20.3 / OTP 29.0.5 and
+`+S 2:2 +SDcpu 1 +SDio 1 +A 2`. Cached dependency *sources* were supplied;
+compiled native builds were fresh. The metadata-free input archive and its
+878-file payload verification are retained. Dependency compilation emitted
+third-party warnings in Toml, WebSockex and Dotenvy; Loopex product compilation
+with warnings-as-errors passed. This is not a claim of warning-free dependencies.
+
+Format, paired build, archive identity, three outside-checkout probes, copied
+CLI execution, eight Launcher cases and forced test compilation passed. The
+complete executor corpus passed **164/164**, zero failures/exclusions,
+seed 3107, 134.5 seconds, 03:08:47–03:11:03 UTC. Command and log exits were 0.
+Executor log hash: `14ce17df34bb5daad207b2ff3006e4ab153bc62c730a53021647c440729dae72`.
+Launcher log: `da7763266ef068732e56bf6fad1efd2e46600ca4e626a79a027bd425529d30b4`.
+Combined native log: `52cc74506631a9512249292e7bc48fca38811b5b280b7842ba633363a89c0f82`.
+
+Native artifact file hashes are companion
+`9e67a7655512ce14baf1cbdcb2e457c139887c072ecbfd4bdc827416b1c2bc26`,
+manifest `2ba4809d7bfb788a9c237403bcd0284f9d90877587491c155127569ce679c1c9`,
+launch configuration `399ab12ab56783392e4ba0a2250714a5b29da6bc1e4de4fbb64f8f06d93d943c`,
+and CLI `384b780f4c256ded2094cbfdaa41a83f8d0608faa8229a15db5d3ff99afd4ad5`.
+The deterministic manifest-term digest is
+`137da50c3d983ceb5dbee853c3ea90439fca288c06accf82836e1a97bf7008db`.
+Archive-verification log:
+`e4e57b6788357fffb58e4353640eb0d300f76dded7dc68e850284c66049fface`.
+Artifact identity is verified against the actual build; byte-reproducible ZIP
+generation across separate invocations is not claimed.
+
+Canonical, malformed-dotenv and descriptor-observed native startup samples
+were 477,534 / 490,423 / 476,414 microseconds, with sampled RSS
+97,884 / 100,532 / 99,384 KiB. RSS came from `/proc` with stable start identity
+and exact worker argv/executable checks. These are observations, not peak-memory
+or timing limits. No Linux whole-parent-death extension is claimed.
+
+#### Original process-inspection failure and actual rollback
+
+The separate native provider-Launcher probe changed execute permission on its
+disposable container's original resolved `/bin/ps` only, verified literal
+EACCES and an identical copied observer's success, then restored mode, inode
+and digest. Other helper identities stayed unchanged. It ran as container root
+solely for that owned-helper fault; this is distinct from the ordinary native
+UID1000 lane. No host helper or unrelated container was altered.
+
+The real cooperative control received exactly one correlated cleanup
+acknowledgement, actual Port exit 0 and Port DOWN at 4 ms. The fault received
+no acknowledgement, actual Port exit 137 and DOWN at 2,003 ms, within its
+2,000-ms cooperative allowance plus 100-ms observation bound. Final scenario
+totals after independent namespace/group observations were 9 and 2,015 ms;
+these are not the raw Port-event timestamps. Both ended with
+zero live owned-group members and removed namespaces. The unchanged launcher
+failed closed. The temporary observer harness emitted one constant-expression
+compiler warning; this is not a product warning or a hidden failed phase.
+Probe/result log SHA-256:
+`40e91aa7d811720cb968c24618afe9eec25b5ffe13b039d82ab4168be3a2d729`.
+Verified result:
+`30af0e3d397bfab0ec7e844d18d81826383bca36f82b3d8a816f2040a1b174ef`.
+Restoration:
+`b95d7590cfeb101bf6aafb86355fc7f3c1852e43b3486887f0394895522cfdbb`.
+
+The real old-reader exercise used exact old source
+`63511ca264ef99e8b93367a9cd671165525e4d4f` with its own forced-compiled
+SessionState BEAM, not a current decoder standing in for it. All five serial
+phases exited 0: old compile; old V1 write; old V1 recovery; S V2 write; old V2
+refusal. Each writer made one scripted model call and retained seven actual
+Store records. Both old-reader runs made zero model calls and published zero
+semantic/public events; V1 reached ready, V2 refused. Original records stayed
+unchanged; each reader added only one ownership record. Complete journal backup
+preceded reading. No operator data or provider credential was used.
+
+Probe source hash:
+`acafc004b82bb349333caab9837c15949da514bdd013c007488b6a8edd120162`.
+Actual old/current SessionState BEAM hashes:
+`02d4f712a9fc2ec39ea16b9dc0f227bc4c35292e4ff518264ee696fe07439bc9` /
+`f277700a2138f62f850128df21a2059e1fbf41e5889082cd19ea104c7e1e2eff`.
+Old-control read log:
+`0a39fd44c7e7032113b2ece86b69a831d180475f2dbae403e2c22638be0484eb`.
+Current-write log:
+`f89ca939f45cdd78f219206594b044a9ff143fae1e75d76bc836237aa393ea91`.
+Old-refusal log:
+`3a2c13a140a828273bac4dfc8dc3693a13ca5f5084f8f5932e8a96c50d68763b`.
+The old reader's successful V1 control and V2 refusal used the same BEAM;
+neither result is an inferred rollback promise.
+
+#### Literal inherited gate failure and required decision
+
+The literal `bash scripts/check-m0-gate.sh` ran in a fresh clean clone of S
+from 2026-09-08T03:11:51Z to 03:20:30Z, serially after all preceding VM work.
+The task driver starts from actual HOME; M0's own accepted isolation remains
+unchanged. The credential parser and output capture exited 0; the gate exited
+1. Its tracked source ended clean. The exact output hash is
+`52e3474db41185536e7fb4854b03aa3f90dec44e1a35578e1e5dbf3855ad322e`.
+The gate document and runner remain the accepted bytes, respectively
+`6e02cd424bab8e3410205ca053adce150ee9fa1a84d7b6f5b032390c4529e09f` and
+`77a0042d65b2fde0e8bea9d61ecf17cbb71545773b390ec58b7d2521f1761f58`.
+The driver hash is
+`01862cf9a95be61386cf74d31e511dc8de0b7ec6d415cca821210288abd2dd24`.
+
+The refusal is `a search-path mutation outside the runner would displace the
+shadow root (outcome 8)`, at `scripts/check-m0-gate.sh:652`. Its unchanged
+repository-wide textual rule reported four sites at S:
+
+| Site | Actual role |
+| --- | --- |
+| `apps/loopex_llm_reqllm/lib/loopex/llm/req_llm/provider_launcher.ex:118` | Constructed downstream environment for the provider carrier shell; first-image sanitation is separately supplied through `spawn_environment()` |
+| `apps/loopex_llm_reqllm/lib/loopex/llm/req_llm/provider_launcher.ex:307` | Constructed environment for the isolated provider worker |
+| `apps/loopex_llm_reqllm/test/support/provider_build_fixture.exs:104` | Constructed, credential-free build subprocess environment |
+| `apps/loopex_llm_reqllm/test/support/provider_build_fixture.exs:202` | Constructed Git subprocess environment for the clean-source check |
+
+These constructions set a child search path; they do not mutate the calling
+gate process's environment. That distinction does not make the locked rule
+optional: it scans every tracked file other than its own runner and refuses
+these exact bytes. The full-suite command later in M0 was not reached. The outer
+serial driver stopped here, so the final-source M1 and M2 invocations never
+started. The real provider sublane precedes this refusal: M0's unchanged
+sequential control flow requires its exit/count/no-skip checks to pass at lines
+448-464 before the scan at line 652 can execute. That sublane therefore passed
+those gate checks at S; its successful output was captured internally but not
+printed or retained in the gate log. No request identifier or usage is recovered
+by that inference. No M0 overall pass, M0 whole-suite pass, M1/M2 pass or complete
+new three-role provider attestation is claimed.
+
+**Decision packet: repair the gate, do not disguise the source.** The maintainer
+owns this unresolved gate decision. Accepted ADR 0019 requires the isolated
+provider boundary, but its implementation disposition explicitly grants no
+required-gate waiver or permission to edit locked bytes. M0 is Closed; its
+Acceptance and Closure both bind the gate digest above. Changing this gate
+therefore requires an additive `amendment-transaction-v2`, not rewriting those
+historical rows or rebinding Acceptance alone.
+
+- **Recommended: a narrowly scoped M0 gate generation.** Preserve the
+  development interpreter-shadow protection and its existing cases. Distinguish
+  the approved child-only environment construction with explicit coverage of
+  the relevant boundaries; a blanket path/file exemption is not sufficient.
+  This keeps the accepted provider architecture and a meaningful inherited
+  check, improving long-term stability and avoiding a source-spelling constraint
+  on modular adapters. It costs one proposal, exact-SHA independent review,
+  explicit acceptance, immediate transition, and fresh affected gate/evidence
+  checks. The final mechanism and its conformance proof are not asserted here.
+- **Explicit source-scoped waiver.** The maintainer could disposition these
+  four exact matches while retaining the red and independently proving the
+  underlying development/toolchain property. This is faster procedurally and
+  changes no product architecture, but leaves the gate unable to qualify the
+  next revision without renewed authority, adds maintenance debt for future
+  adapters, and cannot be recorded as a green gate. It requires exact, durable
+  waiver scope and a release-review decision; general repair authority is not
+  that waiver.
+- **Reverse or replace the isolated-provider design.** Avoiding these
+  constructions by changing the accepted process boundary would reopen ADR
+  0019 and its credential/lifetime evidence, with much greater compatibility,
+  modularity and re-review cost. This is not recommended. Concealing the same
+  constructions with computed names would only evade the scan and is not an
+  acceptable repair.
+
+No option is accepted in this record. Dependent gate changes are paused for
+the maintainer's choice. This is a development-gate correction, not added M3
+product scope; release remains blocked. No further source qualification or
+gate-generation result is promised without running it.
+
+#### New provider-role and account evidence
+
+UNAVAILABLE: complete final-source three-role identifiers, reported usage,
+per-call UTC windows and account confirmation. M0's real-provider sublane
+passed its internal checks as established above, but the success details were
+not retained; M1/M2 never started. No final-source account lookup was performed.
+Historical account rows do not fill that gap. Completing the attestation still
+requires actual role identifiers, source/model/adapter/package identities,
+endpoint class, request count and visible token/cache/time interpretation,
+without credentials or tenant identifiers.
+
+#### Review scope and exclusions
+
+Carry the complete FF17990 mapping above into the handoff, including all medium
+findings and disclosed structural/unexecuted variants. The source-level self-audit
+and clause check do not substitute for independent exact-SHA release review.
+The evidence-only checkpoint carrying this record changes no product, gate,
+plan, accepted ADR or lifecycle byte. It is not the completed evidence child
+required for release review. After disposition of the inherited-gate conflict,
+the remaining literal gates and account evidence still need qualification at
+the applicable exact source, followed by independent review. No closure, merge,
+tag or publication is authorized by any passing command here.
