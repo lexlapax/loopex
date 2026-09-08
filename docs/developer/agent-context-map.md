@@ -1512,3 +1512,36 @@ not accept unseen ADR bytes or fill that pair's governance row. Exact-pair
 acceptance and independent final-source review remain separate. It changes no
 earlier disposition, M2 lifecycle, accepted plan/gate or integration baseline,
 and grants no merge, tag, publication or release approval.
+
+<a id="disposition-m0-gate-generation-6-2026-09-07"></a>
+## M0 Gate Generation 6 Acceptance
+
+On 2026-09-07 (America/Los_Angeles), after receiving the independent exact-SHA
+review, the maintainer explicitly accepted M0 gate generation 6 at proposal
+`f49be58ddfc13dae3d7cb3443363da162f90be31` and directed completion of the remaining
+M2 repair and qualification work. The accepted gate digest is
+`sha256:5f89d8be79c466e2b68e1660668b7a0723940c7480583c495372ddbd14f37ee8`.
+
+The decision accepts the four occurrence-specific child-environment allowances,
+their fail-closed checker, and the two real-boundary conformance observations
+exactly as specified by Amendment 6. It does not broaden those allowances to
+files or other constructions. The interpreter-invocation scan and shadowed
+bootstrap absence proof retain their prior coverage; the amendment narrows only
+the named textual search-path rule and records its limits.
+
+The independent report, `M0-GEN6-f49be58-REVIEW.md`, has SHA-256
+`0e53a408463884aad34f6419ccc83dcd0b886dd43a61af3e88006131c2d2d650`.
+It recommends acceptance with no blocking or high finding. Its simulated rebind
+is diagnostic evidence only, not an accepted transition or a passing result at
+the proposal. The actual rebind still owes exact-transition review, status,
+bootstrap and inherited-gate verification.
+
+This disposition accepts generation 6 alone under `amendment-transaction-v2`.
+Its immediate-child transition changes only the generation-6 row in
+`docs/plans/M0.md` and adds this new disposition to this existing document.
+M0's historical Acceptance and Closure, all earlier dispositions, the gate and
+bound artifacts, normative envelopes, register and lifecycle states remain
+unchanged. M0 and M2 remain Closed. This record does not accept ADR 0022, waive
+required evidence or gates, approve an unseen integration or release candidate,
+or authorize a tag or publication. The separate instruction to finish M2 does
+not substitute for final source-bound evidence and independent release review.
