@@ -4768,9 +4768,10 @@ defmodule Loopex.Executor.Local do
   # Every carrier/guard group signal uses `kill -s SIGNAL -- -PGID`: dash rejects
   # the shorthand `-SIGNAL --`, and both shells need `--` before a negative PID.
   # The builtin keeps signal authority in the live shell, without a later helper.
-  # Wait retries use a trapped-interruption flag in that same shell: dash drops
-  # its job table in command substitutions. Preserve a final status <=128 even
-  # beside a trap, and preserve an untrapped signal exit without retrying it.
+  # Catch TERM until the asynchronous launch so the guard does not inherit an
+  # ignored signal. After that fork, ignoring TERM changes only this carrier:
+  # its one owned-child wait cannot be interrupted by cooperative group TERM.
+  # Capture the actual wait status directly, without PID probes or retries.
   defp launch_carrier_script do
     """
     guard_script=$1
@@ -4780,7 +4781,7 @@ defmodule Loopex.Executor.Local do
     carrier_pid=$$
     mode=$1
     exec 4<&0
-    trap 'wait_interrupted=1' TERM
+    trap ':' TERM
     if [ "$mode" = helper ]; then
       set -m
       /bin/bash -c "$guard_script" "$guard_name" "$carrier_pid" "$@" <&4 4<&- &
@@ -4790,16 +4791,10 @@ defmodule Loopex.Executor.Local do
       /bin/bash -c "$guard_script" "$guard_name" "$carrier_pid" "$@" <&4 4<&- &
       guard_pid=$!
     fi
+    trap '' TERM
     exec </dev/null 4<&-
-    guard_status=125
-    while :; do
-      wait_interrupted=0
-      wait "$guard_pid" 2>/dev/null
-      guard_status=$?
-      if [ "$guard_status" -le 128 ] || [ "$wait_interrupted" -eq 0 ]; then
-        break
-      fi
-    done
+    wait "$guard_pid" 2>/dev/null
+    guard_status=$?
     if [ "$guard_status" -eq 0 ]; then
       exit 0
     fi
@@ -4832,8 +4827,12 @@ defmodule Loopex.Executor.Local do
   # channel before the child is created, never through argv or environment that
   # the child can inspect. FD 3 is copied from the Port's output before the child
   # is started and closed in the child, keeping protocol writes separate from
-  # ordinary inherited descriptors. The status wrapper traps TERM so cooperative
-  # cancellation cannot discard it before the direct child answers. The guard
+  # ordinary inherited descriptors. The status wrapper catches TERM until the
+  # command forks, then ignores it while waiting. The child inherits the earlier
+  # caught disposition, reset for execution, not its parent's later ignore; it
+  # remains free to use default TERM behavior or install its own handler. The
+  # wrapper captures one actual wait result without a signal-interrupted retry.
+  # The guard
   # treats an externally delivered TERM as authority loss and aborts the whole
   # group; only while it sends its own cooperative group TERM does it temporarily
   # ignore that one signal. KILL is deliberately not trapped: it is the final
@@ -4873,7 +4872,7 @@ defmodule Loopex.Executor.Local do
     esac
     (
       trap - HUP INT PIPE
-      trap 'wait_interrupted=1' TERM
+      trap ':' TERM
       if [ "$mode" = command ]; then
         command=$1
         /bin/sh -c "$command" 3>&- </dev/null &
@@ -4881,15 +4880,9 @@ defmodule Loopex.Executor.Local do
         "$@" 3>&- </dev/null &
       fi
       command_pid=$!
-      command_status=125
-      while :; do
-        wait_interrupted=0
-        wait "$command_pid"
-        command_status=$?
-        if [ "$command_status" -le 128 ] || [ "$wait_interrupted" -eq 0 ]; then
-          break
-        fi
-      done
+      trap '' TERM
+      wait "$command_pid"
+      command_status=$?
       printf '\\n#{@guard_status}:%s:%s\\n' "$token" "$command_status" >&3
       exit "$command_status"
     ) &

@@ -4724,11 +4724,12 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     refute carrier =~ ~r/guard_group=.*?kill -(?:s )?(?:TERM|KILL) -- -"\$guard_group"/s,
            "the helper carrier signals a detached sampled group after its guard has exited"
 
-    assert carrier =~ ~r/while :; do\n\s+wait_interrupted=0\n\s+wait "\$guard_pid"/
-    assert carrier =~ "trap 'wait_interrupted=1' TERM"
+    assert carrier =~ ~r/trap ':' TERM\n[ \t]*if \[ "\$mode" = helper \]; then/
 
     assert carrier =~
-             ~r/guard_status=\$\?\n\s+if \[ "\$guard_status" -le 128 \] \|\| \[ "\$wait_interrupted" -eq 0 \]; then\n\s+break/
+             ~r/guard_pid=\$!\n[ \t]*fi\n[ \t]*trap '' TERM\n[ \t]*exec <\/dev\/null 4<&-\n[ \t]*wait "\$guard_pid" 2>\/dev\/null\n[ \t]*guard_status=\$\?/
+
+    refute carrier =~ "wait_interrupted"
 
     assert script =~ "IFS= read -r init"
     assert script =~ "IFS= read -r permit"
@@ -4737,15 +4738,15 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
              ~r/carrier_group=\$1.*?if \[ "\$mode" = helper \]; then\s+group_id=\$\$\s+else\s+group_id=\$carrier_group/s
 
     refute script =~ ~r/group_id=\$\(.*?ps /s
-    assert script =~ ~r/while :; do\n\s+wait_interrupted=0\n\s+wait \"\$command_pid\"/
     assert script =~ "while IFS= read -r control"
 
     assert script =~
-             ~r/command_status=\$\?\n\s+if \[ "\$command_status" -le 128 \] \|\| \[ "\$wait_interrupted" -eq 0 \]; then\n\s+break/
+             ~r/command_pid=\$!\n\s+trap '' TERM\n\s+wait "\$command_pid"\n\s+command_status=\$\?/
 
+    refute script =~ "wait_interrupted"
     refute script =~ "$(jobs -p)"
     refute script =~ ~r/kill -(?:0|-?s 0)(?: --)? "\$command_pid"/
-    assert script =~ "trap - HUP INT PIPE\n  trap 'wait_interrupted=1' TERM"
+    assert script =~ "trap - HUP INT PIPE\n  trap ':' TERM"
 
     assert script =~
              ~r/'loopex-signal:'"\$token"':TERM'\).*?trap '' TERM.*?kill -s TERM -- -"\$group_id".*?trap 'guard_abort' TERM/s,
@@ -4969,14 +4970,13 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
   end
 
   test "a TERM-interrupted wrapper waits for its owned shell job rather than rechecking its pid" do
-    # Concept: cooperative cancellation waits for the command that actually
-    # owns the job, even when TERM interrupts the wrapper's first `wait`.
+    # Concept: cooperative cancellation preserves the command's own TERM
+    # handler and waits for that actual child before confirming cleanup.
     #
-    # Technical depth: observing the numeric PID with `kill -0` after `wait`
-    # reaped the child let PID reuse turn an unrelated process into a reason to
-    # wait again. The non-interactive shell's own job table is stable ownership:
-    # while the trapped child handles TERM it remains listed; after the final
-    # wait it does not, whatever process later receives the number.
+    # Technical depth: this retained cancellation case exercises real group
+    # TERM, not a sampled PID probe. The wrapper now shields its owned-child
+    # wait after forking; the command must still observe TERM and emit its own
+    # handler marker before exiting. The public receipt must confirm cleanup.
     root = workspace()
     ready = Path.join(root, "term-interrupted-wrapper-ready")
     job_id = "term-interrupted-wrapper-#{System.unique_integer([:positive])}"
@@ -4989,7 +4989,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
           "loopex.bash",
           %{
             "command" =>
-              "trap 'exit 7' TERM; printf ready > #{shell_path(ready)}; while :; do sleep 1; done"
+              "trap 'printf term-handled; exit 7' TERM; printf ready > #{shell_path(ready)}; while :; do sleep 1; done"
           },
           %{executor: executor, lease_id: lease_id, job_id: job_id, cleanup_grace_ms: 2_000}
         )
@@ -5001,6 +5001,34 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     assert {:ok, receipt} = Task.await(running, 5_000)
     assert receipt.outcome == :cancelled
     assert receipt.cleanup_confirmation == :confirmed
+    assert receipt.output =~ "term-handled"
+  end
+
+  test "post-fork waiter shielding preserves default and explicit command TERM dispositions" do
+    root = workspace()
+
+    # These actual argv children are independent controls for fork ordering.
+    # An ignored TERM inherited before launch would let the first command
+    # continue and prevent the second noninteractive shell installing its trap.
+    # They do not reproduce the negative wait-status schedule by themselves.
+    assert {:ok, default} =
+             run(root, "loopex.bash", %{
+               "argv" => ["/bin/bash", "-c", "kill -TERM $$; printf term-was-ignored"]
+             })
+
+    assert default.outcome == :failed
+    assert default.cleanup_confirmation == :confirmed
+    assert default.output =~ "status 143"
+    refute default.output =~ "term-was-ignored"
+
+    assert {:ok, handled} =
+             run(root, "loopex.bash", %{
+               "argv" => ["/bin/bash", "-c", "trap 'exit 7' TERM; kill -TERM $$; exit 9"]
+             })
+
+    assert handled.outcome == :failed
+    assert handled.cleanup_confirmation == :confirmed
+    assert handled.output =~ "status 7"
   end
 
   test "a reentrant progress callback restores the outer job's complete execution context" do
