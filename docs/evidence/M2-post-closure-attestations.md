@@ -1,6 +1,6 @@
 # M2 Post-Closure Real-Call Attestations
 
-Three records, one per real-provider role, retaken after the post-closure hotfix
+The first three records, one per real-provider role, were retaken after the post-closure hotfix
 sets on `main` at candidate `34069a0a147e4480b4049710aee0cefbbb7be39c`, with Mint at `1.10.0` (the two
 published HTTP/1 advisories in 1.9.3 are fixed there). This record exists
 because the third independent audit required the real-provider evidence to be
@@ -42,6 +42,78 @@ Total real calls across the three roles: 12. Run window opened
 ## Provider-account verification
 
 Not yet performed.
+
+<a id="source-4e514fb"></a>
+## New-Source Checkpoint — 4e514fb
+
+These additional observations ran serially at exact source
+`4e514fb0680c48b7cec8b61024f9daada53ecabf` on 2026-09-08. They do not relabel
+the earlier source's records. The task-only capture invoked the unchanged bound
+`scripts/m1-exunit-runner.exs` directly with the gate's exact real-role profiles,
+locked names, minima and named exclusions, seed 3107, after clean-source
+formatting and forced product compilation. The complete M2 gate did **not**
+produce these records; its earlier exact-R run failed before the demonstration.
+
+Provider `anthropic`, model `claude-haiku-4-5-20251001`, endpoint
+`https://api.anthropic.com`, adapter build `loopex_llm_reqllm@0.0.0`; current
+Darwin Elixir 1.20.3 / OTP 29.0.5, isolated roots, actual account HOME, four
+normal schedulers and two each of dirty CPU/IO schedulers. Provider secrets
+entered only the runner's bounded private stdin frame from the authorized
+environment file, never an argument or exported startup value. The collector
+checked the actual credential literal against all captured role output before
+writing it. No credential was found.
+
+| Role / case | UTC lane window | Calls | Reported input tokens | Reported output tokens | Result |
+| --- | --- | --- | --- | --- | --- |
+| Db: separate response-identifier check | 08:43:17–08:43:53 | 1 | 15 | 4 | Passed |
+| Db: coding task | Same Db lane window | 7 | 10310 | 572 | Passed |
+| inherited 5c: model session | 08:43:56–08:44:08 | 2 | 1463 | 112 | Passed |
+| inherited 8b: recovery trace | 08:44:11–08:44:26 | 2 | 1463 | 112 | Passed |
+
+Db executed two cases and excluded exactly its five deterministic cases; 5c
+executed one and excluded exactly its deterministic case; 8b executed one
+and excluded exactly its five deterministic cases. These are gate-selected
+real roles, not an ordinary suite excluding its required live cases. Db's
+one-call identifier check and seven-call task are separate attestation lines
+with the same role label; they are not combined into an eight-turn task.
+
+The coding task observed seven turns, six tool calls, four effects, two policy
+denials, all four shipped coding tools, and the expected committed file result.
+The fixture composes a real same-source companion through explicit host
+configuration. Paired-package wiring and artifact hashes remain separate
+evidence; this capture does not label a release binary.
+
+| Observation | Provider-supplied identifiers, in reported order |
+| --- | --- |
+| Db identifier check | `req_011CeqgCA5ssm8udRpTkaXy1` |
+| Db coding task | `req_011CeqgCkfkLM37NXWmau3r7`, `req_011CeqgCxpjopwg63yAqxV4E`, `req_011CeqgDCbDSLyXhVdrtJ9AX`, `req_011CeqgDRnU8aCPVxV1ovTUy`, `req_011CeqgDeuWGbUijXMqcEJPa`, `req_011CeqgDsXH2kDPPpAVje3Fe`, `req_011CeqgE5uuuF9Gy8PsDN1zs` |
+| inherited 5c | `req_011CeqgEyp5RTXHoctjphqrd`, `req_011CeqgFCvce3L7fLESjiixk` |
+| inherited 8b | `req_011CeqgGAhhZKZMyjvXrv1Rk`, `req_011CeqgGVaFi4NLT7QBzJsBL` |
+
+The totals are twelve calls, 13251 reported input tokens and 800 reported
+output tokens. They are adapter-reported aggregates, not account-verified
+per-call usage or a billing statement. The times are lane start/end windows,
+including fixture work, not individual request timestamps. Cache accounting
+and per-call timing must be compared with the provider account separately.
+
+Retained role-log SHA-256:
+
+- Db: `929882eea0b7bce6d20329bd446ba9b5bdfa09e31dfca884046b20af29c401b6`.
+- 5c: `262166830f1b94fef9b0048ab8cfc0aba356ddc3e5d0492b14cb7b392324c288`.
+- 8b: `89a64b01d70d47fb954674f5394cc891663a5fe47e706a5b14914203f6e0ddcd`.
+- Task-only capture driver: `07796fcdd2307509d02ef4d4302555c19e589069cd47de4eeb7d837f62c4c528`.
+
+Raw role logs, exit/window records, compile/format logs, the capture driver
+and the distinct unresolved-gate diagnostics are preserved in the maintainer's
+`loopex-reviews/M2-4e514fb-checkpoint-2026-09-08.Fz1rL0` archive. All 21 manifest
+entries were verified after copying. This is a partial archive, not an accepted
+release-evidence bundle.
+
+**Account verification: not performed for these twelve identifiers.** The
+authenticated Chrome surface is unavailable while the Mac is locked; automatic
+unlock failed. No earlier account row, identifier syntax, test assertion or
+successful runner result fills that gap. Required final account confirmation
+and the unresolved complete-gate result remain outstanding.
 
 ## Related
 

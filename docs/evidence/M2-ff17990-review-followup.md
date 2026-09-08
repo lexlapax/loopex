@@ -1580,3 +1580,93 @@ required for release review. After disposition of the inherited-gate conflict,
 the remaining literal gates and account evidence still need qualification at
 the applicable exact source, followed by independent review. No closure, merge,
 tag or publication is authorized by any passing command here.
+
+<a id="generation-6-transition-qualification"></a>
+## Generation 6 Transition and Remaining Qualification
+
+This checkpoint supersedes the *current-state* M0 blocker above, not its
+historical failure record. The maintainer accepted M0 generation 6 at
+`f49be58ddfc13dae3d7cb3443363da162f90be31`. Its immediate one-parent child R is
+`4c75ae3f81f3caefe7745c40a5b24e9133255e57`: only the M0 generation row and one
+new standalone disposition changed. Independent read-only transition review
+reported no actionable finding. That review and this evidence do not authorize
+integration or publication.
+
+The serial Darwin results below name R, not a later source. All reviewed
+tracked checkouts ended clean. The profile permits writes to isolated task
+roots and process inspection; it is not a wholly write-denied sandbox.
+
+| Exact-R check | Result | Retained log SHA-256 |
+| --- | --- | --- |
+| `mix loopex.status` | Passed | `2bde8a90a81179a725541af673d41ae58ba2fe7412c7c71baabe135c933638c4` |
+| `bash scripts/check-bootstrap.sh` | Passed; 68 tests, seed 99069 | `95b8b3d066169918a3add3657a99df527fe492bfdb5f822f27ee0263f1b26631` |
+| Literal M0 gate | GREEN; ordinary suite 1052 passed, five real-provider exclusions; separate required real lane passed | `735d365392f75d2c7f082d2fbe3a35676df672d78bc0578f3ab5d5f113ac2c92` |
+| Literal M1 gate | GREEN; seed 30838, protected executed 69; ordinary suite 1052 passed, five real-provider exclusions; separate required real roles passed | `5b7141847dd435983411820c6fe4c6cde84dc6971aa0b46d5a3e194ae22af949` |
+| Literal M2 gate | RED at Outcome 4, coding-tools selector; unresolved | `d7d38ad774b0b449821d59c7547289555188ceb86945cfdcf4adf6c975f03a45` |
+
+M0 ran 2026-09-08T06:36:13Z through 07:00:56Z, with ordinary-suite seed
+381527. M1 ran 07:01:30Z through 08:06:33Z. Each used a fresh isolated clone,
+the current Elixir 1.20.3 / OTP 29.0.5 pair, actual account HOME before each
+gate's own isolation, and its unchanged literal runner. Provider secrets entered
+only the authorized private channel. Successful real-role stdout is discarded
+inside these gates; these two green results do not recover identifiers or
+account confirmation. Their logs, transition review and driver records were
+archived in `M0-gen6-R-2026-09-08.AWYOFk` under the maintainer's
+`loopex-reviews` directory, with a checked manifest.
+
+The first M2 task-wrapper attempt never launched the gate: Bash 3.2 rejected an
+empty-array expansion under nounset. The empty gate log, wrapper error and
+pipeline exits are preserved separately. Repairing the task-only argument
+construction changed no tracked or gate byte. The first actual literal M2
+invocation ran 08:09:03Z through 08:27:11Z and returned gate exit 1 with frame
+parser and log exits 0. Its only test diagnostic is `selector failed` for
+`apps/loopex_executor_local/test/coding_tools_test.exs`. It failed before the
+real-provider demonstration. The bound formatter emits neither the assertion
+nor the generated seed on this path, so neither is recoverable from this log.
+This is **not** classified as an environmental failure or a diagnosed product
+defect, and no later pass disposes of it.
+
+Focused exact-R diagnosis subsequently ran all 71 coding-tools cases under
+Mix at seed 3107 (passed), then under a task-only copied standalone formatter
+at seeds 3107 and 591321 (both passed). The copy adds failed-assertion logging;
+selection, closure, assertions, exclusions and minimum remain unchanged. These
+are diagnostic profiles, not canonical-gate evidence and not a same-seed
+reproduction of the unavailable original seed. Logs respectively hash to
+`b524fce8d94c45deffdc820ef4a85099aab6b06345956082d541295468629ad7`,
+`b30e1b647083832ad98bf95e5b31b37c94fc81a706984d3afdc8c5a95c19c7b6` and
+`068b7293705ad33e1c8ee08e01d70bebf95a1444f85c90a59b375eafdf5d8632`.
+
+### Real-Demonstration Fixture Repair
+
+Commits `33d412ca8ba4a92eff8ababc680fb0532094529d` and
+`4e514fb0680c48b7cec8b61024f9daada53ecabf` change only
+`apps/loopex_cli/test/coding_task_test.exs`. The old source-only fixture supplied
+no launch configuration to the source command, and supplied a sampling-only
+option list to the direct adapter call, although accepted ADR 0019 requires
+the isolated companion's verified launch configuration. This mismatch was
+established by inspection; the failed M2 invocation above never reached it.
+
+The repaired fixture builds the real same-source companion. Through the
+existing host-starter seam, it replaces exactly one empty launch field and
+passes every other command-derived option to actual composition unchanged.
+It refuses a nonempty embedded source configuration. The direct provider
+case likewise uses the verified launch fields, with sampling still in the
+request. No model, policy, executor or Store is substituted. All seven names,
+tags, timeouts, task assertions and gate bytes remain unchanged. This proves
+the source command with explicit host configuration; it does not replace the
+separate paired-artifact wiring evidence. No product byte changes from R.
+
+At exact `4e514fb0680c48b7cec8b61024f9daada53ecabf`, formatting and forced
+warnings-as-errors product compilation passed, followed serially by all three
+required real-provider roles through the unchanged bound selector runner.
+The [new-source attestation checkpoint](M2-post-closure-attestations.md#source-4e514fb)
+retains all twelve identifiers, the separate one-call check, role totals,
+UTC windows and precise remaining account-verification gap. This does not
+override the unresolved M2 coding-tools red. No final source-baseline,
+integration, tag or release approval is inferred.
+
+ADR 0022 remains Proposed pending exact-pair acceptance; the implementation
+instruction and M0 acceptance do not accept it. Final exact-source gate
+qualification, account confirmation and independent final evidence-child
+review remain open. Earlier platform, package and rollback observations stay
+bound to source 274afa1; identical product bytes are not described as new runs.
