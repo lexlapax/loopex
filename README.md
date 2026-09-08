@@ -62,6 +62,11 @@ accounting. Its validation and release-review work remain in progress; see the
 [repair task list](docs/evidence/M2-ff17990-review-followup.md#completion-order).
 Those changes are not a publication or a claim that this branch has integrated.
 
+The repaired reference local executor requires `/bin/bash` for its internal
+supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
+[runtime prerequisite](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
+before using the reference stack. Core and custom executors are unaffected.
+
 The [roadmap](docs/roadmap.md#concept) is non-normative capability guidance;
 [CHANGELOG.md](CHANGELOG.md) records what changed.
 

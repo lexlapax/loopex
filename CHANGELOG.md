@@ -31,6 +31,15 @@ rollback implications are documented in the
 [compatibility inventory](docs/developer/compatibility-surfaces.md#concept).
 This entry does not publish a package or certify the unfinished evidence.
 
+The reference local executor also gains an explicit `/bin/bash` runtime
+prerequisite for its internal admission and cleanup scripts on Darwin and Linux.
+The maintainer approved this repair after native Linux qualification exposed
+control-input loss and unavailable job control in the prior noninteractive shell.
+Raw model commands remain on `/bin/sh`, argv remains literal, and Core and custom
+executors gain no dependency. The [operator setup](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
+states the requirement; [ADR 0022](docs/adr/0022-local-executor-supervision-shell.md#concept)
+is Proposed pending exact-pair acceptance.
+
 The next milestone, `M3` (kernel consolidation), is being opened gate-first on
 branch `m3`, where its plan pair and red gate live until acceptance; the headless
 session-protocol draft is retained there as `M4`. Nothing about either is on

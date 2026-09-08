@@ -38,6 +38,16 @@ that calls Mix, and several do.
 Adding another development dependency requires the ordinary dependency
 decision.
 
+The reference local executor has a separate **runtime** prerequisite:
+executable `/bin/bash` for its internal supervision scripts on Darwin and Linux.
+Model-supplied raw commands still use `/bin/sh`, and argv commands remain literal.
+Core and custom executors do not acquire this requirement. This is the
+[maintainer-approved repair choice](docs/developer/agent-context-map.md#disposition-local-executor-bash-2026-09-07),
+documented in [Proposed ADR 0022](docs/adr/0022-local-executor-supervision-shell.md#concept),
+not an inference from the bootstrap's Bash dependency. An incompatible shell is
+not a fallback. See the [operator prerequisite](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
+before running the reference stack.
+
 The M1 gate's stronger filesystem and containment lane additionally requires
 `stat`, `find`, `sort`, `comm`, `od`, `mktemp`, `cp`, `uname`, `/usr/bin/env`,
 `/usr/bin/id`, `/usr/bin/locale`, and either `shasum` or `sha256sum`. The runner probes and validates

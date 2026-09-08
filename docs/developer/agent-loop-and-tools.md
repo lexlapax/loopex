@@ -35,6 +35,11 @@ journal after the registry that held them has changed. Registration is
 append-only and scoped to one runtime; being registered and being offered to a
 model are separate facts.
 
+The reference local executor requires `/bin/bash` for its internal supervision
+scripts, while raw tool commands stay on `/bin/sh` and argv calls remain literal.
+This prerequisite belongs to the concrete adapter, not Core or custom executors;
+see the [operator setup boundary](../operator/tools-and-policy.md#operator-local-supervision-shell).
+
 None of these surfaces is frozen or labelled:
 [Compatibility surfaces](compatibility-surfaces.md#concept).
 
@@ -657,7 +662,15 @@ effect unproven.
 
 The three filesystem tools start no operating-system process.
 A credential-clean Port carrier opens first and starts the token-bound launch
-guard. In command mode, the carrier leads the Port-created process group and the
+guard. Both internal scripts use absolute `/bin/bash`, independently of the raw
+command's `/bin/sh` interpreter. The carrier preserves its control input before
+asynchronous guard launch and closes the redundant descriptor in both processes;
+the model command receives neither that input nor the private status descriptor.
+There is no interpreter-selection option or fallback. The
+[implementation disposition](agent-context-map.md#disposition-local-executor-bash-2026-09-07)
+authorizes this scoped repair; [ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
+remains Proposed pending exact-pair acceptance.
+In command mode, the carrier leads the Port-created process group and the
 guard, status wrapper, command, and remaining descendants share that group. The
 guard receives private control and signals the group it is still a member of, so
 the runtime never turns a sampled numeric process-group identifier into later

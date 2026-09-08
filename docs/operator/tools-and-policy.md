@@ -85,6 +85,24 @@ arbitrary name introduced concurrently elsewhere in the same VM cannot reach
 that first image; the provider credential is removed explicitly after the
 snapshot and does not depend on that broader claim.
 
+<a id="operator-local-supervision-shell"></a>
+### Local Supervision Prerequisite
+
+The reference local executor requires executable `/bin/bash` for its internal
+carrier and cleanup guard on Darwin and Linux. Those scripts control admission,
+process groups, and cleanup; they do not change the interpreter requested by a
+tool. A raw `command` still runs on `/bin/sh`, and an `argv` vector still runs
+without shell interpretation. Core and third-party executors are unaffected.
+
+Provide `/bin/bash` before using the reference stack. The executor does not
+silently select another shell when it is absent; a failed launch is not proof
+that an effect completed or cleanup succeeded. The
+[approved implementation choice](../developer/agent-context-map.md#disposition-local-executor-bash-2026-09-07)
+and [Proposed ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
+record this new prerequisite and its qualification requirements.
+
+### Run and Cleanup Bounds
+
 Every run declares a deadline duration when its prompt is admitted or its queued
 follow-up is promoted. The absolute deadline begins when that run's first model
 request is durably staged. A process loss before first staging therefore does

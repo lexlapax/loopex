@@ -164,6 +164,18 @@ bound elapsing as distinct errors that leave reconciliation host-driven. Omittin
 it is conformant. An implementation of any port is written against bytes that
 may change in the next milestone.
 
+The shipped local executor now requires executable `/bin/bash` for its internal
+carrier and cleanup guard on Darwin and Linux. This is a new concrete-adapter
+runtime prerequisite, not a Core or custom-executor dependency. Raw commands
+still use `/bin/sh`; argv vectors remain literal. There is no interpreter
+selection option or silent fallback. No callback, journal record, or configuration
+schema changes with this prerequisite. The
+[current implementation disposition](agent-context-map.md#disposition-local-executor-bash-2026-09-07)
+authorizes the change; [ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
+is Proposed, not yet an accepted pair. A host that previously supplied only a
+POSIX shell must provide `/bin/bash` or select a different executor before using
+this repaired reference stack.
+
 The shipped local executor's `process_probe` start option is edge configuration,
 defaults to `/bin/ps`, and is recorded on receipts that use it. The probe contract
 is the `-e -o pid= -o pgid=` table dialect with the probe's Port carrier as the
