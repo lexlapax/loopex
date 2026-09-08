@@ -26,6 +26,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
                       [
                         {__ENV__.file, "provider_isolation_fixture.exs"},
                         {Path.expand("../provider_attempt_adapter_contract_test.exs", __DIR__),
+                         "provider_attempt_adapter_contract_test.exs"},
+                        {"apps/loopex_llm_reqllm/test/support/provider_isolation_fixture.exs",
+                         "provider_isolation_fixture.exs"},
+                        {"apps/loopex_llm_reqllm/test/provider_attempt_adapter_contract_test.exs",
                          "provider_attempt_adapter_contract_test.exs"}
                       ],
                       fn {path, label} -> {String.to_charlist(path), label} end
@@ -37,6 +41,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   # source locations enter one nonblocking stderr request. No arguments or
   # exception fields are inspected. Delivery is best-effort; externally killed
   # ExUnit/test-cleanup timeouts cannot run these catches and are not covered.
+  # Compiled stack locations can use the exact repository-relative spellings;
+  # accepting them does not admit arbitrary paths sharing the same basename.
   # This helper never changes the original kind/reason/stack re-raised by callers.
   def report_failure(case_name, phase, stack)
       when case_name in @diagnostic_cases and
