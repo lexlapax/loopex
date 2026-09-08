@@ -105,7 +105,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderWorker do
            pid when is_pid(pid) -> Process.group_leader(pid, sink)
            nil -> false
          end
-       end), do: :ok, else: :error
+       end) do
+      :ok
+    else
+      :error
+    end
   end
 
   defp manifest_matches(expected) do

@@ -1115,3 +1115,19 @@ environment omitted HOME; preserving the existing HOME fixed that environment.
 That changed-environment, incremental result is not a cold-build proof and
 does not qualify these later source bytes. Final-source current/floor/native
 package, whole-suite, live gate/account and rollback checks remain outstanding.
+
+### Floor-format compatibility at the next qualification checkpoint
+
+At clean `b994bc039afcd018b5b02af2d169aa4d8a6fb2a1`, the current-pair cold
+CLI/companion build and all seven subsequent format/archive/outside/descriptor/
+copied-CLI/parent-death commands exited 0. The exact floor-pair cold build also
+exited 0. Its whole-repository format check then exited 1: Elixir 1.17.0 formats
+the compact `if Enum.all?(...)` expression in `ProviderWorker` differently from
+Elixir 1.20.3. No later floor witness was run, and no floor-lane pass is claimed.
+
+The expression now uses the ordinary `do`/`else` block with the same condition
+and `:ok`/`:error` branches. Both exact supported toolchains' whole-repository
+`mix format --check-formatted` commands exit 0 on that repair. These are focused
+format results, not a qualification of the next source's package or runtime.
+The preceding successful packages and failed floor formatting remain bound to
+`b994bc0`; final qualification must use the new clean source throughout.
