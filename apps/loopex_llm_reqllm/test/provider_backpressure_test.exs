@@ -4,6 +4,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
   use ExUnit.Case, async: false
 
   alias Loopex.LLM.ReqLLM, as: Adapter
+  alias Loopex.LLM.ReqLLM.ProviderBridge
   alias Loopex.LLM.ReqLLM.ProviderIsolationFixture, as: Fixture
 
   @head_bytes 32_768
@@ -76,7 +77,36 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
   end
 
   test "the committed deadline stops an actually blocked child writer through independent cleanup" do
-    {fixture, request, call, receiver, _socket} = start_blocked()
+    # Observe the actual guardian's offset snapshot and state. An unrelated
+    # offset read before fixture startup could legitimately differ and is not
+    # this invocation's clock anchor.
+    assert :erlang.trace_pattern({ProviderBridge, :launch, 1}, true, [:local]) == 1
+
+    assert :erlang.trace_pattern(
+             {:erlang, :time_offset, 1},
+             [{:_, [], [{:return_trace}]}],
+             []
+           ) == 1
+
+    on_exit(fn ->
+      :erlang.trace_pattern({ProviderBridge, :launch, 1}, false, [:local])
+      :erlang.trace_pattern({:erlang, :time_offset, 1}, false, [])
+    end)
+
+    {fixture, request, call, receiver, _socket} = start_blocked(Fixture.request(), true)
+    guardian = call.guardian
+    delivered = :erlang.trace_delivered(guardian)
+    assert_receive {:trace_delivered, ^guardian, ^delivered}, remaining(request)
+
+    assert_receive {:trace, ^guardian, :return_from, {:erlang, :time_offset, 1}, offset}, 0
+
+    assert_receive {:trace, ^guardian, :call,
+                    {ProviderBridge, :launch, [%{deadline: invocation_deadline}]}},
+                   0
+
+    assert invocation_deadline ==
+             System.convert_time_unit(request.deadline, :millisecond, :native) - offset
+
     receiver_monitor = Process.monitor(receiver)
     cooperative = System.monotonic_time(:millisecond) + remaining(request) + 2_000
     observation = cooperative + 100
@@ -87,7 +117,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
     assert_receive {:completed, ^caller, {:error, {:dispatched_or_unknown, "model_call_failed"}}},
                    until(cooperative)
 
-    assert System.system_time(:millisecond) >= request.deadline
+    assert System.monotonic_time() >= invocation_deadline
     assert_receive {:DOWN, ^receiver_monitor, :process, ^receiver, :killed}, until(cooperative)
     stop_at(call, cooperative, observation)
     assert_one_transport(fixture)
@@ -169,16 +199,16 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
     end
   end
 
-  defp start_blocked(request \\ Fixture.request()) do
+  defp start_blocked(request \\ Fixture.request(), observe_clock \\ false) do
     fixture = Fixture.new(:backpressure, stream_parts: stream_parts(), paused: true)
-    {call, receiver, socket} = start_observed(fixture, request)
+    {call, receiver, socket} = start_observed(fixture, request, observe_clock)
     assert :erlang.suspend_process(receiver)
     Fixture.release(fixture)
     block_writer(fixture, request, 1)
     {fixture, request, call, receiver, socket}
   end
 
-  defp start_observed(fixture, request) do
+  defp start_observed(fixture, request, observe_clock \\ false) do
     observer = self()
 
     call =
@@ -188,7 +218,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
       end)
 
     guardian = call.guardian
-    :erlang.trace(guardian, true, [:receive, {:tracer, self()}])
+    flags = if observe_clock, do: [:call, :receive], else: [:receive]
+    :erlang.trace(guardian, true, flags ++ [{:tracer, self()}])
     send(call.caller, :continue)
 
     assert_receive {:trace, ^guardian, :receive,

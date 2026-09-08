@@ -89,7 +89,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
               configuration: configuration,
               grace: grace,
               nonce: Base.encode16(:crypto.strong_rand_bytes(32), case: :lower),
-              deadline: now() + max(request.deadline - System.system_time(:millisecond), 0),
+              deadline: invocation_deadline(request.deadline, System.time_offset(:native)),
               phase: :launch,
               namespace: nil,
               port: nil,
@@ -256,7 +256,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
 
   defp tick(state) do
     cond do
-      now() >= state.deadline -> fail(state)
+      System.monotonic_time() >= state.deadline -> fail(state)
       state.phase == :accept -> accept(state)
       true -> loop(state)
     end
@@ -307,7 +307,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
     frame =
       try do
         socket
-        |> ProviderCodec.recv(remaining(deadline))
+        |> ProviderCodec.recv(ProviderCodec.remaining_timeout(deadline, System.monotonic_time()))
         |> received_frame()
       catch
         _kind, _reason -> {:error, :invalid_frame}
@@ -646,6 +646,19 @@ defmodule Loopex.LLM.ReqLLM.ProviderBridge do
     catch
       _, _ -> :ok
     end
+  end
+
+  # Concept: conversion retains the invocation's one committed instant.
+  # Technical depth: adding a later wall remainder to an earlier monotonic
+  # sample charges the interval between reads twice. One native offset maps
+  # the wall instant without either that loss or an opposite extra allowance.
+  # Freeze this offset once; cleanup continues to use its existing millisecond
+  # clock. This internal arithmetic entry is also the deterministic test seam,
+  # not an alternate clock, runtime option, or Model callback.
+  @doc false
+  def invocation_deadline(wall_milliseconds, native_offset)
+      when is_integer(wall_milliseconds) and is_integer(native_offset) do
+    System.convert_time_unit(wall_milliseconds, :millisecond, :native) - native_offset
   end
 
   defp now, do: System.monotonic_time(:millisecond)

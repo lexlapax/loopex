@@ -101,7 +101,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodec do
 
   @doc false
   def recv(socket, timeout) when is_integer(timeout) and timeout >= 0 do
-    deadline = System.monotonic_time(:millisecond) + timeout
+    deadline = System.monotonic_time() + System.convert_time_unit(timeout, :millisecond, :native)
 
     with :ok <- raw_socket(socket),
          {:ok, header} <- receive_bytes(socket, 8, deadline, []),
@@ -152,7 +152,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodec do
     do: {:ok, chunks |> Enum.reverse() |> IO.iodata_to_binary()}
 
   defp receive_bytes(socket, remaining, deadline, chunks) do
-    timeout = deadline - System.monotonic_time(:millisecond)
+    timeout = remaining_timeout(deadline, System.monotonic_time())
 
     if timeout <= 0 do
       {:error, :timeout}
@@ -175,6 +175,30 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodec do
 
         _other ->
           {:error, :invalid_frame}
+      end
+    end
+  end
+
+  # Concept: a positive part of the remaining interval is still usable time.
+  # Technical depth: retain absolute instants in native units and round only
+  # the socket's integer-millisecond wait upward. Flooring either the sampled
+  # instant or its final remainder can return timeout before the actual bound.
+  # The same production arithmetic serves the bridge's invocation receiver;
+  # each codec slice still checks the original deadline, never a fresh budget.
+  @doc false
+  def remaining_timeout(deadline, sampled_now)
+      when is_integer(deadline) and is_integer(sampled_now) do
+    remaining = deadline - sampled_now
+
+    if remaining <= 0 do
+      0
+    else
+      milliseconds = System.convert_time_unit(remaining, :native, :millisecond)
+
+      if System.convert_time_unit(milliseconds, :millisecond, :native) < remaining do
+        milliseconds + 1
+      else
+        milliseconds
       end
     end
   end

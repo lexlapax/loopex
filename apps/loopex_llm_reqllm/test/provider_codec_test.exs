@@ -269,6 +269,47 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
     assert_receive {:DOWN, ^monitor, :process, ^producer, _reason}, 1_000
   end
 
+  test "the actual socket receive retains its native deadline and cannot report an early timeout" do
+    {_sender, receiver} = socket_pair()
+    parent = self()
+    duration_ms = 20
+    duration_native = System.convert_time_unit(duration_ms, :millisecond, :native)
+    assert :erlang.trace_pattern({ProviderCodec, :receive_bytes, 4}, true, [:local]) == 1
+
+    {reader, monitor} =
+      spawn_monitor(fn ->
+        receive do
+          :read ->
+            answer = ProviderCodec.recv(receiver, duration_ms)
+            send(parent, {:native_receive_answer, self(), answer, System.monotonic_time()})
+        end
+      end)
+
+    on_exit(fn ->
+      :erlang.trace_pattern({ProviderCodec, :receive_bytes, 4}, false, [:local])
+      if Process.alive?(reader), do: Process.exit(reader, :kill)
+    end)
+
+    assert :ok = :gen_tcp.controlling_process(receiver, reader)
+    assert :erlang.trace(reader, true, [:call, {:tracer, self()}]) == 1
+    before_start = System.monotonic_time()
+    send(reader, :read)
+
+    assert_receive {:trace, ^reader, :call,
+                    {ProviderCodec, :receive_bytes, [^receiver, 8, deadline, []]}},
+                   1_000
+
+    after_start = System.monotonic_time()
+    # These independent samples bracket the instant the real public recv/2
+    # starts its interval. A disconnected helper or a stored floor-ms instant
+    # cannot satisfy the bracket, even when eventual wall time looks plausible.
+    assert deadline >= before_start + duration_native
+    assert deadline <= after_start + duration_native
+    assert_receive {:native_receive_answer, ^reader, {:error, :timeout}, finished}, 1_000
+    assert finished >= deadline
+    assert_receive {:DOWN, ^monitor, :process, ^reader, :normal}, 1_000
+  end
+
   test "a timeout beyond the VM timer domain receives a complete frame" do
     {sender, receiver} = socket_pair()
     payload = terminal(%{"text" => "complete"})
