@@ -286,7 +286,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
       spawn_monitor(fn ->
         receive do
           :read ->
-            send(parent, {:split_receive_answer, self(), ProviderCodec.recv(receiver, duration_ms)})
+            send(
+              parent,
+              {:split_receive_answer, self(), ProviderCodec.recv(receiver, duration_ms)}
+            )
         end
       end)
 
@@ -349,6 +352,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
       original_deadline,
       budget
     )
+
     assert :ok = :gen_tcp.send(sender, second)
 
     assert_deadline_read(
@@ -359,6 +363,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
       original_deadline,
       budget
     )
+
     assert :ok = :gen_tcp.send(sender, tail)
     assert_deadline_read(reader, receiver, 0, [tail, second, first], original_deadline, budget)
     assert_receive {:split_receive_answer, ^reader, {:ok, :terminal, ^payload}}, budget.()
@@ -456,7 +461,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderCodecTest do
 
   defp assert_deadline_read(reader, receiver, remaining, chunks, deadline, budget) do
     assert_receive {:trace, ^reader, :call,
-                    {ProviderCodec, :receive_bytes, [^receiver, ^remaining, observed_deadline, ^chunks]}},
+                    {ProviderCodec, :receive_bytes,
+                     [^receiver, ^remaining, observed_deadline, ^chunks]}},
                    budget.()
 
     assert observed_deadline == deadline
