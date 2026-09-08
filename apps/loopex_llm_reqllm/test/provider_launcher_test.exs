@@ -167,6 +167,102 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncherTest do
     end
   end
 
+  test "the timer's signal-ignore ordering is structurally fixed before fork" do
+    configuration = %{
+      interpreter_path: "/bin/sh",
+      worker_path: "/unused-worker",
+      build_manifest_sha256: String.duplicate("d", 64)
+    }
+
+    {"/usr/bin/env", arguments} =
+      ProviderLauncher.vector(
+        %{namespace: "/unused-namespace", socket_path: "/unused-namespace/data"},
+        configuration,
+        String.duplicate("a", 64),
+        2_000,
+        9_999_999_999_999
+      )
+
+    guard = Enum.at(arguments, 10)
+
+    # This pins the executable script's order. It does not pretend the live
+    # Launcher test paused the OS scheduler between fork and trap installation.
+    assert guard =~
+             ~r/trap '' TERM HUP INT PIPE\s+\(\s+stopping=0\s+trap 'stopping=1; wait_interrupted=1' USR1/
+
+    assert guard =~
+             ~r/\) 3<&- 4>&- &\s+timer=\$!\s+trap 'wait_interrupted=1' TERM HUP INT PIPE USR1/
+  end
+
+  test "the host shell preserves ignored signals across a paused fork and exec" do
+    # Independent shell conformance, not a substituted Launcher: the first
+    # child pauses before installing its own handler. Its exec'd child waits
+    # for explicit input, so neither observation races a sleep duration.
+    script = ~S"""
+    exec 3<&0
+    trap '' TERM HUP INT PIPE
+    (
+      printf 'before-handler\n'
+      IFS= read -r arm || exit 21
+      [ "$arm" = arm ] || exit 22
+      trap ':' USR1
+      /bin/sh -c 'IFS= read -r finish && [ "$finish" = finish ] && exit 23; exit 24' <&3 3<&- &
+      child=$!
+      exec 3<&-
+      printf 'child:%s\n' "$child"
+      wait "$child"
+      result=$?
+      [ "$result" -eq 23 ] || exit 25
+      printf 'reaped:23\n'
+    ) <&3 &
+    timer=$!
+    exec </dev/null 3<&-
+    wait "$timer"
+    """
+
+    port =
+      Port.open({:spawn_executable, "/bin/sh"}, [
+        :binary,
+        :exit_status,
+        {:line, 1_024},
+        {:args, ["-c", script]},
+        {:env, ProviderLauncher.spawn_environment()}
+      ])
+
+    {:os_pid, carrier} = Port.info(port, :os_pid)
+    monitor = :erlang.monitor(:port, port)
+    owned = %{port: port, carrier: carrier}
+
+    try do
+      assert_receive {^port, {:data, {:eol, "before-handler"}}}, 2_000
+      assert Enum.any?(live_group(carrier), &(&1.pid == carrier))
+      signal_owned_group(owned)
+      assert Port.command(port, "arm\n")
+      assert_receive {^port, {:data, {:eol, "child:" <> child_text}}}, 2_000
+      child = String.to_integer(child_text)
+      assert Enum.any?(live_group(carrier), &(&1.pid == child))
+      signal_owned_group(owned)
+      assert Port.command(port, "finish\n")
+      observed = terminal_observation(port, monitor, System.monotonic_time(:millisecond) + 2_000)
+      assert observed.exit_status == 0
+      assert observed.down
+      assert "reaped:23" in observed.lines
+      assert live_group(carrier) == []
+    after
+      dispose_owned_group(owned)
+      :erlang.demonitor(monitor, [:flush])
+    end
+  end
+
+  defp signal_owned_group(owned) do
+    assert Port.info(owned.port, :os_pid) == {:os_pid, owned.carrier}
+    assert Enum.any?(live_group(owned.carrier), &(&1.pid == owned.carrier))
+
+    for signal <- ["TERM", "HUP", "INT", "PIPE"] do
+      assert {_, 0} = System.cmd("/bin/kill", ["-" <> signal, "--", "-#{owned.carrier}"])
+    end
+  end
+
   defp launch(root, stubborn) do
     script = Path.join(root, "worker.sh")
     pid_path = Path.join(root, "pid")

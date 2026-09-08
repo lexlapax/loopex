@@ -182,6 +182,10 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
   # installation: observing that live child proves cancellation is armed. All
   # signals retain the live birth-group authority. Namespace failure always
   # exits unproved, even if a signal interrupts its timer wait.
+  # Ignore generic termination before forking the timer, not in the newborn
+  # timer: caught traps reset on fork, leaving a default-disposition window.
+  # The timer and its sleeper retain these ignored dispositions; the guard
+  # restores its own interruption traps after capturing the timer identity.
   defp guard_program do
     ~S"""
     group=$1 namespace=$2 nonce=$3 grace=$4
@@ -200,9 +204,9 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
       else
         delay=$(printf '0.%03d' "$remaining")
       fi
+      trap '' TERM HUP INT PIPE
       (
         stopping=0
-        trap 'wait_interrupted=1' TERM HUP INT PIPE
         trap 'stopping=1; wait_interrupted=1' USR1
         [ "$stopping" -eq 1 ] && exit 0
         /bin/sleep "$delay" &
@@ -223,6 +227,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
         exit 125
       ) 3<&- 4>&- &
       timer=$!
+      trap 'wait_interrupted=1' TERM HUP INT PIPE USR1
       if /bin/rm -f "$socket" && /bin/rmdir "$namespace"; then
         :
       else
