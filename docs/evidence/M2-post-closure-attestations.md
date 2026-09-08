@@ -115,6 +115,54 @@ unlock failed. No earlier account row, identifier syntax, test assertion or
 successful runner result fills that gap. Required final account confirmation
 and the unresolved complete-gate result remain outstanding.
 
+<a id="source-4e514fb-account-verification"></a>
+## Provider-Account Verification — 2026-09-08
+
+The earlier account-unavailable status above describes the capture checkpoint.
+On 2026-09-08, the authenticated Claude Platform Logs page at
+`https://platform.claude.com/workspaces/default/logs` was refreshed and inspected
+read-only through Chrome. The page reported its refresh at 03:27 PDT. All twelve
+identifiers for source `4e514fb0680c48b7cec8b61024f9daada53ecabf` were found in the
+account, each with model `claude-haiku-4-5-20251001`, type Streaming and service
+tier Standard. No identifier was inferred from its spelling or from another
+source's test output.
+
+The table displays relative time. Its actual rendered `time` elements carry
+absolute `datetime` attributes; those were read through Chrome's Elements
+inspector, with each time associated with the identifier in the same table row.
+No page code, requests, credentials or account settings were changed. Every
+input-token breakdown was opened: cache reads and both five-minute and one-hour
+cache writes were zero for each of these twelve requests.
+
+| Role | Account request identifier | Account UTC timestamp, 2026-09-08 | Input tokens | Output tokens |
+| --- | --- | --- | --- | --- |
+| Db identifier check | `req_011CeqgCA5ssm8udRpTkaXy1` | 08:43:26.883 | 15 | 4 |
+| Db coding task | `req_011CeqgCkfkLM37NXWmau3r7` | 08:43:35.429 | 1128 | 79 |
+| Db coding task | `req_011CeqgCxpjopwg63yAqxV4E` | 08:43:38.626 | 1224 | 121 |
+| Db coding task | `req_011CeqgDCbDSLyXhVdrtJ9AX` | 08:43:41.679 | 1366 | 98 |
+| Db coding task | `req_011CeqgDRnU8aCPVxV1ovTUy` | 08:43:44.765 | 1485 | 77 |
+| Db coding task | `req_011CeqgDeuWGbUijXMqcEJPa` | 08:43:47.806 | 1588 | 96 |
+| Db coding task | `req_011CeqgDsXH2kDPPpAVje3Fe` | 08:43:50.578 | 1710 | 84 |
+| Db coding task | `req_011CeqgE5uuuF9Gy8PsDN1zs` | 08:43:53.149 | 1809 | 17 |
+| inherited 5c | `req_011CeqgEyp5RTXHoctjphqrd` | 08:44:05.773 | 680 | 87 |
+| inherited 5c | `req_011CeqgFCvce3L7fLESjiixk` | 08:44:08.401 | 783 | 25 |
+| inherited 8b | `req_011CeqgGAhhZKZMyjvXrv1Rk` | 08:44:21.829 | 680 | 87 |
+| inherited 8b | `req_011CeqgGVaFi4NLT7QBzJsBL` | 08:44:25.850 | 783 | 25 |
+
+Every timestamp is within its role's retained lane window at that window's
+one-second precision. In particular, the recorded end seconds `08:43:53` and
+`08:44:08` include their fractional second; they were not millisecond-precision
+cutoffs at `.000`. The provider timestamps are not reinterpreted as dispatch
+instants or inferred from table ordering.
+
+The per-role sums match the captured adapter reports exactly: Db identifier
+15/4, Db coding task 10310/572, inherited 5c 1463/112, inherited 8b 1463/112;
+total 13251 input and 800 output tokens across twelve calls. Account existence,
+model, time-window and token-accounting verification for this checkpoint is
+complete. This is not a billing audit, a new live run at a later SHA, a passing
+complete M2 gate, or an acceptance of the final release candidate. The original
+unexplained Outcome 4 gate failure remains independently outstanding.
+
 ## Related
 
 - [M2 real-call attestations](M2-real-call-attestations.md) (the closure records, frozen)
