@@ -339,7 +339,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderAttemptAdapterContractTest do
                      5_000
     end
 
-    assert Fixture.eventually(fn -> Fixture.reached?(fixture, "pid") end)
+    # Concept: interrupt bootstrap only after its cleanup observations exist.
+    # Technical depth: entry-env is written after the PID and namespace writes
+    # complete; hold_before_entry still blocks before ProviderWorker.main/1.
+    assert Fixture.eventually(fn ->
+             Fixture.reached?(fixture, "pid") and Fixture.reached?(fixture, "entry-env")
+           end)
 
     if phase != :before_entry,
       do: assert(Fixture.eventually(fn -> Fixture.canaries(fixture) == 1 end))
