@@ -137,10 +137,8 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
              ]
              |> Enum.sort()
 
-    assert generation["generation_id"] ==
-             generation["executor_epoch"]
-             |> Integer.to_string(16)
-             |> String.pad_leading(64, "0")
+    assert generation["generation_id"] =~ ~r/\A[0-9a-f]{64}\z/
+    assert Integer.parse(generation["generation_id"], 16) == {generation["executor_epoch"], ""}
 
     assert generation["root_binding"] == expected_root_binding(root)
 

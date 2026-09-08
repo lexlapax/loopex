@@ -1053,7 +1053,9 @@ defmodule Loopex.Executor.Local do
   defp reserve_decision(state, job, job_id) do
     Ledger.with_claim(
       state.ledger,
-      fn ->
+      fn claimed ->
+        state = %{state | ledger: claimed}
+
         case reconcile(state.ledger, resolved_jobs(state, job_id)) do
           nil -> settled_or_reserved(state, job, job_id)
           quarantine -> {:error, quarantine}
@@ -1079,7 +1081,8 @@ defmodule Loopex.Executor.Local do
   defp permit_reserved(state, job, grant, reservation_ref, caller) do
     Ledger.with_claim(
       state.ledger,
-      fn ->
+      fn claimed ->
+        state = %{state | ledger: claimed}
         job_id = Map.get(job, :job_id, "")
 
         if reservation_owned?(state, job_id, reservation_ref, caller) do
@@ -1135,23 +1138,14 @@ defmodule Loopex.Executor.Local do
   end
 
   defp existing_marker_decision(state, job) do
-    job_id = Map.get(job, :job_id, "")
-
-    case Ledger.read_marker(state.ledger, job_id) do
+    case Ledger.read_marker(state.ledger, job) do
       :absent ->
         :new
 
       {:ok, record} ->
-        cond do
-          record["canonical_request_digest"] != Map.get(job, :canonical_request_digest) ->
-            {:error, :job_id_conflict}
-
-          Map.get(record, :ledger_kind) == Ledger.refusal_kind() ->
-            {:error, {:refused_before_effect, refusal_reason(record)}}
-
-          true ->
-            :join
-        end
+        if Map.get(record, :ledger_kind) == Ledger.refusal_kind(),
+          do: {:error, {:refused_before_effect, refusal_reason(record)}},
+          else: :join
 
       {:error, reason} ->
         {:error, reason}
@@ -6438,10 +6432,10 @@ defmodule Loopex.Executor.Local do
     else
       Ledger.with_claim(
         state.ledger,
-        fn ->
+        fn claimed ->
           if operation_owner?(state, job_id),
             do: {:error, :effect_in_flight},
-            else: final_receipt(state.ledger, state.ledger_root, job_id)
+            else: final_receipt(claimed, state.ledger_root, job_id)
         end,
         wait
       )
@@ -6460,7 +6454,7 @@ defmodule Loopex.Executor.Local do
   defp final_receipt_under_claim(_ledger, _root, "", _wait), do: :absent
 
   defp final_receipt_under_claim(ledger, root, job_id, wait) do
-    Ledger.with_claim(ledger, fn -> final_receipt(ledger, root, job_id) end, wait)
+    Ledger.with_claim(ledger, fn claimed -> final_receipt(claimed, root, job_id) end, wait)
   end
 
   defp read_receipt(_root, ""), do: :absent

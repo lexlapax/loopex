@@ -106,6 +106,11 @@ defmodule Loopex.Executor.Local.Ledger do
     binding_mismatch
   )
 
+  @binding_fields ~w(
+    operation_id attempt canonical_request_digest tool_id tool_version
+    effect_class workspace_lease executor_audience expiry fencing_token
+  )
+
   @typedoc """
   ## Concept
 
@@ -218,12 +223,19 @@ defmodule Loopex.Executor.Local.Ledger do
   the claim directory in place and reports `root_claim_retained`. This is the
   fail-closed answer for an administrative body that cannot prove either its
   authority warning or its late writer is settled.
+
+  A one-argument body receives the prepared map with a fresh, ephemeral
+  `root_claim_nonce` for its bounded snapshots. A zero-argument body remains
+  supported where no snapshot is needed. The nonce describes this observation;
+  it is not a transferable proof of claim ownership and is never written to the
+  root or exported from the executor edge.
   """
-  @spec with_claim(prepared(), (-> term()), non_neg_integer()) :: term() | {:error, term()}
+  @spec with_claim(prepared(), (-> term()) | (map() -> term()), non_neg_integer()) ::
+          term() | {:error, term()}
   def with_claim(prepared, work, wait_ms \\ 0)
 
   def with_claim(%{root: _root} = prepared, work, wait_ms)
-      when is_function(work, 0) and is_integer(wait_ms) and wait_ms >= 0 do
+      when (is_function(work, 0) or is_function(work, 1)) and is_integer(wait_ms) and wait_ms >= 0 do
     # `wait_ms` bounds contention, not a claim that is immediately available.
     # Preserve the zero-wait form's one immediate attempt while making every
     # retry spend the original absolute deadline.
@@ -250,9 +262,10 @@ defmodule Loopex.Executor.Local.Ledger do
   entering the protected body; acquiring just before expiry is not authority to
   begin a settlement phase after it.
   """
-  @spec with_claim_until(prepared(), (-> term()), integer()) :: term() | {:error, term()}
+  @spec with_claim_until(prepared(), (-> term()) | (map() -> term()), integer()) ::
+          term() | {:error, term()}
   def with_claim_until(%{root: _root} = prepared, work, deadline)
-      when is_function(work, 0) and is_integer(deadline) do
+      when (is_function(work, 0) or is_function(work, 1)) and is_integer(deadline) do
     if System.monotonic_time(:millisecond) < deadline,
       do: do_with_claim_until(prepared, work, deadline, :deadline_bound),
       else: {:error, {:ledger_unavailable, :root_claim_held}}
@@ -267,9 +280,16 @@ defmodule Loopex.Executor.Local.Ledger do
           try do
             case revalidate(prepared) do
               :ok ->
+                claimed =
+                  Map.put(
+                    prepared,
+                    :root_claim_nonce,
+                    Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)
+                  )
+
                 if work_policy == :initial_attempt or
                      System.monotonic_time(:millisecond) < deadline do
-                  work.()
+                  run_claim_body(work, claimed)
                 else
                   {:error, {:ledger_unavailable, :claim_deadline_reached}}
                 end
@@ -378,18 +398,30 @@ defmodule Loopex.Executor.Local.Ledger do
   ledger-unavailable and never permission. Capacity is refused rather than
   evicted, because an unresolved open entry is exactly the truth that must not be
   thrown away to make room.
+
+  Pass the claimed map received by a one-argument claim body. Its nonce is part
+  of the measured observation, not a new durable record or ownership token.
   """
   @spec open_snapshot(prepared()) :: {:ok, [map()]} | {:error, term()}
-  def open_snapshot(%{root: root} = prepared) do
+  def open_snapshot(%{root: root, root_claim_nonce: nonce} = prepared) do
     directory = open_directory(root)
 
-    with {:ok, names} <- list_entries(directory),
+    with true <- hex_digest?(nonce),
+         {:ok, names} <- list_entries(directory),
          :ok <- within_capacity(names),
          {:ok, entries} <- read_open_entries(directory, Enum.sort(names)),
          {:ok, snapshot} <- bound_snapshot(prepared, entries) do
       {:ok, snapshot}
+    else
+      false -> {:error, {:ledger_unavailable, :missing_claim_context}}
+      {:error, reason} -> {:error, reason}
     end
   end
+
+  def open_snapshot(_prepared), do: {:error, {:ledger_unavailable, :missing_claim_context}}
+
+  defp run_claim_body(work, claimed) when is_function(work, 1), do: work.(claimed)
+  defp run_claim_body(work, _claimed), do: work.()
 
   @doc """
   ## Concept
@@ -417,9 +449,15 @@ defmodule Loopex.Executor.Local.Ledger do
   """
   @spec admit(prepared(), map(), map()) :: :ok | {:error, term()}
   def admit(%{root: root}, marker, open) do
-    with :ok <- publish(open_path(root, open["job_id"]), encode(open)),
-         :ok <- publish(marker_path(root, marker["job_id"]), encode(marker)) do
+    with {:ok, marker_bytes} <- validate_record(marker, [@marker_kind], @record_bytes),
+         {:ok, open_bytes} <- validate_record(open, [@open_kind], @record_bytes),
+         true <- same_fields?(marker, open, ~w(job_id canonical_request_digest cleanup_grace_ms)),
+         :ok <- publish(open_path(root, open["job_id"]), open_bytes),
+         :ok <- publish(marker_path(root, marker["job_id"]), marker_bytes) do
       :ok
+    else
+      false -> {:error, {:ledger_unavailable, :admission_record_mismatch}}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -450,20 +488,28 @@ defmodule Loopex.Executor.Local.Ledger do
   """
   @spec refuse(prepared(), map()) :: :ok | {:error, term()}
   def refuse(%{root: root} = prepared, refusal) do
-    job_id = refusal["job_id"]
+    with {:ok, _bytes} <- validate_record(refusal, [@refusal_kind], @record_bytes) do
+      job_id = refusal["job_id"]
 
-    case read_marker(prepared, job_id) do
-      :absent ->
-        replace(marker_path(root, job_id), refusal)
+      case read_marker(prepared, job_id) do
+        :absent ->
+          replace(marker_path(root, job_id), refusal)
 
-      {:ok, %{ledger_kind: @refusal_kind}} ->
-        replace(marker_path(root, job_id), refusal)
+        {:ok, %{ledger_kind: @refusal_kind} = existing} ->
+          if same_fields?(
+               existing,
+               refusal,
+               ~w(job_id canonical_request_digest operation_id attempt)
+             ),
+             do: replace(marker_path(root, job_id), refusal),
+             else: {:error, {:ledger_conflict, :refusal_identity_mismatch}}
 
-      {:ok, _admission} ->
-        {:error, {:ledger_conflict, :admission_marker_present}}
+        {:ok, _admission} ->
+          {:error, {:ledger_conflict, :admission_marker_present}}
 
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -505,19 +551,16 @@ defmodule Loopex.Executor.Local.Ledger do
   unavailability rather than something this recovery may overwrite.
   """
   @spec restore_open(prepared(), map()) :: :ok | {:error, term()}
-  def restore_open(%{root: root}, open) when is_map(open) do
-    path = open_path(root, Map.get(open, "job_id", ""))
+  def restore_open(%{root: root}, open) do
+    with {:ok, bytes} <- validate_record(open, [@open_kind], @record_bytes) do
+      path = open_path(root, open["job_id"])
 
-    if Map.get(open, :ledger_kind) == @open_kind and exact_keys?(open) and
-         valid_open_entry?(open) do
       case read_record(path, [@open_kind]) do
-        :absent -> publish(path, encode(open))
+        :absent -> publish(path, bytes)
         {:ok, ^open} -> :ok
         {:ok, _other} -> {:error, {:ledger_unavailable, :open_authority_changed}}
         {:error, reason} -> {:error, reason}
       end
-    else
-      {:error, {:ledger_unavailable, :malformed_open_entry}}
     end
   end
 
@@ -596,20 +639,23 @@ defmodule Loopex.Executor.Local.Ledger do
   than journaled, because a refusal nobody can read is not proof that no effect
   began.
   """
-  @spec refusal(map(), atom() | binary(), atom() | nil) :: {:ok, map()} | :error
+  @spec refusal(map(), atom() | binary(), atom() | binary() | nil) :: {:ok, map()} | :error
   def refusal(job, code, field \\ nil) do
-    code = to_string(code)
+    if is_map(job) and (is_atom(code) or is_binary(code)) and
+         (is_nil(field) or is_atom(field) or is_binary(field)) do
+      record = %{
+        :ledger_kind => @refusal_kind,
+        "job_id" => Map.get(job, :job_id),
+        "canonical_request_digest" => Map.get(job, :canonical_request_digest),
+        "operation_id" => Map.get(job, :operation_id),
+        "attempt" => Map.get(job, :attempt),
+        "reason" => %{"code" => to_string(code), "field" => field && to_string(field)}
+      }
 
-    if code in @refusal_codes and (is_nil(field) or code in ~w(missing_binding binding_mismatch)) do
-      {:ok,
-       %{
-         :ledger_kind => @refusal_kind,
-         "job_id" => job.job_id,
-         "canonical_request_digest" => job.canonical_request_digest,
-         "operation_id" => job.operation_id,
-         "attempt" => job.attempt,
-         "reason" => %{"code" => code, "field" => field && to_string(field)}
-       }}
+      case validate_record(record, [@refusal_kind], @record_bytes) do
+        {:ok, _bytes} -> {:ok, record}
+        {:error, _reason} -> :error
+      end
     else
       :error
     end
@@ -624,11 +670,48 @@ defmodule Loopex.Executor.Local.Ledger do
 
   Answers `:absent`, `{:ok, marker}`, `{:ok, refusal}`, or unavailability. A
   present-but-unreadable record is unavailable rather than absent, for the same
-  reason the index is.
+  reason the index is. A job-map caller additionally checks the exact immutable
+  request binding; this never revalidates the duplicate's ephemeral grant.
   """
-  @spec read_marker(prepared(), binary()) :: {:ok, map()} | :absent | {:error, term()}
+  @spec read_marker(prepared(), binary() | map()) :: {:ok, map()} | :absent | {:error, term()}
+  def read_marker(prepared, job) when is_map(job) do
+    case read_marker(prepared, Map.get(job, :job_id)) do
+      {:ok, record} ->
+        if record["canonical_request_digest"] != Map.get(job, :canonical_request_digest) do
+          {:error, :job_id_conflict}
+        else
+          with :ok <- Loopex.Executor.validate_job(job),
+               true <-
+                 record["operation_id"] == job.operation_id and record["attempt"] == job.attempt,
+               true <-
+                 record[:ledger_kind] == @refusal_kind or
+                   record["cleanup_grace_ms"] == job.cleanup_grace_ms do
+            {:ok, record}
+          else
+            false -> {:error, {:ledger_unavailable, :marker_request_mismatch}}
+            {:error, reason} -> {:error, reason}
+          end
+        end
+
+      other ->
+        other
+    end
+  end
+
   def read_marker(%{root: root}, job_id) do
-    read_record(marker_path(root, job_id), [@marker_kind, @refusal_kind])
+    if bounded_identifier?(job_id) do
+      case read_record(marker_path(root, job_id), [@marker_kind, @refusal_kind]) do
+        {:ok, record} ->
+          if record["job_id"] == job_id,
+            do: {:ok, record},
+            else: {:error, {:ledger_unavailable, :marker_identity_mismatch}}
+
+        other ->
+          other
+      end
+    else
+      {:error, {:ledger_unavailable, :invalid_job_id}}
+    end
   end
 
   @doc """
@@ -714,13 +797,11 @@ defmodule Loopex.Executor.Local.Ledger do
       :ledger_kind => @generation_kind,
       "executor_identity" => identity,
       "executor_epoch" => epoch,
-      "generation_id" => epoch |> Integer.to_string(16) |> String.pad_leading(64, "0"),
+      "generation_id" => generation_id(epoch),
       "root_binding" => binding
     }
 
-    bytes = encode(record)
-
-    with true <- byte_size(bytes) <= @generation_bytes,
+    with {:ok, bytes} <- validate_record(record, [@generation_kind], @generation_bytes),
          :ok <- publish(path, bytes),
          {:ok, ^record} <- read_record(path, [@generation_kind], @generation_bytes) do
       {:ok, record}
@@ -747,7 +828,7 @@ defmodule Loopex.Executor.Local.Ledger do
     valid =
       record["executor_identity"] == identity and is_integer(epoch) and epoch > 0 and
         epoch <= @max_epoch and
-        record["generation_id"] == epoch |> Integer.to_string(16) |> String.pad_leading(64, "0") and
+        record["generation_id"] == generation_id(epoch) and
         record["root_binding"] == binding
 
     if valid, do: {:ok, record}, else: {:error, {:ledger_unavailable, :generation_mismatch}}
@@ -759,7 +840,7 @@ defmodule Loopex.Executor.Local.Ledger do
 
       case read_record(path, [@open_kind]) do
         {:ok, record} ->
-          if valid_open_entry?(record),
+          if name == digest(record["job_id"]),
             do: {:cont, {:ok, [{name, record} | entries]}},
             else: {:halt, {:error, {:ledger_unavailable, :malformed_open_entry}}}
 
@@ -776,12 +857,6 @@ defmodule Loopex.Executor.Local.Ledger do
     end
   end
 
-  defp valid_open_entry?(record) do
-    is_binary(record["job_id"]) and is_binary(record["canonical_request_digest"]) and
-      is_binary(record["executor_identity"]) and is_integer(record["origin_executor_epoch"]) and
-      is_integer(record["cleanup_grace_ms"]) and record["cleanup_grace_ms"] in 1..@max_uint64
-  end
-
   # Concept: the snapshot is one closed observation, and it is bounded as a whole
   # rather than only entry by entry.
   #
@@ -796,6 +871,7 @@ defmodule Loopex.Executor.Local.Ledger do
       "loopex:local-root-snapshot:v1",
       prepared.generation_digest,
       prepared.root_binding,
+      prepared.root_claim_nonce,
       length(entries),
       Enum.map(entries, fn {name, record} -> [name, digest(encode(record)), record] end)
     ]
@@ -847,16 +923,92 @@ defmodule Loopex.Executor.Local.Ledger do
   defp decode_record(path, kinds, ceiling) do
     with {:ok, bytes} <- File.read(path),
          record when is_map(record) <- safe_decode(bytes),
-         true <- Map.get(record, :ledger_kind) in kinds,
-         true <- exact_keys?(record),
-         canonical = encode(record),
-         true <- canonical == bytes and byte_size(canonical) <= ceiling do
+         {:ok, canonical} <- validate_record(record, kinds, ceiling),
+         true <- canonical == bytes do
       {:ok, record}
     else
+      {:error, {:ledger_unavailable, _detail} = reason} -> {:error, reason}
       {:error, reason} -> {:error, {:ledger_unavailable, reason}}
       _other -> {:error, {:ledger_unavailable, :malformed_record}}
     end
   end
+
+  # Concept: a canonical record must also describe a value this ledger admits.
+  #
+  # Technical depth: readers and publishers share these domains. Validate the
+  # entire admission pair before its first write, so a malformed second record
+  # cannot create a partial publication. A record's digest encoding is checked
+  # here; only the job-aware caller can recompute its full semantic binding.
+  defp validate_record(record, kinds, ceiling) when is_map(record) do
+    with true <- Map.get(record, :ledger_kind) in kinds,
+         true <- exact_keys?(record) and valid_record_fields?(record),
+         bytes = encode(record),
+         true <- byte_size(bytes) <= ceiling do
+      {:ok, bytes}
+    else
+      _other -> {:error, {:ledger_unavailable, :malformed_record}}
+    end
+  end
+
+  defp validate_record(_record, _kinds, _ceiling),
+    do: {:error, {:ledger_unavailable, :malformed_record}}
+
+  defp valid_record_fields?(%{ledger_kind: @generation_kind} = record) do
+    epoch = record["executor_epoch"]
+
+    is_binary(record["executor_identity"]) and record["executor_identity"] != "" and
+      is_integer(epoch) and epoch > 0 and epoch <= @max_epoch and
+      record["generation_id"] == generation_id(epoch) and hex_digest?(record["root_binding"])
+  end
+
+  defp valid_record_fields?(%{ledger_kind: @marker_kind} = record) do
+    valid_attempt_fields?(record) and uint64?(record["cleanup_grace_ms"]) and
+      hex_digest?(record["admission_nonce"])
+  end
+
+  defp valid_record_fields?(%{ledger_kind: @refusal_kind} = record),
+    do: valid_attempt_fields?(record) and valid_reason?(record["reason"])
+
+  defp valid_record_fields?(%{ledger_kind: @open_kind} = record) do
+    epoch = record["origin_executor_epoch"]
+
+    bounded_identifier?(record["job_id"]) and hex_digest?(record["canonical_request_digest"]) and
+      bounded_identifier?(record["executor_identity"]) and is_integer(epoch) and epoch >= 0 and
+      uint64?(record["cleanup_grace_ms"])
+  end
+
+  defp valid_attempt_fields?(record) do
+    bounded_identifier?(record["job_id"]) and bounded_identifier?(record["operation_id"]) and
+      hex_digest?(record["canonical_request_digest"]) and is_integer(record["attempt"]) and
+      record["attempt"] > 0
+  end
+
+  defp valid_reason?(%{"code" => code, "field" => field} = reason) do
+    map_size(reason) == 2 and code in @refusal_codes and
+      (is_nil(field) or
+         (code in ~w(missing_binding binding_mismatch) and field in @binding_fields))
+  end
+
+  defp valid_reason?(_reason), do: false
+
+  defp bounded_identifier?(value), do: is_binary(value) and byte_size(value) in 1..8_192
+  defp uint64?(value), do: is_integer(value) and value in 1..@max_uint64
+
+  defp hex_digest?(value) when is_binary(value) and byte_size(value) == 64,
+    do: match?({:ok, _bytes}, Base.decode16(value, case: :lower))
+
+  defp hex_digest?(_value), do: false
+
+  # Concept: generation spelling is exact retained truth, never normalized on read.
+  #
+  # Technical depth: ADR 0016 requires 64 lowercase hexadecimal characters.
+  # Encoding the fixed-width bytes states that spelling explicitly; the generic
+  # integer radix renderer emits uppercase letters. Invalid old spelling is
+  # unavailable without rewriting its bytes or inventing migration authority.
+  defp generation_id(epoch), do: Base.encode16(<<epoch::unsigned-256>>, case: :lower)
+
+  defp same_fields?(left, right, fields),
+    do: Enum.all?(fields, &(Map.fetch!(left, &1) == Map.fetch!(right, &1)))
 
   # Concept: every member is either the kind marker or a plain string-keyed
   # field.

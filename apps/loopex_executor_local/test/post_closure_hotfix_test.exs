@@ -1262,8 +1262,15 @@ defmodule Loopex.Executor.Local.PostClosureHotfixTest do
            "claim contention no longer recurs with the original absolute deadline"
 
     assert source =~
-             ~r/case revalidate\(prepared\) do\s+:ok ->\s+if work_policy == :initial_attempt or\s+System\.monotonic_time\(:millisecond\) < deadline do\s+work\.\(\)/s,
+             ~r/case revalidate\(prepared\) do\s+:ok ->\s+claimed =\s+Map\.put\(.*?:root_claim_nonce,.*?\)\s+if work_policy == :initial_attempt or\s+System\.monotonic_time\(:millisecond\) < deadline do\s+run_claim_body\(work, claimed\)/s,
            "the absolute-deadline API no longer fences the body after claim acquisition"
+
+    assert source =~
+             ~r/defp run_claim_body\(work, claimed\) when is_function\(work, 1\), do: work\.\(claimed\)/,
+           "the claimed callback no longer receives the explicit observation context"
+
+    assert source =~ ~r/defp run_claim_body\(work, _claimed\), do: work\.\(\)/,
+           "zero-arity claim bodies no longer retain their original invocation"
 
     assert source =~
              ~r/if\(wait_ms == 0, do: :initial_attempt, else: :deadline_bound\)/,
