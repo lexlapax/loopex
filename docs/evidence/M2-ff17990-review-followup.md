@@ -1058,3 +1058,60 @@ Native executor-app, final joined suite, package/floor, live-provider/account
 and rollback evidence remain separate pending checks. The failed AMD64
 Rosetta preflight and intermediate native failures are retained, not replaced
 by these narrower successes.
+
+### Cleanup watchdog follow-through before final qualification
+
+Read-only follow-through of the portability repair identified two further
+provider-guard defects. Generic termination could disarm the cleanup timer
+before quiescence, and namespace-helper failure could fall through to an
+acknowledgement when its timer wait was interrupted. Both were reproduced:
+the first left the owned group alive past the unchanged observation bound;
+the second emitted a cleanup acknowledgement and exit 0 while an owned
+namespace obstacle remained. Neither result is treated as passing evidence.
+
+The repair joined at `a6187c7`. Only an established quiescent birth group may
+cancel its timer using USR1; generic termination does not cancel it. The
+quiescence check also requires a live, non-zombie direct child of the timer in
+the same group. The timer installs its cancellation handler before spawning
+that child, so this observation establishes readiness without a new protocol
+channel. Namespace failure now exits unproved regardless of interruption.
+Signals retain the live birth-group authority, and all existing command,
+cleanup and observation bounds remain unchanged.
+
+The final follow-through at `cfcd02c` ignores generic termination before the
+timer fork, preserves that inherited disposition in the timer and sleeper,
+and restores interruption handling in the owning guard after capturing the
+timer identity. A structural case pins this executable-script ordering. A
+separate shell-conformance case pauses before handler installation and across
+child execution, sends actual group signals, and requires actual reaping. It
+does not claim to pause the production launcher at its precise fork boundary.
+The read-only follow-through found no remaining concrete issue in these two
+changed files; this is self-audit, not independent acceptance.
+
+The final launcher bytes have SHA256
+`bb62b118fc1d01a30d4b3a83ae28b7a1911577c68a6d34a30a03af1608134f39`.
+All eight launcher cases passed serially with seed `3107` on Darwin in 5.3
+seconds and on the native Linux image above in 4.9 seconds. Formatting and
+standalone warnings-as-errors compilation also passed. The first native
+eight-case run failed because the new shell fixture let an asynchronous
+child inherit `/dev/null` as stdin. Capturing its input descriptor before
+fork repaired that fixture; its failed result is retained separately from
+the corrected run. No test name, gate minimum, or locked artifact changed.
+
+With those final launcher bytes, the actual native guard control produced
+one correlated acknowledgement, exit 0, Port DOWN, an empty owned group and
+removed namespace in 11 ms. Removing execute permission from only the
+container's original ps target produced no acknowledgement, exit 137, Port
+DOWN, an empty group and removed namespace in 2,017 ms, within the unchanged
+2,000 ms cooperative period plus 100 ms observation allowance. The original
+ps inode and digest, and every other helper identity, were unchanged; ps
+permissions were restored and execution succeeded. These are launcher-only,
+synthetic-worker observations, not packaged or live-provider evidence.
+
+The provisional current-pair package at `ef463e0` passed archive identity,
+outside startup, copied CLI, separate FD observation and parent-death checks.
+Its first build failed before product compilation because the isolated task
+environment omitted HOME; preserving the existing HOME fixed that environment.
+That changed-environment, incremental result is not a cold-build proof and
+does not qualify these later source bytes. Final-source current/floor/native
+package, whole-suite, live gate/account and rollback checks remain outstanding.
