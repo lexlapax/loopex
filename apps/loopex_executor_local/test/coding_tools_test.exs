@@ -4660,6 +4660,23 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     end
   end
 
+  test "an ordinary high exit status survives raw argv and bounded helper supervision" do
+    root = workspace()
+    command = "printf entered; exit 200"
+
+    # Concept: an ordinary high exit code remains the command's exact result.
+    # Technical depth: every path proves finite command entry and status 200;
+    # this case sends no signals and makes no concurrent-interruption claim.
+    for arguments <- [%{"command" => command}, %{"argv" => ["/bin/sh", "-c", command]}] do
+      assert {:ok, receipt} = run(root, "loopex.bash", arguments)
+      assert receipt.outcome == :failed
+      assert receipt.cleanup_confirmation == :confirmed
+      assert receipt.output == "entered\n[loopex: the command exited with status 200.]"
+    end
+
+    assert {"entered", 200} = Local.answer_within("/bin/sh", ["-c", command], 5_000)
+  end
+
   test "the launch guard preserves fast command status and remains the only group signal authority" do
     root = workspace()
 
