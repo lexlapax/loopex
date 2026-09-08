@@ -1745,3 +1745,195 @@ attestation is claimed here. Exact-pair ADR 0022 acceptance, final literal M2
 qualification, account lookup and independent final evidence-child/release
 review remain open. Nothing in this checkpoint authorizes integration, a tag
 or publication.
+
+<a id="adr-0022-and-account-qualification"></a>
+## ADR 0022 Acceptance and Provider Account Confirmation
+
+This checkpoint supersedes the outstanding ADR 0022 and account-lookup items
+in the preceding chronological checkpoints; their observations remain records
+of the revisions and times where they were made. The maintainer explicitly
+accepted ADR 0022 at Proposed candidate
+`4c75ae3f81f3caefe7745c40a5b24e9133255e57`. The acceptance commit is
+`12a5daaf327874c36fb1adbd88db0fc925a44585`; the
+[standalone disposition](../developer/agent-context-map.md#disposition-adr-0022-acceptance-2026-09-08)
+records that authority and its exact limits. Independent read-only transition
+review verified the five changed paths, both Proposed-file digests, the
+Technical companion's byte identity, the minimal Concept changes, and the new
+record's uniqueness and scope. This accepted ADR does not waive a failed gate,
+accept a release candidate, or authorize integration, tagging or publication.
+
+Serial verification at exact `12a5daa`, in a clean disposable Darwin clone,
+used Elixir 1.20.3 / OTP 29.0.5, four normal schedulers and two each of dirty
+CPU/IO schedulers. Ambient credentials were absent. The process-permitting
+profile allowed isolated task writes, Mix sockets and process inspection; it
+was not a wholly write-denied profile. Identical product build inputs were
+copied from the earlier source, followed by forced warnings-as-errors product
+compilation.
+
+| Exact acceptance-commit check | UTC window, 2026-09-08 | Result | Log SHA-256 |
+| --- | --- | --- | --- |
+| Forced warnings-as-errors product compilation | 10:32:33–10:32:38 | Exit 0 | `a6cfc0a3781ca0f1d5a6b81784436cc43aab233e7cb4436deba4009f49e7b156` |
+| Literal `mix loopex.status` | 10:32:38–10:39:14 | Exit 0 | `2bde8a90a81179a725541af673d41ae58ba2fe7412c7c71baabe135c933638c4` |
+| Bootstrap aggregate | 10:39:15–10:47:03 | Exit 0; 68 passed, seed 849423 | `4000f9ac7e75498a514de6e1fe075be0aa1739150bd651b2079500206a62be82` |
+
+The initial restricted-profile compilation could not acquire Mix's local TCP
+lock socket (`:eperm`); no compilation ran in that attempt. Its output remains
+separate from the process-permitted result. The local clone initially lacked
+`origin/main`, which bootstrap reported as unavailable branch-residue scope.
+After the aggregate ended, the exact existing reference `3a729b0` was supplied
+and the standalone repository-hygiene check passed against it. That subsequent
+check does not rewrite the original aggregate output. No literal milestone
+gate or whole suite was run at `12a5daa` by this transition validation.
+
+Evidence-only child `ded1faf65b716b12a6fdc9eb175608ab8b0b3078` records
+[authenticated account confirmation](M2-post-closure-attestations.md#source-4e514fb-account-verification)
+for all twelve calls at source `4e514fb`: exact identifiers, rendered UTC
+timestamps, model, reported input/output, and all cache categories. The account
+totals are 13,251 input and 800 output tokens, matching the retained role
+records. This is source-specific provider confirmation, not a billing audit or
+evidence that a later source ran those calls. Both acceptance and evidence
+commits were pushed without changing `main`.
+
+### Supplemental Lease-Schedule Diagnosis
+
+A single benign supplemental batch at unchanged, clean `12a5daa` established
+a scheduling weakness in the protected coding-tools case `a job whose workspace
+lease is lost mid flight is ended and reported unproven`. That case sleeps
+800 ms before revoking the Bash lease, without establishing that the task has
+entered execution. The diagnostic deliberately held the caller before the
+same request-construction and execution boundary until after the unchanged
+cutoff and actual lease DOWN. The real executor then correctly returned
+`{:error, {:refused_before_effect, :executor_prestart_mismatch}}`, which the
+protected case's required receipt shape would reject.
+
+The positive control required real command output and independently observed
+a live owned child before revocation at the same cutoff. The actual receipt
+was `outcome_unknown` with confirmed cleanup; successful process snapshots
+found no live members of the owned group immediately and after the original 3.5-second
+observation horizon. No trailing file effect occurred. The original request,
+grant, Task.await and command durations were unchanged. Two supplemental cases
+passed, seed 0, in 5.3 seconds, during 10:55:01–10:55:07 UTC. Log SHA-256:
+`3c41b12f555578acdcf08ae549b040b8779d1d48226934972e34f22b48069654`.
+All owned processes ended; no tracked source changed. This was not a literal
+gate run or a replacement for its protected test.
+
+This establishes the fixture's possible incorrect rejection, **not** that it
+caused the original Outcome 4 failure. The original failed assertion and seed
+remain unavailable. The edit half's separate fixed-sleep schedule was inspected
+but not executed in this diagnostic. A completed edit cannot be called
+mid-flight merely because its caller is suspended: its guardian and effect
+worker progress independently. Existing asynchronous tracing likewise provides
+observation, not an atomic pause before completion. No product synchronization
+hook, test rewrite, gate change or waiver is made by this evidence record.
+
+### Decision Packet: Diagnosable and Reliably Scheduled Qualification
+
+The maintainer owns the remaining choice; no option is accepted by this record.
+The original log cannot recover a discarded assertion or seed. A later pass
+does not establish which property failed. The controlled schedule above also
+identifies a fixture weakness independently of that unidentified failure.
+
+- **Recommended: narrowly scoped repair proposals.** Preserve the real
+  `Local.execute` paths, locked claims, minima and deadlines. Establish the
+  intended in-flight state causally; do not substitute helper-only evidence
+  for the actual edit path. The Bash progress seam already supports an
+  observation; no existing deterministic edit pause was found. Any new private,
+  bounded synchronization point must be proposed before dependent implementation.
+  Separately retain safe failure metadata such as case identity, source location
+  and seed without weakening the authoritative result channel or printing
+  provider material. Both M1 and M2 bind that shared runner and its corpus, so
+  permanent changes require their sequential additive gate-generation
+  transactions, independent exact-SHA review, acceptance and requalification.
+  This has the greatest immediate review cost but improves repeatability and
+  future diagnosis. A private observation mechanism should not become another
+  public executor port or runtime configuration framework; that limit preserves
+  modularity and avoids imposing a testing interface on other adapters.
+- **Candidate-specific qualification exception.** After reviewing the exact
+  current results, the maintainer could explicitly retain the unidentified
+  failure and unreliable fixture as accepted qualification risks. This changes
+  no product boundary and avoids a runner transaction, but proves neither a
+  repaired test nor the cause of the earlier failure. It leaves subsequent
+  candidates dependent on renewed manual judgment and weakens repeatability
+  for future adapters and platforms. It requires exact durable scope and
+  independent release review; it is not a green-gate substitution or authority
+  to publish by itself.
+
+Continuing unbounded retries is not recommended: it cannot recover the lost
+record and would turn disappearing failures into misleading evidence. A passive
+external seed observer can improve a new run's metadata without changing the
+gate, but cannot restore the assertion already discarded or prove that a
+fixed-sleep fixture established its claimed schedule. The expected remaining
+work is a bounded proposal/repair and review cycle plus serial qualification,
+not a guaranteed release date; the first option includes both holders' required
+transactions rather than hiding that cost.
+
+An independent bounded contract check distinguishes submission for review from
+acceptance or release. The controlled probe does not establish the specific
+same-SHA, same-seed, same-environment disappearing-failure condition: it changes
+the schedule deliberately, and the original seed is unknown. A newer candidate
+may be submitted for independent review with these facts disclosed; that review
+must judge the fixture weakness and its remedy rather than inheriting a waiver
+or an unsubstantiated severity label. M0 Amendment 6 separately requires R to
+re-prove inherited required gates. A later-source green is evidence for that
+later source, not retroactive completion of the outstanding exact-R obligation.
+Private synchronization does not automatically require a gate amendment; its
+precise scope still needs judgment. A change to the shared bound runner does
+require each holder's transaction. No new amendment is begun merely by offering
+this candidate and evidence for review.
+
+### Literal Qualification at ded1faf
+
+The fresh, clean-source literal M2 invocation at
+`ded1faf65b716b12a6fdc9eb175608ab8b0b3078` ran serially on Darwin from
+2026-09-08T10:57:14Z through 11:45:45Z. It used the current Elixir 1.20.3 /
+OTP 29.0.5 pair, four normal schedulers, two each of dirty CPU/IO schedulers,
+and the runner's own isolated build and state roots. `mix deps.get` completed
+first with every locked version unchanged. Ambient provider keys were absent;
+the authorized key entered only through the unchanged private stdin frame.
+No other VM/test lane ran concurrently. A passive external process observer
+sampled only selector paths and numeric seeds; it did not change the gate or
+test state. Tracked source ended clean.
+
+The gate is **RED**, exit 1, with frame-parser and log-writer exits both 0.
+Seed 847813 is retained in the whole-suite output as well as the supplementary
+observer. Log SHA-256:
+`82db18b4280ac578f159d07c1b7f25c79b7397915dac7ce8d1669069fc856057`.
+
+The failure occurred at the ordinary whole-suite command after all protected,
+inherited and machinery selectors, including all three real-provider roles,
+passed the unchanged runner's checks. This follows the actual sequential gate
+control flow, not a claim that every successful selector's captured output was
+printed. Those successful real calls' identifiers were not retained by the
+literal runner; the earlier G account verification is not relabelled as theirs.
+Final matrix/evidence validation after the whole-suite command was not reached.
+
+| Whole-suite application | Passed | Failed | Excluded |
+| --- | --- | --- | --- |
+| loopex_protocol | 12 | 0 | 0 |
+| loopex | 538 | 0 | 0 |
+| loopex_llm_reqllm | 142 | 2 | 1 |
+| loopex_store_local | 41 | 0 | 0 |
+| loopex_executor_local | 164 | 0 | 0 |
+| loopex_composition | 13 | 0 | 0 |
+| loopex_reference_client | 18 | 0 | 2 |
+| loopex_cli | 122 | 0 | 2 |
+| Total | 1050 | 2 | 5 |
+
+The two retained failures are specific and are not described as environmental:
+
+1. `the committed deadline stops an actually blocked child writer through
+   independent cleanup`, in `provider_backpressure_test.exs`, compared the
+   wall clock against the request deadline after the failure answer. Actual
+   values were 1788867523955 and 1788867523956 milliseconds respectively.
+   This one-millisecond difference requires diagnosis of the clock conversion
+   and assertion; it does not authorize adding tolerance or relaxing a bound.
+2. `retaining owner loss before protected entry stops bootstrap without
+   transport`, in `provider_attempt_adapter_contract_test.exs`, reached the
+   cleanup assertion but `ProviderIsolationFixture.assert_gone/1` could not
+   read the fixture's `namespace` marker: `:enoent`. This requires tracing
+   setup/cleanup ordering, not treating a missing observation as proved cleanup.
+
+The current failures are distinct from the original exact-R opaque Outcome 4
+red and from the separately demonstrated lease-test scheduling weakness. No
+retry, repair attribution, green gate, exception or release approval is claimed
+by this record. The candidate is not represented as a qualified source baseline.
