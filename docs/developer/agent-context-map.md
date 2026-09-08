@@ -1489,3 +1489,26 @@ Independent exact-diff review remains required before integration. The separate
 implementation instruction grants no tag, publication, final release approval,
 or approval of an unseen integration candidate. Final source and evidence must
 be offered for release review before those decisions.
+
+<a id="disposition-local-executor-bash-2026-09-07"></a>
+## Local Executor Bash Requirement and Repair Instruction
+
+On 2026-09-07, after the native Linux launch-input and helper-group failures were
+presented with alternatives, the maintainer answered **Yes** to the explicit
+question: may the reference local executor require `/bin/bash` for its internal
+supervision scripts, keeping model commands on `/bin/sh` and Core and custom
+executors independent, and may the repair and qualification be completed?
+
+That current decision authorizes this narrowly scoped runtime dependency,
+implementation, truthful documentation and serial cross-platform tests on
+`codex/m2-release-repair`. Preserve the existing carrier/guard ownership,
+credential boundaries, cleanup protocol and bounds. No POSIX-only fallback,
+shared-group redesign, Linux exclusion, gate weakening or retry waiver was
+approved. Bash in development prerequisites is not the source of this authority.
+
+[ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept) records the
+choice and its technical consequences as a Proposed pair. This instruction does
+not accept unseen ADR bytes or fill that pair's governance row. Exact-pair
+acceptance and independent final-source review remain separate. It changes no
+earlier disposition, M2 lifecycle, accepted plan/gate or integration baseline,
+and grants no merge, tag, publication or release approval.

@@ -31,6 +31,7 @@ a decision adds a new record rather than rewriting the old one.
 | 0019 | Host-owned provider protection | Accepted | [Decision](0019-host-owned-provider-protection.md#concept) | [Technical depth](0019-host-owned-provider-protection-technical.md#technical-depth) |
 | 0020 | Explicit prepared handoff | Accepted | [Decision](0020-explicit-prepared-handoff.md#concept) | [Technical depth](0020-explicit-prepared-handoff-technical.md#technical-depth) |
 | 0021 | Compacted provider-accounting provenance | Accepted | [Decision](0021-compacted-provider-accounting-provenance.md#concept) | [Technical depth](0021-compacted-provider-accounting-provenance-technical.md#technical-depth) |
+| 0022 | Local executor supervision shell | Proposed | [Decision](0022-local-executor-supervision-shell.md#concept) | [Technical depth](0022-local-executor-supervision-shell-technical.md#technical-depth) |
 
 0001 and 0002 were the prerequisites that unblocked the first milestone
 candidate; the [plans register](../plans/README.md) records current status.
@@ -99,6 +100,12 @@ locked gate, or integration authority. The
 records implementation progress and outstanding evidence. ADR 0021 supersedes
 only ADR 0018's settlement version, compact representation/validation, and
 legacy-compatibility clauses, preserving its reported-usage accounting policy.
+
+0022 records the maintainer-approved fixed Bash prerequisite for the reference
+local executor's internal supervision, preserving raw command semantics and
+the current cleanup topology. The implementation instruction is recorded
+separately; this pair remains Proposed pending exact-byte acceptance. It is not
+a retroactive M2 prerequisite and changes no Closed plan or locked gate.
 
 0004 and 0005 are both parked. They designed correction paths for a defect
 found in an accepted plan, then the defect that prompted them turned out to be
