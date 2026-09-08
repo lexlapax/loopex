@@ -1670,3 +1670,78 @@ instruction and M0 acceptance do not accept it. Final exact-source gate
 qualification, account confirmation and independent final evidence-child
 review remain open. Earlier platform, package and rollback observations stay
 bound to source 274afa1; identical product bytes are not described as new runs.
+
+<a id="provider-fixture-7082abc"></a>
+## Provider Fixture and Writer-Schedule Qualification
+
+Test-repair source `7082abcff4be08be5510e930934c0d8df5cb1987` is the child of
+`bc9bb250c5fc420b684b2f1502eac551db1bb33f`. It changes only
+`apps/loopex_llm_reqllm/test/support/provider_isolation_fixture.exs` and
+`apps/loopex_llm_reqllm/test/provider_bridge_test.exs`. Product, configuration,
+dependency, gate and accepted-governance bytes remain unchanged. Independent
+static review found no remaining blocker in that patch; it is not acceptance
+or independent executable release qualification.
+
+The full-context diagnostic at source 4e514fb, seed 221878, passed all eleven
+numbered feature lanes, including coding-tools, then failed two provider-adapter
+cases. The copied formatter disclosed the assertions the literal runner had
+suppressed. Further synthetic-only timing observations kept the original
+2,000 ms request deadlines. Fixture evaluation consumed approximately 250–280 ms,
+dependency startup 280–390 ms, and actual worker invocation approximately
+1,100 ms before dispatch-start publication. Those runs failed the same two
+names at different transport modes or later assertions: they did not establish
+their intended post-transport or retained-live schedule before expiry.
+
+The repair compiles the synthetic modules in a separate preparation VM and
+embeds their BEAMs in the hash-bound fixture worker. The parent never loads those
+modules. Actual worker entry, dependency startup, catalog lookup, protocol,
+transport and cleanup remain inside the unchanged request deadline. The
+compiler uses the existing unconditional credential/loader removal set while
+preserving the caller's search path, including bootstrap shadows. Its ten-second
+self-stop begins at compiler main, not OS spawn; it proves neither a bounded
+OS bootstrap nor immediate teardown on caller death. Cleanup registration now
+precedes preparation. No request deadline or ExUnit timeout was extended.
+
+The broader experiment also exposed an unrelated test race: observing a raw
+writer's birth does not mean it is already blocked. The existing 1,000 ms setup
+wait now requires exactly one writer with a waiting state and the real
+codec-send stack observed together. The 5,000 ms request deadline, killed DOWN,
+ambiguity and cleanup assertions remain unchanged. No protected case name,
+minimum or exclusion changed.
+
+All runs below were serial Darwin observations, with write-permitting isolated
+roots, process inspection and the current Elixir 1.20.3 / OTP 29.0.5 pair.
+
+| Observation | Result | Log SHA-256 |
+| --- | --- | --- |
+| Full-context copied gate, 4e514fb; 08:45:53–09:10:04 UTC | Two provider-adapter failures after all eleven feature lanes passed; not canonical gate evidence | `e70f8c74575440fae1289ab81ea9d0620fb0ea02cce92e2856846d5038e5562a` |
+| Deadline diagnostic, 4e514fb plus observers | Same two case names failed; assertions differed | `ff6cb314eef39f1e1022f219fa39025e030a7a458ea9cede6c4dc338d8714137` |
+| Child-phase diagnostic, 4e514fb plus observers | Same two case names failed; timestamps locate startup and pre-dispatch work | `f3e8839f2a2ca036686c9be73e0d44a00aeda0a3e8b60aac7f5670e1966b2321` |
+| First compiled-BEAM experiment, uncommitted draft | 14 contract cases passed; this precedes the final environment correction | `41389b9ef1d64673d87ebc32407afdbaebedb69f6b4c9e6c631861d38185faee` |
+| Clean 7082abc provider-app run; 09:50:57–09:54:32 UTC | 143 of 144 ordinary cases passed, one real-provider exclusion, one unavailable build-conformance case: copied build dependency targets were missing | `d9f7ae3ac7fa610be2be3d5e9294ad5392b19b5aa5d2394cc76d6a33d49085b9` |
+| Exact 7082abc M0 conformance after restoring task-only dependency targets; 09:57:00–09:57:10 UTC | Both cases passed; actual offline build, four scrubbed Git children and zero parent Erlang shim calls observed | `eca65cf521712c76de290dbabb4fc05691b8bc3bdba6ace63520321d6697e41c` |
+
+Seed 221878 was used throughout this table. The broad run reused an owned copy
+of identical 4e514fb product BEAMs with `--no-compile --no-deps-check`; this is
+explicit diagnostic reuse, not fresh product compilation. The build-conformance
+case separately forced the actual same-source companion build. Formatting,
+commit-message and whitespace checks passed at 7082abc. Tested tracked source
+ended clean. These separate passes are not described as one green whole suite
+or a green literal M2 gate.
+
+The archive `M2-provider-fixture-7082abc-2026-09-08.pauzMR` in the maintainer's
+`loopex-reviews` directory retains the logs, observers, commands, exact-source
+corrections and independent static review, with 32 checked manifest entries.
+It also retains the author's failed first compiler draft (truncated source
+serialization), a task-wrapper build-path error that ran no tests, and the
+unclean broad run. Their raw records are not rewritten into success. Two copied
+driver headers retained older source wording; the archive explicitly corrects
+their actual base/commit rather than claiming they were exact-source records.
+The configured credential's literal bytes were checked absent before archival.
+
+The original opaque coding-tools red remains unresolved; these provider repairs
+do not explain or disposition it. No new account verification or provider
+attestation is claimed here. Exact-pair ADR 0022 acceptance, final literal M2
+qualification, account lookup and independent final evidence-child/release
+review remain open. Nothing in this checkpoint authorizes integration, a tag
+or publication.
