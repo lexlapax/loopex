@@ -151,7 +151,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
     exec </dev/null >/dev/null 2>&1
     guard_program=$1
     shift
-    trap 'wait_interrupted=1' TERM
+    trap 'wait_interrupted=1' TERM USR1
     /bin/sh -c "$guard_program" loopex-provider-guard "$$" "$@" 3<&3 4>&4 &
     guard_pid=$!
     exec 3<&- 4>&-
@@ -177,6 +177,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
   # sleep before the guard acknowledges. Every inspection and namespace helper
   # runs under that one timer. An expired timer kills its still-anchored group;
   # because that also destroys the guard it can never produce a cleanup ACK.
+  # Only a quiescence-authorized USR1 cancels the timer; generic termination
+  # cannot disarm it. Its sole first external child is sleep, forked after trap
+  # installation: observing that live child proves cancellation is armed. All
+  # signals retain the live birth-group authority. Namespace failure always
+  # exits unproved, even if a signal interrupts its timer wait.
   defp guard_program do
     ~S"""
     group=$1 namespace=$2 nonce=$3 grace=$4
@@ -186,7 +191,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
 
     cleanup() {
       remaining=$1 stop_id=$2
-      trap 'wait_interrupted=1' TERM HUP INT PIPE
+      trap 'wait_interrupted=1' TERM HUP INT PIPE USR1
       kill -s TERM -- -"$group" 2>/dev/null
       if [ "${#remaining}" -gt 3 ]; then
         seconds=${remaining%???}
@@ -197,9 +202,14 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
       fi
       (
         stopping=0
-        trap 'stopping=1; wait_interrupted=1' TERM HUP INT PIPE
+        trap 'wait_interrupted=1' TERM HUP INT PIPE
+        trap 'stopping=1; wait_interrupted=1' USR1
+        [ "$stopping" -eq 1 ] && exit 0
         /bin/sleep "$delay" &
         sleeper=$!
+        if [ "$stopping" -eq 1 ]; then
+          kill -s USR1 -- -"$group" 2>/dev/null
+        fi
         while :; do
           wait_interrupted=0
           wait "$sleeper"
@@ -213,7 +223,19 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
         exit 125
       ) 3<&- 4>&- &
       timer=$!
-      /bin/rm -f "$socket" && /bin/rmdir "$namespace" || wait "$timer"
+      if /bin/rm -f "$socket" && /bin/rmdir "$namespace"; then
+        :
+      else
+        while :; do
+          wait_interrupted=0
+          wait "$timer"
+          timer_status=$?
+          if [ "$timer_status" -le 128 ] || [ "$wait_interrupted" -eq 0 ]; then
+            break
+          fi
+        done
+        exit 125
+      fi
       while :; do
         table=$(/bin/sh -c 'printf "%s\n" "$$"; exec /bin/ps -ax -o pid= -o ppid= -o pgid= -o stat=')
         status=$?
@@ -224,6 +246,8 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
           { parent[$1]=$2; groups[$1]=$3; states[$1]=$4 }
           END {
             if (bad || groups[witness] != group || groups[guard] != group || groups[timer] != group) exit 2
+            for (pid in parent) if (parent[pid] == timer && groups[pid] == group && states[pid] !~ /^Z/) timer_started=1
+            if (!timer_started) exit 1
             allowed[guard]=1; allowed[carrier]=1; allowed[witness]=1; timer_tree[timer]=1
             cursor=witness
             while (cursor != guard) {
@@ -234,7 +258,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncher do
             for (pid in groups) if (groups[pid] == group && !allowed[pid] && !timer_tree[pid] && states[pid] !~ /^Z/) exit 1
             exit 0
           }'; then
-          kill -s TERM -- -"$group" 2>/dev/null
+          kill -s USR1 -- -"$group" 2>/dev/null
           while :; do
             wait_interrupted=0
             wait "$timer"
