@@ -98,7 +98,7 @@ Provide `/bin/bash` before using the reference stack. The executor does not
 silently select another shell when it is absent; a failed launch is not proof
 that an effect completed or cleanup succeeded. The
 [approved implementation choice](../developer/agent-context-map.md#disposition-local-executor-bash-2026-09-07)
-and [Proposed ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
+and [Accepted ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
 record this new prerequisite and its qualification requirements.
 
 ### Run and Cleanup Bounds

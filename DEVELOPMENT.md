@@ -43,7 +43,7 @@ executable `/bin/bash` for its internal supervision scripts on Darwin and Linux.
 Model-supplied raw commands still use `/bin/sh`, and argv commands remain literal.
 Core and custom executors do not acquire this requirement. This is the
 [maintainer-approved repair choice](docs/developer/agent-context-map.md#disposition-local-executor-bash-2026-09-07),
-documented in [Proposed ADR 0022](docs/adr/0022-local-executor-supervision-shell.md#concept),
+documented in [Accepted ADR 0022](docs/adr/0022-local-executor-supervision-shell.md#concept),
 not an inference from the bootstrap's Bash dependency. An incompatible shell is
 not a fallback. See the [operator prerequisite](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
 before running the reference stack.

@@ -1545,3 +1545,40 @@ unchanged. M0 and M2 remain Closed. This record does not accept ADR 0022, waive
 required evidence or gates, approve an unseen integration or release candidate,
 or authorize a tag or publication. The separate instruction to finish M2 does
 not substitute for final source-bound evidence and independent release review.
+
+<a id="disposition-adr-0022-acceptance-2026-09-08"></a>
+## ADR 0022 Exact-Pair Acceptance
+
+On 2026-09-08 (America/Los_Angeles), the maintainer answered **Yes** to the
+explicit question accepting ADR 0022 at candidate
+`4c75ae3f81f3caefe7745c40a5b24e9133255e57`: require Bash for the reference local
+executor's internal supervision while model-supplied raw commands remain on
+`/bin/sh`. Core and third-party executors acquire no Bash prerequisite. This
+records exact-pair acceptance, separately from the earlier implementation-only
+instruction and the M0 generation-6 disposition.
+
+The bound Proposed pair is:
+
+- Concept: `sha256:d76b4996903e60a99bffcc35d31a0b0226f7123ce502b7e9a54ee7a8cd303edd`.
+- Technical depth: `sha256:5822d3fc93548a7d3c707fb82fc1d62d1a9932d9668c8d6e28defb28fda23467`.
+
+The independent exact-candidate static review recommended acceptance with no
+concrete text/code conflict. It distinguished existing Darwin and native Linux
+qualification evidence from new execution at this candidate; acceptance does
+not turn those historical results into later-source runs or universal platform
+coverage.
+
+Within the pair, this administrative transition changes only the Concept status
+and Acceptance row; the Technical depth file remains byte-identical to the
+candidate. It also updates ADR 0022's index status and explanation, the two
+current guidance links' status labels in `DEVELOPMENT.md` and
+`docs/operator/tools-and-policy.md`, and adds this one standalone disposition.
+It changes no earlier disposition, product, gate, bound artifact, normative
+plan envelope, register, or milestone lifecycle. Independent exact-transition
+review remains required before integration.
+
+This decision accepts ADR 0022 alone. It does not waive the unexplained M2
+coding-tools gate failure, provider-account verification, or any other required
+evidence; it does not approve an unseen integration or release candidate, merge,
+tag, or publication. M2 remains Closed, with post-closure source qualification
+and independent release review still outstanding.
