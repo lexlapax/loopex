@@ -682,6 +682,356 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
     end
   end
 
+  test "a retained receipt admits exactly its mandatory keys on lookup and duplicate execution" do
+    fixture = prepared_fixture("receipt-exact-keys")
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    request =
+      job(fixture, "receipt-exact-keys", %{
+        "path" => "receipt-exact-keys.txt",
+        "content" => "ok"
+      })
+
+    assert {:ok, receipt} = Local.execute(local, request, grant(request), [], nil)
+    assert Local.stats(local).dispatches[request.job_id] == 1
+
+    path = receipt_path!(fixture.ledger, request.job_id)
+    assert {:ok, ^receipt} = Local.receipt(local, request.job_id)
+
+    mutations =
+      [unknown_key: Map.put(receipt, :adapter_private, "not part of the receipt contract")] ++
+        Enum.map(Map.keys(receipt), &{{:missing, &1}, Map.delete(receipt, &1)})
+
+    for {label, malformed} <- mutations do
+      File.write!(path, :erlang.term_to_binary(malformed, [:deterministic]))
+
+      assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt},
+             "#{inspect(label)} was returned by retained lookup"
+
+      assert Local.execute(local, request, grant(request), [], nil) ==
+               {:error, :invalid_retained_receipt},
+             "#{inspect(label)} was returned by duplicate execution"
+    end
+
+    assert Local.stats(local).dispatches[request.job_id] == 1
+  end
+
+  test "a malformed duplicate job is refused before retained replay or admission join" do
+    fixture = prepared_fixture("malformed-duplicate-job")
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    retained =
+      job(fixture, "malformed-retained-job", %{
+        "path" => "malformed-retained-job.txt",
+        "content" => "ok"
+      })
+
+    assert {:ok, receipt} = Local.execute(local, retained, grant(retained), [], nil)
+    malformed_retained = Map.delete(retained, :operation_id)
+
+    assert Local.execute(local, malformed_retained, grant(retained), [], nil) ==
+             {:error, {:refused_before_effect, :canonical_job_request_mismatch}}
+
+    assert Process.alive?(local)
+    assert {:ok, ^receipt} = Local.receipt(local, retained.job_id)
+    assert Local.stats(local).dispatches[retained.job_id] == 1
+
+    joining =
+      job(fixture, "malformed-joining-job", %{
+        "relative_path" => "malformed-joining-job.txt",
+        "content" => "ok",
+        "delay_ms" => 1_000
+      })
+
+    parent = self()
+    joining_grant = grant(joining)
+
+    owner =
+      Task.async(fn ->
+        Local.execute(local, joining, joining_grant, [notify: parent], nil)
+      end)
+
+    assert_receive {:executor_process_started, "malformed-joining-job", _tool, _environment},
+                   5_000
+
+    malformed_join = Map.put(joining, :attempt, 0)
+
+    assert Local.execute(local, malformed_join, joining_grant, [], nil) ==
+             {:error, {:refused_before_effect, :canonical_job_request_mismatch}}
+
+    assert Process.alive?(local)
+    assert {:ok, joined_receipt} = Task.await(owner, 5_000)
+    assert joined_receipt.outcome == :completed
+    assert Local.stats(local).dispatches[joining.job_id] == 1
+  end
+
+  test "a retained receipt validates every member domain and relation before replay" do
+    fixture = prepared_fixture("receipt-domains")
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    request =
+      job(fixture, "receipt-domains", %{
+        "path" => "receipt-domains.txt",
+        "content" => "ok"
+      })
+
+    assert {:ok, receipt} = Local.execute(local, request, grant(request), [], nil)
+    path = receipt_path!(fixture.ledger, request.job_id)
+
+    mutations = [
+      protocol_version: Map.put(receipt, :protocol_version, 2),
+      job_id: Map.put(receipt, :job_id, 7),
+      operation_id: Map.put(receipt, :operation_id, ""),
+      attempt: Map.put(receipt, :attempt, 0),
+      session_id: Map.put(receipt, :session_id, ""),
+      run_id: Map.put(receipt, :run_id, ""),
+      turn_id: Map.put(receipt, :turn_id, ""),
+      tool_call_id: Map.put(receipt, :tool_call_id, ""),
+      session_epoch_at_dispatch: Map.put(receipt, :session_epoch_at_dispatch, -1),
+      executor_epoch: Map.put(receipt, :executor_epoch, -1),
+      executor_identity: Map.put(receipt, :executor_identity, ""),
+      canonical_request_digest: Map.put(receipt, :canonical_request_digest, "not-a-digest"),
+      fencing_token: Map.put(receipt, :fencing_token, -1),
+      tool_id: Map.put(receipt, :tool_id, ""),
+      tool_version: Map.put(receipt, :tool_version, ""),
+      unknown_tool_version: Map.put(receipt, :tool_version, "2.0.0"),
+      outcome: Map.put(receipt, :outcome, :invented),
+      unproduced_outcome: Map.put(receipt, :outcome, :denied),
+      output: Map.put(receipt, :output, :not_binary),
+      oversized_output: Map.put(receipt, :output, :binary.copy("x", 1_048_577)),
+      tool_output_ceiling: Map.put(receipt, :output, :binary.copy("x", 4_097)),
+      progress_count: Map.put(receipt, :progress_count, -1),
+      filesystem_progress: Map.put(receipt, :progress_count, 1),
+      observed_at_ms: Map.put(receipt, :observed_at_ms, -1),
+      child_environment_names: Map.put(receipt, :child_environment_names, "PATH"),
+      child_environment_assignment:
+        Map.put(receipt, :child_environment_names, ["PATH=/usr/bin:/bin"]),
+      child_environment_unproduced: Map.put(receipt, :child_environment_names, ["HOME"]),
+      child_environment_credential:
+        Map.put(receipt, :child_environment_names, ["LOOPEX_PROVIDER_API_KEY"]),
+      provider_credential_present: Map.put(receipt, :provider_credential_present, true),
+      cleanup_grace_ms: Map.put(receipt, :cleanup_grace_ms, 0),
+      cleanup_confirmation: Map.put(receipt, :cleanup_confirmation, :maybe),
+      receipt_retention_bound_ms: Map.put(receipt, :receipt_retention_bound_ms, 0),
+      retention_relation: Map.update!(receipt, :receipt_retention_bound_ms, &(&1 + 1)),
+      cleanup_relation:
+        receipt
+        |> Map.put(:outcome, :completed)
+        |> Map.put(:cleanup_confirmation, :unconfirmed),
+      process_probe: Map.put(receipt, :process_probe, "relative/ps"),
+      effective_deadline_ms: Map.put(receipt, :effective_deadline_ms, 0),
+      run_deadline_ms: Map.put(receipt, :run_deadline_ms, 0),
+      deadline_relation: Map.put(receipt, :effective_deadline_ms, receipt.run_deadline_ms + 1),
+      artifacts: Map.put(receipt, :artifacts, %{})
+    ]
+
+    for {label, malformed} <- mutations do
+      File.write!(path, :erlang.term_to_binary(malformed, [:deterministic]))
+
+      assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt},
+             "#{inspect(label)} was returned by retained lookup"
+
+      assert Local.execute(local, request, grant(request), [], nil) ==
+               {:error, :invalid_retained_receipt},
+             "#{inspect(label)} was returned by duplicate execution"
+    end
+
+    assert Local.stats(local).dispatches[request.job_id] == 1
+  end
+
+  test "duplicate execution binds every repeated retained receipt identity to its job" do
+    fixture = prepared_fixture("receipt-job-relations")
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    request =
+      job(fixture, "receipt-job-relations", %{
+        "path" => "receipt-job-relations.txt",
+        "content" => "ok"
+      })
+
+    assert {:ok, receipt} = Local.execute(local, request, grant(request), [], nil)
+    path = receipt_path!(fixture.ledger, request.job_id)
+
+    mutations = [
+      protocol_version: Map.put(receipt, :protocol_version, receipt.protocol_version + 1),
+      operation_id: Map.put(receipt, :operation_id, receipt.operation_id <> "-other"),
+      attempt: Map.put(receipt, :attempt, receipt.attempt + 1),
+      session_id: Map.put(receipt, :session_id, receipt.session_id <> "-other"),
+      run_id: Map.put(receipt, :run_id, receipt.run_id <> "-other"),
+      turn_id: Map.put(receipt, :turn_id, receipt.turn_id <> "-other"),
+      tool_call_id: Map.put(receipt, :tool_call_id, receipt.tool_call_id <> "-other"),
+      session_epoch_at_dispatch:
+        Map.put(receipt, :session_epoch_at_dispatch, receipt.session_epoch_at_dispatch + 1),
+      executor_epoch: Map.put(receipt, :executor_epoch, receipt.executor_epoch + 1),
+      executor_identity:
+        Map.put(receipt, :executor_identity, receipt.executor_identity <> "-other"),
+      canonical_request_digest:
+        Map.put(receipt, :canonical_request_digest, String.duplicate("0", 64)),
+      fencing_token: Map.put(receipt, :fencing_token, receipt.fencing_token + 1),
+      tool_id: Map.put(receipt, :tool_id, receipt.tool_id <> "-other"),
+      tool_version: Map.put(receipt, :tool_version, receipt.tool_version <> "-other"),
+      cleanup_grace_ms:
+        receipt
+        |> Map.put(:cleanup_grace_ms, receipt.cleanup_grace_ms + 4)
+        |> Map.put(:receipt_retention_bound_ms, receipt.receipt_retention_bound_ms + 1),
+      output_limit: Map.put(receipt, :output, :binary.copy("x", 4_097)),
+      run_deadline_ms: Map.put(receipt, :run_deadline_ms, receipt.run_deadline_ms + 1)
+    ]
+
+    for {label, altered} <- mutations do
+      File.write!(path, :erlang.term_to_binary(altered, [:deterministic]))
+
+      expected =
+        if label == :canonical_request_digest,
+          do: {:error, :job_id_conflict},
+          else: {:error, :invalid_retained_receipt}
+
+      assert Local.execute(local, request, grant(request), [], nil) == expected,
+             "#{inspect(label)} was replayed for a different job identity"
+    end
+
+    File.write!(path, :erlang.term_to_binary(receipt, [:deterministic]))
+
+    smaller =
+      job(
+        fixture,
+        "receipt-smaller-output-limit",
+        %{"path" => "receipt-smaller-output-limit.txt", "content" => "ok"},
+        System.system_time(:millisecond) + 60_000,
+        %{resource_budgets: %{"max_output_bytes" => 512}}
+      )
+
+    assert {:ok, smaller_receipt} = Local.execute(local, smaller, grant(smaller), [], nil)
+    assert byte_size(smaller_receipt.output) <= 512
+    smaller_path = receipt_path!(fixture.ledger, smaller.job_id)
+
+    File.write!(
+      smaller_path,
+      :erlang.term_to_binary(%{smaller_receipt | output: :binary.copy("x", 513)}, [
+        :deterministic
+      ])
+    )
+
+    assert Local.execute(local, smaller, grant(smaller), [], nil) ==
+             {:error, :invalid_retained_receipt}
+
+    assert Local.stats(local).dispatches[request.job_id] == 1
+  end
+
+  test "retained process-tool receipts bind exactly the PATH-only child environment" do
+    cases = [
+      {"bash", %{"command" => "printf ok"}, %{}},
+      {"demo", %{"relative_path" => "demo-environment.txt", "content" => "ok"},
+       %{tool_id: "loopex.demo.write", effect_class: "workspace_write"}}
+    ]
+
+    for {label, arguments, overrides} <- cases do
+      fixture = prepared_fixture("receipt-environment-#{label}")
+      {:ok, local} = start_local(fixture)
+      on_exit(fn -> stop(local) end)
+
+      request =
+        job(
+          fixture,
+          "receipt-environment-#{label}",
+          arguments,
+          System.system_time(:millisecond) + 60_000,
+          overrides
+        )
+
+      assert {:ok, receipt} = Local.execute(local, request, grant(request), [], nil)
+      assert receipt.child_environment_names == ["PATH"]
+      path = receipt_path!(fixture.ledger, request.job_id)
+
+      for names <- [[], ["PATH", "HOME"]] do
+        File.write!(
+          path,
+          :erlang.term_to_binary(%{receipt | child_environment_names: names}, [:deterministic])
+        )
+
+        assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
+
+        assert Local.execute(local, request, grant(request), [], nil) ==
+                 {:error, :invalid_retained_receipt}
+      end
+
+      if label == "bash" do
+        bash_output_limit =
+          Loopex.Executor.Local.CodingTools.definitions()
+          |> Enum.find(&(&1["tool_id"] == "loopex.bash"))
+          |> get_in(["budgets", "output_bytes"])
+
+        File.write!(
+          path,
+          :erlang.term_to_binary(
+            %{receipt | output: :binary.copy("x", bash_output_limit + 1)},
+            [:deterministic]
+          )
+        )
+
+        assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
+      else
+        File.write!(
+          path,
+          :erlang.term_to_binary(%{receipt | progress_count: 1}, [:deterministic])
+        )
+
+        assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
+
+        {:ok, artifact_store} = ArtifactStore.start(:truthful)
+        on_exit(fn -> stop(artifact_store) end)
+
+        assert {:ok, unrelated_reference} =
+                 ArtifactStore.put(artifact_store, "unrelated", %{
+                   media_type: "text/plain",
+                   role: "tool_output",
+                   metadata: %{}
+                 })
+
+        File.write!(
+          path,
+          :erlang.term_to_binary(%{receipt | artifacts: [unrelated_reference]}, [:deterministic])
+        )
+
+        assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
+      end
+
+      assert Local.stats(local).dispatches[request.job_id] == 1
+    end
+  end
+
+  test "a retained receipt refuses noncanonical external-term bytes" do
+    fixture = prepared_fixture("receipt-canonical-bytes")
+    {:ok, local} = start_local(fixture)
+    on_exit(fn -> stop(local) end)
+
+    request =
+      job(fixture, "receipt-canonical-bytes", %{
+        "path" => "receipt-canonical-bytes.txt",
+        "content" => "ok"
+      })
+
+    assert {:ok, receipt} = Local.execute(local, request, grant(request), [], nil)
+    path = receipt_path!(fixture.ledger, request.job_id)
+    canonical = :erlang.term_to_binary(receipt, [:deterministic])
+    noncanonical = :erlang.term_to_binary(receipt, [:compressed])
+
+    refute noncanonical == canonical
+
+    File.write!(path, noncanonical)
+
+    assert Local.receipt(local, request.job_id) == {:error, :invalid_retained_receipt}
+
+    assert Local.execute(local, request, grant(request), [], nil) ==
+             {:error, :invalid_retained_receipt}
+
+    assert Local.stats(local).dispatches[request.job_id] == 1
+  end
+
   test "receipt fitting spills complete bytes and fail-closed artifact answers claim no suffix" do
     full = :binary.copy("receipt-fit-line\n", 512)
 
@@ -721,6 +1071,34 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
         :truthful ->
           assert [reference] = receipt.artifacts
           assert Loopex.ArtifactStore.valid_reference?(reference)
+
+          path = receipt_path!(fixture.ledger, request.job_id)
+
+          File.write!(
+            path,
+            :erlang.term_to_binary(%{receipt | artifacts: [reference, reference]}, [
+              :deterministic
+            ])
+          )
+
+          assert Local.receipt(local, request.job_id) ==
+                   {:error, :invalid_retained_receipt}
+
+          assert Local.execute(local, request, grant(request), [], nil) ==
+                   {:error, :invalid_retained_receipt}
+
+          File.write!(
+            path,
+            :erlang.term_to_binary(%{receipt | artifacts: [Map.delete(reference, :digest)]}, [
+              :deterministic
+            ])
+          )
+
+          assert Local.receipt(local, request.job_id) ==
+                   {:error, :invalid_retained_receipt}
+
+          assert Local.execute(local, request, grant(request), [], nil) ==
+                   {:error, :invalid_retained_receipt}
 
         unavailable when unavailable in [:refuse, :malformed] ->
           assert receipt.artifacts == []

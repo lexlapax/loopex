@@ -38,7 +38,9 @@ control-input loss and unavailable job control in the prior noninteractive shell
 Raw model commands remain on `/bin/sh`, argv remains literal, and Core and custom
 executors gain no dependency. The [operator setup](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
 states the requirement; [ADR 0022](docs/adr/0022-local-executor-supervision-shell.md#concept)
-is Proposed pending exact-pair acceptance.
+is Accepted at its exact pair. That acceptance governs only this supervision-shell
+choice; it does not qualify a release source or authorize integration, tagging or
+publication.
 
 The next milestone, `M3` (kernel consolidation), is being opened gate-first on
 branch `m3`, where its plan pair and red gate live until acceptance; the headless

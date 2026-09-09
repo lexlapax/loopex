@@ -1992,10 +1992,10 @@ The provider corpus had 149 cases with one real-provider exclusion; all remainin
 | Elixir 1.20.3 / OTP 29.0.5 | 07:59:27–08:06:38 | `df5c0e509384100297ee1a918b9c920bd82cf320fe3fe0486002f5b94d1d8aa5` | `3a01cbe6e7346f34af4b1de2ebff3d488fe4806ccfdc2c5389e726d25e32ee8e` | `57f40653b31cec061bc358fc01e199e1b69e8967d91893079b8e107fd70b341c` | `04f66c808f4ec7cade77eb4c59fed8310466d46a31f921b8313f58670cc5c967` |
 | Elixir 1.17.0 / OTP 26.0 | 08:06:57–08:14:58 | `36332cfe0b430407e4720b67b2695b00302b20e31a99e1766bdbb983c75595c9` | `99ba62ad025eb2ac13aff31e51e9db91b28e070956bf08fc15f4a994292ac500` | `f48f627868c929ef03371531295eecccb554c8c69d38316df5ffab29e0ef720c` | `9b0d509cf2e97831d254b101214ae9b1c24e64339902c1fe53ad08d685f8788a` |
 
-All five digest columns above are SHA-256 values over the exact packaged file
-named by the column. The manifest's internal canonical digest was also checked
-by the outside-checkout witness; the file digest is retained here so an archive
-copy can be compared byte for byte.
+All four artifact-digest columns above are SHA-256 values over the exact
+packaged file named by the column. The manifest's internal canonical digest was
+also checked by the outside-checkout witness; the file digest is retained here
+so an archive copy can be compared byte for byte.
 
 The two Darwin gate-capture roles were then run serially from two further fresh
 detached roots. These are distinct from both the ordinary GREEN gate and the
@@ -2048,9 +2048,18 @@ effective-deadline receipts and unconfirmed deadlines. Every production mutation
 was killed by the expected behavioral corpus; no survivor was found. This is
 supplementary adversarial evidence, not a substitute for independent review.
 
-The historical exact-source failures above remain records of their own sources:
-the later green result is not back-projected onto the opaque exact-`7753856` red,
-the exact-`710c1d0` cleanup failure, or either earlier M2 provider failure.
+The historical exact-source failures above remain records of their own sources.
+At M0 generation 6's immediate child R, exact `4c75ae3`, the literal M2 gate
+failed opaquely in Outcome 4's coding-tools selector; its authoritative output
+retained neither the randomized seed nor the failed assertion. The later
+test-only source `7753856` produced a separate opaque Outcome 4 coding-tools red
+with the same unavailable seed and assertion. Exact `815751f` instead failed in
+the provider-adapter selector; that runner likewise discarded its seed and
+assertion. Exact `2d7c066` retained seed `785205` and one suite failure from its
+provider-adapter run, but no failed assertion; a narrower copied-runner
+diagnostic later passed its 14 selected cases and did not identify or dispose of
+the literal failure. The final green result is not back-projected onto any of
+those four runs or onto exact `710c1d0`'s separate cleanup failure.
 
 The screened final-source archive is retained at
 `/Users/spuri/loopex-reviews/M2-a0a9-final-qualification-2026-09-09.4JF0ct`.

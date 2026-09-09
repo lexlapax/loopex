@@ -101,10 +101,12 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
   # supplies literal synthetic transport configuration and a test manifest.
   # This is process conformance, never evidence of a self-contained package.
   def new(mode \\ :reply, options \\ []) do
+    nonce = Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+
     root =
       Path.join(
         System.tmp_dir!(),
-        "loopex-provider-isolation-#{System.unique_integer([:positive])}"
+        "loopex-provider-isolation-#{nonce}"
       )
 
     File.mkdir!(root)

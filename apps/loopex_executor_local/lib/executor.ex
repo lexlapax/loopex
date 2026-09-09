@@ -31,6 +31,44 @@ defmodule Loopex.Executor.Local do
   @max_output_bytes 1_048_576
   @max_progress_chunk_bytes 65_536
   @max_job_id_bytes 8_192
+  @receipt_digest ~r/\A[0-9a-f]{64}\z/
+  @receipt_environment_name ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
+  @receipt_outcomes [
+    :completed,
+    :failed,
+    :cancelled,
+    :outcome_unknown
+  ]
+  @receipt_fields [
+    :protocol_version,
+    :job_id,
+    :operation_id,
+    :attempt,
+    :session_id,
+    :run_id,
+    :turn_id,
+    :tool_call_id,
+    :session_epoch_at_dispatch,
+    :executor_epoch,
+    :executor_identity,
+    :canonical_request_digest,
+    :fencing_token,
+    :tool_id,
+    :tool_version,
+    :outcome,
+    :output,
+    :progress_count,
+    :observed_at_ms,
+    :child_environment_names,
+    :provider_credential_present,
+    :cleanup_grace_ms,
+    :cleanup_confirmation,
+    :receipt_retention_bound_ms,
+    :process_probe,
+    :effective_deadline_ms,
+    :run_deadline_ms,
+    :artifacts
+  ]
 
   # Concept: the declared grace the cancellation sequence gets once the run's own
   # instant has passed, and the only number any of that work is measured against.
@@ -266,19 +304,25 @@ defmodule Loopex.Executor.Local do
     # unrelated observation timeout cannot stand in for that decision. The root
     # claim wait, job deadline, and live-owner fences still bound permission;
     # waiting grants no extra effect authority, and server exit still ends the call.
-    case GenServer.call(executor, {:reserve, job}, :infinity) do
-      {:ok, %{reservation_ref: reservation_ref} = placement} ->
-        try do
-          run_reserved(placement, job, grant, options, progress)
-        after
-          GenServer.cast(executor, {:release, job_id, reservation_ref})
+    case Executor.validate_job(job) do
+      :ok ->
+        case GenServer.call(executor, {:reserve, job}, :infinity) do
+          {:ok, %{reservation_ref: reservation_ref} = placement} ->
+            try do
+              run_reserved(placement, job, grant, options, progress)
+            after
+              GenServer.cast(executor, {:release, job_id, reservation_ref})
+            end
+
+          {:retained, receipt} ->
+            {:ok, receipt}
+
+          {:error, reason} ->
+            {:error, reason}
         end
 
-      {:retained, receipt} ->
-        {:ok, receipt}
-
-      {:error, reason} ->
-        {:error, reason}
+      {:error, _invalid_job} ->
+        refused_before_effect(:canonical_job_request_mismatch)
     end
   end
 
@@ -967,12 +1011,12 @@ defmodule Loopex.Executor.Local do
   # records its exact live holder so receipt lookup and release below describe
   # work still held here rather than work this server is performing.
   # A missing or oversized identity cannot name durable truth and is refused
-  # without reaching the ledger or entering the reservation map. The bound is
-  # the canonical JobRequest identifier bound; applying it here keeps hostile
-  # input out of serialized key and path work without moving full validation.
-  # Full validation deliberately remains after marker resolution, so a valid
-  # same-digest admission still joins before a duplicate caller's ephemeral
-  # grant is revalidated.
+  # without reaching the ledger or entering the reservation map. The complete
+  # immutable JobRequest was already validated at the callback boundary before
+  # either retained replay or admission join. Ephemeral grant and lease
+  # validation deliberately remain after marker resolution, so a valid
+  # same-digest admission still joins before a duplicate caller's current
+  # authority is revalidated.
   def handle_call({:reserve, %{job_id: job_id} = job}, {caller, _tag}, state)
       when is_binary(job_id) and byte_size(job_id) in 1..@max_job_id_bytes do
     case reserve_decision(state, job, job_id) do
@@ -1220,10 +1264,17 @@ defmodule Loopex.Executor.Local do
   defp settled_or_reserved(state, job, job_id) do
     case final_receipt(state.ledger, state.ledger_root, job_id) do
       {:ok, receipt} ->
-        if Map.get(receipt, :canonical_request_digest) ==
-             Map.get(job, :canonical_request_digest),
-           do: {:retained, receipt},
-           else: {:error, :job_id_conflict}
+        cond do
+          Map.get(receipt, :canonical_request_digest) !=
+              Map.get(job, :canonical_request_digest) ->
+            {:error, :job_id_conflict}
+
+          retained_receipt_matches_job?(receipt, job) ->
+            {:retained, receipt}
+
+          true ->
+            {:error, :invalid_retained_receipt}
+        end
 
       :absent ->
         :reserve
@@ -1233,6 +1284,45 @@ defmodule Loopex.Executor.Local do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp retained_receipt_matches_job?(receipt, job) do
+    comparisons = [
+      {:protocol_version, :protocol_version},
+      {:job_id, :job_id},
+      {:operation_id, :operation_id},
+      {:attempt, :attempt},
+      {:session_id, :session_id},
+      {:run_id, :run_id},
+      {:turn_id, :turn_id},
+      {:tool_call_id, :tool_call_id},
+      {:session_epoch_at_dispatch, :origin_session_epoch},
+      {:executor_epoch, :origin_executor_epoch},
+      {:executor_identity, :executor_identity},
+      {:canonical_request_digest, :canonical_request_digest},
+      {:fencing_token, :fencing_token},
+      {:tool_id, :tool_id},
+      {:tool_version, :tool_version},
+      {:cleanup_grace_ms, :cleanup_grace_ms},
+      {:run_deadline_ms, :run_deadline}
+    ]
+
+    Enum.all?(comparisons, fn {receipt_field, job_field} ->
+      Map.get(receipt, receipt_field) == Map.get(job, job_field)
+    end) and retained_output_matches_job?(receipt, job)
+  end
+
+  defp retained_output_matches_job?(receipt, job) do
+    case resolve_tool(job) do
+      {:ok, %{coding: _definition} = tool} ->
+        byte_size(receipt.output) <= effective_output_limits(job, tool).output
+
+      {:ok, _demonstration_tool} ->
+        byte_size(receipt.output) <= @max_output_bytes
+
+      {:error, _reason} ->
+        false
     end
   end
 
@@ -1962,7 +2052,9 @@ defmodule Loopex.Executor.Local do
     else
       case final_receipt_under_claim(state.ledger, state.ledger_root, job.job_id, 0) do
         {:ok, receipt} ->
-          {:ok, receipt}
+          if retained_receipt_matches_job?(receipt, job),
+            do: {:ok, receipt},
+            else: {:error, :invalid_retained_receipt}
 
         unresolved when unresolved in @join_unresolved ->
           Process.sleep(@join_poll_ms)
@@ -2948,10 +3040,12 @@ defmodule Loopex.Executor.Local do
   # Losing the workspace claim makes the effect unproven; it does not erase a
   # cleanup confirmation already established by the tool boundary.
   defp unproven_receipt(receipt) do
+    output_limit = receipt_output_limit(receipt)
+
     %{
       receipt
       | outcome: :outcome_unknown,
-        output: receipt.output <> @lease_lost_note
+        output: bounded_terminal_output(receipt.output, @lease_lost_note, output_limit)
     }
   end
 
@@ -4821,9 +4915,11 @@ defmodule Loopex.Executor.Local do
   # reads control for the whole job. EOF can therefore terminate its
   # still-anchored group even while the command is silent, and TERM/KILL
   # actuation occurs inside a current member rather than in a later helper aimed
-  # at a sampled number. The wrapper's private status frame
-  # reports the direct child's wait status; the guard accepts token-bound signal
-  # and release lines on stdin. The token itself is delivered over that control
+  # at a sampled number. The wrapper's private status frame reports both its own
+  # process identity and the direct child's wait status. That identity lets the
+  # runtime distinguish a terminal wrapper still flushing the frame from live
+  # command work in the first process-table sample. The guard accepts token-bound
+  # signal and release lines on stdin. The token itself is delivered over that control
   # channel before the child is created, never through argv or environment that
   # the child can inspect. FD 3 is copied from the Port's output before the child
   # is started and closed in the child, keeping protocol writes separate from
@@ -4883,10 +4979,11 @@ defmodule Loopex.Executor.Local do
       trap '' TERM
       wait "$command_pid"
       command_status=$?
-      printf '\\n#{@guard_status}:%s:%s\\n' "$token" "$command_status" >&3
+      printf '\\n#{@guard_status}:%s:status:%s\\n' "$token" "$command_status" >&3
       exit "$command_status"
     ) &
     status_pid=$!
+    printf '\\n#{@guard_status}:%s:wrapper:%s\\n' "$token" "$status_pid" >&3
     while IFS= read -r control; do
       case "$control" in
         '#{@guard_signal}:'"$token"':TERM')
@@ -4973,6 +5070,7 @@ defmodule Loopex.Executor.Local do
         group: nil,
         anchor_pid: nil,
         carrier_in_group: nil,
+        terminal_wrapper_pid: nil,
         token: token,
         announced: false,
         state: :live
@@ -5025,7 +5123,8 @@ defmodule Loopex.Executor.Local do
             {:ok, next} ->
               register_inflight(job.job_id, next.group)
 
-              if is_integer(next.command_status) do
+              if is_integer(next.command_status) and
+                   is_integer(next.guard.terminal_wrapper_pid) do
                 finished =
                   finish_guarded_output(
                     port,
@@ -5209,31 +5308,12 @@ defmodule Loopex.Executor.Local do
   # Technical depth: FD 3 and the tool's stdout ultimately share the Port pipe,
   # so either may be split or coalesced at arbitrary byte boundaries. Keep only
   # the shortest suffix that could begin the token-bound status marker, emit all
-  # earlier bytes normally, and remove exactly one complete frame. This keeps
+  # earlier bytes normally, and remove each complete frame. The live guard names
+  # the wrapper it just spawned, while that wrapper later reports the command's
+  # status; requiring both facts avoids assuming either writer wins the race.
+  # This keeps
   # progress and terminal output byte-identical without assuming one write maps
   # to one Port message.
-  defp collect_guard_chunk(%{command_status: status} = collector, chunk, limit)
-       when is_integer(status) do
-    marker = "\n#{@guard_status}:#{collector.guard.token}:"
-    combined = collector.control_buffer <> chunk
-
-    case :binary.match(combined, marker) do
-      :nomatch ->
-        retained = marker_suffix_size(combined, marker)
-        emitted = byte_size(combined) - retained
-        safe = binary_part(combined, 0, emitted)
-        suffix = binary_part(combined, emitted, retained)
-
-        case append_collected(%{collector | control_buffer: <<>>}, safe, limit) do
-          {:ok, next} -> {:ok, %{next | control_buffer: suffix}}
-          overflow -> overflow
-        end
-
-      {_offset, _size} ->
-        {:ok, %{collector | control_buffer: <<>>, protocol_valid: false}}
-    end
-  end
-
   defp collect_guard_chunk(collector, chunk, limit) do
     marker = "\n#{@guard_status}:#{collector.guard.token}:"
     combined = collector.control_buffer <> chunk
@@ -5247,17 +5327,16 @@ defmodule Loopex.Executor.Local do
 
         case :binary.match(after_marker, "\n") do
           {newline, 1} ->
-            status_bytes = binary_part(after_marker, 0, newline)
+            frame = binary_part(after_marker, 0, newline)
             tail_offset = newline + 1
             tail = binary_part(after_marker, tail_offset, byte_size(after_marker) - tail_offset)
 
-            with {status, ""} when status in 0..255 <- Integer.parse(status_bytes),
-                 {:ok, next} <-
+            with {:ok, next} <-
                    collector
                    |> Map.put(:control_buffer, <<>>)
-                   |> append_collected(before, limit) do
-              next
-              |> Map.put(:command_status, status)
+                   |> append_collected(before, limit),
+                 {:ok, framed} <- collect_guard_frame(next, frame) do
+              framed
               |> collect_guard_chunk(tail, limit)
             else
               {:artifact_limit_exceeded, next, observed} ->
@@ -5281,6 +5360,63 @@ defmodule Loopex.Executor.Local do
           {:ok, next} -> {:ok, %{next | control_buffer: suffix}}
           overflow -> overflow
         end
+    end
+  end
+
+  defp collect_guard_frame(%{command_status: nil} = collector, "status:" <> status_bytes) do
+    case Integer.parse(status_bytes) do
+      {status, ""} when status in 0..255 -> {:ok, %{collector | command_status: status}}
+      _invalid_status -> :error
+    end
+  end
+
+  defp collect_guard_frame(
+         %{guard: %{terminal_wrapper_pid: nil}} = collector,
+         "wrapper:" <> wrapper_pid_bytes
+       ) do
+    case Integer.parse(wrapper_pid_bytes) do
+      {wrapper_pid, ""} when wrapper_pid > 1 ->
+        {:ok, put_in(collector, [:guard, :terminal_wrapper_pid], wrapper_pid)}
+
+      _invalid_pid ->
+        :error
+    end
+  end
+
+  defp collect_guard_frame(_collector, _duplicate_or_invalid), do: :error
+
+  # Concept: tests can drive the authenticated frame parser without racing an
+  # operating-system process.
+  #
+  # Technical depth: this is the production parser over raw Port chunks, not a
+  # second model of it. The fixed token is private to this probe. A complete
+  # proof requires exactly one status and one wrapper fact, an empty partial
+  # frame buffer, and no invalid or duplicate frame.
+  @doc false
+  @spec guard_protocol_probe([binary()]) :: :valid | :invalid
+  def guard_protocol_probe(chunks) when is_list(chunks) do
+    collector = new_output_collector(nil, 2, "loopex-protocol-probe", nil, %{})
+
+    parsed =
+      Enum.reduce_while(chunks, collector, fn chunk, current ->
+        case collect_guard_chunk(current, chunk, @helper_control_bytes) do
+          {:ok, next} -> {:cont, next}
+          {:artifact_limit_exceeded, _next, _observed} -> {:halt, :invalid}
+        end
+      end)
+
+    case parsed do
+      %{
+        protocol_valid: true,
+        command_status: status,
+        control_buffer: <<>>,
+        guard: %{terminal_wrapper_pid: wrapper_pid}
+      }
+      when is_integer(status) and is_integer(wrapper_pid) ->
+        :valid
+
+      _incomplete_or_invalid ->
+        :invalid
     end
   end
 
@@ -5447,7 +5583,8 @@ defmodule Loopex.Executor.Local do
       end
 
     protocol_proved =
-      collector.protocol_valid and collector.guard.announced and guard_exit_proved
+      collector.protocol_valid and collector.guard.announced and
+        is_integer(collector.guard.terminal_wrapper_pid) and guard_exit_proved
 
     %{
       output: flatten_chunks(collector),
@@ -5494,15 +5631,19 @@ defmodule Loopex.Executor.Local do
 
   # The wrapper and guard are separate writers to the Port. Seeing through `ps`
   # that the wrapper exited does not prove its status bytes reached this BEAM
-  # process before the guard can exit. Ordinary release is therefore available
-  # only after the collector already parsed the authenticated frame. A cleanup
-  # path that has not seen it uses the live guard's final KILL instead, which
-  # preserves cleanup truth without depending on cross-writer message order.
+  # process before the guard can exit. Conversely, parsing the frame may precede
+  # the wrapper's own exit. Ordinary release is therefore available only after
+  # the collector parsed the authenticated frame, whose wrapper identity lets
+  # the quiescence proof admit that one terminal member. A cleanup path that has
+  # not seen it uses the live guard's final KILL instead, which preserves cleanup
+  # truth without depending on cross-writer message order.
   defp release_launch_guard(guard, _episode, status_known?) do
     # Both callers reach this function only from the positive result of
-    # `guard_children_gone?/2`. The status wrapper has already exited at that
-    # point, so nothing in the guard can create a new child between that proof
-    # and this token-bound release. Re-running the bounded external probe here
+    # `guard_children_gone?/2`. The status wrapper has either exited or is the
+    # sole extra member named by its authenticated terminal frame; it can create
+    # no child after that frame, and the guard reaps it before exiting. Nothing
+    # in the guard can therefore create a new child between that proof and this
+    # token-bound release. Re-running the bounded external probe here
     # made a transient second non-answer turn an already-proved clean group into
     # a forced KILL and lose the carrier's status.
     if status_known? and launch_guard_live?(guard) do
@@ -5554,7 +5695,8 @@ defmodule Loopex.Executor.Local do
         guard.group,
         guard.anchor_pid,
         guard.os_pid,
-        guard.carrier_in_group
+        guard.carrier_in_group,
+        guard.terminal_wrapper_pid
       )
     else
       false
@@ -5566,18 +5708,28 @@ defmodule Loopex.Executor.Local do
          group,
          anchor_pid,
          carrier_pid,
-         carrier_in_group
+         carrier_in_group,
+         terminal_wrapper_pid
        )
        when is_integer(group) and is_integer(anchor_pid) and is_integer(carrier_pid) and
               is_boolean(carrier_in_group) do
-    expected =
+    fixed_members =
       if carrier_in_group,
-        do: Enum.sort([anchor_pid, carrier_pid]),
+        do: [anchor_pid, carrier_pid],
         else: [anchor_pid]
 
     case process_group_members(answer, group) do
-      {:ok, members} -> Enum.sort(members) == expected
-      _other -> false
+      {:ok, members} ->
+        members = Enum.sort(members)
+        fixed_members = Enum.sort(fixed_members)
+
+        members == fixed_members or
+          (is_integer(terminal_wrapper_pid) and terminal_wrapper_pid > 1 and
+             terminal_wrapper_pid not in fixed_members and
+             members == Enum.sort([terminal_wrapper_pid | fixed_members]))
+
+      _other ->
+        false
     end
   end
 
@@ -5586,7 +5738,8 @@ defmodule Loopex.Executor.Local do
          _group,
          _anchor_pid,
          _carrier_pid,
-         _carrier_in_group
+         _carrier_in_group,
+         _terminal_wrapper_pid
        ),
        do: false
 
@@ -5847,7 +6000,9 @@ defmodule Loopex.Executor.Local do
       receive do
         {^port, {:data, chunk}} ->
           case collect_chunk(collector, chunk, limit) do
-            {:ok, %{command_status: status} = answered} when is_integer(status) ->
+            {:ok,
+             %{command_status: status, guard: %{terminal_wrapper_pid: wrapper_pid}} = answered}
+            when is_integer(status) and is_integer(wrapper_pid) ->
               finish_helper_answer(port, answered, limit)
 
             {:ok, next} ->
@@ -6461,15 +6616,133 @@ defmodule Loopex.Executor.Local do
   end
 
   defp decode_receipt(bytes, job_id) do
-    receipt = :erlang.binary_to_term(bytes, [:safe])
-
-    if is_map(receipt) and Map.get(receipt, :job_id) == job_id and
-         cleanup_facts_readable?(receipt),
-       do: {:ok, receipt},
-       else: {:error, :invalid_retained_receipt}
+    with receipt <- :erlang.binary_to_term(bytes, [:safe]),
+         true <- :erlang.term_to_binary(receipt, [:deterministic]) == bytes,
+         true <- exact_receipt_fields?(receipt),
+         true <- receipt_fields_readable?(receipt, job_id) do
+      {:ok, receipt}
+    else
+      _invalid -> {:error, :invalid_retained_receipt}
+    end
   rescue
     _error -> {:error, :invalid_retained_receipt}
   end
+
+  defp exact_receipt_fields?(receipt) when is_map(receipt) and not is_struct(receipt),
+    do: Enum.sort(Map.keys(receipt)) == Enum.sort(@receipt_fields)
+
+  defp exact_receipt_fields?(_receipt), do: false
+
+  # Concept: retained bytes are terminal authority only when every member is a
+  # value this Local executor could have produced for the named job.
+  #
+  # Technical depth: ADR 0016 makes the retained receipt an exact-key canonical
+  # external-term record. Checking only the job ID and the two cleanup members
+  # admitted rewritten identity, deadline, environment, artifact, and outcome
+  # values as final truth on both lookup and duplicate execution. This predicate
+  # independently closes every constructed member's domain and the relations
+  # among cleanup, retention, admission observation, and the two deadlines.
+  defp receipt_fields_readable?(receipt, job_id) do
+    identifiers = [
+      receipt.job_id,
+      receipt.operation_id,
+      receipt.session_id,
+      receipt.run_id,
+      receipt.turn_id,
+      receipt.tool_call_id,
+      receipt.executor_identity,
+      receipt.tool_id,
+      receipt.tool_version
+    ]
+
+    receipt.protocol_version == 1 and receipt.job_id == job_id and
+      Enum.all?(identifiers, &bounded_receipt_binary?/1) and
+      is_integer(receipt.attempt) and receipt.attempt > 0 and
+      is_integer(receipt.session_epoch_at_dispatch) and receipt.session_epoch_at_dispatch >= 0 and
+      is_integer(receipt.executor_epoch) and receipt.executor_epoch >= 0 and
+      digest_readable?(receipt.canonical_request_digest) and
+      is_integer(receipt.fencing_token) and receipt.fencing_token >= 0 and
+      receipt.outcome in @receipt_outcomes and is_binary(receipt.output) and
+      byte_size(receipt.output) <= @max_output_bytes and
+      is_integer(receipt.progress_count) and receipt.progress_count >= 0 and
+      is_integer(receipt.observed_at_ms) and receipt.observed_at_ms >= 0 and
+      environment_names_readable?(receipt.child_environment_names) and
+      tool_receipt_readable?(receipt) and
+      receipt.provider_credential_present == false and
+      is_integer(receipt.cleanup_grace_ms) and receipt.cleanup_grace_ms in 1..@max_uint64 and
+      cleanup_facts_readable?(receipt) and retention_bound_matches?(receipt) and
+      process_probe_readable?(receipt.process_probe) and deadlines_readable?(receipt) and
+      artifacts_readable?(receipt.artifacts)
+  end
+
+  defp bounded_receipt_binary?(value),
+    do: is_binary(value) and byte_size(value) in 1..@max_job_id_bytes
+
+  defp digest_readable?(digest) when is_binary(digest),
+    do: Regex.match?(@receipt_digest, digest)
+
+  defp digest_readable?(_digest), do: false
+
+  defp environment_names_readable?(names) when is_list(names) do
+    names == Enum.uniq(names) and
+      Enum.all?(names, fn name ->
+        is_binary(name) and byte_size(name) in 1..@max_job_id_bytes and
+          Regex.match?(@receipt_environment_name, name) and name != @credential_name
+      end)
+  end
+
+  defp environment_names_readable?(_names), do: false
+
+  defp tool_receipt_readable?(receipt) do
+    case tool(receipt.tool_id) do
+      {:ok,
+       %{
+         version: version,
+         coding: %{"tool_id" => "loopex.bash", "budgets" => %{"output_bytes" => output}}
+       }} ->
+        receipt.tool_version == version and receipt.child_environment_names == [@search_path_name] and
+          byte_size(receipt.output) <= output
+
+      {:ok, %{version: version, coding: %{"budgets" => %{"output_bytes" => output}}}} ->
+        receipt.tool_version == version and receipt.child_environment_names == [] and
+          receipt.progress_count == 0 and byte_size(receipt.output) <= output
+
+      {:ok, %{version: version}} ->
+        receipt.tool_version == version and receipt.child_environment_names == [@search_path_name] and
+          receipt.progress_count == 0 and receipt.artifacts == [] and
+          byte_size(receipt.output) <= @max_output_bytes
+
+      :error ->
+        false
+    end
+  end
+
+  defp receipt_output_limit(receipt) do
+    case tool(receipt.tool_id) do
+      {:ok, %{coding: %{"budgets" => %{"output_bytes" => output}}}} -> output
+      {:ok, _demonstration_tool} -> @max_output_bytes
+      :error -> @max_output_bytes
+    end
+  end
+
+  defp retention_bound_matches?(receipt),
+    do: receipt.receipt_retention_bound_ms == receipt_reserve_ms(receipt.cleanup_grace_ms)
+
+  defp process_probe_readable?(probe),
+    do:
+      is_binary(probe) and String.starts_with?(probe, "/") and
+        not String.contains?(probe, <<0>>)
+
+  defp deadlines_readable?(receipt) do
+    is_integer(receipt.effective_deadline_ms) and receipt.effective_deadline_ms > 0 and
+      is_integer(receipt.run_deadline_ms) and receipt.run_deadline_ms > 0 and
+      receipt.effective_deadline_ms <= receipt.run_deadline_ms
+  end
+
+  defp artifacts_readable?(artifacts) when is_list(artifacts) and length(artifacts) <= 1,
+    do: Enum.all?(artifacts, &Loopex.ArtifactStore.valid_reference?/1)
+
+  defp artifacts_readable?(_artifacts), do: false
 
   # Concept: a retained receipt whose cleanup facts are missing, unreadable, or
   # contradictory is not a receipt this executor will hand back.

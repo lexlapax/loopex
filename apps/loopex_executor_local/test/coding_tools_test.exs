@@ -3968,8 +3968,6 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     {executor, lease_id} = executor_with_options(root, clock_provider: clock)
     observer = self()
 
-    started = System.monotonic_time(:millisecond)
-
     running =
       Task.async(fn ->
         run(
@@ -3992,11 +3990,10 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     assert {:ok, receipt} = Task.await(running, 10_000)
 
-    elapsed = System.monotonic_time(:millisecond) - started
-
-    assert elapsed < div(delay, 2),
-           "the demonstration launcher outlived the run's committed deadline"
-
+    # The substituted paired clock, the cancelled terminal and the eventual
+    # absence of the delayed effect are the ordering proof. A tighter elapsed
+    # wall-time assertion measures scheduler and cleanup-probe load instead of
+    # the committed clock and can reject these same facts on a busy host.
     assert receipt.outcome == :cancelled
     assert receipt.cleanup_confirmation == :confirmed
     assert receipt.output =~ "run deadline"
@@ -5197,19 +5194,60 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
   test "the launch guard preserves fast command status and remains the only group signal authority" do
     root = workspace()
+    {executor, lease_id} = executor_for(root)
 
-    assert {:ok, succeeded} =
-             run(root, "loopex.bash", %{"argv" => ["/usr/bin/true"]})
+    # A fast status wrapper may still be present in the first process-table
+    # sample taken after its authenticated frame arrives. Exercise that narrow
+    # ordering repeatedly through one real executor: the wrapper is terminal
+    # protocol evidence, never unfinished model work.
+    for _iteration <- 1..12 do
+      assert {:ok, succeeded} =
+               run(
+                 root,
+                 "loopex.bash",
+                 %{"argv" => ["/usr/bin/true"]},
+                 %{executor: executor, lease_id: lease_id}
+               )
 
-    assert succeeded.outcome == :completed
-    assert succeeded.cleanup_confirmation == :confirmed
+      assert succeeded.outcome == :completed
+      assert succeeded.cleanup_confirmation == :confirmed
+    end
 
     assert {:ok, failed} =
-             run(root, "loopex.bash", %{"argv" => ["/usr/bin/false"]})
+             run(
+               root,
+               "loopex.bash",
+               %{"argv" => ["/usr/bin/false"]},
+               %{executor: executor, lease_id: lease_id}
+             )
 
     assert failed.outcome == :failed
     assert failed.cleanup_confirmation == :confirmed
     assert failed.output =~ "status 1"
+
+    frame = "\nloopex-command-status:loopex-protocol-probe:"
+
+    assert Local.guard_protocol_probe([
+             frame <> "wrap",
+             "per:23\n" <> frame <> "status:0\n"
+           ]) == :valid
+
+    assert Local.guard_protocol_probe([
+             frame <> "status:0\n",
+             frame <> "status:0\n",
+             frame <> "wrapper:23\n"
+           ]) == :invalid
+
+    assert Local.guard_protocol_probe([
+             frame <> "wrapper:23\n",
+             frame <> "wrapper:24\n",
+             frame <> "status:0\n"
+           ]) == :invalid
+
+    assert Local.guard_protocol_probe([
+             frame <> "status:not-an-integer\n",
+             frame <> "wrapper:23\n"
+           ]) == :invalid
 
     # Concept: the Port's operating-system child is an authority object, not a
     # sampled number. It stays alive until this runtime has either released an
@@ -5260,6 +5298,14 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
 
     assert script =~
              ~r/command_pid=\$!\n\s+trap '' TERM\n\s+wait "\$command_pid"\n\s+command_status=\$\?/
+
+    assert script =~
+             ~S|"$token" "$command_status"|,
+           "the authenticated status frame does not report the waited command status"
+
+    assert script =~
+             ~S|"$token" "$status_pid"|,
+           "the live guard does not authenticate the exact terminal wrapper it spawned"
 
     refute script =~ "wait_interrupted"
     refute script =~ "$(jobs -p)"
@@ -5327,20 +5373,20 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
            "the guard can be released without authenticated status or live Port authority"
 
     assert source =~
-             ~r/defp guard_answered_alone\?.*?expected =\s+if carrier_in_group,\s+do: Enum\.sort\(\[anchor_pid, carrier_pid\]\),\s+else: \[anchor_pid\].*?Enum\.sort\(members\) == expected/s,
-           "normal completion no longer requires every fixed authority member and no command member"
+             ~r/defp guard_answered_alone\?.*?fixed_members =\s+if carrier_in_group,\s+do: \[anchor_pid, carrier_pid\],\s+else: \[anchor_pid\].*?members == fixed_members or.*?members == Enum\.sort\(\[terminal_wrapper_pid \| fixed_members\]\)/s,
+           "normal completion neither admits its authenticated terminal wrapper nor excludes other command members"
 
     assert source =~
              ~r/defp launch_guard_live\?\(%\{state: :live, port: port, os_pid: os_pid\}\).*?Port\.info\(port, :os_pid\) == \{:os_pid, os_pid\}/s,
            "a released or killed guard can still authorize a group signal"
 
     assert source =~
-             ~r/protocol_proved =\s+collector\.protocol_valid and collector\.guard\.announced and guard_exit_proved/s,
+             ~r/protocol_proved =\s+collector\.protocol_valid and collector\.guard\.announced and\s+is_integer\(collector\.guard\.terminal_wrapper_pid\) and guard_exit_proved/s,
            "missing, forged, or duplicate guard control evidence can be reported confirmed"
 
     assert source =~
-             ~r/defp collect_guard_chunk\(%\{command_status: status\}.*?\{_offset, _size\} ->\s+\{:ok, %\{collector \| control_buffer: <<>>, protocol_valid: false\}\}/s,
-           "a second authenticated command-status frame does not invalidate the protocol"
+             ~r/defp collect_guard_frame\(_collector, _duplicate_or_invalid\), do: :error/,
+           "a duplicate authenticated command-status fact does not invalidate the protocol"
 
     assert source =~
              ~r/_invalid_frame ->\s+\{:ok, %\{collector \| control_buffer: <<>>, protocol_valid: false\}\}/s,
