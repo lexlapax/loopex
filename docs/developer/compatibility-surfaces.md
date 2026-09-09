@@ -255,7 +255,8 @@ an unfamiliar error atom nor loss of a reply proves that nothing ran.
 Local also exports hidden test-support entries: `stats/1`, `tool/1`,
 `bounded_work/3,4`, `bounded_read_probe/2`, `await_owned_process_start/4`,
 `artifact_retention_result/1`, `launcher_probe_port/1,3`, `launcher_vector/1`,
-`answer_within/3`, and `process_group_answered_empty?/2,3`. `@doc false` hides
+`answer_within/3`, `guard_protocol_probe/1`, `receipt_decode_probe/3`, and
+`process_group_answered_empty?/2,3`. `@doc false` hides
 generated documentation, not callability. These are unstable concrete test
 support, not additions to `Loopex.Executor` conformance or supported embedder
 extension points.

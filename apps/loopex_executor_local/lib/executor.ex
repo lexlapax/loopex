@@ -30,6 +30,7 @@ defmodule Loopex.Executor.Local do
 
   @max_output_bytes 1_048_576
   @max_progress_chunk_bytes 65_536
+  @max_receipt_bytes Loopex.Store.max_item_bytes()
   @max_job_id_bytes 8_192
   @receipt_digest ~r/\A[0-9a-f]{64}\z/
   @receipt_environment_name ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
@@ -38,6 +39,13 @@ defmodule Loopex.Executor.Local do
     :failed,
     :cancelled,
     :outcome_unknown
+  ]
+  @receipt_terminal_variants [
+    {:completed, :confirmed},
+    {:failed, :confirmed},
+    {:cancelled, :confirmed},
+    {:outcome_unknown, :confirmed},
+    {:outcome_unknown, :unconfirmed}
   ]
   @receipt_fields [
     :protocol_version,
@@ -1151,7 +1159,8 @@ defmodule Loopex.Executor.Local do
            tool: nil,
            lease_pid: nil,
            workspace: nil,
-           arguments: nil
+           arguments: nil,
+           receipt_output_limit: nil
          }}
 
       {:error, reason} ->
@@ -1201,15 +1210,16 @@ defmodule Loopex.Executor.Local do
       {:ok, tool, lease_pid, workspace, arguments} ->
         case final_root_reconciliation(state, job, reservation_ref, caller) do
           :ok ->
-            case open_admission(state, job, reservation_ref, caller) do
-              {:ok, admission} ->
+            case open_admission(state, job, reservation_ref, caller, tool, arguments) do
+              {:ok, admission, receipt_output_limit} ->
                 {:ok,
                  %{
                    decision: {:admitted, admission},
                    tool: tool,
                    lease_pid: lease_pid,
                    workspace: workspace,
-                   arguments: arguments
+                   arguments: arguments,
+                   receipt_output_limit: receipt_output_limit
                  }}
 
               {:error, reason} ->
@@ -1527,7 +1537,8 @@ defmodule Loopex.Executor.Local do
            tool: tool,
            lease_pid: lease_pid,
            workspace: workspace,
-           arguments: arguments
+           arguments: arguments,
+           receipt_output_limit: receipt_output_limit
          }} ->
           admitted_execute(
             placement,
@@ -1537,6 +1548,7 @@ defmodule Loopex.Executor.Local do
             lease_pid,
             workspace,
             arguments,
+            receipt_output_limit,
             options,
             progress
           )
@@ -1629,6 +1641,7 @@ defmodule Loopex.Executor.Local do
          lease_pid,
          workspace,
          arguments,
+         receipt_output_limit,
          options,
          progress
        ) do
@@ -1644,6 +1657,7 @@ defmodule Loopex.Executor.Local do
                  tool,
                  workspace,
                  arguments,
+                 receipt_output_limit,
                  options,
                  lease,
                  progress
@@ -1752,7 +1766,7 @@ defmodule Loopex.Executor.Local do
   defp publish_settlement(placement, job, receipt, lease) do
     deadline = retention_until()
 
-    case retain_receipt_under_lease(placement.ledger_root, receipt, lease, deadline) do
+    case retain_receipt_under_lease(placement.ledger_root, job, receipt, lease, deadline) do
       {:ok, retained} ->
         dispose_open_authority(placement, job, retained, lease)
 
@@ -1969,9 +1983,11 @@ defmodule Loopex.Executor.Local do
   # to withdraw. After the durable records, the exact reservation token becomes
   # the operation owner under the still-held root claim; only then may the one
   # effect permit return.
-  defp open_admission(state, job, reservation_ref, caller) do
+  defp open_admission(state, job, reservation_ref, caller, tool, arguments) do
     with {:ok, wall, monotonic} <- sample(state),
          {:ok, action} <- derive_action_deadline(wall, monotonic, job),
+         {:ok, receipt_output_limit} <-
+           reserve_receipt_output(state, job, tool, arguments, wall),
          :ok <- authorize_effect(state, job, action),
          :ok <-
            Ledger.admit(
@@ -1980,7 +1996,8 @@ defmodule Loopex.Executor.Local do
              Ledger.open_entry(job, state.identity)
            ),
          :ok <- claim_operation_owner(state, job.job_id, reservation_ref, caller) do
-      {:ok, %{wall: wall, monotonic: monotonic, action: action, observed_at_ms: wall}}
+      {:ok, %{wall: wall, monotonic: monotonic, action: action, observed_at_ms: wall},
+       receipt_output_limit}
     else
       {:error, {:refused_before_effect, reason}} ->
         refusal_result(state, job, reason, {:refused_before_effect, reason})
@@ -2229,12 +2246,13 @@ defmodule Loopex.Executor.Local do
          %{coding: _definition} = tool,
          workspace,
          arguments,
+         receipt_output_limit,
          options,
          lease,
          progress
        ) do
     deadline = effective_deadline(job, tool)
-    limits = effective_output_limits(job, tool)
+    limits = cap_output_limit(effective_output_limits(job, tool), receipt_output_limit)
 
     {tool_result, progress_count, cleanup_confirmation} =
       run_coding_tool(
@@ -2279,12 +2297,18 @@ defmodule Loopex.Executor.Local do
          tool,
          workspace,
          arguments,
+         receipt_output_limit,
          options,
          lease,
          _progress
        ) do
     deadline = effective_deadline(job, tool)
-    limits = %{output: @max_output_bytes, artifact: @max_output_bytes}
+
+    limits =
+      cap_output_limit(
+        %{output: @max_output_bytes, artifact: @max_output_bytes},
+        receipt_output_limit
+      )
 
     {tool_result, progress_count, cleanup_confirmation} =
       run_owned_process(
@@ -2362,17 +2386,23 @@ defmodule Loopex.Executor.Local do
   # The peek that remains is not the guarantee; it is the cheap branch for a DOWN
   # that has already arrived, which lets this executor write the truthful receipt
   # once rather than write a false one and then replace it.
-  defp retain_receipt_under_lease(root, receipt, {monitor, lease_pid} = lease, deadline) do
+  defp retain_receipt_under_lease(
+         root,
+         job,
+         receipt,
+         {monitor, lease_pid} = lease,
+         deadline
+       ) do
     receive do
       {:DOWN, ^monitor, :process, ^lease_pid, _reason} ->
-        retain_after_lease_loss(root, unproven_receipt(receipt))
+        retain_after_lease_loss(root, unproven_receipt(job, receipt))
         |> tag_lease_lost_retention()
     after
-      0 -> stage_and_commit(root, receipt, lease, deadline)
+      0 -> stage_and_commit(root, job, receipt, lease, deadline)
     end
   end
 
-  defp stage_and_commit(root, receipt, {_monitor, lease_pid} = lease, deadline) do
+  defp stage_and_commit(root, job, receipt, {_monitor, lease_pid} = lease, deadline) do
     staging = staging_path(root, receipt)
 
     case bounded_guardian_until(
@@ -2399,7 +2429,7 @@ defmodule Loopex.Executor.Local do
         {:unconfirmed, {:receipt_retention_guardian_unconfirmed, reason}}
 
       {:abandoned, :workspace_lease_lost, stopped, _late} ->
-        abandon_retention(root, receipt, staging, stopped, lease)
+        abandon_retention(root, job, receipt, staging, stopped, lease)
 
       {:abandoned, :bound_reached, stopped, late} ->
         abandon_retention_at_bound(receipt, staging, stopped, late)
@@ -3019,11 +3049,11 @@ defmodule Loopex.Executor.Local do
   # still land after this one, so which receipt is durable is genuinely unknown;
   # saying the receipt was not retained is honest, and claiming an outcome for
   # bytes this executor cannot vouch for is not.
-  defp abandon_retention(root, receipt, staging, stopped, _lease) do
+  defp abandon_retention(root, job, receipt, staging, stopped, _lease) do
     if stopped do
       File.rm(staging)
 
-      retain_after_lease_loss(root, unproven_receipt(receipt))
+      retain_after_lease_loss(root, unproven_receipt(job, receipt))
       |> tag_lease_lost_retention()
     else
       {:unconfirmed, :workspace_lease_lost_with_retention_worker_unconfirmed}
@@ -3039,8 +3069,8 @@ defmodule Loopex.Executor.Local do
   # Cleanup confirmation is a separate fact about the captured process group.
   # Losing the workspace claim makes the effect unproven; it does not erase a
   # cleanup confirmation already established by the tool boundary.
-  defp unproven_receipt(receipt) do
-    output_limit = receipt_output_limit(receipt)
+  defp unproven_receipt(job, receipt) do
+    output_limit = receipt_output_limit(job, receipt)
 
     %{
       receipt
@@ -4354,6 +4384,80 @@ defmodule Loopex.Executor.Local do
     case Map.fetch!(budgets, name) do
       value when is_integer(value) and value > 0 -> value
     end
+  end
+
+  # Concept: the durable terminal is known to fit before this executor grants
+  # the effect permission that makes a terminal receipt mandatory.
+  #
+  # Technical depth: the Store ceiling applies to the complete deterministic
+  # external-term record, not to `output` alone. Reserve against every valid
+  # outcome/cleanup pairing and, for coding tools, against both no artifact and
+  # the largest compact artifact reference ADR 0015 admits. Every other receipt
+  # member is the exact validated value this job will retain, including the
+  # admission sample already taken; the progress count that arises while work
+  # runs uses its largest admitted encoding. Because an external-term binary's
+  # header has fixed width here, subtracting the empty output record's size gives
+  # the exact number of output bytes that variant can carry. A fixed shape that
+  # leaves no byte for output is refused before the admission marker and open
+  # authority are written.
+  defp reserve_receipt_output(state, job, tool, arguments, observed_at_ms) do
+    environment = receipt_environment(tool, arguments)
+
+    capacities =
+      for {outcome, cleanup} <- @receipt_terminal_variants,
+          artifacts <- receipt_artifact_variants(state, tool) do
+        state
+        |> receipt(
+          job,
+          tool,
+          outcome,
+          "",
+          environment,
+          artifacts,
+          Map.get(job, :effective_job_deadline),
+          @max_uint64,
+          cleanup
+        )
+        |> Map.put(:observed_at_ms, observed_at_ms)
+        |> :erlang.term_to_binary([:deterministic])
+        |> byte_size()
+        |> then(&(@max_receipt_bytes - &1))
+      end
+
+    case Enum.min(capacities) do
+      limit when limit > 0 -> {:ok, limit}
+      _no_capacity -> refused_before_effect(:receipt_record_shape_too_large)
+    end
+  end
+
+  defp receipt_environment(%{coding: _definition}, arguments),
+    do: coding_tool_environment(arguments)
+
+  defp receipt_environment(_demonstration, _arguments), do: demonstration_environment()
+
+  defp receipt_artifact_variants(%{artifacts: artifacts}, %{coding: _definition})
+       when not is_nil(artifacts),
+       do: [[], [largest_artifact_reference()]]
+
+  defp receipt_artifact_variants(_state, _tool), do: [[]]
+
+  defp largest_artifact_reference do
+    digest = String.duplicate("f", 64)
+
+    %{
+      digest: digest,
+      size: @max_uint64,
+      locator: String.duplicate("l", 1_024),
+      media_type: String.duplicate("m", 255),
+      role: "tool_output",
+      use_canonicalization_version: LoopexProtocol.Canonical.version(),
+      use_digest: digest,
+      use_locator: "use:" <> digest
+    }
+  end
+
+  defp cap_output_limit(limits, receipt_output_limit) do
+    %{limits | output: min(limits.output, receipt_output_limit)}
   end
 
   # Concept: output beyond a tool's bound is retained, not discarded.
@@ -6467,10 +6571,14 @@ defmodule Loopex.Executor.Local do
     bytes = :erlang.term_to_binary(receipt, [:deterministic])
 
     result =
-      with :ok <- write_synced_receipt(temporary, bytes),
+      with true <- byte_size(bytes) <= @max_receipt_bytes,
+           :ok <- write_synced_receipt(temporary, bytes),
            :ok <- File.rename(temporary, path),
            :ok <- sync_parent_directory(path) do
         :ok
+      else
+        false -> {:error, :receipt_record_shape_too_large}
+        other -> other
       end
 
     if result != :ok, do: File.rm(temporary)
@@ -6608,15 +6716,131 @@ defmodule Loopex.Executor.Local do
   defp read_receipt(_root, ""), do: :absent
 
   defp read_receipt(root, job_id) do
-    case File.read(receipt_path(root, job_id)) do
-      {:ok, bytes} -> decode_receipt(bytes, job_id)
-      {:error, :enoent} -> :absent
-      {:error, reason} -> {:error, {:receipt_read_failed, reason}}
+    path = receipt_path(root, job_id)
+
+    with {:ok, identity} <- receipt_file_identity(path),
+         {:ok, file} <- File.open(path, [:read, :binary, :raw]) do
+      read_bounded_receipt(file, path, identity, job_id)
+    else
+      :absent ->
+        :absent
+
+      {:error, reason}
+      when reason in [:receipt_record_too_large, :receipt_record_not_a_regular_file] ->
+        {:error, :invalid_retained_receipt}
+
+      {:error, reason} ->
+        {:error, {:receipt_read_failed, reason}}
     end
   end
 
-  defp decode_receipt(bytes, job_id) do
-    with receipt <- :erlang.binary_to_term(bytes, [:safe]),
+  # Concept: a receipt is a bounded ordinary file on this ledger, never a link,
+  # pipe, device, or name that changed while it was opened.
+  #
+  # Technical depth: opening first followed symlinks and could block the whole VM
+  # on a FIFO while the root-wide claim was held. `lstat` refuses those names
+  # before open; the handle identity and a second pathname observation then
+  # prove that the bytes read are the same regular file that was admitted. The
+  # raw size is bounded before decode, and the read asks the kernel for only one
+  # byte beyond that ceiling so an oversized hostile record is never loaded
+  # whole merely to reject it.
+  defp receipt_file_identity(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular, size: size} = stat} when size <= @max_receipt_bytes ->
+        {:ok, receipt_identity(stat)}
+
+      {:ok, %File.Stat{type: :regular}} ->
+        {:error, :receipt_record_too_large}
+
+      {:ok, _non_regular} ->
+        {:error, :receipt_record_not_a_regular_file}
+
+      {:error, :enoent} ->
+        :absent
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp opened_receipt_identity(file) do
+    case :file.read_file_info(file) do
+      {:ok, record} ->
+        case File.Stat.from_record(record) do
+          %File.Stat{type: :regular, size: size} = stat when size <= @max_receipt_bytes ->
+            {:ok, receipt_identity(stat)}
+
+          %File.Stat{type: :regular} ->
+            {:error, :receipt_record_too_large}
+
+          %File.Stat{} ->
+            {:error, :receipt_record_not_a_regular_file}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp receipt_identity(stat), do: {stat.major_device, stat.inode, stat.size}
+
+  defp read_bounded_receipt(file, path, identity, job_id) do
+    result =
+      with {:ok, ^identity} <- opened_receipt_identity(file),
+           {:ok, ^identity} <- receipt_file_identity(path) do
+        IO.binread(file, @max_receipt_bytes + 1)
+      else
+        _changed -> {:error, :receipt_record_replaced}
+      end
+
+    close_result = File.close(file)
+
+    case {result, close_result} do
+      {bytes, :ok} when is_binary(bytes) and byte_size(bytes) <= @max_receipt_bytes ->
+        decode_receipt(bytes, job_id)
+
+      {:eof, :ok} ->
+        {:error, :invalid_retained_receipt}
+
+      {bytes, :ok} when is_binary(bytes) ->
+        {:error, :invalid_retained_receipt}
+
+      {{:error, reason}, _close}
+      when reason in [
+             :receipt_record_too_large,
+             :receipt_record_not_a_regular_file,
+             :receipt_record_replaced
+           ] ->
+        {:error, :invalid_retained_receipt}
+
+      {{:error, reason}, _close} ->
+        {:error, {:receipt_read_failed, reason}}
+
+      {_read, {:error, reason}} ->
+        {:error, {:receipt_read_failed, reason}}
+    end
+  end
+
+  # A canonical receipt is an uncompressed map external term. Refusing the ETF
+  # compression tag before decoding prevents a small file from expanding into a
+  # large term merely to be rejected by the later canonical-byte comparison.
+  defp decode_receipt(bytes, job_id),
+    do: decode_receipt(bytes, job_id, &:erlang.binary_to_term(&1, [:safe]))
+
+  # The injected decoder makes the allocation boundary directly observable to
+  # the locked contract case without changing the production path.
+  @doc false
+  @spec receipt_decode_probe(binary(), binary(), (binary() -> term())) ::
+          {:ok, map()} | {:error, :invalid_retained_receipt}
+  def receipt_decode_probe(bytes, job_id, decoder)
+      when is_binary(bytes) and is_binary(job_id) and is_function(decoder, 1),
+      do: decode_receipt(bytes, job_id, decoder)
+
+  defp decode_receipt(<<131, 80, _compressed::binary>>, _job_id, _decoder),
+    do: {:error, :invalid_retained_receipt}
+
+  defp decode_receipt(bytes, job_id, decoder) when byte_size(bytes) <= @max_receipt_bytes do
+    with receipt <- decoder.(bytes),
          true <- :erlang.term_to_binary(receipt, [:deterministic]) == bytes,
          true <- exact_receipt_fields?(receipt),
          true <- receipt_fields_readable?(receipt, job_id) do
@@ -6717,6 +6941,19 @@ defmodule Loopex.Executor.Local do
     end
   end
 
+  defp receipt_output_limit(job, receipt) do
+    domain_limit =
+      case resolve_tool(job) do
+        {:ok, %{coding: _definition} = tool} -> effective_output_limits(job, tool).output
+        {:ok, _demonstration_tool} -> receipt_output_limit(receipt)
+        {:error, _reason} -> 0
+      end
+
+    safe_receipt = %{receipt | outcome: :outcome_unknown, output: ""}
+    receipt_limit = @max_receipt_bytes - encoded_receipt_size(safe_receipt)
+    max(min(domain_limit, receipt_limit), 0)
+  end
+
   defp receipt_output_limit(receipt) do
     case tool(receipt.tool_id) do
       {:ok, %{coding: %{"budgets" => %{"output_bytes" => output}}}} -> output
@@ -6724,6 +6961,9 @@ defmodule Loopex.Executor.Local do
       :error -> @max_output_bytes
     end
   end
+
+  defp encoded_receipt_size(receipt),
+    do: receipt |> :erlang.term_to_binary([:deterministic]) |> byte_size()
 
   defp retention_bound_matches?(receipt),
     do: receipt.receipt_retention_bound_ms == receipt_reserve_ms(receipt.cleanup_grace_ms)

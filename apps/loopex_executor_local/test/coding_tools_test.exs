@@ -1984,11 +1984,15 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
           "loopex.bash",
           %{
             "command" =>
-              "ps -o pgid= -p $$ | tr -d ' ' > #{shell_path(ready)}; " <>
+              "printf '%200s' x; ps -o pgid= -p $$ | tr -d ' ' > #{shell_path(ready)}; " <>
                 "while [ ! -f #{shell_path(release)} ]; do :; done; " <>
                 "echo survived > #{shell_path(marker)}"
           },
-          %{executor: executor, lease_id: lease_id}
+          %{
+            executor: executor,
+            lease_id: lease_id,
+            resource_budgets: %{"max_output_bytes" => 256}
+          }
         )
       end)
 
@@ -2006,8 +2010,10 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     # exactly what is no longer true.
     assert receipt.outcome == :outcome_unknown
     assert receipt.cleanup_confirmation == :confirmed
+    assert byte_size(receipt.output) <= 256
     assert receipt.output =~ "workspace lease was lost"
     assert receipt.output =~ "unproven"
+    assert {:ok, ^receipt} = Local.receipt(executor, receipt.job_id)
 
     # And the command was actually ended, rather than merely reported on.
     File.write!(release, "continue")

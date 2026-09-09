@@ -1108,6 +1108,175 @@ defmodule Loopex.Executor.LocalAuthorityContractTest do
                    receipt.output =~ "retention unavailable"
       end
     end
+
+    # A legal complete tool result can itself fill the Store item ceiling. The
+    # executor must lower its inline ceiling before the read begins so the
+    # existing truncation path retains the full bytes and the complete receipt
+    # still fits; rejecting the receipt after the effect would strand open
+    # authority instead.
+    complete_fixture = prepared_fixture("receipt-fit-complete")
+    complete = :binary.copy("c", 65_536)
+    File.write!(Path.join(complete_fixture.workspace, "complete.txt"), complete)
+    {:ok, complete_store} = ArtifactStore.start(:truthful)
+    on_exit(fn -> stop(complete_store) end)
+
+    {:ok, complete_local} =
+      start_local(complete_fixture,
+        artifacts: %{module: ArtifactStore, handle: complete_store}
+      )
+
+    on_exit(fn -> stop(complete_local) end)
+
+    complete_job =
+      job(
+        complete_fixture,
+        "receipt-fit-complete",
+        %{"path" => "complete.txt"},
+        System.system_time(:millisecond) + 60_000,
+        %{
+          tool_id: "loopex.read",
+          effect_class: "read_only",
+          required_capabilities: ["read_only"],
+          resource_budgets: %{"max_output_bytes" => 65_536}
+        }
+      )
+
+    assert {:ok, complete_receipt} =
+             Local.execute(complete_local, complete_job, grant(complete_job), [], nil)
+
+    assert [{^complete, _normalized_use}] = ArtifactStore.retained(complete_store)
+    assert [_reference] = complete_receipt.artifacts
+    assert byte_size(complete_receipt.output) < byte_size(complete)
+    assert byte_size(:erlang.term_to_binary(complete_receipt, [:deterministic])) <= 65_536
+
+    # A fixed receipt shape that cannot fit is refused before the write effect,
+    # not discovered while its mandatory terminal is being retained.
+    preflight_fixture = prepared_fixture("receipt-fit-preflight")
+
+    {:ok, preflight_local} =
+      start_local(preflight_fixture,
+        process_probe: "/" <> :binary.copy("p", 65_536)
+      )
+
+    on_exit(fn -> stop(preflight_local) end)
+
+    preflight_job =
+      job(preflight_fixture, "receipt-fit-preflight", %{
+        "path" => "must-not-exist.txt",
+        "content" => "forbidden"
+      })
+
+    assert Local.execute(preflight_local, preflight_job, grant(preflight_job), [], nil) ==
+             {:error, {:refused_before_effect, :receipt_record_shape_too_large}}
+
+    refute File.exists?(Path.join(preflight_fixture.workspace, "must-not-exist.txt"))
+    assert Map.get(Local.stats(preflight_local).dispatches, preflight_job.job_id, 0) == 0
+
+    # The raw retained envelope is bounded independently of every member's
+    # domain. The output member's own ceiling is larger than the complete
+    # envelope, so this remains valid in every other respect and would replay if
+    # the complete-byte ceiling were omitted.
+    envelope_fixture = prepared_fixture("receipt-envelope")
+    {:ok, envelope_local} = start_local(envelope_fixture)
+    on_exit(fn -> stop(envelope_local) end)
+
+    envelope_job =
+      job(
+        envelope_fixture,
+        "receipt-envelope-job",
+        %{"relative_path" => "receipt-envelope.txt", "content" => "ok"},
+        System.system_time(:millisecond) + 60_000,
+        %{tool_id: "loopex.demo.write", effect_class: "workspace_write"}
+      )
+
+    assert {:ok, envelope_receipt} =
+             Local.execute(envelope_local, envelope_job, grant(envelope_job), [], nil)
+
+    envelope_path = receipt_path!(envelope_fixture.ledger, envelope_job.job_id)
+
+    empty_envelope =
+      envelope_receipt
+      |> Map.put(:output, "")
+      |> :erlang.term_to_binary([:deterministic])
+
+    exact_output = :binary.copy("x", 65_536 - byte_size(empty_envelope))
+
+    exact_bytes =
+      envelope_receipt
+      |> Map.put(:output, exact_output)
+      |> :erlang.term_to_binary([:deterministic])
+
+    assert byte_size(exact_bytes) == 65_536
+    File.write!(envelope_path, exact_bytes)
+    assert {:ok, %{output: ^exact_output}} = Local.receipt(envelope_local, envelope_job.job_id)
+
+    oversized_bytes =
+      envelope_receipt
+      |> Map.put(:output, exact_output <> "x")
+      |> :erlang.term_to_binary([:deterministic])
+
+    assert byte_size(oversized_bytes) == 65_537
+    File.write!(envelope_path, oversized_bytes)
+
+    assert Local.receipt(envelope_local, envelope_job.job_id) ==
+             {:error, :invalid_retained_receipt}
+
+    assert Local.execute(envelope_local, envelope_job, grant(envelope_job), [], nil) ==
+             {:error, :invalid_retained_receipt}
+
+    # A compressed ETF can be tiny while expanding into a large term. The
+    # retained dialect is deterministic and uncompressed, so its tag is refused
+    # before external-term decoding rather than allocating the expanded value.
+    compressed_bytes =
+      envelope_receipt
+      |> Map.put(:output, :binary.copy("x", 1_048_576))
+      |> :erlang.term_to_binary([:compressed])
+
+    assert byte_size(compressed_bytes) < 65_536
+    assert match?(<<131, 80, _::binary>>, compressed_bytes)
+
+    owner = self()
+
+    assert Local.receipt_decode_probe(compressed_bytes, envelope_job.job_id, fn bytes ->
+             send(owner, {:receipt_decoder_called, bytes})
+             :erlang.binary_to_term(bytes, [:safe])
+           end) == {:error, :invalid_retained_receipt}
+
+    refute_receive {:receipt_decoder_called, _bytes}
+
+    assert {:ok, ^envelope_receipt} =
+             Local.receipt_decode_probe(
+               :erlang.term_to_binary(envelope_receipt, [:deterministic]),
+               envelope_job.job_id,
+               fn bytes ->
+                 send(owner, {:receipt_decoder_called, bytes})
+                 :erlang.binary_to_term(bytes, [:safe])
+               end
+             )
+
+    assert_receive {:receipt_decoder_called, _canonical_bytes}
+
+    File.write!(envelope_path, compressed_bytes)
+
+    assert Local.receipt(envelope_local, envelope_job.job_id) ==
+             {:error, :invalid_retained_receipt}
+
+    # A symlink and FIFO are unavailable ledger entries. Neither is opened, so a
+    # FIFO cannot wedge the VM while the root-wide claim is held.
+    canonical_path = envelope_path <> ".canonical"
+    File.write!(canonical_path, :erlang.term_to_binary(envelope_receipt, [:deterministic]))
+    File.rm!(envelope_path)
+    File.ln_s!(canonical_path, envelope_path)
+
+    assert Local.receipt(envelope_local, envelope_job.job_id) ==
+             {:error, :invalid_retained_receipt}
+
+    File.rm!(envelope_path)
+    mkfifo = System.find_executable("mkfifo") || flunk("mkfifo is required by the Local gate")
+    {_output, 0} = System.cmd(mkfifo, [envelope_path])
+
+    assert Local.receipt(envelope_local, envelope_job.job_id) ==
+             {:error, :invalid_retained_receipt}
   end
 
   test "complete root snapshots enforce both entry capacity and the byte ceiling" do

@@ -126,6 +126,47 @@ defmodule Loopex.Executor.LocalTest do
     assert {:error, {:refused_before_effect, :canonical_job_request_mismatch}} =
              Local.execute(fixture.executor, altered, grant)
 
+    # The attempt-local deadline is outside the digest, but it is still a
+    # required bounded job fact. Missing, malformed, and run-widening values all
+    # refuse at the same serialized boundary before a reservation or effect can
+    # exist. Without a positive dispatch-local wall ceiling, equality to the run
+    # deadline is independently reproducible too.
+    bounded_fields =
+      job
+      |> Map.from_struct()
+      |> Map.drop([:canonical_request_bytes, :canonical_request_digest, :effective_job_deadline])
+      |> Map.put(:resource_budgets, %{
+        "max_output_bytes" => 1_048_576,
+        "max_wall_time_ms" => 1_000
+      })
+
+    assert {:ok, bounded_job} = Executor.job(bounded_fields)
+    assert :ok = Executor.validate_job(bounded_job)
+
+    assert {:ok, bounded_grant} =
+             Executor.issue_grant({:host_policy, :allow}, bounded_job, grant.expiry)
+
+    invalid_deadlines = [
+      Map.delete(bounded_job, :effective_job_deadline),
+      %{bounded_job | effective_job_deadline: "later"},
+      %{bounded_job | effective_job_deadline: bounded_job.run_deadline + 1}
+    ]
+
+    for malformed <- invalid_deadlines do
+      assert {:error, :canonical_job_request_mismatch} = Executor.validate_job(malformed)
+
+      assert {:error, {:refused_before_effect, :canonical_job_request_mismatch}} =
+               Local.execute(fixture.executor, malformed, bounded_grant)
+    end
+
+    shortened_without_ceiling = %{job | effective_job_deadline: job.run_deadline - 1}
+
+    assert {:error, :canonical_job_request_mismatch} =
+             Executor.validate_job(shortened_without_ceiling)
+
+    assert {:error, {:refused_before_effect, :canonical_job_request_mismatch}} =
+             Local.execute(fixture.executor, shortened_without_ceiling, grant)
+
     assert %{dispatches: %{}} = Local.stats(fixture.executor)
 
     assert {:ok, receipt} = Local.execute(fixture.executor, job, grant)
