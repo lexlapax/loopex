@@ -3217,7 +3217,7 @@ defmodule Loopex.Executor.Local.CodingToolsTest do
     source = File.read!(Path.expand("../lib/executor.ex", __DIR__))
 
     assert source =~
-             ~r/with :ok <- write_synced_receipt\(temporary, bytes\),\n\s+:ok <- File\.rename\(temporary, path\),\n\s+:ok <- sync_parent_directory\(path\)/,
+             ~r/with true <- byte_size\(bytes\) <= @max_receipt_bytes,\n\s+:ok <- write_synced_receipt\(temporary, bytes\),\n\s+:ok <- File\.rename\(temporary, path\),\n\s+:ok <- sync_parent_directory\(path\)/,
            "receipt publication no longer orders file sync, rename, and directory sync"
 
     assert source =~

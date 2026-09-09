@@ -309,10 +309,16 @@ Developer companion:
 
 | Tool | Wall time | Output bytes | Artifact bytes |
 | --- | --- | --- | --- |
-| `loopex.read` | 30,000 ms | 65,536 | 8,388,608 |
+| `loopex.read` | 30,000 ms | 16,384 | 8,388,608 |
 | `loopex.write` | 30,000 ms | 4,096 | 8,388,608 |
 | `loopex.edit` | 30,000 ms | 4,096 | 8,388,608 |
-| `loopex.bash` | 120,000 ms | 65,536 | 8,388,608 |
+| `loopex.bash` | 120,000 ms | 16,384 | 8,388,608 |
+
+The read and shell ceilings leave room for both the durable receipt and the next
+staged context inside the Store's 65,536-byte record ceiling. Local measures the
+complete receipt before starting an effect; unusually large valid identity
+fields can reduce the inline prefix further, with truncation or artifact
+retention reported in the result.
 
 All four carry version `1.0.0`. The `loopex.` prefix is a reserved namespace: the
 runtime admits a tool with that prefix only through its own `:tools` start

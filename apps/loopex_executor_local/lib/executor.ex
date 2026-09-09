@@ -4393,9 +4393,11 @@ defmodule Loopex.Executor.Local do
   # external-term record, not to `output` alone. Reserve against every valid
   # outcome/cleanup pairing and, for coding tools, against both no artifact and
   # the largest compact artifact reference ADR 0015 admits. Every other receipt
-  # member is the exact validated value this job will retain, including the
-  # admission sample already taken; the progress count that arises while work
-  # runs uses its largest admitted encoding. Because an external-term binary's
+  # member is an encoding-size upper bound for the value this job will retain,
+  # including the admission sample already taken; the effective deadline uses
+  # the job deadline, whose integer encoding is at least as wide as the earlier
+  # terminal deadline, and the progress count that arises while work runs uses
+  # its largest admitted encoding. Because an external-term binary's
   # header has fixed width here, subtracting the empty output record's size gives
   # the exact number of output bytes that variant can carry. A fixed shape that
   # leaves no byte for output is refused before the admission marker and open
@@ -6946,7 +6948,7 @@ defmodule Loopex.Executor.Local do
       case resolve_tool(job) do
         {:ok, %{coding: _definition} = tool} -> effective_output_limits(job, tool).output
         {:ok, _demonstration_tool} -> receipt_output_limit(receipt)
-        {:error, _reason} -> 0
+        {:error, _reason} -> receipt_output_limit(receipt)
       end
 
     safe_receipt = %{receipt | outcome: :outcome_unknown, output: ""}

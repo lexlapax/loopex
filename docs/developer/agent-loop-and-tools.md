@@ -630,10 +630,16 @@ declarations in the reserved namespace:
 
 | `tool_id` | Effect class | Idempotency | Output ceiling |
 | --- | --- | --- | --- |
-| `loopex.read` | `read_only` | `safe_retry` | 65536 bytes |
+| `loopex.read` | `read_only` | `safe_retry` | 16384 bytes |
 | `loopex.write` | `workspace_write` | `safe_retry` | 4096 bytes |
 | `loopex.edit` | `workspace_write` | `never_blind_retry` | 4096 bytes |
-| `loopex.bash` | `process` | `never_blind_retry` | 65536 bytes |
+| `loopex.bash` | `process` | `never_blind_retry` | 16384 bytes |
+
+The two largest inline ceilings reserve three quarters of the Store's
+65,536-byte private record for the executor receipt and the next staged-context
+envelope. Local still measures the exact receipt before admitting an effect and
+may narrow the visible prefix further when valid identity fields consume more
+than that reserved headroom.
 
 Containment is checked against the *resolved* path, not the requested one.
 `resolve/2` resolves the workspace root, expands the requested path against it,

@@ -20,6 +20,7 @@ defmodule LoopexCli.CodingTaskTest do
   alias LoopexCli.Demonstration.Evidence
   alias LoopexCli.Policy.AllowAll
   alias LoopexCli.Render
+  alias Loopex.Executor.Local.CodingTools
   alias Loopex.LLM.ReqLLM.ProviderBuildFixture
 
   # Concept: the attended demonstration and the deterministic cases that support
@@ -123,6 +124,49 @@ defmodule LoopexCli.CodingTaskTest do
     started = Enum.filter(events, &(&1.kind == "tool.started"))
     tools = started |> Enum.map(& &1["tool_id"]) |> Enum.uniq() |> Enum.sort()
     assert tools == ["loopex.bash", "loopex.edit", "loopex.read", "loopex.write"]
+  end
+
+  test "an exact-limit read survives the executor receipt and Store commit" do
+    limit = CodingTools.limits().read_bytes
+    exact = String.duplicate("x", limit)
+
+    stack =
+      stack(
+        label: "exact-limit-read",
+        script: [
+          %{
+            text: "reading the exact-limit file",
+            calls: [Demonstration.call("c1", "read", %{"path" => "notes.md"})]
+          },
+          %{text: "done", calls: []}
+        ]
+      )
+
+    File.write!(Path.join(stack.workspace, "notes.md"), exact)
+    {session_id, attachment} = Demonstration.prompt(stack, "read notes.md")
+    events = drain(attachment)
+    finished = Enum.find(events, &(&1.kind == "run.finished"))
+
+    assert finished["outcome"] == "completed", inspect(events)
+
+    [_first, second] = Loopex.AgentLoopTestModel.dispatched(stack.model)
+    tool_result = Enum.find(second.messages, &(&1["role"] == "tool"))
+    assert tool_result["outcome"] == "completed"
+    assert tool_result["content"] == exact
+
+    receipt =
+      stack.store
+      |> Demonstration.records(session_id)
+      |> Enum.find(&(&1.payload.kind == "executor_receipt_committed"))
+      |> get_in([:payload, "receipt"])
+
+    assert receipt["output"] == exact
+
+    assert :ok =
+             Loopex.Store.validate_private_record(%{
+               "receipt" => receipt,
+               kind: "executor_receipt_candidate"
+             })
   end
 
   test "the task transcript shows every tool call decision and result" do
