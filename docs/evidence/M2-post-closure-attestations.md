@@ -163,6 +163,100 @@ complete. This is not a billing audit, a new live run at a later SHA, a passing
 complete M2 gate, or an acceptance of the final release candidate. The original
 unexplained Outcome 4 gate failure remains independently outstanding.
 
+<a id="source-a0a9af8"></a>
+## Final-Source Attestations — `a0a9af8`
+
+These observations ran serially at exact source
+`a0a9af8960cad2a473a1741f08ac2e08d4d2728f` after that source's literal M2
+gate completed GREEN. They do not relabel any earlier source's records. The
+task-only capture invoked the unchanged bound selector runner with the gate's
+exact three real-provider profiles, locked names, minima and exclusions, seed
+`3107`, after clean-source formatting and forced warnings-as-errors compilation.
+The literal gate's qualification record SHA-256 was
+`79898c7d81f015343a233c17b71e6f27fc34459140b3944007ba62e26e45e14c`.
+
+Provider `anthropic`, model `claude-haiku-4-5-20251001`, endpoint
+`https://api.anthropic.com`, adapter build `loopex_llm_reqllm@0.0.0`; current
+Darwin Elixir 1.20.3 / OTP 29.0.5 with isolated build, dependency and state
+roots. The provider secret entered only the runner's bounded nonce-bearing
+standard-input frame from the maintainer-authorized environment file. It was
+neither an argument nor an exported startup value. The collector held all
+merged output in memory, rejected output containing the actual credential
+literal, and only then wrote the role logs. No credential was found.
+
+| Role / case | UTC lane window, 2026-09-09 | Calls | Reported input tokens | Reported output tokens | Result |
+| --- | --- | --- | --- | --- | --- |
+| Db: separate response-identifier check | 08:20:42–08:21:15 | 1 | 15 | 5 | Passed |
+| Db: coding task | Same Db lane window | 7 | 10282 | 572 | Passed |
+| inherited 5c: model session | 08:21:18–08:21:29 | 2 | 1475 | 124 | Passed |
+| inherited 8b: recovery trace | 08:21:31–08:21:44 | 2 | 1463 | 112 | Passed |
+
+Db executed exactly its two live cases; 5c and 8b each executed exactly one.
+Their deterministic companions were excluded by exact name. These are selected
+real roles, not an ordinary suite whose live cases were skipped. Db's one-call
+identifier check and seven-call coding task are separate attestations sharing
+one role label.
+
+| Observation | Provider-supplied identifiers, in reported order |
+| --- | --- |
+| Db identifier check | `req_011CesYH8P9XpbnqYDxUY5HC` |
+| Db coding task | `req_011CesYHfURZBXCPnwEhbHT4`, `req_011CesYHsun7RXb42LzgJktN`, `req_011CesYJ6jD4PvUxc7nTmrZJ`, `req_011CesYJJdKdC3LvMTjWbdgi`, `req_011CesYJW9NKoda7ArZEAotG`, `req_011CesYJiLbbs34iFHWrd2kW`, `req_011CesYJvVLjnydoQRDgSxcg` |
+| inherited 5c | `req_011CesYKhQK8A7M3xYgZg6YY`, `req_011CesYKucXpy9fgsRjysFvD` |
+| inherited 8b | `req_011CesYLm4riwG4U6j74NnE2`, `req_011CesYM2ssHoChWJzcBR3Qq` |
+
+The adapter-reported totals are twelve calls, 13,235 input tokens and 813
+output tokens. They are not a billing statement. Role windows include fixture
+work and are not individual request timestamps. Account existence, individual
+timestamps, model, cache categories and per-call usage are checked separately;
+identifier syntax or a successful test is not substituted for that lookup.
+
+Retained role-log SHA-256:
+
+- Db: `65fb96fc34f8baf9a1c97fe36b6bb5c652438fcd95fdcdcf43a3eff264b39d6e`.
+- 5c: `988251babf1a7221703803f13483ba5b169150a6950b4e3fd2d089be036cf70e`.
+- 8b: `2dfdb0ab1eb5c0c96584af44ea6e415ec7bd8e665552a2de6982df6f64d3fc26`.
+- Task-only capture driver: `0e6d469806607ecadc44ae4a43dbdfe2b4f6461ec2dd79a10e4112f0bb73a683`.
+
+The capture window was `2026-09-09T08:20:05Z` through `08:21:44Z`; the driver
+and all role runners exited zero. This capture proves the selected source paths
+ran and emitted the recorded adapter values. Provider-account verification is
+a separate load-bearing observation and is not inferred here.
+
+<a id="source-a0a9af8-account-verification"></a>
+## Final-Source Provider-Account Verification — 2026-09-09
+
+The authenticated Claude Platform Logs page was refreshed and inspected
+read-only through Chrome with 100 rows visible. Each of the twelve identifiers
+above appeared exactly once. Every row named model
+`claude-haiku-4-5-20251001`, type `Streaming` and service tier `Standard`.
+The absolute UTC timestamp was read from the row's rendered time element, and
+the input-token popover was opened for every row. Cache read, five-minute cache
+write and one-hour cache write were each zero for all twelve requests.
+A screened plain-text transcription for the evidence archive has SHA-256
+`62b012624e9ddafd1774a47c902bd4ac869ecf635016df1a7b4bb33dbb5d0564`.
+
+| Role | Account request identifier | Account UTC timestamp | Input | Output | Cache read / 5m write / 1h write |
+| --- | --- | --- | ---: | ---: | --- |
+| Db identifier check | `req_011CesYH8P9XpbnqYDxUY5HC` | `2026-09-09T08:20:51.051Z` | 15 | 5 | 0 / 0 / 0 |
+| Db coding task | `req_011CesYHfURZBXCPnwEhbHT4` | `2026-09-09T08:20:58.971Z` | 1128 | 82 | 0 / 0 / 0 |
+| Db coding task | `req_011CesYHsun7RXb42LzgJktN` | `2026-09-09T08:21:02.077Z` | 1227 | 123 | 0 / 0 / 0 |
+| Db coding task | `req_011CesYJ6jD4PvUxc7nTmrZJ` | `2026-09-09T08:21:04.713Z` | 1371 | 93 | 0 / 0 / 0 |
+| Db coding task | `req_011CesYJJdKdC3LvMTjWbdgi` | `2026-09-09T08:21:07.370Z` | 1485 | 71 | 0 / 0 / 0 |
+| Db coding task | `req_011CesYJW9NKoda7ArZEAotG` | `2026-09-09T08:21:10.422Z` | 1573 | 106 | 0 / 0 / 0 |
+| Db coding task | `req_011CesYJiLbbs34iFHWrd2kW` | `2026-09-09T08:21:13.122Z` | 1705 | 73 | 0 / 0 / 0 |
+| Db coding task | `req_011CesYJvVLjnydoQRDgSxcg` | `2026-09-09T08:21:15.457Z` | 1793 | 24 | 0 / 0 / 0 |
+| inherited 5c | `req_011CesYKhQK8A7M3xYgZg6YY` | `2026-09-09T08:21:26.512Z` | 680 | 99 | 0 / 0 / 0 |
+| inherited 5c | `req_011CesYKucXpy9fgsRjysFvD` | `2026-09-09T08:21:28.875Z` | 795 | 25 | 0 / 0 / 0 |
+| inherited 8b | `req_011CesYLm4riwG4U6j74NnE2` | `2026-09-09T08:21:40.749Z` | 680 | 87 | 0 / 0 / 0 |
+| inherited 8b | `req_011CesYM2ssHoChWJzcBR3Qq` | `2026-09-09T08:21:44.198Z` | 783 | 25 | 0 / 0 / 0 |
+
+Every timestamp falls within its retained role window. The account sums
+reconcile exactly with the captured adapter reports: Db identifier 15/5, Db
+coding task 10,282/572, inherited 5c 1,475/124 and inherited 8b 1,463/112;
+total 13,235 input and 813 output tokens. This confirms account existence,
+model, request type, service tier, time window, per-call usage and cache
+categories for the final source. It is not a billing audit or release authority.
+
 ## Related
 
 - [M2 real-call attestations](M2-real-call-attestations.md) (the closure records, frozen)

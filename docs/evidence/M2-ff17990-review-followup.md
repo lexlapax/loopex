@@ -181,7 +181,7 @@ register, accepted gates, and historical dispositions remain unchanged.
 | ADR 0021 accounting provenance | Joined Core/CLI lanes pass at `47948df`; genuine old-reader control/refusal and actual child-provider accounting/rendering proofs remain source-scoped below | Final-source rollback and independent review; no old-source result is projected onto the final candidate |
 | Rejoin and conformance | Clean `47948df`: zero compile warnings, 1,031 passed, zero failed, five live exclusions; `810f44c` subsequently strengthens one existing cleanup-receipt witness | Final clean source selection and serial qualification; no locked name, minimum, bound artifact or production byte changed in the witness repair |
 | Clause-derived mutant hunt | The six earlier focused survivors have behavioral detectors; the restored-report content audit found and repaired a cleanup-adopter witness gap | The newest mutation was not executed after action-review refusal; no mutation kill or whole-suite survivor is claimed for it; independent review remains required |
-| Final source and live evidence | Pending; integrator | Clean source `S`; full serial checks, literal M2 gate, actual provider/build identity and account verification |
+| Final source and live evidence | [Complete at `a0a9af8`](#final-source-a0a9af8); integrator | Clean source `S`; full serial checks, literal M2 gate, actual provider/build identity and account verification |
 | Release-review handoff | Pending; independent reviewer | Evidence-only child `E` names final `S` and actual repair range; push checkpoints; no integration or publication inferred |
 
 Each writer uses its own disposable clone and branch. The integrator owns rejoin
@@ -1937,3 +1937,134 @@ The current failures are distinct from the original exact-R opaque Outcome 4
 red and from the separately demonstrated lease-test scheduling weakness. No
 retry, repair attribution, green gate, exception or release approval is claimed
 by this record. The candidate is not represented as a qualified source baseline.
+
+<a id="final-source-a0a9af8"></a>
+### Final Source Qualification — `a0a9af8`
+
+The release-repair source settled at exact
+`a0a9af8960cad2a473a1741f08ac2e08d4d2728f`. Its final commit changes three
+test files and no product byte: it replaces fixed-sleep scheduling with observed
+boundaries in the coding-tool cleanup cases and proves that the first protected
+provider image, rather than only its downstream command, receives the constructed
+credential-free environment. Both authorized repair references were pushed to
+this exact source. `main` remained at
+`3a729b08ff0ce9f14bca1ef64da04ee96879ac2b`; no integration, tag or publication
+is represented here.
+
+This source-specific section supersedes the earlier completion-order table's
+`Pending` final-source row. That table remains the historical workstream
+checkpoint at which it was written. The independent-review row remains pending
+until the evidence-only child assembled from these results is reviewed.
+
+The clean source passed warnings-as-errors compilation, formatting, repository
+status and bootstrap. The serial credential-free umbrella suite used seed
+`970189` and produced 1,072 passed cases, five required real-provider exclusions
+and zero failures across all eight applications. The M2 gate then ran literally
+in a fresh detached clone with the authorized credential entering only its
+bounded standard-input frame. From `2026-09-09T05:19:53Z` through
+`06:04:56Z` it completed GREEN at seed `112484`, with 650 protected cases.
+Parser, gate and log-writer exits were all zero; the combined log SHA-256 is
+`c84ef95951d277acfff9855e108312debf0fc64689488aac78fbb3da238677e2`.
+The checkout remained clean. A preceding restricted-sandbox attempt that could
+not acquire Mix's local TCP lock ran no gate and is retained separately as
+unavailable environment evidence, not as a product red.
+
+The closed inherited gates were run serially from separate fresh detached clones
+at the same source:
+
+| Gate / pair | UTC window, 2026-09-09 | Result | Log SHA-256 |
+| --- | --- | --- | --- |
+| M0, Elixir 1.20.3 / OTP 29.0.5 | 06:09:45–06:33:18 | GREEN; umbrella seed `160712`, 1,072 passed and five excluded | `11b0dc50a4155d4bb6a5bf6beb8c5fefe74d3eda331d9a98d249619e8c4e5779` |
+| M0, Elixir 1.17.0 / OTP 26.0 | 06:33:41–06:56:52 | GREEN; umbrella seed `995643`, 1,072 passed and five excluded | `5788aa9f65a86d7eb1077c738b7ca829138f1c48f85a9148e6203286d70d519e` |
+| M1, Elixir 1.20.3 / OTP 29.0.5 | 06:57:13–07:52:12 | GREEN; seed `21325`, 69 protected cases; umbrella suite green | `6f3060853198de458ab140e909c742520707734b80d212c0f3f373a6bae4625e` |
+
+Fresh Darwin package qualification used isolated dependency, build, state and
+log roots. On both the current and floor pairs it passed formatting, forced
+warnings-as-errors product and test compilation, provider-companion and CLI
+escript construction, archive identity, canonical and malformed outside-checkout
+startup, entry-descriptor exclusion, outside-checkout CLI execution, whole-parent
+VM death cleanup, and the focused provider and executor corpora at seed `3107`.
+The provider corpus had 149 cases with one real-provider exclusion; all remaining
+148 passed. All 180 executor cases passed.
+
+| Darwin pair | UTC window | Provider companion | Manifest file | Launch file | CLI |
+| --- | --- | --- | --- | --- | --- |
+| Elixir 1.20.3 / OTP 29.0.5 | 07:59:27–08:06:38 | `df5c0e509384100297ee1a918b9c920bd82cf320fe3fe0486002f5b94d1d8aa5` | `3a01cbe6e7346f34af4b1de2ebff3d488fe4806ccfdc2c5389e726d25e32ee8e` | `57f40653b31cec061bc358fc01e199e1b69e8967d91893079b8e107fd70b341c` | `04f66c808f4ec7cade77eb4c59fed8310466d46a31f921b8313f58670cc5c967` |
+| Elixir 1.17.0 / OTP 26.0 | 08:06:57–08:14:58 | `36332cfe0b430407e4720b67b2695b00302b20e31a99e1766bdbb983c75595c9` | `99ba62ad025eb2ac13aff31e51e9db91b28e070956bf08fc15f4a994292ac500` | `f48f627868c929ef03371531295eecccb554c8c69d38316df5ffab29e0ef720c` | `9b0d509cf2e97831d254b101214ae9b1c24e64339902c1fe53ad08d685f8788a` |
+
+All five digest columns above are SHA-256 values over the exact packaged file
+named by the column. The manifest's internal canonical digest was also checked
+by the outside-checkout witness; the file digest is retained here so an archive
+copy can be compared byte for byte.
+
+The two Darwin gate-capture roles were then run serially from two further fresh
+detached roots. These are distinct from both the ordinary GREEN gate and the
+package qualification above. Each emitted the gate's canonical CAPTURE record,
+with the same sealed provider, model, endpoint, adapter, executor and four-tool
+identities:
+
+| Capture lane | UTC process window, 2026-09-09 | Gate record | Log SHA-256 |
+| --- | --- | --- | --- |
+| `darwin-current` | 08:31:06–09:14:28 | seed `262267`; 650 executed; Elixir 1.20.3 / OTP 29.0.5; `recorded=2026-09-09T08:56:02Z`; CAPTURE, exit 0 | `2ed187435b9466382a85eb0280379602f6cc98e39a1478eaecb310122362ba94` |
+| `darwin-floor` | 09:15:01–09:57:09 | seed `335233`; 650 executed; Elixir 1.17.0 / OTP 26.0; `recorded=2026-09-09T09:37:25Z`; CAPTURE, exit 0 | `cbabba389ba5b34ad88f74fb2266daa3199eb4f7f6344a3c579aae0fae9b50d8` |
+
+Both capture wrappers' frame-parser, gate and log-writer exits were zero, and
+both source clones ended clean. Their `recorded` fields belong to the gate's
+sealed demonstration observation; the wider process windows include later
+binding-independent and whole-suite work and are not reinterpreted as request
+times.
+
+The first native-Linux preparation attempt at the same source exited before
+product compilation because its prepared Hex archive was under a different
+Mix-home path than the gate process used. The opening probe reported Hex SCM
+unavailable; no locked lane or provider request ran. Its
+`2026-09-09T14:12:38Z`–`14:12:39Z` log has SHA-256
+`b16d7b79f5cd89ca100c7c4ba18460e6eaf2e44ac5751c2f4e92f1f1cbbf752c`.
+It is retained as unavailable environment evidence, not a product red or a
+retry pass. The subsequent Linux lane uses a new source root and matched cache
+paths.
+
+That qualifying Linux lane ran serially in the exact
+`loopex-m1-current:elixir-1.20.3-otp-29.0.5` AMD64/Linux image, whose image
+SHA-256 is
+`b55d940a6542359c567e88c3576e4303b20a90a429969c70bd7874b5ea41099b`.
+The provider credential was read from the maintainer-authorized environment
+file already present on the Linux host and entered only through the gate's
+bounded standard-input frame; it was not mounted, exported or logged. From
+`2026-09-09T14:15:17Z` through `14:52:16Z`, the gate completed CAPTURE at seed
+`165887` with 650 protected cases, Elixir 1.20.3 and OTP 29.0.5. Its canonical
+recorded time is `2026-09-09T14:37:21Z`; parser framing, gate and log writing
+all exited zero, the source checkout remained clean, and the combined log
+SHA-256 is
+`5b9198ef0e3afee703ddefd3298b7ba13cc3427ff2d3b9c72dd0923b18d5bd47`.
+
+The clause-derived pre-handoff mutant hunt attacked seventeen independent
+Outcome 4 boundaries: exact workspace resolution, exclusive creation,
+filesystem-receipt environment truth, cleanup span and job cleanup, lease-loss
+settlement, post-effect normalization, coordinator progress counts, zero-based
+sequence numbers, both deadline fences, effect-intent preflight, root-claim
+terminal reads and binding, guard authority, retention-unavailable suffixes,
+effective-deadline receipts and unconfirmed deadlines. Every production mutation
+was killed by the expected behavioral corpus; no survivor was found. This is
+supplementary adversarial evidence, not a substitute for independent review.
+
+The historical exact-source failures above remain records of their own sources:
+the later green result is not back-projected onto the opaque exact-`7753856` red,
+the exact-`710c1d0` cleanup failure, or either earlier M2 provider failure.
+
+The screened final-source archive is retained at
+`/Users/spuri/loopex-reviews/M2-a0a9-final-qualification-2026-09-09.4JF0ct`.
+Its 90-entry `PAYLOAD-SHA256.txt` has SHA-256
+`f815cfa745a3b6a1c46317d467cb31c506d304cca2c97c16bcbf66ac5f4a47cc`.
+That manifest covers the execution records, logs, collectors and packaged-file
+digests but deliberately excludes its own bytes and the two documentation
+copies, avoiding a circular digest when this evidence-only child is formed.
+The archive was screened against the exact authorized credential and generic
+credential patterns before durable copying; neither was present. It contains no
+source, dependency or build tree and confers no integration or release authority.
+
+The evidence-only child carrying this section has exact source `a0a9af8` as its
+sole parent and changes only this file and
+`docs/evidence/M2-post-closure-attestations.md`. It changes no product, test,
+gate, plan, ADR, lifecycle, register or release byte. Its independent review is
+still required; this record neither performs nor predicts that review.
