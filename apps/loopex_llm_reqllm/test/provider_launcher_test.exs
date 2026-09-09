@@ -91,7 +91,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncherTest do
     monitor = :erlang.monitor(:port, port)
     :gen_tcp.close(namespace.listener)
     stop = String.duplicate("e", 32)
-    deadline = System.monotonic_time(:millisecond) + 2_000 + 100
+    terminal_deadline = System.monotonic_time(:millisecond) + 2_000 + 100
 
     try do
       assert Port.command(port, "stop:#{nonce}:#{stop}:2000\n")
@@ -103,9 +103,21 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncherTest do
       refute File.exists?(namespace.namespace)
       assert process_alive?(child)
       assert {_, 0} = System.cmd("/bin/kill", ["-TERM", "--", "-#{owned.carrier}"])
-      observed = terminal_observation(port, monitor, deadline)
+      observed = terminal_observation(port, monitor, terminal_deadline)
       first_members = live_group(owned.carrier)
-      members = await_empty_group(owned.carrier, deadline, first_members)
+
+      # The guard's nonzero terminal is still required inside the configured
+      # cleanup period above. Kernel process-table visibility is observed under
+      # a separate test-only bound: the adapter has already reported cleanup
+      # unproved, so this wait grants no authority and cannot turn lateness into
+      # a cleanup acknowledgement. Reusing the spent terminal deadline made a
+      # single late `ps` row both the first and final observation under load.
+      members =
+        await_empty_group(
+          owned.carrier,
+          System.monotonic_time(:millisecond) + 5_000,
+          first_members
+        )
 
       IO.inspect(
         %{
@@ -317,19 +329,38 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncherTest do
 
     Enum.any?(members, fn timer ->
       timer.ppid == owned.guard and timer.pid != child and
-        Enum.any?(members, &(&1.ppid == timer.pid))
+        Enum.any?(members, fn descendant ->
+          descendant.ppid == timer.pid and Path.basename(descendant.comm) == "sleep"
+        end)
     end)
   end
 
   defp live_group(group) do
     {table, 0} =
-      System.cmd("/bin/ps", ["-ax", "-o", "pid=", "-o", "ppid=", "-o", "pgid=", "-o", "stat="])
+      System.cmd("/bin/ps", [
+        "-ax",
+        "-o",
+        "pid=",
+        "-o",
+        "ppid=",
+        "-o",
+        "pgid=",
+        "-o",
+        "stat=",
+        "-o",
+        "comm="
+      ])
 
     for line <- String.split(table, "\n", trim: true),
-        [pid, parent, pgid, state] = String.split(String.trim(line)),
+        [pid, parent, pgid, state, comm] = String.split(String.trim(line), ~r/\s+/, parts: 5),
         String.to_integer(pgid) == group,
         not String.starts_with?(state, "Z"),
-        do: %{pid: String.to_integer(pid), ppid: String.to_integer(parent), state: state}
+        do: %{
+          pid: String.to_integer(pid),
+          ppid: String.to_integer(parent),
+          state: state,
+          comm: comm
+        }
   end
 
   # Port exit and DOWN prove only that the direct carrier ended. OS group
