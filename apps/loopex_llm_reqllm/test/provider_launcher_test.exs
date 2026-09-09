@@ -104,8 +104,18 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncherTest do
       assert process_alive?(child)
       assert {_, 0} = System.cmd("/bin/kill", ["-TERM", "--", "-#{owned.carrier}"])
       observed = terminal_observation(port, monitor, deadline)
-      members = live_group(owned.carrier)
-      IO.inspect(%{repeated_cleanup_term: observed, live_group: members}, limit: :infinity)
+      first_members = live_group(owned.carrier)
+      members = await_empty_group(owned.carrier, deadline, first_members)
+
+      IO.inspect(
+        %{
+          repeated_cleanup_term: observed,
+          first_live_group: first_members,
+          final_live_group: members
+        },
+        limit: :infinity
+      )
+
       assert is_integer(observed.exit_status)
       assert observed.down
       refute observed.exit_status == 0
@@ -320,6 +330,27 @@ defmodule Loopex.LLM.ReqLLM.ProviderLauncherTest do
         String.to_integer(pgid) == group,
         not String.starts_with?(state, "Z"),
         do: %{pid: String.to_integer(pid), ppid: String.to_integer(parent), state: state}
+  end
+
+  # Port exit and DOWN prove only that the direct carrier ended. OS group
+  # termination can still be in flight, so spend only the remainder of the
+  # already-established observation deadline looking for positive quiescence.
+  # A fresh timeout would silently extend the cleanup contract.
+  defp await_empty_group(_group, _deadline, []), do: []
+
+  defp await_empty_group(group, deadline, last_observation) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      last_observation
+    else
+      receive do
+      after
+        min(10, remaining) ->
+          members = live_group(group)
+          await_empty_group(group, deadline, members)
+      end
+    end
   end
 
   defp terminal_observation(
