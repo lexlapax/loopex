@@ -211,6 +211,20 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
 
 ### Fixed
 
+- The reference local executor now reserves a bounded receipt before admitting
+  an effect, reads retained receipts through a bounded regular-file path, and
+  keeps every committed receipt within the Store's 65,536-byte private-record
+  ceiling. A full-budget read now reaches the next model request and durable
+  journal as proved content instead of being rejected downstream as an invalid
+  executor receipt.
+- The provider backpressure witness now becomes eligible only after the test's
+  explicit fill release. A transient earlier send could previously publish the
+  write-once blocked marker with a stale send count under whole-suite load,
+  producing a same-source false red even though the bounded writer was sound.
+- M0 gate generation 6 narrows its search-path text allowance to the four exact
+  child-environment constructions used by M2 while retaining the whole-tree
+  interpreter scan and real-boundary absence checks. This restores the inherited
+  M0 gate without weakening its Python and `jq` retirement guarantee.
 - Replacing the command's interrupt handler could either drop a prepared
   capability presentation or leave an interval with no interrupt coverage. The
   temporary installer-lifetime guard now monitors the installer before it
@@ -916,6 +930,11 @@ session-protocol draft is retained there as `M4`. Nothing about either is on
 
 ### Changed
 
+- The reference `loopex.read` and `loopex.bash` inline output ceilings are
+  16,384 bytes rather than 65,536 bytes. The smaller limit leaves deterministic
+  room for receipt identity and accounting fields inside the Store record;
+  larger output is truncated or retained as an artifact according to the
+  configured artifact store.
 - The Store answers one refusal taxonomy for every path that admits an item.
   Building a transaction, preflighting a record through
   `Loopex.Store.normalize_and_measure_item/2`, and validating a transaction all

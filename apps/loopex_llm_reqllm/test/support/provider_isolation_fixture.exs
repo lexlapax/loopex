@@ -669,7 +669,11 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
                 publish(root, "backpressure-buffered", %{pending_bytes: pending,
                   writer_in_send: false, actual_send_calls: calls, slot_items: 0})
               end
-              if pending > 0 and in_send and kind in [:delta, :terminal] do
+              blocked_phase =
+                File.exists?(Path.join(root, "backpressure-buffered")) and
+                  File.exists?(Path.join(root, "fill-writer"))
+
+              if blocked_phase and pending > 0 and in_send and kind in [:delta, :terminal] do
                 if not File.exists?(Path.join(root, "backpressure-blocked")) do
                   publish(root, "backpressure-blocked", %{pending_bytes: pending,
                     writer_in_send: true, kind: Atom.to_string(kind), actual_send_calls: calls})

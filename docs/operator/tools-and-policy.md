@@ -315,10 +315,11 @@ Developer companion:
 | `loopex.bash` | 120,000 ms | 16,384 | 8,388,608 |
 
 The read and shell ceilings leave room for both the durable receipt and the next
-staged context inside the Store's 65,536-byte record ceiling. Local measures the
-complete receipt before starting an effect; unusually large valid identity
-fields can reduce the inline prefix further, with truncation or artifact
-retention reported in the result.
+staged context inside the Store's 65,536-byte record ceiling. Local reserves
+capacity for the receipt before starting an effect and measures the complete
+receipt before retaining it; unusually large valid identity fields can reduce
+the inline prefix further, with truncation or artifact retention reported in the
+result.
 
 All four carry version `1.0.0`. The `loopex.` prefix is a reserved namespace: the
 runtime admits a tool with that prefix only through its own `:tools` start

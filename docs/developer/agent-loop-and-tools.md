@@ -637,9 +637,10 @@ declarations in the reserved namespace:
 
 The two largest inline ceilings reserve three quarters of the Store's
 65,536-byte private record for the executor receipt and the next staged-context
-envelope. Local still measures the exact receipt before admitting an effect and
-may narrow the visible prefix further when valid identity fields consume more
-than that reserved headroom.
+envelope. Local reserves capacity for the receipt before admitting an effect and
+measures the complete receipt before retaining it; valid identity fields may
+narrow the visible prefix further when they consume more than that reserved
+headroom.
 
 Containment is checked against the *resolved* path, not the requested one.
 `resolve/2` resolves the workspace root, expands the requested path against it,

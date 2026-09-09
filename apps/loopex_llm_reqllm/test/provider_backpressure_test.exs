@@ -257,6 +257,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
     refute buffered["writer_in_send"]
     assert buffered["actual_send_calls"] == buffered_calls
     assert buffered["slot_items"] == 0
+    refute Fixture.reached?(fixture, "backpressure-blocked")
     File.write!(Fixture.marker(fixture, "fill-writer"), "release")
     proof = await_proof(fixture, "backpressure-blocked", request)
     assert proof["pending_bytes"] > 0

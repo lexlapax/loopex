@@ -56,11 +56,12 @@ embedded runtime beneath it and run the complete source-tree loop, or use the
 [developer embedding guide](docs/developer/runtime-and-embedding.md#concept) to
 understand the composition and commit ordering.
 
-The current repair branch implements the accepted follow-up decisions for a
-private provider process, explicit local recovery handoff, and versioned provider
-accounting. Its validation and release-review work remain in progress; see the
-[repair task list](docs/evidence/M2-ff17990-review-followup.md#completion-order).
-Those changes are not a publication or a claim that this branch has integrated.
+The post-closure repair line implements the accepted follow-up decisions for a
+private provider process, explicit local recovery handoff, versioned provider
+accounting, and bounded executor receipts. Its final source qualification and
+independent integration review are retained in the
+[repair record](docs/evidence/M2-ff17990-review-followup.md#completion-order).
+Those repairs do not publish a package or label a public surface.
 
 The repaired reference local executor requires `/bin/bash` for its internal
 supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
