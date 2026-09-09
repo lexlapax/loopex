@@ -638,6 +638,20 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
                 {Loopex.LLM.ReqLLM.ProviderCodec, :send, 3, _} -> true
                 _ -> false
               end)
+
+              # Concept: the stack and the trace count describe one causal
+              # observation of the actual writer.
+              # Technical depth: the socket can acquire pending bytes, or the
+              # scheduler can expose the writer inside ProviderCodec.send/3,
+              # before this tracer has consumed that function's call message.
+              # Drain through trace_delivered/1 before publishing either
+              # backpressure witness so the count cannot lag the socket or
+              # stack by one.
+              {kind, calls} =
+                if pending > 0 or in_send,
+                  do: synchronize_backpressure_trace(writer, socket, kind, calls),
+                  else: {kind, calls}
+
               publish(root, "backpressure-observation", %{
                 pending_bytes: pending, writer_in_send: in_send,
                 actual_send_calls: calls, kind: if(kind, do: Atom.to_string(kind), else: nil),
@@ -693,6 +707,25 @@ defmodule Loopex.LLM.ReqLLM.ProviderIsolationFixture do
                 end
             end
             backpressure_observer(root, socket, owner, writer, slots, kind, calls)
+        end
+      end
+
+      defp synchronize_backpressure_trace(writer, socket, kind, calls) do
+        delivered = :erlang.trace_delivered(writer)
+        drain_backpressure_trace(writer, socket, delivered, kind, calls)
+      end
+
+      defp drain_backpressure_trace(writer, socket, delivered, kind, calls) do
+        receive do
+          {:trace, ^writer, :call,
+           {Loopex.LLM.ReqLLM.ProviderCodec, :send, [^socket, next_kind, _payload]}} ->
+            drain_backpressure_trace(writer, socket, delivered, next_kind, calls + 1)
+
+          {:trace_delivered, ^writer, ^delivered} ->
+            {kind, calls}
+
+          {:DOWN, _monitor, :process, ^writer, _reason} ->
+            {kind, calls}
         end
       end
 
