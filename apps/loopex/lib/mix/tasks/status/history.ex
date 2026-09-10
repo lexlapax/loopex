@@ -44,6 +44,8 @@ defmodule Loopex.Checks.History do
   alias Loopex.Checks.Register
 
   @index "docs/plans/README.md"
+  @override_anchor_prefix "override-disposition-"
+  @markdown_link ~r/\[[^\]\n]*\]\(([^#)\s]+)#([^)\s]+)\)/u
 
   # The states in which a milestone claims its prerequisites were settled.
   @prerequisite_states ["Accepted", "In progress", "In review", "Closed"]
@@ -147,7 +149,7 @@ defmodule Loopex.Checks.History do
       Map.put(inherited, revision, anchors)
     end)
 
-    require_prerequisite_adrs!(walk)
+    require_prerequisite_adrs!(walk, resolve_file)
 
     :ok
   end
@@ -174,14 +176,23 @@ defmodule Loopex.Checks.History do
   # predates the register markers, and demanding them there would fail on the
   # seed rather than on a defect. After it, an absent or unparseable index is the
   # same evasion as a false one.
-  defp require_prerequisite_adrs!(walk) do
-    Enum.reduce(walk, false, fn {revision, _parents, governed}, seen ->
+  defp require_prerequisite_adrs!(walk, resolve_file) do
+    Enum.reduce(walk, false, fn {revision, parents, governed}, seen ->
       case register_rows(Map.get(governed, @index), revision, seen, governed) do
         nil ->
           seen
 
         rows ->
           Enum.reduce(rows, seen, fn {name, state}, acc ->
+            require_override_dispositions!(
+              name,
+              state,
+              revision,
+              parents,
+              governed,
+              resolve_file
+            )
+
             case declared_prerequisites(governed, name, revision) do
               [] ->
                 acc
@@ -195,6 +206,128 @@ defmodule Loopex.Checks.History do
     end)
 
     :ok
+  end
+
+  # Concept: an override used by an accepted milestone is authority recorded
+  # before the transition, not prose the transition can mint for itself.
+  #
+  # Technical depth: only links to the reserved override-disposition anchor
+  # prefix invoke this rule. Every such local target must contain the visible
+  # anchor exactly once at the accepted revision and at each direct parent. That
+  # makes an absent record and a record first added by the transition mechanically
+  # distinct from a reviewed standalone disposition. The committed walk resolves
+  # targets from Git; the synthetic working-tree child reads the same current
+  # Markdown inventory as the rest of the status check.
+  defp require_override_dispositions!(name, state, revision, parents, governed, resolve_file) do
+    accepted? = plan_accepted?(Map.get(governed, "docs/plans/#{name}.md"), name, revision)
+
+    if state in @prerequisite_states or accepted? do
+      governed
+      |> override_disposition_links(name)
+      |> Enum.each(fn {target, fragment} ->
+        require_override_anchor!(target, fragment, revision, name, governed, resolve_file)
+
+        if parents == [] do
+          raise Invalid,
+                "#{@index} at #{revision}: `#{name}` cites override disposition " <>
+                  "#{target}##{fragment}, but no parent carries the standalone record"
+        end
+
+        Enum.each(parents, fn parent ->
+          require_override_anchor!(target, fragment, parent, name, governed, resolve_file,
+            transition: revision
+          )
+        end)
+      end)
+    end
+
+    :ok
+  end
+
+  defp override_disposition_links(governed, name) do
+    [
+      "docs/plans/#{name}.md",
+      "docs/plans/#{name}-technical.md",
+      "docs/plans/#{name}-gate.md"
+    ]
+    |> Enum.flat_map(fn source ->
+      case Map.get(governed, source) do
+        nil ->
+          []
+
+        text ->
+          lines = Markdown.lines(text, source)
+
+          text
+          |> Markdown.visible_line_numbers(source)
+          |> Enum.flat_map(fn index -> Regex.scan(@markdown_link, Enum.at(lines, index)) end)
+          |> Enum.flat_map(fn
+            [_link, raw_target, @override_anchor_prefix <> _rest = fragment] ->
+              target = Paths.normalise(Paths.join(Paths.dirname(source), raw_target))
+
+              if String.starts_with?(raw_target, ["/", "http:", "https:", "//"]) or
+                   target == ".." or String.starts_with?(target, "../") do
+                raise Invalid,
+                      "#{source}: override disposition must be one local fragmented record"
+              end
+
+              [{target, fragment}]
+
+            _ordinary_link ->
+              []
+          end)
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  defp require_override_anchor!(
+         target,
+         fragment,
+         at,
+         name,
+         current,
+         resolve_file,
+         options \\ []
+       ) do
+    text =
+      case at do
+        "working tree" -> Map.get(current, target)
+        _revision -> resolve_file && resolve_file.(at, target)
+      end
+
+    count = if text == nil, do: 0, else: visible_anchor_count(text, target, fragment)
+
+    if count != 1 do
+      case Keyword.get(options, :transition) do
+        nil ->
+          raise Invalid,
+                "#{@index} at #{at}: `#{name}` cites missing override disposition " <>
+                  "#{target}##{fragment}"
+
+        transition ->
+          raise Invalid,
+                "#{@index} at #{transition}: `#{name}` cites override disposition " <>
+                  "#{target}##{fragment} first added by that transition; the standalone " <>
+                  "record and exact-SHA review must predate dependent work"
+      end
+    end
+
+    :ok
+  end
+
+  defp visible_anchor_count(text, path, fragment) do
+    lines = Markdown.lines(text, path)
+
+    text
+    |> Markdown.visible_line_numbers(path)
+    |> Enum.count(fn index ->
+      lines
+      |> Enum.at(index)
+      |> Markdown.exposed_line()
+      |> Markdown.anchors_in()
+      |> Enum.member?(fragment)
+    end)
   end
 
   defp require_settled_prerequisites!(name, state, adrs, revision, governed) do

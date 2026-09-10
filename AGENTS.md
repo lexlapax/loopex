@@ -154,32 +154,54 @@ No actor accepts its own gate, ADR, waiver, blocking-finding disposition, or
 closure candidate. Gate weakening, evidence waiver, and scope deferral remain
 non-delegable unless the maintainer explicitly delegates that exact decision.
 
-Released contracts; accepted ADR-pair decision, status, and consequences;
-accepted plan-pair purpose, scope, outcomes, ownership, rejoin barriers, and evidence
-obligations; and locked gates are immutable historical records. Their continuing
-requirements change through an accepted amendment or the explicit maintainer
-override below. Conforming explanations and progress may be updated.
+Released public contracts and accepted ADR-pair decisions, status, and
+consequences change only through their versioned amendment paths. Accepted
+plan-pair purpose, scope, outcomes, ownership, rejoin barriers and evidence
+obligations, and locked gates are immutable historical records. A successor may
+replace a continuing development-time restriction from one of those records only
+through the explicit maintainer override below. Conforming explanations and
+progress may be updated.
 
 <a id="maintainer-override"></a>
-**Explicit maintainer override.** The maintainer may approve a named change to an
-inherited restriction or to amendment procedure for the current or a future
-milestone. Record the actual instruction once in an existing durable disposition:
-the affected rule/test/artifact, successor scope, replacement requirement,
-preserved guarantees and required validation. Do not infer approval of another
-restriction, plan, ADR, closure, merge or release. Once that scope is explicitly
-approved, implement and validate it without asking again or requiring a separate
-amendment proposal/rebind solely to repeat the same decision. Multiple affected
-holders may be covered by one expressly scoped approval.
+**Explicit maintainer override.** The maintainer may approve a named change to a
+continuing development-time restriction in a test, gate or procedure, including
+the amendment procedure used by the current or a future milestone. This route
+cannot change a released public surface or an accepted ADR decision. Record the
+actual instruction once in an existing durable disposition: the affected
+rule/test/artifact, successor scope, replacement requirement, preserved
+guarantees and required validation. Do not infer approval of another restriction,
+plan, ADR, closure, merge or release.
+
+An override disposition is one standalone commit that adds that disposition and
+changes nothing else. Before dependent work, an independent read-only reviewer
+examines its exact SHA with the same changed-path and authority scrutiny required
+for a transition commit. Override anchors use the
+`override-disposition-<scope>-<date>` prefix. Repository status refuses a plan
+transition that cites a missing override anchor or one first added by the
+transition itself. Once that scope is explicitly approved, recorded and reviewed,
+implement and validate it without asking again or requiring a separate amendment
+proposal/rebind solely to repeat the same decision.
+
+A disposition already present only in an unaccepted Open planning lineage when
+this safeguard first lands is not retroactively compliant. Carry it forward only
+through a new standalone ratification disposition, exact-SHA reviewed before the
+next dependent edit and before acceptance; the plan cites that ratification
+anchor. This migration applies only to that still-Open lineage and never repairs
+an accepted or released transition after the fact.
 
 Historical acceptance and closure records, candidates and evidence remain true
 for the revisions they name. An inherited implementation inventory is not a
 permanent product limit when a successor change is explicitly approved. Keep
 historical selector identifiers where needed for unchanged runners and explain
 their current assertions beside the test and in the disposition. Changed
-digest-bound bytes still require an explicit, validated binding route; an
-override is never a blanket instruction to ignore a hash mismatch or report
-an unrun check as passing. Include any necessary enforcement change in the same
-reviewable work rather than seeking repeated approval of the named exception.
+digest-bound bytes still require an explicit binding route. An approval may cover
+several named holders, but each holder records its replacement binding through
+that holder's own commit and receives its own status check and exact-SHA review
+before the next holder proceeds. In this contract, a validated binding route
+means that per-holder sequence has completed. An override is never a blanket
+instruction to ignore a hash mismatch or report an unrun check as passing.
+Include any necessary enforcement change in the same reviewable work rather than
+seeking repeated approval of the named exception.
 Record reversible choices in the nearest existing code, test, plan progress, or
 subsystem document—never a new ADR or sidecar diary merely to log activity.
 
@@ -313,8 +335,10 @@ register and plan index.
   v1 governs amending a gate while its plan is Accepted, v2 governs adding a gate
   generation after it is Closed, and a gate that lawfully used both carries both.
   A gate carries at most one marker of each kind, carries the v1 marker if it
-  holds any amendment section, and carries the v2 marker if it holds any gate
-  generation row.
+  holds any v1 amendment section, including a historical section retained after
+  a later procedural override, and carries the v2 marker if it holds any gate
+  generation row. A procedural override introducing another transaction must
+  name its own visible marker and mechanical enforcement before use.
   Amendment sections appear in physical document order with consecutive numbers.
   The amendment proposal `A` is the first revision that advances the generation;
   it retains both the prior Acceptance row and lifecycle state, so binding
@@ -410,11 +434,14 @@ register and plan index.
   and real-path, migration, rollback, performance, and exact-package proof when
   claimed. Unknown or shared gate scope fails closed to the full gate.
 - Ordinary implementation checkpoints use focused checks for the changed
-  guarantees. Run the full required inherited set at the acceptance base,
-  amendment rebinds when required, closure candidates and scheduled CI, and again
-  when changed bytes invalidate that evidence. Do not turn every edit into a
-  full inherited run. An observed inherited regression still blocks; focused
-  results do not replace evidence required at those contract moments.
+  guarantees. Run the full required inherited set at the acceptance base, each
+  rejoin of a parallel workstream to the milestone branch, amendment rebinds when
+  required, closure candidates and the accepted plan's scheduled cadence, and
+  again when changed bytes invalidate that evidence. Do not turn every edit into
+  a full inherited run. An observed inherited regression still blocks. Missing a
+  required scheduled or rejoin run is a process defect and leaves inherited
+  evidence unavailable; focused results do not replace evidence required at
+  those contract moments.
   A plan may bind outcome clauses, witness identities and executable closure
   commands before every future test body exists. It must already provide a real
   behavioral opening red and truthful executable routing; a missing test body
@@ -422,9 +449,9 @@ register and plan index.
   and failure cases as implementation reaches them. Every required witness
   must pass before closure. Newly authored successor tests may be red during
   their development; distinguish that expected successor red from a regression
-  in an inherited guarantee. The maintainer explicitly approved this preparation
-  rule for M3; its [disposition](docs/developer/agent-context-map.md#disposition-m3-incremental-witness-approval-2026-09-09)
-  preserves full acceptance-base and closure evidence.
+  in an inherited guarantee. A milestone using this preparation rule records its
+  own authority in its plan; this canonical contract does not depend on a
+  milestone-specific disposition.
 - An independent reviewer examines the exact candidate SHA for plan/ADR
   compliance, correctness, test honesty, public impact, security, and rollback.
   Unresolved blocking or high-severity findings block regardless of green gates.
@@ -695,6 +722,7 @@ boundary.
 Commit titles are short and imperative and carry a milestone marker:
 `area(marker): summary`, where `marker` is `planning`, `seed`, or the milestone
 the work belongs to (`M0`, `v0.1`). Keep draft protocol
-docs, conformance fixtures, and operator guidance aligned; change accepted
-contracts, plans, and ADR semantics through their amendment paths or a recorded,
-explicitly scoped [maintainer override](#maintainer-override).
+docs, conformance fixtures, and operator guidance aligned; change released
+contracts and accepted ADR semantics through their amendment paths. A recorded,
+explicitly scoped [maintainer override](#maintainer-override) applies only to the
+continuing development-time restrictions defined above.

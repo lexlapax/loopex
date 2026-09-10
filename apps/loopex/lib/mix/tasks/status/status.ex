@@ -43,6 +43,7 @@ defmodule Loopex.Checks.Status do
   alias Loopex.Checks.Register
 
   @index "docs/plans/README.md"
+  @override_dispositions "docs/developer/agent-context-map.md"
 
   @required [
     "README.md",
@@ -296,7 +297,7 @@ defmodule Loopex.Checks.Status do
       adr_paths |> Enum.flat_map(&[&1, Paths.technical(&1)]) |> MapSet.new()
 
     Map.filter(documents, fn {path, _text} ->
-      path == @index or MapSet.member?(adr_set, path) or
+      path in [@index, @override_dispositions] or MapSet.member?(adr_set, path) or
         (String.starts_with?(path, "docs/plans/") and path != @index and
            String.ends_with?(path, ".md"))
     end)

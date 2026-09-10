@@ -1471,6 +1471,62 @@ defmodule Loopex.HistoryAnchoringTest do
     end
   end
 
+  @override_anchor "override-disposition-m3-test-2026-09-10"
+
+  defp m3_override_files(state, context) do
+    m3_prerequisite_files(state, nil, :link)
+    |> Map.update!("docs/plans/M3-technical.md", fn technical ->
+      technical <>
+        "\nOverride authority: [override disposition]" <>
+        "(../developer/agent-context-map.md##{@override_anchor}).\n"
+    end)
+    |> Map.put(@context_path, context)
+  end
+
+  test "an M3 override disposition anchor predates acceptance" do
+    before = "# Context map\n"
+
+    recorded =
+      before <>
+        "\n<a id=\"#{@override_anchor}\"></a>\n" <>
+        "### Reviewed maintainer override\n\nExact instruction and bounded scope.\n"
+
+    open = m3_override_files("Open", recorded)
+    accepted = m3_override_files("Accepted", recorded)
+
+    assert :ok ==
+             prerequisite_history([
+               {sha("a"), [], open},
+               {sha("b"), [sha("a")], accepted}
+             ])
+
+    missing = m3_override_files("Accepted", before)
+
+    assert_raise Invalid, ~r/cites missing override disposition/, fn ->
+      prerequisite_history([{sha("a"), [], missing}])
+    end
+
+    added_by_transition = m3_override_files("Accepted", recorded)
+
+    assert_raise Invalid, ~r/first added by that transition/, fn ->
+      prerequisite_history([
+        {sha("a"), [], m3_override_files("Open", before)},
+        {sha("b"), [sha("a")], added_by_transition}
+      ])
+    end
+
+    open_without_record = m3_override_files("Open", before)
+    committed = [{sha("a"), [], open_without_record}]
+
+    assert_raise Invalid, ~r/working tree.*first added by that transition/s, fn ->
+      History.governance_history(
+        added_by_transition,
+        {sha("a"), committed},
+        generation_resolver(committed)
+      )
+    end
+  end
+
   test "a Closed milestone cannot conceal an outstanding prerequisite behind an Open successor" do
     # The live capsule only ever describes the milestone a reader would call
     # active, so once `M2` is Closed beside an Open successor nothing asks again

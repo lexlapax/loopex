@@ -109,10 +109,16 @@ For the named milestone:
    and does not integrate until separately approved closure.
 
    For an amendment to an already Accepted plan, use the repository's generic
-   two-revision, direct one-parent transaction. Number Amendment sections
-   consecutively in physical document order. Put the single visible
-   `<a id="amendment-transaction-v1"></a>` marker in every active or future
-   amended gate; closed pre-v1 amendment history remains valid. Proposal `A` is the first revision
+   two-revision, direct one-parent transaction unless a standalone, independently
+   reviewed maintainer disposition explicitly replaces that development
+   procedure under `AGENTS.md#maintainer-override`. The override cannot alter a
+   released public surface or an accepted ADR decision, and every changed bound
+   holder still follows its own reviewed binding commit. Number Amendment
+   sections consecutively in physical document order. Put the single visible
+   `<a id="amendment-transaction-v1"></a>` marker in every active or future gate
+   containing a v1 amendment section, including when a later approved procedure
+   retains that historical section; closed pre-v1 amendment history remains
+   valid. Proposal `A` is the first revision
    that advances the generation and retains the prior Acceptance row and
    lifecycle state:
    require its binding-dependent commands to fail only for that stale binding,

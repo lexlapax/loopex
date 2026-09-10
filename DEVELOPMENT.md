@@ -263,11 +263,16 @@ real `~/.loopex`.
 
 ### Accepted-plan amendments
 
-An accepted plan or gate amendment uses two direct, one-parent revisions for
-every milestone, not a milestone-specific exception. Number Amendment sections
-consecutively in physical document order. Every active or future amended gate
-carries exactly one visible `<a id="amendment-transaction-v1"></a>` marker;
-closed pre-v1 amendment history remains valid. Proposal `A` is the first revision to
+By default, an accepted plan or gate amendment uses the repository's two direct,
+one-parent revisions. A maintainer-approved procedural override follows the
+standalone disposition, exact-SHA review and per-holder validation rules in
+[AGENTS.md](AGENTS.md#maintainer-override) before dependent work; it cannot alter
+a released public surface or an accepted ADR decision. Number Amendment sections
+consecutively in physical document order. Every active or future gate containing
+a v1 amendment section carries exactly one visible
+`<a id="amendment-transaction-v1"></a>` marker, including when a later approved
+procedure retains that historical section; closed pre-v1 amendment history
+remains valid. Proposal `A` is the first revision to
 advance the generation; it carries the amended bytes and retains the prior
 Acceptance row and lifecycle state. Confirm that `mix loopex.status`, bootstrap,
 and any
