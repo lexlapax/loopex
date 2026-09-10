@@ -213,8 +213,8 @@ same terms — that is Apache-2.0 §5, and there is no separate CLA.
 The next milestone, `M3` (extensible local foundations), has an Open documentation candidate on
 branch `m3` and is not yet accepted; see that branch's `docs/plans/README.md`.
 
-The [M3 plan](docs/plans/M3.md#concept) proposes compatible skills, durable
-policy interactions and shared local foundations. Its [M4 successor draft](docs/archive/M4.md#concept)
-uses them through a foreground protocol and TypeScript workflow. This planning
-revision changes documents only; executable gate readiness and milestone
-acceptance remain pending.
+The [M3 plan](docs/plans/M3.md#concept) proposes project skills and the remaining
+core repairs. Its [M4 successor draft](docs/archive/M4.md#concept) adds durable
+interactions, bounded artifact ranges and a foreground protocol/TypeScript
+consumer. The M3 opening runner now proves an actual required-only admission
+ordering defect. Full executable gate readiness and acceptance remain pending.

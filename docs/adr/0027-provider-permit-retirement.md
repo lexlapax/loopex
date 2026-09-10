@@ -6,6 +6,7 @@ Technical depth: [Provider permit retirement mechanics](0027-provider-permit-ret
 - **Status:** Proposed
 - **Date:** 2026-09-09
 - **Decision owner:** Maintainer
+- **Supersedes:** 0018
 - **Prerequisite for:** M3 acceptance
 
 <a id="concept-adr-0027-decision"></a>

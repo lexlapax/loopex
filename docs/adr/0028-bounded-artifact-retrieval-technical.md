@@ -46,7 +46,13 @@ fails the memory obligation even when the response bytes are correct.
 Returning an unchecked range with a claimed object hash overstates integrity.
 Adding a chunk-tree format creates migration and packaging cost without a
 second requirement. Stream verification is the smallest bounded implementation;
-its read amplification is documented, measured and accepted with this decision.
+one request verifies at most one complete object, so reading an N-byte object
+in R-byte chunks costs N * ceil(N/R) verified bytes across the complete stream.
+Measure that cost with M4 frame/range sizes. Before acceptance settle finite
+per-read byte/deadline, concurrent-reader and connection-work budgets alongside
+ADR 0023; absent budgets block acceptance rather than imply unlimited work.
+Those budgets must be stated in both Concept and Technical contracts; this
+unopened proposal does not claim them measured or accepted.
 
 <a id="technical-adr-0028-compatibility"></a>
 ### Compatibility and Rollback Mechanics
@@ -60,4 +66,4 @@ unbounded fetch. Old artifacts remain readable and no format migration is
 introduced. Removal restores the prior API without rewriting data.
 
 Acceptance binds this complete pair at an exact candidate. Its evidence and
-compatibility claims remain unproved until the M3 gate's required paths execute.
+compatibility claims remain unproved until the M4 gate's required paths execute.

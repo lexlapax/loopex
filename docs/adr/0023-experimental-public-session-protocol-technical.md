@@ -72,7 +72,7 @@ The project_resources pair preserves the existing root AGENTS.md trust class;
 resources.catalog/read map M3's resource_catalog/read_resource facade queries,
 and the two session methods map M3's exact admission/selection commands. No
 wire method fetches arbitrary URLs or selects a host resource root.
-Artifact reads map M3's read_artifact query: opaque use reference plus bounded
+Artifact reads map M4's ADR 0028 read_artifact query: opaque use reference plus bounded
 offset/length, separate full-object and returned-range digests, total size,
 returned range and bytes in a declared transfer encoding. They expose no path.
 

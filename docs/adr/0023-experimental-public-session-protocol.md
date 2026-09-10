@@ -20,7 +20,8 @@ Technical depth: [Protocol mechanics](0023-experimental-public-session-protocol-
 ## Context
 
 M2 makes one foreground process a useful coding harness; M3 adds reusable
-resources, durable interactions and bounded artifact access. Its public Elixir
+project skills and core repairs. M4 first adds durable interactions and bounded
+artifact ranges at the shared core/port boundaries. The public Elixir
 facade owns the durable command semantics, but another program has no bounded,
 language-neutral way to initialize the runtime, submit those commands, or
 distinguish durable events from transient progress. Adding JSON around internal
@@ -130,8 +131,9 @@ Technical depth: [Evidence and operational consequences](0023-experimental-publi
 No released wire surface or installed base exists. A client and server must
 agree on the exact experimental generation and schema digest, so M4 creates no
 reader/writer compatibility range. Before M4 closure, rollback removes the
-app-server and schema bundle and returns callers to M3's embedded and command
-surfaces. This decision adds no Store schema by itself. A later compatibility
+app-server and schema bundle while retaining the M4 core reader for roots with
+interaction records. Returning to the M3 binary requires the retained pre-M4
+root/binary pair under ADR 0024; transport removal alone is no data downgrade. This decision adds no Store schema by itself. A later compatibility
 freeze, package, or public release needs its own explicit authority.
 
 Technical depth: [Rollback mechanics](0023-experimental-public-session-protocol-technical.md#technical-adr-0023-compatibility).

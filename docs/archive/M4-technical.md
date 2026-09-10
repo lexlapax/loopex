@@ -22,24 +22,33 @@ history, complete its executable contract/vector tests and obtain fresh review.
 At final acceptance all inherited gates are green and the M4 boundary remains
 truthfully red for missing external behavior.
 
-[Proposed ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept)
-must be accepted before M4. ADRs 0024–0028 and M3's actual resource, interaction,
-artifact and launch interfaces are inherited prerequisites, not M4 deliverables.
-Before acceptance reconcile the entire schema with those implemented interfaces;
-no TODO member or unimplemented method earns an advertised capability.
+M4 accepts ADR 0023 (protocol), ADR 0024 (durable interactions), ADR 0026
+(development floor) and ADR 0028 (bounded artifact retrieval) before dependent
+work. ADRs 0025/0027 and M3's working resource/launch/repair interfaces are
+inherited. Reconcile the schema with those interfaces and the new core contracts;
+no TODO member or unproved method earns an advertised capability.
 
-The ninth application and dependency-inventory changes, and the source VERSION
-change to 0.1.0, require the applicable Closed M1/M2 gate generations. Resolve
-the holder inventory on the exact M3 base, include any M3-bound artifact holder,
-and settle each transaction sequentially before binding those bytes in M4.
-Do not freeze an inventory that the milestone already promises to replace.
-Publication/tag/release and each compatibility freeze remain separate decisions.
+The first prerequisite workstream settles the floor before M4 binds its own
+future edits: proposed Elixir 1.18.5/OTP 27.3.4 and current 1.20.3/29.0.5, with
+real matrix evidence. Inventory every Closed holder of changed artifacts on the
+exact integrated M3 base. M0/M1/M2 are known floor holders; include M3 if its gate
+binds the pins or affected machinery. Do not promise three transactions or waive
+a fourth. Use each holder's v2 atomic proposal and immediate accepted rebind,
+with the required stale-binding and inherited-green evidence at each revision.
+Prior Acceptance/Closure rows stay immutable. Moving this cost from M3 does not
+remove it, and no floor change is made by this draft.
 
-M3 owns floor settlement, inherited-gate enforcement, context/dispatcher/permit
-repairs and cleanup/configuration consistency. M4 does not carry duplicate
-versions of those workstreams. A newly observed inherited defect is reproduced
-at the exact base with the same command/signature and dispositioned through
-its owner; a protocol workaround cannot conceal it.
+The ninth app, dependency inventory and source VERSION 0.1.0 also require their
+actual holders' transactions. Where the same holder binds several planned
+changes, review the complete coherent proposal together rather than lock known
+future edits and repeat the transaction. Do not combine unrelated decisions or
+skip any holder. All such transactions settle before M4 acceptance; publication
+and compatibility freezes still require separate authority.
+
+M3 owns resource admission, inherited-gate enforcement and the three repairs.
+M4 adds core defer/answer and ArtifactStore ranges before the app-server maps
+them. An inherited defect is reproduced at the exact base and repaired at its
+owner; a wire workaround cannot conceal it.
 
 <a id="technical-plan-ownership"></a>
 ### Ownership, Decision Owners, and Rejoin Barriers
@@ -49,12 +58,13 @@ Concept: [Scope](M4.md#concept-plan-scope).
 | Component | Owns | Cannot own |
 | --- | --- | --- |
 | `loopex_protocol` | Bounded DTOs, validators, schemas, vectors and capability identity | JSON implementation, runtime or authority |
-| `loopex` | M3 facade, session input, interactions, resource admission, artifact-use authorization and truth | Framing or connection policy |
+| `loopex` | Inherited resource facade plus new M4 interaction lifecycle, range query and artifact-use authorization | Framing or connection policy |
 | `loopex_app_server` | Foreground lifetime, UTF-8 JSONL framing, request correlation, bounded writer and facade mapping | Store/coordinator calls, a second loop, resource parsing, policy selection |
-| `loopex_composition` | Trusted startup wiring, provider companion, explicit prepared handoff and host resource roots | Wire-supplied implementation selection |
+| `loopex_composition` | Trusted startup wiring, provider companion, explicit prepared handoff and project resource configuration | Wire-supplied implementation selection |
 | TypeScript consumer | User workflow and local output presentation | Normative session, trust or policy semantics |
 
-The ordered rejoin is contracts → thin server and client workflow → remaining
+The ordered rejoin is prerequisite transactions/contracts → core interaction
+and artifact-range witnesses → thin server/client workflow → remaining
 method/delivery coverage → integrated audit → independent review. Protocol and
 consumer work may develop together against fixed vectors; the integrator owns
 one candidate and the real-process rejoin. Prove resource selection, defer,
@@ -63,7 +73,7 @@ building further UI or generalized transports.
 
 Use the existing command identity for `admit_resources`, `activate_skill` and
 `respond_interaction`; request IDs never enter journals or asynchronous facts.
-M3's resource queries and read_artifact API supply the results. Client trust
+M3 resource queries and M4's ADR 0028 facade range query supply the results. Client trust
 answers are evidence presented to host policy, not a way to name arbitrary
 filesystem roots or import a URL. Acquisition remains an explicit host workflow.
 
@@ -90,24 +100,25 @@ Concept: [Outcomes](M4.md#concept-plan-outcomes).
 | --- | --- |
 | 1 | Independent raw-byte client launches actual server process, exact init/schema/limits vector, refusal before init, no durable work on malformed startup |
 | 2 | Identical command corpus through facade/wire; independent variation of request and command identity; snapshot-before-live; committed admission before correlated delivery; command replay after disconnect |
-| 3 | Catalog and selected content identity preserved; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy authorization and tool receipt; wire-selected policy/module/root refused |
-| 4 | M3 range verification reused, object and range digests distinguished; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
+| 3 | Durable interaction request/answer/policy/intent cuts, fixed timestamps through commit_unknown, expiry/abort/restart races and policy identity; catalog and selected content identity preserved; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy authorization and tool receipt; wire-selected policy/module/root refused |
+| 4 | ADR 0028 full-object verification and range allocation proved at ArtifactStore and facade, object and range digests distinguished; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
 | 5 | TypeScript drives skill/interaction/tool/artifact with real Store and executor; real-provider task separately attended; abrupt kill and fresh-process resume; graceful EOF case remains distinct |
 | 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; exact source/schema/client versions and toolchain/platform identities |
 
-The existing raw-process probe witnesses the initial protocol/interaction
-subset, not complete skills support. Extend its vectors and the integrated
-client fixture after M3 contracts settle; complete and lock them while M4 is
-Open. An echo server cannot pass because admissions, event order, exact
+The superseded raw-process scaffold is retained in Git history at
+`ba51d1898bcca109a5ed32a8cc3ba831323113a1`; it is removed from live scripts.
+Reconstruct and reconcile vectors and the integrated client fixture only when
+M4 opens. Complete and lock the revised executable proof before acceptance. An echo server cannot pass because admissions, event order, exact
 interaction/tool identity, real artifact bytes and fresh settled snapshots are
 required. Parsing fixture-shaped output is not full JSON conformance.
 
 Every protected selector uses the existing authoritative standalone ExUnit
 channel. Preserve the inherited repair manifest rather than re-listing old case
 counts in this draft. The complete gate runs inherited predecessors, protected
-selectors, whole suite, language clients and retained-evidence validation. Its
-scaffolding may be exercised now, but no M4 opening/acceptance proof is claimed
-by keeping draft files or obtaining the M2-era EOF observation.
+selectors, whole suite, language clients and retained-evidence validation. Use M3
+checkpoint/full modes and one decisive named witness per clause; ordinary
+negatives stay in the required suite without freezing their inventories. Real
+provider cases live in separate files. No current M4 opening proof is claimed.
 
 Apply the M3 [integrated audit](../plans/M3-technical.md#technical-plan-evidence)
 to direct facade, CLI, wire, recovery child and actual built server/companion.
@@ -124,8 +135,9 @@ Concept: [Scope](M4.md#concept-plan-scope).
 
 All surfaces remain experimental. Exact generation/schema agreement is required;
 there is no mixed-generation promise, public-protocol freeze or daemon claim.
-Unknown mutating discriminants refuse. The app-server adds no durable record
-family; interactions/resources already belong to M3. Source VERSION is distinct
+Unknown mutating discriminants refuse. ADR 0024 adds versioned core interaction
+records; the app-server itself writes no private record. M3 resource semantics
+remain intact. Source VERSION is distinct
 from protocol generation, journal version, provider build and schema digest.
 
 <a id="technical-plan-migration"></a>
@@ -133,12 +145,14 @@ from protocol generation, journal version, provider build and schema digest.
 
 Concept: [Scope](M4.md#concept-plan-scope).
 
-Prove fresh-process restart on actual M3-format data and old-reader controls for
-any separately accepted new format. M4 cannot silently add a Store schema to
-support its mapping. Removing the experimental server/client leaves M3's
-embedded/terminal capabilities and data intact. Restore any version/inventory
-protection through governed transactions; never delete historical authority.
-No installed-data migration, in-place downgrade or service installation claim.
+Prove new readers on genuine M3 histories, interaction recovery on M4 records
+and old readers refusing unknown interaction records before effects. Retain an
+old-format positive control and old root/binary pair; removing the server does
+not make an interaction-bearing root readable by M3. Resource behavior and
+existing artifact formats remain unchanged. Range capability removal restores
+the previous full-object API without rewriting artifacts. Restore floor/version/
+inventory protections through governed transactions. No in-place downgrade,
+installed-data migration or service installation claim.
 
 <a id="technical-plan-packaging"></a>
 ### Packaging
@@ -170,10 +184,11 @@ package or service install follows from closure alone.
 
 Concept: [Scope](M4.md#concept-plan-scope).
 
-One application, one stdio mapping, bounded schemas/vectors and the small client
-workflow justify growth. No new role or external production dependency; no
-transport registry, socket abstraction, daemon supervisor, duplicate resource
-resolver, second interaction reducer, direct Store/model/executor dependency or
-private coordinator shortcut. Artifact verification and launch configuration
-reuse M3. Raw line count is a review signal; behavior and measured limits govern.
+One application, the core policy-interaction slice, optional ArtifactStore range
+capability, one stdio mapping and bounded schemas/client fixtures justify growth. No new role or external production dependency, transport registry, socket
+abstraction, daemon supervisor, duplicate resource resolver or second interaction
+reducer. The app-server has no direct Store/model/executor dependency or private
+coordinator shortcut. Artifact object/use identity and launch configuration
+reuse existing owners. Implement new interaction/range behavior once in core/ports,
+then prove all consumer mappings against it. Raw line count is a review signal; behavior and measured limits govern.
 <!-- loopex:plan-technical-envelope:end -->

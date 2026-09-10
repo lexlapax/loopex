@@ -112,9 +112,12 @@ the toolchain lets you build and test today: `mix test` from the repository root
 `bash scripts/check-m0-gate.sh` for the closed M0 gate,
 `/bin/bash -p scripts/check-m1-gate.sh` for the closed M1 gate,
 `bash scripts/check-m2-gate.sh` for the closed M2 gate, and
-`bash scripts/check-m3-gate.sh` for the retained M3 gate scaffold. Its debt-only
-probe predates the revised foundation plan; executable readiness must be
-completed while M3 remains Open before the new gate can be accepted. The
+`bash scripts/check-m3-gate.sh` for the Open M3 scaffold. `--inspect` checks its
+artifact identities; `--preflight` and `--checkpoint` run the isolated real-session
+admission-ordering probe, currently RED for a missing repair. Checkpoint is not
+full-gate evidence. Complete integrated skills/witness/full lanes while M3 is
+Open before acceptance. The unopened M4 runner is unavailable; its superseded
+scaffolding is retained in Git at `ba51d1898bcca109a5ed32a8cc3ba831323113a1`. The
 privileged-Bash flag is part of the command: the runner refuses an ordinary Bash
 because inherited functions and `BASH_ENV` would otherwise precede its
 environment boundary.

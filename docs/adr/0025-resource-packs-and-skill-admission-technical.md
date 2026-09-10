@@ -10,7 +10,7 @@ Concept: [Context and decision](0025-resource-packs-and-skill-admission.md#conce
 
 ### Owners and public entrypoints
 
-The host resolver in `loopex_composition` owns roots, acquisition configuration,
+The host resolver in `loopex_composition` owns fixed project discovery, acquisition configuration,
 frontmatter parsing, containment and installed-pack publication. It passes no
 path to core. Core owns a pure `Loopex.ResourcePack` boundary:
 `digest(manifest)` returns `{:ok, manifest_digest, normalized_manifest}` or a
@@ -23,15 +23,22 @@ session authority.
 The public facade exposes `resource_catalog(runtime, session_id)` and
 `read_resource(runtime, session_id, request)`. Session input gains
 `admit_resources` and `activate_skill`, each using the existing command identity
-and transaction discipline. `admit_resources` carries one bounded host decision
+and transaction discipline. Both require a settled session before a new run;
+changes during a run refuse. `admit_resources` carries one bounded host decision
 and manifest identity; `activate_skill` carries catalog identity and its exact
-digest. Reading content returns bounded data, never a filesystem path. The
+digest plus an ordered unique `supporting_labels` list (default empty, at most
+64 labels from that pack's admitted manifest). Persist labels with pre-run
+selection and freeze them into the run. Unknown/wrong-pack/duplicate labels
+refuse; replay of a command ID with changed labels conflicts. `read_resource`
+is inspection-only and changes no selection. Reading content returns bounded
+data, never a filesystem path. The
 coordinator rechecks the current decision and identity before staging it.
 
 Reference CLI: `loopex skill add <source> --rev <commit> --path <directory>` for
-Git, `loopex skill add <https-SKILL.md>` for a single file, `loopex skill list`,
+Git only, `loopex skill list`,
 `loopex skill show <source-qualified-name>`, and `loopex run --skill <name>` for
-explicit selection. A trust prompt displays the complete manifest digest and
+explicit selection, with repeatable `--skill-resource <skill>:<label>` arguments
+for supporting labels. A trust prompt displays the complete manifest digest and
 source; headless hosts supply the same decision explicitly. Add never implies
 trust. Default policy for import is explicit operator authorization, and every
 fetch still crosses the normal executor admission path.
@@ -42,7 +49,9 @@ fetch still crosses the normal executor admission path.
 version is `loopex.resource_pack/1`. Revision may be null. A pack has exactly
 `source_id`, `origin`, `commit`, `tree_digest`, `name`, `description`,
 `manual_only`, `files`. Origin is a bounded sanitized source descriptor with no
-credential/query secret; commit is null for HTTPS and exact for Git. Each file
+credential/query secret; commit is the exact Git source commit for imported
+packs. Locally authored project packs may have null commit and must never claim
+verified remote provenance. Each file
 has exactly `label`, `size`, `digest`, `content`, `contained`; content is binary,
 size and SHA-256 must match, contained must be true. Labels are relative display
 strings only. The manifest digest covers normalized metadata and every file's
@@ -81,20 +90,24 @@ introduced. Compatibility is the tested subset, not every vendor extension.
 
 ### Acquisition and retention
 
-Resolve a Git reference once to an exact commit before staging and retain its
-selected tree identity. Use argument vectors, explicit host Git executable,
+Require the operator's exact Git commit, verify it before staging and retain the
+selected tree identity. Discovery itself only enumerates the fixed project
+skill directory; it never consults workspace Git history. Importing a selected
+remote Git tree is an explicit executor effect, not discovery from local history. Use argument vectors, explicit host Git executable,
 closed configuration/environment, no submodule recursion, hooks, filters or
 LFS execution. Refuse links, special files, escapes and unexpected size/counts.
-Git uses the existing executor command job, not a new effect kind. HTTPS uses
-an ordinary host-approved fetch in the hand: TLS validation, at most three
-same-origin HTTPS redirects, a 30-second deadline and the SKILL.md byte cap.
+Git uses the existing executor command job with a 30-second absolute deadline,
+existing bounded output/cancellation and a probed explicit Git executable. No
+new effect kind, provider-adapter HTTP client or HTTPS single-file importer is
+introduced.
 No credentials enter source URLs, manifests or ordinary job records. Credentialed
 private sources require an existing scoped host secret channel; otherwise
 refuse with a clear unsupported-source diagnostic.
 
 Stage under a task-owned sibling directory, verify every identity and bound,
-then atomically rename the complete pack into host-owned content-addressed
-retention. Existing content with the same digest must be byte-identical;
+then atomically publish the complete project pack. Retain admitted pack bytes
+under host-owned content identity separately from discovery and tool artifacts.
+Retention configuration is not a configured resource-discovery root. Existing content with the same digest must be byte-identical;
 changed content is a new pack. Never overwrite an installed directory in place.
 Interrupted acquisition retains the prior installation and cleans only owned
 staging. Downloaded links never trigger additional fetches. A Git pack can
@@ -110,8 +123,10 @@ decision. A missing or stale decision yields a bounded declined receipt and no
 skill content, while ordinary coding continues.
 
 Selection enters the fixed context stage, never an independent injection path.
-The model sees source-qualified catalog entries and can ask for an admitted
-skill; the operator's explicit selection uses the same command. Each run keeps
+The model sees catalog entries but cannot activate them. Only an explicit
+operator/host command admits or selects resources while the session is settled.
+Supporting requests name labels already in the admitted manifest; no model text,
+link or script expands it. Each run freezes
 an ordered set of at most four selected identities; duplicate selection is
 idempotent, changed digest requires renewed trust, and a fifth selection
 refuses rather than silently evicting another. Unselected instructions and
@@ -124,8 +139,8 @@ requested supporting blocks in that fixed order (selections in durable command
 order). Each optional block is admitted whole if the resulting complete request
 and receipt fit token, byte, depth and cardinality limits; otherwise withhold
 that block and retain its exact closed reason. Later blocks may still fit.
-Required-only failure dispatches no provider. Refusal reports the measured
-required-only lower bound separately from the actual attempted cost. Historical
+Required-only failure dispatches no provider. Refusal preserves ADR 0017's existing first-failure and observed/record_byte_cost
+meaning; do not invent a second lower-bound field in historical receipts. Historical
 M2 refusal members retain their meaning and bytes.
 
 Use versioned resource receipts with exact fixed scalar identity fields and a
@@ -142,10 +157,15 @@ not_dispatched retry and ambiguous-attempt rules continue unchanged.
 
 ### Evidence and alternatives
 
-Test local Git and loopback HTTPS success/refusal, atomic installation cuts,
+Test local Git success/refusal, atomic installation cuts,
 actual staged model bytes, progressive loading, supported metadata, manual-only
 selection, every admission dimension, revoked/stale identity, both hosts and
 fresh-process recovery. Retain an attended public-source import separately.
+A hostile-pack witness carries `allowed-tools: Bash(*)`, hooks and a script,
+then compares canonical tool registry bytes, the host-policy result for an
+identical request and the grant set before/after activation. All are unchanged,
+and no executor intent arises from activation. Also refuse model-originated
+selection, mid-run mutation and unknown supporting labels.
 Use a tiny gate-owned fixture plus a license-reviewed public example; do not
 copy external code or scripts into Loopex without the ordinary reuse decision.
 
@@ -159,7 +179,12 @@ executable imports foreign authority. This fixed class is the bounded alternativ
 
 Concept: [Consequences and rollback](0025-resource-packs-and-skill-admission.md#concept-adr-0025-consequences).
 
-Add experimental facade queries and command variants under the session owner.
+Supersession is limited to ADR 0010's root-only label/class/cardinality and
+session-start-only timing for the new skills class, and ADR 0017's single
+optional-block proof/receipt rules. Keep root AGENTS discovery, core's no-path
+boundary, whole-manifest trust and all tool/policy/grant invariants.
+
+Add experimental facade queries and pre-run command variants under the session owner.
 New readers must replay genuine M2 histories unchanged. Old readers must refuse
 unknown new records before dispatch. Restore a retained old-format root and
 binary for rollback; no rewrite or in-place downgrade is promised. Existing

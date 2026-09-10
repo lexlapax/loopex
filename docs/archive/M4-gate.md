@@ -2,11 +2,12 @@
 
 Unopened acceptance specification for the headless external consumer. The
 [Concept plan](M4.md#concept) and [technical plan](M4-technical.md#technical-depth)
-are the paired proposal. This revision changes documentation only; the existing
-runner, raw-process probe and vectors remain unchanged scaffolding and make no
-M4 acceptance or complete-feature claim.
+are the paired proposal. The superseded runner, raw-process probe and fixtures
+are removed from live scripts and retained at Git revision
+`ba51d1898bcca109a5ed32a8cc3ba831323113a1`. Reconstruct them against settled M3
+and M4 contracts only when M4 opens; no current executable M4 gate is claimed.
 
-The intended ordinary command is:
+The intended future complete command, currently unavailable, is:
 
 ```text
 bash scripts/check-m4-gate.sh
@@ -27,10 +28,13 @@ The old M2-governance base and `cf77165` EOF observation are historical only.
 
 Before acceptance:
 
-1. Reconcile ADR 0023, complete DTO/schema/vector bytes and the actual M3 facade,
-   resource, interaction and artifact contracts. Advertise only implemented
+1. Settle ADRs 0023/0024/0026/0028 and their complete core/port contracts, then
+   reconcile DTO/schema/vector bytes with the actual M3 resource facade. Before
+   acceptance construct executable interaction/range witnesses and prove their
+   declared reds on the unchanged base. After acceptance, require local core/port
+   greens before wire implementation/rejoin. Advertise only implemented
    semantic capabilities; unknown input rules and every limit are exact.
-2. Extend the existing independent raw-process probe to the full foundation
+2. Rebuild the independent raw-process probe to the full foundation
    workflow: initialize, create, attach, select an admitted skill, submit prompt,
    observe durable admission, answer the exact interaction, observe policy-
    authorized tool receipt, verify actual artifact bytes and a settled snapshot.
@@ -40,15 +44,16 @@ Before acceptance:
 4. Complete all runner lanes before implementation: isolated compile and probe,
    inherited gates, authoritative protected selectors, whole suite, independent
    clients, attended real-provider workflow and retained-evidence validation.
-   Replace the current direct `mix test` subset as acceptance authority with the
+   Use the
    existing standalone result channel. Do not build a second result/evidence
    framework.
-5. Settle applicable Closed-gate inventory/version transactions before M4 binds
+5. Settle all floor/inventory/version holder transactions, including M3 if it
+   binds changed artifacts, before M4 binds
    their replacement bytes. Run fresh exact-candidate review after prerequisites
    and executable readiness are complete.
 
-The old raw probe's interaction round trip is useful preliminary scaffolding;
-it does not yet prove skill use, the TypeScript workflow or artifact integrity.
+The old raw probe is historical design material, not current executable proof
+of skills, interactions, the TypeScript workflow or artifact integrity.
 Neither document presence nor acceptance state can satisfy the new opening.
 
 ## Required Raw-Process Conjunction
@@ -75,13 +80,19 @@ Abrupt process death and fresh-process resume use actual Store data and prove no
 duplicate effect. Graceful EOF/cancellation is a separate case; a cancelled
 interaction does not become pending on restart.
 
-## Existing Scaffold Identity
+## Scaffold Reconstruction and Checkpoints
 
-The executable files and current fixture bytes remain those retained from the
-previous M4 draft. At opening, refresh and bind all of them in one exact Bound
-Artifacts table, including the authoritative result runner/corpus and new
-client/vector manifests. The current documentation change does not modify them.
-No old digest is presented as binding future schema or runner behavior.
+Restore only the fixtures and machinery still needed from the historical draft
+when M4 opens. Refresh and bind the runner, authoritative result channel, full
+schema and independent client/vector fixtures against the actual base. No live
+M4 runner or old digest claims a new contract while the plan is archived.
+
+Use explicit focused checkpoint and full/default modes as specified in M3.
+Checkpoint runs inspection, opening and changed-outcome deterministic witnesses;
+shared/unclassified paths select every outcome. Unknown acceptance impact needs
+the full gate. Inherited commands run at acceptance, rebind children, closure,
+scheduled CI and evidence-invalidating changes, not inside selector execution.
+Focused results never claim full completion or excuse an observed red.
 
 ## Required Gate Lanes and Protected Outcomes
 
@@ -90,17 +101,19 @@ No old digest is presented as binding future schema or runner behavior.
 | Inspection | Exact plan/gate/schema/vector identities; status/topology; facade/dependency constraints; no product claim |
 | 1 — Initialization | `apps/loopex_app_server/test/initialization_test.exs`: negotiation, mutation-before-init refusal, duplicate init, stdout purity and real process boundary |
 | 2 — Session mapping | `apps/loopex_app_server/test/session_mapping_test.exs`: same corpus facade/wire, independent identity variation, idempotency, admission vs completion, snapshot/live ordering |
-| 3 — Foundation mapping | `apps/loopex_app_server/test/foundation_mapping_test.exs`: exact resources, missing/stale trust, manual-only selection, interaction/policy separation, wire cannot select roots/modules/profiles or grant |
-| 4 — Delivery | `apps/loopex_app_server/test/delivery_bounds_test.exs`: range integrity/allocation, malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
+| 3 — Foundation mapping | `apps/loopex/test/interaction_lifecycle_test.exs`, `apps/loopex_app_server/test/foundation_mapping_test.exs`: durable request/answer/policy/intent cuts, fixed timestamps through uncertain commits, expiry/abort/restart races; exact resources, missing/stale trust, manual-only selection, interaction/policy separation, wire cannot select roots/modules/profiles or grant |
+| 4 — Delivery | `apps/loopex_store_local/test/artifact_range_test.exs`, `apps/loopex_app_server/test/delivery_bounds_test.exs`: range integrity/allocation, malformed UTF-8, duplicate keys, nesting, fragmented/multiple/oversized frames, blocked reader, detach cursor, late progress and actual cleanup |
 | 5 — External workflow | `apps/loopex_app_server/test/external_workflow_test.exs`: TypeScript skill → approval → actual tool → artifact → abrupt restart, plus separate graceful EOF behavior |
 | 6 — Conformance | `apps/loopex_protocol/test/public_schema_conformance_test.exs`: independently executed Elixir, Python and TypeScript clients over canonical positive/negative vectors |
 | Inherited | Acyclic register-derived predecessor gates and their unchanged required real lanes; no bootstrap back-edge or self-invocation after closure |
-| Full verification | Whole credential-free suite, formatting, warnings-as-errors compilation, documentation/dependency checks and complete protected case identity/state/minimum validation |
+| Full verification | Whole credential-free suite, formatting, warnings-as-errors compilation, documentation/dependency checks and complete protected witness identity/runnable-state validation |
 | Real evidence | Attended provider/task through shipped server and TypeScript; genuine Store/executor and build/companion identities; source/schema/vector/client versions; matrix and rollback controls |
 
-Before acceptance expand each protected family to exact names/states/minima,
-application owner, compiled dependency closure and standalone-runner invocation.
-Preserve M3's inherited repair lock, do not reconstruct it from stale M2 counts.
+Before acceptance bind one decisive named witness per clause, its runnable
+state, owner/dependency closure and standalone invocation. Other required suite
+negatives keep mutable names and counts. Separate real-provider files remove
+any need for an exact mixed-file exclusion lock. Preserve M3 and earlier locks
+unchanged; do not reconstruct them from stale case counts.
 The app-server adds zero external production dependencies; the existing ReqLLM
 edge dependency closure remains allowed. Exactly nine application identities and
 the existing role set are checked after their prerequisite transactions settle.
@@ -112,7 +125,7 @@ bounded stdin credential delivery and whole-child-group cleanup design. Extend
 its real lane to the new workflow. Secrets never enter ordinary children,
 fixtures, diagnostics or evidence; an inherited M2 task is not proof of M4's
 external workflow. Output and queue bounds apply at the receiver before decode,
-and the server never bypasses M3's bounded artifact read with a whole-object
+and the server never bypasses ADR 0028's bounded artifact read with a whole-object
 allocation.
 
 Every result names exact source, gate, command, seed/count/limits, toolchain,

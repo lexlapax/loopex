@@ -22,13 +22,20 @@ the exact document set its milestone must update.
 
 No package or compatibility-labelled surface is pending.
 
-Revise the Open [M3 plan](docs/plans/M3.md#concept) around extensible local
-foundations and the [unopened M4 draft](docs/archive/M4.md#concept) around their
-external consumption. Move durable interactions into M3, add compatible skills
-and bounded artifact access, reconcile integrated M2 repairs, and require early
-end-to-end proof and an integrated audit before independent review. Renumber the
-protocol/interaction proposals and add explicit foundation ADR proposals. This
-change updates documentation only; no product or gate implementation is added.
+Narrow the Open [M3 plan](docs/plans/M3.md#concept) to project skills, three core
+repairs and reliable verification. Move durable interactions, artifact ranges
+and the floor refresh to the [unopened M4 draft](docs/archive/M4.md#concept).
+Require Git-only acquisition, operator-only pre-run selection, hostile-pack
+authority invariance, early integrated proof and self-audit. Specify focused
+checkpoints and stable clause witnesses while preserving full inherited checks
+at contract moments. Align proposed ADRs and roadmap/index documentation.
+
+Replace the obsolete M3 gate probe with real local Store/session observations
+of required-only admission ordering and explicit inspection/checkpoint modes.
+Remove unopened M4 executable scaffolding from live scripts; its old bytes are
+retained in Git. No product behavior is implemented. The branch also retains
+its earlier status-task M3 prerequisite entry and test from the original draft;
+those are tooling code, not documentation authored by this revision.
 
 ## [v0.0.0-m2] — 2026-09-09
 
@@ -57,7 +64,7 @@ is Accepted at its exact pair. That ADR acceptance governs only this
 supervision-shell choice; the final-source disposition separately governs
 integration and the source-snapshot tag, and neither publishes a package.
 
-The next milestone, `M3` (kernel consolidation), is being opened gate-first on
+The next milestone, `M3` (extensible local foundations), is being opened gate-first on
 branch `m3`, where its plan pair and red gate live until acceptance; the headless
 session-protocol draft is retained there as `M4`. Neither unaccepted plan pair
 nor gate is on `main`, by the contract's rule that an unaccepted Open tree never

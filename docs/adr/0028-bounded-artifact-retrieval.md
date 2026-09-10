@@ -6,7 +6,8 @@ Technical depth: [Bounded artifact retrieval mechanics](0028-bounded-artifact-re
 - **Status:** Proposed
 - **Date:** 2026-09-09
 - **Decision owner:** Maintainer
-- **Prerequisite for:** M3 acceptance
+- **Supersedes:** 0015
+- **Prerequisite for:** M4 acceptance
 
 <a id="concept-adr-0028-decision"></a>
 ### Context and Decision
@@ -30,7 +31,10 @@ Technical depth: [Contract and evidence](0028-bounded-artifact-retrieval-technic
 Terminal, embedded and M4 consumers retrieve large tool output without loading
 it all in memory. Full-object verification costs a sequential read per request
 in this first implementation; caching and Merkle formats remain outside scope.
-Resource packs do not enter the tool-output artifact namespace.
+Resource packs do not enter the tool-output artifact namespace. Before M4
+acceptance, pair the range/frame contract with explicit per-read byte/deadline,
+concurrent-reader and connection-work budgets and measured read amplification.
+Missing budget decisions block acceptance; they are not an unlimited-I/O grant.
 
 Keep existing put/fetch callbacks and object/use formats. Add one optional bounded
 fetch_range ArtifactStore callback and an experimental facade query. A custom ArtifactStore that does

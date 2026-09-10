@@ -44,7 +44,8 @@ Technical depth: [M0 candidate proof boundaries](roadmap-technical.md#technical-
 Can a developer use a small, durable, truthful coding loop through the
 embedded API and reference client? Three milestones answer it: the foreground
 harness a developer drives from a terminal, reusable local foundations including
-skills and durable policy interactions, then the headless boundary another
+project skills and core repairs, then durable interactions, artifact ranges
+and the headless boundary another
 program drives with the same semantics. It builds on the durable single-machine session and effect truth M1
 delivered. Its surfaces remain experimental throughout, and the projected
 `0.1.0` tag sits at the end of the last of the three rather than the first.
@@ -72,11 +73,12 @@ Technical depth: [Foreground-harness candidate proof](roadmap-technical.md#techn
 <a id="concept-roadmap-kernel-consolidation"></a>
 ##### Extensible local foundations — M3 candidate
 
-Can an operator acquire and use a compatible skill, answer a durable policy
-question and inspect the result through the same local runtime? M3 joins those
-capabilities to the remaining context, dispatcher and permit-retention repairs.
-It settles shared contracts and runtime-floor prerequisites, protects the
-integrated M2 repairs and proves one complete workflow before adding breadth.
+Can an operator import a pinned Git skill, explicitly select it and inspect a
+real tool result through the same local runtime? M3 joins project-only resources
+to the remaining context, dispatcher and permit-retention repairs. It settles
+two prerequisite decisions, protects inherited guarantees with clause witnesses
+and proves one complete workflow before breadth. Focused checkpoints keep
+full inherited runs at contract moments and evidence-invalidating changes.
 Resource packs and registered tools provide bounded extensibility; trusted
 VM-global plugin activation remains at its later vision barrier.
 
@@ -86,8 +88,10 @@ Technical depth: [Foundation candidate proof](roadmap-technical.md#technical-roa
 ##### Headless external consumption — M4 candidate
 
 Can an independent program use those foundations without a second session or
-policy engine? M4 projects the actual M3 facade through strict foreground stdio
-JSONL, with schemas and vectors, then demonstrates a TypeScript client selecting
+policy engine? M4 first adds core durable interactions and bounded ArtifactStore
+retrieval, and settles the floor refresh with its complete holder inventory.
+It maps the shared facade through strict foreground stdio JSONL and demonstrates
+a TypeScript client selecting
 a skill, answering an interaction, observing a real tool result, retrieving an
 artifact and recovering after process loss. The daemon remains a later host.
 

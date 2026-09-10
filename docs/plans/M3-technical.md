@@ -11,57 +11,43 @@ Concept: [Extensible local foundations](M3.md#concept).
 
 Concept: [Scope](M3.md#concept-plan-scope).
 
-Concept: [non-goals](M3.md#concept-plan-non-goals).
+Concept: [Non-goals](M3.md#concept-plan-non-goals).
 
-The base is integrated M2 at
-`b637873ddc39542ec27add71015b46a4f7c7f80e`. Merge it into the existing M3 history;
-do not discard bound candidates by rebase or squash. Prove bootstrap and every
-Closed gate on the refreshed base and the candidate's distinct capability red.
-M3 stays Open until a fresh exact-candidate review and explicit acceptance.
+The integrated M2 base is `b637873ddc39542ec27add71015b46a4f7c7f80e`, retained
+as an ancestor without rebasing or squashing bound history. Before acceptance,
+prove bootstrap and the required inherited gates green on the exact candidate,
+its distinct behavioral red, complete executable readiness and independent review.
+M3 stays Open until explicit acceptance of the reviewed plan pair and gate.
 
-The acceptance packet settles these proposals before dependent implementation:
+Only two new ADRs are M3 prerequisites:
 
 | Decision | Owner and acceptance point | Effect |
 | --- | --- | --- |
-| [ADR 0024](../adr/0024-durable-interaction-lifecycle-and-host-policy-authority.md#concept) | Maintainer, before M3 acceptance | Session-owned defer and response lifecycle; M4 only maps it |
-| [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) | Maintainer, before M3 acceptance | Narrow extension of ADR 0010 resources and ADR 0017's single optional block proof; acquisition, trust, retention and progressive activation |
-| [ADR 0026](../adr/0026-development-floor-refresh.md#concept) | Maintainer, before M3 acceptance | Deliberately chosen distinct floor/current pairs, then sequential Closed-gate generations |
-| [ADR 0027](../adr/0027-provider-permit-retirement.md#concept) | Maintainer, before M3 acceptance | Narrow supersession of ADR 0018's whole-generation spent-reference retention |
-| [ADR 0028](../adr/0028-bounded-artifact-retrieval.md#concept) | Maintainer, before M3 acceptance | Range access with bounded allocation and honest object/use integrity |
-| [ADR 0023](../adr/0023-experimental-public-session-protocol.md#concept) | Maintainer, before M4 acceptance | Protocol decision, not an M3 prerequisite |
+| [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) | Maintainer, before M3 acceptance | Fixed project-skill class, Git import, trust, pre-run selection, retention and optional-block admission |
+| [ADR 0027](../adr/0027-provider-permit-retirement.md#concept) | Maintainer, before M3 acceptance | Safe retirement of whole-generation in-memory spent references under unchanged fencing and accounting |
 
-Settle the floor before M3 is accepted and binds `.tool-versions`. The change
-requires three sequential v2 gate-generation transactions for Closed M0, M1 and
-M2, not an avoidable fourth self-amendment on Accepted M3. Each proposal and its
-immediate rebind child retain the exact evidence required by AGENTS.md; old
-Acceptance and Closure records stay immutable. The M0 diagnostic correction and
-any still-needed bound isolation-test repair join the applicable holder's
-proposal only if their complete bytes and meaning have been reviewed together.
-No product work or parallel bound-byte edits enter those transactions. The
-planning checkpoint itself changes neither toolchain pins nor Closed gates.
-
-A floor decision does not waive any matrix lane. The proposed floor is Elixir
-1.18.5/OTP 27.3.4; current remains 1.20.3/29.0.5. These are explicit pins, not a
-claim that they are today's newest patches. Re-prove Darwin floor/current and
-Linux current. If the packet cannot be accepted, resolve the plan prerequisite
-with the maintainer while Open; implementation must not improvise a substitute.
+Accepted M2 ADRs remain inherited constraints. ADRs 0023, 0024, 0026 and 0028
+belong to M4: protocol, durable interactions, floor and artifact ranges. No floor
+change or planned Closed-gate transaction is an M3 opening prerequisite. An
+actual required inherited-lock change still needs its holder's transaction;
+this plan grants no waiver. M4 must derive its own holder inventory, including
+M3 if M3's accepted gate binds a file it changes. Deferral moves transaction cost;
+it does not prove that only three holders will exist later.
 
 **Complete readiness packet**
 
-Before acceptance, all future protected tests and exact boundary vectors exist
-and can execute against the unchanged base. Their failures must be the stated
-missing behavior, never undefined helpers, incomplete runners, unavailable
-dependencies or governance status. The existing runner retains the superseded debt-only probe. This documentation
-revision implements no gate code and supplies no new behavioral red. All
-selector, suite, evidence and opening-probe lanes must be completed while Open
-and reviewed before their lock. No lane is completed by milestone product
-implementation.
+The current opening probe exercises required-only admission through real session
+staging and retained Store receipts. It proves that one missing repair; it does
+not prove skills work. Before acceptance, add the integrated skill boundary
+probe, all clause witnesses, exact schemas/vectors and executable full-gate lanes.
+A test harness may use existing product entrypoints but may not supply the
+missing product behavior. Undefined helpers, compile failures and absent
+fixtures are unavailable evidence, not the declared red.
 
-Each outcome has one obligation row recording: operator result; public entry;
-owner; authority input; durable identity; transaction/recovery cuts; bounded
-resource; expected refusal; exact test witness; attended evidence; compatibility
-and rollback. Resolve conflicting ADR clauses, configuration propagation and
-error semantics in that row before the first implementation task is assigned.
+Each obligation row settles operator result, entrypoint, owner, authority input,
+durable identity, transaction cuts, bounds, refusal, witness, compatibility and
+rollback before implementation. Exact accepted commands and witness identities
+are completed while Open. No unresolved contract is delegated to an implementer.
 
 <a id="technical-plan-ownership"></a>
 ### Ownership, Decision Owners, and Rejoin Barriers
@@ -70,199 +56,172 @@ Concept: [Scope](M3.md#concept-plan-scope).
 
 | Slice | Owned boundary and paths | Rejoin evidence |
 | --- | --- | --- |
-| Prerequisites | Maintainer dispositions, ADR pairs, affected Closed gate generations | All prerequisite transactions settled and inherited green proof on exact source |
-| Resources | `loopex_composition` host resource resolver/importer; core fixed admission and context staging; CLI commands | Reference and explicit host root agree; exact selected bytes reach staged model input; no path or network access enters core |
-| Interactions | Core input algebra, reducer, coordinator and policy evaluator; CLI presentation | One durable winner under answer/expiry/abort/deadline; policy allow precedes executor intent |
-| Queries | Public facade plus ArtifactStore implementation | Resources are separately retained; artifact use identity and streaming full-object verification precede bounded range delivery |
-| Repairs | Context admission, event dispatcher and Control | Generated bounds, held-Store availability, retired-permit refusal and successor safety |
-| Integration | Composition, CLI and evidence fixtures | Same semantics through both entries, real effects and fresh-process reconstruction |
-| Gate protection | Repository scripts and test-honesty witnesses | Acyclic inherited invocation, exact regression lock and decisive mutations |
+| Resources | `loopex_composition` resolver/importer; core admission/staging; CLI resource commands | Project-only discovery, executor-owned Git effects, exact admitted bytes, no core paths/network |
+| Repairs | Context staging/admission, dispatcher and Control | Required-only properties, held-Store availability, retirement and succession negatives |
+| Integration | Composition and CLI using existing policy, executor and ArtifactStore | Same configured skill/tool/artifact result through embedding and built CLI |
+| Gate protection | Repository entrypoints and behavioral witness manifest | Focused checkpoint selection, acyclic inherited calls and truthful failure propagation |
 
-The integration order is: prerequisites → one thin vertical workflow → bounded
-feature expansion and independent repairs → integrated self-audit → final
-independent review. Parallel work is optional and follows AGENTS.md isolation
-and ownership rules; it creates no additional acceptance or milestone gates.
+One integrator owns rejoin and the exact candidate. Sequence: decisions and gate
+readiness → one thin workflow → bounded expansion and independent repairs →
+integrated self-audit → independent closure review. Parallel work follows the
+repository isolation/ownership rules; workstreams have no separate gate.
 
-The first integrated workflow uses one small pinned skill, one selected
-supporting resource, one existing host-registered tool, policy defer/answer, a
-real local executor result and bounded artifact read. Capture actual staged
-provider input and restart a separate process against the real local Store.
-Run through direct embedding and the shipped CLI, including the built CLI and
-provider companion outside the source directory. Do this before registry breadth,
-UI polish or additional skill formats. M4's projected DTOs must be representable
-from these results, but M3 implements no wire server.
-
-The shared model/executor launch options are trusted host data. Resolve them
-once in composition and preserve them through prepared recovery. Existing
-provider protection and explicit participant handoff remain the actual path;
-no hidden process dictionary, VM-global logger substitution or bypass fixture.
+The first workflow imports one tiny pinned project skill, admits its full
+manifest, selects its instructions and one already manifested supporting label,
+uses one existing tool under allow/deny policy, and inspects the real artifact
+through the existing full-object fetch. Capture actual staged model input and
+reconstruct retained state in a fresh process. Exercise direct embedding and
+the source-built CLI/provider companion outside the checkout before breadth.
+No policy defer, range API or wire implementation enters this M3 workflow.
 
 **Transaction and failure matrix**
 
 | Boundary | Required state cuts and negatives |
 | --- | --- |
-| Fetch/install | Allow/deny/cancel/timeout; source resolves to different commit; truncated download; cap exceeded; redirect policy; link/special file; interrupted atomic publication; existing destination; no script or hook execution |
-| Trust/context | Missing/stale/revoked decision; catalog addition/removal; changed bytes after discovery; manual-only selection; duplicate name; unsupported field; required-only fit/fail; aggregate tokens/bytes/depth/cardinality; no partial instruction truncation |
-| Interaction | Before/after request, response, resolution, grant and intent commits; commit_unknown at each; duplicate/conflicting answer; expiry vs abort/deadline; second defer; changed policy identity; owner loss; no effect before allow |
-| Provider | Exact staged content vs dispatch authority; before/after permit spend; ambiguous open attempt; settled old attempt replay after retirement; successor fencing; preserve usage-v2 provenance |
-| Dispatcher | Held Store, asynchronous read result after detach or replacement, stale owner/cursor, overflow, blocked observer, bounded acknowledgement and ordered publication |
-| Artifact | Object/use mismatch, cross-session reference, absent object, corruption before and after range, zero/last/over-range, concurrent read, bounded memory and descriptor cleanup |
-| Host lifecycle | CLI/embedding configuration equivalence; abrupt parent VM loss; graceful cancellation; second interrupt; prepared transfer; late completion; provider companion identity and actual process exit |
+| Git/import | Allow/deny, deadline/cancel, exact-commit mismatch, truncated tree, size/count cap, links/special files, interrupted publication and existing destination; no hook/filter/script execution |
+| Trust/context | Missing/stale decision, changed bytes, catalog change, unsupported metadata, pre-run-only commands, manifested-label selection, whole-block withholding, all four admission dimensions |
+| Authority | Hostile allowed-tools/hooks/script pack; compare canonical tool registry, same-request policy result and grant set before/after activation; no effect from resource commands |
+| Provider | Exact staged bytes vs dispatch authority, permit spend, ambiguous attempt, settled old identity after retirement, owner succession and settlement-v2 preservation |
+| Dispatcher | Held Store, late result after detach/replacement, stale owner/cursor, overflow, unrelated-session acknowledgements and ordered publication |
+| Existing artifact/host paths | Authorized full-object use and integrity checks; CLI/embedding launch equivalence, abrupt loss vs graceful cancel, prepared transfer, provider companion/process cleanup |
 
-An interaction cancelled during graceful shutdown stays cancelled. The restart
-proof resumes retained pending/answered state after abrupt loss, not a question
-already resolved by the shutdown contract. Creation and expiry instants are
-chosen once before their transaction and retained through uncertainty; a retry
-never changes a mutation digest by reading the clock again.
+Resource commands require settled state before the next run and freeze a per-run
+selection. Late model output cannot mutate it. Supporting requests choose only
+existing manifest labels. Replay uses retained exact request bytes without
+refetch or inferred permission to redispatch an ambiguous provider attempt.
 
 <a id="technical-plan-evidence"></a>
 ### Evidence Obligations and Mapping
 
 Concept: [Outcomes](M3.md#concept-plan-outcomes).
 
-The gate's future data manifest is the single executable selector inventory. Re-derive
-M2 repair case identities from integrated source, not the old 79-case snapshot.
-Existing locks stay intact. Lock repaired-path cases by actual ExUnit identity
-and state and run them through `scripts/m1-exunit-runner.exs`; deletion, rename,
-skip or exclusion fails. Counts support identity checks and are not a delivery
-objective. A test's file digest may bind the inherited snapshot only while the
-candidate is Open; before acceptance, bind its identities rather than freeze
-bytes M3 must extend.
+The Concept outcomes and gate obligation table use the same exact selector
+paths. Lock one named decisive witness per required clause; one integrated case
+may prove multiple clauses only when each has its own observed assertion.
+Keep additional negatives in the ordinary required suite without freezing their
+names, whole-file counts or exclusions. Adding or renaming an unprotected test
+is not a gate amendment; changing a protected witness still is. Existing Closed
+locks remain untouched and fully enforced at required contract moments.
 
-For each outcome retain the following additional proof:
+Do not freeze test-file bytes that M3 must extend. Bind canonical gate/harness,
+fixture/vector and result-channel bytes; lock protected tests by identity and
+required runnable state. Deterministic and real-provider cases live in separate
+files so no mutable mixed-file exclusion inventory becomes a lock. A protected
+case that is missing, skipped or excluded fails. Counts are not a delivery
+objective. Before acceptance refresh repaired-path clause witnesses against
+`b637873ddc39542ec27add71015b46a4f7c7f80e`; do not inherit the obsolete 79-case
+snapshot or freeze every test added since a moving historical revision.
 
-1. **Acquisition:** actual local Git and loopback HTTPS source, including exact
-   commit/content identity and interrupted publication. An attended public-source
-   import proves the network path; online availability is not a deterministic
-   gate dependency and a cached import is not that proof.
-2. **Context:** generated lists through cardinality 1,024; full maximal receipt
-   shape; whole-block withholding across all four admission dimensions; actual
-   staged bytes and digests before/after restart; no source reread for a retained
-   request. No provider redispatch inferred from retained bytes.
-3. **Interactions:** reducer properties plus real Store cuts and a fresh-process
-   answer-to-authorized-effect trace. Answer admission and policy authorization
-   are separately observed.
-4. **Common foundations:** CLI and embedded workflow, genuine model/tool task,
-   resource/artifact inspection, trusted launch configuration and source-built
-   CLI/companion identities. Artifact range checks measure peak allocation, not
-   only output frame size.
-5. **Repairs:** required-only lower-bound properties and historical refusal
-   replay; bounded unrelated-session control under a held Store; long-history
-   permit-retention observation with hostile late requests and succession.
-6. **Inherited protection:** register-derived gate enumeration; missing/red gate
-   and omitted-invocation negatives; no bootstrap recursion; cross-VM scratch
-   allocation; mutations of known repaired failure clauses and sibling branches.
-7. **Closure:** exact source/gate/toolchain/platform/seed/limits; real-path build
-   identities; old-reader positive controls and refusal of new records before
-   effects; every documentation row; integrated audit and independent review.
+1. **Acquisition:** actual local Git fixture and executor job, exact tree/file
+   identities, deadlines/cleanup and interrupted atomic installation. An attended
+   public Git import separately proves the real network path.
+2. **Context:** catalog/instruction/supporting stages, hostile-pack invariance,
+   generated structures through cardinality 1,024 and maximal receipts, actual
+   staged request capture and fresh-process replay with no source reread.
+3. **Workflow:** both entries and source-built CLI/companion, actual tool result,
+   existing full-object artifact inspection, trusted launch/recovery configuration;
+   an attended real-provider task in a separate selector file.
+4. **Repairs:** required-only fixed-point lower-bound/first-failure properties and
+   historical refusal replay; held-Store unrelated-session latency; long-history
+   retention with delayed requests and owner succession. Use ADR 0017's existing
+   refusal members and meanings, not a new inferred lower-bound receipt field.
+5. **Gate protection:** synthetic register invocation and M3-Closed transition,
+   missing/red/omitted predecessor, bootstrap recursion refusal, cross-VM scratch
+   allocation, and mutations of repaired-path clauses and sibling transitions.
 
-**Review workflow that addresses M2's failure pattern**
+**Cheap checkpoints and full contract evidence**
 
-- Review the contract/ownership matrix and the first integrated workflow before
-  broad implementation. Each slice ends with production-boundary proof and a
-  focused diff review; final review should not be the first composition check.
-- Every negative test first proves that it reached the intended boundary. Use
-  actual values, captured requests, receipts and liveness witnesses. Source text,
-  configuration literals, startup failure and a short silent interval cannot
-  substitute for the behavior claimed.
-- Preserve legacy guarantees while extending tests. Before gate amendment or
-  closure handoff, apply the repository mutant-hunt procedure to each changed
-  obligation and adjacent failure path. Surviving meaningful mutants block that
-  handoff until repaired or explicitly dispositioned.
-- A repeated finding class triggers an audit of all entrypoints and sibling
-  transitions in that class. Resolve its root cause and update the obligation
-  map once; do not turn serial reviewer comments into the implementation plan.
-- Before final review, the implementer audits contracts/composition, lifetime,
-  test honesty, trust/diagnostics, toolchain/build/rollback and documentation as
-  one product. Freeze clean source S, run required lanes serially, and retain
-  evidence naming S. Evidence-only descendants name their source; they never
-  back-project a result onto different bytes.
-- Relevant product/configuration/schema changes invalidate their affected
-  evidence and review. Shared ownership or unknown impact means the full gate.
-  No fixed number of review rounds, weakened gate or retry-to-green rule is
-  introduced. Environment failure remains unavailable evidence.
+The locked default command is the complete closure gate. `--checkpoint` is
+explicitly focused diagnostic evidence: inspection, isolated compile/opening
+probe, and changed-outcome deterministic witnesses selected by a digest-bound
+path-to-outcome map. Shared or unclassified product paths select all outcomes;
+unknown acceptance impact requires the full gate. Selection starts from an
+explicit retained comparison SHA, includes tracked/untracked relevant work,
+and cannot interpret an empty/invalid comparison as no work. The exact mapping
+and role grammar must exist and be negatively tested before acceptance.
+
+Run the full inherited aggregate at the acceptance base, every amendment rebind
+child, closure candidates and scheduled CI; also after changes that invalidate
+that evidence. Existing gates must remain green between those moments. Focused
+results do not replace full evidence or excuse an observed inherited failure.
+Do not put the aggregate inside protected-selector execution or bootstrap.
+Scheduled runs are a future CI obligation, not an automation created by this
+plan. Record per-lane duration so cost is observable; no promised minute count.
+
+**Review and closure evidence**
+
+Every negative proves it reached its intended boundary. Source regexes, literal
+configuration, startup failure and short silence cannot witness behavior.
+Preserve inherited assertions. Before amendment/closure handoff, use mutant-hunt
+on changed obligations and sibling paths, then independent review. Repeated
+finding classes trigger an all-entrypoint root-cause audit, not another narrow
+patch/reviewer loop. The implementer self-audits composition, lifetime, trust,
+rollback, packaging and docs before final review.
+
+Freeze source S for required evidence. Bind source/gate/commands/seed, limits,
+actual toolchains/platforms and non-secret build identities. Run real build and
+platform paths early and at closure; retained old-reader positive controls,
+new-format refusal and every documentation row remain mandatory. Relevant byte
+changes invalidate affected evidence/review; unknown scope means the full gate.
+A same-source disappearing failure is a blocking flake, not a successful retry.
 
 **Acyclic gate ownership**
 
-The outer repository entrypoint `scripts/check-closed-gates.sh` reads the
-register and invokes each Closed gate's exact command. Closed leaf gates may
-call bootstrap; bootstrap never calls the aggregate. The active M3 runner calls
-the aggregate once. A structural check and adversarial test verify the active
-runner's mandatory call and reject a bootstrap back-edge. Hosted CI may call
-that entrypoint and owns no additional acceptance semantics. When M3 closes,
-its inherited invocation is a bounded prefix of predecessors, excluding itself;
-a future aggregate must not recursively execute the same Closed gate. Prove
-this transition before acceptance with a synthetic register containing Closed
-M3 and a successor. No skip environment variable suppresses required gates.
+`scripts/check-closed-gates.sh` reads the canonical register and runs the exact
+required commands. Bootstrap is a leaf. The full M3 runner owns the inherited
+aggregate call; checkpoint mode cannot claim full-gate completion. Once M3 is
+Closed its inherited call selects only its predecessor prefix, excluding itself.
+Prove that synthetic transition and reject missing invocation/back-edges before
+acceptance. No environment skip or authority bypass is permitted.
 
 <a id="technical-plan-compatibility"></a>
 ### Compatibility
 
 Concept: [Scope](M3.md#concept-plan-scope).
 
-New resource/activation and interaction command variants, resource queries and
-bounded artifact reads are experimental additions to the public facade. Core
-receives canonical plain data; YAML, URLs, paths and host selection stay at the
-edge. New resource and interaction durable records are versioned, never hidden
-optional changes to a closed exact record shape. Existing AGENTS.md and M2
-refusals replay unchanged. ADR 0025 owns optional-resource structural admission;
-ADR 0027 changes retention, not the provider attempt or accounting algebra.
+Resource queries and admission/activation commands are experimental additions.
+Core receives canonical data; Git, paths and parsing stay at the edge. Version
+new resource records/receipts and preserve genuine M2 replay, root AGENTS and
+historical refusals. ADR 0025 explicitly narrows its supersession of 0010/0017.
+ADR 0027 changes in-memory retention, not attempt/accounting algebra. Existing
+allow/deny policy and full-object ArtifactStore contracts remain unchanged.
 
 <a id="technical-plan-migration"></a>
 ### Migration and Rollback
 
 Concept: [Scope](M3.md#concept-plan-scope).
 
-Preserve M2 roots and prove a new reader can replay genuine M2 histories. New
-M3 records use fresh task roots during development. An old binary is not a
-rollback plan for a root containing unknown new records: prove it refuses
-before dispatch with an unchanged historical prefix, alongside a genuine
-old-format positive control. Return to the retained pre-upgrade root/binary
-pair; do not delete or rewrite operator history. No in-place downgrade promise.
-
-Resource installation publishes into a host-owned retained-pack directory by
-atomic rename only after complete validation. Interrupted imports leave the
-previous installed pack intact; cleanup affects only task-owned staging.
-Already staged context remains available independently of installed-pack
-removal. No fallback reread or refetch changes a retained request.
-
-Floor and gate rollback follow new accepted transactions, not Git reversion of
-immutable authority records. Artifact API changes are additive with the old
-fetch path retained; exact ADR 0015 object/use identity remains unchanged.
+Use fresh M3 evidence roots. Prove new readers on genuine M2 history and old
+readers refusing unknown M3 records before dispatch, with an old-format positive
+control. Roll back with retained old root/binary pairs; never rewrite operator
+history or promise in-place downgrade. Import validates in task-owned staging
+then atomically publishes the project pack; interruption preserves the previous
+installation. Retained staging bytes survive later pack removal. Cleanup touches
+only task-owned temporary state. No floor or artifact format migration is added.
 
 <a id="technical-plan-packaging"></a>
 ### Packaging
 
 Concept: [Scope](M3.md#concept-plan-scope).
 
-Eight umbrella applications and existing roles remain. Resource parsing and
-acquisition live in the host/composition and hand; core and protocol remain
-stdlib/OTP only. Use the existing executor command job for explicitly authorized
-Git acquisition, with argument vectors and a closed environment; HTTPS uses the
-existing edge dependency closure. No new external library, generic YAML runtime
-or executor job kind is authorized. Support the bounded Agent Skills frontmatter
-subset explicitly; reject unsupported YAML constructs with a useful diagnostic.
-Git is a prerequisite for Git import only, probed before side effects.
-
-The existing CLI and private provider companion gain source-built foundation
-commands and examples. Root VERSION and application versions remain the M2
-values. No tag, release, package publication or installation service is created.
+Keep eight apps and existing roles, versions and toolchain pins. Core/protocol
+remain stdlib/OTP only. Git import uses an existing executor command job with
+explicit executable, closed environment/configuration, probed Git prerequisite,
+bounded deadline/output and normal cancellation. No HTTPS fetch, new executor
+kind, production library or generic YAML runtime. Parse a declared bounded
+frontmatter subset and diagnose unsupported constructs. The CLI gains skill
+add/list/show and explicit pre-run selection. No publication or service install.
 
 <a id="technical-plan-minimalism"></a>
 ### Proportional Minimalism Budget
 
 Concept: [Scope](M3.md#concept-plan-scope).
 
-Justified growth is the fixed skills resource class, one durable interaction
-slice, bounded query plumbing, host resource acquisition and three direct core
-repairs, plus necessary evidence. Use existing Store transactions, policy and
-executor jobs rather than a second workflow engine. Keep one admission owner,
-one manifest format and one activation path across CLI and embedding.
-
-No new application/role, external production dependency, generic pipeline,
-transport abstraction, plugin loader, worker pool, retention-policy framework,
-or second session reducer. Resource/interaction limits are concrete in the ADR
-proposals; toolchain and gate prerequisites are settled before locking them.
-Do not impose arbitrary line caps that reward compressed code or lost evidence.
-Review code growth against actual reused boundaries and delete obsolete paths.
+Justified growth is one fixed ResourcePack boundary, resource catalog/read
+queries, admit/activate commands, host resolver/importer and CLI adapters, three
+direct core repairs and repository verification. One admission owner, manifest
+and selection path serve both hosts. No new app/dependency/job kind, second
+policy evaluator, interaction family, range port, default tool, plugin loader,
+generic pipeline, worker pool or second reducer. Review growth against actual
+boundary reuse; arbitrary line ceilings do not replace complete evidence.
 <!-- loopex:plan-technical-envelope:end -->

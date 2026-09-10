@@ -1,151 +1,158 @@
 # M3 Gate
 
-Candidate acceptance specification for extensible local foundations. This
-revision changes documentation only. The existing runner is retained unchanged
-and implements the superseded debt-only opening probes; it is not evidence that
-the redesigned gate is complete. **M3 stays Open and is not acceptance-ready
-until the executable readiness work below is finished and reviewed.**
+Open candidate specification for project skills and core repairs. No plan or ADR
+is accepted by this revision. The opening runner is a bounded behavioral probe;
+its red does not establish complete executable acceptance for all M3 outcomes.
+**Full lane/witness readiness and independent review remain prerequisites.**
 
-The intended ordinary command remains:
+The locked complete command, once acceptance-ready, is:
 
 ```text
 bash scripts/check-m3-gate.sh
 ```
 
-The [Concept plan](M3.md#concept) owns outcomes; the
+The [Concept plan](M3.md#concept) owns the five outcomes and the
 [technical plan](M3-technical.md#technical-depth) owns the contracts and evidence.
-Acceptance must bind their final envelopes and this gate to one exact candidate.
-The maintainer's request to revise and push these documents is not acceptance.
 
 <a id="amendment-transaction-v1"></a>
 
-After acceptance, changes use the ordinary direct proposal/rebind transaction.
-Floor settlement precedes acceptance, so the floor change creates no planned M3
-self-amendment. Closed M0–M2 generations retain their separate authority.
+After acceptance, amendments use the direct proposal/rebind transaction. M3
+changes no floor pin or Closed gate as an opening prerequisite. M4 owns its
+future floor proposal and must derive all then-current artifact holders.
+
+## Current Opening Observation
+
+The runner compiles into an isolated root and drives actual sessions using the
+real local Store and a deterministic model. Positive controls prove a small
+required request dispatches and an admitted project reaches staged input. An
+oversized required request proves refusal before dispatch. Adding the same
+small admitted project must still refuse at required-only preflight and record
+`not_evaluated_required_failure`; the current product instead records optional
+byte-budget evaluation before that refusal.
+
+```text
+M3 gate RED: required-only context overflow evaluates optional project content before refusal
+```
+
+This is a credential-free behavioral red for outcome 4, witnessed by retained
+receipts and model-call observations. It does not depend on acceptance state,
+exported function names, source text, case counts or an invented receipt member.
+Compile/tool/fixture failure and a missing positive control are UNAVAILABLE
+(exit 2); the observed defect is RED (exit 1). Inspection can pass without a
+behavior claim. If this one probe becomes green before the remaining lanes are
+implemented, the scaffold reports UNAVAILABLE rather than a full-gate PASS.
 
 ## Readiness Work Before Acceptance
 
-1. Replace the old probe with an actual foundation-boundary workflow: resolve
-   a bounded compatible skill, admit its exact manifest, observe catalog and
-   selected instruction bytes in staged model input, and suspend a real session
-   on policy defer. The response path must show answer admission separately
-   from host authorization and actual tool execution. Use a real local Store
-   and executor with a deterministic model for this opening proof.
-2. Missing or refused capability is a behavioral red. Compilation failure,
-   missing fixture/helper, dependency failure or inability to allocate an
-   isolated root is unavailable evidence. Acceptance status, a filename,
-   exported-function check, source text or test count cannot make the probe green.
-3. Implement all required runner lanes before acceptance: inspection, isolated
-   compile and opening probe, inherited gates, protected selectors, whole suite,
-   real-provider workflow and retained-evidence validation. No unconditional
-   “lane not yet written” remains in the accepted runner.
-4. Construct every protected test/vector while Open. It must reach the intended
-   product boundary and fail for declared missing behavior on the unchanged
-   product base. The accepted candidate still has a distinct red; no milestone
-   product implementation is needed to finish its test harness.
-5. Refresh and bind the M2 repair inventory at exact integrated source
-   `b637873ddc39542ec27add71015b46a4f7c7f80e`, using `6345ded` as the repair-range
-   starting revision. Expand generated ExUnit names, preserve every inherited
-   protected identity and record exact names/states/minima in one executable
-   manifest. The former 79-case/18-selector table is obsolete. Do not freeze
-   whole test files that this milestone must extend.
-6. Validate the complete call graph and the synthetic transition where M3
-   becomes Closed. The outer aggregate reads the register and runs required
-   predecessor gates. Bootstrap remains a leaf dependency and never calls the
-   aggregate. A closed milestone's inherited call is limited to its predecessor
-   prefix, excluding itself; no skip flag or environment bypass suppresses a
-   required gate. The active-runner invocation is structurally checked and
-   execution is separately tested.
-7. Settle prerequisite ADRs and floor/Closed-gate transactions before binding
-   M3. Re-run inherited gates, the complete readiness packet and fresh
-   independent review on that exact source. A stale pre-refresh red does not
-   qualify the new candidate.
-
-## Planned Opening Observation
-
-The future opening observation records separately: acquisition/manifest identity,
-trust result, catalog metadata, selected instruction digest, staged request
-identity, durable pending interaction and absence of executor dispatch before
-allow. It reports each boundary it reached. The declared missing behavior is:
-
-```text
-M3 gate RED: an operator cannot use an admitted compatible skill and complete a durable policy interaction through the local session workflow
-```
-
-That is the replacement to implement during gate construction. The retained
-old runner currently emits its old debt-probe red and cannot supply this proof.
-This document does not relabel that output or claim either a new red or PASS.
+1. Construct the integrated Git skill → admitted context → tool → existing
+   full-object artifact workflow and its opening red on the unchanged product
+   base. Undefined future APIs/helpers alone cannot supply that red. The current
+   admission probe remains a repair witness, not a substitute for skills proof.
+2. Complete every full lane and the focused checkpoint selector mapping while
+   Open, before product implementation. No unconditional unavailable lane remains
+   in an accepted runner. Use actual boundary witnesses, canonical fixtures and
+   authoritative test results; preserve all inherited locks unchanged.
+3. Finalize the exact clause-witness manifest, protected runnable states and
+   path-to-outcome map. Refresh M2 repaired-path obligations at integrated source
+   `b637873ddc39542ec27add71015b46a4f7c7f80e`; do not freeze the old 79-case table.
+   Lock decisive witnesses, not every negative or mixed-file exclusion count.
+4. Prove checkpoint selection and complete-command routing with missing/shared/
+   unclassified paths, invalid comparison SHAs, protected exclusion and omitted
+   inherited invocation. Prove the acyclic aggregate with a synthetic Closed M3
+   register and successor. Bootstrap never invokes the aggregate.
+5. Settle ADRs 0025 and 0027, then run the full inherited commands and readiness
+   evidence at the exact acceptance candidate for fresh independent review.
 
 ## Bound Artifacts
 
-These are the existing scaffold bytes retained by this documentation revision.
-The Open candidate refreshes this table when executable readiness is performed;
+These are the current opening-scaffold bytes.
+The Open candidate refreshes this table when executable readiness is completed;
 acceptance binds the final runner, harness, canonical fixtures, manifests,
 configuration and authoritative result channel. Existing Closed locks remain
 unchanged.
 
 | SHA-256 | Path |
 | --- | --- |
-| `36fa5a17b764638ffea72aa87da4903e1e0f28f6fe5338c7c46a756184dbe6df` | `scripts/check-m3-gate.sh` |
+| `658327afd1356ec1ddedfcc804b41820df4b52f77ffb903d120708a2720fcb76` | `scripts/check-m3-gate.sh` |
+| `1c0165e28189fd19f85c247c7ee3f93d1ae56f2ef17eb1c8dcc588dbd9747287` | `scripts/m3-opening-probe.exs` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
 
-## Required Lanes
+## Runner Modes and Evidence Cost
+
+| Mode | Current scaffold | Required before acceptance |
+| --- | --- | --- |
+| `--inspect` | Artifact identity and required-file inspection | Also exact status/pairing, topology and command-graph checks |
+| `--preflight` | Isolated compile and real-session opening observation | Complete integrated opening proof |
+| `--checkpoint` | Inspection and opening observation; cannot claim full PASS | Also changed-outcome deterministic clause witnesses from the locked path map |
+| No flag | Opening observation; refuses unavailable unfinished lanes if it becomes green | Every lane below, including inherited gates and retained real-path evidence |
+
+Checkpoint results are focused diagnostics, never acceptance or closure proof.
+The accepted checkpoint role takes an explicit retained comparison SHA, selects
+all deterministic outcomes on shared/unclassified product changes, and includes
+relevant untracked work. Invalid or unavailable comparison is not an empty diff.
+Its exact argument grammar and executable selector map must be locked before
+acceptance; this scaffold does not claim they are already implemented.
+
+Run the inherited aggregate at the acceptance base, every rebind child, closure
+candidates, scheduled CI and whenever changed bytes invalidate its evidence.
+There is no requirement to rerun the two-hour inherited set on every commit;
+that duration is the supplied review's machine observation, not a timing promise.
+An observed red still blocks. Unknown acceptance impact fails closed to the full
+gate. Protected-selector execution never invokes the aggregate itself.
+
+## Required Full Lanes
 
 | Lane | Complete executable obligation |
 | --- | --- |
-| Inspection | Plan pairing/status, exact artifact identity, doc topology, dependency and invocation structure; no claim about product behavior |
-| Opening | Isolated clean build and the deterministic real-Store/real-executor foundation probe; credential-free |
-| Inherited | Bootstrap and every required Closed gate's exact command, full required credential lanes and truthful failure propagation |
-| Protected outcomes | Existing standalone ExUnit runner, seed 3107, exact per-selector case identities/states and minima; no skipped or excluded protected case |
-| Whole suite | Complete credential-free suite, formatting, warnings-as-errors compilation and documentation/dependency checks |
-| Real workflow | Attended public-source import and real-provider coding task using admitted skill content, durable approval, actual tool result and artifact inspection |
-| Retained evidence | Exact source/gate/command/seed/limits/toolchain/platform and non-secret build identities; artifact digests and all required outcome classes |
+| Inspection | Exact plan/status, artifact identity, doc topology, dependency/command graph |
+| Opening | Isolated compile; real Store/executor integrated skill workflow and admission ordering |
+| Inherited | Bootstrap and all required Closed commands with credential lanes and truthful propagation |
+| Protected outcomes | Standalone authoritative ExUnit result channel, seed 3107, exact required witness identities and runnable states |
+| Whole suite | Complete deterministic suite, format, warning-free compile, documentation and dependency checks |
+| Real workflow | Separately selected attended public Git import and real-provider skill/tool/artifact task |
+| Retained evidence | Source/gate/command/seed/limits, actual toolchains/platforms and non-secret build/artifact identities |
 
-Reuse M1/M2's existing authoritative result and isolated provider machinery.
-Ordinary mode's provider input is a bounded non-exported stdin frame, translated
-only at the inherited or explicitly tagged real-provider lane. Inspection and
-opening require no credential. Do not make “no credential lane” coexist with a
-mandatory real workflow, or substitute the inherited M2 task for the new skill
-workflow. Every required command is present before the gate is accepted.
+Real-provider tests live in dedicated files. The final full runner uses existing
+bounded non-exported credential input only for the explicitly real lanes; the
+current credential-free scaffold refuses credentials. Deterministic checkpoints
+never hold provider secrets. No mixed-file exact `excluded=` inventory is locked.
 
 ## Protected Outcome Obligations
 
 | Outcome | Protected selector family | Required clauses |
 | --- | --- | --- |
-| 1 | `apps/loopex_composition/test/skill_acquisition_test.exs` | Pinned Git and explicit HTTPS; complete file identity; no ambient traversal or script execution; cap/timeout/cancel/containment failures; atomic install cuts and previous-pack preservation |
-| 2 | `apps/loopex/test/skill_context_test.exs` | Catalog before instructions; requested resources only; manual-only and duplicate-name rules; trust invalidation; complete staged request/digest capture; all four admission dimensions; no refetch or ambiguous provider redispatch |
-| 3 | `apps/loopex/test/interaction_lifecycle_test.exs` | Pending/answered/allowed distinctions; request/answer/grant/intent transaction cuts; uncertain commit with fixed time; idempotency; expiry/abort/deadline and repeated defer; matching policy after restart; no effect from answer alone |
-| 4 | `apps/loopex_cli/test/foundation_workflow_test.exs`, `apps/loopex_store_local/test/artifact_range_test.exs` | Same embedded/CLI behavior; trusted launch/recovery consistency; built CLI and provider companion; full-object/use/range integrity; bounded allocation; descriptor and process cleanup |
-| 5 | Context admission, dispatcher availability and provider-attempt protocol selectors | Required-only property through cardinality 1,024; maximal receipt shape; old refusal replay; held-Store multi-session latency; asynchronous publication fences; bounded retention plus stale/retired permit refusal and succession |
-| 6 | `apps/loopex/test/closed_gate_aggregate_test.exs`, integrated repair inventory | Register-derived commands; missing/unreadable/red/omitted invocation; bootstrap back-edge; synthetic M3 closure; exact repair identities; real test-honesty mutations and cross-VM scratch allocation |
-| 7 | All above plus closure evidence | Genuine prior-format positive controls, new-format refusal before effects, early and final platform/build proof, complete self-audit and documentation |
+| 1 | `apps/loopex_composition/test/skill_acquisition_test.exs` | Exact Git tree and complete file identity; closed executor environment; caps/deadline/cancel; containment; no hooks/scripts; atomic publication and previous-pack preservation |
+| 2 | `apps/loopex/test/skill_context_test.exs` | Catalog/instruction/supporting order; operator-only settled-state commands; manifest-only labels; trust invalidation; hostile-pack tool/policy/grant invariance; all admission dimensions; retained input identity with no refetch/ambiguous redispatch |
+| 3 | `apps/loopex_cli/test/foundation_workflow_test.exs` | Same embedded/CLI semantics; source-built CLI/companion; trusted launch/recovery; actual authorized tool and existing full-object artifact integrity |
+| 4 | `apps/loopex/test/context_admission_test.exs`, `apps/loopex/test/event_dispatcher_availability_test.exs`, `apps/loopex/test/provider_attempt_protocol_test.exs` | Required-only order/fixed-point properties and old refusal replay; held-Store availability/publication fencing; bounded retention with retired-identity and successor refusal |
+| 5 | `apps/loopex/test/closed_gate_aggregate_test.exs` | Register-derived predecessor commands; missing/red/omitted invocation; no bootstrap back-edge; synthetic M3 closure; checkpoint mapping and representative repair-witness integrity |
 
-The final executable manifest expands these families into exact case names,
-state, minimum, application owner and permitted compiled dependency closure.
-Selection is claim-proportional: properties for reducers, conformance for
-boundaries, real process/Store faults for durability, negative authority cases
-for trust and real packages/paths where claimed. The table is not a substitute
-for executable tests and does not freeze hypothetical counts.
+Each required clause has one named decisive witness in the final executable
+manifest. Additional ordinary-suite negatives remain required to pass but their
+names and whole-file counts are not locked. An integrated witness can serve
+multiple clauses only with distinct observable assertions. Canonical fixture,
+harness and result-channel bytes are digest-bound; mutable test files are
+protected by witness identity and required state. No protected witness may be
+removed, renamed, skipped or excluded without the accepted amendment process.
+Existing Closed gate locks retain their original meaning.
 
-## Test Honesty and Review
+## Closure Evidence and Review
 
-The M2 failure pattern is addressed by early integrated proof and explicit
-obligation ownership. Every negative first proves it reached its intended
-boundary. Mutations attack the actual clause and sibling transition, not an
-adjacent setup check. Preserve legacy assertions when repairing a case.
-Re-audit repeated finding classes across all entrypoints before handing the
-candidate back. The implementer completes the integrated self-audit before
-independent review; neither actor accepts its own result.
+Closure is evidence for the five product outcomes, not a sixth process outcome.
+Every negative proves its boundary was reached. Mutation attacks the clause and
+sibling transition; preserve legacy assertions. Repeated findings trigger a
+root-cause audit across entrypoints. Integrated implementer self-audit precedes
+independent exact-source review. Neither actor accepts its own result.
 
-Freeze clean source S for final evidence. Record result identity at S; changes to
-shared contracts/launch/configuration invalidate all affected evidence, with
-unknown impact defaulting to the full gate. Evidence-only descendants do not
-relabel an earlier result as a later run. Required real paths, rollback controls,
-platforms and operator demonstrations cannot be inferred from synthetic tests.
-A red check or unresolved blocking finding blocks closure. A disappearing
-same-source failure is a blocking flake, not a successful retry.
+Freeze source S and retain genuine old-format positive controls, old-reader
+refusal of new resource records before effects, actual build/platform proof,
+real workflow evidence and the seven documentation rows. Evidence-only children
+name S; they do not relabel earlier results as later runs. Relevant byte changes
+invalidate affected evidence/review; unknown scope requires the full gate.
+A red or unresolved blocking finding blocks closure. A disappearing same-source
+failure is a blocking flake. No fixed review-round or runtime promise is made.
 
 ## Documentation Obligations
 

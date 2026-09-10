@@ -8,7 +8,7 @@ Technical depth: [Interaction mechanics](0024-durable-interaction-lifecycle-and-
 - **Status:** Proposed
 - **Date:** 2026-08-24
 - **Decision owner:** Maintainer
-- **Prerequisite for:** `M3` acceptance
+- **Prerequisite for:** `M4` acceptance
 
 ## Governance Record
 
@@ -27,7 +27,7 @@ a task is running. Adding a prompt at the wire alone would be unsafe: a
 transport reply could be mistaken for authority, disappear on process loss, or
 race an abort or deadline without a durable winner.
 
-M3 needs a session-owned interaction that survives its host process and
+M4 needs a session-owned interaction that survives its host process and
 returns an operator answer to host policy. The answer is evidence for a new
 policy decision; it is never a grant.
 
@@ -39,11 +39,11 @@ Technical depth: [Missing durable decision point](0024-durable-interaction-lifec
 - A policy `defer` commits one pending interaction before
   `interaction.requested` publishes. The owning tool decision and run suspend,
   and no executor intent or process starts.
-- M3 activates ADR 0009's existing callback branch; it does not widen the
+- M4 activates ADR 0009's existing callback branch; it does not widen the
   callback return. The locked M2 one-shot `Loopex.Policy.decide/2` projection
   continues to turn `defer` into `interaction_unsupported`. A separately named
   interaction-aware evaluator admits a validated `defer` only for the
-  session-owned M3 lifecycle and re-enters the same host callback with one
+  session-owned M4 lifecycle and re-enters the same host callback with one
   bounded `interaction_response` field after an answer commits.
 - The coordinator creates a durable opaque `interaction_id` distinct from every
   request, command, session, run, turn, tool-call, operation, and attempt
@@ -99,7 +99,7 @@ Technical depth: [Exact state and race contract](0024-durable-interaction-lifecy
 - **Map expiry to a new run-terminal outcome.** Rejected because the existing
   denial and deadline algebra already state what happened without widening the
   founding terminal set.
-- **Generalize M3 into a workflow/question engine.** Rejected because the only
+- **Generalize M4 into a workflow/question engine.** Rejected because the only
   proven producer is policy `defer`.
 
 <a id="concept-adr-0024-consequences"></a>
@@ -116,11 +116,12 @@ Technical depth: [Evidence consequences](0024-durable-interaction-lifecycle-and-
 <a id="concept-adr-0024-compatibility"></a>
 ## Compatibility, Migration, and Rollback
 
-The interaction records add private session format. There is no installed base:
-M2 evidence roots need not be migrated, and an M2 binary is not promised to open
-an M3 root containing interactions. Before closure, rollback removes interaction
-admission, policy re-evaluation, and their records together. A later persisted-
-data promise requires an explicit migration decision.
+The interaction records add versioned private session format.
+Use fresh M4 evidence roots. New readers replay genuine M3 histories, and old
+readers must refuse M4 interaction records before effects beside an old-format
+positive control. Rollback returns to a retained old root/binary pair; removing
+the server or new reader cannot downgrade an interaction-bearing root. A later
+persisted-data promise requires an explicit migration decision.
 
 Technical depth: [Format and rollback](0024-durable-interaction-lifecycle-and-host-policy-authority-technical.md#technical-adr-0024-compatibility).
 
@@ -129,4 +130,4 @@ Technical depth: [Format and rollback](0024-durable-interaction-lifecycle-and-ho
 - [ADR 0009](0009-tool-executor-and-grant-contracts.md#concept)
 - [ADR 0010](0010-provider-continuation-and-context-staging.md#concept)
 - [ADR 0011](0011-session-input-algebra-and-streaming.md#concept)
-- [M3 Concept plan](../plans/M3.md#concept)
+- [M4 Concept plan](../archive/M4.md#concept)
