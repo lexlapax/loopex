@@ -46,7 +46,7 @@ claim that they are today's newest patches. Re-prove Darwin floor/current and
 Linux current. If the packet cannot be accepted, resolve the plan prerequisite
 with the maintainer while Open; implementation must not improvise a substitute.
 
-### Complete readiness packet
+**Complete readiness packet**
 
 Before acceptance, all future protected tests and exact boundary vectors exist
 and can execute against the unchanged base. Their failures must be the stated
@@ -64,7 +64,7 @@ and rollback. Resolve conflicting ADR clauses, configuration propagation and
 error semantics in that row before the first implementation task is assigned.
 
 <a id="technical-plan-ownership"></a>
-### Ownership and Rejoin Barriers
+### Ownership, Decision Owners, and Rejoin Barriers
 
 Concept: [Scope](M3.md#concept-plan-scope).
 
@@ -97,7 +97,7 @@ once in composition and preserve them through prepared recovery. Existing
 provider protection and explicit participant handoff remain the actual path;
 no hidden process dictionary, VM-global logger substitution or bypass fixture.
 
-### Transaction and failure matrix
+**Transaction and failure matrix**
 
 | Boundary | Required state cuts and negatives |
 | --- | --- |
@@ -156,7 +156,7 @@ For each outcome retain the following additional proof:
    identities; old-reader positive controls and refusal of new records before
    effects; every documentation row; integrated audit and independent review.
 
-### Review workflow that addresses M2's failure pattern
+**Review workflow that addresses M2's failure pattern**
 
 - Review the contract/ownership matrix and the first integrated workflow before
   broad implementation. Each slice ends with production-boundary proof and a
@@ -182,7 +182,7 @@ For each outcome retain the following additional proof:
   No fixed number of review rounds, weakened gate or retry-to-green rule is
   introduced. Environment failure remains unavailable evidence.
 
-### Acyclic gate ownership
+**Acyclic gate ownership**
 
 The outer repository entrypoint `scripts/check-closed-gates.sh` reads the
 register and invokes each Closed gate's exact command. Closed leaf gates may
@@ -266,39 +266,3 @@ proposals; toolchain and gate prerequisites are settled before locking them.
 Do not impose arbitrary line caps that reward compressed code or lost evidence.
 Review code growth against actual reused boundaries and delete obsolete paths.
 <!-- loopex:plan-technical-envelope:end -->
-
-## Research and Scope Rationale
-
-Research reviewed for this proposal on 2026-09-09 distinguishes portable
-resource directories, discovery catalogs and hosted services:
-
-- [Agent Skills specification](https://agentskills.io/specification) defines
-  SKILL.md metadata, instructions and optional supporting files. Its
-  [client guidance](https://agentskills.io/client-implementation/adding-skills-support)
-  informs discovery, explicit selection and progressive loading. Compatibility
-  is a declared tested subset, not permission to inherit every vendor field.
-- [skills.md documentation](https://skills.md/docs) describes hosted execution
-  through service interfaces. Downloadable resource packs meet M3's local
-  foundation outcome; adding a hosted execution provider is separate scope.
-- [skills.sh](https://skills.sh/) and the
-  [Vercel installer source](https://github.com/vercel-labs/skills/blob/main/src/local-lock.ts)
-  inform distribution and local lock/provenance. The previous blanket claim
-  that this installer carries no checksums or provenance is incorrect: its
-  lock records source information and a computed content hash.
-- [GitHub CLI skill installation](https://cli.github.com/manual/gh_skill_install)
-  illustrates explicit sources and pinned revisions. Loopex still makes its own
-  acquisition, containment, retention and trust decisions.
-- [SkillsMP](https://skillsmp.com/) is a discovery index, and
-  [Tessl evaluation](https://docs.tessl.io/evaluate) supplies evaluation signals;
-  neither is a runtime authority or substitute for Loopex's negative tests.
-- [Claude Code skills](https://code.claude.com/docs/en/skills) include richer
-  execution and invocation semantics. Preserve manual-only restrictions and
-  diagnose unsupported execution fields; do not import tool permission grants.
-- [OpenClaw skills](https://docs.openclaw.ai/skills) illustrates another skills
-  and registry ecosystem. Package discovery and trusted code activation remain
-  separate decisions in Loopex.
-
-A skill is the first resource-pack capability, not the definition of the whole
-foundation milestone. Durable interactions, resource identity, bounded artifact
-access, explicit launch wiring and safe core availability/retention are the
-other shared requirements that would otherwise be discovered while building M4.

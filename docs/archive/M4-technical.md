@@ -42,7 +42,7 @@ at the exact base with the same command/signature and dispositioned through
 its owner; a protocol workaround cannot conceal it.
 
 <a id="technical-plan-ownership"></a>
-### Ownership and Rejoin
+### Ownership, Decision Owners, and Rejoin Barriers
 
 Concept: [Scope](M4.md#concept-plan-scope).
 
