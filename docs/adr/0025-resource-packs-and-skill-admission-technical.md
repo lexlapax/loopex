@@ -32,13 +32,26 @@ below, before it starts the runtime supervisor or any child. It has no continuin
 mutation authority; after launch, Runtime Control remains the sole acquisition
 owner.
 
-The behavior has exactly these three process-local callbacks:
+The behavior has exactly these six process-local callbacks:
 
 ```text
 capabilities(acquirer_ref) ->
   {:ok, %{executor_identity: binary(), executor_epoch: non_neg_integer(),
           workspace_ref: binary(), workspace_lease: binary(),
           git_graph_identity: binary(), capabilities: [atom()]}}
+  | {:error, :acquirer_unavailable}
+
+prepare(acquirer_ref, resource_acquisition_preparation_v1) ->
+  {:ok, resource_acquisition_preparation_receipt_v1}
+  | {:error, :acquirer_unavailable}
+
+prepared(acquirer_ref, runtime_id, operation_id) ->
+  {:ok, :absent | resource_acquisition_preparation_v1}
+  | {:error, :acquirer_unavailable}
+
+release_preparation(acquirer_ref,
+                    resource_acquisition_preparation_release_v1) ->
+  {:ok, :released}
   | {:error, :acquirer_unavailable}
 
 acquire(acquirer_ref, resource_acquisition_request_v1,
@@ -51,36 +64,66 @@ reconcile(acquirer_ref, resource_acquisition_reconciliation_query_v1) ->
   | {:error, :acquirer_unavailable}
 ```
 
-`acquirer_ref` is an opaque trusted-composition reference bound at route
-selection to the returned executor/workspace identity. It also contains one
-host-owned, non-grant-derived current-authority observer whose exact private
+`acquirer_ref` is an opaque trusted-composition reference selected by the host's
+trusted route before policy evaluation. `capabilities/1` is read-only: it creates
+no process, file, network request, durable record, or authority. Its exact
+validated result supplies the executor, graph, workspace, lease, and capability
+members of the policy request. Runtime Control calls it again after an allow and
+requires byte equality before constructing the request and grant; a failure or
+change commits the pre-attempt `acquirer_unavailable` terminal. After that
+second observation Runtime Control constructs the request, grant, exact Store
+attempt transaction and preparation record below. `prepare/2` durably reserves
+the attempt's complete scratch, log and prospective evidence entitlement before
+Runtime Control may submit that Store transaction. `prepared/3` is the
+read-only recovery observation for a lost prepare reply or replacement Control;
+it returns `:absent` only after the capacity lock proves that no reservation for
+the operation exists, returns the one exact `prepared` record, and reports
+unavailable for a conflicting, corrupt, settling or multiply owned record.
+`release_preparation/2` releases only a prepared transaction whose Store status
+observer proves the exact final `not_committed` result. None of these three
+callbacks creates an admission, process, network request, workspace byte,
+policy result or Store fact. The attempt and hand then bind the same capability,
+request, grant and preparation bytes.
+
+The reference also contains one host-owned, non-grant-derived current-authority observer whose exact private
 result is `{:ok, %{runtime_id: runtime_id, operation_id: operation_id,
 command_id: command_id, attempt: attempt,
+authority_kind: :dispatch | :reconciliation,
 state: :attempt_open | :terminal_quarantined,
+preparation_id: preparation_id, preparation_digest: preparation_digest,
 canonical_request_digest: canonical_request_digest,
 canonical_grant_digest: canonical_grant_digest, workspace_ref: workspace_ref,
 workspace_lease: workspace_lease, executor_identity: executor_identity,
 executor_epoch: executor_epoch, fencing_token: fencing_token,
+current_reconciliation_query_id: query_id_or_nil,
+current_recovery_epoch: recovery_epoch_or_nil,
+current_reconciliation_query_digest: query_digest_or_nil,
 authority_hold: opaque_ref}}` or
 `{:error, :authority_unavailable}`. The observer folds the current Store attempt
 and fence and the host's current workspace/executor lease; request, grant,
 caller input, and pack content cannot supply it. No settled, superseded, absent,
-or different attempt may return the success form. `authority_hold` is
+or different attempt or query may return the success form. The `dispatch` form
+requires `attempt_open`, no committed current reconciliation query, and all
+three query members nil. The `reconciliation` form requires the exact current
+committed unresolved query and all three query members non-null; its digest is
+the canonical complete query digest below, and its state equals that query's
+base state. No other kind/state/nullability relation is legal. `authority_hold` is
 process-local, cannot be encoded or compared as grant data, and remains held
 through guard release and process lifetime; its invalidation enters the durable
 cancellation path. `loopex_executor_local` calls that observer while holding its
 final serialized attempt lock immediately before local admission and guard
-creation and compares every durable member independently with the request and
-grant. Observer unavailability returns `{:error, :acquirer_unavailable}` with no
+creation and requires the dispatch form, then compares every durable member
+independently with the preparation, request and grant. Observer unavailability returns `{:error, :acquirer_unavailable}` with no
 local admission, receipt, or effect and leaves the committed Store attempt open
 for solicited reconciliation. A well-formed mismatch produces the corresponding
 existing `refused_before_effect` receipt. `acquire/3` requires
-`:attempt_open`. Before `reconcile/2` performs any local tombstone, process
+`:attempt_open` and the dispatch form. Before `reconcile/2` performs any local tombstone, process
 status/signal/wait, response append, or return, it invokes the same observer
-under the attempt lock and requires either the query's exact `:attempt_open` or
-`:terminal_quarantined` base. It independently compares runtime, command,
-operation, attempt, both digests, current responder workspace/executor
-lease/epoch, and the attempt-stable fencing token. Failure returns
+under the attempt lock and requires the reconciliation form with the query's
+exact `:attempt_open` or `:terminal_quarantined` base. It independently compares
+runtime, command, operation, attempt, preparation, both request/grant digests,
+current query ID, recovery epoch and query digest, current responder
+workspace/executor lease/epoch, and the attempt-stable fencing token. Failure returns
 `{:error, :acquirer_unavailable}` with no local mutation or response; the
 committed query remains reconciling. This is the exact current-responder fence
 check, so another redundant fence field is not added to the query schema. The same trusted route
@@ -88,18 +131,45 @@ delivers lease, executor-epoch, fence, deadline, and Control-channel loss to the
 running hand's cancellation path; inability to retain that route makes the
 capability unavailable before attempt commit.
 
-Runtime Control validates
-the closed capabilities map and required-capability set before committing an
-attempt. It invokes `acquire/3` only after that attempt commits, in a supervised
+The reference additionally contains one host-owned, non-authorizing settlement
+observer used only for capacity release. Its success form identifies the exact
+runtime, command, operation, attempt, preparation, request/grant digests, and one of three
+closed dispositions. `attempt_not_committed` carries the prepared Store attempt
+transaction ID and digest plus the exact final not-committed reason and has nil
+reconciliation and terminal members. `pending_policy_not_dispatched` carries the positive
+committed reconciliation-result ordinal and result-record digest and has nil
+terminal members; `terminal` carries the Store terminal transaction ID, terminal
+record digest, outcome, and nullable receipt digest and has nil reconciliation
+members. It folds only current Store truth and returns
+`{:error, :settlement_unavailable}` on absence, ambiguity, or unavailability.
+Neither form grants effect, cleanup, or release authority until the hand also
+matches its immutable local records under the capacity and attempt locks.
+
+Runtime Control selects the trusted route and validates the closed capabilities
+map and required-capability set before policy evaluation, then revalidates the
+same map after allow. Before evaluating policy from `pending_policy`, it first
+calls `prepared/3`: an exact retained preparation bypasses a new policy or grant
+and re-presents only its retained Store transaction; `:absent` permits a new
+policy evaluation; unavailable state leaves the operation pending with no new
+transaction. After allow it must resolve `prepare/2` to an exact receipt or an
+authoritative `prepared/3` result before submitting the Store attempt. A
+confirmed prepare refusal with authoritative absence commits the pre-attempt
+`acquirer_unavailable` terminal. A lost or unavailable prepare observation
+leaves `pending_policy`; it cannot be converted to absence. After a final Store
+`not_committed` result, Runtime Control calls `release_preparation/2` and cannot
+start another policy attempt until release is confirmed. It invokes `acquire/3`
+only after the prepared attempt commits, in a supervised
 task outside the Control mailbox, and invokes `reconcile/2` only for the current
 committed solicited query. A malformed return, callback raise/exit, deadline, or
 transport loss proves no effect fact: after attempt commit it leaves the attempt
 open; after query commit it leaves the query reconciling. Only a validated
 receipt or response supplies a Store transition candidate. A capability-query
 failure before attempt commit may produce the specified pre-attempt
-`acquirer_unavailable` terminal. The callbacks create no session event, public
-progress record, or authority beyond the committed request, grant, attempt, and
-query that precede them.
+`acquirer_unavailable` terminal. The callbacks create no session event or public
+progress record. A prepared record authorizes only submission or
+resolution of its one embedded Store attempt transaction; it grants no effect.
+Every effect or reconciliation action still requires the committed attempt or
+query and the exact current-authority form above.
 
 Acquisition extends the Store transition catalogue while preserving ADR 0006's
 three outcomes and exact-representation recovery and ADR 0008's one-Control-per-
@@ -183,6 +253,92 @@ source-qualified identity, name, description, digest and manual-only status.
 These pure functions are necessary for pre-session inspection; they grant no
 session authority.
 
+`Loopex.ResourcePackReview` owns the one process-local pre-trust review cursor
+over that immutable normalized snapshot. Both the reference CLI and a headless
+host use this same owner and algebra; neither implements its own page counter or
+confirmation shortcut:
+
+```text
+open_review(normalized_manifest, review_id) ->
+  {:ok, review_ref, resource_review_page_v1, resource_review_cursor_v1}
+  | {:error, :invalid_resource_review | :resource_review_unavailable}
+
+next_review_page(review_ref, resource_review_cursor_v1) ->
+  {:ok, resource_review_page_v1, resource_review_cursor_v1}
+  | {:complete, resource_review_completion_v1}
+  | {:error, :invalid_resource_review | :resource_review_out_of_order |
+             :resource_review_unavailable}
+
+confirm_review(review_ref, resource_review_confirmation_v1) ->
+  {:ok, resource_review_evidence_v1}
+  | {:error, :invalid_resource_review | :resource_review_incomplete |
+             :resource_review_changed | :resource_review_unavailable}
+
+cancel_review(review_ref) -> :ok
+```
+
+`review_ref` is an opaque process-local reference and grants no trust. Review ID
+is an independent 128-bit random value encoded as 32 lowercase hex bytes. The
+cursor has exactly `kind`, `review_id`, `workspace_ref`, `manifest_digest`,
+`next_page_ordinal`, and `prior_page_digest`; generation zero has ordinal zero
+and nil prior digest. Each successful page increments the ordinal and binds the
+canonical digest of the preceding page under kind
+`loopex.resource_review_page/1`. The first presentation of the exact current
+cursor advances once. After advancement the owner retains that request cursor
+and its exact response, so a lost-reply retry of that one cursor returns the
+same page and successor without advancing again. Any earlier, skipped, changed,
+or other-review cursor refuses without advancing.
+
+The page has exactly `kind`, `review_id`, `workspace_ref`, `manifest_digest`,
+`page_ordinal`, `page_kind`, and `payload`. `page_kind` is `identity` or `body`.
+An identity payload has exactly `first_row`, `row_count`, and `rows`, with one to
+32 consecutive canonical identity rows and the 32 KiB display bound below. A
+body payload has exactly `pack_index`, `file_index`, `label`, `file_digest`,
+`encoding`, `byte_offset`, `page_length`, `terminal`, and `body`, with the exact
+8 KiB source/24 KiB display limits and encoding below. An empty file has the one
+terminal zero-byte body page. The completion has exactly `kind`, `review_id`,
+`workspace_ref`, `manifest_digest`, `page_count`, and `terminal_page_digest` and
+is returned only after every identity row and every file byte appeared once in
+canonical order.
+
+The flattened identity sequence is closed: first one `manifest_identity` row,
+then for each pack in manifest order one `pack_identity` row followed by all of
+that pack's `file_identity` rows in file order. `first_row` is the zero-based
+offset in that sequence and `row_count` equals the exact list length. The row
+member sets are:
+
+```text
+manifest_identity
+  row_kind, workspace_ref, manifest_digest, repository_origin, revision,
+  pack_count
+
+pack_identity
+  row_kind, pack_index, source_id, origin, name, description, manual_only,
+  commit, tree_digest, pack_digest, file_count
+
+file_identity
+  row_kind, pack_index, file_index, label, size, digest
+```
+
+Every value is the byte-identical normalized manifest value. The manifest's
+repository origin/revision and a locally authored pack's commit/tree identity
+retain their declared nullable relations; imported provenance requires all
+remote identity members. Indices are canonical nonnegative integers and counts
+match the complete manifest. No extra row kind/member, reordering, omission, or
+duplicate is legal. All identity pages precede body pages; body pages then use
+pack/file/byte order.
+
+Confirmation repeats those six completion members exactly under kind
+`resource_review_confirmation_v1`. Evidence repeats them under kind
+`resource_review_evidence_v1` and is returned once; exact confirmation replay
+returns the same evidence. Changed confirmation bytes refuse. The evidence is
+proof that this host workflow reached its confirmation cut, not a policy grant
+or a decision by itself. Only the trusted host/operator may translate it into
+the separately bounded decision supplied to `admit_resources`. EOF, owner exit,
+cancel, cursor/digest/order failure, or snapshot change destroys the ephemeral
+review and produces no evidence, admission command, or trust. A process restart
+starts a new review ID at page zero.
+
 The public facade exposes `resource_catalog(runtime, session_id)` and
 `read_resource(runtime, session_id, request)`. Session input gains
 `admit_resources` and `activate_skill`, each using the existing command identity
@@ -225,9 +381,9 @@ four exact members. Reopening the same durable runtime requires exact binding
 equality; a missing, changed, or nil/non-nil mismatch refuses
 `resource_binding_changed`. Ordinary use of changed bytes requires both a new
 runtime identity and a new trust decision; a decision alone cannot replace the
-durable binding. For a non-nil manifest, before submitting the first binding
-transaction the host durably syncs the exact normalized snapshot and its
-verified provenance in its resource-retention store under
+durable binding. For every non-nil resource envelope, before submitting the
+first binding transaction the host durably syncs the exact normalized snapshot
+form and its verified provenance in its resource-retention store under
 `{runtime_id, tx_id}`, reopens those bytes, and recomputes the same digest. The
 retained bundle repeats the workspace and manifest identities and the complete
 ordered imported-provenance dependency set; it is a per-runtime copy and is
@@ -245,52 +401,333 @@ bytes refuse launch as `resource_snapshot_unavailable` with zero children. This
 retained snapshot is separate from installation and tool artifacts and never
 substitutes for the fresh current-workspace attestation.
 
+A nil manifest uses the same snapshot reservation, bundle, binding intent, and
+retirement path. Its canonical snapshot preimage under kind
+`loopex.resource_snapshot_retention/1` is exactly `%{"manifest" => nil,
+"provenance_dependencies" => []}`; `manifest_digest` is nil, content and
+metadata charges are zero, and dependencies are empty. It still consumes one of
+the 16 runtime-snapshot slots. This gives the workspace-bound empty-skills form
+the same crash recovery and prevents an untracked intent-only exception.
+
 The per-runtime retained bundle is the closed record
 `resource_snapshot_retention_v1` with exactly `kind`, `runtime_id`,
 `binding_tx_id`, `workspace_ref`, `manifest_digest`, `snapshot_digest`,
-`content_bytes`, `metadata_bytes`, and `provenance_dependencies`.
+`content_bytes`, `metadata_bytes`, and `provenance_dependencies`. Its separate
+capacity reservation below precedes materialization and binds these exact
+identity, digest, count, and dependency values. The reservation may advance to
+`materialized` only after the bundle and its separately stored snapshot bytes
+have been synced, reopened, and matched to every declared count and digest. That
+state authorizes creation of only the prospective binding intent already bound
+by the reservation; the Store call still requires `attached`.
 `snapshot_digest` uses kind `loopex.resource_snapshot_retention/1` over the
 normalized manifest plus every dependency row. Counts equal the retained bytes.
 Each imported pack contributes one row, sorted by manifest pack order, with
 exactly `source_id`, `pack_digest`, `import_generation_digest`,
 `source_runtime_id`, `operation_id`, `attempt`, `store_terminal_tx_id`,
-`store_terminal_record_digest`, `hand_receipt_digest`, and
-`publication_identity`; locally authored packs contribute no row. Every value
-must match the manifest and the committed provenance generation defined below.
+`store_terminal_record_digest`, `hand_receipt_digest`,
+`evidence_package_digest`, and
+`publication_identity`; locally authored packs contribute no row. Manifest,
+provenance, receipt, Store, and publication members must match their respective
+owners below. `evidence_package_digest` matches the attached evidence
+reservation and reopened `resource_acquisition_evidence_v1` for the same
+runtime/operation/attempt; that package's exact receipt and provenance generation
+plus its Store terminal ID/digest pair in turn match the other row members and
+the authoritative Store record. It is deliberately not
+a field of the earlier committed provenance generation, which precedes Store
+terminal and evidence-package creation.
 The Store terminal record digest uses kind
 `loopex.resource_acquisition_terminal/1`. Missing, duplicate, reordered, or
 mismatched dependencies make the snapshot unavailable before a Store binding
 call.
 
-All aggregate host ceilings use one protected-root
-`resource_capacity_v1` CAS ledger rather than independent preflight counts. Its
-closed record has `kind`, `generation`, `prior_digest`, `cli_slots`,
-`snapshot_slots`, and `attempt_slots`, fits 512 KiB, and sorts each slot list by
-its canonical identity. A CLI slot binds operation/runtime and reserves 512 KiB;
-a snapshot slot binds `{runtime_id, binding_tx_id}`, exact content/metadata
-charges and its snapshot digest; an attempt slot binds the exact attempt key and
-reserves 80 MiB, covering the 64 MiB task scratch and 16 MiB local log. The
-closed ceilings are 1,024 retained CLI journals/512 MiB of their bytes, 16
-snapshot slots/1 GiB content/128 MiB metadata, and six unresolved or quarantined
-attempt slots/480 MiB. A mutation carries a deterministic transaction ID,
-expected generation and complete prior digest; under the capacity lock it writes
-one complete successor through sync, atomic replace, parent sync, reopen, and
-digest validation. Unknown completion is resolved by exact transaction replay;
-no independent identity can over-admit a stale count.
+Aggregate host ceilings are enforced by one kernel-released capacity lock over
+the protected-root reservation directory. There is no independently mutable
+global counter. Each complete canonical reservation file is one inventory row;
+the reference host uses the literal global directories
+`<state_root>/resource-capacity/reservations/` and
+`<state_root>/resource-capacity/evidence/` plus the lock label
+`<state_root>/resource-capacity/resource-capacity.lock`. Every workspace-key
+hand root configured under that state root shares this one lock and inventory;
+per-workspace counting is invalid. These paths never enter core or a durable
+product record. Under the lock the helper validates every ordinary no-follow
+file and sums the
+class counts and charges before creating, changing, or removing one. An unknown
+label, malformed chain, invalid count, over-bound existing artifact, second
+temporary file, or unavailable inventory makes capacity unavailable and is
+never treated as free space.
 
-The host reserves a CLI slot before creating `prepared`, a snapshot slot in the
-same runtime-lock interval before creating its binding intent, and an attempt
-slot before local admission. Failure reserves nothing and returns the stated
-capacity refusal before the corresponding Store/effect boundary. A CLI slot
-becomes its compact retained tombstone charge after retirement. A snapshot slot
-is released only after the runtime root and every staged/admitted use are
-retired. An attempt slot remains charged through every open, unknown, or
-quarantined state; after a known Store terminal and permitted exact-owned
-cleanup, the hand may retain the bounded receipt/provenance evidence and release
-the log/scratch reservation. Dependency rows in any retained snapshot pin their
-named provenance generation, hand receipt, and Store terminal against eviction,
-replacement cleanup, or compaction. Capacity-ledger corruption or uncertainty
-is unavailable and never treated as free space.
+The same locked inventory walks the fixed protected-state CLI-journal,
+per-workspace snapshot/intent, attempt-log, provenance, and global evidence-
+package directories.
+Every complete artifact belongs to exactly one reservation in a state that
+permits it, and every artifact required by an attached, retired, materialized,
+or releasing reservation exists with the bound identity and digest. Only the one
+identity/transaction/state-qualified partial form named by the recovery rules
+may be completed or removed. Workspace scratch/staging is deliberately outside
+that global walk because its path is not retained and only a supplied current
+workspace-root handle may resolve it. Every acquisition reservation carrying attempt capacity still charges
+the full 64 MiB; the matching object token and closed scratch shape are validated
+when that root is supplied, and unavailable workspace evidence leaves the charge
+intact. An unmatched protected-state artifact, duplicate owner, attached-
+artifact mismatch, or unrecognized temporary byte makes capacity unavailable;
+it is never omitted from accounting or adopted by a new operation.
+
+Every reservation has the exact member set below. Its derived
+`reservation_digest` uses kind `loopex.resource_capacity_reservation/1` over the
+complete canonical record bytes; it is not another record member.
+`transaction_id` uses kind `loopex.resource_capacity_transaction/1` over the
+complete candidate record with `transaction_id` omitted. The canonical filename
+uses kind `loopex.resource_capacity_reservation_key/1` over exactly `%{"kind" =>
+kind, "key" => key}`, where key is the CLI local operation ID, the snapshot
+runtime/binding-transaction pair, or the attempt runtime/operation/attempt tuple
+as applicable. A create or update uses one temporary name derived
+from the reservation key and transaction ID. Under the capacity lock the helper
+first resolves that exact temporary name, writes and syncs complete candidate
+bytes, reopens and validates them, performs a no-replace create or expected-
+generation/prior-digest atomic replacement, syncs the parent, and reopens the
+winner. Create or replacement uncertainty is resolved from the canonical file,
+generation and digest. An exact replay matches; different bytes conflict. A
+sole exact complete temporary file may finish its interrupted transaction. An
+incomplete generation-zero create temporary file may be removed only when the
+canonical file is absent and the class-specific boundary was forbidden before
+installation. An incomplete successor-update temporary file may be removed and
+recreated when the canonical file still byte-matches that transaction's exact
+expected generation and digest and no successor is installed. Any other
+predecessor, successor, or temporary relation is unavailable.
+
+```text
+skill_cli_reservation_v1
+  kind, generation, prior_digest, transaction_id, state,
+  local_operation_id, runtime_id, journal_frame, journal_frame_digest,
+  journal_bytes_charge
+
+resource_snapshot_reservation_v1
+  kind, generation, prior_digest, transaction_id, state,
+  runtime_id, binding_tx_id, workspace_ref, manifest_digest, snapshot_digest,
+  binding_intent_digest, content_bytes_charge, metadata_bytes_charge,
+  provenance_dependencies, release_proof_digest
+
+resource_acquisition_reservation_v1
+  kind, generation, prior_digest, transaction_id, state,
+  runtime_id, command_id, operation_id, attempt, preparation_id,
+  preparation_digest, preparation_record_digest,
+  canonical_request_digest, canonical_grant_digest,
+  store_attempt_tx_id, store_attempt_transaction_digest,
+  store_attempt_transaction, scratch_bytes_charge, log_bytes_charge,
+  evidence_bytes_charge, local_proof_digest, settlement_observation,
+  preparation_release_proof_digest, attempt_release_proof_digest,
+  evidence_package_digest,
+  evidence_release_proof_digest
+```
+
+Generation zero has nil `prior_digest`; every successor increments by one and
+binds the complete prior reservation digest. Key, identity, and charge members
+repeat byte-for-byte. A snapshot's `release_proof_digest` is nil until
+`releasing`; the releasing successor binds the exact retirement/idle/use proof.
+An acquisition reservation's preparation and transaction members repeat
+byte-for-byte for its lifetime. Its three charges are fixed at 64 MiB, 16 MiB,
+and 2 MiB. The state determines which charges count after effect evidence is
+attached; changing their literal values is never a release. The three proof
+members and evidence-package digest follow the state table below. No member,
+state, transition, or nullability relation beyond those listed here is legal.
+The attempt release proof uses kind `loopex.resource_attempt_release/1` over
+exactly `%{"local_proof_digest" => digest, "settlement_observation" =>
+complete_settlement_observer_result}`. The snapshot release proof uses kind
+`loopex.resource_snapshot_release/1` over exactly `retirement_kind`,
+`retirement_digest`, the complete Store-idle observation, and the canonical
+empty staged/admitted-use inventory. `retirement_kind` is `cli_retired`, whose
+digest names the exact retired CLI frame, or `embedding_retired`, whose digest
+names the exact host retirement record below. The retained-evidence release
+proof uses kind `loopex.resource_evidence_release/1` over exactly its current-provenance absence,
+the complete validated snapshot-reservation inventory digest, and the canonical
+empty staged/admitted-use inventory. A missing or unrepeatable proof prevents
+the releasing transition.
+
+Three physical reservation classes enforce four logical ceilings:
+
+- `skill_cli_reservation_v1`, keyed by `local_operation_id`, embeds the complete
+  generation-zero `prepared` journal frame and binds its digest plus runtime ID.
+  The embedded frame is at most 64 KiB, its digest is the exact
+  `loopex.skill_cli_operation/1` digest, and both repeat byte-for-byte in every
+  reservation generation.
+  States are `reserved`, `attached`, and `retired`. `reserved` precedes journal
+  materialization; the byte-identical journal must reopen before `attached`; no
+  Store call is legal before `attached`. Retirement syncs the journal's retired
+  frame first and the reservation's retired successor second. Both remain as
+  permanent runtime-ID reuse fences. Up to 1,024 files charge 512 KiB each and
+  512 MiB total in every state; physical retirement compaction does not release
+  the logical charge or lifetime slot.
+  Recovery of `reserved` plus an absent journal can materialize only the embedded
+  generation-zero frame; `reserved` plus that exact journal advances to
+  `attached`. `Attached` plus an absent or mismatched journal is unavailable.
+  An attached reservation plus an exact retired journal advances only to
+  `retired`, and a retired reservation requires that exact retired journal.
+  None of these repairs makes a Store call.
+- `resource_snapshot_reservation_v1`, keyed by `{runtime_id, binding_tx_id}`,
+  binds workspace, manifest, snapshot and prospective binding-intent digests, exact content
+  and metadata charges, and the full ordered provenance dependencies. States are
+  `reserved`, `materialized`, `attached`, and `releasing`. `reserved` precedes
+  the snapshot. The complete snapshot bundle and bytes must reopen and match
+  before `materialized`; only that state may create the exact prospective intent.
+  Both snapshot and intent must reopen before `attached`; no Store binding call
+  is legal before `attached`. A reserved or materialized crash may finish exact artifacts or remove
+  only its proven partial artifacts and reservation because the boundary was not
+  crossed. `attached` survives binding `commit_unknown`. `releasing` retains its
+  full charge and dependency pins until snapshot and intent absence are reopened,
+  then the reservation is removed and the parent synced. Up to 16 reservations
+  charge at most 1 GiB of snapshot content and 128 MiB of metadata.
+- `resource_acquisition_reservation_v1`, keyed by
+  `{runtime_id, operation_id, attempt}`, atomically owns the attempt's 64 MiB
+  scratch charge, 16 MiB log charge and 2 MiB prospective retained-evidence
+  entitlement. Generation zero is created by `prepare/2` before the embedded
+  Store attempt transaction may be submitted. It binds the complete exact
+  preparation record and Store transaction, so a crash cannot leave a committed
+  attempt with no bounded tombstone or evidence capacity and cannot strand one
+  half of a split reservation. Up to six reservations that still carry attempt
+  charges consume at most 480 MiB; up to 1,024 reservations that carry evidence
+  entitlement or retained evidence consume at most 2 GiB. Both independent
+  ceilings must admit generation zero. Capacity refusal therefore happens before
+  Store attempt commit and cannot require an off-budget reconciliation record.
+
+The acquisition reservation has exactly these states and nullability:
+
+| State | Legal successor and retained relation | Counted charge |
+| --- | --- | --- |
+| `prepared` | generation zero only; all proof, settlement and package members nil; embeds the one Store attempt transaction. Exact local admission may exist only at the interrupted attach cut. It may advance to `attached`, `preparation_releasing`, `attempt_releasing`, or remain for exact transaction resolution | scratch + log + evidence |
+| `preparation_releasing` | only after the observer proves that embedded attempt transaction finally did not commit; only `settlement_observation` and `preparation_release_proof_digest` are non-null | scratch + log + evidence until reservation absence is reopened |
+| `attached` | requires the exact admission and generation-zero active authority; all proof, settlement and package members nil. Open, commit-unknown, quarantined and outcome-unknown attempts remain here | scratch + log + evidence |
+| `attempt_releasing` | only after exact local terminal or `revoked/not_dispatched` proof and matching committed Store settlement; local proof, settlement and attempt-release proof are non-null; evidence members remain nil | scratch + log + evidence until scratch, log and reservation absence are reopened |
+| `evidence_materializing` | same local and Store proof as `attempt_releasing`, plus the prospective non-null evidence-package digest; package may be absent, partial only in the one recoverable temporary form, or exact | scratch + log + evidence |
+| `evidence_releasing` | exact evidence package is synced and reopened; all attempt proof and package members are non-null; evidence-release proof is nil | scratch + log + evidence until scratch and log absence are reopened |
+| `evidence_attached` | exact evidence package remains; attempt proof and package members are non-null; evidence-release proof is nil; scratch and log are proved absent | evidence only |
+| `evidence_retiring` | `evidence_attached` plus the non-null dependency-absence evidence-release proof | evidence until package and reservation absence are reopened |
+
+`preparation_release_proof_digest` uses kind
+`loopex.resource_preparation_release/1` over the complete
+`attempt_not_committed` settlement observation and the preparation-record
+digest. Every other state requires it to be nil. `attempt_release_proof_digest`
+uses the attempt release proof defined above and is non-null exactly from
+`attempt_releasing` or `evidence_materializing` onward. `evidence_package_digest`
+is non-null exactly in the four evidence states. `evidence_release_proof_digest`
+is non-null only in `evidence_retiring`. `local_proof_digest` and
+`settlement_observation` are both nil or both non-null, except that
+`preparation_releasing` carries only the settlement observation. A state change
+cannot alter any preparation, transaction, identity, request, grant or charge
+member.
+The complete acquisition reservation is at most 256 KiB. A candidate that
+cannot contain the already bounded preparation and transaction within that
+limit is an authoritative preparation refusal before Store submission; no
+truncation or external locator substitutes for the embedded bytes.
+
+`prepare/2` validates the complete preparation, current initialized
+workspace/executor binding and advertised capability envelope without invoking
+the current-attempt observer, because the Store attempt does not exist yet. Under
+the capacity lock it inventories every class and either creates and reopens the
+one exact `prepared` reservation or returns exact replay. A different retained
+preparation at the key or ID is unavailable. A lost reply is resolved only by
+`prepared/3`. `release_preparation/2` invokes the settlement observer, requires
+the exact `attempt_not_committed` form for the embedded transaction, advances to
+`preparation_releasing`, removes no attempt log or workspace path because none
+may have been authorized, removes and reopens reservation absence, and syncs the
+parent. An absent transaction is re-presented rather than released; Store
+unavailability or `commit_unknown` retains the full charge.
+
+After the Store attempt commits, `acquire/3` takes the capacity then attempt lock,
+reopens the exact `prepared` reservation, invokes the current-authority observer
+and races any solicited reconciliation at that lock. If admission wins, it
+atomically appends and reopens admission plus generation-zero active authority,
+then advances the reservation to `attached`; guard release requires both. A
+crash with exact admission under `prepared` may only finish that transition. If
+the current responder wins while admission and authority are absent, it appends
+the exact `revoked/not_dispatched` tombstone and response; a later committed
+Store result authorizes the direct `prepared` to `attempt_releasing` transition.
+Any other partial or mismatched relation is unavailable. Thus delayed dispatch
+and reconciliation have one winner and neither can create unreserved state.
+
+Each reservation contributes the state-specific charge in the table until its
+canonical file or authorized successor is durably established; every releasing
+state still counts, and dependency pins remain through evidence retirement. A
+CLI reservation is never deleted. A snapshot may enter `releasing` only after one exact synced retirement
+source, a Store idle proof, and proof that no staged or admitted use names the
+binding. The reference CLI source is its retired journal frame. For direct
+embedding, trusted composition supplies a private `retention_ref`; after the
+embedder stops the runtime, its host-only `retire_runtime(retention_ref,
+runtime_id, retirement_id)` operation holds the same runtime lock, rechecks
+Store idle and the empty-use inventory, then writes and
+reopens `resource_runtime_retirement_v1` with exactly `kind`, `runtime_id`,
+`retirement_id`, `binding_tx_id`, `store_idle_observation_digest`, and
+`use_inventory_digest`. The record is at most 16 KiB and its canonical digest
+uses kind `loopex.resource_runtime_retirement/1`. It authorizes only the matching
+snapshot releasing transition and can be removed after that reservation is
+durably absent. The historical Store binding remains and its runtime ID remains
+non-reusable. Exact operation replay returns the retained result; reuse of the
+retirement ID with different bytes conflicts; unavailable Store or inventory
+truth returns unavailable without a record or cleanup. This is a host-private
+retention operation, not a core/session facade or wire command. Every provenance retirement or compaction
+takes the capacity lock and refuses to remove a generation named by any snapshot
+reservation or acquisition evidence package.
+
+Attempt capacity remains charged through open, commit-unknown, outcome-unknown
+and quarantined states. Before each new preparation or admission and during executor-local startup recovery,
+the hand checks release candidates under the capacity then attempt lock. Release
+requires its host-owned settlement observer to prove either the exact matching Store terminal or
+the exact committed reconciliation result that returned the attempt to
+`pending_policy` as `not_dispatched`. Store unavailability, result-commit
+ambiguity, or a digest/ordinal mismatch retains the reservation. Before deleting
+anything, the hand appends or reopens the immutable local terminal or
+`revoked/not_dispatched` proof and computes one release-proof digest over that
+local proof plus the exact settlement-observer result. It then follows exactly
+one branch.
+
+For proven `not_dispatched`, or a known non-unknown terminal needing no retained
+local evidence, recovery advances `prepared` or `attached` to
+`attempt_releasing`, removes only exact-owned scratch and the local log, reopens
+their absence, then removes the reservation and syncs the parent before another
+attempt may be prepared. `terminal_quarantined` and every `outcome_unknown`
+remain fully charged in `attached` and cannot enter this branch. For a proven
+terminal whose receipt or provenance remains required, recovery advances
+`attached` to `evidence_materializing` with the prospective immutable-package
+digest, writes, syncs and reopens that package, advances to
+`evidence_releasing`, removes exact-owned scratch and the attempt log, reopens
+their absence, then advances to `evidence_attached`. Only this last transition
+releases the 80 MiB attempt charge; the 2 MiB evidence entitlement remains.
+Every releasing or materializing state retains the full charge and is the sole
+cleanup authority after a crash. Exact conversion replay uses the same
+generations and digests. Retained evidence may advance to `evidence_retiring`
+only after no current provenance generation, snapshot dependency, staged
+request, or admitted use names it. Recovery then removes and reopens package
+absence, removes the reservation, and syncs the parent. No cross-form proof is
+accepted. These rules preserve bounded progress without treating an unknown
+Store result or elapsed cleanup time as free capacity.
+
+The immutable evidence package is the closed record
+`resource_acquisition_evidence_v1` with exactly `kind`, `runtime_id`,
+`command_id`, `operation_id`, `attempt`, `canonical_request_digest`,
+`canonical_grant_digest`, `receipt`, `receipt_digest`, `completion_intent`,
+`completion_intent_digest`, `provenance_generation`,
+`import_generation_digest`, `store_terminal_tx_id`,
+`store_terminal_record_digest`, `git_metadata_digests`, and `evidence_digest`.
+Its filename is the canonical digest under kind
+`loopex.resource_acquisition_evidence_key/1` of the runtime/operation/attempt
+tuple. `evidence_digest` uses kind `loopex.resource_acquisition_evidence/1` over
+every other member. The receipt, intent and provenance members are the exact
+retained bytes and digests defined by their owners. The Store remains the
+authoritative owner of terminal bytes: the package retains only its exact
+transaction ID and canonical record digest, and recovery must re-read and match
+that Store record before using them. Neither pair is evidence of terminal truth
+when the Store read is unavailable. No projection of the three copied records is
+accepted.
+
+`git_metadata_digests` is the exact ordered list of one map per authenticated
+metadata reply with exactly `command_ordinal`, `command_kind`, and
+`reply_digest`. Ordinals start at zero and are consecutive; command kind is
+`commit_type`, `selected_tree`, `tree_walk`, `object_type`, or `object_size`;
+reply digest is the per-reply `loopex.git_metadata/1` digest below. The list has
+at most 131 rows: three fixed replies plus type and size for each of at most 64
+accepted files. The 512 KiB completion-intent frame, 512 KiB provenance slot,
+48 KiB receipt, digest list, Store ID/digest pair and canonical framing fit the
+package's 2 MiB bound. A candidate that does not fit keeps the attempt charge
+and makes retention unavailable rather than dropping evidence.
 
 `current_attestation` is validated launch evidence and is never part of the
 immutable snapshot-binding digest. It is a closed map with exactly `kind`,
@@ -483,7 +920,8 @@ Reference CLI:
 credential-free public HTTPS Git only, `loopex skill list`,
 `loopex skill show <source-qualified-name>`, and `loopex run --skill <name>` for
 explicit selection, with repeatable `--skill-resource <skill>:<label>` arguments
-for supporting labels. Before trust, one bounded review cursor displays the
+for supporting labels. Before trust, the CLI drives the exact
+`Loopex.ResourcePackReview` algebra above; one bounded review cursor displays the
 manifest digest, workspace repository origin/revision, every pack's source,
 commit/tree identity and every file label, size and digest, followed by every
 file body from the retained snapshot. Identity pages contain at most 32 file rows
@@ -516,8 +954,12 @@ committed and a grant is minted. A script used later as an ordinary tool remains
 subject to the existing tool policy and grant.
 
 Every `skill add` invocation allocates a fresh administrative `runtime_id`,
-`command_id`, and local operation handle, then synchronously retains this exact
-immutable host record before calling `acquire_resource`:
+`command_id`, and local operation handle. Under the runtime, operation, and
+capacity locks it first creates the `reserved` CLI reservation containing the
+exact generation-zero frame, then materializes and reopens that byte-identical
+journal and advances the reservation to `attached`. Only after that sequence may
+it submit a binding or acquisition Store call. The journal's immutable host
+record is:
 
 ```text
 skill_cli_operation_v1
@@ -533,13 +975,13 @@ canonical acquisition command, its digest is the command digest defined below,
 and the workspace/manifest/binding members equal the exact non-nil launch
 envelope, durable binding intent and derived Store binding transaction for that
 administrative runtime. Each frame is at most 64 KiB, so every legal 16 KiB
-command plus its fixed identities fits. The reference CLI generates each of its three
-IDs as independent 128-bit cryptographic random values encoded as 32 lowercase
-hex bytes and rejects a locator or Store collision before submission. The
-reference host retains at most 1,024 such
-operation journals under the same protected state root as its Store and
-acquisition hand. A journal contains at most eight append-only frames and 512 KiB;
-the root contains at most 1,024 journals and 512 MiB. A new add refuses
+command plus its fixed identities fits. The reference CLI generates each of its
+three IDs as independent 128-bit cryptographic random values encoded as 32
+lowercase hex bytes and rejects a journal, reservation, runtime, command,
+operation, or Store collision before submission. The reference host retains at
+most 1,024 such operation journals and matching reservations under the same
+protected state root as its Store and acquisition hand. A journal contains at
+most eight append-only frames and 512 KiB; the capacity charges above apply. A new add refuses
 `operation_journal_full` before any Store call when any bound is reached.
 
 The portable journal filename is the canonical digest under kind
@@ -599,13 +1041,27 @@ whose state is exactly `terminal`; `terminal_quarantined` keeps the journal
 idle. No other state, edge, disposition or
 nullability is valid.
 `intent_ready` follows only after the snapshot and binding intent are durably
-reopened; `binding_resolving` is synced before its first binding mutation and
+reopened and their snapshot reservation is `attached`. A `materialized`
+reservation may finish that exact intent and attach; only while the CLI journal
+remains `prepared` and no Store call was possible may recovery instead remove
+its exact artifacts through the reserved cleanup path. `binding_resolving` is
+synced before its first binding mutation and
 `command_resolving` is synced after its non-authorizing binding/command reads but
 before its first command mutation. `retired` authorizes only bounded host cleanup. Lock, create,
 append, sync, reopen, decode, bound, capacity, or durability uncertainty is
 `operation_journal_unavailable`; a possibly submitted state must be resolved,
 never treated as absent. Crash-cut evidence covers every transition and Store
 call.
+
+Before accepting another `skill add`, every reference CLI startup and
+`loopex skill operation list` takes the capacity lock and inventories all CLI
+reservations. A `reserved` reservation with an absent journal must materialize
+and reopen only its embedded generation-zero frame; a byte-identical journal
+advances it to `attached`. The command then lists every attached or retired
+handle, including those reconstructed after a process died before displaying
+the handle. A missing or conflicting reservation/journal relation makes the
+inventory unavailable and refuses a new add; no lifetime slot can remain hidden
+from the operator enumeration.
 
 `loopex skill operation list` pages at most 32 handles per response,
 `loopex skill operation resume <local-operation-id>` reopens the exact recorded
@@ -624,7 +1080,8 @@ Resume re-presents only the exact recorded command until its disposition is
 authoritative. An accepted result advances to `operation_open`; under a changed
 attestation Runtime Control then commits the exact
 `unavailable/resource_binding_changed` terminal through its recovery-only path
-with zero policy, grant, attempt, or hand call. A busy result remains resolving
+after `prepared/3` proves absence, with zero policy, grant, attempt, `prepare/2`,
+`acquire/3`, or `reconcile/2` call. A busy result remains resolving
 until the runtime slot is idle. Restoring old source bytes cannot reverse a
 terminal journal disposition.
 
@@ -634,8 +1091,11 @@ locks. For `command_terminal` or `command_busy`, the Store must also prove the
 runtime slot idle; the runtime lock keeps that observation true through cleanup.
 It appends `retired` before removing only this runtime's `{runtime_id, tx_id}`
 snapshot bundle and binding-intent bytes through identity-checked no-follow
-operations; the compact journal remains the host reuse fence while the Store root
-exists. A crash after `retired` retries only cleanup, and exact replay is
+operations. It then advances the matching CLI reservation to `retired` and the
+snapshot reservation to `releasing`; after reopened absence of the snapshot and
+intent it removes only the snapshot reservation. The compact journal and CLI
+reservation remain the host reuse fences while the Store root exists. A crash
+after `retired` retries only these state-bound cleanup steps, and exact replay is
 idempotent. `prepared`, resolving, open, unknown, unavailable, corrupt,
 conflicting or unproved journals cannot be forgotten. Because every initial,
 resume and forget path shares the lock and a Store call must have its preceding
@@ -646,8 +1106,8 @@ redispatching Git: exact command replay returns the Store's retained operation
 identity, and status or reconciliation continues from there. A crash after the
 binding submission but before the command either resumes the exact binding or
 settles the no-effect retirement path above; it cannot strand an unbounded
-snapshot or manufacture command history. This host journal
-is a recovery locator, never command, policy, terminal, or provenance truth.
+snapshot or manufacture command history. This host journal is recovery state,
+never command, policy, Store terminal, or provenance truth.
 
 The administrative runtime resumes in `resource_recovery_only` only when its
 fresh attestation is changed or unavailable; exact replay/status/reconciliation
@@ -859,14 +1319,101 @@ with `resource_manifest_missing`, `resource_not_admitted`,
 applicable; a catalog response over its ceiling returns `resource_catalog_limit`.
 Reading never selects. Pre-admission CLI inspection uses host data.
 
-Frontmatter supports the spec's string metadata, literal/folded multiline
-strings and a bounded string metadata map. Refuse aliases, tags, nested object
-programming or executable interpolation. Preserve optional license and
-compatibility metadata for inspection. Parse `disable-model-invocation: true`
-as manual-only; executable hooks, dynamic shell markers, context-fork and
-vendor-specific tool grants are unsupported diagnostics and inert content.
-`allowed-tools` never changes host authority. No runtime YAML dependency is
-introduced. Compatibility is the tested subset, not every vendor extension.
+#### Closed `SKILL.md` frontmatter profile
+
+Loopex supports one closed, dependency-free YAML subset. It does not claim
+general YAML compatibility. A valid ecosystem skill outside this syntax is
+reported as outside the Loopex subset and is not admitted.
+
+`SKILL.md` is at most 65,536 bytes, is valid UTF-8 without BOM or NUL, uses LF
+line endings, and begins at byte zero with `---\n`. The first later line exactly
+equal to `---\n` closes frontmatter; the remainder is Markdown and is not parsed
+as YAML. CR, a tab in frontmatter syntax, trailing whitespace, a YAML directive,
+or an unclosed delimiter refuses. Input order has no authority.
+
+The grammar is one top-level mapping. A top-level key begins in column zero,
+matches `[A-Za-z][A-Za-z0-9_-]{0,63}`, and is followed by `:`, then either one
+or more ASCII spaces and a scalar, one allowed block-scalar header, or the
+special nested `metadata` mapping. Blank lines and comment-only lines whose
+first non-space byte is `#` are allowed between entries. Inline comments are
+unsupported. A `#` inside quoted or block-scalar content is data.
+
+A single-line string is exactly one of these forms:
+
+- a nonempty plain scalar with no leading or trailing space, control byte, `:`,
+  or `#`; its first byte is not a YAML indicator (`-`, `?`, `:`, `,`, `[`, `]`,
+  `{`, `}`, `#`, `&`, `*`, `!`, `|`, `>`, single quote, double quote, `%`, `@`,
+  or ASCII `0x60`). Plain values have no implicit null, number, timestamp, or
+  boolean typing except where a field below explicitly requires a boolean;
+- a single-quoted scalar on one physical line, where `''` decodes to one
+  apostrophe and backslash has no special meaning; or
+- a double-quoted scalar on one physical line, with only `\"`, `\\`, `\/`,
+  `\b`, `\f`, `\n`, `\r`, `\t`, `\xHH`, `\uHHHH`, and `\UHHHHHHHH` escapes.
+  A hex escape must decode to one Unicode scalar other than NUL; surrogates,
+  values above U+10FFFF, and every other escape refuse.
+
+There is no interpolation. Dollar signs, command markers and similar accepted
+bytes remain inert data. Literal and folded block strings are allowed only for
+top-level string fields. Their headers are exactly `|`, `|-`, `|+`, `>`, `>-`,
+or `>+`; explicit indentation indicators are unsupported. Every nonempty
+content line begins with exactly two spaces, which are removed. Tabs and further
+leading indentation refuse. Literal form preserves remaining bytes and line
+breaks. Folded form joins consecutive nonempty lines with one ASCII space and
+each run of empty lines contributes that many LF bytes. Strip chomping removes
+all terminal LFs, clip chomping retains exactly one, and keep chomping retains
+every physical terminal LF. A `#` in a block is content.
+
+The recognized fields are closed:
+
+| Field | Exact contract |
+| --- | --- |
+| `name` | Required single-line string matching `[a-z0-9]+(?:-[a-z0-9]+)*`, 1–64 ASCII bytes, and byte-equal to the containing directory basename. |
+| `description` | Required nonempty string of at most 1,024 Unicode scalars and 1,024 UTF-8 bytes. |
+| `license` | Optional nonempty string of at most 1,024 UTF-8 bytes. |
+| `compatibility` | Optional nonempty string of at most 500 Unicode scalars and 500 UTF-8 bytes. The byte ceiling is an intentional stricter Loopex subset of the ecosystem character ceiling. |
+| `metadata` | Optional nonempty mapping of at most 32 contiguous child entries. Each begins with exactly two spaces, uses a case-sensitive unique key matching `[A-Za-z0-9][A-Za-z0-9._/-]{0,127}`, and has a single-line string value of at most 1,024 UTF-8 bytes. Decoded key and value bytes total at most 8,192. An empty or flow mapping refuses. |
+| `allowed-tools` | Optional nonempty string of at most 4,096 UTF-8 bytes, retained for inspection and always inert. It never adds a tool, policy allowance, capability or grant. |
+| `disable-model-invocation` | Optional plain scalar exactly `true` or `false`; quoted values and YAML boolean aliases refuse. `true` maps to `manual_only: true`; missing or `false` maps to false. This is a supported vendor extension, not an Agent Skills standard field. |
+
+There are at most 32 top-level entries. An unknown top-level key is accepted
+only with a string scalar or block string of at most 4,096 decoded UTF-8 bytes.
+It produces an `unsupported_frontmatter_field` diagnostic and has no runtime
+meaning; its original bytes remain covered by the file digest. Unknown mappings
+or sequences refuse, so hook-like or command-like content can be inspected only
+as inert scalar text and cannot acquire executable structure.
+
+Every top-level and metadata key is unique. A missing required field, empty
+required value, duplicate, wrong recognized-field type, invalid or mismatched
+name, or exceeded count/byte bound refuses. Flow collections, sequences, nested
+mappings other than `metadata`, anchors, aliases, tags, merge keys, directives,
+explicit type annotations, and multiple documents refuse. Unicode is not
+normalized: decoded scalar sequences are retained exactly and the original file
+bytes remain digest-bound.
+
+Parser failures use the closed classes `encoding`, `frame`, `syntax`,
+`duplicate_key`, `unsupported_structure`, `type`, `required`, `name`, and
+`limit`. Acquisition maps each to the existing durable `pack_invalid` terminal.
+Safe operator diagnostics may include the class and one-based line number but
+never untrusted content. Discovery and Git acquisition use the same bounded byte
+scanner in the resource-pack boundary. It invokes no external parser or process
+and adds no YAML dependency.
+
+Conformance evidence retains the exact input bytes and either the exact decoded
+result or failure class. Positive vectors cover the official minimal example,
+the official optional-fields example including quoted `"1.0"` metadata, every
+quoting form, all six block headers with exact decoded bytes, UTF-8 and escape
+decoding, full-line comments, both `disable-model-invocation` values, inert
+`allowed-tools`, and one unknown scalar extension. Negative vectors cover BOM,
+invalid UTF-8, NUL, CRLF, missing or displaced delimiters, tabs, trailing
+whitespace, inline comments, illegal escapes, every excluded YAML construct,
+duplicate top-level and metadata keys, missing required fields, every wrong
+recognized-field type, invalid or directory-mismatched names, and an unknown
+structured extension. Boundary vectors accept every exact ceiling and refuse
+its smallest exceeding value, including decoded byte/scalar limits, entry
+counts, metadata aggregate bytes and the complete file bound. The hostile-pack
+witness additionally proves that accepted `allowed-tools`, hook-like scalar
+text and command markers leave tool-registry bytes, policy results, grants and
+executor intent unchanged.
 
 ### Acquisition and retention
 
@@ -946,8 +1493,10 @@ raw callback output:
 The acquisition denial categories are exactly `policy_denied`,
 `effect_class_not_permitted`, `workspace_not_permitted`,
 `interaction_unsupported`, and `policy_unavailable`. Every denied or unavailable
-command terminates durably without grant, attempt, hand, or executor call. The
-reference composition has no acquisition-policy default.
+command terminates durably without grant, attempt, `acquire/3`, `reconcile/2`,
+process, network, or filesystem effect. The prior read-only `capabilities/1`
+observation may have occurred. The reference composition has no acquisition-
+policy default.
 
 After allow and executor placement, Runtime Control constructs exactly one
 `resource_acquisition_request_v1`. Its ordered semantic fields are:
@@ -959,6 +1508,7 @@ runtime_id
 command_id
 operation_id
 attempt
+preparation_id
 acquisition_kind
 executor_identity
 executor_epoch
@@ -990,8 +1540,12 @@ cleanup_grace_ms
 `retention_policy_ref` is `loopex.resource_pack_retention.v1`, and
 `cleanup_grace_ms` is 2,000. `required_capabilities` is the ordered set
 `git_https_public`, `bounded_transport`, `durable_receipt`,
-`atomic_no_replace`, `nofollow_tree`, `durable_sync`, and
+`atomic_no_replace`, `nofollow_tree`, `durable_sync`,
 `process_tree_cleanup`, `process_resource_limits`, and `bounded_scratch`.
+`preparation_id` is a fresh 128-bit cryptographic random value encoded as 32
+lowercase hexadecimal bytes. It is generated only after the post-allow
+capability revalidation and is never reused by another attempt. A collision
+with any retained preparation or reservation refuses before Store submission.
 After a valid policy allow and before constructing the
 request or grant, Runtime Control captures one nonnegative Unix-millisecond wall
 clock instant. `operation_deadline` is the checked sum of that instant and the
@@ -1070,12 +1624,12 @@ or output path is nonconforming. If its Git/platform combination cannot establis
 these controls, acquisition is unavailable before process start.
 
 `resource_acquisition_grant_v1` is a closed string-key map with exactly `kind`, `issued_by`,
-`operation_id`, `attempt`, `canonical_request_digest`, `acquisition_kind`,
+`operation_id`, `attempt`, `preparation_id`, `canonical_request_digest`, `acquisition_kind`,
 `protocol_version`, `effect_class`, `workspace_lease`, `executor_audience`,
 `expiry`, `fencing_token`, and `policy_context`. `issued_by` is
 `host_policy_allow`; `policy_context` is ADR 0009's bounded non-secret context,
 including its optional bounded `decision_ref` when the host supplied one.
-The ten binding fields are the intervening members from `operation_id` through
+The eleven binding fields are the intervening members from `operation_id` through
 `fencing_token`. This family uses `acquisition_kind` and `protocol_version`
 instead of inventing a tool ID/version. Canonical encoding uses
 `LoopexProtocol.Canonical` under kind `loopex.resource_acquisition_grant/1`; its
@@ -1086,6 +1640,49 @@ identity/epoch, workspace lease, fence, exact equality of grant expiry and
 operation deadline, and that deadline's freshness at its final serialized
 pre-start boundary. Changed canonical grant bytes under a
 retained digest refuse. Queueing grants no authority.
+
+The preparation binding avoids a digest cycle. Runtime Control first constructs
+the complete request containing `preparation_id` and computes
+`canonical_request_digest`, then constructs the complete grant containing that
+same ID and request digest and computes `canonical_grant_digest`. It next
+computes `preparation_digest` under kind
+`loopex.resource_acquisition_preparation_identity/1` over exactly
+`runtime_id`, `command_id`, `operation_id`, `attempt`, `preparation_id`,
+`canonical_request_digest`, and `canonical_grant_digest`. The Store attempt
+record carries that digest. Runtime Control then constructs the complete Store
+attempt transaction and finally the closed preparation record:
+
+```text
+resource_acquisition_preparation_v1
+  kind, protocol_version, runtime_id, command_id, operation_id, attempt,
+  preparation_id, preparation_digest, canonical_request_digest,
+  canonical_grant_digest, store_attempt_tx_id,
+  store_attempt_transaction_digest, store_attempt_transaction
+
+resource_acquisition_preparation_receipt_v1
+  kind, protocol_version, runtime_id, operation_id, attempt, preparation_id,
+  preparation_record_digest, reservation_digest, state
+
+resource_acquisition_preparation_release_v1
+  kind, protocol_version, runtime_id, command_id, operation_id, attempt,
+  preparation_id, preparation_record_digest, store_attempt_tx_id,
+  store_attempt_transaction_digest
+```
+
+The preparation's transaction is the complete canonical
+`resource_acquisition_commit` candidate defined below, including its complete
+attempt record, request and grant. `store_attempt_transaction_digest` equals
+that transaction's `canonical_mutation_digest`; its ID equals the transaction's
+`tx_id`. `preparation_record_digest` uses kind
+`loopex.resource_acquisition_preparation/1` over every preparation member.
+Every record is at most 192 KiB; all identifiers and nested records retain their
+stricter bounds. The receipt state is exactly `prepared` and its digests equal
+the reopened reservation. The release record is only a request to verify and
+release that exact preparation; it carries no Store observation supplied by the
+caller. A different byte, digest, transaction, attempt or state refuses. The
+preparation record is the sole restart source for the Store candidate; no
+policy callback, clock sample, random ID or grant is reconstructed across that
+cut.
 
 The host initializes each acquisition-hand reference with one trusted canonical
 workspace root and the current `(workspace_ref, workspace_lease)` binding. The
@@ -1150,7 +1747,7 @@ Only these ordered record bundles are legal:
 | No operation; command accepted | `[resource_acquisition_command_v1, resource_acquisition_intent_v1]` |
 | Another operation open | `[resource_acquisition_command_v1]`, with `acquisition_busy` and transaction `operation_id: nil` |
 | Normalized policy denial, absent-policy unavailable, or pre-attempt capability/deadline failure | `[resource_acquisition_terminal_v1]` |
-| Authorized dispatch | `[resource_acquisition_attempt_v1]` |
+| Prepared authorized dispatch | `[resource_acquisition_attempt_v1]` |
 | Direct hand terminal | `[resource_acquisition_terminal_v1]` |
 | Begin or supersede reconciliation | `[resource_acquisition_reconciliation_query_v1]` |
 | Nonterminal reconciliation observation or quarantine release | `[resource_acquisition_reconciliation_result_v1]` |
@@ -1230,8 +1827,9 @@ resource_acquisition_intent_v1
   retention_policy_ref, idempotency_class
 
 resource_acquisition_attempt_v1
-  kind, runtime_id, command_id, operation_id, attempt,
-  canonical_request_digest, canonical_grant_digest, request, grant
+  kind, runtime_id, command_id, operation_id, attempt, preparation_id,
+  preparation_digest, canonical_request_digest, canonical_grant_digest,
+  request, grant
 
 resource_acquisition_terminal_v1
   kind, runtime_id, command_id, operation_id, attempt,
@@ -1279,15 +1877,19 @@ The acknowledged lifecycle is total:
 | no open operation | valid command | atomically commit accepted command plus intent, enter `pending_policy`, then acknowledge the operation; no effect exists |
 | any open operation | another valid command | commit only `acquisition_busy`; create no operation, policy request, grant or effect |
 | `terminal_quarantined` | another valid command | commit only `acquisition_busy` until exact post-unknown process absence releases quarantine |
-| `pending_policy` | initial drive or restart | evaluate the current bounded host policy again; re-evaluation is safe because no attempt or effect exists |
+| `pending_policy` | initial drive or restart | select the trusted route and call read-only `prepared/3` before policy; an exact preparation re-presents only its embedded Store attempt transaction, `:absent` permits the capability and policy path, and unavailable/conflicting state leaves the operation pending |
+| `pending_policy` | route or capability observation unavailable or malformed before policy | commit `unavailable` / `acquirer_unavailable` with zero policy call, grant, attempt, or effect; clear the open-operation slot |
 | `pending_policy` | any normalized policy denial, including policy failure/defer | commit the matching `denied` pre-attempt terminal and exact category; clear the open-operation slot |
-| `pending_policy` | exact recovery-only CLI write-ahead command after source change | commit `unavailable` / `resource_binding_changed` with zero policy, grant, attempt or hand call; clear the open-operation slot |
+| `pending_policy` | exact recovery-only CLI write-ahead command after source change and `prepared/3` proves absence | commit `unavailable` / `resource_binding_changed` with zero policy, grant, attempt, `prepare/2`, `acquire/3` or `reconcile/2` call; clear the open-operation slot |
 | `pending_policy` | no acquisition policy configured | commit `unavailable` / `policy_unavailable`; clear the open-operation slot |
-| `pending_policy` | allow but the hand/capability is unavailable or the deadline elapsed | commit the matching pre-attempt unavailable terminal; clear the open-operation slot |
-| `pending_policy` | allow and hand available | build exact request/grant, atomically commit attempt with the next fence, enter `attempt_open`, then dispatch |
-| `pending_policy` | crash after allow but before confirmed attempt | recover as `pending_policy` and re-evaluate; an uncommitted grant authorizes nothing |
-| attempt commit | `not_committed` | remain `pending_policy`; dispatch nothing |
+| `pending_policy` | allow but capability revalidation changes/fails or the deadline elapsed | commit the matching pre-attempt unavailable terminal; clear the open-operation slot |
+| `pending_policy` | allow and identical capability revalidation | build the request, grant, preparation identity and exact Store attempt transaction; call `prepare/2`; only a confirmed exact reservation permits Store submission |
+| `pending_policy` | confirmed preparation capacity refusal with authoritative absence | commit `unavailable` / `acquirer_unavailable` with zero attempt or effect; clear the open-operation slot |
+| `pending_policy` | lost or unavailable prepare result | call `prepared/3`; an exact record resumes its embedded transaction, authoritative absence may settle unavailable, and uncertainty remains pending without a replacement policy/grant |
+| prepared attempt | initial submission or restart | re-present the byte-identical embedded Store transaction; no new policy, clock, random identity, request or grant is permitted |
+| attempt commit | `not_committed` | call `release_preparation/2`; remain `pending_policy` and dispatch nothing only after the exact prepared reservation is durably absent |
 | attempt commit | `commit_unknown` | fence the acquisition OwnerLane and re-present the identical transaction until its exact outcome is known |
+| attempt commit | `committed` | enter `attempt_open`, then call `acquire/3`; under the attempt lock the hand attaches only the matching prepared reservation and local admission before guard release |
 | `attempt_open` | valid retained hand terminal | atomically commit the matching terminal and clear or quarantine the open slot as defined below |
 | `attempt_open` | timeout, crash, malformed result or lost reply | remain open and report retained status; do not redispatch; only an accepted reconciliation command may commit a query |
 | `attempt_open` or `terminal_quarantined` | valid reconciliation request | atomically commit one exact solicited query, acknowledge its ID, then invoke only the named recovery hand |
@@ -1312,8 +1914,8 @@ committed. Process quarantine survives a terminal `outcome_unknown` until the
 current retained hand later proves the old process absent; the unknown outcome
 itself never changes.
 
-The attempt retains the complete canonical request and grant maps. Their stored
-digests must match those exact bytes; the grant's ten binding members and complete
+The attempt retains the complete preparation identity and canonical request and grant maps. Their stored
+digests must match those exact bytes; the grant's eleven binding members and complete
 policy context are therefore durable and independently replayable rather than an
 undefined projection.
 
@@ -1322,14 +1924,21 @@ The hand retains this exact terminal shape before returning it:
 ```text
 resource_acquisition_receipt_v1
   kind, protocol_version, runtime_id, command_id, operation_id, attempt,
-  canonical_request_digest, canonical_grant_digest, workspace_ref,
+  preparation_id, preparation_digest, canonical_request_digest,
+  canonical_grant_digest, workspace_ref,
   workspace_lease, executor_identity, git_graph_identity,
   executor_epoch, fencing_token, outcome, reason, process_cleanup, source,
   commit, source_directory, destination_name, destination_label,
   created_parents, tree_digest,
   pack_digest, file_set_digest, file_count, pack_bytes, publication_state,
-  publication_identity, observed_budgets
+  publication_identity, git_metadata_digest, observed_budgets
 ```
+
+The complete canonical receipt is at most 48 KiB. Together with the terminal's
+fixed identities and framing it must fit the Store record's 64 KiB ceiling. A
+larger candidate becomes local non-success
+`indeterminate_evidence/receipt_unavailable`; it cannot become a Store terminal
+or remote provenance.
 
 Hand outcomes are `completed`, `refused_before_effect`, `failed`, `cancelled`,
 and `indeterminate_evidence`; publication states are `none`, `prepared`,
@@ -1353,6 +1962,12 @@ actual value above their acceptance ceiling only with a non-success
 `budget_exhausted` receipt; no later child or publication may follow. Scratch
 still remains inside its hard complete-task ceiling. No successful receipt
 contains an over-limit observation.
+`git_metadata_digest` is always the lowercase SHA-256 canonical digest under
+kind `loopex.git_metadata_transcript/1` of the evidence package's exact ordered
+`git_metadata_digests` list, including the canonical empty-list digest when no
+metadata reply was accepted. The receipt, completion intent, local terminal,
+evidence package, and replay all require byte-identical equality; a digest alone
+never substitutes for the retained list while that evidence is required.
 `created_parents` is an ordered list of at most three exact maps with only
 `label` and `object_token`. Labels are drawn, in this order, from `.agents`,
 `.agents/skills`, and `.agents/.loopex-skill-staging`; a row exists only when
@@ -1364,7 +1979,7 @@ Reason and evidence pairings are closed:
 | Hand outcome | Exact reason set | Required evidence relation |
 | --- | --- | --- |
 | `completed` | nil | `process_cleanup: confirmed`, `publication_state: committed`, non-null publication identity, and complete tree/pack/file-set identities |
-| `refused_before_effect` | `invalid_request`, `invalid_grant`, `expired_before_start`, `workspace_binding_changed`, `executor_binding_changed`, `fence_changed`, `unsupported_platform`, `retention_capacity`, or `destination_exists` | `process_cleanup: not_started`, `publication_state: none`, and no process/publication identity |
+| `refused_before_effect` | `invalid_request`, `invalid_grant`, `expired_before_start`, `workspace_binding_changed`, `executor_binding_changed`, `fence_changed`, `unsupported_platform`, or `destination_exists` | `process_cleanup: not_started`, `publication_state: none`, and no process/publication identity |
 | `failed` | `workspace_prepare_failed`, `git_failed`, `source_mismatch`, `commit_mismatch`, `pack_invalid`, `budget_exhausted`, `prepared_conflict`, or `publication_failed` | `process_cleanup: confirmed`; publication is `none`, `prepared`, or `published_unverified` according to the reached cut |
 | `cancelled` | `deadline_elapsed`, `lease_lost`, `fence_lost`, or `control_channel_lost` | `process_cleanup: confirmed`; publication is `none`, `prepared`, or `published_unverified` according to the reached cut |
 | `indeterminate_evidence` | `cleanup_unproved`, `ledger_unavailable`, `receipt_unavailable`, or `publication_evidence_unproved` | `process_cleanup: indeterminate`; no success or remote provenance may be inferred |
@@ -1442,11 +2057,15 @@ generation/digest and prior open generation/digest, appends one closed record
 bundle, syncs the log and containing directory, and acknowledges only after
 reopen/validation. A frame is at most 512 KiB; one attempt log is at most 64
 frames and 16 MiB, with the last two frames and 1 MiB reserved for a terminal or
-indeterminate response/authority transaction. The capacity ledger admits at
-most six unresolved or quarantined attempts and reserves 80 MiB for each one's
-log plus complete task scratch. Local admission consumes that prior reservation
-or returns `refused_before_effect/retention_capacity` without creating
-an admission, open, authority, guard, or workspace byte. This bounds repeated
+indeterminate response/authority transaction. The capacity inventory admits at
+most six unresolved or quarantined attempts and charges 80 MiB for each one's
+log plus complete task scratch. Local admission requires the one exact prepared
+acquisition reservation above. Capacity refusal or unavailable inventory returns
+`{:error, :acquirer_unavailable}` without an admission, open, authority, receipt,
+guard, Store attempt, or workspace byte when preparation was never installed.
+A lost preparation reply is resolved from its reservation; after a committed
+Store attempt, solicited reconciliation records the reserved no-admission
+`not_dispatched` proof before that reservation can release. This bounds repeated
 unknown attempts; elapsed cleanup time never frees capacity.
 Equivalent durable implementations must preserve that per-attempt atomic
 compare-and-append behavior.
@@ -1476,7 +2095,7 @@ local_resource_acquisition_completion_intent_v1
   kind, protocol_version, runtime_id, command_id, operation_id, attempt,
   canonical_request_digest, canonical_grant_digest, open_head_digest,
   prior_provenance_digest, prospective_receipt_digest,
-  prospective_receipt
+  prospective_receipt, git_metadata_digests
 ```
 
 Each is keyed in the workspace-scoped ledger by its record kind plus
@@ -1546,6 +2165,13 @@ receipt is the complete exact `completed` receipt below, including
 `publication_state: committed`; the intent is preparation evidence and does not
 make that prospective state true. Its digest uses kind
 `loopex.local_resource_acquisition_completion_intent/1`. Under the attempt lock
+its `git_metadata_digests` is the complete exact ordered transcript defined for
+the evidence package, and its canonical transcript digest must equal the
+prospective receipt's `git_metadata_digest`. This retained list is the recovery
+source after the provenance and Store-terminal crash cuts; the aggregate digest
+alone cannot reconstruct it. The complete intent remains within the 512 KiB
+frame ceiling or completion becomes `indeterminate_evidence/receipt_unavailable`
+before provenance. Under the attempt lock
 the helper appends, syncs, reopens, and validates this intent before it may commit
 provenance. Exact replay is idempotent and changed bytes conflict. If cancellation
 wins before provenance, the intent remains nonauthorizing and the cancellation
@@ -1670,18 +2296,52 @@ Git cannot select another writable root.
 
 The reference graph version is `loopex.git_skill_fetch/1`. The 40- or 64-byte
 lowercase commit selects `sha1` or `sha256` respectively before repository
-creation; no negotiation changes that choice. `git_graph_identity` is the
-lowercase SHA-256 canonical digest under kind `loopex.git_skill_fetch/1` of
-exactly `%{"graph_version" => "loopex.git_skill_fetch/1", "object_format" =>
-object_format, "git_version" => exact_version_line, "git_binary_digest" =>
-sha256, "exec_programs" => ordered_name_and_sha256_rows, "common_config_digest"
-=> sha256, "environment_shape_digest" => sha256, "write_grammar_digest" =>
-sha256}`. The executable rows contain only `git`, `git-remote-https`, and
-`git-index-pack`; aliases must resolve to the recorded regular-file bytes.
-Absolute paths stay private. The executor identity and epoch bind this graph
-identity, and capabilities, policy request, acquisition request, and receipt all
-carry the same value. Any executable, version, configuration, environment, or
-grammar change requires a new executor epoch and a successful startup probe.
+creation; no negotiation changes that choice.
+
+Before `capabilities/1` may advertise acquisition, the Port owner establishes
+one executable snapshot for `loopex_fs_guard`, `git`, `git-remote-https`, and
+`git-index-pack`. It starts each resolution from a retained host-approved
+executable-root directory handle, examines every component without following it
+implicitly, and opens the final ordinary executable regular file without
+following the final label. A symbolic alias is permitted only through an
+explicit acyclic walk of at most eight links and 4,096 aggregate raw target
+bytes; every target must remain beneath the retained root. Absolute or escaping
+targets, loops, another object kind, an unreadable component, or an unverifiable
+object refuse the graph.
+
+An executable-image row has exactly `%{"name" => name, "binary_digest" =>
+sha256, "byte_length" => nonnegative_uint64, "file_mode" =>
+nonnegative_uint32, "object_token" => object_token, "resolution_digest" =>
+resolution_digest, "launch_mode" => "verified_handle" |
+"verified_child_image"}`. `object_token` is the platform's stable no-follow
+object identity of at most 256 bytes. `resolution_digest` is the lowercase
+SHA-256 canonical digest under kind `loopex.executable_resolution/1` of the
+executable-root object token and ordered component transcript; each transcript
+row contains the component-name digest, observed object kind and object token,
+plus the raw-target digest only for an alias. Absolute paths and raw alias
+targets remain process-local. The owner retains the final open handle and
+resolution transcript for the executor epoch.
+
+`git_graph_identity` is the lowercase SHA-256 canonical digest under kind
+`loopex.git_skill_fetch/1` of exactly `%{"graph_version" =>
+"loopex.git_skill_fetch/1", "object_format" => object_format, "git_version" =>
+exact_version_line, "guard_helper" => guard_helper_row,
+"git_binary_digest" => git_row.binary_digest, "exec_programs" => [git_row,
+git_remote_https_row, git_index_pack_row], "common_config_digest" => sha256,
+"environment_shape_digest" => sha256, "write_grammar_digest" => sha256}`. The
+executor identity and epoch bind exactly this graph identity, and capabilities,
+policy request, acquisition request and receipt carry the same value.
+
+At the final serialized pre-start boundary, while the attempt lock and
+current-authority hold remain active and immediately before the one-shot guard
+release, the hand re-stats and fully rehashes every retained executable handle,
+compares its object token, length, mode and digest, and repeats the
+descriptor-relative no-follow resolution from the retained root. The fresh
+resolution must reach the same retained object and reproduce the exact
+resolution digest. This detects both path-component replacement and in-place
+byte change; a retained handle alone does not waive it. Any mismatch keeps the
+guard closed, yields `refused_before_effect/executor_binding_changed`, and
+permanently disables new acquisition for that executor epoch.
 
 Let `G` be the absolute verified Git binary followed, in this exact order, by
 `-c credential.helper=`, `-c core.hooksPath=<verified-empty-directory>`,
@@ -1721,7 +2381,9 @@ label/UTF-8/depth/cardinality rules before use. Extra fields, missing or
 extra terminators, abbreviated IDs, duplicate/colliding names, invalid type/mode,
 or output after the accepted grammar refuses. The metadata digest uses kind
 `loopex.git_metadata/1` over command ordinal plus the exact raw reply and is
-bound into the hand's retained execution evidence.
+retained in the evidence package's exact ordered `git_metadata_digests` list;
+the receipt's `git_metadata_digest` binds that complete list. Neither digest
+permits replay from unretained or reparsed diagnostic output.
 
 Every child receives only `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, the helper-owned
 `HOME`, `XDG_CONFIG_HOME`, `TMPDIR`, and empty-search `PATH`, the verified
@@ -1815,9 +2477,11 @@ The reference implementation realizes its no-follow, durable-journal,
 process-supervision and no-replace guarantees through the repository-owned
 `apps/loopex_executor_local/c_src/loopex_fs_guard.c`, built as the private Port
 executable `loopex_executor_local/priv/loopex_fs_guard`. It is a C11, libc-only
-helper with a closed length-prefixed command protocol and 512 KiB request/response
-bounds, which contain the largest 192 KiB reconciliation record plus its atomic
-ledger envelope and the largest provenance CAS. Verified snapshot, pack, Git-metadata and blob
+helper with a closed length-prefixed command protocol and 1 MiB request/response
+bounds. That frame contains one at-most-512-KiB local record or provenance CAS,
+its complete append/compare envelope, and framing without truncation; exact
+maximal-envelope proof remains required. The 2 MiB evidence package and verified
+snapshot, pack, Git-metadata and blob
 streams use separately authenticated length-bounded descriptors and never enter
 that frame. A snapshot descriptor binds the exact manifest/content lengths,
 digest and destination identity before a stream begins; the helper enforces the
@@ -1828,6 +2492,46 @@ hand/state root with no-follow semantics, compares both expected stable object
 identities, and never resolves a label from one root beneath the other. Canonical
 records retain only their opaque root/lease bindings, not either path.
 
+The Port owner admits the running `loopex_fs_guard` child only after an
+independent kernel-backed check proves that the child's actual executable image
+matches the bound helper row. A pathname, `argv[0]`, version output, helper
+self-report, or reopening the pathname is not image proof. No root handle,
+command frame, authority hold, relay endpoint or writable descriptor is
+delivered before that check succeeds.
+
+`verified_handle` means the kernel executes the retained final handle without
+another pathname lookup. `verified_child_image` means a platform execution-event
+barrier holds the newly selected image before it can perform an effect, exposes
+a kernel-authenticated handle or stable identity for that actual image, and
+permits the supervisor to hash and compare it with the bound row before release.
+The helper applies one of those modes to the main Git child and every internally
+selected `git-remote-https` and `git-index-pack` image. `GIT_EXEC_PATH`, directory
+membership, a matching basename and a pre-exec pathname digest are routing
+inputs only; none proves the selected image. An unexpected, changed or
+unverifiable child receives no release, and the helper terminates and reaps the
+group.
+
+Startup self-probes each selected launch mode on the current target. If neither
+mode can prove the helper and every permitted Git image, `capabilities/1`
+returns `{:error, :acquirer_unavailable}` and ordinary sessions continue
+without Git acquisition. A mismatch before the one-shot guard release is
+`refused_before_effect/executor_binding_changed`. A child-image mismatch after
+release settles as `failed/git_failed` only with confirmed process-group
+cleanup; otherwise it is `indeterminate_evidence/cleanup_unproved`.
+
+One acquisition-hand process incarnation owns one never-reused executor epoch
+and exactly one executable graph. Any resolution, digest, handle or actual-image
+mismatch permanently disables new acquisition and child creation in that
+incarnation; the hand does not re-resolve, recompute or substitute an executable
+under the same epoch. Already-open attempts may use the verified running helper
+only for status, termination, retained-receipt recovery and settlement, never
+for another child or publication. Helper or acquirer loss ends the incarnation.
+A replacement requires a fresh executor epoch, fresh graph identity and
+successful startup probe; the host's current-authority route refuses reuse of
+the ended epoch. The current Darwin and Linux lanes prove their concrete mode
+before claiming Git acquisition support; a target with only pathname checks is
+explicitly acquisition-unavailable.
+
 The helper protocol is closed to these operation families:
 
 - open/reopen both roots and compare their expected stable identities;
@@ -1836,12 +2540,13 @@ The helper protocol is closed to these operation families:
 - create/reopen the append-only CLI journal, compare-and-append one frame,
   repair only its final incomplete frame, append retirement, and remove only the
   named runtime snapshot/intent after retirement;
-- create/reopen/remove one per-runtime snapshot and binding intent, and perform
-  the complete `resource_capacity_v1` reserve/release CAS;
+- create/reopen/remove one per-runtime snapshot and binding intent, inventory
+  the three reservation classes under the capacity lock, and create, update,
+  convert, or retire their exact reservation files;
 - create/reopen the per-attempt local ledger, compare-and-append a closed bundle
   against authority/open heads, and repair only its final incomplete frame;
 - create/reopen/identify/sync directories; stream and verify bounded snapshot,
-  Git-metadata, pack, and staged regular-file bytes; inventory the closed scratch
+  evidence-package, Git-metadata, pack, and staged regular-file bytes; inventory the closed scratch
   graph; compare-and-swap the provenance slots; publish with no replacement; and
   remove only exact-owned staging;
 - spawn/release/status/signal/wait the authenticated guard process group and
@@ -1849,10 +2554,10 @@ The helper protocol is closed to these operation families:
 
 The universal lock order when several are held is runtime, CLI operation,
 capacity, attempt, then provenance locks in canonical provenance-digest order.
-No capacity release holds an attempt/provenance lock: it occurs only after a
-terminal fact is durable, then revalidates that immutable fact under the capacity
-lock. Every cross-root workspace mutation holds the attempt lock and uses only
-workspace-root handles. A provenance mutation also holds its canonical
+Capacity admission or release may hold the capacity lock followed by one
+attempt lock and the provenance locks required to validate exact dependencies;
+it never acquires them in reverse order. Every cross-root workspace mutation
+holds the attempt lock and uses only workspace-root handles. A provenance mutation also holds its canonical
 `{workspace_ref, pack_digest}` lock; its conditional slot write is synced and
 reopened before release. Two lock identities never append one log or mutate one
 provenance slot concurrently. Unknown lock, CAS, or repair completion is reopened
@@ -1906,7 +2611,7 @@ Each attempt writes only to
 workspace_ref, "runtime_id" => runtime_id, "operation_id" => operation_id,
 "attempt" => attempt, "canonical_request_digest" =>
 canonical_request_digest}`. This is a task-owned ordinary directory whose
-stable object token is in the synced open ledger before guard release. An
+stable object token is in the synced open ledger before guard release. A
 first creation of that label refuses `workspace_prepare_failed` before guard
 release when any object already exists and never adopts or removes it. Only
 reconciliation or resume of an already-open exact attempt may reopen the object,
@@ -1954,18 +2659,20 @@ attempt-qualified prepared generation. Every slot transition uses the helper's
 kernel-released provenance lock keyed by the canonical digest of
 `{workspace_ref, pack_digest}` while the caller already holds its attempt lock;
 the helper compares the complete prior two-slot bytes, conditionally writes one
-successor, syncs and reopens it before acknowledgement. Its prepared-slot
+successor, syncs and reopens it before acknowledgement. M3 never replaces a
+different committed generation. A non-null committed generation matching this
+exact operation/attempt/request/grant is terminal replay; any other non-null
+committed generation refuses before preparing or publishing. Its prepared-slot
 transition is one atomic conditional write: nil may become only this exact
-operation/attempt/request/grant generation;
+operation/attempt/request/grant generation while committed is nil;
 an exact re-presentation is idempotent; a different live generation refuses
 without changing either slot. Before any unknown outcome exists, normal cleanup
 conditionally clears only the exact matching operation/attempt/request/grant
 generation. Once its owner is unknown, the prepared slot and staging remain
 untouched until explicit operator recovery outside this protocol. A conflicting
-or unresolved prepared slot blocks publication. Prepared is written and
-synced with nil publication identity while any prior committed generation remains
-unchanged. An identical pack digest never overwrites committed merely because a
-new attempt started. The hand then
+or unresolved prepared slot blocks publication. Prepared is written and synced
+with nil publication identity only while committed is nil. An identical pack
+digest never overwrites committed merely because a new attempt started. The hand then
 performs one atomic no-replace rename; a racing destination is a known failure
 and is untouched. A platform without a provable no-replace primitive reports
 acquisition unavailable before Git starts.
@@ -1985,8 +2692,10 @@ budgets and append the exact synced completion intent. Only after reopening that
 intent may it
 atomically copy every prepared member unchanged except `state`, install the
 verified publication identity plus the matching completion-intent and receipt
-digests, replace the committed slot, and clear only that
-exact prepared generation under the same provenance CAS. After that synced and
+digests, install the committed slot only if it is still nil (or exact-match an
+already installed byte-identical generation during replay), and clear only that
+exact prepared generation under the same provenance CAS. A different committed
+generation refuses and remains unchanged. After that synced and
 reopened successor it appends the byte-identical completed receipt and terminal
 authority and returns. A crash before the provenance CAS leaves a nonauthorizing
 completion intent; cancellation or exact recovery may settle it. A crash after
@@ -2073,7 +2782,11 @@ resource_acquisition_reconciliation_result_v1
 ```
 
 Each `kind` is exactly its displayed record name and each `protocol_version` is
-1. Query IDs are unique bounded runtime-control identities. `recovery_epoch` is
+1. `current_reconciliation_query_digest` in the authority observation is the
+lowercase SHA-256 canonical digest of the complete query under kind
+`loopex.resource_acquisition_reconciliation_query/1`; the hand recomputes it
+from the received query rather than accepting a caller-supplied digest. Query
+IDs are unique bounded runtime-control identities. `recovery_epoch` is
 operation-wide, begins at one, and advances by exactly one for each accepted
 initial or superseding query; it never resets at an attempt boundary. The
 query's attempt
@@ -2113,8 +2826,15 @@ unrelated writer may race at any cut. `next_attempt_permitted` releases only the
 attempt fence; the next hand still performs the ordinary existing-destination
 refusal before any effect.
 
-`not_dispatched` requires the exact synced admission-without-open plus
-`revoked/not_dispatched` authority transition above.
+`not_dispatched` requires the matching `prepared` or `attached` acquisition
+reservation and the current committed query proved by the authority observer.
+Exactly two local cuts are legal: admission plus active authority with no open
+or receipt atomically advances to generation-one `revoked/not_dispatched` plus
+the response; or complete absence of admission, open, receipt and authority
+atomically installs the generation-zero tombstone plus response. Both cuts prove
+that the one-shot guard was never released. The atomic append wins against a
+delayed admission or open transition under the same attempt lock; every other
+partial relation is unavailable.
 `in_flight` requires the current retained hand, open record and captured process-
 group identity. `terminal` requires the complete retained receipt. An
 `indeterminate_evidence` response means no valid terminal receipt establishes the
@@ -2213,8 +2933,10 @@ Rediscovery attaches remote identity only when the Store has a completed
 its exact hand receipt matches operation,
 attempt, request/grant digests, workspace, executor/epoch, fence, source/tree/pack/file-
 set, destination and publication identity, the committed `skill_import_v1`
-generation matches those same facts, and current no-follow destination identity
-and complete bytes recompute them. Any missing, prepared, unknown, old-epoch,
+generation matches those same facts, the `evidence_attached` acquisition reservation and
+reopened `resource_acquisition_evidence_v1` match that receipt, generation and
+Store terminal, and current no-follow destination identity and complete bytes
+recompute them. Any missing, prepared, unknown, old-epoch,
 replaced or mismatched fact discards all remote-qualified fields and normalizes
 the pack to `origin: "project"`, `source_id: "project:" <> name`, and null
 commit/tree identity. Copying the installed directory, committing it, or moving
@@ -2224,19 +2946,22 @@ local/unverified result.
 The host retains snapshot bytes, provenance and unresolved hand records under its
 configured protected state root, separate from discovery and tool artifacts.
 Retention policy may keep more history but may not evict an unresolved attempt;
-a receipt needed by an uncommitted Store transaction; the matching hand receipt
-named by the current committed `skill_import_v1` generation; that provenance
-generation itself; the hand receipt, Store terminal transaction/record, and
-provenance generation named by any retained snapshot dependency row; or any
+a receipt needed by an uncommitted Store transaction; the matching attached
+evidence package and hand receipt named by the current committed
+`skill_import_v1` generation; that provenance generation itself; the evidence
+package, hand receipt, Store terminal transaction/record, and provenance
+generation named by any retained snapshot dependency row; or any
 per-runtime snapshot bundle and binding intent named by a retained
 `resource_snapshot_binding_v1` until that runtime root and its staged/admitted
 uses are retired.
-Replacing or retiring a provenance generation is the only operation that may
+Retiring a provenance generation is the only operation that may
 release its matched receipt retention, and it first proves that no current
 generation, retained snapshot dependency, staged request, or admitted use names
-it. Store-terminal compaction applies the same dependency predicate. A reference-CLI administrative
-runtime may release its snapshot and intent only after the exact synced retirement
-frame above; a current provenance generation can still keep its terminal/receipt
+it. Store-terminal and evidence-package compaction apply the same dependency
+predicate. A reference-CLI administrative runtime may release its snapshot and
+intent only after the exact synced retirement frame above; a direct embedder
+uses the private retained retirement record above. A current provenance
+generation can still keep its terminal/receipt
 facts after that host-only runtime retirement. Staged and admitted uses may extend
 retention beyond the binding lifetime. A
 host unable to retain those facts refuses before effect. Existing content under
@@ -2588,13 +3313,25 @@ response sync and before result commit, then reconstruct the byte-identical
 result and transaction ID after restart; repeat with an unknown result commit,
 a responder-epoch replacement, and a late old-epoch response. Prove query/result
 transactions never advance attempt or fence. Exercise every normalized ADR 0009
-allow, five-category deny, invalid/failed callback, defer and absent-policy row,
-with zero grant, attempt or hand dispatch on every non-allow. Prove canonical command replay
+allow, five-category deny, invalid/failed callback, defer and absent-policy row.
+The prior read-only `prepared/3` and `capabilities/1` observations may occur;
+prove zero `prepare/2`, grant, Store attempt, `acquire/3`, `reconcile/2`, process,
+network or filesystem effect on every non-allow. Prove canonical command replay
 and conflict, same-operation next-attempt authority only after retained
 `not_dispatched`, terminal-commit ambiguity, append-only reconciliation ordinals,
 immutable unknown, the complete closed terminal/status/reconciliation relations,
 post-unknown process-absence release without cleanup, and refusal of unsolicited
 or stale completion.
+Exercise `prepare/2`, `prepared/3` and `release_preparation/2` at every write,
+sync, reopen, reply-loss, Store submission and Store-result cut. Prove that the
+combined reservation exists before every Store attempt, embeds the exact
+transaction, reserves both attempt and evidence ceilings atomically, re-presents
+only those bytes after restart, and releases a noncommitted transaction only
+from the exact observer proof. Exhaust each independent ceiling, corrupt every
+state/proof relation, interrupt every reservation generation and race delayed
+admission against the current-query tombstone. No failure may create an
+off-budget ledger record, second policy/grant, uncharged effect, hidden capacity
+release or cross-attempt cleanup.
 
 Drive the real local acquisition hand over a credential-free loopback HTTPS Git
 fixture. Prove source grammar, disabled ambient credentials/configuration/
@@ -2609,6 +3346,14 @@ limit without executing downloaded content. Exercise first installation with
 both fixed parents absent, every parent-creation race and sync cut, and a staged
 attempt outside the discovery directory; links and special objects at every
 fixed label refuse, while only exact attempt-owned staging is cleaned.
+Race every executable path component and alias by rename, replacement and
+in-place rewrite after startup observation, after policy allow and at the final
+guard boundary. Substitute the Port-helper path before and during spawn, and
+force wrong or unverifiable main-Git, HTTPS-helper and index-pack images. Prove
+zero guard release for every pre-start mismatch, exact post-release termination
+and receipt classification, permanent same-epoch graph invalidation, no
+pathname-only fallback, and recovery only through a fresh executor epoch and
+freshly probed graph.
 
 Exercise every file sync, prepared provenance, no-replace rename, parent sync,
 destination verification, committed provenance, retained receipt and Store
@@ -2684,8 +3429,11 @@ For the same narrow variant it supersedes ADR 0007's universal session
 tool-version grant bindings; executor accepted/started/progress event sequence;
 session-origin terminal-receipt tuple; session/coordinator-epoch reconciliation;
 and the matching universal wording in Concept vision section 15 and Technical
-vision sections 6.3, 8.4, 9.3, 9.4, 15.1 and 23.3. Session epoch/origin remains
-mandatory for every session-owned effect. The runtime-control replacements are runtime/command/operation/attempt
+vision sections 6.3, 8.4, 9.3, 9.4, 15.1, 17.1 and 23.3. Section 17.1's
+hand-package rule is superseded only for this tagged Runtime Control
+acquisition hand; every ordinary session hand remains behind the existing
+session `JobRequest` boundary. Session epoch/origin remains mandatory for every
+session-owned effect. The runtime-control replacements are runtime/command/operation/attempt
 identity, separately bound original-effect and current-responder epochs,
 receipt-only completion, bounded status and Runtime Control reconciliation. The
 new administrative grant is a separate operation-kind encoding with the same
@@ -2719,7 +3467,7 @@ trust remain unchanged.
 Add experimental facade queries and pre-run command variants under the session
 owner, one Runtime Control acquisition transaction family, one immutable
 pre-child snapshot-binding transaction family, one bounded reference-host CLI
-recovery locator and one optional administrative hand port. Existing
+recovery journal and one optional administrative hand port. Existing
 `Loopex.Executor.JobRequest`, executor callback,
 tool definitions, ordinary grants, session identities and tool receipts remain
 byte- and meaning-unchanged. Existing custom executors remain conformant. A host
@@ -2736,14 +3484,18 @@ An omitted resource binding keeps a new core-only start and a genuine M2 runtime
 in that old form. A non-nil resource-binding envelope commits
 `resource_snapshot_binding_v1` before children, so an M2 binary cannot safely
 open that Store root even if no acquisition or session resource command follows.
-M2 likewise cannot open a root containing acquisition records or the hand's new
-ledger. An existing unbound M2 runtime can continue in
+M2 likewise refuses Store acquisition records when it parses that Store root.
+The separate M3 CLI journal, reservations, snapshot retention, and hand ledger
+are host-private sibling state that M2 never opens; they are invisible and
+non-authorizing to M2 and cannot serve as its refusal evidence. An existing unbound M2 runtime can continue in
 `legacy_no_resources` mode, but it cannot be upgraded in place to resources.
 Rollback restores a retained M2 Store/hand root and matching binary; it never
 points M2 at a resource-enabled M3 root, rewrites M3 state or promises an in-
-place downgrade. M2 ignores installed project skill directories, which confer
-no authority by themselves. Existing admitted AGENTS.md behavior and provider
-redispatch restrictions remain intact.
+place downgrade. Rollback also restores matching old host state and routing; it
+never relies on an M2 process to detect M3-private sibling files. M2 ignores
+installed project skill directories, which confer no authority by themselves.
+Existing admitted AGENTS.md behavior and provider redispatch restrictions
+remain intact.
 
 Acceptance binds this complete pair at an exact candidate. Its evidence and
 compatibility claims remain unproved until the M3 gate's required paths execute.

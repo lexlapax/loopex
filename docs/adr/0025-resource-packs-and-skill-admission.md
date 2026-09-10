@@ -21,7 +21,9 @@ invalidate ADR 0017's single-flat-block proof. Acquisition, retention, admission
 and execution need distinct owners before that capability ships.
 
 Add one fixed resource-pack class, with Agent Skills as its first format.
-Hosts acquire and parse bounded packs; core receives canonical plain data and
+Compatibility means the ADR's closed, dependency-free frontmatter subset and
+conformance vectors, not general YAML or every vendor extension; a skill outside
+that subset is diagnosed and refused. Hosts acquire and parse bounded packs; core receives canonical plain data and
 owns exact context admission. Preserve root AGENTS.md behavior unchanged.
 
 Support only project `.agents/skills/<name>/SKILL.md`, with bounded supporting
@@ -43,6 +45,13 @@ journaling and atomic no-replace publication. Builders need a C11 compiler and
 platform headers on supported Darwin and Linux targets; shipped runtimes contain
 the built helper and need no compiler. The helper is process-isolated from the
 BEAM and adds no package dependency.
+The helper image and every Git image are fixed for one acquisition-hand executor
+epoch. The hand executes an already verified object where the platform supports
+it; otherwise the native supervisor must prove the kernel-selected child image
+at a pre-effect execution barrier. A target that cannot prove either mode makes
+Git acquisition unavailable while ordinary sessions and local skill discovery
+continue. Any path, object, byte or child-image mismatch invalidates the graph
+and ends that executor epoch for new acquisition.
 Composition only wires those owners. The
 operation has its own request/grant/receipt family and carries no fictitious
 session, run, turn, tool-call or tool identity; the existing session
@@ -106,7 +115,7 @@ while sessions retain only identities. Resource-enabled requests pay a fixed
 bounded receipt-header cost before optional admission. These choices require
 explicit ADR acceptance; this revision implements no runtime behavior.
 
-The reference CLI records one bounded workspace/snapshot-bound locator-journal
+The reference CLI records one bounded workspace/snapshot-bound recovery-journal
 family before any `skill add` Store call: an active recovery journal and, only at
 safe terminal cleanup, its compact administrative-runtime retirement frame. A
 lost binding or command acknowledgement reopens only the exact authorized
@@ -120,6 +129,24 @@ observe bytes its acquisition later publishes. Actual use occurs through a diffe
 rediscovers the changed project, joins provenance through the original
 runtime/operation identity, displays the new manifest and obtains new trust.
 Existing sessions do not migrate to the installed bytes.
+
+The reference host enforces aggregate retention with one host-global lock and
+durable per-artifact reservations rather than a counter that can diverge from
+the files it counts. It reserves the CLI journal before its first Store call,
+the snapshot before materialization and binding, and one combined local-attempt
+plus retained-evidence entitlement before the Store attempt is submitted. That
+reservation embeds the one exact Store attempt transaction, so restart resolves
+or re-presents it without repeating policy or minting a grant. The closed
+ceilings are 1,024 lifetime CLI journals charging 512 MiB; 16 runtime snapshots
+charging 1 GiB content and 128 MiB metadata; six unresolved or quarantined
+attempts charging 480 MiB; and 1,024 retained evidence packages charging 2 GiB.
+An unknown, quarantined, corrupt, or release-in-progress artifact remains
+charged. Release records the matching Store, local, retirement, and dependency
+proof before deleting any owned bytes; restart resumes that exact transition.
+Capacity refusal happens before Store attempt commit and crosses no local effect
+boundary. A lost-before-dispatch attempt releases only after its `not_dispatched` result is known
+committed. CLI retirement keeps a permanent runtime-reuse fence; direct
+embedders use the same private retention owner and Store-idle proof.
 
 For administrative resource acquisition only, supersede ADR 0007's universal
 session `JobRequest`; job/session/run/turn/tool-call and session-origin identities;
@@ -198,18 +225,23 @@ the resource-binding envelope preserves a core-only or genuine M2 runtime in
 that form, but that durable identity cannot later enable resources. Supplying
 the envelope commits a new snapshot-binding record before children, so an M2
 binary cannot safely open that Store root even when no acquisition or session
-resource command follows. Acquisition records and M3 hand state also make the
-root incompatible. Rollback therefore restores a retained old-format Store/hand
-root and matching binary rather than pointing the old binary at a resource-
-enabled M3 root; no rewrite or in-place downgrade is promised. M3 hand
+resource command follows. Store acquisition records have the same old-reader
+refusal requirement. M3's separate host-private journal, reservation, snapshot,
+and hand files are invisible to an M2 binary; they cannot serve as old-reader
+refusal or rollback evidence, and the old host must never infer that their
+absence or silence authorizes reuse. Rollback therefore restores a retained old-
+format Store root, matching old host state, and matching binary rather than
+pointing the old binary at a resource-enabled M3 root; no rewrite or in-place
+downgrade is promised. M3 hand
 receipts and Store terminals remain retained while a current committed import
 generation names them; losing either deliberately degrades rediscovery to local
-content and is not permitted retention. The CLI locator/retirement journal is
-host-private state, and an old reference host must refuse its unknown record
-kind rather than reuse or delete the associated administrative runtime. Project
-directories alone grant nothing, so an M2 binary ignores an installed skill
-directory. Existing admitted AGENTS.md behavior and provider redispatch
-restrictions remain intact.
+content and is not permitted retention. The CLI journal and retirement fence
+are host-private state that M2 neither opens nor interprets. An M3 host prevents
+a matching old host from reusing or deleting the associated administrative
+runtime; that protection is a host routing/rollback obligation, not a claim that
+M2 parses the new sibling file. Project directories alone grant nothing, so an
+M2 binary ignores an installed skill directory. Existing admitted AGENTS.md
+behavior and provider redispatch restrictions remain intact.
 
 Technical depth: [Compatibility mechanics](0025-resource-packs-and-skill-admission-technical.md#technical-adr-0025-compatibility).
 
