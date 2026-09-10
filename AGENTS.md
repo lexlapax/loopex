@@ -443,7 +443,9 @@ register and plan index.
   a full inherited run. An observed inherited regression still blocks. Missing a
   required scheduled or rejoin run is a process defect and leaves inherited
   evidence unavailable; focused results do not replace evidence required at
-  those contract moments.
+  those contract moments. A later-discovered inherited red that remained
+  unobserved between required contract moments is an evidence-schedule defect,
+  not a conforming interval.
   A plan may bind outcome clauses, witness identities and executable closure
   commands before every future test body exists. It must already provide a real
   behavioral opening red and truthful executable routing; a missing test body

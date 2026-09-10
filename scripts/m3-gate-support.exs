@@ -13,8 +13,6 @@ defmodule Loopex.M3Gate.Support do
   defp outcome("apps/loopex/test/m3_gate_support_test.exs"), do: [5]
   defp outcome("apps/loopex/test/history_anchoring_test.exs"), do: [5]
   defp outcome("apps/loopex/test/skill_context_test.exs"), do: [2]
-  defp outcome("apps/loopex/test/resource_acquisition_test.exs"), do: [1]
-  defp outcome("apps/loopex_executor_local/test/resource_acquisition_test.exs"), do: [1]
 
   defp outcome("apps/loopex/test/" <> name)
        when name in [
@@ -29,12 +27,6 @@ defmodule Loopex.M3Gate.Support do
        do: [4]
 
   defp outcome("apps/loopex/lib/loopex/skill" <> _), do: [2, 3]
-  defp outcome("apps/loopex/lib/loopex/resource_acquisition" <> _), do: [1, 3]
-
-  defp outcome("apps/loopex_executor_local/lib/" <> name)
-       when name in ["resource_acquisition.ex", "loopex_executor_local/resource_acquisition.ex"],
-       do: [1, 3]
-
   defp outcome("apps/loopex_composition/test/skill_acquisition_test.exs"), do: [1, 3]
 
   defp outcome("apps/loopex_composition/lib/loopex_composition/skill_acquisition.ex"),

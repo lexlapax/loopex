@@ -12,20 +12,6 @@ defmodule Loopex.M3GateSupportTest do
 
     assert Support.select_outcomes(["apps/loopex/lib/loopex/skill_catalog.ex"]) == [2, 3]
 
-    assert Support.select_outcomes(["apps/loopex/test/resource_acquisition_test.exs"]) == [1]
-
-    assert Support.select_outcomes([
-             "apps/loopex_executor_local/test/resource_acquisition_test.exs"
-           ]) == [1]
-
-    assert Support.select_outcomes([
-             "apps/loopex/lib/loopex/resource_acquisition/request.ex"
-           ]) == [1, 3]
-
-    assert Support.select_outcomes([
-             "apps/loopex_executor_local/lib/loopex_executor_local/resource_acquisition.ex"
-           ]) == [1, 3]
-
     assert Support.select_outcomes(["apps/loopex_composition/lib/importer.ex"]) == [1, 2, 3, 4, 5]
 
     assert Support.select_outcomes(["apps/loopex_composition/lib/loopex_composition.ex"]) == [

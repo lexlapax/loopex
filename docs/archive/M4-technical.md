@@ -85,19 +85,7 @@ Use the existing command identity for `admit_resources`, `activate_skill` and
 `respond_interaction`; request IDs never enter journals or asynchronous facts.
 M3 resource queries and M4's ADR 0028 facade range query supply the results. Client trust
 answers are evidence presented to host policy, not a way to name arbitrary
-filesystem roots or import a URL. Acquisition remains M3's operator-only
-runtime-control and authorized-hand workflow; M4 adds no acquisition wire method.
-The host alone supplies M3's exact bound-manifest/current-attestation envelope
-as immutable process-start configuration. The app-server retains it without
-starting or attaching a runtime until protocol initialization succeeds. It then
-starts or attaches that runtime, allows M3's pre-child binding transaction to
-settle, and only afterwards accepts the first post-initialization request. A
-missing, malformed or incompatible initialization produces zero runtime
-attachment, binding transaction or other durable mutation. Exact match permits
-ordinary service; changed or unavailable source permits only the inherited
-recovery operations. No
-initialization field, request, interaction answer, or client schema may select or
-weaken that mode.
+filesystem roots or import a URL. Acquisition remains an explicit host workflow.
 
 Initialization negotiates `loopex.experimental/1`, exact schema digest and
 server-enforced ceilings. The complete request method table, closed enum sets,
@@ -122,7 +110,7 @@ Concept: [Outcomes](M4.md#concept-plan-outcomes).
 | --- | --- |
 | 1 | Independent raw-byte client launches actual server process, exact init/schema/limits vector, refusal before init, no durable work on malformed startup |
 | 2 | Identical command corpus through facade/wire; independent variation of request and command identity; snapshot-before-live; committed admission before correlated delivery; command replay after disconnect |
-| 3 | Durable interaction request/answer/policy/intent cuts, fixed timestamps through commit_unknown, expiry/abort/restart races and policy identity; catalog and selected content identity preserved; M3 bound-manifest/current-attestation and recovery-only mode preserved across process restart; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy authorization and tool receipt; wire-selected policy/module/root/snapshot/attestation/mode refused |
+| 3 | Durable interaction request/answer/policy/intent cuts, fixed timestamps through commit_unknown, expiry/abort/restart races and policy identity; catalog and selected content identity preserved; stale/missing trust withholds content; manual-only restriction; interaction answer admission separately observed from policy authorization and tool receipt; wire-selected policy/module/root refused |
 | 4 | ADR 0028 full-object verification and range allocation proved at ArtifactStore and facade, object and range digests distinguished; oversized/fragmented/multiple frames; malformed UTF-8/duplicate keys/depth; slow reader; bounded queue; late progress; stdout contamination; actual process-tree cleanup |
 | 5 | TypeScript drives skill/interaction/tool/artifact with real Store and executor; real-provider task separately attended; abrupt kill and fresh-process resume; graceful EOF case remains distinct |
 | 6 | Elixir, Python and TypeScript clients execute the same positive/negative vectors without importing the server codec; exact source/schema/client versions and toolchain/platform identities |
@@ -158,9 +146,8 @@ Concept: [Scope](M4.md#concept-plan-scope).
 All surfaces remain experimental. Exact generation/schema agreement is required;
 there is no mixed-generation promise, public-protocol freeze or daemon claim.
 Unknown mutating discriminants refuse. ADR 0024 adds versioned core interaction
-records; the app-server itself writes no private record. M3 snapshot binding,
-current-attestation, recovery-only, acquisition provenance, and separate fresh-
-runtime use semantics remain intact. Source VERSION is distinct
+records; the app-server itself writes no private record. M3 resource semantics
+remain intact. Source VERSION is distinct
 from protocol generation, journal version, provider build and schema digest.
 
 <a id="technical-plan-migration"></a>
@@ -168,12 +155,10 @@ from protocol generation, journal version, provider build and schema digest.
 
 Concept: [Scope](M4.md#concept-plan-scope).
 
-Prove new readers on genuine resource-enabled M3 histories and genuine resource-
-disabled M2-form histories, interaction recovery on M4 records, and old readers
-refusing unknown interaction records before effects. Retain both positive
-controls and their matching old root/binary pairs; removing the server does not
-make an interaction-bearing root readable by M3. An M4 host preserves the exact
-M3 launch envelope and recovery-only behavior across server restart. Resource behavior and
+Prove new readers on genuine M3 histories, interaction recovery on M4 records
+and old readers refusing unknown interaction records before effects. Retain an
+old-format positive control and old root/binary pair; removing the server does
+not make an interaction-bearing root readable by M3. Resource behavior and
 existing artifact formats remain unchanged. Range capability removal restores
 the previous full-object API without rewriting artifacts. Restore floor/version/
 inventory protections through governed transactions. No in-place downgrade,
