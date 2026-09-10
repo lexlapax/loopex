@@ -231,8 +231,10 @@ you are working in.
 
 **The tool children are separate processes, and they are the only thing that
 executes model-supplied commands.** Each is started in its own process group with
-a fixed `PATH` and nothing else in its environment, so stopping one stops
-everything it spawned rather than orphaning a background job.
+a fixed `PATH` and nothing else in its environment. Ordinary descendants remain
+in that group and are stopped together; an unsandboxed command can deliberately
+escape or sabotage cleanup, in which case Loopex reports the effect unproven and
+quarantines its authority rather than claiming a clean stop.
 
 **The provider is the only thing off the machine.** The host bridge reads its
 credential from the declared environment variable only for the provider call

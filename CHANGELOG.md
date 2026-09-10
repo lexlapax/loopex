@@ -21,8 +21,9 @@ the exact document set its milestone must update.
 ## [Unreleased]
 
 Post-closure repair work on `codex/m2-release-repair` implements accepted ADRs
-0019–0021. Its exact-source qualification and independent review disposition are
-retained in the [repair record](docs/evidence/M2-ff17990-review-followup.md#completion-order).
+0019–0021. Integration requires its exact-source qualification and independent
+review disposition to be named in the
+[repair record](docs/evidence/M2-ff17990-review-followup.md#completion-order).
 The provider uses a separately built private OS process instead
 of taking over the embedding VM's diagnostics. Interactive recovery presents an
 explicit local participant rather than selecting behavior through process-local

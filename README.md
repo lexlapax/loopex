@@ -61,8 +61,9 @@ The post-closure repair line implements the accepted follow-up decisions for a
 private provider process, explicit local recovery handoff, versioned provider
 accounting, and bounded executor receipts. The
 [repair record](docs/evidence/M2-ff17990-review-followup.md#completion-order)
-carries the exact-source qualification and independent integration-review
-status. Those repairs do not publish a package or label a public surface.
+must name the exact-source qualification and independent integration-review
+disposition used for integration. Those repairs do not publish a package or
+label a public surface.
 
 The repaired reference local executor requires `/bin/bash` for its internal
 supervision on Darwin and Linux; raw commands still use `/bin/sh`. See the
