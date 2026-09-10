@@ -257,6 +257,29 @@ total 13,235 input and 813 output tokens. This confirms account existence,
 model, request type, service tier, time window, per-call usage and cache
 categories for the final source. It is not a billing audit or release authority.
 
+<a id="source-06dadbb-provider-boundary"></a>
+## Release-Source Provider Evidence Boundary — `06dadbb`
+
+The final repaired source is exact
+`06dadbba1ce806bec571802a76f65c31e7bfbb32`. No new provider request was made
+for that source during the independent review because its execution environment
+did not authorize the credential-to-provider channel. No credential was read,
+printed, retained, or transmitted, and no current-source request identifier,
+token total, time window, or provider-account row exists to report.
+
+The provider adapter production bytes and the three real-role paths are
+unchanged from `a0a9af8`, whose twelve calls and account lookup remain recorded
+above. The intervening product change is in local executor receipt admission and
+its core validation; the current credential-free suite and full-stack receipt
+case exercise that change without contacting a provider. The historical calls
+therefore remain useful provider-path evidence for their own source but are not
+relabeled as an exact-`06dadbb` end-to-end run.
+
+The maintainer's final-edge disposition accepts this unavailable current-source
+retake, rather than a fabricated or inferred PASS, for the source-only M2
+integration. It changes no provider claim and authorizes no package,
+compatibility label, registry publication, or broader evidence waiver.
+
 ## Related
 
 - [M2 real-call attestations](M2-real-call-attestations.md) (the closure records, frozen)

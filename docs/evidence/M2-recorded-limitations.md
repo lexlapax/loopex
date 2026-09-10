@@ -870,13 +870,15 @@ that cleared its authority.
 
 **Frozen-source precedence.** One earlier sentence in the closed M2 Technical
 envelope says that a valid usage pair remains reported when the reply itself is
-unreadable. The same envelope's Outcome 1 instead requires an unreadable or
-malformed live reply to consume the remaining allowance, and accepted ADR 0018
-replaces the provider result/accounting projection with that conservative rule.
-Under the repository's authority order the accepted ADR controls this repair.
-The closed envelope is not edited here, and this record does not pretend the
-older sentence agrees: current code and active guidance follow ADR 0018 and the
-locked outcome.
+unreadable. Outcome 1 requires malformed or pre-validation-refused raw input to
+consume estimated remaining allowance, while ADR 0018 combination 5 preserves
+reported usage when a complete validated reply is compacted only because its
+settlement will not fit. Accepted ADR 0021 supplies the retained provenance that
+makes those cases distinguishable: `none` provenance admits only estimated
+accounting, and compact provenance admits reported accounting only when it
+matches the validated usage. The closed envelope is not edited here. Current
+code and active guidance implement the ADR 0018 distinction through ADR 0021's
+versioned settlement rather than applying one conservative rule to both cases.
 
 **Disposition.** Maintainer, 2026-09-04: “Repair and release.” In the repository
 state where `VERSION` remains `0.0.0`, no surface is labelled, and M2 explicitly
@@ -887,3 +889,49 @@ release. Those require their own accepted release-bearing decision. M3 inherits 
 obligation to lock the tests added by this repair range, alongside the earlier
 post-closure hotfix tests, before it can claim the corresponding protections.
 Twenty-first recorded override.
+
+<a id="final-repaired-source-integration"></a>
+## Final repaired source, evidence boundary, integration, and source tag
+
+**What is true.** The final repaired source is exact
+`06dadbba1ce806bec571802a76f65c31e7bfbb32`. It extends the twenty-first
+override's range through the bounded local-receipt repairs, the deterministic
+provider-backpressure witness, the full-stack receipt round-trip, and the
+coherent operator, developer, repository-summary, changelog, and roadmap
+updates. The source and test tree at `cc55342118293f9303869a324e62a8805ad4762d`
+is byte-identical to the final source; the intervening commits change only
+documentation.
+
+The independent source review found no remaining source defect. Its serial
+credential-free suite at seed `424242` produced 1,079 passes, five expected
+real-provider exclusions, and zero failures. The exact receipt round-trip case
+passed once and the repaired provider-backpressure file passed all three cases.
+The current-source live-provider roles were not run: the review environment
+would not authorize the credential-to-provider channel. No credential was read,
+printed, retained, or transmitted. The twelve account-verified calls at
+`a0a9af8` remain historical evidence for the unchanged provider adapter and
+real-role paths; they are not relabelled as an exact-source run and do not prove
+the later executor-receipt changes.
+
+**Disposition.** Maintainer, 2026-09-09: the instruction that M2 may override
+its gate rules so long as the code functions is applied only to this final
+post-closure integration edge. The maintainer accepts the current live-provider
+retake and full literal inherited-gate reruns as unavailable rather than PASS,
+accepts the serial suite and focused real-process evidence above as the product
+qualification for this edge, and authorizes integration after independent
+review of the additive evidence child. This disposition does not rewrite the
+four frozen M2 closure records or back-project later results onto them.
+
+The evidence child is the immediate child of the exact source and changes only
+`M2-ff17990-review-followup.md`, `M2-post-closure-attestations.md`, and this
+file. That additive three-file shape is accepted in place of the gate's
+pre-closure four-file capture shape, which cannot be recreated after Closure
+without rewriting frozen historical evidence. This is a narrow post-closure
+evidence waiver, not a reusable gate rule.
+
+After that edge receives a clean exact-SHA review, the maintainer authorizes a
+history-preserving merge to `main` and one annotated `v0.0.0-m2` tag at the
+resulting integrated source commit. The tag is a source-only milestone snapshot:
+it publishes no package, changes no `VERSION` value, freezes no public API or
+compatibility surface, performs no registry upload, and creates no release
+artifact beyond the annotated Git reference. Twenty-second recorded override.

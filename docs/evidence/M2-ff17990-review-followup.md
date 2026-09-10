@@ -2077,3 +2077,39 @@ sole parent and changes only this file and
 `docs/evidence/M2-post-closure-attestations.md`. It changes no product, test,
 gate, plan, ADR, lifecycle, register or release byte. Its independent review is
 still required; this record neither performs nor predicts that review.
+
+<a id="final-repaired-source-06dadbb"></a>
+### Final Repaired Source Qualification — `06dadbb`
+
+The post-closure repair source settled at exact
+`06dadbba1ce806bec571802a76f65c31e7bfbb32`. The product and test tree is
+byte-identical to exact `cc55342118293f9303869a324e62a8805ad4762d`; the
+commits between those revisions update documentation only. This section extends
+the earlier `a0a9af8` record without rewriting or relabelling it.
+
+The independent source reviewer executed the credential-free suite serially on
+Darwin with Elixir 1.20.3 and OTP 29.0.5 at seed `424242`. It produced 1,079
+passes, five expected real-provider exclusions, zero failures, and these
+per-application counts: 12 protocol, 538 core, 148 provider, 41 Store, 186 local
+executor, 13 composition, 18 reference client, and 123 CLI. The exact-limit
+receipt round-trip passed once, and the provider-backpressure file passed all
+three cases after the bridge was loaded before trace installation. Formatting,
+compiled-documentation, commit-message, and diff checks passed on the same
+product-identical lineage and its documentation-only children.
+
+The reviewer found no remaining source defect. The exact-source real-provider
+roles and full literal inherited gates were not run. The review environment
+would not authorize the credential-to-provider channel; no credential was read,
+printed, retained, or transmitted. Under the maintainer's narrow final-edge
+override, that is retained as unavailable evidence rather than reported as a
+pass. The account-verified `a0a9af8` attestations remain evidence of their own
+source and the unchanged provider adapter and role paths; they do not prove the
+later executor receipt changes or become exact-source attestations by inference.
+
+This evidence-only child has exact source `06dadbb` as its sole parent and
+changes exactly this file, `M2-post-closure-attestations.md`, and
+`M2-recorded-limitations.md`. It changes no product, test, gate, plan, ADR,
+lifecycle, register, root summary, changelog, roadmap, package, or version byte.
+Its independent exact-SHA review remains the final prerequisite to the
+history-preserving merge and annotated source-snapshot tag authorized in the
+recorded disposition.
