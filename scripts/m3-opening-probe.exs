@@ -228,4 +228,3 @@ catch
     IO.puts(:stderr, "M3 opening UNAVAILABLE: #{kind}")
     System.halt(2)
 end
-
