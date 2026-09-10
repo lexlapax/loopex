@@ -6,7 +6,9 @@ defmodule Loopex.M3GateSupportTest do
 
   test "checkpoint routing selects all outcomes for unknown and shared paths" do
     assert Support.select_outcomes(["apps/loopex_composition/test/skill_acquisition_test.exs"]) ==
-             [1]
+             [1, 3]
+
+    assert Support.select_outcomes(["apps/loopex/lib/loopex/skill_catalog.ex"]) == [2, 3]
 
     assert Support.select_outcomes(["apps/loopex_composition/lib/importer.ex"]) == [1, 2, 3, 4, 5]
 
@@ -39,6 +41,15 @@ defmodule Loopex.M3GateSupportTest do
            ]
 
     assert Support.select_outcomes(["new-unclassified-file"]) == [1, 2, 3, 4, 5]
+
+    assert Support.select_outcomes(["apps/loopex/test/closed_gate_aggregate_test.exs"]) == [
+             1,
+             2,
+             3,
+             4,
+             5
+           ]
+
     assert Support.select_outcomes([]) == []
   end
 
@@ -55,6 +66,8 @@ defmodule Loopex.M3GateSupportTest do
     assert Support.closed_prefix(register, "M3") == ["M0", "M1", "M2"]
     assert Support.closed_prefix(register, "M4") == ["M0", "M1", "M2", "M3"]
     assert Support.closed_prefix(register, :all) == ["M0", "M1", "M2", "M3"]
+    assert Support.closed_prefix(register([{"M0", "Closed"}, {"M4", "Blocked"}]), :all) == ["M0"]
+    assert Support.closed_prefix(register([{"M0", "Closed"}, {"M4", "Blocked"}]), "M4") == ["M0"]
     assert_raise ArgumentError, fn -> Support.closed_prefix(register, "unknown") end
 
     assert_raise ArgumentError, fn ->
@@ -84,6 +97,36 @@ defmodule Loopex.M3GateSupportTest do
     end
 
     assert Support.no_bootstrap_backedge!("bash scripts/check-status.sh\n") == :ok
+  end
+
+  test "selector accounting prevents an incomplete floor loop from reporting success" do
+    expected = ["one_test.exs", "two_test.exs", "three_test.exs"]
+    assert Support.verify_selector_account(expected, expected) == {3, 3}
+
+    for observed <- [
+          ["one_test.exs"],
+          ["one_test.exs", "three_test.exs"],
+          ["one_test.exs", "two_test.exs", "two_test.exs", "three_test.exs"],
+          Enum.reverse(expected),
+          expected ++ ["extra_test.exs"]
+        ] do
+      assert_raise ArgumentError, fn -> Support.verify_selector_account(expected, observed) end
+    end
+
+    repository = Path.expand("../../..", __DIR__)
+    runner = File.read!(Path.join(repository, "scripts/check-m3-gate.sh"))
+    refute runner =~ "<<<"
+    assert runner =~ ~s(support args "$root" "$task_root/build/test" "$selector" </dev/null)
+    assert runner =~ ~s(support report "$task_root/selector.log" "$nonce" "$selector")
+    assert runner =~ ~s("$kind" </dev/null)
+    assert runner =~ "elixir -e 'IO.write(Base.encode16"
+    assert runner =~ "</dev/null) || die 'cannot allocate selector nonce'"
+
+    {account, _} = :binary.match(runner, "support selector-account")
+    {checkpoint_success, _} = :binary.match(runner, "M3 checkpoint selected outcomes passed")
+    {final_pass, _} = :binary.match(runner, "LOOPEX_M3_GATE_REPORT")
+    assert account < checkpoint_success
+    assert account < final_pass
   end
 
   test "gate commands preserve privileged M1 and reject ambiguous executable forms" do
@@ -117,12 +160,117 @@ defmodule Loopex.M3GateSupportTest do
     File.rm!(Path.join(root, "scripts/check-m2-gate.sh"))
     {output, 2} = aggregate(root)
     assert output =~ "closed gate runner absent: M2"
+
+    repository = Path.expand("../../..", __DIR__)
+
+    {output, 2} =
+      System.cmd("bash", ["scripts/check-closed-gates.sh", "--list", "--before", "M3"],
+        cd: repository,
+        env: [{"LOOPEX_M3_BOOTSTRAP_ACTIVE", "1"}],
+        stderr_to_stdout: true
+      )
+
+    assert output =~ "bootstrap must not invoke the closed-gate aggregate"
+
+    assert File.read!(Path.join(repository, "scripts/check-m3-gate.sh")) =~
+             "LOOPEX_M3_BOOTSTRAP_ACTIVE=1"
   end
 
   test "unavailable comparison commits never become an empty change set" do
     root = Path.expand("../../..", __DIR__)
     assert_raise ArgumentError, fn -> Support.changed_paths(root, "HEAD") end
     assert_raise ArgumentError, fn -> Support.changed_paths(root, String.duplicate("0", 40)) end
+  end
+
+  test "inspection is read-only and checkpoint Git routing includes untracked work without stderr contamination" do
+    repository = Path.expand("../../..", __DIR__)
+
+    unavailable_tmp =
+      Path.join(System.tmp_dir!(), "m3-inspect-missing-#{System.unique_integer([:positive])}")
+
+    File.rm_rf!(unavailable_tmp)
+
+    {output, 0} =
+      System.cmd("bash", ["-c", "exec bash scripts/check-m3-gate.sh --inspect </dev/null"],
+        cd: repository,
+        env: [{"TMPDIR", unavailable_tmp}],
+        stderr_to_stdout: true
+      )
+
+    assert output =~ "M3 inspection OK"
+
+    root = git_fixture_root()
+    tracked = Path.join(root, "tracked.txt")
+    File.write!(tracked, "tracked\n")
+    git!(root, ["add", "tracked.txt"])
+
+    git!(root, [
+      "-c",
+      "user.name=M3 Test",
+      "-c",
+      "user.email=m3@example.invalid",
+      "commit",
+      "-qm",
+      "base"
+    ])
+
+    head = git!(root, ["rev-parse", "HEAD"]) |> String.trim()
+    assert Support.changed_paths(root, head) == []
+
+    bin = Path.join(root, "warning-bin")
+    File.mkdir_p!(bin)
+    real_git = System.find_executable("git") || flunk("git is unavailable")
+    refute real_git =~ "'"
+
+    File.write!(
+      Path.join(bin, "git"),
+      "#!/bin/sh\nprintf '%s\\n' 'warning: synthetic confstr diagnostic' >&2\nexec '#{real_git}' \"$@\"\n"
+    )
+
+    File.chmod!(Path.join(bin, "git"), 0o755)
+    git!(root, ["add", "warning-bin/git"])
+
+    git!(root, [
+      "-c",
+      "user.name=M3 Test",
+      "-c",
+      "user.email=m3@example.invalid",
+      "commit",
+      "-qm",
+      "warning wrapper"
+    ])
+
+    warning_head = git!(root, ["rev-parse", "HEAD"]) |> String.trim()
+    support = Path.join(repository, "scripts/m3-gate-support.exs")
+    path = bin <> ":" <> (System.get_env("PATH") || "")
+
+    {identity, 0} =
+      System.cmd(
+        "elixir",
+        [support, "--m3-gate-support", "identity", root, "committed"],
+        env: [{"PATH", path}],
+        stderr_to_stdout: false
+      )
+
+    assert identity =~ "LOOPEX_M3_SOURCE sha=#{warning_head}"
+    refute identity =~ "confstr"
+
+    {selection, 0} =
+      System.cmd(
+        "elixir",
+        [support, "--m3-gate-support", "selection", root, warning_head],
+        env: [{"PATH", path}],
+        stderr_to_stdout: false
+      )
+
+    assert selection == "\n"
+
+    skill = Path.join(root, "apps/loopex/lib/loopex/skill_catalog.ex")
+    File.mkdir_p!(Path.dirname(skill))
+    File.write!(skill, "# untracked checkpoint input\n")
+    changed = Support.changed_paths(root, warning_head)
+    assert "apps/loopex/lib/loopex/skill_catalog.ex" in changed
+    assert Support.select_outcomes(changed) == [2, 3]
   end
 
   test "unknown future gate credential protocols refuse before any invocation" do
@@ -308,6 +456,22 @@ defmodule Loopex.M3GateSupportTest do
     end
 
     root
+  end
+
+  defp git_fixture_root do
+    suffix = Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+    root = Path.join(System.tmp_dir!(), "m3-git-test-#{System.pid()}-#{suffix}")
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+    {_, 0} = System.cmd("git", ["init", "-q", root])
+    root
+  end
+
+  defp git!(root, args) do
+    case System.cmd("git", args, cd: root, stderr_to_stdout: true) do
+      {output, 0} -> output
+      {output, status} -> flunk("git #{Enum.join(args, " ")} failed #{status}: #{output}")
+    end
   end
 
   defp register(rows) do

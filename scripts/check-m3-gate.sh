@@ -66,27 +66,28 @@ artifacts=$(awk '
   END { if (!count) exit 2 }
 ' docs/plans/M3-gate.md) || die 'Bound Artifacts table is empty or malformed'
 for required in scripts/m3-gate-support.exs scripts/check-closed-gates.sh scripts/m3-outcomes.exs scripts/check-m3-gate.sh scripts/m3-opening-probe.exs scripts/m1-exunit-runner.exs apps/loopex/test/m1_exunit_runner_test.exs .tool-versions; do
-  found=0
-  while read -r expected path; do
-    [ "$path" != "$required" ] || found=1
-  done <<< "$artifacts"
-  [ "$found" = 1 ] || die "Bound Artifacts table omits $required"
+  printf '%s\n' "$artifacts" |
+    awk -v required="$required" '$2 == required { found = 1 } END { exit(found ? 0 : 1) }' ||
+    die "Bound Artifacts table omits $required"
 done
-while read -r expected path; do
+printf '%s\n' "$artifacts" | while read -r expected path; do
   [ -r "$path" ] || die "bound artifact is unreadable: $path"
   actual=$(shasum -a 256 "$path" | cut -d' ' -f1) || die "cannot hash $path"
   [ "$actual" = "$expected" ] || die "bound artifact digest mismatch: $path"
-done <<< "$artifacts"
-support() { elixir scripts/m3-gate-support.exs --m3-gate-support "$@"; }
+done
+support() { env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir scripts/m3-gate-support.exs --m3-gate-support "$@"; }
 support inspect "$root"
-if [ "$role" = checkpoint ]; then
-  selected_ids=$(support selection "$root" "$comparison") || exit $?
-fi
 if [ "$role" = inspect ]; then
   printf '%s\n' 'M3 inspection OK: scaffold artifact hashes verified; no behavioral or closure evidence'
   exit 0
 fi
-support identity "$root" opening
+if [ "$role" = checkpoint ]; then
+  selected_ids=$(support selection "$root" "$comparison") || exit $?
+  source_identity=$(support identity "$root" working) || exit $?
+else
+  source_identity=$(support identity "$root" committed) || exit $?
+fi
+printf '%s\n' "$source_identity"
 for command in mix elixir mktemp mkdir rm cat tail; do
   command -v "$command" >/dev/null 2>&1 || die "required tool is absent: $command"
 done
@@ -116,7 +117,7 @@ mkdir -p "$task_root/home" "$task_root/state" || die 'cannot create isolated dir
 task_compile_started=$SECONDS
 if (
   cd apps/loopex_store_local &&
-  env -u MIX_BUILD_PATH -u MIX_DEPS_PATH MIX_ENV=prod \
+  env -u MIX_BUILD_PATH -u MIX_DEPS_PATH LANG=C.UTF-8 LC_ALL=C.UTF-8 MIX_ENV=prod \
     MIX_BUILD_ROOT="$task_root/build" HOME="$task_root/home" \
     HEX_HOME="$task_root/home/.hex" MIX_HOME="$task_root/home/.mix" \
     HEX_OFFLINE=1 TMPDIR="$task_root" mix compile </dev/null
@@ -138,7 +139,7 @@ printf 'M3 %s: running the context-admission opening witness only\n' "$role"
 result=0
 opening_result=0
 task_opening_started=$SECONDS
-env -u MIX_BUILD_PATH -u MIX_DEPS_PATH MIX_ENV=prod \
+env -u MIX_BUILD_PATH -u MIX_DEPS_PATH LANG=C.UTF-8 LC_ALL=C.UTF-8 MIX_ENV=prod \
   MIX_BUILD_ROOT="$task_root/build" HOME="$task_root/home" \
   HEX_HOME="$task_root/home/.hex" MIX_HOME="$task_root/home/.mix" \
   HEX_OFFLINE=1 TMPDIR="$task_root" \
@@ -165,20 +166,28 @@ if [ "$role" = preflight ]; then
   exit 0
 fi
 if [ "$role" = full ]; then
-  full_identity=$(support identity "$root" full) || exit $?
-  printf '%s\n' "$full_identity"
+  [ -n "$m3_provider_key" ] || die 'full gate requires provider input for the real workflow'
+  full_identity=$source_identity
   selected_ids=1,2,3,4,5
 fi
 
+if [ "$role" = checkpoint ] && [ -z "$selected_ids" ]; then
+  final_identity=$(support identity "$root" working) || exit $?
+  [ "$source_identity" = "$final_identity" ] || die 'source identity changed during the checkpoint'
+  printf 'M3 checkpoint no outcomes selected: comparison=%s opening_exit=%s; diagnostic only, not closure evidence\n' "$comparison" "$opening_result"
+  exit "$opening_result"
+fi
+
 support prepare-build "$task_root" "$operator_mix_home" "${LOOPEX_HOME:-$operator_home/.loopex}" "${LOOPEX_WORKSPACE:-$root}" || exit $?
-if ! elixir -r apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
+if ! env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir -r apps/loopex/lib/mix/tasks/loopex.deps_budget.ex \
   -e 'Loopex.Checks.DepsBudget.main(System.argv())' -- \
   --materialize "$operator_hex_home/packages" "$task_root/deps" "$task_root/protected-file-ids" </dev/null; then
   die 'lock-bound dependency source could not be materialized offline'
 fi
 mkdir -p "$task_root/workspace" "$task_root/rebar-cache"
 isolated() {
-  env -u MIX_BUILD_PATH -u MIX_REBAR3 HOME="$task_root/home" TMPDIR="$task_root" \
+  env -u MIX_BUILD_PATH -u MIX_REBAR3 LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+    HOME="$task_root/home" TMPDIR="$task_root" \
     HEX_HOME="$task_root/home/.hex" MIX_HOME="$task_root/home/.mix" \
     HEX_OFFLINE=1 MIX_BUILD_ROOT="$task_root/build" MIX_DEPS_PATH="$task_root/deps" \
     LOOPEX_HOME="$task_root/state" LOOPEX_WORKSPACE="$task_root/workspace" \
@@ -206,10 +215,10 @@ run_selector() {
   local selector=$1 kind=$2 result=0 nonce
   local task_selector_started=$SECONDS
   local argv=() value
-  support args "$root" "$task_root/build/test" "$selector" > "$task_root/selector-args" || exit $?
+  support args "$root" "$task_root/build/test" "$selector" </dev/null > "$task_root/selector-args" || exit $?
   while IFS= read -r -d '' value; do argv+=("$value"); done < "$task_root/selector-args"
   [ "${#argv[@]}" -ge 10 ] || die 'selector argument construction incomplete'
-  nonce=$(elixir -e 'IO.write(Base.encode16(:crypto.strong_rand_bytes(16), case: :lower))') || die 'cannot allocate selector nonce'
+  nonce=$(env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir -e 'IO.write(Base.encode16(:crypto.strong_rand_bytes(16), case: :lower))' </dev/null) || die 'cannot allocate selector nonce'
   printf 'M3 selector: %s kind=%s\n' "$selector" "$kind"
   if [ "$kind" = real ]; then
     [ -n "$m3_provider_key" ] || die 'full gate requires provider input for the real workflow'
@@ -222,13 +231,18 @@ run_selector() {
   cat "$task_root/selector.log"
   lane_finished "$selector" "$task_selector_started" "$result"
   [ "$result" = 0 ] || { printf 'M3 gate RED: selector failed: %s\n' "$selector" >&2; exit "$result"; }
-  support report "$task_root/selector.log" "$nonce" "$selector" "${argv[7]}" "$kind" || exit $?
+  support report "$task_root/selector.log" "$nonce" "$selector" "${argv[7]}" "$kind" </dev/null || exit $?
+  printf '%s\n' "$selector" >> "$task_root/selector-ledger"
 }
 support selectors "$root" "$selected_ids" > "$task_root/selectors" || exit $?
+: > "$task_root/selector-ledger"
 while IFS= read -r selector; do
   [ -z "$selector" ] || run_selector "$selector" deterministic
 done < "$task_root/selectors"
+support selector-account "$task_root/selectors" "$task_root/selector-ledger" </dev/null || exit $?
 if [ "$role" = checkpoint ]; then
+  final_identity=$(support identity "$root" working) || exit $?
+  [ "$source_identity" = "$final_identity" ] || die 'source identity changed during the checkpoint'
   printf 'M3 checkpoint selected outcomes passed: outcomes=%s opening_exit=%s; diagnostic only, not closure evidence\n' "$selected_ids" "$opening_result"
   exit "$opening_result"
 fi
@@ -236,7 +250,7 @@ run_step mix test --exclude real_provider --seed 3107
 run_step mix format --check-formatted
 run_step mix loopex.docs_check
 run_step mix loopex.deps_budget
-run_step bash scripts/check-bootstrap.sh
+run_step env LOOPEX_M3_BOOTSTRAP_ACTIVE=1 bash scripts/check-bootstrap.sh
 # Restore the operator's nonsecret package caches for immutable inherited gates;
 # their own runners establish their locked isolation and credential boundaries.
 result=0
@@ -254,8 +268,10 @@ lane_finished inherited "$task_inherited_started" "$result"
 [ "$result" = 0 ] || exit "$result"
 [ "$(tail -n 1 "$task_root/inherited.log")" = 'LOOPEX_CLOSED_GATES_REPORT caller=M3 complete=true' ] || die 'inherited gate invocation report missing'
 real_selector=$(support real "$root") || exit $?
+printf '%s\n' "$real_selector" >> "$task_root/selectors"
 run_selector "$real_selector" real
-final_identity=$(support identity "$root" full) || exit $?
+support selector-account "$task_root/selectors" "$task_root/selector-ledger" </dev/null || exit $?
+final_identity=$(support identity "$root" committed) || exit $?
 [ "$full_identity" = "$final_identity" ] || die 'source identity changed during the full gate'
 [ "$build_identity" = "$(support build "$task_root/build/test")" ] || die 'selector build identity changed during the full gate'
 printf '%s\n' "$final_identity"

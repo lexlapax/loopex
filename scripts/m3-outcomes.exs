@@ -84,7 +84,9 @@
             "closed gate prefix excludes the caller and future milestones",
             "closed gate inventory refuses omitted and failed invocation records",
             "actual aggregate runs the predecessor prefix and propagates a failed gate",
-            "authoritative reports reject missing duplicate mismatched and malformed evidence"
+            "authoritative reports reject missing duplicate mismatched and malformed evidence",
+            "selector accounting prevents an incomplete floor loop from reporting success",
+            "inspection is read-only and checkpoint Git routing includes untracked work without stderr contamination"
           ]
         }
       ]

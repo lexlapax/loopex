@@ -11,7 +11,6 @@ defmodule Loopex.M3Gate.Support do
   end
 
   defp outcome("apps/loopex/test/m3_gate_support_test.exs"), do: [5]
-  defp outcome("apps/loopex/test/closed_gate_aggregate_test.exs"), do: [5]
   defp outcome("apps/loopex/test/skill_context_test.exs"), do: [2]
 
   defp outcome("apps/loopex/test/" <> name)
@@ -26,9 +25,12 @@ defmodule Loopex.M3Gate.Support do
        when name in ["provider_attempt.ex", "event_dispatcher.ex"],
        do: [4]
 
-  defp outcome("apps/loopex/lib/loopex/skill" <> _), do: [2]
-  defp outcome("apps/loopex_composition/test/skill_acquisition_test.exs"), do: [1]
-  defp outcome("apps/loopex_composition/lib/loopex_composition/skill_acquisition.ex"), do: [1]
+  defp outcome("apps/loopex/lib/loopex/skill" <> _), do: [2, 3]
+  defp outcome("apps/loopex_composition/test/skill_acquisition_test.exs"), do: [1, 3]
+
+  defp outcome("apps/loopex_composition/lib/loopex_composition/skill_acquisition.ex"),
+    do: [1, 3]
+
   defp outcome("apps/loopex_cli/test/foundation_workflow_test.exs"), do: [3]
   defp outcome(_), do: @all
 
@@ -44,7 +46,7 @@ defmodule Loopex.M3Gate.Support do
       for line <- String.split(section, "\n"), String.starts_with?(line, "| `") do
         [_, name, state] =
           required_match(
-            ~r/^\| `([^`]+)` \| (Closed|Open|Accepted|In progress|In review) \|/,
+            ~r/^\| `([^`]+)` \| (Closed|Open|Accepted|In progress|In review|Blocked) \|/,
             line,
             "malformed register row"
           )
@@ -125,6 +127,15 @@ defmodule Loopex.M3Gate.Support do
     :ok
   end
 
+  def verify_selector_account(expected, observed) do
+    ensure(
+      expected == observed,
+      "selector lanes are omitted, duplicated, reordered or unexpected"
+    )
+
+    {length(expected), length(observed)}
+  end
+
   def manifest(root) do
     {data, _} = Code.eval_file(Path.join(root, "scripts/m3-outcomes.exs"))
 
@@ -195,25 +206,32 @@ defmodule Loopex.M3Gate.Support do
       "comparison must be a complete commit SHA"
     )
 
-    git(root, ["cat-file", "-e", comparison <> "^{commit}"])
-    tracked = git(root, ["diff", "--name-only", "-z", comparison, "--"])
-    untracked = git(root, ["ls-files", "--others", "--exclude-standard", "-z"])
-    String.split(tracked <> untracked, <<0>>, trim: true) |> Enum.uniq() |> Enum.sort()
+    ensure(git(root, ["cat-file", "-e", comparison <> "^{commit}"]) == "", "invalid comparison")
+
+    ensure(
+      git(root, ["merge-base", "--is-ancestor", comparison, "HEAD"]) == "",
+      "comparison is not retained by HEAD"
+    )
+
+    tracked = git(root, ["diff", "--name-only", "-z", comparison, "--"]) |> nul_paths!()
+    untracked = git(root, ["ls-files", "--others", "--exclude-standard", "-z"]) |> nul_paths!()
+    Enum.uniq(tracked ++ untracked) |> Enum.sort()
   end
 
-  def source_identity(root, clean?) do
-    if clean?,
-      do:
-        ensure(
-          git(root, ["status", "--porcelain", "--untracked-files=all"]) == "",
-          "full gate requires exact clean committed source"
-        )
+  def source_identity(root, mode) when mode in [:committed, :working] do
+    if mode == :committed do
+      ensure(
+        git(root, ["status", "--porcelain", "--untracked-files=all"]) == "",
+        "committed-source role requires an exact clean tree"
+      )
+    end
 
     sha = git(root, ["rev-parse", "HEAD"]) |> String.trim()
+    ensure(Regex.match?(~r/\A[0-9a-f]{40}\z/, sha), "source commit identity is malformed")
 
     paths =
       git(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"])
-      |> String.split(<<0>>, trim: true)
+      |> nul_paths!()
       |> Enum.uniq()
       |> Enum.sort()
 
@@ -240,7 +258,8 @@ defmodule Loopex.M3Gate.Support do
     entry = git(root, ["ls-files", "--stage", "--", path])
 
     ensure(
-      Regex.match?(~r/\A100644 [0-9a-f]+ 0\t/, entry) and File.regular?(Path.join(root, path)),
+      Regex.match?(~r/\A100644 [0-9a-f]{40,64} 0\t#{Regex.escape(path)}\n\z/, entry) and
+        File.regular?(Path.join(root, path)),
       "required selector must be tracked and present: #{path}"
     )
 
@@ -248,7 +267,7 @@ defmodule Loopex.M3Gate.Support do
 
     projects =
       git(root, ["ls-files", "-z", "--", "mix.exs", "apps/*/mix.exs"])
-      |> String.split(<<0>>, trim: true)
+      |> nul_paths!()
 
     {:ok, context} = apply(Loopex.Checks.DepsBudget, :execution_context, [root, path, projects])
 
@@ -341,10 +360,29 @@ defmodule Loopex.M3Gate.Support do
     do: Regex.run(regex, text) || raise(ArgumentError, reason)
 
   defp git(root, args) do
-    case System.cmd("git", ["-C", root | args], stderr_to_stdout: true) do
+    case System.cmd("git", ["-C", root | args], stderr_to_stdout: false) do
       {output, 0} -> output
       _ -> raise ArgumentError, "Git evidence unavailable: #{hd(args)}"
     end
+  end
+
+  defp nul_paths!(""), do: []
+
+  defp nul_paths!(output) do
+    ensure(String.ends_with?(output, <<0>>), "Git path inventory is truncated")
+
+    output
+    |> String.trim_trailing(<<0>>)
+    |> String.split(<<0>>, trim: true)
+    |> Enum.map(fn path ->
+      ensure(
+        String.valid?(path) and Path.type(path) == :relative and
+          not Enum.any?(String.split(path, "/"), &(&1 in ["", ".", ".."])),
+        "Git path inventory contains a noncanonical path"
+      )
+
+      path
+    end)
   end
 
   # Concept: build prerequisites use nonsecret tool snapshots and locked packages.
@@ -429,8 +467,8 @@ defmodule Loopex.M3Gate.Support do
       ["selection", root, sha] ->
         changed_paths(root, sha) |> select_outcomes() |> Enum.join(",") |> IO.puts()
 
-      ["identity", root, mode] ->
-        {sha, digest} = source_identity(root, mode == "full")
+      ["identity", root, mode] when mode in ["committed", "working"] ->
+        {sha, digest} = source_identity(root, String.to_existing_atom(mode))
 
         IO.puts(
           "LOOPEX_M3_SOURCE sha=#{sha} working_digest=sha256:#{digest} seed=3107 elixir=#{System.version()} otp=#{:erlang.system_info(:otp_release)} erts=#{:erlang.system_info(:version)} platform=#{:erlang.system_info(:system_architecture)}"
@@ -484,6 +522,15 @@ defmodule Loopex.M3Gate.Support do
           end)
 
         verify_invocations(expected, records)
+
+      ["selector-account", expected_path, observed_path] ->
+        expected = File.read!(expected_path) |> String.split("\n", trim: true)
+        observed = File.read!(observed_path) |> String.split("\n", trim: true)
+        {expected_count, observed_count} = verify_selector_account(expected, observed)
+
+        IO.puts(
+          "LOOPEX_M3_SELECTOR_ACCOUNT expected=#{expected_count} observed=#{observed_count} result=PASS"
+        )
 
       _ ->
         raise ArgumentError, "invalid M3 support command"

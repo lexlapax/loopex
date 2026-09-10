@@ -6,6 +6,7 @@ set +x
 set +a
 export LC_ALL=C
 fail() { printf 'Closed gates UNAVAILABLE: %s\n' "$*" >&2; exit 2; }
+[ "${LOOPEX_M3_BOOTSTRAP_ACTIVE:-}" != 1 ] || fail 'bootstrap must not invoke the closed-gate aggregate'
 [ "${LOOPEX_PROVIDER_API_KEY+x}" != x ] || fail 'provider input must use the bounded stdin frame'
 unset OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY GOOGLE_API_KEY AZURE_OPENAI_API_KEY
 caller=all
@@ -34,12 +35,12 @@ fi
 root=$(git rev-parse --show-toplevel) || fail 'not a checkout'
 cd "$root"
 if [ "$list" = 1 ]; then
-  exec elixir scripts/m3-gate-support.exs --m3-gate-support closed "$root" "$caller"
+  exec env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir scripts/m3-gate-support.exs --m3-gate-support closed "$root" "$caller"
 fi
 task_root=$(mktemp -d "${TMPDIR:-/tmp}/loopex-closed-gates.XXXXXXXX") || fail 'cannot allocate invocation ledger'
 trap 'rm -rf "$task_root"' EXIT
 trap 'exit 2' INT TERM
-elixir scripts/m3-gate-support.exs --m3-gate-support closed "$root" "$caller" > "$task_root/plan" || exit $?
+env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir scripts/m3-gate-support.exs --m3-gate-support closed "$root" "$caller" > "$task_root/plan" || exit $?
 # Only these existing gates have a declared credential protocol. A successor
 # can run without a key; forwarding a key requires its own explicit contract.
 if [ -n "$key" ]; then
@@ -73,5 +74,5 @@ while IFS=$'\t' read -r name interpreter first second; do
   printf '%s\t%s\n' "$name" "$result" >> "$task_root/ledger"
   [ "$result" = 0 ] || { printf 'Closed gate failed: %s exit=%s\n' "$name" "$result" >&2; exit "$result"; }
 done < "$task_root/plan"
-elixir scripts/m3-gate-support.exs --m3-gate-support account "$task_root/plan" "$task_root/ledger"
+env LANG=C.UTF-8 LC_ALL=C.UTF-8 elixir scripts/m3-gate-support.exs --m3-gate-support account "$task_root/plan" "$task_root/ledger"
 printf 'LOOPEX_CLOSED_GATES_REPORT caller=%s complete=true\n' "$caller"

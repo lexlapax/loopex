@@ -2,8 +2,9 @@
 
 Open candidate for project skills and core repairs. No plan or ADR is accepted
 by this revision. The runner binds a real behavioral opening probe, executable
-closure lanes and exact future witness identities. Under the maintainer's
-[preparation-rule approval](../developer/agent-context-map.md#disposition-m3-incremental-witness-approval-2026-09-09),
+closure lanes and exact future witness identities. Under the independently
+reviewed maintainer
+[preparation-rule ratification](../developer/agent-context-map.md#override-disposition-m3-incremental-witness-ratification-2026-09-10),
 future test bodies are written during implementation; every named witness must
 pass before closure. Acceptance-base evidence and independent review remain required.
 
@@ -57,8 +58,11 @@ dependency is UNAVAILABLE, never a full-gate PASS.
    fixes decisive witness identities for all five outcomes and the dedicated
    attended workflow. It does not freeze every negative case or file count.
 2. Verify routing, invalid comparisons, unknown/shared paths, unavailable
-   selectors, authoritative reports and predecessor invocation. Bootstrap stays
-   a leaf; a synthetic Closed M3 must still select only its predecessors.
+   selectors, exact selector-lane accounting, read-only inspection, untracked
+   checkpoint inputs, separated Git diagnostics, authoritative reports and
+   predecessor invocation. Bootstrap stays a leaf; a synthetic Closed M3 must
+   still select only its predecessors, and a runtime sentinel rejects disguised
+   aggregate recursion.
 3. Prove the exact opening red on the unchanged product base. The current
    admission probe witnesses a repair, not working skills. Undefined future APIs
    and absent fixtures cannot supply that red.
@@ -83,11 +87,11 @@ are not frozen. The inherited M1 harness corpus retains its existing binding.
 
 | SHA-256 | Path |
 | --- | --- |
-| `ec50de91d86c9c81ac2304bc8a03614d1332dba450775064a215328e89522309` | `scripts/check-m3-gate.sh` |
+| `9f2d82cc7e8577371e655be4c4c622fceeb9734ebbb0e971c95f49ba9873aa40` | `scripts/check-m3-gate.sh` |
 | `9bf18c61bdcd9292c1ad382ef373fe11acb4764b5535de744f75342c9f85a84a` | `scripts/m3-opening-probe.exs` |
-| `b308ec692c9597cd093b3b5ac6eaf129723a0dd6c9bb6131901b2936b494eec6` | `scripts/m3-gate-support.exs` |
-| `5ee6fe5a49eddd7e3af5b934d029c98b25642ef1019c2579ba062451c0ea986d` | `scripts/check-closed-gates.sh` |
-| `af94827d7474f5feb058fe1eb857681bc73db5d9dad326a80392ba97d6bbaefb` | `scripts/m3-outcomes.exs` |
+| `74ae9c7abe0ec374f9d1b83bf99e98c35b52639c4bbb420fe79c01e74a0e260f` | `scripts/m3-gate-support.exs` |
+| `b09b5e2bf1df8b6b50db86cabb44b29b9aff5d5b81ac550ac9d7450a66e932a3` | `scripts/check-closed-gates.sh` |
+| `d865966a9027aef99cd90ec87135823d2d6f2b824cb40758e480f86f05816aac` | `scripts/m3-outcomes.exs` |
 | `cc290e60d9f9588c75f1259b25976a58d1c30713e570cd5a88c70cdf3c2159a0` | `scripts/m1-exunit-runner.exs` |
 | `0a8406ca080c70624e776b01e37c7ded210b54659064cf63723a847a54debe2d` | `apps/loopex/test/m1_exunit_runner_test.exs` |
 | `fad47299b27a767785d2a6a776155038054f5457ee3ce0195a37ae667f7a9999` | `.tool-versions` |
@@ -96,29 +100,44 @@ are not frozen. The inherited M1 harness corpus retains its existing binding.
 
 | Mode | Executed role | Evidence meaning |
 | --- | --- | --- |
-| `--inspect` | Bound artifacts, manifest shape and bootstrap back-edge check | Inspection only; no behavioral PASS |
-| `--preflight` | Inspection, isolated compile and real-session opening observation | Declared missing behavior or opening-only green |
-| `--checkpoint <comparison-SHA>` | Inspection, source identity, opening and changed-outcome deterministic selectors | Focused diagnostics; retains an opening red after selected checks pass |
+| `--inspect` | Bound artifacts, manifest shape and bootstrap back-edge check; no scratch allocation or source identity | Inspection only; no behavioral PASS |
+| `--preflight` | Clean committed-source identity, isolated compile and real-session opening observation | Declared missing behavior or opening-only green |
+| `--checkpoint <comparison-SHA>` | Working-source identity, opening and changed-outcome deterministic selectors | Focused diagnostics; retains an opening red after selected checks pass |
 | No flag | Opening; once green, every complete lane below | PASS only after all closure obligations execute successfully |
 
 Checkpoint results are focused diagnostics, never acceptance or closure proof.
 The accepted checkpoint role takes an explicit retained comparison SHA, selects
 all deterministic outcomes on shared/unclassified product changes, and includes
 relevant untracked work. Invalid or unavailable comparison is not an empty diff.
-The comparison is a complete 40-character retained commit SHA. The executable
-path map lives in the bound support script. Relevant untracked work participates
-in selection; an invalid comparison never becomes an empty change set. An
-opening red stops full/preflight mode. Checkpoint mode continues its selected
+The comparison is a complete 40-character commit SHA retained as an ancestor of
+`HEAD`. The executable path map lives in the bound support script. Relevant
+untracked work participates in selection; Git diagnostics remain outside the
+machine-readable output. An invalid comparison never becomes an empty change
+set. Exact `HEAD` with no working change prints a distinct no-outcomes diagnostic
+and returns the opening result; it cannot print a selected-outcomes success.
+An opening red stops full/preflight mode. Checkpoint mode continues its selected
 diagnostics, returns 1 if they pass while the opening remains red, and returns 2
-if a selected witness is unavailable. Both observations remain visible; neither
-result is acceptance or closure evidence.
+if a selected witness is unavailable. Before either a checkpoint-success line
+or full-gate continuation, an exact ordered selector ledger must account for
+every manifest-derived lane. Both observations remain visible; neither result
+is acceptance or closure evidence.
 
-Run the inherited aggregate at the acceptance base, every rebind child, closure
-candidates, scheduled CI and whenever changed bytes invalidate its evidence.
-There is no requirement to rerun the two-hour inherited set on every commit;
-that duration is the supplied review's machine observation, not a timing promise.
-An observed red still blocks. Unknown acceptance impact fails closed to the full
-gate. Protected-selector execution never invokes the aggregate itself.
+Run the inherited aggregate at the acceptance base, every parallel-workstream
+rejoin, every rebind child, closure candidates, scheduled CI and whenever changed
+bytes invalidate its evidence. There is no requirement to rerun the two-hour
+inherited set on every commit; that duration is the supplied review's machine
+observation, not a timing promise. An omitted scheduled or rejoin run is
+unavailable evidence, and an observed red blocks. Unknown acceptance impact
+fails closed to the full gate. Protected-selector execution never invokes the
+aggregate itself.
+
+The shell keeps byte-counted parsing under `LC_ALL=C`; every Elixir and Mix child
+runs under `C.UTF-8`. Full and preflight roles require one clean committed source
+identity. Checkpoint mode binds tracked and untracked working bytes at entry and
+rechecks them before its result. Once the opening red is repaired, full mode
+refuses a missing provider frame before dependency materialization or closure
+lanes. Bootstrap runs with a private activity sentinel that the aggregate rejects,
+so variable-expanded or otherwise disguised bootstrap recursion cannot execute.
 
 ## Required Full Lanes
 
@@ -152,7 +171,7 @@ provider-neutral input variable does not make other providers' keys compatible.
 | 2 | `apps/loopex/test/skill_context_test.exs` | Catalog/instruction/supporting order; operator-only settled-state commands; manifest-only labels; trust invalidation; hostile-pack tool/policy/grant invariance; all admission dimensions; retained input identity with no refetch/ambiguous redispatch |
 | 3 | `apps/loopex_cli/test/foundation_workflow_test.exs` | Same embedded/CLI semantics; source-built CLI/companion; trusted launch/recovery; actual authorized tool and existing full-object artifact integrity |
 | 4 | `apps/loopex/test/context_admission_test.exs`, `apps/loopex/test/event_dispatcher_availability_test.exs`, `apps/loopex/test/provider_attempt_protocol_test.exs` | Required-only order/fixed-point properties and old refusal replay; held-Store availability/publication fencing; bounded retention with retired-identity and successor refusal |
-| 5 | `apps/loopex/test/m3_gate_support_test.exs` | Register-derived predecessor commands; missing/red/omitted invocation; no bootstrap back-edge; synthetic M3 closure; checkpoint mapping and representative repair-witness integrity |
+| 5 | `apps/loopex/test/m3_gate_support_test.exs` | Register-derived predecessor commands including a later `Blocked` row; missing/red/omitted invocation; runtime bootstrap back-edge refusal; synthetic M3 closure; checkpoint mapping including untracked work and empty exact-HEAD diagnostics; separated Git output; exact selector-lane accounting; representative repair-witness integrity |
 
 Each required clause maps to a named decisive witness in `scripts/m3-outcomes.exs`.
 Related clauses may share one named case only when it contains distinct observed
