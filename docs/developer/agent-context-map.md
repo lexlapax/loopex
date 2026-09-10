@@ -1743,3 +1743,35 @@ waive an inherited regression, or approve a merge, closure, release, tag or
 publication. This commit adds only this disposition; an independent exact-SHA
 read must approve its changed-path and authority scope before any dependent M3
 edit lands.
+
+<a id="override-disposition-m3-acceptance-aggregate-2026-09-10"></a>
+### M3 acceptance aggregate override — 2026-09-10
+
+The maintainer's actual instruction was: “no need to run m0-m2 aggregate. i
+override during plan acceptance”. This instruction was given after reviewing
+the completion checklist for the next M3 plan-acceptance candidate.
+
+For the M3 plan-acceptance transition only, this replaces the procedure that
+requires a new full M0–M2 inherited aggregate at the exact acceptance candidate.
+The transition may rely on the inherited product baseline fixed by
+`b637873ddc39542ec27add71015b46a4f7c7f80e` and proceed without claiming a new
+aggregate result at the candidate SHA. The acceptance record and review must
+state that this evidence was explicitly waived rather than passed, unavailable,
+or silently omitted.
+
+The replacement validation remains: exact-candidate compilation, formatting,
+status, documentation and bootstrap checks; the complete deterministic suite;
+all applicable M3 runner roles; the accepted Elixir 1.17.0/OTP 26.0 runner
+regression proof; recomputed bound-artifact digests; and independent exact-SHA
+review. Any inherited regression actually observed by those checks still blocks.
+The ordinary inherited aggregate obligations at a later parallel-workstream
+rejoin, bound-holder rebind, closure candidate, or evidence-invalidating product
+change remain in force unless separately overridden.
+
+This override changes one development-time evidence procedure. It changes no
+released public surface or accepted ADR decision, does not weaken an M3 outcome
+or closure witness, and does not accept M3, ADR 0025 or ADR 0027, authorize
+product implementation, approve integration, closure, release, tag or
+publication, or report an unrun check as PASS. This commit adds only this
+disposition; an independent exact-SHA read must approve its changed path and
+authority scope before dependent M3 acceptance-plan edits land.
