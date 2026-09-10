@@ -1703,3 +1703,43 @@ any other M2 witness, and does not accept M3, either prerequisite ADR, a merge,
 closure, release, tag or publication. This commit adds only this disposition;
 an independent exact-SHA read must approve its changed-path and authority scope
 before any dependent M3 edit lands.
+
+<a id="override-disposition-m3-incremental-witness-ratification-2026-09-10"></a>
+### M3 incremental witness preparation ratification — 2026-09-10
+
+This standalone record ratifies the still-Open M3 witness-preparation exception
+under the prospective safeguard in `AGENTS.md`. It leaves the earlier 2026-09-09
+record unchanged as history; this anchor is the authority M3 must cite before
+acceptance.
+
+The proposal presented for decision was: “M3 acceptance locks outcome clauses,
+witness names, runnable gate commands and a real behavioral opening red; future
+test bodies are written during implementation and all must pass before closure.”
+The maintainer answered: “I wxplicitly approve it”. These are verbatim
+transcriptions of the proposal and approval in the M3 planning task.
+
+For M3, this replaces the draft preparation rule that required every future
+test body to exist before plan acceptance. Acceptance instead binds the complete
+outcome clauses, exact witness identities, executable routing and commands, and
+the behavioral opening red. The implementation phase may author the named
+future test bodies. Every required witness must exist, run, and pass before
+closure; missing, skipped, excluded, malformed, or unavailable evidence cannot
+be reported as PASS.
+
+The first implementation checkpoint must prove the thin integrated
+skill/tool/artifact workflow before breadth rejoins. The two prerequisite ADR
+decisions and complete contracts, the inherited acceptance-base aggregate,
+focused changed-outcome checks, later rejoin evidence, closure evidence, and
+independent review remain required. The opening red must continue to arise from
+observed product behavior and cannot be replaced by a missing file, compile
+failure, label, stub, or inert scaffold.
+
+This override changes one continuing development-time preparation procedure for
+the still-Open M3 plan and gate. It changes no released public surface or
+accepted ADR decision and does not remove an outcome, witness, real-path class,
+trust negative, compatibility proof, rollback proof, or documentation duty. It
+does not accept M3, ADR 0025 or ADR 0027, authorize product implementation,
+waive an inherited regression, or approve a merge, closure, release, tag or
+publication. This commit adds only this disposition; an independent exact-SHA
+read must approve its changed-path and authority scope before any dependent M3
+edit lands.
