@@ -5,10 +5,11 @@
 
 Every surface M2 touches is unstable. None is labelled, frozen, versioned for
 consumers, or given a compatibility promise, and none is owed a deprecation
-window or a migration note. `VERSION` is `0.0.0`, nothing is tagged, and nothing
-is published, so the vision's package surface — released names, their contents,
-and the constraints they declare — stays inert because it has never been
-created.
+window or a migration note. `VERSION` remains `0.0.0`; the annotated
+`v0.0.0-m2` tag identifies the integrated M2 source snapshot and labels no
+consumer surface. Nothing is packaged or published, so the vision's package
+surface — released names, their contents, and the constraints they declare —
+stays inert because it has never been created.
 
 That is a deliberate position, not an omission. The
 [compatibility contract](../vision.md#concept-vision-compatibility) freezes a

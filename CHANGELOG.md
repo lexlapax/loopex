@@ -5,13 +5,14 @@ All notable changes to Loopex are recorded here. The format follows
 semantic versioning under the
 [0.x compatibility policy](docs/vision.md#concept-vision-compatibility). That
 policy labels public surfaces stable, release-candidate, or experimental once
-there are public surfaces to label. Nothing is labelled yet — see
+there are public surfaces to label. No public surface is labelled yet — see
 [compatibility surfaces](docs/developer/compatibility-surfaces.md#concept).
 
-Nothing is released or installable yet. Entries below the first release record
-repository, planning, and milestone implementation work, and carry no
-compatibility meaning: M0's product code is disposable experiment and scaffold,
-and no public surface is labelled.
+No package is released or installable yet. The annotated `v0.0.0-m2` tag marks
+the exact integrated M2 source snapshot; it is not a package version, public API
+freeze, or compatibility label. Entries below the first package release record
+repository, planning, and milestone implementation work, and carry no consumer
+compatibility meaning.
 
 Updating this file is part of a milestone closure candidate, not an optional
 courtesy — see [AGENTS.md](AGENTS.md) § Milestones and Gates. Each gate locks
@@ -20,8 +21,9 @@ the exact document set its milestone must update.
 ## [Unreleased]
 
 Post-closure repair work on `codex/m2-release-repair` implements accepted ADRs
-0019–0021 and remains subject to exact-source verification and independent
-release review. The provider uses a separately built private OS process instead
+0019–0021. Its exact-source qualification and independent review disposition are
+retained in the [repair record](docs/evidence/M2-ff17990-review-followup.md#completion-order).
+The provider uses a separately built private OS process instead
 of taking over the embedding VM's diagnostics. Interactive recovery presents an
 explicit local participant rather than selecting behavior through process-local
 state. New provider settlements carry version-2 accounting provenance; an old
@@ -29,7 +31,7 @@ reader cannot resume a session containing that version, and ambiguous legacy
 reported accounting is refused rather than rewritten. Operator setup and
 rollback implications are documented in the
 [compatibility inventory](docs/developer/compatibility-surfaces.md#concept).
-This entry does not publish a package or certify the unfinished evidence.
+This entry does not publish a package or label a public surface.
 
 The reference local executor also gains an explicit `/bin/bash` runtime
 prerequisite for its internal admission and cleanup scripts on Darwin and Linux.
@@ -38,9 +40,9 @@ control-input loss and unavailable job control in the prior noninteractive shell
 Raw model commands remain on `/bin/sh`, argv remains literal, and Core and custom
 executors gain no dependency. The [operator setup](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
 states the requirement; [ADR 0022](docs/adr/0022-local-executor-supervision-shell.md#concept)
-is Accepted at its exact pair. That acceptance governs only this supervision-shell
-choice; it does not qualify a release source or authorize integration, tagging or
-publication.
+is Accepted at its exact pair. That ADR acceptance governs only this
+supervision-shell choice; the separate final-source disposition governs
+integration and the source-snapshot tag, and neither publishes a package.
 
 The next milestone, `M3` (kernel consolidation), is being opened gate-first on
 branch `m3`, where its plan pair and red gate live until acceptance; the headless
