@@ -112,7 +112,8 @@ defmodule Loopex.Checks.Register do
       {"docs/adr/0011-session-input-algebra-and-streaming.md", "ADR 0011"}
     ],
     "M3" => [
-      {"docs/adr/0002-bootstrap-runtime-floor.md", "ADR 0002"}
+      {"docs/adr/0025-resource-packs-and-skill-admission.md", "ADR 0025"},
+      {"docs/adr/0027-provider-permit-retirement.md", "ADR 0027"}
     ]
   }
 

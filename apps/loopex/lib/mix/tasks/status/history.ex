@@ -228,6 +228,8 @@ defmodule Loopex.Checks.History do
   # section is required of every plan companion, so the declaration is always
   # there to read. A declared decision whose document is absent at that revision
   # cannot be judged, which is a failure and not a pass.
+  # Bold declarations and Markdown links both identify decisions; incidental
+  # bare ADR mentions, such as a successor milestone's non-prerequisites, do not.
   defp declared_prerequisites(governed, name, revision) do
     case Map.get(governed, "docs/plans/#{name}-technical.md") do
       nil ->
@@ -258,8 +260,8 @@ defmodule Loopex.Checks.History do
         rest
         |> String.split(~r/\n### /, parts: 2)
         |> List.first()
-        |> then(&Regex.scan(~r/\*\*ADR (\d{4})\b/, &1))
-        |> Enum.map(&Enum.at(&1, 1))
+        |> then(&Regex.scan(~r/\*\*ADR (\d{4})\b|\[ADR (\d{4})\]\([^\n)]+\)/, &1))
+        |> Enum.map(fn [_match | captures] -> Enum.find(captures, &(&1 != "")) end)
         |> Enum.uniq()
 
       _other ->

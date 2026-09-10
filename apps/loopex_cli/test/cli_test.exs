@@ -2552,6 +2552,13 @@ defmodule LoopexCliTest do
            ]
   end
 
+  # Concept: preserve the original commands while allowing M3's approved skill
+  # extension. The test name below remains the historical locked selector identity.
+  #
+  # Technical depth: the explicit scoped override is recorded at
+  # docs/developer/agent-context-map.md#disposition-m3-cli-extension-override-2026-09-09.
+  # Skill is optional before implementation; repeated dispatch heads count as one
+  # command. Further extensions require an explicit override of this permitted set.
   test "the command exposes exactly run sessions resume cancel and artifact and no wire or line framing surface" do
     source = File.read!(app_path("lib/loopex_cli.ex"))
     {:ok, ast} = Code.string_to_quoted(source)
@@ -2564,9 +2571,16 @@ defmodule LoopexCliTest do
         [{:|, _metadata, [command, _tail]}] when is_binary(command) -> [command]
         _other -> []
       end)
-      |> Enum.sort()
+      |> MapSet.new()
 
-    assert commands == ~w(artifact cancel resume run sessions)
+    required = MapSet.new(~w(artifact cancel resume run sessions))
+    permitted_extensions = MapSet.new(~w(skill))
+
+    assert MapSet.subset?(required, commands),
+           "missing required CLI commands: #{inspect(MapSet.difference(required, commands))}"
+
+    assert MapSet.subset?(commands, MapSet.union(required, permitted_extensions)),
+           "unapproved CLI commands: #{inspect(MapSet.difference(commands, MapSet.union(required, permitted_extensions)))}"
   end
 
   test "a dropped stream closure leaves the terminal falling back to the durable record without inferring abandonment or starting a timer" do

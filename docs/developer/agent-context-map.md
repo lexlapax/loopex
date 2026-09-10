@@ -65,6 +65,24 @@ change; property tests own reducer/replay claims; fault injection owns
 durable-transition claims. Real-provider runs are a tagged, explicitly invoked
 lane — never part of the default suite.
 
+Use focused checks during implementation and the full inherited set at the
+contract moments named in [AGENTS.md](../../AGENTS.md#maintainer-override) and
+the active plan. Under the
+[approved M3 preparation rule](#disposition-m3-incremental-witness-approval-2026-09-09),
+acceptance binds clauses, witness identities, runnable commands and a real
+opening red; future test bodies grow with implementation. The closure command
+must reject missing witnesses and unavailable evidence. Focused results never
+substitute for required acceptance-base or closure evidence.
+
+An inherited test inventory may be changed under a recorded, explicitly scoped
+maintainer override. Follow [the canonical override rule](../../AGENTS.md#maintainer-override),
+not a new approval loop inferred from an old selector name. Preserve historical
+records and unchanged guarantees. A bound artifact still needs a validated
+replacement binding if the approved change reaches its bytes. The
+[M3 CLI exception](#disposition-m3-cli-extension-override-2026-09-09) is the current
+example: the test file is not digest-bound, so no gate-generation transaction
+is needed for the approved assertion change.
+
 ## Development Client Guidance
 
 - `scripts/check-agent-bootstrap.sh`, `scripts/check-gitignore.sh`,
@@ -1582,3 +1600,64 @@ coding-tools gate failure, provider-account verification, or any other required
 evidence; it does not approve an unseen integration or release candidate, merge,
 tag, or publication. M2 remains Closed, with post-closure source qualification
 and independent release review still outstanding.
+
+<a id="disposition-m3-cli-extension-override-2026-09-09"></a>
+### M3 inherited CLI restriction override — 2026-09-09
+
+The maintainer explicitly directed that amendment procedure be overrideable
+with their approval in later milestones, requested the corresponding canonical
+contract and context-map changes, and approved changing the inherited CLI
+restriction on the `m3` branch: “my override would modify that restriction in
+m3 in cli_test.exs”. They then directed completion of the changes for review
+and acceptance before product implementation.
+
+This disposition authorizes the assertion change in
+`apps/loopex_cli/test/cli_test.exs`: require the existing `artifact`, `cancel`,
+`resume`, `run` and `sessions` commands, and permit the planned `skill` extension.
+`skill` may remain absent while M3 is Open. Repeated clauses for a command count
+as one command. Removing an inherited command or adding another unapproved
+command still fails. M3 gains no protocol/wire scope from this exception; existing
+facade, dependency and runtime-boundary witnesses remain required.
+
+The test's historical string, “the command exposes exactly run sessions resume
+cancel and artifact and no wire or line framing surface”, remains only its
+protected selector identifier in the unchanged M2 gate and runner. Its current
+assertions implement the approved successor requirement above. That old string
+does not independently reimpose a five-command ceiling. This preserves the
+historical gate bytes, minimum and required passing identity without requiring
+a separate amendment proposal/rebind. The test file is not digest-bound.
+
+Focused proof executed the genuine selector in disposable source trees: the
+original assertion rejected two `skill` dispatch clauses; the revised assertion
+passed with the unchanged CLI and with those clauses, rejected removal of
+`sessions`, and rejected an added `app-server` command. Each diagnostic ran the
+one selected case with 46 unrelated cases excluded and zero skipped. These are
+focused diagnostics, not a full M2 gate result. Product source was restored.
+
+This approval changes the named inherited restriction and permits the canonical
+override route. It does not accept M3, ADR 0025 or ADR 0027, authorize product
+implementation, waive unrelated evidence, change any bound artifact digest, or
+approve a merge or release. Subsequent exceptions need their own explicit scope
+and approval; historical acceptance and closure evidence remains unchanged.
+
+<a id="disposition-m3-incremental-witness-approval-2026-09-09"></a>
+### M3 incremental witness preparation approval — 2026-09-09
+
+The maintainer explicitly approved the following separately presented change:
+M3 acceptance locks outcome clauses, witness names, runnable gate commands and
+a real behavioral opening red; future test bodies are written during
+implementation and all must pass before closure. This followed a specific
+approval request explaining that the change goes beyond the earlier CLI
+exception. The maintainer answered “I wxplicitly approve it”.
+
+Replace the draft's requirement to construct every future test body before
+acceptance with that rule. Keep the two prerequisite ADR decisions, complete
+contracts, executable gate routing, inherited acceptance-base evidence and
+independent review. Require the thin integrated skill/tool/artifact workflow
+at the first implementation checkpoint. A missing or skipped witness is never
+a pass, and the declared opening red must come from actual product behavior.
+
+This approval authorizes the preparation-rule changes in AGENTS.md, this map
+and the M3 plan/gate. It does not accept the eventual M3 candidate or proposed
+ADRs, authorize product implementation, waive an observed inherited regression,
+or remove any closure outcome or evidence requirement.

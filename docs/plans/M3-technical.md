@@ -23,26 +23,39 @@ Only two new ADRs are M3 prerequisites:
 
 | Decision | Owner and acceptance point | Effect |
 | --- | --- | --- |
-| [ADR 0025](../adr/0025-resource-packs-and-skill-admission.md#concept) | Maintainer, before M3 acceptance | Fixed project-skill class, Git import, trust, pre-run selection, retention and optional-block admission |
-| [ADR 0027](../adr/0027-provider-permit-retirement.md#concept) | Maintainer, before M3 acceptance | Safe retirement of whole-generation in-memory spent references under unchanged fencing and accounting |
+| [**ADR 0025**](../adr/0025-resource-packs-and-skill-admission.md#concept) | Maintainer, before M3 acceptance | Fixed project-skill class, Git import, trust, pre-run selection, retention and optional-block admission |
+| [**ADR 0027**](../adr/0027-provider-permit-retirement.md#concept) | Maintainer, before M3 acceptance | Safe retirement of whole-generation in-memory spent references under unchanged fencing and accounting |
 
 Accepted M2 ADRs remain inherited constraints. ADRs 0023, 0024, 0026 and 0028
 belong to M4: protocol, durable interactions, floor and artifact ranges. No floor
-change or planned Closed-gate transaction is an M3 opening prerequisite. An
-actual required inherited-lock change still needs its holder's transaction;
-this plan grants no waiver. M4 must derive its own holder inventory, including
+change or Closed-gate transaction is an M3 opening prerequisite. An
+inherited restriction changes through its holder's transaction or an explicitly
+scoped maintainer override under AGENTS.md. M4 must derive its own holder inventory, including
 M3 if M3's accepted gate binds a file it changes. Deferral moves transaction cost;
 it does not prove that only three holders will exist later.
+
+**Approved CLI exception.** The maintainer's
+[scoped override](../developer/agent-context-map.md#disposition-m3-cli-extension-override-2026-09-09)
+changes the continuing assertion in `cli_test.exs`: preserve the five inherited
+commands and permit `skill` in M3. The old protected test name remains a
+historical selector identity, not a permanent command ceiling. No Closed gate,
+runner or bound-artifact bytes change and no additional amendment transaction
+blocks the CLI workstream. Existing facade, dependency and no-wire scope
+constraints remain required. This exception accepts no M3 product implementation.
 
 **Complete readiness packet**
 
 The current opening probe exercises required-only admission through real session
 staging and retained Store receipts. It proves that one missing repair; it does
-not prove skills work. Before acceptance, add the integrated skill boundary
-probe, all clause witnesses, exact schemas/vectors and executable full-gate lanes.
-A test harness may use existing product entrypoints but may not supply the
-missing product behavior. Undefined helpers, compile failures and absent
-fixtures are unavailable evidence, not the declared red.
+not prove skills work. Under the maintainer's
+[explicit preparation-rule approval](../developer/agent-context-map.md#disposition-m3-incremental-witness-approval-2026-09-09),
+acceptance binds complete outcome clauses, exact contracts, witness identities,
+checkpoint routing and executable closure commands. Test bodies and feature
+fixtures are developed with implementation; they need not all exist before
+acceptance. The first implementation checkpoint must demonstrate the integrated
+skill workflow before feature breadth. A harness cannot supply missing product
+behavior. Undefined helpers, compile failures and absent witnesses never supply
+the opening red or a passing closure lane.
 
 Each obligation row settles operator result, entrypoint, owner, authority input,
 durable identity, transaction cuts, bounds, refusal, witness, compatibility and
@@ -100,11 +113,13 @@ paths. Lock one named decisive witness per required clause; one integrated case
 may prove multiple clauses only when each has its own observed assertion.
 Keep additional negatives in the ordinary required suite without freezing their
 names, whole-file counts or exclusions. Adding or renaming an unprotected test
-is not a gate amendment; changing a protected witness still is. Existing Closed
-locks remain untouched and fully enforced at required contract moments.
+is not a gate amendment. Changing a protected obligation needs its amendment or
+an explicit maintainer override. Existing Closed locks remain fully enforced
+with only the recorded CLI assertion exception at required contract moments.
 
 Do not freeze test-file bytes that M3 must extend. Bind canonical gate/harness,
-fixture/vector and result-channel bytes; lock protected tests by identity and
+fixture/vector and result-channel bytes present at acceptance; lock the
+declared future protected tests by identity and
 required runnable state. Deterministic and real-provider cases live in separate
 files so no mutable mixed-file exclusion inventory becomes a lock. A protected
 case that is missing, skipped or excluded fails. Counts are not a delivery
@@ -120,7 +135,8 @@ snapshot or freeze every test added since a moving historical revision.
    staged request capture and fresh-process replay with no source reread.
 3. **Workflow:** both entries and source-built CLI/companion, actual tool result,
    existing full-object artifact inspection, trusted launch/recovery configuration;
-   an attended real-provider task in a separate selector file.
+   an attended real-provider task in
+   `apps/loopex_cli/test/foundation_workflow_real_test.exs`.
 4. **Repairs:** required-only fixed-point lower-bound/first-failure properties and
    historical refusal replay; held-Store unrelated-session latency; long-history
    retention with delayed requests and owner succession. Use ADR 0017's existing

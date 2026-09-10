@@ -1374,6 +1374,103 @@ defmodule Loopex.HistoryAnchoringTest do
     History.governance_history(files, {head, snapshots}, generation_resolver(snapshots))
   end
 
+  @m3_adrs [
+    {"docs/adr/0025-resource-packs-and-skill-admission.md", "ADR 0025"},
+    {"docs/adr/0027-provider-permit-retirement.md", "ADR 0027"}
+  ]
+
+  defp m3_prerequisite_files(state, proposed, format) do
+    declarations =
+      Enum.map_join(@m3_adrs, "\n", fn {path, name} ->
+        label =
+          if format == :bold,
+            do: "**#{name}**",
+            else: "[#{name}](../adr/#{Path.basename(path)}#concept)"
+
+        "| #{label} | Before M3 acceptance |"
+      end)
+
+    technical =
+      Fixture.technical_plan()
+      |> String.replace("M0", "M3")
+      |> String.replace(
+        "Prerequisites are accepted before plan acceptance.",
+        "Only two new ADRs are M3 prerequisites:\n\n" <>
+          "| Decision | Acceptance point |\n| --- | --- |\n" <>
+          declarations <>
+          "\n\nADRs 0023, 0024, 0026 and 0028 belong to M4. ADR 0026 is not an M3 prerequisite."
+      )
+
+    Enum.reduce(
+      @m3_adrs,
+      %{
+        @index_path => prerequisite_index([{"M3", state}]),
+        "docs/plans/M3-gate.md" => Fixture.gate(),
+        "docs/plans/M3-technical.md" => technical
+      },
+      fn {path, name}, files ->
+        status = if name == proposed, do: "Proposed", else: "Accepted"
+
+        files
+        |> Map.put(path, prerequisite_adr(path, status))
+        |> Map.put(
+          String.replace_suffix(path, ".md", "-technical.md"),
+          "## Technical depth\n\nConcept: [Decision](#{Path.basename(path)}#concept)\n"
+        )
+      end
+    )
+  end
+
+  test "M3 history enforces each bold or linked prerequisite in every accepted lifecycle state" do
+    for format <- [:bold, :link], state <- ["Accepted", "In progress", "In review", "Closed"] do
+      settled = m3_prerequisite_files(state, nil, format)
+      assert :ok == prerequisite_history([{sha("a"), [], settled}])
+
+      for {_path, name} <- @m3_adrs do
+        outstanding = m3_prerequisite_files(state, name, format)
+
+        assert_raise Invalid, ~r/`M3` is #{state} while #{name} is not accepted/, fn ->
+          prerequisite_history([{sha("a"), [], outstanding}])
+        end
+      end
+    end
+  end
+
+  test "M3 history refuses either missing declared ADR and allows unsettled Open planning" do
+    for format <- [:bold, :link], {path, name} <- @m3_adrs do
+      open = m3_prerequisite_files("Open", name, format)
+      assert :ok == prerequisite_history([{sha("a"), [], open}])
+
+      assert_raise Invalid, ~r/`M3` names #{name} as a prerequisite but no such decision/, fn ->
+        prerequisite_history([{sha("a"), [], Map.delete(open, path)}])
+      end
+    end
+  end
+
+  test "M3 later ADR acceptance cannot launder an earlier transition or completed Open acceptance" do
+    for format <- [:bold, :link], {_path, name} <- @m3_adrs, state <- ["Accepted", "Open"] do
+      outstanding = m3_prerequisite_files(state, name, format)
+      settled = m3_prerequisite_files(state, nil, format)
+
+      {outstanding, settled, trigger} =
+        if state == "Open" do
+          plan = Fixture.plan(governed: true) |> String.replace("M0", "M3")
+
+          {Map.put(outstanding, "docs/plans/M3.md", plan),
+           Map.put(settled, "docs/plans/M3.md", plan), "carries a complete Acceptance row"}
+        else
+          {outstanding, settled, "is Accepted"}
+        end
+
+      assert_raise Invalid, ~r/#{sha("a")}: `M3` #{trigger} while #{name}/, fn ->
+        prerequisite_history([
+          {sha("a"), [], outstanding},
+          {sha("b"), [sha("a")], settled}
+        ])
+      end
+    end
+  end
+
   test "a Closed milestone cannot conceal an outstanding prerequisite behind an Open successor" do
     # The live capsule only ever describes the milestone a reader would call
     # active, so once `M2` is Closed beside an Open successor nothing asks again

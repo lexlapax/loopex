@@ -32,6 +32,89 @@ defmodule Loopex.M3Opening.Executor do
   def cancel(_, _), do: {:ok, :cleaned}
 end
 
+# Concept: observe actual candidate evaluation without changing product code.
+# Technical depth: only fixture-runtime descendants inherit call tracing. The
+# dedicated tracer discards candidate bodies and retains bounded counters only.
+# Both boundaries have positive controls; delivery is fenced before reading them.
+defmodule Loopex.M3Opening.Trace do
+  @boundaries [
+    {Loopex.Runtime.ContextAdmission, :preflight_required_candidate, 2},
+    {Loopex.Store, :normalize_and_measure_item, 2}
+  ]
+
+  def start do
+    tracer =
+      spawn_link(fn ->
+        collect(%{
+          required_store: 0,
+          optional_store: 0,
+          required_admission: 0,
+          optional_admission: 0
+        })
+      end)
+
+    for {module, _, _} = boundary <- @boundaries do
+      {:module, ^module} = Code.ensure_loaded(module)
+      1 = :erlang.trace_pattern(boundary, true, [:local])
+    end
+
+    1 = :erlang.trace(self(), true, [:call, :set_on_spawn, {:tracer, tracer}])
+    tracer
+  end
+
+  def detach_parent do
+    1 = :erlang.trace(self(), false, [:call, :set_on_spawn])
+  end
+
+  def finish(tracer) do
+    barrier = :erlang.trace_delivered(:all)
+
+    receive do
+      {:trace_delivered, :all, ^barrier} -> :ok
+    after
+      1_000 -> throw({:witness_error, "trace_delivery_barrier_missing"})
+    end
+
+    for boundary <- @boundaries, do: :erlang.trace_pattern(boundary, false, [:local])
+    send(tracer, {:finish, self()})
+
+    receive do
+      {:candidate_trace, ^tracer, counts} -> counts
+    after
+      1_000 -> throw({:witness_error, "trace_collector_result_missing"})
+    end
+  end
+
+  defp collect(counts) do
+    receive do
+      {:trace, _pid, :call, {Loopex.Store, :normalize_and_measure_item, [:record, candidate]}} ->
+        collect(count(counts, candidate, :required_store, :optional_store))
+
+      {:trace, _pid, :call,
+       {Loopex.Runtime.ContextAdmission, :preflight_required_candidate, [candidate, _]}} ->
+        collect(count(counts, candidate, :required_admission, :optional_admission))
+
+      {:finish, caller} ->
+        send(caller, {:candidate_trace, self(), counts})
+
+      _ ->
+        collect(counts)
+    end
+  end
+
+  defp count(counts, %{"context_receipt" => %{"blocks" => blocks}}, required, optional)
+       when is_list(blocks) do
+    key =
+      if Enum.any?(blocks, &(is_map(&1) and &1["provenance_class"] == "project_resource")),
+        do: optional,
+        else: required
+
+    Map.update!(counts, key, &min(&1 + 1, 1_024))
+  end
+
+  defp count(counts, _candidate, _required, _optional), do: counts
+end
+
 defmodule Loopex.M3Opening do
   alias Loopex.Store
 
@@ -41,62 +124,110 @@ defmodule Loopex.M3Opening do
     required = observe(root, 32_000, false)
     optional = observe(root, 32_000, true)
 
-    for control <- [small, project_control] do
-      true = control.calls == 1 and is_nil(control.refusal)
-      true = is_map(control.staged)
+    for {name, control} <- [{"required_control", small}, {"project_control", project_control}] do
+      require_witness(control.calls == 1, name <> "_model_call_missing_or_duplicate")
+
+      require_witness(
+        is_nil(control.refusal) and is_map(control.staged),
+        name <> "_staged_receipt_missing"
+      )
     end
 
-    "staged" = get_in(project_control.staged, ["project_resource", "disposition"])
+    require_witness(
+      get_in(project_control.staged, ["project_resource", "disposition"]) == "staged",
+      "project_control_not_staged"
+    )
 
-    true =
-      Enum.any?(project_control.staged["blocks"], &(&1["provenance_class"] == "project_resource"))
+    require_witness(
+      Enum.any?(
+        project_control.staged["blocks"],
+        &(&1["provenance_class"] == "project_resource")
+      ),
+      "project_control_descriptor_missing"
+    )
 
-    for overflow <- [required, optional] do
-      true = overflow.calls == 0 and is_nil(overflow.staged)
+    require_witness(
+      small.trace.required_store > 0 and small.trace.required_admission > 0,
+      "required_control_trace_missing"
+    )
 
-      %{
-        "dimension" => "context_record_bytes",
-        "limit" => limit,
-        "observed" => observed,
-        "record_byte_cost" => observed,
-        "system_message_count" => 1,
-        "session_message_count" => 1,
-        "steer_message_count" => 0,
-        "tool_definition_count" => 0
-      } = overflow.refusal
+    require_witness(
+      project_control.trace.optional_store > 0 and project_control.trace.optional_admission > 0,
+      "project_control_trace_missing"
+    )
 
-      true = limit == Store.max_item_bytes() and observed > limit
-      true = is_binary(overflow.refusal["ordered_descriptor_digest"])
-      true = byte_size(overflow.refusal["ordered_descriptor_digest"]) == 64
+    for {name, overflow} <- [{"required_overflow", required}, {"project_overflow", optional}] do
+      require_witness(
+        overflow.calls == 0 and is_nil(overflow.staged),
+        name <> "_unexpected_dispatch_or_staging"
+      )
+
+      require_witness(
+        match?(
+          %{
+            "dimension" => "context_record_bytes",
+            "limit" => _limit,
+            "observed" => observed,
+            "record_byte_cost" => observed,
+            "system_message_count" => 1,
+            "session_message_count" => 1,
+            "steer_message_count" => 0,
+            "tool_definition_count" => 0
+          },
+          overflow.refusal
+        ),
+        name <> "_invalid_compact_refusal"
+      )
+
+      require_witness(
+        overflow.refusal["limit"] == Store.max_item_bytes() and
+          overflow.refusal["observed"] > overflow.refusal["limit"],
+        name <> "_not_above_byte_ceiling"
+      )
+
+      digest = overflow.refusal["ordered_descriptor_digest"]
+
+      require_witness(
+        is_binary(digest) and byte_size(digest) == 64,
+        name <> "_descriptor_digest_missing"
+      )
+
+      require_witness(overflow.trace.required_store > 0, name <> "_required_measurement_missing")
     end
 
-    "no_manifest" = required.refusal["project_disposition"]
+    require_witness(
+      required.refusal["project_disposition"] == "no_manifest",
+      "required_overflow_unexpected_project"
+    )
 
-    true =
+    require_witness(
       required.refusal["provider_estimated_tokens"] ==
-        optional.refusal["provider_estimated_tokens"]
+        optional.refusal["provider_estimated_tokens"],
+      "required_token_observations_disagree"
+    )
 
     disposition = optional.refusal["project_disposition"]
 
     IO.puts(
-      "LOOPEX_M3_OBSERVATION controls=2/2 required_bytes=#{required.refusal["observed"]} optional_retry_bytes=#{optional.refusal["observed"]} ceiling=#{Store.max_item_bytes()} overflow_model_calls=0 required_counts=1,1,0,0 project_disposition=#{disposition}"
+      "LOOPEX_M3_OBSERVATION controls=2/2 required_bytes=#{required.refusal["observed"]} optional_retry_bytes=#{optional.refusal["observed"]} ceiling=#{Store.max_item_bytes()} overflow_model_calls=0 required_counts=1,1,0,0 project_disposition=#{disposition} optional_store_measurements=#{optional.trace.optional_store} optional_admissions=#{optional.trace.optional_admission}"
     )
 
-    case disposition do
-      "context_record_bytes" ->
-        IO.puts(
-          "M3 gate RED: required-only context overflow evaluates optional project content before refusal"
-        )
+    if optional.trace.optional_store > 0 or optional.trace.optional_admission > 0 do
+      IO.puts(
+        "M3 gate RED: required-only context overflow evaluates optional project content before refusal"
+      )
 
-        System.halt(1)
-
-      "not_evaluated_required_failure" ->
-        :ok
-
-      _ ->
-        raise "unexpected required-overflow project disposition"
+      System.halt(1)
+    else
+      require_witness(
+        disposition == "not_evaluated_required_failure",
+        "required_overflow_wrong_project_disposition"
+      )
     end
   end
+
+  defp require_witness(true, _reason), do: :ok
+  defp require_witness(false, reason), do: throw({:witness_error, reason})
 
   defp observe(root, size, project?) do
     label = "probe-#{size}-#{project?}"
@@ -129,6 +260,8 @@ defmodule Loopex.M3Opening do
       revocation_state: "active"
     }
 
+    tracer = Loopex.M3Opening.Trace.start()
+
     {:ok, runtime} =
       Loopex.start_link(
         runtime_id: label,
@@ -152,6 +285,8 @@ defmodule Loopex.M3Opening do
         project_decision: if(project?, do: decision)
       )
 
+    Loopex.M3Opening.Trace.detach_parent()
+
     try do
       {:ok, session} = Loopex.create_session(runtime, %{}, command_id: label <> "-create")
       {:ok, attachment} = Loopex.attach(runtime, session, after_event_sequence: 0)
@@ -173,13 +308,21 @@ defmodule Loopex.M3Opening do
 
       if staged do
         {:ok, _normalized, measured} = Store.normalize_and_measure_item(:record, staged.payload)
-        true = measured == staged.payload["context_receipt"]["record_byte_cost"]
+
+        require_witness(
+          measured == staged.payload["context_receipt"]["record_byte_cost"],
+          label <> "_staged_byte_cost_mismatch"
+        )
       end
+
+      Loopex.stop(runtime)
+      trace = Loopex.M3Opening.Trace.finish(tracer)
 
       %{
         refusal: result && result.payload,
         staged: staged && staged.payload["context_receipt"],
-        calls: drain(0)
+        calls: drain(0),
+        trace: trace
       }
     after
       Loopex.stop(runtime)
@@ -193,7 +336,11 @@ defmodule Loopex.M3Opening do
         :ok
 
       _ ->
-        if System.monotonic_time(:millisecond) >= deadline, do: raise("session did not settle")
+        require_witness(
+          System.monotonic_time(:millisecond) < deadline,
+          "session_settlement_deadline_exceeded"
+        )
+
         Process.sleep(10)
         settle(runtime, session, deadline)
     end
@@ -202,7 +349,7 @@ defmodule Loopex.M3Opening do
   defp drain(calls) do
     receive do
       :model_called -> drain(calls + 1)
-      :unexpected_executor_call -> raise "unexpected executor invocation"
+      :unexpected_executor_call -> throw({:witness_error, "unexpected_executor_invocation"})
       _ -> drain(calls)
     after
       0 -> calls
@@ -224,6 +371,10 @@ rescue
 
     System.halt(2)
 catch
+  :throw, {:witness_error, reason} ->
+    IO.puts(:stderr, "M3 opening WITNESS ERROR: #{reason}")
+    System.halt(2)
+
   kind, _reason ->
     IO.puts(:stderr, "M3 opening UNAVAILABLE: #{kind}")
     System.halt(2)

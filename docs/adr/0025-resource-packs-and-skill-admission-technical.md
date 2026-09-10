@@ -8,6 +8,10 @@ Concept: [Resource packs and skill admission](0025-resource-packs-and-skill-admi
 
 Concept: [Context and decision](0025-resource-packs-and-skill-admission.md#concept-adr-0025-decision).
 
+All member sets, bounds and new record forms below remain **Proposed** for
+maintainer review with this pair. They are not accepted persistent contracts or
+authorization for dependent product implementation.
+
 ### Owners and public entrypoints
 
 The host resolver in `loopex_composition` owns fixed project discovery, acquisition configuration,
@@ -27,12 +31,24 @@ and transaction discipline. Both require a settled session before a new run;
 changes during a run refuse. `admit_resources` carries one bounded host decision
 and manifest identity; `activate_skill` carries catalog identity and its exact
 digest plus an ordered unique `supporting_labels` list (default empty, at most
-64 labels from that pack's admitted manifest). Persist labels with pre-run
+eight labels from that pack's admitted manifest). Persist labels with pre-run
 selection and freeze them into the run. Unknown/wrong-pack/duplicate labels
 refuse; replay of a command ID with changed labels conflicts. `read_resource`
 is inspection-only and changes no selection. Reading content returns bounded
 data, never a filesystem path. The
 coordinator rechecks the current decision and identity before staging it.
+
+Propose one optional runtime launch input, `resource_manifest: nil | manifest`.
+The host supplies complete immutable canonical content, not paths or a resolver
+callback. Validate counts, sizes, digests and containment assertions before
+starting children. File contents total at most 64 MiB; canonical metadata with
+content omitted totals at most 8 MiB. Launch data never enter genesis or a
+command record. Hosts retain verified snapshots under their manifest digest
+before admission, separately from installation and tool artifacts. Resume
+supplies the matching snapshot, using existing prepared-resume inspection before
+activation. Missing or mismatched content cannot substitute for an admitted
+identity. Already staged requests remain recoverable without it. M3 proposes
+no hot replacement API or automatic retained-pack garbage collection.
 
 Reference CLI: `loopex skill add <source> --rev <commit> --path <directory>` for
 Git only, `loopex skill list`,
@@ -49,9 +65,12 @@ fetch still crosses the normal executor admission path.
 version is `loopex.resource_pack/1`. Revision may be null. A pack has exactly
 `source_id`, `origin`, `commit`, `tree_digest`, `name`, `description`,
 `manual_only`, `files`. Origin is a bounded sanitized source descriptor with no
-credential/query secret; commit is the exact Git source commit for imported
-packs. Locally authored project packs may have null commit and must never claim
-verified remote provenance. Each file
+credential/query secret. For imported packs, `commit` is the exact Git commit
+object ID and `tree_digest` is the selected directory's Git tree object ID.
+Both use the repository's native object format: 40 lowercase hex characters for
+SHA-1 or 64 for SHA-256, with matching formats. Locally authored project packs
+have null commit and tree identity and must never claim verified remote
+provenance. Each file
 has exactly `label`, `size`, `digest`, `content`, `contained`; content is binary,
 size and SHA-256 must match, contained must be true. Labels are relative display
 strings only. The manifest digest covers normalized metadata and every file's
@@ -71,13 +90,100 @@ there is no search-order authority.
 | Description | 1,024 UTF-8 bytes |
 | Model-visible catalog | 16 KiB before ordinary context admission |
 | Active skills per run | 4 |
+| Selected supporting files | 8 per skill; 32 per run |
 | One requested supporting resource | 16 KiB, whole text or refusal |
+| One complete resource command record | 16 KiB |
+| Resource receipt metadata | 8 KiB; at most 37 compact block dispositions |
 
 These are candidate limits for explicit acceptance, not measurements or format
 requirements imposed on the internet ecosystem. Oversized packs are diagnosed
 as outside the supported subset. Total staged context still obeys the existing
 run token and 65,536-byte Store-record limits; a 1 MiB retained bundle does not
 mean 1 MiB of context can be admitted.
+
+Loopex digests are lowercase 64-character SHA-256 hex; the native Git object IDs
+above are exempt from this framing. File digests use
+`LoopexProtocol.Canonical.digest_bytes/1`. Manifest/pack digests use
+`Canonical.digest/1` over `%{"encoding" => Canonical.version(), "kind" => kind,
+"value" => normalized_metadata}`. Kinds are `loopex.resource_manifest/1` and
+`loopex.resource_pack/1`; metadata has string keys and omits file content only.
+Verified file sizes/digests bind the bodies. Pack/file indices are zero-based
+canonical positions and always qualified by the manifest digest. Equal digest
+indices do not permit unequal retained bytes.
+
+### Proposed command and query member sets
+
+New commands normalize atom/string aliases once into durable string-key maps;
+duplicate aliases, extra keys and malformed members refuse before retention.
+Command IDs are nonempty binaries of at most 256 bytes. Historical command
+normalization remains unchanged.
+
+```elixir
+%{type: :admit_resources, command_id: id, manifest_digest: digest,
+  decision: nil | %{manifest_digest: digest, workspace_ref: workspace,
+    trust_scope: "project_skills",
+    decision_source: "interactive_operator" | "host_supplied",
+    issued_at: iso8601, expires_at: nil,
+    revocation_state: "active" | "revoked"}}
+
+%{type: :activate_skill, command_id: id, manifest_digest: digest,
+  source_id: source, name: name, pack_digest: digest, supporting_labels: []}
+```
+
+Workspace/source labels are at most 1,024 UTF-8 bytes; issuance is a valid
+ISO-8601 timestamp of at most 64 bytes. Supporting labels are ordered, unique
+and at most eight per skill; `SKILL.md` is implicit. Both commands require
+settled state. Canonical repetition returns its durable result before checking
+current resources. Positive admission requires the configured snapshot and all
+decision bindings to match. Nil/revoked decisions disable resource admission.
+Disabling names the existing admitted manifest and uses its retained workspace
+binding even if the launch snapshot is missing; without prior admission it
+returns `resource_not_admitted`. The outer digest must match that retained
+admission. A non-nil revoked decision must also match that digest, retained
+workspace and `project_skills` trust scope. A mismatch returns
+`resource_binding_changed` without changing resource state. Revocation never
+requires rereading a pack.
+New successful admission clears selections; replay does not clear them again.
+Repeating an identical selection preserves order; a new command can replace
+that skill's supporting labels while settled. A fifth distinct skill refuses.
+Existing reply forms remain `{:accepted, command_id}` or `{:error, reason}`.
+
+State-dependent refusals are retained and replayed. Their closed reasons are
+`run_active`, `resource_manifest_missing`, `resource_binding_changed`,
+`resource_not_admitted`, `resource_not_found`, `resource_selection_limit`,
+`resource_support_not_found`. Malformed commands use the existing validation
+error envelope and commit no partial resource state.
+
+Propose `resource_command_v1` with exactly `kind`, `command`, `command_digest`,
+`disposition`, `resolved`. The complete normalized small command uses the existing
+canonical command-digest framing. Disposition is `accepted` or a reason above;
+rejected records have nil resolution. Accepted admission resolves to
+`workspace_ref`, `manifest_digest`. Accepted activation resolves to `pack_index`,
+`instruction_file_index`, `instruction_digest`, `supporting_files`; supporting
+entries have exactly `file_index`, `digest`, `size`, in requested order. Measure
+the complete candidate with `Store.normalize_and_measure_item/2` and enforce
+16 KiB before commit. Existing fencing and commit-unknown discipline applies.
+
+Prompt admission freezes current resource state; follow-up promotion freezes
+the then-current state. Replay reconstructs it from preceding commands without
+an extra run record. `selection_digest` uses the framing above with kind
+`loopex.resource_selection/1` and value containing exactly `decision` and ordered
+resolved `selections`. Later requests use that frozen run snapshot.
+
+`resource_catalog` returns exactly `configured_manifest_digest`,
+`admitted_manifest_digest`, `decision_disposition`, `entries`, inside the existing
+facade success envelope. Missing digests are nil. Disposition is `no_decision`,
+`active`, `revoked`, `binding_changed` or `retained_content_missing`. Entries have
+exactly `pack_index`, `source_id`, `name`, `description`, `pack_digest`,
+`manual_only`. The complete response is bounded to 256 KiB or refuses before
+return. `read_resource` accepts exactly `manifest_digest`, `source_id`, `name`,
+`label`, requires active matching admission and retained content, verifies its
+digest, and returns exactly `digest`, `size`, `content` in the success envelope.
+Return at most 64 KiB without truncation; absent, oversized or mismatched content
+refuses with `resource_manifest_missing`, `resource_not_admitted`,
+`resource_binding_changed`, `resource_not_found` or `resource_byte_limit` as
+applicable; a catalog response over its ceiling returns `resource_catalog_limit`.
+Reading never selects. Pre-admission CLI inspection uses host data.
 
 Frontmatter supports the spec's string metadata, literal/folded multiline
 strings and a bounded string metadata map. Refuse aliases, tags, nested object
@@ -143,15 +249,58 @@ Required-only failure dispatches no provider. Refusal preserves ADR 0017's exist
 meaning; do not invent a second lower-bound field in historical receipts. Historical
 M2 refusal members retain their meaning and bytes.
 
-Use versioned resource receipts with exact fixed scalar identity fields and a
-bounded flat list of block dispositions; choose/check the receipt shape before
-acceptance so receipt metadata cannot overflow the limit it reports. The
-readiness fixtures must contain the maximal 64-pack/four-selection shape and
-generated structural boundaries; schema completeness is an acceptance stop.
+Propose `model_request_committed_resources_v1` with the existing model-record
+member set and versioned context receipt. Preserve existing receipt members,
+set `provider_revision` to `3`, add the `resource_pack` provenance bucket and
+exactly this member (durable maps use string keys):
+
+```text
+resource_packs = {
+  version: 1, manifest_digest: <64 hex>, selection_digest: <64 hex>,
+  status: <integer>, blocks: [{pack: <index>, file: <index>, status: <integer>}, ...]
+}
+```
+
+Header statuses: `0 not_evaluated`, `1 evaluated`, `2 no_decision`, `3 revoked`,
+`4 binding_changed`, `5 retained_content_missing`, `6 metadata_budget`.
+Block statuses: `0 not_evaluated`, `1 staged`, `2 catalog_byte_limit`,
+`3 resource_byte_limit`, `4 unsupported_text`, `5 context_tokens`,
+`6 context_record_depth`, `7 context_record_cardinality`, `8 context_record_bytes`.
+No other values are admitted. Catalog indices are `64/64`; normal indices are
+`0..63`. At most 37 rows exist: catalog, four instructions, 32 supporting files.
+The complete member is at most 8 KiB; non-UTF-8 selected text is unsupported.
+
+Required-only preflight includes the fixed header with status `0`, empty blocks.
+Use the durable admitted manifest digest, including its retained identity after
+revocation. Without a prior successful resource admission, retain the M2 request
+form even if a launch snapshot is configured; catalog inspection reports the
+missing decision without versioning an otherwise ordinary request. The
+selection digest binds a nil/revoked decision and empty selections when admission
+has been disabled. A header with status `2` denotes that explicit nil decision.
+Its size is independent of optional contents and selection count: an explicit
+new-format envelope cost that leaves M2 records unchanged. Only after success
+evaluate root AGENTS, catalog, instructions, then supporting blocks. Reserve
+compact disposition metadata before content. If it cannot fit, withhold the
+resource class with header status `6` and empty rows; root AGENTS retains its
+existing receipt. Otherwise, each whole block must fit the complete fixed-point
+record in every dimension. Later blocks may fit. Structural boundaries and the
+64-pack/four-selection maximum remain mandatory implementation/closure proof.
+
+Resource descriptors retain existing fields and
+`untrusted_behavior_shaping_data` trust. Their source reference has exactly
+`kind`, `manifest_digest`, `pack`, `file`, `file_digest`, with kind `resource_pack`.
+For the catalog sentinel `64/64`, `file_digest` is `Canonical.digest_bytes/1`
+over the exact UTF-8 model-visible catalog block. For ordinary file indices it
+is the manifest's digest of the retained file bytes. Neither digest includes
+its descriptor or receipt.
+The request/attempt-open atomic pairing stays unchanged; no third request record
+or new provider-attempt transaction is proposed. Sessions that never use resource
+commands keep the existing M2 record forms.
 
 Recovery uses the retained staged request, not today's files or network.
-Unstaged later requests may resolve the admitted immutable pack identity.
-Missing retained content refuses rather than substituting new bytes. Exact
+Unstaged later requests resolve only the run's admitted immutable snapshot.
+Missing retained content declines that class with status `5`, rather than
+substituting new bytes or stopping ordinary coding. Exact
 request identity does not authorize provider redispatch: ADR 0018's only
 not_dispatched retry and ambiguous-attempt rules continue unchanged.
 

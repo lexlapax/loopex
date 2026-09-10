@@ -31,6 +31,12 @@ and explicitly selected manifested supporting labels. Admission and selection
 require settled state before a run; the run keeps an immutable selection. Model
 output is never a resource command. Scripts run only as ordinary authorized tools.
 
+For review, this Proposed pair recommends one immutable host-supplied snapshot
+per runtime, four selected skills and eight supporting files per skill. Packs
+may still contain 64 files. Resource-enabled requests pay a fixed bounded
+receipt-header cost before optional admission. These choices require explicit
+ADR acceptance; this revision implements no runtime behavior.
+
 For project skills only, supersede ADR 0010's root-AGENTS-only permitted label,
 fixed-class/cardinality and session-start-only trust timing restrictions. Add
 pre-run resource admission while settled, not arbitrary paths or mid-run trust.

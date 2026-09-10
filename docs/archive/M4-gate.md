@@ -13,10 +13,15 @@ The intended future complete command, currently unavailable, is:
 bash scripts/check-m4-gate.sh
 ```
 
+This script is absent from the live tree; the command becomes runnable only
+after the archived scaffold is reconstructed when M4 opens.
+
 <a id="amendment-transaction-v1"></a>
 
 After eventual acceptance, amendments follow the direct proposal/rebind
-transaction. No acceptance or amendment is recorded by this unopened draft.
+transaction unless the maintainer explicitly approves a named procedural
+override under AGENTS.md. Historical bindings and unaffected evidence stay
+enforced. No acceptance or amendment is recorded by this unopened draft.
 
 ## Opening and Readiness
 
@@ -47,8 +52,8 @@ Before acceptance:
    Use the
    existing standalone result channel. Do not build a second result/evidence
    framework.
-5. Settle all floor/inventory/version holder transactions, including M3 if it
-   binds changed artifacts, before M4 binds
+5. Settle all floor/inventory/version holder transactions or explicitly approved
+   replacement binding routes, including M3 if it binds changed artifacts, before M4 binds
    their replacement bytes. Run fresh exact-candidate review after prerequisites
    and executable readiness are complete.
 

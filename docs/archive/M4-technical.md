@@ -32,17 +32,20 @@ The first prerequisite workstream settles the floor before M4 binds its own
 future edits: proposed Elixir 1.18.5/OTP 27.3.4 and current 1.20.3/29.0.5, with
 real matrix evidence. Inventory every Closed holder of changed artifacts on the
 exact integrated M3 base. M0/M1/M2 are known floor holders; include M3 if its gate
-binds the pins or affected machinery. Do not promise three transactions or waive
-a fourth. Use each holder's v2 atomic proposal and immediate accepted rebind,
-with the required stale-binding and inherited-green evidence at each revision.
+binds the pins or affected machinery. Use each holder's v2 proposal/rebind by
+default, or an expressly scoped maintainer override covering the named holders,
+replacement bindings and validation. One approval may cover a coherent batch;
+do not demand repeated approval of the same exception. The override must have
+a supported binding route and cannot simply ignore current hash mismatches.
+Without such approval, retain the default transaction and its required evidence.
 Prior Acceptance/Closure rows stay immutable. Moving this cost from M3 does not
 remove it, and no floor change is made by this draft.
 
 The ninth app, dependency inventory and source VERSION 0.1.0 also require their
-actual holders' transactions. Where the same holder binds several planned
+actual holders' transactions or the explicitly approved override route. Where the same holder binds several planned
 changes, review the complete coherent proposal together rather than lock known
 future edits and repeat the transaction. Do not combine unrelated decisions or
-skip any holder. All such transactions settle before M4 acceptance; publication
+skip any holder. All replacement bindings settle before M4 acceptance; publication
 and compatibility freezes still require separate authority.
 
 M3 owns resource admission, inherited-gate enforcement and the three repairs.

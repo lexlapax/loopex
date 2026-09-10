@@ -33,9 +33,15 @@ at contract moments. Align proposed ADRs and roadmap/index documentation.
 Replace the obsolete M3 gate probe with real local Store/session observations
 of required-only admission ordering and explicit inspection/checkpoint modes.
 Remove unopened M4 executable scaffolding from live scripts; its old bytes are
-retained in Git. No product behavior is implemented. The branch also retains
-its earlier status-task M3 prerequisite entry and test from the original draft;
-those are tooling code, not documentation authored by this revision.
+retained in Git. Harden the probe with actual Store-measurement observations,
+named failed controls and isolated execution. Correct M3's prerequisite guard
+to require ADRs 0025/0027 and recognize linked declarations in history.
+
+Record the maintainer-approved successor exception to M2's CLI inventory:
+preserve the five existing commands and permit `skill`, with negative checks
+for missing legacy commands and unapproved additions. Make scoped maintainer
+overrides an explicit governance route, preserving historical evidence and
+digest enforcement. No M3 product feature is implemented by these changes.
 
 ## [v0.0.0-m2] — 2026-09-09
 
