@@ -15,9 +15,10 @@ M4's range-read promise requires a shared bounded implementation. Existing
 ArtifactStore.fetch retrieves and validates an entire object; a small output
 chunk alone does not bound memory or prove the requested object is intact.
 
-Add bounded range retrieval through the public facade and Store boundary while
+Add bounded range retrieval through the public facade and ArtifactStore boundary while
 preserving ADR 0015's distinct object and use identities and closed tool_output
-provenance. Validate the authorized use and stream-verify the complete immutable
+provenance. Narrowly extend ADR 0015’s ArtifactStore callback inventory with an optional
+range capability; the session journal Store is unchanged. Validate the authorized use and stream-verify the complete immutable
 object before returning a requested range. Report full-object and returned-range
 digests separately. Do not label a range hash as proof of the complete object.
 
@@ -31,8 +32,8 @@ it all in memory. Full-object verification costs a sequential read per request
 in this first implementation; caching and Merkle formats remain outside scope.
 Resource packs do not enter the tool-output artifact namespace.
 
-Keep existing put/fetch callbacks and object/use formats. Add one bounded
-fetch_range callback and an experimental facade query. A custom Store that does
+Keep existing put/fetch callbacks and object/use formats. Add one optional bounded
+fetch_range ArtifactStore callback and an experimental facade query. A custom ArtifactStore that does
 not implement the capability returns unsupported; it does not fall back to an
 unbounded fetch. Old artifacts remain readable and no format migration is
 introduced. Removal restores the prior API without rewriting data.

@@ -73,7 +73,7 @@ Concept: [Scope](M3.md#concept-plan-scope).
 | Prerequisites | Maintainer dispositions, ADR pairs, affected Closed gate generations | All prerequisite transactions settled and inherited green proof on exact source |
 | Resources | `loopex_composition` host resource resolver/importer; core fixed admission and context staging; CLI commands | Reference and explicit host root agree; exact selected bytes reach staged model input; no path or network access enters core |
 | Interactions | Core input algebra, reducer, coordinator and policy evaluator; CLI presentation | One durable winner under answer/expiry/abort/deadline; policy allow precedes executor intent |
-| Queries | Public facade plus Store artifact implementation | Resources are separately retained; artifact use identity and streaming full-object verification precede bounded range delivery |
+| Queries | Public facade plus ArtifactStore implementation | Resources are separately retained; artifact use identity and streaming full-object verification precede bounded range delivery |
 | Repairs | Context admission, event dispatcher and Control | Generated bounds, held-Store availability, retired-permit refusal and successor safety |
 | Integration | Composition, CLI and evidence fixtures | Same semantics through both entries, real effects and fresh-process reconstruction |
 | Gate protection | Repository scripts and test-honesty witnesses | Acyclic inherited invocation, exact regression lock and decisive mutations |
