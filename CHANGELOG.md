@@ -8,9 +8,9 @@ policy labels public surfaces stable, release-candidate, or experimental once
 there are public surfaces to label. No public surface is labelled yet — see
 [compatibility surfaces](docs/developer/compatibility-surfaces.md#concept).
 
-No package is released or installable yet. The annotated `v0.0.0-m2` tag marks
-the exact integrated M2 source snapshot; it is not a package version, public API
-freeze, or compatibility label. Entries below the first package release record
+No package is released or installable yet. The annotated tag `v0.0.0-m2` is
+defined as the exact integrated M2 source snapshot; it is not a package version,
+public API freeze, or compatibility label. Entries below the first package release record
 repository, planning, and milestone implementation work, and carry no consumer
 compatibility meaning.
 
@@ -41,8 +41,8 @@ Raw model commands remain on `/bin/sh`, argv remains literal, and Core and custo
 executors gain no dependency. The [operator setup](docs/operator/tools-and-policy.md#operator-local-supervision-shell)
 states the requirement; [ADR 0022](docs/adr/0022-local-executor-supervision-shell.md#concept)
 is Accepted at its exact pair. That ADR acceptance governs only this
-supervision-shell choice; the separate final-source disposition governs
-integration and the source-snapshot tag, and neither publishes a package.
+supervision-shell choice; integration and the source-snapshot tag require their
+own final-source disposition, and neither publishes a package.
 
 The next milestone, `M3` (kernel consolidation), is being opened gate-first on
 branch `m3`, where its plan pair and red gate live until acceptance; the headless

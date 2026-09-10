@@ -5,9 +5,9 @@
 
 Every surface M2 touches is unstable. None is labelled, frozen, versioned for
 consumers, or given a compatibility promise, and none is owed a deprecation
-window or a migration note. `VERSION` remains `0.0.0`; the annotated
-`v0.0.0-m2` tag identifies the integrated M2 source snapshot and labels no
-consumer surface. Nothing is packaged or published, so the vision's package
+window or a migration note. `VERSION` remains `0.0.0`; `v0.0.0-m2` is reserved
+for the exact integrated M2 source snapshot and labels no consumer surface.
+Nothing is packaged or published, so the vision's package
 surface — released names, their contents, and the constraints they declare —
 stays inert because it has never been created.
 

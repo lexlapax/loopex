@@ -318,11 +318,12 @@ expiry, and fencing token. A missing binding and a wrong one are distinguished. 
 job that fails any of this runs nothing, and the refusal is published durably
 before the caller hears about it.
 
-**Nothing about the credential is on disk.** It is read from
-`LOOPEX_PROVIDER_API_KEY` by the model adapter and by nothing else, and passed as
-a per-request option rather than stored in application state. It reaches no
-journal record, no receipt, no artifact, no public event, no progress item, and
-no diagnostic.
+**Nothing about the credential is on disk.** The host adapter reads
+`LOOPEX_PROVIDER_API_KEY` only for the provider call. A short-lived sender
+materializes it only after the configured private companion proves its protected
+entry and build identity, and the companion uses it as a per-request option. It
+is not stored in application state and reaches no journal record, receipt,
+artifact, public event, progress item, or diagnostic.
 
 Every executor spawn removes that name explicitly, and the model-supplied command
 then crosses `/usr/bin/env -i` and receives `PATH=/usr/bin:/bin` and nothing
@@ -330,11 +331,11 @@ else. Each receipt records the constructed environment's variable names and
 whether the credential was present, so the claim is journalled rather than
 asserted.
 
-Provider failures are bounded before they can carry it anywhere. Every error from
-the provider call is classified to `model_call_failed`, and the diagnostic text
-kept internally has the credential's bytes substituted out *before* it is
-truncated. Before Control is asked to authorize the attempt, the coordinator
-starts a dormant lifetime guard under the owner generation's private supervisor.
+Provider failures are bounded before they can carry it anywhere. The companion
+suppresses its raw diagnostics before ReqLLM starts, and the parent receives only
+the classified literal `model_call_failed`, never provider diagnostic text.
+Before Control is asked to authorize the attempt, the coordinator starts a
+dormant lifetime guard under the owner generation's private supervisor.
 The exact permitted worker asks that guard to create a linked callback. Catchable
 failures are normalized inside the callback;
 the guard traps asynchronous linked exits, cannot finish before the callback, and

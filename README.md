@@ -49,8 +49,8 @@ are part of the closed product baseline; the marked status capsule above and
 the canonical plan register carry the milestone state.
 
 Loopex remains source-tree milestone work, not an installable package or frozen
-public API. The annotated `v0.0.0-m2` tag identifies the integrated M2 source
-snapshot only. Start with the
+public API. The annotated tag `v0.0.0-m2` is reserved for the exact integrated
+M2 source snapshot only. Start with the
 [coding sessions guide](docs/operator/coding-sessions.md#concept) for the `loopex`
 command, or the [operator runtime guide](docs/operator/runtime.md#concept) for the
 embedded runtime beneath it and run the complete source-tree loop, or use the

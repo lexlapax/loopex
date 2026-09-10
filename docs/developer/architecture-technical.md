@@ -412,7 +412,7 @@ Concept: [Five replaceable boundaries](architecture.md#concept-arch-ports).
 | --- | --- |
 | `Loopex.Store` | `transact/2`, `transaction_status/4`, `runtime_command/2`, `ownership_head/3`, `load_records/4`, `load_events/4` |
 | `Loopex.Model` | `complete/3` |
-| `Loopex.Executor` | `execute/5`, `cancel/2` |
+| `Loopex.Executor` | `execute/5`, `cancel/2`, optional `retained_receipt/2` |
 | `Loopex.ArtifactStore` | `put/3`, `fetch/2`, `stat/2`, `describe/2` |
 | `Loopex.Policy` | `decide/1` |
 

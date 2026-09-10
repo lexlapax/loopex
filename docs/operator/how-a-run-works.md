@@ -175,8 +175,9 @@ loopex: reconcile with reconciliation_9f2c…
 Technical depth:
 [Where the files live](how-a-run-works-technical.md#technical-run-state-root).
 
-Everything except the provider is on your machine, and almost everything is
-inside one operating-system process.
+Everything except the provider is on your machine. Session authority, policy,
+storage, and tools live in the main Loopex process; each provider invocation
+uses a separate short-lived companion process.
 
 ```mermaid
 flowchart TB
@@ -187,8 +188,9 @@ flowchart TB
         RT["the runtime: session owner, turn loop, bounds"]
         POL["your host policy — allow or deny"]
         EXEC["the local executor + receipt ledger"]
-        LLM["the model adapter"]
+        LLM["the model adapter host bridge"]
       end
+      COMP["private provider companion<br/>one short-lived OS process per call"]
     end
 
     subgraph ROOT["the state root — a directory you choose"]
@@ -215,7 +217,8 @@ flowchart TB
     EXEC --> ART
     EXEC --> KIDS
     KIDS --> WS
-    LLM --> NET
+    LLM --> COMP
+    COMP --> NET
     CMD -.reads.-> ROOT
 ```
 
@@ -227,12 +230,14 @@ artifacts go to the state root; the tools change files in the workspace. Point
 you are working in.
 
 **The tool children are separate processes, and they are the only thing that
-touches your machine.** Each is started in its own process group with a fixed
-`PATH` and nothing else in its environment, so stopping one stops everything it
-spawned rather than orphaning a background job.
+executes model-supplied commands.** Each is started in its own process group with
+a fixed `PATH` and nothing else in its environment, so stopping one stops
+everything it spawned rather than orphaning a background job.
 
-**The provider is the only thing off the machine.** The credential for it is read
-from an environment variable by the model adapter and by nothing else. It is
+**The provider is the only thing off the machine.** The host bridge reads its
+credential from the declared environment variable only for the provider call
+and delivers it to the protected companion after that process proves its entry
+and build identity. It is
 never written to the journal, never given to a tool child, and never printed.
 
 <a id="concept-run-interrupt"></a>
@@ -343,8 +348,8 @@ model's replies, and the contents of every file the session read. Decide what to
 let a session read with that in mind. See
 [What is kept on disk](tools-and-policy.md#operator-tools-disclosure).
 
-And this is a working milestone surface: not packaged, not installed, not
-released, and carrying no compatibility promise.
+And this is a working milestone surface: not packaged or installed, with a
+source-only milestone tag and no compatibility promise.
 
 ## Related
 

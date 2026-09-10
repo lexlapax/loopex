@@ -14,10 +14,11 @@ durable session truth, no cursor truth, no store access, and no authority
 decision. If the command disappeared, everything it does would still be
 reachable.
 
-This is a working milestone surface. It is not packaged, not installed, not
-released, and carries no compatibility promise. An M1-era session data root is
-**not** readable by M2: the durable record shape changed, and M2 will not open
-one. Start a new state root rather than pointing M2 at an M1 directory.
+This is a working milestone surface. It is not packaged or installed, and the
+`v0.0.0-m2` source-only milestone tag carries no compatibility promise. An
+M1-era session data root is **not** readable by M2: the durable record shape
+changed, and M2 will not open one. Start a new state root rather than pointing
+M2 at an M1 directory.
 
 Tools, host policy, and artifacts:
 [Tools and policy](tools-and-policy.md#concept). Developer detail:

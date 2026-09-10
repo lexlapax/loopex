@@ -676,7 +676,7 @@ the model command receives neither that input nor the private status descriptor.
 There is no interpreter-selection option or fallback. The
 [implementation disposition](agent-context-map.md#disposition-local-executor-bash-2026-09-07)
 authorizes this scoped repair; [ADR 0022](../adr/0022-local-executor-supervision-shell.md#concept)
-remains Proposed pending exact-pair acceptance.
+is Accepted through its exact-pair disposition.
 In command mode, the carrier leads the Port-created process group and the
 guard, status wrapper, command, and remaining descendants share that group. The
 guard receives private control and signals the group it is still a member of, so
@@ -856,7 +856,7 @@ facts, so a successor resumes from the journal rather than from anyone's memory:
    exactly one attempt-scoped model stream domain and is the provider-dispatch
    linearization point even where late receipt prevents the provider call.
 3. On reply or failure — validate the provider-neutral result and atomically
-   commit `model_attempt_settled_v1` with its accounting, conversation
+   commit `model_attempt_settled_v2` with its accounting, conversation
    disposition, and retry/continue/terminal choice. A valid canonical reply
    closes from its own `delta_count` and commits the assistant message and
    event. Exact pretransport `not_dispatched` on attempt one charges nothing and
