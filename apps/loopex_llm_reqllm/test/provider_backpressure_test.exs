@@ -80,6 +80,7 @@ defmodule Loopex.LLM.ReqLLM.ProviderBackpressureTest do
     # Observe the actual guardian's offset snapshot and state. An unrelated
     # offset read before fixture startup could legitimately differ and is not
     # this invocation's clock anchor.
+    assert {:module, ProviderBridge} = Code.ensure_loaded(ProviderBridge)
     assert :erlang.trace_pattern({ProviderBridge, :launch, 1}, true, [:local]) == 1
 
     assert :erlang.trace_pattern(
