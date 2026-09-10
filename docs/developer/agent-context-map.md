@@ -1661,3 +1661,45 @@ This approval authorizes the preparation-rule changes in AGENTS.md, this map
 and the M3 plan/gate. It does not accept the eventual M3 candidate or proposed
 ADRs, authorize product implementation, waive an observed inherited regression,
 or remove any closure outcome or evidence requirement.
+
+<a id="override-disposition-m3-cli-extension-ratification-2026-09-10"></a>
+### M3 CLI extension override ratification — 2026-09-10
+
+This standalone record ratifies the still-Open M3 CLI exception under the
+prospective safeguard in `AGENTS.md`. It leaves the earlier 2026-09-09 record
+unchanged as history; this anchor is the authority M3 must cite before acceptance.
+
+The maintainer's actual instruction sequence was: “going forward, amendments
+should be overrideable, with my approval, in future milestones”; “yes, so in
+this case, my override would modify that restriction in m3 in cli_test.exs”;
+“complete all the changes so that I can review and accept it and we can move on
+to implementation”; and “I wxplicitly approve it”. These are transcriptions of
+the maintainer's messages in the task that requested the M3 planning changes.
+
+The affected restriction is the assertion in
+`apps/loopex_cli/test/cli_test.exs` whose historical protected name says the
+command exposes exactly `run`, `sessions`, `resume`, `cancel` and `artifact`.
+For M3, the replacement requires those five commands and permits only the
+planned `skill` extension. Repeated and guarded literal command clauses count
+once. Removing a required command, adding any other literal command, or hiding
+a dynamic remap behind a dispatch clause still fails.
+
+The historical selector's additional words “and no wire or line framing
+surface” were never asserted by this case, before or after the exception. This
+case owns the public command inventory. The separate facade/dependency-direction
+witnesses retain their existing meaning, and M3's no-protocol scope remains a
+plan and review obligation. The protected test name stays unchanged only because
+the M2 runner locks its identity; it is not evidence for an assertion its body
+never made.
+
+Validation requires the focused unchanged/add-skill/remove-required/add-other
+mutations, the strengthened guarded/dynamic-clause checks, and the complete M2
+gate green through the inherited aggregate at the exact M3 acceptance base.
+Focused diagnostics alone do not settle that forward requirement.
+
+This override changes one continuing development-time test restriction for M3.
+It changes no released public surface or accepted ADR decision, does not weaken
+any other M2 witness, and does not accept M3, either prerequisite ADR, a merge,
+closure, release, tag or publication. This commit adds only this disposition;
+an independent exact-SHA read must approve its changed-path and authority scope
+before any dependent M3 edit lands.
